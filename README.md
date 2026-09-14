@@ -59,9 +59,17 @@ With the Compose PostgreSQL healthy, run:
 make smoke
 ```
 
-This builds and starts `temporality-runtime`, creates an initial Frame, submits a validated `CognitiveEmission`, reduces its attention/frame operations into an immutable transition, restores the next Frame from PostgreSQL, verifies replay, prints the IDs/digest, and stops the runtime.
+This builds and starts `temporality-runtime`, creates an initial Frame, creates an Objective, verifies two identical deterministic RenderPackets, submits a validated `CognitiveEmission`, reduces its attention/frame operations into an immutable transition, restores the next Frame from PostgreSQL, verifies replay, prints the IDs/digest, and stops the runtime.
 
 The M2 emission endpoint rejects emissions containing claims or actions until those intents can be committed atomically with Frame and Execution state; they are never silently dropped.
+
+Objective and render endpoints:
+
+```text
+POST /v1/objectives
+GET  /v1/objectives/{id}
+POST /v1/render
+```
 
 Frame endpoints:
 

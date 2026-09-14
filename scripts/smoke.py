@@ -37,12 +37,15 @@ def main():
     try:
         wait_until_ready()
         episode_id = str(uuid.uuid4())
+        objective_id = str(uuid.uuid4())
+        objective = {"objective": {"objective_id": objective_id, "episode_id": episode_id, "text": "Verify Temporality render and cognition workflow", "success_conditions": ["render_is_deterministic", "frame_transition_is_replayable"], "constraints": {"max_cost": 1.0}}, "event": {"payload": {}, "provenance": {"source": "smoke"}}}
+        request("POST", "/v1/objectives", objective)
         create = {
             "frame": {
                 "agent_id": str(uuid.uuid4()),
                 "episode_id": episode_id,
                 "branch_id": str(uuid.uuid4()),
-                "objective_id": str(uuid.uuid4()),
+                "objective_id": objective_id,
                 "focus": {"type": "query", "query": "verify Temporality smoke workflow"},
                 "mode": "explore",
                 "attention": {"policy": "balanced", "deliberate": True, "ambient": True, "max_candidates": 32},
@@ -54,6 +57,10 @@ def main():
         }
         _, created = request("POST", "/v1/frames", create)
         initial = created["frame"]
+        render_request = {"frame_id": initial["frame_id"], "objective_id": objective_id, "budget_tokens": 2000}
+        _, first_render = request("POST", "/v1/render", render_request)
+        _, repeated_render = request("POST", "/v1/render", render_request)
+        assert first_render == repeated_render
         emission = {
             "schema": "frp.cognitive-emission.v1",
             "emission_id": str(uuid.uuid4()),
@@ -68,8 +75,8 @@ def main():
         assert restored["parent_frame_id"] == initial["frame_id"]
         assert restored["focus"]["query"] == "evidence that validates Temporality" and restored["revision"] == 1
         assert len(restored["working_set"]) == 1
-        assert len(replay["events"]) == 2 and replay["digest"]
-        print(json.dumps({"status": "ok", "initial_frame_id": initial["frame_id"], "next_frame_id": restored["frame_id"], "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
+        assert len(replay["events"]) == 3 and replay["digest"]
+        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "next_frame_id": restored["frame_id"], "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
     finally:
         runtime.terminate()
         try:

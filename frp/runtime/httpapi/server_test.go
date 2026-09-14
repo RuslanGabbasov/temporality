@@ -108,6 +108,10 @@ func TestCommitAndTransitionClaim(t *testing.T) {
 
 func TestFrameCreateTransitionGetAndReplay(t *testing.T) {
 	handler := testHandler()
+	objectiveCreated := serve(handler, http.MethodPost, "/v1/objectives", []byte(`{"objective":{"objective_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b04","episode_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b02","text":"Verify the runtime","success_conditions":["render_is_deterministic"],"constraints":{}},"event":{"payload":{},"provenance":{"source":"test"}}}`))
+	if objectiveCreated.Code != http.StatusCreated {
+		t.Fatalf("create objective: %s", objectiveCreated.Body.String())
+	}
 	createBody := []byte(`{"frame":{"agent_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b01","episode_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b02","branch_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b03","objective_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b04","focus":{"type":"query","query":"initial investigation"},"mode":"explore","attention":{"policy":"balanced","deliberate":true,"ambient":true,"max_candidates":32},"zoom":2,"filters":{"trust_min":0.5},"budget":{"tokens":8000}},"event":{"payload":{},"provenance":{"source":"test"}}}`)
 	created := serve(handler, http.MethodPost, "/v1/frames", createBody)
 	if created.Code != http.StatusCreated {
@@ -118,6 +122,12 @@ func TestFrameCreateTransitionGetAndReplay(t *testing.T) {
 	}
 	if err := json.Unmarshal(created.Body.Bytes(), &initial); err != nil {
 		t.Fatal(err)
+	}
+	renderBody := []byte(`{"frame_id":"` + initial.Frame.FrameID + `","objective_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b04","budget_tokens":2000}`)
+	firstRender := serve(handler, http.MethodPost, "/v1/render", renderBody)
+	secondRender := serve(handler, http.MethodPost, "/v1/render", renderBody)
+	if firstRender.Code != http.StatusOK || firstRender.Body.String() != secondRender.Body.String() {
+		t.Fatalf("render is not deterministic: %s / %s", firstRender.Body.String(), secondRender.Body.String())
 	}
 	transitionBody := []byte(`{"transition":{"as_of":"2026-09-14T12:00:00Z","operations":[{"op":"pin","ref":{"type":"claim","id":"018f47a7-34b2-7d10-a932-4f3ff37a4b10"}},{"op":"set_mode","mode":"verify"}]},"event":{"payload":{},"provenance":{"source":"test"}}}`)
 	transitioned := serve(handler, http.MethodPost, "/v1/frames/"+initial.Frame.FrameID+"/transitions", transitionBody)
@@ -160,8 +170,8 @@ func TestFrameCreateTransitionGetAndReplay(t *testing.T) {
 	if err := json.Unmarshal(replayed.Body.Bytes(), &replayResult); err != nil {
 		t.Fatal(err)
 	}
-	if len(replayResult.Events) != 3 {
-		t.Fatalf("expected frame create, direct transition, and emission transition events: %s", replayed.Body.String())
+	if len(replayResult.Events) != 4 {
+		t.Fatalf("expected objective, frame create, direct transition, and emission transition events: %s", replayed.Body.String())
 	}
 }
 

@@ -9,20 +9,22 @@ import (
 
 	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/frame"
+	"github.com/temporality-project/temporality/frp/objective"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/substrate"
 )
 
 type Store struct {
-	mu        sync.RWMutex
-	events    map[string]protocol.Event
-	claims    map[string]cognition.Claim
-	relations []cognition.ClaimRelation
-	frames    map[string]frame.Frame
+	mu         sync.RWMutex
+	events     map[string]protocol.Event
+	claims     map[string]cognition.Claim
+	relations  []cognition.ClaimRelation
+	frames     map[string]frame.Frame
+	objectives map[string]objective.Objective
 }
 
 func New() *Store {
-	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame)}
+	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective)}
 }
 
 func (s *Store) Append(_ context.Context, event protocol.Event) error {
@@ -151,6 +153,33 @@ func (s *Store) ListRelations(_ context.Context, id string) ([]cognition.ClaimRe
 		}
 	}
 	return result, nil
+}
+
+func (s *Store) CreateObjective(_ context.Context, value objective.Objective, event protocol.Event) error {
+	if err := objective.ValidateCreate(value, event); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.objectives[value.ObjectiveID]; exists {
+		return errors.New("objective already exists")
+	}
+	if _, exists := s.events[event.EventID]; exists {
+		return errors.New("event already exists")
+	}
+	s.events[event.EventID] = event
+	s.objectives[value.ObjectiveID] = value
+	return nil
+}
+func (s *Store) GetObjective(_ context.Context, id string) (objective.Objective, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.objectives[id]
+	if !exists {
+		return objective.Objective{}, objective.ErrNotFound
+	}
+	value.SuccessConditions = append([]string(nil), value.SuccessConditions...)
+	return value, nil
 }
 
 func (s *Store) CreateFrame(_ context.Context, value frame.Frame, event protocol.Event) error {

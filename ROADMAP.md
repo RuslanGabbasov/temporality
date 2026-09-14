@@ -21,7 +21,11 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Deep immutability and transition graph tests.
   - [x] Atomic Frame + `frame.transitioned` Event persistence with PostgreSQL restart/replay coverage.
   - [x] CognitiveEmission validation and deterministic reduction into Frame operations.
-- [ ] **M3:** RenderPacket and Objective.
+- [x] **M3 — RenderPacket and Objective:**
+  - [x] Immutable Objective persistence with canonical `episode.started` Event.
+  - [x] Deterministic RenderPacket and content-derived render IDs.
+  - [x] Canonical sections, provenance, memory version, and token budget trimming.
+  - [x] `/v1/render` integrated into the runnable smoke workflow.
 - [ ] **M4:** Deliberate and ambient Attention.
 - [ ] **M5:** Affordance registry and deterministic Executor.
 - [ ] **M6:** Adaptive Planner.

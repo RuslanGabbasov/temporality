@@ -14,7 +14,9 @@ import (
 
 	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/frame"
+	"github.com/temporality-project/temporality/frp/objective"
 	"github.com/temporality-project/temporality/frp/protocol"
+	"github.com/temporality-project/temporality/frp/render"
 	"github.com/temporality-project/temporality/frp/replay"
 	"github.com/temporality-project/temporality/frp/substrate"
 )
@@ -35,6 +37,9 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/events", s.listEvents)
 	mux.HandleFunc("GET /v1/events/{id}", s.getEvent)
 	mux.HandleFunc("POST /v1/replay", s.replayEvents)
+	mux.HandleFunc("POST /v1/render", s.renderFrame)
+	mux.HandleFunc("POST /v1/objectives", s.createObjective)
+	mux.HandleFunc("GET /v1/objectives/{id}", s.getObjective)
 	mux.HandleFunc("POST /v1/claims", s.commitClaim)
 	mux.HandleFunc("POST /v1/claims/{id}/transitions", s.transitionClaim)
 	mux.HandleFunc("GET /v1/claims/{id}", s.getClaim)
@@ -115,6 +120,80 @@ func (s *Server) getEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, event)
+}
+
+type objectiveCreateRequest struct {
+	Objective objective.Objective `json:"objective"`
+	Event     protocol.Event      `json:"event"`
+}
+
+func (s *Server) createObjective(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(objective.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("objectives are not supported"))
+		return
+	}
+	var request objectiveCreateRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	request.Objective.ApplyDefaults()
+	if request.Objective.ObjectiveID == "" {
+		request.Objective.ObjectiveID = newUUID()
+	}
+	now := s.now().UTC()
+	if request.Event.EventID == "" {
+		request.Event.EventID = newUUID()
+	}
+	request.Event.ApplyDefaults(now)
+	request.Event.Type = "episode.started"
+	request.Event.EpisodeID = request.Objective.EpisodeID
+	request.Event.Payload["objective_id"] = request.Objective.ObjectiveID
+	if err := store.CreateObjective(r.Context(), request.Objective, request.Event); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, request)
+}
+func (s *Server) getObjective(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(objective.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("objectives are not supported"))
+		return
+	}
+	value, err := store.GetObjective(r.Context(), r.PathValue("id"))
+	if errors.Is(err, objective.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("internal error"))
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+func (s *Server) renderFrame(w http.ResponseWriter, r *http.Request) {
+	stores, ok := s.store.(render.Stores)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("render is not supported"))
+		return
+	}
+	var request render.Request
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	packet, err := render.New(stores).Render(r.Context(), request)
+	if errors.Is(err, frame.ErrFrameNotFound) || errors.Is(err, objective.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, packet)
 }
 
 type frameCreateRequest struct {
