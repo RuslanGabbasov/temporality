@@ -56,7 +56,11 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Deterministic evidence-backed procedure projection from terminal Executions.
   - [x] Smoothed success rates, failure penalties, minimum evidence and poisoning mitigation.
   - [x] PostgreSQL rebuild/list/get/match API and deterministic RenderPacket integration.
-- [ ] **M10:** Human Cognitive Debugger.
+- [x] **M10 — Human Cognitive Debugger:**
+  - [x] React/TypeScript episode timeline and Frame/RenderPacket inspector.
+  - [x] Attention, outside-frame, provenance, Claims, Events and Executions views.
+  - [x] Time travel, replay, blame, fork and branch inspection operations.
+  - [x] Production static container and full Compose deployment.
 
 ## Architectural constraints
 

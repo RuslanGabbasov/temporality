@@ -15,5 +15,45 @@ services:
     volumes:
       - temporality-postgres:/var/lib/postgresql/data
 
+  runtime:
+    build:
+      context: .
+      target: runtime
+    environment:
+      DATABASE_URL: postgres://temporality:temporality@postgres:5432/temporality?sslmode=disable
+      HTTP_ADDR: :8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/healthz >/dev/null"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  executor:
+    build:
+      context: .
+      target: executor
+    environment:
+      DATABASE_URL: postgres://temporality:temporality@postgres:5432/temporality?sslmode=disable
+    depends_on:
+      runtime:
+        condition: service_healthy
+    restart: unless-stopped
+
+  debugger:
+    build:
+      context: debugger
+    ports:
+      - "3000:80"
+    depends_on:
+      runtime:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   temporality-postgres:

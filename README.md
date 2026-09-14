@@ -20,6 +20,20 @@ Implemented foundations for **M0 — Event Log + replay** and **M1 — Claims**:
 
 See [`ROADMAP.md`](ROADMAP.md) for subsequent milestones.
 
+## Run the complete stack
+
+```sh
+docker compose up --build -d
+```
+
+Open the Human Cognitive Debugger at [http://localhost:3000](http://localhost:3000). The Runtime API remains available at `http://localhost:8080`; the debugger accesses it only through its `/api` reverse proxy and never connects to PostgreSQL directly.
+
+Stop application processes while retaining PostgreSQL data:
+
+```sh
+docker compose stop runtime executor debugger
+```
+
 ## Run locally
 
 Requirements: Go 1.23+, Docker Compose.
@@ -144,6 +158,16 @@ POST /v1/frames/{id}/transitions
 POST /v1/frames/{id}/emissions
 GET  /v1/frames/{id}
 ```
+
+## Debugger development
+
+```sh
+npm --prefix debugger install
+npm --prefix debugger test
+npm --prefix debugger run dev
+```
+
+The Vite development server proxies `/api` to `localhost:8080`.
 
 ## Development
 
