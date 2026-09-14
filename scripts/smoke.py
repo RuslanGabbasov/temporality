@@ -69,27 +69,32 @@ def main():
         map_items = next(section for section in first_render["sections"] if section["kind"] == "map")["items"]
         assert map_items and any(item["candidate"]["ref"]["type"] == "region" for item in map_items)
         definition = {"id": "inspect_environment", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
-        emission = {"schema": "frp.cognitive-emission.v1", "emission_id": str(uuid.uuid4()), "frame_id": initial["frame_id"], "claims": [{"proposition": "Temporality step is atomic", "confidence": 0.95, "status": "candidate"}], "attention": [{"op": "attend", "target": {"type": "query", "text": "evidence that validates Temporality"}}], "frame_ops": [{"op": "pin", "ref": f"event:{created['event']['event_id']}"}], "actions": [{"affordance": "inspect_environment", "args": {"path": "."}}]}
-        _, stepped = request("POST", "/v1/step", {"frame_id": initial["frame_id"], "emission": emission, "definitions": [definition]})
+        adaptive_definition = {"id": "adaptive_inspection", "execution_mode": "adaptive", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {"enabled": True, "model": "recorded", "max_steps": 2}, "failure_policy": {"retry_transient": False, "allow_strategy_change": True, "max_retries": 0}}
+        planner_trace = [{"step": {"id": "inspect", "capability": "filesystem.read", "operation": "stat", "input": {"path": "."}}}, {"complete": True, "summary": "environment inspected"}]
+        emission = {"schema": "frp.cognitive-emission.v1", "emission_id": str(uuid.uuid4()), "frame_id": initial["frame_id"], "claims": [{"proposition": "Temporality step is atomic", "confidence": 0.95, "status": "candidate"}], "attention": [{"op": "attend", "target": {"type": "query", "text": "evidence that validates Temporality"}}], "frame_ops": [{"op": "pin", "ref": f"event:{created['event']['event_id']}"}], "actions": [{"affordance": "inspect_environment", "args": {"path": "."}}, {"affordance": "adaptive_inspection", "args": {"objective": "inspect environment", "planner_proposals": planner_trace}}]}
+        _, stepped = request("POST", "/v1/step", {"frame_id": initial["frame_id"], "emission": emission, "definitions": [definition, adaptive_definition]})
         next_frame = stepped["frame"]
-        assert len(stepped["claims"]) == 1 and len(stepped["executions"]) == 1
+        assert len(stepped["claims"]) == 1 and len(stepped["executions"]) == 2
         _, restored = request("GET", f"/v1/frames/{next_frame['frame_id']}")
-        execution_id = stepped["executions"][0]["execution_id"]
+        execution_ids = [item["execution_id"] for item in stepped["executions"]]
+        execution_id = execution_ids[0]
         executor_env = os.environ.copy()
         executor_env.update({"DATABASE_URL": DATABASE_URL, "EPISODE_ID": episode_id})
         executor = subprocess.Popen([EXECUTOR_BINARY], env=executor_env)
-        final_execution = None
-        for _ in range(50):
-            _, final_execution = request("GET", f"/v1/executions/{execution_id}")
-            if final_execution["status"] in ("completed", "failed"):
+        final_executions = {}
+        for _ in range(80):
+            for item_id in execution_ids:
+                _, final_executions[item_id] = request("GET", f"/v1/executions/{item_id}")
+            if all(item["status"] in ("completed", "failed") for item in final_executions.values()):
                 break
             time.sleep(0.1)
-        assert final_execution and final_execution["status"] == "completed"
+        assert all(item["status"] == "completed" for item in final_executions.values())
+        final_execution = final_executions[execution_id]
         _, replay = request("POST", "/v1/replay", {"episode_id": episode_id})
         assert restored["parent_frame_id"] == initial["frame_id"]
         assert restored["focus"]["query"] == "evidence that validates Temporality" and restored["revision"] == 1
         assert len(restored["working_set"]) == 1
-        assert len(replay["events"]) == 9 and replay["digest"]
+        assert len(replay["events"]) == 13 and replay["digest"]
         print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "execution_id": execution_id, "execution_status": final_execution["status"], "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
     finally:
         if executor is not None:

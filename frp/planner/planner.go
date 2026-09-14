@@ -1,14 +1,62 @@
 package planner
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/temporality-project/temporality/frp/affordance"
 	"github.com/temporality-project/temporality/frp/execution"
-	"strings"
 )
 
 const Version = "planner-0.3.1"
+
+type RunStatus string
+
+type StepStatus string
+
+const (
+	RunRunning   RunStatus = "running"
+	RunCompleted RunStatus = "completed"
+	RunFailed    RunStatus = "failed"
+
+	StepProposed  StepStatus = "proposed"
+	StepCompleted StepStatus = "completed"
+	StepFailed    StepStatus = "failed"
+)
+
+var ErrNotFound = errors.New("planner run not found")
+
+type Run struct {
+	ExecutionID string    `json:"execution_id"`
+	Context     Context   `json:"context"`
+	State       State     `json:"state"`
+	Status      RunStatus `json:"status"`
+	Error       string    `json:"error,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type DurableStep struct {
+	ExecutionID string      `json:"execution_id"`
+	Ordinal     int         `json:"ordinal"`
+	Proposal    Proposal    `json:"proposal"`
+	Result      *StepResult `json:"result,omitempty"`
+	Status      StepStatus  `json:"status"`
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
+}
+
+type Store interface {
+	EnsurePlannerRun(context.Context, Run) (Run, error)
+	GetPlannerRun(context.Context, string) (Run, error)
+	ListPlannerSteps(context.Context, string) ([]DurableStep, error)
+	RecordPlannerProposal(context.Context, string, Proposal, State, time.Time) (DurableStep, error)
+	RecordPlannerResult(context.Context, string, int, StepResult, State, time.Time) error
+	FinishPlannerRun(context.Context, string, RunStatus, State, string, time.Time) error
+}
 
 type Context struct {
 	ExecutionID     string                `json:"execution_id"`

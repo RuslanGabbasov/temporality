@@ -43,9 +43,9 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Persist-before-effect smoke lifecycle through the separate internal Executor boundary.
   - [x] Atomic CognitiveEmission Step integration across Frame, Claims, Attention and Executions.
   - [x] Separate executor process with declarative workflows, effect-boundary validation, and safe filesystem adapter.
-- [ ] **M6 — Adaptive Planner:**
+- [x] **M6 — Adaptive Planner:**
   - [x] Bounded planner context/state, capability checks, step limits, recorded replay adapter.
-  - [ ] Durable child planner episode and executor integration.
+  - [x] Durable planner runs/steps, proposal-before-effect persistence, restart resume, and executor integration.
 - [ ] **M7 — Time travel, snapshots, and blame:**
   - [x] Pure snapshot metadata/hash/selection, replay purity contract, deterministic blame traversal.
   - [ ] Event cursors, PostgreSQL snapshots/provenance edges, replay/blame APIs.

@@ -4,14 +4,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"github.com/temporality-project/temporality/frp/execution"
-	"github.com/temporality-project/temporality/frp/execution/worker"
-	"github.com/temporality-project/temporality/frp/substrate/postgres"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/temporality-project/temporality/frp/execution"
+	"github.com/temporality-project/temporality/frp/execution/worker"
+	"github.com/temporality-project/temporality/frp/planner"
+	"github.com/temporality-project/temporality/frp/substrate/postgres"
 )
 
 func main() {
@@ -30,7 +32,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
-	runner := worker.Worker{Store: store, Workflows: map[string]execution.DeterministicWorkflow{"inspect_environment": worker.InspectEnvironmentWorkflow{}}, Adapter: worker.SafeAdapter{}, NewID: newID, Now: time.Now}
+	adapter := worker.SafeAdapter{}
+	plannerRunner := &worker.DurablePlannerRunner{Store: store, Planner: &planner.ArgumentAdapter{}, Adapter: adapter, Now: time.Now}
+	runner := worker.Worker{Store: store, Workflows: map[string]execution.DeterministicWorkflow{"inspect_environment": worker.InspectEnvironmentWorkflow{}}, Adapter: adapter, NewID: newID, Now: time.Now, PlannerRunner: plannerRunner}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	log.Info("Temporality executor started")

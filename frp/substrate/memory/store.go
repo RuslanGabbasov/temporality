@@ -15,6 +15,7 @@ import (
 	"github.com/temporality-project/temporality/frp/execution"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
+	"github.com/temporality-project/temporality/frp/planner"
 	"github.com/temporality-project/temporality/frp/projection"
 	"github.com/temporality-project/temporality/frp/protocol"
 	stepRuntime "github.com/temporality-project/temporality/frp/runtime/step"
@@ -32,11 +33,13 @@ type Store struct {
 	definitions    map[string]affordance.Definition
 	requests       map[string]affordance.Request
 	executions     map[string]execution.Execution
+	plannerRuns    map[string]planner.Run
+	plannerSteps   map[string][]planner.DurableStep
 	cognitiveSteps map[string]stepRuntime.Prepared
 }
 
 func New() *Store {
-	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective), definitions: make(map[string]affordance.Definition), requests: make(map[string]affordance.Request), executions: make(map[string]execution.Execution), cognitiveSteps: make(map[string]stepRuntime.Prepared)}
+	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective), definitions: make(map[string]affordance.Definition), requests: make(map[string]affordance.Request), executions: make(map[string]execution.Execution), plannerRuns: make(map[string]planner.Run), plannerSteps: make(map[string][]planner.DurableStep), cognitiveSteps: make(map[string]stepRuntime.Prepared)}
 }
 
 func (s *Store) Append(_ context.Context, event protocol.Event) error {
@@ -390,6 +393,100 @@ func (s *Store) ListActiveExecutions(_ context.Context, episodeID string) ([]exe
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ExecutionID < result[j].ExecutionID })
 	return result, nil
+}
+
+func (s *Store) EnsurePlannerRun(_ context.Context, value planner.Run) (planner.Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.plannerRuns[value.ExecutionID]; ok {
+		return clone(existing), nil
+	}
+	if _, ok := s.executions[value.ExecutionID]; !ok {
+		return planner.Run{}, execution.ErrNotFound
+	}
+	s.plannerRuns[value.ExecutionID] = clone(value)
+	return clone(value), nil
+}
+
+func (s *Store) GetPlannerRun(_ context.Context, executionID string) (planner.Run, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.plannerRuns[executionID]
+	if !ok {
+		return planner.Run{}, planner.ErrNotFound
+	}
+	return clone(value), nil
+}
+
+func (s *Store) ListPlannerSteps(_ context.Context, executionID string) ([]planner.DurableStep, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := s.plannerRuns[executionID]; !ok {
+		return nil, planner.ErrNotFound
+	}
+	return clone(s.plannerSteps[executionID]), nil
+}
+
+func (s *Store) RecordPlannerProposal(_ context.Context, executionID string, proposal planner.Proposal, state planner.State, at time.Time) (planner.DurableStep, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.plannerRuns[executionID]
+	if !ok {
+		return planner.DurableStep{}, planner.ErrNotFound
+	}
+	if run.Status != planner.RunRunning {
+		return planner.DurableStep{}, errors.New("planner run is terminal")
+	}
+	steps := s.plannerSteps[executionID]
+	status := planner.StepProposed
+	if proposal.Complete {
+		status = planner.StepCompleted
+	}
+	value := planner.DurableStep{ExecutionID: executionID, Ordinal: len(steps) + 1, Proposal: clone(proposal), Status: status, CreatedAt: at, UpdatedAt: at}
+	s.plannerSteps[executionID] = append(steps, value)
+	run.State, run.UpdatedAt = clone(state), at
+	s.plannerRuns[executionID] = run
+	return clone(value), nil
+}
+
+func (s *Store) RecordPlannerResult(_ context.Context, executionID string, ordinal int, result planner.StepResult, state planner.State, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	steps := s.plannerSteps[executionID]
+	if ordinal <= 0 || ordinal > len(steps) {
+		return errors.New("planner step not found")
+	}
+	step := steps[ordinal-1]
+	if step.Status != planner.StepProposed {
+		return errors.New("planner step already has result")
+	}
+	step.Result, step.UpdatedAt = &result, at
+	if result.Success {
+		step.Status = planner.StepCompleted
+	} else {
+		step.Status = planner.StepFailed
+	}
+	steps[ordinal-1] = step
+	s.plannerSteps[executionID] = steps
+	run := s.plannerRuns[executionID]
+	run.State, run.UpdatedAt = clone(state), at
+	s.plannerRuns[executionID] = run
+	return nil
+}
+
+func (s *Store) FinishPlannerRun(_ context.Context, executionID string, status planner.RunStatus, state planner.State, message string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.plannerRuns[executionID]
+	if !ok {
+		return planner.ErrNotFound
+	}
+	if status != planner.RunCompleted && status != planner.RunFailed {
+		return errors.New("invalid terminal planner status")
+	}
+	run.Status, run.State, run.Error, run.UpdatedAt = status, clone(state), message, at
+	s.plannerRuns[executionID] = run
+	return nil
 }
 
 func (s *Store) CommitStep(_ context.Context, prepared stepRuntime.Prepared) (stepRuntime.Result, error) {

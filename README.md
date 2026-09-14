@@ -99,7 +99,7 @@ GET  /v1/executions/{id}
 POST /internal/v1/executions/{id}/transitions
 ```
 
-Execution requests and `execution.created` are committed before the Executor can move an execution to `running`. The PoC executor supports the versioned `inspect_environment` deterministic workflow through a safe Go filesystem adapter; it does not embed shell execution in the Runtime.
+Execution requests and `execution.created` are committed before the Executor can move an execution to `running`. The PoC executor supports the versioned `inspect_environment` deterministic workflow and bounded adaptive executions through durable recorded planner traces through a safe Go filesystem adapter; Every adaptive proposal is persisted before its effect and checked against capabilities/max steps. The recorded adapter performs no inference or network calls, and shell execution is not embedded in the Runtime.
 
 Frame endpoints:
 
