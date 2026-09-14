@@ -15,7 +15,12 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Atomic Event + Claim + relations commit in PostgreSQL and memory adapters.
   - [x] Claim create/read HTTP API and transactional rollback integration test.
   - [x] Claim lifecycle transitions (`supported`, `refuted`, `superseded`) and temporal validity invariants.
-- [ ] **M2:** Immutable Frame and deterministic reducer.
+- [ ] **M2 — Immutable Frame and deterministic reducer:**
+  - [x] Versioned Frame value object and JSON Schema.
+  - [x] Deterministic, side-effect-free reducer with content-derived frame IDs.
+  - [x] Deep immutability and transition graph tests.
+  - [ ] Atomic Frame + `frame.transitioned` Event persistence.
+  - [ ] CognitiveEmission validation and reduction into Frame operations.
 - [ ] **M3:** RenderPacket and Objective.
 - [ ] **M4:** Deliberate and ambient Attention.
 - [ ] **M5:** Affordance registry and deterministic Executor.

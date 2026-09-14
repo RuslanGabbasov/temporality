@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://temporality.dev/schemas/frp/v0.3/Frame.schema.json",
+  "title": "FRP Frame",
+  "type": "object",
+  "required": ["protocol","version","frame_id","agent_id","episode_id","branch_id","objective_id","as_of","focus","working_set","mode","attention","zoom","filters","budget","revision"],
+  "properties": {
+    "protocol":{"const":"frp"},"version":{"const":"0.3"},"frame_id":{"type":"string"},"parent_frame_id":{"type":"string"},
+    "agent_id":{"type":"string"},"episode_id":{"type":"string"},"branch_id":{"type":"string"},"objective_id":{"type":"string"},"as_of":{"type":"string","format":"date-time"},
+    "focus":{"type":"object"},"working_set":{"type":"array"},"mode":{"enum":["explore","exploit","reflect","verify"]},
+    "attention":{"type":"object"},"zoom":{"type":"integer","minimum":0},"filters":{"type":"object"},"budget":{"type":"object"},"revision":{"type":"integer","minimum":0}
+  },
+  "additionalProperties":false
+}
