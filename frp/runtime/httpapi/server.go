@@ -35,6 +35,7 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/events/{id}", s.getEvent)
 	mux.HandleFunc("POST /v1/replay", s.replayEvents)
 	mux.HandleFunc("POST /v1/claims", s.commitClaim)
+	mux.HandleFunc("POST /v1/claims/{id}/transitions", s.transitionClaim)
 	mux.HandleFunc("GET /v1/claims/{id}", s.getClaim)
 	mux.HandleFunc("GET /metrics", s.metrics.handler)
 	return s.metrics.count(mux)
@@ -149,6 +150,52 @@ func (s *Server) commitClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, commit)
+}
+
+type transitionRequest struct {
+	Event      protocol.Event        `json:"event"`
+	ToStatus   cognition.ClaimStatus `json:"to_status"`
+	Confidence *float32              `json:"confidence,omitempty"`
+	ValidAt    time.Time             `json:"valid_at,omitempty"`
+}
+
+func (s *Server) transitionClaim(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(cognition.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("claims are not supported"))
+		return
+	}
+	var request transitionRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	now := s.now().UTC()
+	if request.ValidAt.IsZero() {
+		request.ValidAt = now
+	}
+	if request.Event.EventID == "" {
+		request.Event.EventID = newUUID()
+	}
+	request.Event.ApplyDefaults(now)
+	request.Event.ValidTime = request.ValidAt
+	request.Event.Type = "claim." + string(request.ToStatus)
+	if request.Event.Payload == nil {
+		request.Event.Payload = map[string]any{}
+	}
+	request.Event.Payload["claim_id"] = r.PathValue("id")
+	request.Event.Payload["status"] = request.ToStatus
+	transition := cognition.Transition{Event: request.Event, ClaimID: r.PathValue("id"), ToStatus: request.ToStatus, Confidence: request.Confidence, ValidAt: request.ValidAt}
+	claim, err := store.TransitionClaim(r.Context(), transition)
+	if errors.Is(err, cognition.ErrClaimNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"event": transition.Event, "claim": claim})
 }
 
 func (s *Server) getClaim(w http.ResponseWriter, r *http.Request) {

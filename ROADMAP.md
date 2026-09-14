@@ -9,12 +9,12 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Opaque cursor pagination for memory and PostgreSQL event streams.
   - [x] Prometheus-compatible HTTP, append, and replay metrics.
   - [ ] Full crash-recovery killer test (blocked by Frame/Reducer/RenderPacket in M2–M3; durable Event Store restart is covered).
-- [ ] **M1 — Claims and evidence relations:**
+- [x] **M1 — Claims and evidence relations:**
   - [x] Versioned Claim and ClaimRelation protocol objects and JSON Schemas.
   - [x] PostgreSQL schema with referential and confidence constraints.
   - [x] Atomic Event + Claim + relations commit in PostgreSQL and memory adapters.
   - [x] Claim create/read HTTP API and transactional rollback integration test.
-  - [ ] Claim lifecycle transitions (`supported`, `refuted`, `superseded`) and temporal validity invariants.
+  - [x] Claim lifecycle transitions (`supported`, `refuted`, `superseded`) and temporal validity invariants.
 - [ ] **M2:** Immutable Frame and deterministic reducer.
 - [ ] **M3:** RenderPacket and Objective.
 - [ ] **M4:** Deliberate and ambient Attention.

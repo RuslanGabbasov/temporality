@@ -41,6 +41,7 @@ func (c Commit) Validate() error {
 
 type Store interface {
 	CommitClaim(context.Context, Commit) error
+	TransitionClaim(context.Context, Transition) (Claim, error)
 	GetClaim(context.Context, string) (Claim, error)
 	ListRelations(context.Context, string) ([]ClaimRelation, error)
 }

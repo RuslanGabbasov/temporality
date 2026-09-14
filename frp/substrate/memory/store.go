@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 
@@ -94,6 +95,38 @@ func (s *Store) CommitClaim(_ context.Context, commit cognition.Commit) error {
 	s.claims[commit.Claim.ClaimID] = commit.Claim
 	s.relations = append(s.relations, commit.Relations...)
 	return nil
+}
+
+func (s *Store) TransitionClaim(_ context.Context, transition cognition.Transition) (cognition.Claim, error) {
+	if err := transition.Validate(); err != nil {
+		return cognition.Claim{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	claim, exists := s.claims[transition.ClaimID]
+	if !exists {
+		return cognition.Claim{}, cognition.ErrClaimNotFound
+	}
+	if _, exists = s.events[transition.Event.EventID]; exists {
+		return cognition.Claim{}, errors.New("event already exists")
+	}
+	if !cognition.CanTransition(claim.Status, transition.ToStatus) {
+		return cognition.Claim{}, fmt.Errorf("invalid claim transition %s -> %s", claim.Status, transition.ToStatus)
+	}
+	if transition.ValidAt.Before(claim.ValidFrom) {
+		return cognition.Claim{}, errors.New("transition valid_at cannot precede claim valid_from")
+	}
+	claim.Status = transition.ToStatus
+	if transition.Confidence != nil {
+		claim.Confidence = *transition.Confidence
+	}
+	if transition.ToStatus == cognition.ClaimRefuted || transition.ToStatus == cognition.ClaimSuperseded {
+		validTo := transition.ValidAt
+		claim.ValidTo = &validTo
+	}
+	s.events[transition.Event.EventID] = transition.Event
+	s.claims[claim.ClaimID] = claim
+	return claim, nil
 }
 
 func (s *Store) GetClaim(_ context.Context, id string) (cognition.Claim, error) {

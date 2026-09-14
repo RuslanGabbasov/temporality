@@ -137,7 +137,7 @@ func TestClaimCommitIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	for _, migration := range []string{"../../../migrations/000001_event_store.up.sql", "../../../migrations/000002_claims.up.sql"} {
+	for _, migration := range []string{"../../../migrations/000001_event_store.up.sql", "../../../migrations/000002_claims.up.sql", "../../../migrations/000003_claim_guards.up.sql"} {
 		if err = store.Migrate(ctx, migration); err != nil {
 			t.Fatal(err)
 		}
@@ -163,6 +163,68 @@ func TestClaimCommitIsAtomic(t *testing.T) {
 	}
 	if _, err = store.GetClaim(ctx, invalid.Claim.ClaimID); err != cognition.ErrClaimNotFound {
 		t.Fatalf("claim was not rolled back: %v", err)
+	}
+}
+
+func TestClaimLifecycleAndGuard(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	store, err := postgres.Open(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, migration := range []string{"../../../migrations/000001_event_store.up.sql", "../../../migrations/000002_claims.up.sql", "../../../migrations/000003_claim_guards.up.sql"} {
+		if err = store.Migrate(ctx, migration); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commit := claimCommit("Lifecycle claim", nil)
+	if err = store.CommitClaim(ctx, commit); err != nil {
+		t.Fatal(err)
+	}
+	confidence := float32(0.95)
+	at := commit.Claim.ValidFrom.Add(time.Second)
+	transitionEvent := protocol.Event{Protocol: protocol.Name, Version: protocol.Version, EventID: newTestUUID(), TransactionTime: at, ValidTime: at, Type: "claim.supported", Payload: map[string]any{"claim_id": commit.Claim.ClaimID}, Provenance: map[string]any{"source": "integration-test"}}
+	updated, err := store.TransitionClaim(ctx, cognition.Transition{Event: transitionEvent, ClaimID: commit.Claim.ClaimID, ToStatus: cognition.ClaimSupported, Confidence: &confidence, ValidAt: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != cognition.ClaimSupported || updated.Confidence != confidence || updated.ValidTo != nil {
+		t.Fatalf("unexpected supported claim: %#v", updated)
+	}
+
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, "UPDATE claims SET confidence=0 WHERE claim_id=$1", commit.Claim.ClaimID); err == nil {
+		pool.Close()
+		t.Fatal("direct claim update bypassed canonical transition")
+	}
+	pool.Close()
+
+	refutedAt := at.Add(time.Second)
+	refutedEvent := protocol.Event{Protocol: protocol.Name, Version: protocol.Version, EventID: newTestUUID(), TransactionTime: refutedAt, ValidTime: refutedAt, Type: "claim.refuted", Payload: map[string]any{}, Provenance: map[string]any{}}
+	updated, err = store.TransitionClaim(ctx, cognition.Transition{Event: refutedEvent, ClaimID: commit.Claim.ClaimID, ToStatus: cognition.ClaimRefuted, ValidAt: refutedAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ValidTo == nil || !updated.ValidTo.Equal(refutedAt) {
+		t.Fatalf("terminal validity not closed: %#v", updated)
+	}
+	invalidEvent := refutedEvent
+	invalidEvent.EventID = newTestUUID()
+	invalidEvent.Type = "claim.supported"
+	invalidEvent.ValidTime = refutedAt.Add(time.Second)
+	if _, err = store.TransitionClaim(ctx, cognition.Transition{Event: invalidEvent, ClaimID: commit.Claim.ClaimID, ToStatus: cognition.ClaimSupported, ValidAt: invalidEvent.ValidTime}); err == nil {
+		t.Fatal("transition from terminal state succeeded")
+	}
+	if _, err = store.Get(ctx, invalidEvent.EventID); err != substrate.ErrNotFound {
+		t.Fatalf("invalid transition event was persisted: %v", err)
 	}
 }
 

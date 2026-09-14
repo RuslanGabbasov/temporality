@@ -101,6 +101,23 @@ func TestCommitAndGetClaim(t *testing.T) {
 	if got.Code != http.StatusOK {
 		t.Fatalf("get claim status=%d body=%s", got.Code, got.Body.String())
 	}
+	transitioned := serve(handler, http.MethodPost, "/v1/claims/"+commit.Claim.ClaimID+"/transitions", []byte(`{"event":{"payload":{},"provenance":{"source":"test"}},"to_status":"supported","confidence":0.98}`))
+	if transitioned.Code != http.StatusOK {
+		t.Fatalf("transition status=%d body=%s", transitioned.Code, transitioned.Body.String())
+	}
+	var result struct {
+		Claim cognition.Claim `json:"claim"`
+	}
+	if err := json.Unmarshal(transitioned.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Claim.Status != cognition.ClaimSupported || result.Claim.Confidence != 0.98 {
+		t.Fatalf("unexpected transition: %s", transitioned.Body.String())
+	}
+	invalid := serve(handler, http.MethodPost, "/v1/claims/"+commit.Claim.ClaimID+"/transitions", []byte(`{"event":{"payload":{},"provenance":{}},"to_status":"supported"}`))
+	if invalid.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid transition status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
 }
 
 func serve(handler http.Handler, method, path string, body []byte) *httptest.ResponseRecorder {

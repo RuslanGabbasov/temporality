@@ -45,6 +45,10 @@ curl http://localhost:8080/metrics
 curl -X POST http://localhost:8080/v1/claims \
   -H 'content-type: application/json' \
   -d '{"event":{"payload":{},"provenance":{"source":"user"}},"claim":{"proposition":"The build is reproducible","confidence":0.9}}'
+
+curl -X POST http://localhost:8080/v1/claims/CLAIM_ID/transitions \
+  -H 'content-type: application/json' \
+  -d '{"event":{"payload":{},"provenance":{"source":"verification"}},"to_status":"supported","confidence":0.98}'
 ```
 
 ## Development
