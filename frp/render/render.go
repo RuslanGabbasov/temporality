@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/temporality-project/temporality/frp/attention"
 	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
@@ -108,8 +110,20 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	for _, event := range events {
 		recent = append(recent, event)
 	}
-	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{map[string]any{"agent_id": current.AgentID, "episode_id": current.EpisodeID, "branch_id": current.BranchID}}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: []any{}}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "periphery", Attention: "ambient", Items: []any{}}, {Kind: "working_set", Attention: "deliberate", Items: working}, {Kind: "procedures", Attention: "ambient", Items: []any{}}, {Kind: "recent", Attention: "ambient", Items: recent}}
-	packet := Packet{Protocol: protocol.Name, ProtocolVersion: protocol.Version, FrameID: current.FrameID, MemoryVersion: memoryVersion, RendererVersion: Version, Sections: sections, OutsideFrame: OutsideFrame{Hint: "No projection-backed outside-frame counts in M3"}, Provenance: Provenance{ProjectionVersion: "none", AttentionVersion: "none", EmbeddingModel: "none", AsOf: current.AsOf.Format("2006-01-02T15:04:05.999999999Z07:00")}, TokenUsage: TokenUsage{Budget: request.BudgetTokens}}
+	ambient, err := selectAmbient(current, goal, events)
+	if err != nil {
+		return Packet{}, err
+	}
+	mapItems := make([]any, 0, len(ambient.Selected))
+	periphery := make([]any, 0, len(ambient.Selected))
+	for _, selected := range ambient.Selected {
+		mapItems = append(mapItems, selected)
+		periphery = append(periphery, selected.Candidate.Payload)
+	}
+	outside := ambient.Considered - len(ambient.Selected)
+	hint := fmt.Sprintf("%d attention candidates are outside the frame", outside)
+	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{map[string]any{"agent_id": current.AgentID, "episode_id": current.EpisodeID, "branch_id": current.BranchID}}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: mapItems}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "periphery", Attention: "ambient", Items: periphery}, {Kind: "working_set", Attention: "deliberate", Items: working}, {Kind: "procedures", Attention: "ambient", Items: []any{}}, {Kind: "recent", Attention: "ambient", Items: recent}}
+	packet := Packet{Protocol: protocol.Name, ProtocolVersion: protocol.Version, FrameID: current.FrameID, MemoryVersion: memoryVersion, RendererVersion: Version, Sections: sections, OutsideFrame: OutsideFrame{NearbyRegions: outside, Hint: hint}, Provenance: Provenance{ProjectionVersion: "event-candidates.v1", AttentionVersion: attention.Version, EmbeddingModel: "none", AsOf: current.AsOf.Format("2006-01-02T15:04:05.999999999Z07:00")}, TokenUsage: TokenUsage{Budget: request.BudgetTokens}}
 	for {
 		packet.TokenUsage.Estimated = estimate(packet)
 		if packet.TokenUsage.Estimated <= request.BudgetTokens {
@@ -124,6 +138,75 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	packet.RenderID = contentID(packet)
 	return packet, nil
 }
+func selectAmbient(current frame.Frame, goal objective.Objective, events []protocol.Event) (attention.Result, error) {
+	if !current.Attention.Ambient {
+		return attention.Result{Version: attention.Version, Selected: []attention.ScoredCandidate{}}, nil
+	}
+	pins := map[string]struct{}{}
+	for _, ref := range current.WorkingSet {
+		pins[string(ref.Type)+":"+ref.ID] = struct{}{}
+	}
+	candidates := make([]attention.Candidate, 0, len(events))
+	focusText := current.Focus.Query
+	for i, event := range events {
+		trust := .5
+		if event.SourceTrust != nil {
+			trust = float64(*event.SourceTrust)
+		}
+		if trust < float64(current.Filters.TrustMin) {
+			continue
+		}
+		encoded, _ := json.Marshal(event.Payload)
+		text := event.Type + " " + string(encoded)
+		pin := 0.0
+		if _, ok := pins["event:"+event.EventID]; ok {
+			pin = 1
+		}
+		agent := 0.0
+		if event.AgentID != "" && event.AgentID == current.AgentID {
+			agent = 1
+		}
+		surprise := 0.0
+		if event.Contradiction != nil {
+			surprise = float64(*event.Contradiction)
+		}
+		recency := float64(i+1) / float64(len(events))
+		candidates = append(candidates, attention.Candidate{Ref: frame.Ref{Type: frame.RefEvent, ID: event.EventID}, Features: attention.Features{SemanticRelevance: overlap(focusText, text), Recency: recency, Trust: trust, TaskRelevance: overlap(goal.Text, text), Surprise: surprise, AgentRelevance: agent, Pin: pin}, Payload: event})
+	}
+	engine, err := attention.New(attention.DefaultPolicy())
+	if err != nil {
+		return attention.Result{}, err
+	}
+	return engine.SelectAmbient(candidates, pins, current.Attention.MaxCandidates)
+}
+func overlap(left, right string) float64 {
+	terms := func(value string) map[string]struct{} {
+		result := map[string]struct{}{}
+		for _, term := range strings.Fields(strings.ToLower(value)) {
+			term = strings.Trim(term, ".,:;!?()[]{}\"")
+			if len(term) > 2 {
+				result[term] = struct{}{}
+			}
+		}
+		return result
+	}
+	a, b := terms(left), terms(right)
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	matches := 0
+	for term := range a {
+		if _, ok := b[term]; ok {
+			matches++
+		}
+	}
+	denominator := len(a)
+	if len(b) < denominator {
+		denominator = len(b)
+	}
+	return float64(matches) / float64(denominator)
+}
+
 func (r *Renderer) focusItem(ctx context.Context, focus frame.Focus) (any, error) {
 	if focus.Type == frame.RefQuery {
 		return map[string]any{"type": focus.Type, "query": focus.Query}, nil

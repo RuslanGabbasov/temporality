@@ -9,6 +9,7 @@ Implemented foundations for **M0 — Event Log + replay** and **M1 — Claims**:
 - versioned FRP `Event` protocol object and JSON Schema;
 - append-only PostgreSQL event store;
 - deterministic replay ordered by valid time, transaction time, and event ID;
+- versioned deliberate/ambient attention with stable scoring and hysteresis;
 - replay boundaries by episode, branch, and `as_of`;
 - versioned replay manifests included in deterministic digests;
 - HTTP/JSON API with opaque cursor pagination;
@@ -60,6 +61,8 @@ make smoke
 ```
 
 This builds and starts `temporality-runtime`, creates an initial Frame, creates an Objective, verifies two identical deterministic RenderPackets, submits a validated `CognitiveEmission`, reduces its attention/frame operations into an immutable transition, restores the next Frame from PostgreSQL, verifies replay, prints the IDs/digest, and stops the runtime.
+
+Render packets expose the attention engine version, scored ambient map, selected periphery, and an outside-frame candidate count. Deliberate `attend()` operations bypass ambient hysteresis.
 
 The M2 emission endpoint rejects emissions containing claims or actions until those intents can be committed atomically with Frame and Execution state; they are never silently dropped.
 

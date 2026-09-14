@@ -26,7 +26,13 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Deterministic RenderPacket and content-derived render IDs.
   - [x] Canonical sections, provenance, memory version, and token budget trimming.
   - [x] `/v1/render` integrated into the runnable smoke workflow.
-- [ ] **M4:** Deliberate and ambient Attention.
+- [ ] **M4 — Deliberate and ambient Attention:**
+  - [x] Versioned deterministic ambient scoring over normalized features.
+  - [x] Stable tie-breaking, trust filters, explicit pins, and ambient-only hysteresis.
+  - [x] Deliberate semantic jumps remain independent from ambient hysteresis.
+  - [x] RenderPacket scored map, periphery, outside-frame count, and attention provenance.
+  - [ ] Region/graph projection candidates.
+  - [ ] Canonical `attention.selected` / `attention.suggested` telemetry and attention metrics.
 - [ ] **M5:** Affordance registry and deterministic Executor.
 - [ ] **M6:** Adaptive Planner.
 - [ ] **M7:** Time travel, snapshots, and blame.

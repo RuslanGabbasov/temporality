@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://temporality.dev/schemas/frp/v0.3/AttentionResult.schema.json","title":"FRP Ambient Attention Result","type":"object","required":["version","considered","selected"],"properties":{"version":{"type":"string"},"considered":{"type":"integer","minimum":0},"selected":{"type":"array"}},"additionalProperties":false}
