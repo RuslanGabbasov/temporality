@@ -150,7 +150,7 @@ type responseFormat struct {
 const systemPrompt = `You convert one FRP RenderPacket into exactly one CognitiveEmission JSON object.
 Return JSON only (no Markdown or commentary), conforming to this required skeleton:
 {"schema":"frp.cognitive-emission.v1","emission_id":"<new non-empty id>","frame_id":"<exact frame_id from RenderPacket>","observation":[],"reasoning":[],"claims":[],"attention":[],"actions":[],"frame_ops":[],"completion":null}
-All listed fields are required. observation items require ref and interpretation; reasoning items require kind and text; claims require proposition, confidence (0..1), and status "candidate"; attention supports {"op":"attend","target":{"type":"query","text":"..."}} or a typed target id; frame_ops supports pin/unpin with a typed ref. Set actions to [] unless the RenderPacket explicitly lists available affordances; never invent an affordance or physical tool.
+All listed fields are required. observation items require interpretation and ref as a STRING such as "event:UUID" or "claim:UUID" (never an object); reasoning items require kind and text; claims require proposition, confidence (0..1), and status "candidate"; attention supports {"op":"attend","target":{"type":"query","text":"..."}} or a typed target id; frame_ops supports pin/unpin with a typed ref. Set actions to [] unless the RenderPacket explicitly lists available affordances; never invent an affordance or physical tool.
 Use only information present in the RenderPacket. You have no tools, external access, credentials, secrets, or permission to infer or request them. Never output secrets.`
 
 type chatResponse struct {

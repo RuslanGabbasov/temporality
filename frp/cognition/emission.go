@@ -1,6 +1,7 @@
 package cognition
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +15,34 @@ type Observation struct {
 	Ref            string `json:"ref"`
 	Interpretation string `json:"interpretation"`
 }
+
+// UnmarshalJSON accepts the canonical string ref and normalizes the common
+// model mistake of copying a RenderPacket ref object {type,id}. Marshal output
+// remains canonical because Ref is always stored as a string.
+func (o *Observation) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Ref            json.RawMessage `json:"ref"`
+		Interpretation string          `json:"interpretation"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	var ref string
+	if err := json.Unmarshal(wire.Ref, &ref); err != nil {
+		var object struct {
+			Type frame.RefType `json:"type"`
+			ID   string        `json:"id"`
+		}
+		if objectErr := json.Unmarshal(wire.Ref, &object); objectErr != nil || object.Type == "" || object.ID == "" {
+			return errors.New("observation ref must be a canonical string or {type,id} object")
+		}
+		ref = string(object.Type) + ":" + object.ID
+	}
+	o.Ref = ref
+	o.Interpretation = wire.Interpretation
+	return nil
+}
+
 type Reasoning struct {
 	Kind string `json:"kind"`
 	Text string `json:"text"`
