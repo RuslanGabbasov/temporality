@@ -19,7 +19,7 @@ describe('episode workflow', () => {
     const result = await runEpisodeWorkflow(client, draft, { configured: true }, (stage) => stages.push(stage), ids)
     expect(stages).toEqual(['Creating objective', 'Creating frame', 'Rebuilding regions', 'Calling model'])
     expect(result.childFrameId).toBe('child')
-    expect(client.modelStep).toHaveBeenCalledWith({ frame_id: 'parent', objective_id: 'objective', budget_tokens: 1200, definitions: [] })
+    expect(client.modelStep).toHaveBeenCalledWith({ frame_id: 'parent', objective_id: 'objective', budget_tokens: 1200, definitions: [] }, undefined)
   })
 
   it('creates persistent records but does not call an unconfigured model', async () => {
@@ -39,10 +39,24 @@ describe('episode workflow', () => {
     } satisfies Partial<EpisodeWorkflowError>)
   })
 
+  it('preserves resumable IDs when model cancellation aborts the workflow', async () => {
+    const client = mockApi(); const controller = new AbortController()
+    vi.mocked(client.modelStep).mockImplementation((_body, signal) => new Promise((_resolve, reject) => {
+      if (signal?.aborted) reject(new DOMException('Aborted', 'AbortError'))
+      else signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+    }))
+    const running = runEpisodeWorkflow(client, draft, { configured: true }, undefined, ids, controller.signal)
+    controller.abort()
+    await expect(running).rejects.toMatchObject({
+      result: { ids, parentFrameId: 'parent', needsModel: false },
+      cause: { name: 'AbortError' },
+    } satisfies Partial<EpisodeWorkflowError>)
+  })
+
   it('continues from the selected frame and its objective', async () => {
     const client = mockApi()
     await continueWithModel(client, 'selected-frame', 'selected-objective', 777)
-    expect(client.modelStep).toHaveBeenCalledWith({ frame_id: 'selected-frame', objective_id: 'selected-objective', budget_tokens: 777, definitions: [] })
+    expect(client.modelStep).toHaveBeenCalledWith({ frame_id: 'selected-frame', objective_id: 'selected-objective', budget_tokens: 777, definitions: [] }, undefined)
   })
 
   it('builds render input only from the selected Frame and falls back to 4000 tokens', () => {

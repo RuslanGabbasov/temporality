@@ -123,9 +123,12 @@ export interface ModelStepResponse {
 
 export interface ModelConfig {
   configured: boolean
-  provenance?: { model?: string; base_url?: string; [key: string]: Json | undefined }
+  provenance?: { model?: string; provider?: string; base_url?: string; timeout_ms?: number; timeout_seconds?: number; [key: string]: Json | undefined }
   model?: string
+  provider?: string
   base_url?: string
+  timeout_ms?: number
+  timeout_seconds?: number
 }
 
 export interface CreateFrameResponse { frame: Frame }

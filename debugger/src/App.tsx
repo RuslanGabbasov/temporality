@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { api, API_BASE } from './api'
 import { eventKey, eventLabel, eventTime, executionIdOf, frameIdOf, unwrapEvents } from './timeline'
+import { formatDuration, isAbortError, modelProgress, modelTimeoutMs } from './modelProgress'
 import type { Execution, ForkGroup, Frame, FrameSection, FrpEvent, ModelConfig, ModelStepResponse, RenderResponse } from './types'
 import { childFrameId, continueWithModel, EpisodeWorkflowError, renderRequest, runEpisodeWorkflow, twoBranchForkRequest, type EpisodeDraft, type EpisodeWorkflowResult, type WorkflowStage } from './workflow'
 
@@ -32,6 +33,7 @@ function App() {
   const [modelConfig, setModelConfig] = useState<ModelConfig | null>(null); const [configBusy, setConfigBusy] = useState(false); const [configError, setConfigError] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false); const [draft, setDraft] = useState(DEFAULT_DRAFT); const [conditionsText, setConditionsText] = useState('')
   const [workflowBusy, setWorkflowBusy] = useState(false); const [workflowStage, setWorkflowStage] = useState<WorkflowStage | ''>(''); const [workflowError, setWorkflowError] = useState(''); const [pending, setPending] = useState<EpisodeWorkflowResult | null>(null); const [summary, setSummary] = useState<ModelStepResponse | null>(null)
+  const [modelRun, setModelRun] = useState<{ controller: AbortController; startedAt: number; now: number; operation: string } | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
 
   const loadEvents = useCallback(async (id: string) => {
@@ -46,7 +48,8 @@ function App() {
     try { setModelConfig(await api.modelConfig()) } catch (error) { setConfigError(errorText(error, 'Unable to load model config')) } finally { setConfigBusy(false) }
   }, [])
   useEffect(() => { void refreshConfig() }, [refreshConfig])
-  useEffect(() => { if (!episodeId) return; const timer = window.setInterval(() => void loadEvents(episodeId), 5000); return () => window.clearInterval(timer) }, [episodeId, loadEvents])
+  useEffect(() => { if (!episodeId || modelRun) return; const timer = window.setInterval(() => void loadEvents(episodeId), 5000); return () => window.clearInterval(timer) }, [episodeId, loadEvents, modelRun])
+  useEffect(() => { if (!modelRun) return; const timer = window.setInterval(() => setModelRun((run) => run ? { ...run, now: Date.now() } : null), 1000); return () => window.clearInterval(timer) }, [modelRun?.startedAt])
   useEffect(() => { if (dialogOpen) dialogRef.current?.showModal(); else dialogRef.current?.close() }, [dialogOpen])
 
   async function openFrame(id: string) {
@@ -62,6 +65,10 @@ function App() {
   function fork() { if (!frameId) return; void runAction('fork', async () => setForkGroup(await api.fork(twoBranchForkRequest(frameId)))) }
   function renderSelected() { if (!frame) return; const request = renderRequest(frame, selectedFrameId); if (request) void runAction('render', async () => setRendered(await api.render(request))) }
 
+  function withDuration(result: ModelStepResponse, startedAt: number): ModelStepResponse {
+    const durationMs = Date.now() - startedAt
+    return { ...result, debugger_summary: { duration_ms: durationMs, duration: formatDuration(durationMs) } }
+  }
   async function finishModel(result: EpisodeWorkflowResult, modelResult?: ModelStepResponse) {
     setPending(null); setSummary(modelResult ?? result.modelResult ?? null); setEpisodeId(result.ids.episodeId); setEpisodeInput(result.ids.episodeId)
     await loadEvents(result.ids.episodeId)
@@ -71,27 +78,37 @@ function App() {
   async function createEpisode(event: FormEvent) {
     event.preventDefault(); if (workflowBusy || !draft.prompt.trim()) return
     setWorkflowBusy(true); setWorkflowError(''); setSummary(null)
+    const controller = new AbortController(); let modelStartedAt = 0
     try {
-      const result = await runEpisodeWorkflow(api, { ...draft, successConditions: conditionsText.split('\n').map((value) => value.trim()).filter(Boolean) }, modelConfig ?? { configured: false }, setWorkflowStage)
+      const result = await runEpisodeWorkflow(api, { ...draft, successConditions: conditionsText.split('\n').map((value) => value.trim()).filter(Boolean) }, modelConfig ?? { configured: false }, (stage) => { setWorkflowStage(stage); if (stage === 'Calling model') { modelStartedAt = Date.now(); setModelRun({ controller, startedAt: modelStartedAt, now: modelStartedAt, operation: 'New Episode' }) } }, undefined, controller.signal)
+      if (result.modelResult && modelStartedAt) result.modelResult = withDuration(result.modelResult, modelStartedAt)
       setDialogOpen(false); setEpisodeId(result.ids.episodeId); setEpisodeInput(result.ids.episodeId); await loadEvents(result.ids.episodeId); await openFrame(result.parentFrameId)
       if (result.needsModel) { setPending(result); setWorkflowError('Objective and Frame were created. Configure TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID, refresh model status, then retry.') } else await finishModel(result)
     } catch (error) {
       if (error instanceof EpisodeWorkflowError) { setPending(error.result); setEpisodeId(error.result.ids.episodeId); setEpisodeInput(error.result.ids.episodeId); setDialogOpen(false); await loadEvents(error.result.ids.episodeId); await openFrame(error.result.parentFrameId) }
-      setWorkflowError(errorText(error, 'Unable to create episode'))
-    } finally { setWorkflowBusy(false); setWorkflowStage('') }
+      setWorkflowError(isAbortError(error instanceof EpisodeWorkflowError ? error.cause : error) ? 'Model step cancelled. Episode and frame IDs are retained and ready to retry.' : errorText(error, 'Unable to create episode'))
+    } finally { setWorkflowBusy(false); setWorkflowStage(''); setModelRun(null) }
   }
   async function retryPending() {
     if (!pending || workflowBusy) return
     if (!modelConfig?.configured) { setWorkflowError('Model is still unconfigured. Set the runtime model environment, then refresh model status.'); return }
     setWorkflowBusy(true); setWorkflowStage('Calling model'); setWorkflowError('')
-    try { const result = await continueWithModel(api, pending.parentFrameId, pending.ids.objectiveId, draft.tokenBudget); await finishModel(pending, result) } catch (error) { setWorkflowError(errorText(error, 'Model step failed; IDs are retained for retry.')) } finally { setWorkflowBusy(false); setWorkflowStage('') }
+    const controller = new AbortController(); const startedAt = Date.now(); setModelRun({ controller, startedAt, now: startedAt, operation: 'Retry' })
+    try { const result = await continueWithModel(api, pending.parentFrameId, pending.ids.objectiveId, draft.tokenBudget, controller.signal); await finishModel(pending, withDuration(result, startedAt)) } catch (error) { setWorkflowError(isAbortError(error) ? 'Model step cancelled. Episode and frame IDs are retained and ready to retry.' : errorText(error, 'Model step failed; IDs are retained for retry.')) } finally { setWorkflowBusy(false); setWorkflowStage(''); setModelRun(null) }
   }
-  function continueSelected() { if (!frameId || !objectiveId) return; void runAction('Calling model', async () => { const result = await continueWithModel(api, frameId, objectiveId, frameBudget(frame)); setSummary(result); if (episodeId) await loadEvents(episodeId); const child = childFrameId(result); if (child) await openFrame(child) }) }
+  function continueSelected() {
+    if (!frameId || !objectiveId || actionBusy) return
+    const controller = new AbortController(); const startedAt = Date.now(); setActionBusy('Calling model'); setActionError(''); setModelRun({ controller, startedAt, now: startedAt, operation: 'Continue' })
+    void (async () => { try { const result = await continueWithModel(api, frameId, objectiveId, frameBudget(frame), controller.signal); setSummary(withDuration(result, startedAt)); if (episodeId) await loadEvents(episodeId); const child = childFrameId(result); if (child) await openFrame(child) } catch (error) { setActionError(isAbortError(error) ? `Model step cancelled. Episode ${episodeId || 'ID'} and frame ${frameId} are unchanged; Continue can be retried.` : errorText(error, 'Model step failed')) } finally { setActionBusy(''); setModelRun(null) } })()
+  }
 
   const provenance = modelConfig?.provenance; const modelName = provenance?.model ?? modelConfig?.model; const baseUrl = provenance?.base_url ?? modelConfig?.base_url
+  const provider = provenance?.provider ?? modelConfig?.provider ?? (baseUrl ? (() => { try { return new URL(baseUrl).host } catch { return baseUrl } })() : 'provider')
+  const progress = modelRun ? modelProgress(modelRun.startedAt, modelRun.now, modelTimeoutMs(modelConfig)) : null
   return <div className="app-shell">
     <header className="topbar"><div><span className="eyebrow">TEMPORALITY / FRP</span><h1>Cognitive Debugger</h1></div><div className="header-actions"><div className={`model-badge ${modelConfig?.configured ? 'ready' : 'offline'}`} title={configError || undefined}><span className="pulse" />{configBusy ? 'Checking model…' : modelConfig?.configured ? `Configured · ${modelName ?? 'model'} · ${baseUrl ?? 'base URL set'}` : 'Model not configured'}</div><button className="icon-button" onClick={() => void refreshConfig()} disabled={configBusy} aria-label="Refresh model configuration">↻</button><span className="connection">API <code>{API_BASE}</code></span><button className="primary" onClick={() => setDialogOpen(true)}>＋ New Episode</button></div></header>
 
+    {modelRun && progress && <section className="model-progress" role="status" aria-live="polite"><div className="model-activity" aria-hidden="true"><span /><span /><span /></div><div className="model-progress-copy"><span className="eyebrow">{modelRun.operation.toUpperCase()} · CALLING MODEL</span><h2>{modelName ?? 'Configured model'} <small>via {provider}</small></h2><p>The provider is processing this frame. The result commits atomically only when the model step completes.</p></div><div className="model-timing"><strong>{progress.elapsed}</strong><span>elapsed</span>{progress.timeout !== undefined && <small>{progress.timedOut ? 'Configured timeout reached' : `timeout in ${progress.timeout}`}</small>}</div><button className="cancel-model" onClick={() => modelRun.controller.abort()}>Cancel model step</button></section>}
     <main className="workspace">
       <aside className="timeline panel" aria-label="Episode timeline"><div className="panel-heading"><div><span className="eyebrow">EPISODE</span><h2>Timeline</h2></div>{episodeId && <button className="icon-button" onClick={() => void loadEvents(episodeId)} aria-label="Refresh timeline">↻</button>}</div>
         <form className="episode-form" onSubmit={submitEpisode}><label htmlFor="episode">Episode ID</label><div className="input-row"><input id="episode" value={episodeInput} onChange={(e) => setEpisodeInput(e.target.value)} placeholder="UUID" required /><button type="submit">Open</button></div><label htmlFor="limit">Event limit <output>{limit}</output></label><input id="limit" type="range" min="10" max="500" step="10" value={limit} onChange={(e) => setLimit(Number(e.target.value))} /></form>

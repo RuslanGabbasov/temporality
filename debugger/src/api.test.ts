@@ -41,6 +41,14 @@ describe('operational API', () => {
     ])
   })
 
+  it('passes an AbortSignal to the model-step fetch contract', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+    await api.modelStep({ frame_id: 'f', objective_id: 'o', budget_tokens: 1, definitions: [] }, controller.signal)
+    expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal)
+  })
+
   it('includes HTTP response details in errors', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"error":"bad model"}', { status: 502, statusText: 'Bad Gateway' })))
     await expect(api.modelStep({ frame_id: 'f', objective_id: 'o', budget_tokens: 1, definitions: [] })).rejects.toThrow('502 Bad Gateway — {"error":"bad model"}')

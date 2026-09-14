@@ -25,7 +25,7 @@ async function request<T>(path: string, init?: RequestInit, query?: Record<strin
   return response.json() as Promise<T>
 }
 
-const post = <T>(path: string, body: unknown) => request<T>(path, { method: 'POST', body: JSON.stringify(body) })
+const post = <T>(path: string, body: unknown, signal?: AbortSignal) => request<T>(path, { method: 'POST', body: JSON.stringify(body), signal })
 
 export const api = {
   events: (episodeId: string, limit: number) => request<FrpEvent[] | { events: FrpEvent[] }>('/v1/events', undefined, { episode_id: episodeId, limit }),
@@ -37,7 +37,7 @@ export const api = {
   fork: (body: ForkRequest) => post<ForkGroup>('/v1/fork', body),
   createObjective: (body: CreateObjectiveRequest) => post<CreateObjectiveResponse>('/v1/objectives', body),
   createFrame: (body: CreateFrameRequest) => post<CreateFrameResponse>('/v1/frames', body),
-  modelStep: (body: ModelStepRequest) => post<ModelStepResponse>('/v1/model-step', body),
+  modelStep: (body: ModelStepRequest, signal?: AbortSignal) => post<ModelStepResponse>('/v1/model-step', body, signal),
   modelConfig: () => request<ModelConfig>('/v1/model/config'),
   rebuildRegions: (episodeId: string, branchId: string) => post<unknown>('/v1/projections/regions/rebuild', { episode_id: episodeId, branch_id: branchId }),
 }

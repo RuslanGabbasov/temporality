@@ -32,7 +32,7 @@ export interface WorkflowApi {
   createObjective(body: CreateObjectiveRequest): Promise<unknown>
   createFrame(body: CreateFrameRequest): Promise<CreateFrameResponse>
   rebuildRegions(episodeId: string, branchId: string): Promise<unknown>
-  modelStep(body: ModelStepRequest): Promise<ModelStepResponse>
+  modelStep(body: ModelStepRequest, signal?: AbortSignal): Promise<ModelStepResponse>
 }
 
 export class EpisodeWorkflowError extends Error {
@@ -72,6 +72,7 @@ export async function runEpisodeWorkflow(
   config: ModelConfig,
   onStage: (stage: WorkflowStage) => void = () => undefined,
   ids = generateEpisodeIds(),
+  signal?: AbortSignal,
 ): Promise<EpisodeWorkflowResult> {
   const retained: EpisodeWorkflowResult = { ids, parentFrameId: ids.frameId, needsModel: !config.configured }
   try {
@@ -110,7 +111,7 @@ export async function runEpisodeWorkflow(
     }
     if (!config.configured) return retained
     onStage('Calling model')
-    const modelResult = await continueWithModel(client, retained.parentFrameId, ids.objectiveId, draft.tokenBudget)
+    const modelResult = await continueWithModel(client, retained.parentFrameId, ids.objectiveId, draft.tokenBudget, signal)
     return { ...retained, needsModel: false, modelResult, childFrameId: childFrameId(modelResult) }
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : 'Episode workflow failed'
@@ -118,6 +119,6 @@ export async function runEpisodeWorkflow(
   }
 }
 
-export function continueWithModel(client: Pick<WorkflowApi, 'modelStep'>, frameId: string, objectiveId: string, budgetTokens: number) {
-  return client.modelStep({ frame_id: frameId, objective_id: objectiveId, budget_tokens: budgetTokens, definitions: [] })
+export function continueWithModel(client: Pick<WorkflowApi, 'modelStep'>, frameId: string, objectiveId: string, budgetTokens: number, signal?: AbortSignal) {
+  return client.modelStep({ frame_id: frameId, objective_id: objectiveId, budget_tokens: budgetTokens, definitions: [] }, signal)
 }

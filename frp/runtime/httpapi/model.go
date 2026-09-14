@@ -66,6 +66,7 @@ func (s *Server) modelStep(w http.ResponseWriter, r *http.Request) {
 		definitions[definition.ID] = definition
 	}
 	startedAt := time.Now()
+	s.log.Info("model step started", "frame_id", request.FrameID, "model", adapter.Provenance().Model, "timeout_ms", adapter.Provenance().TimeoutMS)
 	result, err := (modelstep.Service{
 		Store:           store,
 		Adapter:         adapter,
