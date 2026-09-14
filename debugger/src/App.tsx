@@ -1,5 +1,6 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { api, API_BASE } from './api'
+import { extractClaims, extractModelAnswer } from './answer'
 import { eventKey, eventLabel, eventTime, executionIdOf, frameIdOf, unwrapEvents } from './timeline'
 import { formatDuration, isAbortError, modelProgress, modelTimeoutMs } from './modelProgress'
 import type { Execution, ForkGroup, Frame, FrameSection, FrpEvent, ModelConfig, ModelStepResponse, RenderResponse } from './types'
@@ -11,6 +12,20 @@ const DEFAULT_DRAFT: EpisodeDraft = { prompt: '', successConditions: [], tokenBu
 function JsonView({ value, empty = 'No data' }: { value: unknown; empty?: string }) {
   if (value === undefined || value === null) return <p className="muted empty">{empty}</p>
   return <pre>{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</pre>
+}
+function ModelResult({ response, panelRef }: { response: ModelStepResponse; panelRef: React.RefObject<HTMLElement | null> }) {
+  const answer = extractModelAnswer(response)
+  const claims = extractClaims(response)
+  const protocol = { render_packet: response.render_packet, emission: response.emission, step: response.step }
+  return <section className="model-result" aria-label="Model result">
+    <article className={`answer-panel ${answer.kind === 'empty' ? 'answer-empty' : ''}`} ref={panelRef} tabIndex={-1} aria-labelledby="model-answer-title">
+      <span className="eyebrow">MODEL OUTPUT</span><h3 id="model-answer-title">{answer.label}</h3>
+      {answer.text ? <div className="answer-text">{answer.text}</div> : <div className="empty-answer" role="status"><strong>No model answer was returned.</strong><span>Inspect Protocol details below, then retry “Continue with model” or revise the objective.</span></div>}
+    </article>
+    <article className="claims-panel"><h3>Claims <span>{claims.length}</span></h3>{claims.length ? <ul>{claims.map((claim, index) => <li key={`${claim.proposition}-${index}`}><span>{claim.proposition}</span><small>{claim.confidence !== undefined && <data value={claim.confidence}>confidence {Math.round(claim.confidence * 100)}%</data>}{claim.status && <span className="claim-status">{claim.status}</span>}</small></li>)}</ul> : <p className="muted">No claims emitted.</p>}</article>
+    <details className="protocol-details"><summary>Protocol details: RenderPacket / Emission / Step</summary><JsonView value={protocol} /></details>
+    {(response.model_provenance !== undefined || response.debugger_summary !== undefined) && <div className="model-meta">{response.model_provenance !== undefined && <article><h3>Model provenance</h3><JsonView value={response.model_provenance} /></article>}{response.debugger_summary !== undefined && <article><h3>Debugger summary</h3><JsonView value={response.debugger_summary} /></article>}</div>}
+  </section>
 }
 function Status({ loading, error, children }: { loading: boolean; error?: string; children: ReactNode }) {
   if (loading) return <div className="status" role="status"><span className="spinner" /> Loading…</div>
@@ -35,6 +50,7 @@ function App() {
   const [workflowBusy, setWorkflowBusy] = useState(false); const [workflowStage, setWorkflowStage] = useState<WorkflowStage | ''>(''); const [workflowError, setWorkflowError] = useState(''); const [pending, setPending] = useState<EpisodeWorkflowResult | null>(null); const [summary, setSummary] = useState<ModelStepResponse | null>(null)
   const [modelRun, setModelRun] = useState<{ controller: AbortController; startedAt: number; now: number; operation: string } | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const answerPanelRef = useRef<HTMLElement>(null)
 
   const loadEvents = useCallback(async (id: string) => {
     if (!id.trim()) return []
@@ -51,6 +67,14 @@ function App() {
   useEffect(() => { if (!episodeId || modelRun) return; const timer = window.setInterval(() => void loadEvents(episodeId), 5000); return () => window.clearInterval(timer) }, [episodeId, loadEvents, modelRun])
   useEffect(() => { if (!modelRun) return; const timer = window.setInterval(() => setModelRun((run) => run ? { ...run, now: Date.now() } : null), 1000); return () => window.clearInterval(timer) }, [modelRun?.startedAt])
   useEffect(() => { if (dialogOpen) dialogRef.current?.showModal(); else dialogRef.current?.close() }, [dialogOpen])
+  useEffect(() => {
+    if (!summary || frameBusy) return
+    const frame = window.requestAnimationFrame(() => {
+      answerPanelRef.current?.focus({ preventScroll: true })
+      answerPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [summary, frameBusy])
 
   async function openFrame(id: string) {
     setSelectedFrameId(id); setFrameBusy(true); setFrameError(''); setFrame(null); setRendered(null); setReplay(null); setBlame(null); setForkGroup(null); setActionError('')
@@ -118,8 +142,9 @@ function App() {
 
       <section className="inspector panel" aria-label="Frame inspector"><div className="panel-heading inspector-heading"><div><span className="eyebrow">SELECTED FRAME</span><h2>{selectedFrameId || 'No frame selected'}</h2></div>{objectiveId && <div className="objective"><span>Objective</span><code>{objectiveId}</code></div>}</div>
         <Status loading={frameBusy} error={frameError}>{!frame ? <div className="hero-empty"><div className="frame-glyph">⌗</div><h3>Create a task or select a frame</h3><p>Run cognition with a configured model, or inspect an existing episode’s boundaries, evidence, token use, and provenance.</p><button className="primary" onClick={() => setDialogOpen(true)}>New Episode</button></div> : <><div className="actionbar" aria-label="Frame actions"><button onClick={continueSelected} disabled={!!actionBusy || !modelConfig?.configured}>Continue with model</button><button onClick={renderSelected} disabled={!!actionBusy || !objectiveId} title="Render the selected Frame using its objective and token budget (default 4000)">Render selected frame</button><button onClick={() => void runAction('replay', async () => setReplay(await api.replay(frameId)))} disabled={!!actionBusy}>↶ Replay from here</button><button onClick={fork} disabled={!!actionBusy}>⑂ Fork ×2</button>{actionBusy && <span className="muted" role="status"><span className="spinner" /> {actionBusy}…</span>}</div>{actionError && <div className="status error" role="alert">{actionError}</div>}
+          {summary && <ModelResult response={summary} panelRef={answerPanelRef} />}
           <div className="section-grid">{SECTIONS.map((section) => <article className={`data-card ${section === 'focus' ? 'featured' : ''}`} key={section}><h3><span>{section === 'focus' ? '◎' : '◇'}</span>{section}</h3><JsonView value={frame.sections?.[section] ?? frame[section]} /></article>)}</div><div className="evidence-grid"><article className="data-card warning"><h3><span>↗</span>outside_frame</h3><JsonView value={frame.outside_frame} /></article><article className="data-card"><h3><span>⌁</span>provenance</h3><JsonView value={frame.provenance} /></article><article className="data-card"><h3><span>◴</span>token usage</h3><JsonView value={frame.token_usage ?? frame.usage} /></article></div>
-          {(summary || rendered || replay) && <div className="result-grid">{summary && <article className="result-card"><h3>Model result summary</h3><JsonView value={summary} /></article>}{rendered && <article className="result-card"><h3>Rendered cognition</h3><JsonView value={rendered.rendered ?? rendered.output ?? rendered.content ?? rendered} /></article>}{replay !== null && <article className="result-card"><h3>Replay result</h3><JsonView value={replay} /></article>}</div>}
+          {(rendered || replay) && <div className="result-grid">{rendered && <article className="result-card"><h3>Rendered cognition</h3><JsonView value={rendered.rendered ?? rendered.output ?? rendered.content ?? rendered} /></article>}{replay !== null && <article className="result-card"><h3>Replay result</h3><JsonView value={replay} /></article>}</div>}
           <article className="tool-card"><div><span className="eyebrow">CAUSAL REFERENCE</span><h3>Blame analysis</h3><p>Enter the exact Claim, Event, or Frame reference ID to trace—not a natural-language question.</p></div><form onSubmit={submitBlame}><label>Claim / Event / Frame reference ID<input value={blameRootId} onChange={(e) => setBlameRootId(e.target.value)} placeholder="Reference ID" aria-label="Blame root reference ID" required /></label><label>Maximum traversal depth<input type="number" min="1" step="1" value={blameMaxDepth} onChange={(e) => setBlameMaxDepth(Number(e.target.value))} aria-label="Blame maximum depth" required /></label><button disabled={!!actionBusy}>Trace reference</button></form>{blame !== null && <JsonView value={blame} />}</article>{forkGroup && <article className="tool-card"><span className="eyebrow">COUNTERFACTUAL GROUP</span><h3>Forked branches</h3><p>Fork group <code>{forkGroup.fork_group_id}</code></p><div className="branch-grid">{forkGroup.branches.map((branch) => <div className="branch" key={branch.branch_id}><strong>{branch.label ?? 'Branch'}</strong><code>{branch.branch_id}</code><JsonView value={branch} /></div>)}</div></article>}</>}</Status>
       </section>
       <aside className={`execution-drawer panel ${execution || executionBusy || executionError ? 'open' : ''}`} aria-label="Execution details"><div className="panel-heading"><div><span className="eyebrow">EXECUTION</span><h2>Details</h2></div><button className="icon-button" onClick={() => { setExecution(null); setExecutionError('') }} aria-label="Close execution details">×</button></div><Status loading={executionBusy} error={executionError}><JsonView value={execution} /></Status></aside>

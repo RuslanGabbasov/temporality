@@ -34,7 +34,7 @@ func TestOpenAIAdapterSuccessAndDeterministicRequest(t *testing.T) {
 		messages, _ := body["messages"].([]any)
 		system, _ := messages[0].(map[string]any)
 		systemContent, _ := system["content"].(string)
-		if !strings.Contains(systemContent, `"completion":null`) || !strings.Contains(systemContent, "no tools") || !strings.Contains(systemContent, "Never output secrets") {
+		if !strings.Contains(systemContent, `"completion":null`) || !strings.Contains(systemContent, `kind "answer"`) || !strings.Contains(systemContent, "same language") || !strings.Contains(systemContent, "no tools") || !strings.Contains(systemContent, "Never output secrets") {
 			t.Errorf("system prompt lacks schema or safety constraints: %q", systemContent)
 		}
 		format, _ := body["response_format"].(map[string]any)
