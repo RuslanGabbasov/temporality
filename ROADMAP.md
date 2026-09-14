@@ -52,7 +52,10 @@ The milestone order follows FRP v0.3 section 38.
 - [x] **M8 — Fork and A/B cognition:**
   - [x] Branch/ForkGroup models, deterministic immutable fork roots, trajectory comparator.
   - [x] PostgreSQL branch heads, atomic fork transaction, CAS, branch APIs, persisted comparisons and isolation tests.
-- [ ] **M9:** Procedures.
+- [x] **M9 — Procedures:**
+  - [x] Deterministic evidence-backed procedure projection from terminal Executions.
+  - [x] Smoothed success rates, failure penalties, minimum evidence and poisoning mitigation.
+  - [x] PostgreSQL rebuild/list/get/match API and deterministic RenderPacket integration.
 - [ ] **M10:** Human Cognitive Debugger.
 
 ## Architectural constraints

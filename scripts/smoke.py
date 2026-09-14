@@ -40,7 +40,7 @@ def main():
         wait_until_ready()
         episode_id = str(uuid.uuid4())
         objective_id = str(uuid.uuid4())
-        objective = {"objective": {"objective_id": objective_id, "episode_id": episode_id, "text": "Verify Temporality render and cognition workflow", "success_conditions": ["render_is_deterministic", "frame_transition_is_replayable"], "constraints": {"max_cost": 1.0}}, "event": {"payload": {}, "provenance": {"source": "smoke"}}}
+        objective = {"objective": {"objective_id": objective_id, "episode_id": episode_id, "text": "Inspect environment and verify Temporality render and cognition workflow", "success_conditions": ["render_is_deterministic", "frame_transition_is_replayable"], "constraints": {"max_cost": 1.0}}, "event": {"payload": {}, "provenance": {"source": "smoke"}}}
         request("POST", "/v1/objectives", objective)
         create = {
             "frame": {
@@ -91,6 +91,11 @@ def main():
             time.sleep(0.1)
         assert all(item["status"] == "completed" for item in final_executions.values())
         final_execution = final_executions[execution_id]
+        _, procedure_projection = request("POST", "/v1/projections/procedures/rebuild", {"episode_id": episode_id, "minimum_evidence": 1})
+        assert procedure_projection["procedures"]
+        _, learned_render = request("POST", "/v1/render", {"frame_id": restored["frame_id"], "objective_id": objective_id, "budget_tokens": 3000})
+        procedure_items = next(section for section in learned_render["sections"] if section["kind"] == "procedures")["items"]
+        assert procedure_items and procedure_items[0]["provenance"]["projection_version"] == "procedure-projector.v1"
         _, snapshot = request("POST", "/v1/snapshots", {"frame_id": restored["frame_id"]})
         _, frame_replay = request("POST", "/v1/replay", {"frame_id": restored["frame_id"]})
         assert frame_replay["snapshot"]["snapshot_id"] == snapshot["metadata"]["snapshot_id"]
@@ -109,7 +114,7 @@ def main():
         assert restored["focus"]["query"] == "evidence that validates Temporality" and restored["revision"] == 1
         assert len(restored["working_set"]) == 1
         assert len(replay["events"]) >= 17 and replay["digest"]
-        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "execution_id": execution_id, "execution_status": final_execution["status"], "snapshot_id": snapshot["metadata"]["snapshot_id"], "frame_hash": frame_replay["frame_hash"], "frame_replay_events": len(frame_replay["events"]), "blame_nodes": len(blame["nodes"]), "fork_group_id": fork_group["fork_group_id"], "fork_branches": len(fork_group["branches"]), "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
+        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "execution_id": execution_id, "execution_status": final_execution["status"], "snapshot_id": snapshot["metadata"]["snapshot_id"], "frame_hash": frame_replay["frame_hash"], "frame_replay_events": len(frame_replay["events"]), "blame_nodes": len(blame["nodes"]), "fork_group_id": fork_group["fork_group_id"], "fork_branches": len(fork_group["branches"]), "procedure_count": len(procedure_projection["procedures"]), "matched_procedures": len(procedure_items), "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
     finally:
         if executor is not None:
             executor.terminate()

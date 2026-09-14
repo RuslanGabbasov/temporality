@@ -13,12 +13,18 @@ import (
 	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
+	"github.com/temporality-project/temporality/frp/procedure"
 	"github.com/temporality-project/temporality/frp/projection"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/substrate"
 )
 
 const Version = "render-0.3.1"
+
+const (
+	procedureMatchThreshold = 0.1
+	maxProcedureMatches     = 8
+)
 
 type Request struct {
 	FrameID      string `json:"frame_id"`
@@ -45,6 +51,14 @@ type Provenance struct {
 type TokenUsage struct {
 	Estimated int `json:"estimated"`
 	Budget    int `json:"budget"`
+}
+type ProcedureMatch struct {
+	Score      float64                  `json:"score"`
+	Procedure  procedure.Procedure      `json:"procedure"`
+	Provenance ProcedureMatchProvenance `json:"provenance"`
+}
+type ProcedureMatchProvenance struct {
+	ProjectionVersion string `json:"projection_version"`
 }
 type Packet struct {
 	Protocol        string       `json:"protocol"`
@@ -128,9 +142,24 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 		mapItems = append(mapItems, selected)
 		periphery = append(periphery, selected.Candidate.Payload)
 	}
+	procedureItems := []any{}
+	if procedureStore, ok := any(r.stores).(procedure.Store); ok {
+		values, listErr := procedureStore.ListProcedures(ctx, procedure.Filter{EpisodeID: current.EpisodeID})
+		if listErr != nil {
+			return Packet{}, listErr
+		}
+		matches := procedure.MatchProcedures(values, goal, current, procedure.MatchConfig{Threshold: procedureMatchThreshold})
+		if len(matches) > maxProcedureMatches {
+			matches = matches[:maxProcedureMatches]
+		}
+		procedureItems = make([]any, 0, len(matches))
+		for _, match := range matches {
+			procedureItems = append(procedureItems, ProcedureMatch{Score: match.Score, Procedure: match.Procedure, Provenance: ProcedureMatchProvenance{ProjectionVersion: match.Procedure.ProjectionVersion}})
+		}
+	}
 	outside := ambient.Considered - len(ambient.Selected)
 	hint := fmt.Sprintf("%d attention candidates are outside the frame", outside)
-	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{map[string]any{"agent_id": current.AgentID, "episode_id": current.EpisodeID, "branch_id": current.BranchID}}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: mapItems}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "periphery", Attention: "ambient", Items: periphery}, {Kind: "working_set", Attention: "deliberate", Items: working}, {Kind: "procedures", Attention: "ambient", Items: []any{}}, {Kind: "recent", Attention: "ambient", Items: recent}}
+	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{map[string]any{"agent_id": current.AgentID, "episode_id": current.EpisodeID, "branch_id": current.BranchID}}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: mapItems}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "periphery", Attention: "ambient", Items: periphery}, {Kind: "working_set", Attention: "deliberate", Items: working}, {Kind: "procedures", Attention: "ambient", Items: procedureItems}, {Kind: "recent", Attention: "ambient", Items: recent}}
 	packet := Packet{Protocol: protocol.Name, ProtocolVersion: protocol.Version, FrameID: current.FrameID, MemoryVersion: memoryVersion, RendererVersion: Version, Sections: sections, OutsideFrame: OutsideFrame{NearbyRegions: outside, Hint: hint}, Provenance: Provenance{ProjectionVersion: "event-candidates.v1", AttentionVersion: attention.Version, EmbeddingModel: "none", AsOf: current.AsOf.Format("2006-01-02T15:04:05.999999999Z07:00")}, TokenUsage: TokenUsage{Budget: request.BudgetTokens}}
 	for {
 		packet.TokenUsage.Estimated = estimate(packet)

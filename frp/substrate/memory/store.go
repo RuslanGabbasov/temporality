@@ -17,6 +17,7 @@ import (
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
 	"github.com/temporality-project/temporality/frp/planner"
+	"github.com/temporality-project/temporality/frp/procedure"
 	"github.com/temporality-project/temporality/frp/projection"
 	"github.com/temporality-project/temporality/frp/protocol"
 	stepRuntime "github.com/temporality-project/temporality/frp/runtime/step"
@@ -32,6 +33,7 @@ type Store struct {
 	frames         map[string]frame.Frame
 	objectives     map[string]objective.Objective
 	regions        []projection.Region
+	procedures     []procedure.Procedure
 	definitions    map[string]affordance.Definition
 	requests       map[string]affordance.Request
 	executions     map[string]execution.Execution
@@ -221,6 +223,72 @@ func (s *Store) ListRegions(_ context.Context, filter projection.RegionFilter) (
 		result = append(result, copy)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].RegionID < result[j].RegionID })
+	return result, nil
+}
+
+func (s *Store) ReplaceProcedures(_ context.Context, episodeID string, values []procedure.Procedure) error {
+	for _, value := range values {
+		if err := value.Validate(); err != nil || value.EpisodeID != episodeID {
+			if err != nil {
+				return err
+			}
+			return errors.New("procedure episode does not match replacement scope")
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make([]procedure.Procedure, 0, len(s.procedures)+len(values))
+	for _, value := range s.procedures {
+		if value.EpisodeID != episodeID {
+			kept = append(kept, clone(value))
+		}
+	}
+	for _, value := range values {
+		kept = append(kept, clone(value))
+	}
+	s.procedures = kept
+	return nil
+}
+
+func (s *Store) ListProcedures(_ context.Context, filter procedure.Filter) ([]procedure.Procedure, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]procedure.Procedure, 0)
+	for _, value := range s.procedures {
+		if filter.EpisodeID == "" || value.EpisodeID == filter.EpisodeID {
+			result = append(result, clone(value))
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ProcedureID < result[j].ProcedureID })
+	return result, nil
+}
+
+func (s *Store) GetProcedure(_ context.Context, id string) (procedure.Procedure, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, value := range s.procedures {
+		if value.ProcedureID == id {
+			return clone(value), nil
+		}
+	}
+	return procedure.Procedure{}, procedure.ErrNotFound
+}
+
+func (s *Store) ListProcedureEvidence(_ context.Context, episodeID string) ([]procedure.Evidence, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]procedure.Evidence, 0)
+	for _, value := range s.executions {
+		if value.EpisodeID != episodeID || !value.Status.Terminal() {
+			continue
+		}
+		request, ok := s.requests[value.RequestID]
+		if !ok {
+			continue
+		}
+		result = append(result, procedure.Evidence{Execution: clone(value), Request: clone(request)})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Execution.ExecutionID < result[j].Execution.ExecutionID })
 	return result, nil
 }
 
