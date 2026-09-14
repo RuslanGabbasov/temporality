@@ -20,6 +20,7 @@ import (
 	"github.com/temporality-project/temporality/frp/protocol"
 	stepRuntime "github.com/temporality-project/temporality/frp/runtime/step"
 	"github.com/temporality-project/temporality/frp/substrate"
+	"github.com/temporality-project/temporality/frp/timetravel"
 )
 
 type Store struct {
@@ -36,10 +37,20 @@ type Store struct {
 	plannerRuns    map[string]planner.Run
 	plannerSteps   map[string][]planner.DurableStep
 	cognitiveSteps map[string]stepRuntime.Prepared
+	eventSeq       map[string]int64
+	nextEventSeq   int64
+	frameEvents    map[string]string
+	snapshots      map[string]timetravel.Snapshot
 }
 
 func New() *Store {
-	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective), definitions: make(map[string]affordance.Definition), requests: make(map[string]affordance.Request), executions: make(map[string]execution.Execution), plannerRuns: make(map[string]planner.Run), plannerSteps: make(map[string][]planner.DurableStep), cognitiveSteps: make(map[string]stepRuntime.Prepared)}
+	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective), definitions: make(map[string]affordance.Definition), requests: make(map[string]affordance.Request), executions: make(map[string]execution.Execution), plannerRuns: make(map[string]planner.Run), plannerSteps: make(map[string][]planner.DurableStep), cognitiveSteps: make(map[string]stepRuntime.Prepared), eventSeq: make(map[string]int64), frameEvents: make(map[string]string), snapshots: make(map[string]timetravel.Snapshot)}
+}
+
+func (s *Store) putEvent(event protocol.Event) {
+	s.nextEventSeq++
+	s.events[event.EventID] = event
+	s.eventSeq[event.EventID] = s.nextEventSeq
 }
 
 func (s *Store) Append(_ context.Context, event protocol.Event) error {
@@ -51,7 +62,7 @@ func (s *Store) Append(_ context.Context, event protocol.Event) error {
 	if _, exists := s.events[event.EventID]; exists {
 		return errors.New("event already exists")
 	}
-	s.events[event.EventID] = event
+	s.putEvent(event)
 	return nil
 }
 
@@ -110,7 +121,7 @@ func (s *Store) CommitClaim(_ context.Context, commit cognition.Commit) error {
 			return cognition.ErrClaimNotFound
 		}
 	}
-	s.events[commit.Event.EventID] = commit.Event
+	s.putEvent(commit.Event)
 	s.claims[commit.Claim.ClaimID] = commit.Claim
 	s.relations = append(s.relations, commit.Relations...)
 	return nil
@@ -143,7 +154,7 @@ func (s *Store) TransitionClaim(_ context.Context, transition cognition.Transiti
 		validTo := transition.ValidAt
 		claim.ValidTo = &validTo
 	}
-	s.events[transition.Event.EventID] = transition.Event
+	s.putEvent(transition.Event)
 	s.claims[claim.ClaimID] = claim
 	return claim, nil
 }
@@ -221,7 +232,7 @@ func (s *Store) CreateObjective(_ context.Context, value objective.Objective, ev
 	if _, exists := s.events[event.EventID]; exists {
 		return errors.New("event already exists")
 	}
-	s.events[event.EventID] = event
+	s.putEvent(event)
 	s.objectives[value.ObjectiveID] = value
 	return nil
 }
@@ -248,7 +259,8 @@ func (s *Store) CreateFrame(_ context.Context, value frame.Frame, event protocol
 	if _, exists := s.events[event.EventID]; exists {
 		return errors.New("event already exists")
 	}
-	s.events[event.EventID] = event
+	s.putEvent(event)
+	s.frameEvents[value.FrameID] = event.EventID
 	s.frames[value.FrameID] = copyFrame(value)
 	return nil
 }
@@ -279,7 +291,8 @@ func (s *Store) TransitionFrame(_ context.Context, parentID string, transition f
 	if _, exists = s.frames[next.FrameID]; exists {
 		return frame.TransitionResult{}, frame.ErrFrameExists
 	}
-	s.events[event.EventID] = event
+	s.putEvent(event)
+	s.frameEvents[next.FrameID] = event.EventID
 	s.frames[next.FrameID] = copyFrame(next)
 	return frame.TransitionResult{Frame: copyFrame(next), Event: event}, nil
 }
@@ -325,8 +338,8 @@ func (s *Store) CreateExecution(_ context.Context, def affordance.Definition, re
 	s.definitions[def.ID] = clone(def)
 	s.requests[request.RequestID] = clone(request)
 	s.executions[value.ExecutionID] = clone(value)
-	s.events[requested.EventID] = clone(requested)
-	s.events[created.EventID] = clone(created)
+	s.putEvent(clone(requested))
+	s.putEvent(clone(created))
 	return nil
 }
 
@@ -347,7 +360,7 @@ func (s *Store) TransitionExecution(_ context.Context, id string, next execution
 	if _, ok = s.events[event.EventID]; ok {
 		return execution.Execution{}, errors.New("event already exists")
 	}
-	s.events[event.EventID] = clone(event)
+	s.putEvent(clone(event))
 	s.executions[id] = clone(updated)
 	return clone(updated), nil
 }
@@ -539,7 +552,7 @@ func (s *Store) CommitStep(_ context.Context, prepared stepRuntime.Prepared) (st
 	s.cognitiveSteps[prepared.Emission.EmissionID] = clone(prepared)
 	claims := make([]cognition.Claim, 0, len(prepared.Claims))
 	for _, candidate := range prepared.Claims {
-		s.events[candidate.Event.EventID] = clone(candidate.Event)
+		s.putEvent(clone(candidate.Event))
 		s.claims[candidate.Value.ClaimID] = clone(candidate.Value)
 		claims = append(claims, clone(candidate.Value))
 	}
@@ -554,11 +567,12 @@ func (s *Store) CommitStep(_ context.Context, prepared stepRuntime.Prepared) (st
 		s.definitions[action.Definition.ID] = clone(action.Definition)
 		s.requests[action.Request.RequestID] = clone(action.Request)
 		s.executions[action.Execution.ExecutionID] = clone(action.Execution)
-		s.events[action.Requested.EventID] = clone(action.Requested)
-		s.events[action.Created.EventID] = clone(action.Created)
+		s.putEvent(clone(action.Requested))
+		s.putEvent(clone(action.Created))
 		executions = append(executions, clone(action.Execution))
 	}
-	s.events[prepared.Transition.EventID] = clone(prepared.Transition)
+	s.putEvent(clone(prepared.Transition))
+	s.frameEvents[prepared.Decision.Frame.FrameID] = prepared.Transition.EventID
 	s.frames[prepared.Decision.Frame.FrameID] = copyFrame(prepared.Decision.Frame)
 	return stepRuntime.Result{Decision: clone(prepared.Decision), Frame: copyFrame(prepared.Decision.Frame), Claims: claims, Executions: executions, Events: clone(prepared.Events)}, nil
 }

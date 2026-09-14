@@ -23,6 +23,7 @@ import (
 	"github.com/temporality-project/temporality/frp/replay"
 	runtimeStep "github.com/temporality-project/temporality/frp/runtime/step"
 	"github.com/temporality-project/temporality/frp/substrate"
+	"github.com/temporality-project/temporality/frp/timetravel"
 )
 
 type Server struct {
@@ -41,6 +42,9 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/events", s.listEvents)
 	mux.HandleFunc("GET /v1/events/{id}", s.getEvent)
 	mux.HandleFunc("POST /v1/replay", s.replayEvents)
+	mux.HandleFunc("POST /v1/snapshots", s.createSnapshot)
+	mux.HandleFunc("GET /v1/snapshots/{id}", s.getSnapshot)
+	mux.HandleFunc("POST /v1/blame", s.buildBlame)
 	mux.HandleFunc("POST /v1/step", s.step)
 	mux.HandleFunc("POST /v1/render", s.renderFrame)
 	mux.HandleFunc("POST /v1/objectives", s.createObjective)
@@ -662,6 +666,7 @@ func (s *Server) getClaim(w http.ResponseWriter, r *http.Request) {
 }
 
 type replayRequest struct {
+	FrameID   string          `json:"frame_id,omitempty"`
 	EpisodeID string          `json:"episode_id"`
 	BranchID  string          `json:"branch_id"`
 	AsOf      *time.Time      `json:"as_of,omitempty"`
@@ -678,6 +683,28 @@ func (s *Server) replayEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if request.FrameID != "" {
+		store, ok := s.store.(timetravel.ReplayStore)
+		if !ok {
+			s.metrics.replayErrors.Add(1)
+			writeError(w, http.StatusUnprocessableEntity, errors.New("frame replay is not supported"))
+			return
+		}
+		result, err := timetravel.ReplayFrame(r.Context(), store, request.FrameID)
+		if errors.Is(err, frame.ErrFrameNotFound) {
+			s.metrics.replayErrors.Add(1)
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if err != nil {
+			s.metrics.replayErrors.Add(1)
+			s.log.Error("replay frame", "error", err)
+			writeError(w, http.StatusInternalServerError, errors.New("internal error"))
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
 	result, err := s.replay.ReplayWithManifest(r.Context(), substrate.EventFilter{EpisodeID: request.EpisodeID, BranchID: request.BranchID, AsOf: request.AsOf}, request.Manifest)
 	if err != nil {
 		s.metrics.replayErrors.Add(1)
@@ -686,6 +713,103 @@ func (s *Server) replayEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+type snapshotRequest struct {
+	FrameID string `json:"frame_id"`
+}
+
+func (s *Server) createSnapshot(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(timetravel.ReplayStore)
+	if !ok {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("snapshots are not supported"))
+		return
+	}
+	var request snapshotRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if request.FrameID == "" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("frame_id is required"))
+		return
+	}
+	replayed, err := timetravel.ReplayFrame(r.Context(), store, request.FrameID)
+	if errors.Is(err, frame.ErrFrameNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		s.log.Error("replay frame for snapshot", "error", err)
+		writeError(w, http.StatusInternalServerError, errors.New("internal error"))
+		return
+	}
+	content, err := json.Marshal(replayed.Frame)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	snapshot, err := timetravel.NewSnapshot(timetravel.SnapshotMetadata{SnapshotID: newUUID(), EpisodeID: replayed.Frame.EpisodeID, CreatedAt: s.now().UTC(), Through: replayed.Through}, content)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	if err := store.CreateSnapshot(r.Context(), snapshot); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, snapshot)
+}
+
+func (s *Server) getSnapshot(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(timetravel.SnapshotStore)
+	if !ok {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("snapshots are not supported"))
+		return
+	}
+	snapshot, err := store.GetSnapshot(r.Context(), r.PathValue("id"))
+	if errors.Is(err, substrate.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		s.log.Error("get snapshot", "error", err)
+		writeError(w, http.StatusInternalServerError, errors.New("internal error"))
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+type blameRequest struct {
+	RootID   string `json:"root_id"`
+	MaxDepth int    `json:"max_depth"`
+}
+
+func (s *Server) buildBlame(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(timetravel.ProvenanceStore)
+	if !ok {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("provenance is not supported"))
+		return
+	}
+	var request blameRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if request.RootID == "" || request.MaxDepth < 0 {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("root_id is required and max_depth cannot be negative"))
+		return
+	}
+	graph, err := store.BuildBlame(r.Context(), request.RootID, request.MaxDepth)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, graph)
 }
 
 func defaultString(value, fallback string) string {

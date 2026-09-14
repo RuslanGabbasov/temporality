@@ -46,9 +46,9 @@ The milestone order follows FRP v0.3 section 38.
 - [x] **M6 — Adaptive Planner:**
   - [x] Bounded planner context/state, capability checks, step limits, recorded replay adapter.
   - [x] Durable planner runs/steps, proposal-before-effect persistence, restart resume, and executor integration.
-- [ ] **M7 — Time travel, snapshots, and blame:**
+- [x] **M7 — Time travel, snapshots, and blame:**
   - [x] Pure snapshot metadata/hash/selection, replay purity contract, deterministic blame traversal.
-  - [ ] Event cursors, PostgreSQL snapshots/provenance edges, replay/blame APIs.
+  - [x] Strict event cursors, inline PostgreSQL snapshots, corruption fallback, frame replay and blame APIs.
 - [ ] **M8 — Fork and A/B cognition:**
   - [x] Branch/ForkGroup models, deterministic immutable fork roots, trajectory comparator.
   - [ ] PostgreSQL branch heads/fork transaction, branch APIs, persisted comparisons and isolation tests.

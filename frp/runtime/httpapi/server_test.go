@@ -104,6 +104,26 @@ func TestCommitAndTransitionClaim(t *testing.T) {
 	if result.Claim.Status != cognition.ClaimSupported {
 		t.Fatalf("unexpected transition: %s", transitioned.Body.String())
 	}
+	blamed := serve(handler, http.MethodPost, "/v1/blame", []byte(`{"root_id":"`+commit.Claim.ClaimID+`","max_depth":1}`))
+	if blamed.Code != http.StatusOK {
+		t.Fatalf("blame status=%d body=%s", blamed.Code, blamed.Body.String())
+	}
+	var graph struct {
+		RootID string `json:"root_id"`
+		Nodes  []struct {
+			ID string `json:"id"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal(blamed.Body.Bytes(), &graph); err != nil {
+		t.Fatal(err)
+	}
+	if graph.RootID != commit.Claim.ClaimID || len(graph.Nodes) != 2 {
+		t.Fatalf("unexpected blame graph: %s", blamed.Body.String())
+	}
+	missing := serve(handler, http.MethodPost, "/v1/blame", []byte(`{"root_id":"missing","max_depth":1}`))
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing blame status=%d body=%s", missing.Code, missing.Body.String())
+	}
 }
 
 func TestFrameCreateTransitionGetAndReplay(t *testing.T) {
@@ -122,6 +142,47 @@ func TestFrameCreateTransitionGetAndReplay(t *testing.T) {
 	}
 	if err := json.Unmarshal(created.Body.Bytes(), &initial); err != nil {
 		t.Fatal(err)
+	}
+	frameReplay := serve(handler, http.MethodPost, "/v1/replay", []byte(`{"frame_id":"`+initial.Frame.FrameID+`"}`))
+	if frameReplay.Code != http.StatusOK {
+		t.Fatalf("frame replay status=%d body=%s", frameReplay.Code, frameReplay.Body.String())
+	}
+	var replayedFrame struct {
+		Frame     frame.Frame `json:"frame"`
+		FrameHash string      `json:"frame_hash"`
+		Through   struct {
+			EventSeq int64 `json:"event_seq"`
+		} `json:"through"`
+	}
+	if err := json.Unmarshal(frameReplay.Body.Bytes(), &replayedFrame); err != nil {
+		t.Fatal(err)
+	}
+	if replayedFrame.Frame.FrameID != initial.Frame.FrameID || replayedFrame.FrameHash == "" || replayedFrame.Through.EventSeq <= 0 {
+		t.Fatalf("unexpected frame replay: %s", frameReplay.Body.String())
+	}
+	snapshotCreated := serve(handler, http.MethodPost, "/v1/snapshots", []byte(`{"frame_id":"`+initial.Frame.FrameID+`"}`))
+	if snapshotCreated.Code != http.StatusCreated {
+		t.Fatalf("snapshot status=%d body=%s", snapshotCreated.Code, snapshotCreated.Body.String())
+	}
+	var snapshot struct {
+		Metadata struct {
+			SnapshotID string `json:"snapshot_id"`
+		} `json:"metadata"`
+		Content frame.Frame `json:"content"`
+	}
+	if err := json.Unmarshal(snapshotCreated.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Metadata.SnapshotID == "" || snapshot.Content.FrameID != initial.Frame.FrameID {
+		t.Fatalf("unexpected snapshot: %s", snapshotCreated.Body.String())
+	}
+	gotSnapshot := serve(handler, http.MethodGet, "/v1/snapshots/"+snapshot.Metadata.SnapshotID, nil)
+	if gotSnapshot.Code != http.StatusOK || gotSnapshot.Body.String() != snapshotCreated.Body.String() {
+		t.Fatalf("get snapshot status=%d body=%s", gotSnapshot.Code, gotSnapshot.Body.String())
+	}
+	missingSnapshot := serve(handler, http.MethodGet, "/v1/snapshots/missing", nil)
+	if missingSnapshot.Code != http.StatusNotFound {
+		t.Fatalf("missing snapshot status=%d body=%s", missingSnapshot.Code, missingSnapshot.Body.String())
 	}
 	renderBody := []byte(`{"frame_id":"` + initial.Frame.FrameID + `","objective_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b04","budget_tokens":2000}`)
 	firstRender := serve(handler, http.MethodPost, "/v1/render", renderBody)

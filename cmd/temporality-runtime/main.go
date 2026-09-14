@@ -47,7 +47,7 @@ func openStore(ctx context.Context, log *slog.Logger) (substrate.EventStore, fun
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, migration := range []string{"migrations/000001_event_store.up.sql", "migrations/000002_claims.up.sql", "migrations/000003_claim_guards.up.sql", "migrations/000004_frames.up.sql", "migrations/000005_objectives.up.sql", "migrations/000006_regions.up.sql", "migrations/000007_execution.up.sql", "migrations/000008_step.up.sql", "migrations/000009_planner.up.sql"} {
+	for _, migration := range []string{"migrations/000001_event_store.up.sql", "migrations/000002_claims.up.sql", "migrations/000003_claim_guards.up.sql", "migrations/000004_frames.up.sql", "migrations/000005_objectives.up.sql", "migrations/000006_regions.up.sql", "migrations/000007_execution.up.sql", "migrations/000008_step.up.sql", "migrations/000009_planner.up.sql", "migrations/000010_time_travel.up.sql"} {
 		if err = store.Migrate(ctx, migration); err != nil {
 			store.Close()
 			return nil, nil, err

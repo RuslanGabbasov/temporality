@@ -10,6 +10,7 @@ type BlameNodeType string
 
 const (
 	BlameNodeEvent      BlameNodeType = "event"
+	BlameNodeClaim      BlameNodeType = "claim"
 	BlameNodeSnapshot   BlameNodeType = "snapshot"
 	BlameNodeState      BlameNodeType = "state"
 	BlameNodeDecision   BlameNodeType = "decision"
@@ -109,7 +110,7 @@ func BuildBlameGraph(rootID string, nodes []BlameNode, edges []BlameEdge, maxDep
 
 func validNodeType(value BlameNodeType) bool {
 	switch value {
-	case BlameNodeEvent, BlameNodeSnapshot, BlameNodeState, BlameNodeDecision, BlameNodeSideEffect:
+	case BlameNodeEvent, BlameNodeClaim, BlameNodeSnapshot, BlameNodeState, BlameNodeDecision, BlameNodeSideEffect:
 		return true
 	default:
 		return false

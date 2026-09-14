@@ -66,6 +66,17 @@ Render packets expose the attention engine version, scored Event/Region ambient 
 
 The M2 emission endpoint rejects emissions containing claims or actions until those intents can be committed atomically with Frame and Execution state; they are never silently dropped.
 
+Time-travel and provenance endpoints:
+
+```text
+POST /v1/replay                  # episode replay or frame_id cursor replay
+POST /v1/snapshots
+GET  /v1/snapshots/{id}
+POST /v1/blame
+```
+
+Frame replay is read-only, excludes events after the target Frame cursor, verifies a canonical Frame hash, and treats snapshots only as optional accelerators. Corrupt snapshots fall back to an earlier snapshot or full Event replay.
+
 Rebuildable projection endpoints:
 
 ```text

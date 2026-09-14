@@ -2,7 +2,8 @@ package postgres_test
 
 import (
 	"context"
-	"fmt"
+	"crypto/rand"
+	"encoding/hex"
 	"os"
 	"testing"
 	"time"
@@ -235,6 +236,12 @@ func claimCommit(proposition string, relations []cognition.ClaimRelation) cognit
 }
 
 func newTestUUID() string {
-	n := time.Now().UnixNano()
-	return fmt.Sprintf("%08x-0000-4000-8000-%012x", uint32(n>>32), uint64(n)&0xffffffffffff)
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		panic(err)
+	}
+	value[6] = (value[6] & 0x0f) | 0x40
+	value[8] = (value[8] & 0x3f) | 0x80
+	h := hex.EncodeToString(value[:])
+	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }

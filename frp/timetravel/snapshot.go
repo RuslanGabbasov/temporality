@@ -18,9 +18,11 @@ const (
 	SnapshotVersion = "1"
 )
 
-// EventCursor identifies a stable position in the event order. EventID is the
-// tie-breaker for events sharing a transaction timestamp.
+// EventCursor identifies a stable position in insertion order. EventSeq is the
+// durable cursor; timestamp and ID are retained for audit metadata and backward
+// compatibility with v1 snapshot documents.
 type EventCursor struct {
+	EventSeq        int64     `json:"event_seq"`
 	TransactionTime time.Time `json:"tx_time"`
 	EventID         string    `json:"event_id"`
 }
@@ -189,6 +191,15 @@ func SelectSnapshot(snapshots []Snapshot, query SnapshotSelection) (Snapshot, bo
 }
 
 func compareCursor(a, b EventCursor) int {
+	if a.EventSeq != 0 || b.EventSeq != 0 {
+		if a.EventSeq < b.EventSeq {
+			return -1
+		}
+		if a.EventSeq > b.EventSeq {
+			return 1
+		}
+		return 0
+	}
 	if a.TransactionTime.Before(b.TransactionTime) {
 		return -1
 	}
