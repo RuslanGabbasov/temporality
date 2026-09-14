@@ -47,6 +47,8 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/snapshots/{id}", s.getSnapshot)
 	mux.HandleFunc("POST /v1/blame", s.buildBlame)
 	mux.HandleFunc("POST /v1/step", s.step)
+	mux.HandleFunc("POST /v1/model-step", s.modelStep)
+	mux.HandleFunc("GET /v1/model/config", s.modelConfig)
 	mux.HandleFunc("POST /v1/render", s.renderFrame)
 	mux.HandleFunc("POST /v1/objectives", s.createObjective)
 	mux.HandleFunc("GET /v1/objectives/{id}", s.getObjective)
@@ -520,7 +522,15 @@ func (s *Server) rebuildRegions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"projection_version": projection.RegionProjectorVersion, "regions": regions})
+	edges := []projection.Edge{}
+	if edgeStore, supported := s.store.(projection.EdgeStore); supported {
+		edges = projection.BuildEdges(request.EpisodeID, request.BranchID, events, regions)
+		if err = edgeStore.ReplaceEdges(r.Context(), request.EpisodeID, request.BranchID, edges); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"projection_version": projection.RegionProjectorVersion, "edge_projection_version": projection.EdgeProjectorVersion, "regions": regions, "edges": edges})
 }
 func (s *Server) listRegions(w http.ResponseWriter, r *http.Request) {
 	store, ok := s.store.(projection.RegionStore)

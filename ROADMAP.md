@@ -3,12 +3,12 @@
 The milestone order follows FRP v0.3 section 38.
 
 - [x] **M0 foundation:** Event protocol, append-only log, deterministic replay, PostgreSQL and memory adapters, HTTP API.
-- [ ] **M0 hardening:**
+- [x] **M0 hardening:**
   - [x] PostgreSQL integration test for persistence, duplicate rejection, and append-only enforcement.
   - [x] Versioned replay manifests included in replay digests.
   - [x] Opaque cursor pagination for memory and PostgreSQL event streams.
   - [x] Prometheus-compatible HTTP, append, and replay metrics.
-  - [ ] Full crash-recovery killer test (blocked by Frame/Reducer/RenderPacket in M2–M3; durable Event Store restart is covered).
+  - [x] Full PostgreSQL crash-recovery killer test with exact RenderPacket bytes/hash, model provenance, parent replay and committed child Frame.
 - [x] **M1 — Claims and evidence relations:**
   - [x] Versioned Claim and ClaimRelation protocol objects and JSON Schemas.
   - [x] PostgreSQL schema with referential and confidence constraints.
@@ -26,16 +26,16 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Deterministic RenderPacket and content-derived render IDs.
   - [x] Canonical sections, provenance, memory version, and token budget trimming.
   - [x] `/v1/render` integrated into the runnable smoke workflow.
-- [ ] **M4 — Deliberate and ambient Attention:**
+- [x] **M4 — Deliberate and ambient Attention:**
   - [x] Versioned deterministic ambient scoring over normalized features.
   - [x] Stable tie-breaking, trust filters, explicit pins, and ambient-only hysteresis.
   - [x] Deliberate semantic jumps remain independent from ambient hysteresis.
   - [x] RenderPacket scored map, periphery, outside-frame count, and attention provenance.
   - [x] Rebuildable versioned Region projection and region-based ambient candidates.
-  - [ ] Graph proximity projection and edges.
+  - [x] Rebuildable typed graph edges and graph-proximity scoring.
   - [x] Attention entropy, focus switches, ambient hit rate, missed candidates, and collapse metrics.
   - [x] Canonical `attention.selected` Events in the atomic Step transaction.
-  - [ ] `attention.suggested` recording when a rendered packet is consumed by a model step.
+  - [x] Canonical `attention.suggested` Events when a RenderPacket is consumed by Model Step.
 - [x] **M5 — Affordance registry and deterministic Executor:**
   - [x] Versioned affordance definitions/requests, capability and limit validation.
   - [x] Execution state machine, normalized failures, canonical event helpers, declarative workflows.

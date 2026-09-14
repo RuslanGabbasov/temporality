@@ -60,7 +60,7 @@ def main():
         _, created = request("POST", "/v1/frames", create)
         initial = created["frame"]
         _, projection = request("POST", "/v1/projections/regions/rebuild", {"episode_id": episode_id, "branch_id": initial["branch_id"]})
-        assert projection["projection_version"] == "region-event-type.v1" and projection["regions"]
+        assert projection["projection_version"] == "region-event-type.v1" and projection["edge_projection_version"] == "region-edges.v1" and projection["regions"]
         render_request = {"frame_id": initial["frame_id"], "objective_id": objective_id, "budget_tokens": 2000}
         _, first_render = request("POST", "/v1/render", render_request)
         _, repeated_render = request("POST", "/v1/render", render_request)

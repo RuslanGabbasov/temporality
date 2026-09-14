@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://temporality.dev/schemas/frp/v0.3/RegionEdge.schema.json",
+  "title": "FRP RegionEdge",
+  "type": "object",
+  "required": ["edge_id", "episode_id", "branch_id", "source_region_id", "target_region_id", "type", "weight", "evidence_count", "projection_version"],
+  "properties": {
+    "edge_id": { "type": "string", "format": "uuid" },
+    "episode_id": { "type": "string", "format": "uuid" },
+    "branch_id": { "type": "string", "format": "uuid" },
+    "source_region_id": { "type": "string", "format": "uuid" },
+    "target_region_id": { "type": "string", "format": "uuid" },
+    "type": { "enum": ["shared_event", "sequence_adjacency"] },
+    "weight": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+    "evidence_count": { "type": "integer", "minimum": 1 },
+    "projection_version": { "const": "region-edges.v1" }
+  },
+  "additionalProperties": false
+}

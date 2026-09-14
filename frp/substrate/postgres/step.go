@@ -46,7 +46,12 @@ func (s *Store) CommitStep(ctx context.Context, prepared stepRuntime.Prepared) (
 		return stepRuntime.Result{}, err
 	}
 
-	if _, err = tx.Exec(ctx, `INSERT INTO cognitive_steps(emission_id,parent_frame_id,next_frame_id,emission,emission_hash,committed_at) VALUES($1,$2,$3,$4,$5,$6)`, prepared.Emission.EmissionID, prepared.Current.FrameID, prepared.Decision.Frame.FrameID, prepared.EmissionJSON, prepared.EmissionHash, prepared.Transition.TransactionTime); err != nil {
+	if len(prepared.RenderPacketJSON) == 0 {
+		_, err = tx.Exec(ctx, `INSERT INTO cognitive_steps(emission_id,parent_frame_id,next_frame_id,emission,emission_hash,committed_at) VALUES($1,$2,$3,$4,$5,$6)`, prepared.Emission.EmissionID, prepared.Current.FrameID, prepared.Decision.Frame.FrameID, prepared.EmissionJSON, prepared.EmissionHash, prepared.Transition.TransactionTime)
+	} else {
+		_, err = tx.Exec(ctx, `INSERT INTO cognitive_steps(emission_id,parent_frame_id,next_frame_id,emission,emission_hash,committed_at,render_packet,render_packet_raw,render_packet_hash,model_provenance,renderer_version,attention_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, prepared.Emission.EmissionID, prepared.Current.FrameID, prepared.Decision.Frame.FrameID, prepared.EmissionJSON, prepared.EmissionHash, prepared.Transition.TransactionTime, prepared.RenderPacketJSON, prepared.RenderPacketJSON, prepared.RenderPacketHash, prepared.ModelProvenance, prepared.RendererVersion, prepared.AttentionVersion)
+	}
+	if err != nil {
 		return stepRuntime.Result{}, err
 	}
 	claims := make([]cognition.Claim, 0, len(prepared.Claims))
@@ -86,6 +91,29 @@ func (s *Store) CommitStep(ctx context.Context, prepared stepRuntime.Prepared) (
 		return stepRuntime.Result{}, err
 	}
 	return stepRuntime.Result{Decision: prepared.Decision, Frame: prepared.Decision.Frame, Claims: claims, Executions: executions, Events: prepared.Events}, nil
+}
+
+func (s *Store) GetCognitiveStep(ctx context.Context, emissionID string) (stepRuntime.Prepared, error) {
+	var prepared stepRuntime.Prepared
+	var emissionJSON, packetJSON, provenance []byte
+	err := s.pool.QueryRow(ctx, `SELECT emission,emission_hash,COALESCE(render_packet_raw,convert_to(COALESCE(render_packet,'null'::jsonb)::text,'UTF8')),COALESCE(render_packet_hash,''),COALESCE(model_provenance,'null'::jsonb),COALESCE(renderer_version,''),COALESCE(attention_version,'') FROM cognitive_steps WHERE emission_id=$1`, emissionID).Scan(&emissionJSON, &prepared.EmissionHash, &packetJSON, &prepared.RenderPacketHash, &provenance, &prepared.RendererVersion, &prepared.AttentionVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return prepared, fmt.Errorf("cognitive step not found")
+	}
+	if err != nil {
+		return prepared, err
+	}
+	if err = json.Unmarshal(emissionJSON, &prepared.Emission); err != nil {
+		return prepared, err
+	}
+	prepared.EmissionJSON = append([]byte(nil), emissionJSON...)
+	if string(packetJSON) != "null" {
+		prepared.RenderPacketJSON = append([]byte(nil), packetJSON...)
+	}
+	if string(provenance) != "null" {
+		prepared.ModelProvenance = append([]byte(nil), provenance...)
+	}
+	return prepared, nil
 }
 
 func insertStepAction(ctx context.Context, tx pgx.Tx, action stepRuntime.Action) error {

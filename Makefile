@@ -1,4 +1,4 @@
-.PHONY: test race integration build debugger-test debugger-build stack-up stack-stop smoke run fmt
+.PHONY: test race integration build debugger-test debugger-build stack-up stack-stop smoke model-smoke run fmt
 
 test:
 	go test ./...
@@ -25,10 +25,13 @@ stack-stop:
 build:
 	mkdir -p bin
 	go build -o bin/temporality-runtime ./cmd/temporality-runtime
-		go build -o bin/temporality-executor ./cmd/temporality-executor
+	go build -o bin/temporality-executor ./cmd/temporality-executor
 
 smoke: build
 	python3 scripts/smoke.py
+
+model-smoke: build
+	python3 scripts/model_smoke.py
 
 run:
 	go run ./cmd/temporality-runtime

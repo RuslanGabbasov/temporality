@@ -33,6 +33,7 @@ type Store struct {
 	frames         map[string]frame.Frame
 	objectives     map[string]objective.Objective
 	regions        []projection.Region
+	edges          []projection.Edge
 	procedures     []procedure.Procedure
 	definitions    map[string]affordance.Definition
 	requests       map[string]affordance.Request
@@ -223,6 +224,48 @@ func (s *Store) ListRegions(_ context.Context, filter projection.RegionFilter) (
 		result = append(result, copy)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].RegionID < result[j].RegionID })
+	return result, nil
+}
+
+func (s *Store) ReplaceEdges(_ context.Context, episodeID, branchID string, edges []projection.Edge) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make([]projection.Edge, 0, len(s.edges)+len(edges))
+	for _, edge := range s.edges {
+		if edge.EpisodeID != episodeID || edge.BranchID != branchID {
+			kept = append(kept, edge)
+		}
+	}
+	kept = append(kept, edges...)
+	s.edges = kept
+	return nil
+}
+
+func (s *Store) ListEdges(_ context.Context, filter projection.EdgeFilter) ([]projection.Edge, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]projection.Edge, 0)
+	for _, edge := range s.edges {
+		if filter.EpisodeID != "" && edge.EpisodeID != filter.EpisodeID {
+			continue
+		}
+		if filter.BranchID != "" && edge.BranchID != filter.BranchID {
+			continue
+		}
+		result = append(result, edge)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].SourceRegionID != result[j].SourceRegionID {
+			return result[i].SourceRegionID < result[j].SourceRegionID
+		}
+		if result[i].TargetRegionID != result[j].TargetRegionID {
+			return result[i].TargetRegionID < result[j].TargetRegionID
+		}
+		if result[i].Type != result[j].Type {
+			return result[i].Type < result[j].Type
+		}
+		return result[i].EdgeID < result[j].EdgeID
+	})
 	return result, nil
 }
 
@@ -632,7 +675,7 @@ func (s *Store) CommitStep(_ context.Context, prepared stepRuntime.Prepared) (st
 	actionEvents := len(prepared.Actions) * 2
 	attentionEnd := len(prepared.Events) - actionEvents - 1
 	for i := claimEvents; i < attentionEnd; i++ {
-		s.events[prepared.Events[i].EventID] = clone(prepared.Events[i])
+		s.putEvent(clone(prepared.Events[i]))
 	}
 	executions := make([]execution.Execution, 0, len(prepared.Actions))
 	for _, action := range prepared.Actions {
@@ -647,6 +690,16 @@ func (s *Store) CommitStep(_ context.Context, prepared stepRuntime.Prepared) (st
 	s.frameEvents[prepared.Decision.Frame.FrameID] = prepared.Transition.EventID
 	s.frames[prepared.Decision.Frame.FrameID] = copyFrame(prepared.Decision.Frame)
 	return stepRuntime.Result{Decision: clone(prepared.Decision), Frame: copyFrame(prepared.Decision.Frame), Claims: claims, Executions: executions, Events: clone(prepared.Events)}, nil
+}
+
+func (s *Store) GetCognitiveStep(_ context.Context, emissionID string) (stepRuntime.Prepared, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.cognitiveSteps[emissionID]
+	if !ok {
+		return stepRuntime.Prepared{}, substrate.ErrNotFound
+	}
+	return clone(value), nil
 }
 
 func (s *Store) validateStepRefsLocked(prepared stepRuntime.Prepared) error {

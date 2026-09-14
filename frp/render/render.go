@@ -132,7 +132,14 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 			return Packet{}, err
 		}
 	}
-	ambient, err := selectAmbient(current, goal, events, regions)
+	edges := []projection.Edge{}
+	if edgeStore, ok := any(r.stores).(projection.EdgeStore); ok {
+		edges, err = edgeStore.ListEdges(ctx, projection.EdgeFilter{EpisodeID: current.EpisodeID, BranchID: current.BranchID})
+		if err != nil {
+			return Packet{}, err
+		}
+	}
+	ambient, err := selectAmbient(current, goal, events, regions, edges)
 	if err != nil {
 		return Packet{}, err
 	}
@@ -175,14 +182,22 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	packet.RenderID = contentID(packet)
 	return packet, nil
 }
-func selectAmbient(current frame.Frame, goal objective.Objective, events []protocol.Event, regions []projection.Region) (attention.Result, error) {
+func selectAmbient(current frame.Frame, goal objective.Objective, events []protocol.Event, regions []projection.Region, edges []projection.Edge) (attention.Result, error) {
 	if !current.Attention.Ambient {
 		return attention.Result{Version: attention.Version, Selected: []attention.ScoredCandidate{}}, nil
 	}
 	pins := map[string]struct{}{}
+	anchorRegions := map[string]struct{}{}
+	if current.Focus.Type == frame.RefRegion {
+		anchorRegions[current.Focus.ID] = struct{}{}
+	}
 	for _, ref := range current.WorkingSet {
 		pins[string(ref.Type)+":"+ref.ID] = struct{}{}
+		if ref.Type == frame.RefRegion {
+			anchorRegions[ref.ID] = struct{}{}
+		}
 	}
+	graphProximity := regionGraphProximity(anchorRegions, edges)
 	candidates := make([]attention.Candidate, 0, len(events)+len(regions))
 	focusText := current.Focus.Query
 	for i, event := range events {
@@ -219,7 +234,7 @@ func selectAmbient(current frame.Frame, goal objective.Objective, events []proto
 		if _, ok := pins["region:"+region.RegionID]; ok {
 			pin = 1
 		}
-		candidates = append(candidates, attention.Candidate{Ref: frame.Ref{Type: frame.RefRegion, ID: region.RegionID}, Features: attention.Features{SemanticRelevance: overlap(focusText, region.Label), Activation: region.Activation, Trust: trust, TaskRelevance: overlap(goal.Text, region.Label), Pin: pin}, Payload: region})
+		candidates = append(candidates, attention.Candidate{Ref: frame.Ref{Type: frame.RefRegion, ID: region.RegionID}, Features: attention.Features{SemanticRelevance: overlap(focusText, region.Label), GraphProximity: graphProximity[region.RegionID], Activation: region.Activation, Trust: trust, TaskRelevance: overlap(goal.Text, region.Label), Pin: pin}, Payload: region})
 	}
 	engine, err := attention.New(attention.DefaultPolicy())
 	if err != nil {
@@ -227,6 +242,20 @@ func selectAmbient(current frame.Frame, goal objective.Objective, events []proto
 	}
 	return engine.SelectAmbient(candidates, pins, current.Attention.MaxCandidates)
 }
+
+func regionGraphProximity(anchors map[string]struct{}, edges []projection.Edge) map[string]float64 {
+	result := make(map[string]float64)
+	for _, edge := range edges {
+		if _, ok := anchors[edge.SourceRegionID]; ok && edge.Weight > result[edge.TargetRegionID] {
+			result[edge.TargetRegionID] = edge.Weight
+		}
+		if _, ok := anchors[edge.TargetRegionID]; ok && edge.Weight > result[edge.SourceRegionID] {
+			result[edge.SourceRegionID] = edge.Weight
+		}
+	}
+	return result
+}
+
 func overlap(left, right string) float64 {
 	terms := func(value string) map[string]struct{} {
 		result := map[string]struct{}{}

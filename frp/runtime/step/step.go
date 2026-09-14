@@ -14,12 +14,14 @@ import (
 	"github.com/temporality-project/temporality/frp/execution"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/protocol"
+	"github.com/temporality-project/temporality/frp/render"
 )
 
 const (
-	EventClaimCandidate    = "claim.candidate"
-	EventAttentionSelected = "attention.selected"
-	EventFrameTransitioned = "frame.transitioned"
+	EventClaimCandidate     = "claim.candidate"
+	EventAttentionSelected  = "attention.selected"
+	EventAttentionSuggested = "attention.suggested"
+	EventFrameTransitioned  = "frame.transitioned"
 )
 
 var ErrCurrentFrameChanged = errors.New("current frame changed")
@@ -33,6 +35,12 @@ type Input struct {
 	Definitions map[string]affordance.Definition
 	NewID       IDProvider
 	Now         TimeProvider
+
+	// SuggestedAttention and render metadata are optional for compatibility with
+	// callers that commit an already-produced emission.
+	SuggestedAttention []frame.Ref
+	RenderPacket       *render.Packet
+	ModelProvenance    json.RawMessage
 }
 
 type Claim struct {
@@ -49,15 +57,21 @@ type Action struct {
 }
 
 type Prepared struct {
-	Current      frame.Frame
-	Emission     cognition.CognitiveEmission
-	EmissionJSON []byte
-	EmissionHash string
-	Decision     cognition.Decision
-	Claims       []Claim
-	Actions      []Action
-	Events       []protocol.Event
-	Transition   protocol.Event
+	Current            frame.Frame
+	Emission           cognition.CognitiveEmission
+	EmissionJSON       []byte
+	EmissionHash       string
+	Decision           cognition.Decision
+	Claims             []Claim
+	Actions            []Action
+	Events             []protocol.Event
+	Transition         protocol.Event
+	SuggestedAttention []frame.Ref
+	RenderPacketJSON   []byte
+	RenderPacketHash   string
+	ModelProvenance    json.RawMessage
+	RendererVersion    string
+	AttentionVersion   string
 }
 
 type Result struct {
@@ -92,7 +106,17 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 		return Result{}, err
 	}
 	sum := sha256.Sum256(emissionJSON)
-	prepared := Prepared{Current: input.Current, Emission: emission, EmissionJSON: emissionJSON, EmissionHash: hex.EncodeToString(sum[:]), Decision: decision, Claims: []Claim{}, Actions: []Action{}, Events: []protocol.Event{}}
+	prepared := Prepared{Current: input.Current, Emission: emission, EmissionJSON: emissionJSON, EmissionHash: hex.EncodeToString(sum[:]), Decision: decision, Claims: []Claim{}, Actions: []Action{}, Events: []protocol.Event{}, SuggestedAttention: append([]frame.Ref(nil), input.SuggestedAttention...), ModelProvenance: append(json.RawMessage(nil), input.ModelProvenance...)}
+	if input.RenderPacket != nil {
+		prepared.RenderPacketJSON, err = json.Marshal(input.RenderPacket)
+		if err != nil {
+			return Result{}, fmt.Errorf("marshal render packet: %w", err)
+		}
+		renderSum := sha256.Sum256(prepared.RenderPacketJSON)
+		prepared.RenderPacketHash = hex.EncodeToString(renderSum[:])
+		prepared.RendererVersion = input.RenderPacket.RendererVersion
+		prepared.AttentionVersion = input.RenderPacket.Provenance.AttentionVersion
+	}
 
 	newEvent := func(kind string, payload map[string]any) (protocol.Event, error) {
 		id := input.NewID()
@@ -119,6 +143,16 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 			return Result{}, err
 		}
 		prepared.Claims = append(prepared.Claims, Claim{Value: value, Event: event})
+		prepared.Events = append(prepared.Events, event)
+	}
+	for _, suggested := range input.SuggestedAttention {
+		if err = suggested.Validate(); err != nil {
+			return Result{}, fmt.Errorf("suggested attention: %w", err)
+		}
+		event, eventErr := newEvent(EventAttentionSuggested, map[string]any{"emission_id": emission.EmissionID, "ref": string(suggested.Type) + ":" + suggested.ID})
+		if eventErr != nil {
+			return Result{}, eventErr
+		}
 		prepared.Events = append(prepared.Events, event)
 	}
 	if input.Current.Attention.Deliberate {

@@ -45,6 +45,78 @@ DATABASE_URL=postgres://temporality:temporality@localhost:5432/temporality?sslmo
 
 If `DATABASE_URL` is omitted, the runtime uses an ephemeral in-memory store.
 
+## Настройка модели (OpenAI-compatible)
+
+Runtime вызывает провайдера через OpenAI-compatible Chat Completions API. Скопируйте `.env.example` в `.env` и настройте переменные:
+
+```sh
+cp .env.example .env
+```
+
+- `TEMPORALITY_MODEL_BASE_URL` — корень API, обычно с суффиксом `/v1`;
+- `TEMPORALITY_MODEL_ID` — идентификатор модели у провайдера;
+- `TEMPORALITY_MODEL_API_KEY` — ключ (может быть пустым для Ollama; ключ никогда не возвращается в provenance);
+- `TEMPORALITY_MODEL_TEMPERATURE` — температура `0..2`, по умолчанию `0`;
+- `TEMPORALITY_MODEL_TIMEOUT` — Go duration, например `60s`.
+
+Compose передаёт эти значения в runtime. Примеры провайдеров:
+
+```dotenv
+# OpenAI
+TEMPORALITY_MODEL_BASE_URL=https://api.openai.com/v1
+TEMPORALITY_MODEL_ID=gpt-4.1-mini
+TEMPORALITY_MODEL_API_KEY=your-key
+
+# OpenRouter
+TEMPORALITY_MODEL_BASE_URL=https://openrouter.ai/api/v1
+TEMPORALITY_MODEL_ID=openai/gpt-4.1-mini
+TEMPORALITY_MODEL_API_KEY=your-openrouter-key
+
+# Локальный Ollama, доступный из Compose-контейнера
+TEMPORALITY_MODEL_BASE_URL=http://host.docker.internal:11434/v1
+TEMPORALITY_MODEL_ID=llama3.2
+TEMPORALITY_MODEL_API_KEY=
+```
+
+Для Ollama сначала загрузите модель: `ollama pull llama3.2`. При запуске Runtime вне Docker используйте `http://localhost:11434/v1`; `host.docker.internal` нужен именно контейнеру Compose.
+
+После изменения `.env` пересоздайте Runtime:
+
+```sh
+docker compose up --build -d runtime executor debugger
+```
+
+Безопасную публичную конфигурацию (без API key) можно проверить так:
+
+```sh
+curl http://localhost:8080/v1/model/config
+```
+
+Провайдер должен поддерживать `response_format: {"type":"json_object"}` и возвращать один валидный объект `CognitiveEmission` со всеми обязательными полями схемы. Модели без надёжного JSON object mode могут приводить к ответу `502` на `/v1/model-step`.
+
+End-to-end проверка с локальным mock OpenAI-compatible сервером (нужен запущенный PostgreSQL, например `docker compose up -d postgres`):
+
+```sh
+make model-smoke
+```
+
+Smoke сначала собирает runtime, поднимает mock на `127.0.0.1:18081`, выполняет model-step и проверяет child Frame, replay, model provenance и события `attention.suggested`; реальные ключи и внешний model API не используются.
+
+Для реального вызова сначала создайте Objective и initial Frame (это делает `scripts/smoke.py`, а IDs также видны в Debugger timeline), затем вызовите:
+
+```sh
+curl -X POST http://localhost:8080/v1/model-step \
+  -H 'content-type: application/json' \
+  -d '{
+    "frame_id": "FRAME_UUID",
+    "objective_id": "OBJECTIVE_UUID",
+    "budget_tokens": 4000,
+    "definitions": []
+  }'
+```
+
+`definitions` содержит разрешённые Affordance Definitions, если модели разрешены actions. Пустой массив означает cognition-only шаг без физических действий. Ответ `503` означает отсутствующую/невалидную env-конфигурацию; `502` — ошибку provider, JSON mode или невалидный `CognitiveEmission`. API key не сохраняется в Event Log, RenderPacket, model provenance или HTTP-ответах.
+
 ```sh
 curl -X POST http://localhost:8080/v1/events \
   -H 'content-type: application/json' \

@@ -1,0 +1,230 @@
+// Package model connects rendered FRP packets to cognitive model adapters.
+package model
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/temporality-project/temporality/frp/cognition"
+	"github.com/temporality-project/temporality/frp/render"
+)
+
+// Adapter converts a rendered packet into a validated cognitive emission.
+type Adapter interface {
+	Emit(context.Context, render.Packet) (cognition.CognitiveEmission, error)
+}
+
+// Config is non-secret model configuration and may safely be retained as provenance.
+// BaseURL is the OpenAI-compatible API root, normally ending in /v1.
+type Config struct {
+	BaseURL     string        `json:"base_url"`
+	Model       string        `json:"model"`
+	Temperature float64       `json:"temperature"`
+	Timeout     time.Duration `json:"timeout"`
+}
+
+// Credentials are deliberately separate from serializable model provenance.
+type Credentials struct {
+	APIKey string `json:"-"`
+}
+
+// Provenance describes the public configuration used for a model call.
+type Provenance struct {
+	Adapter     string  `json:"adapter"`
+	BaseURL     string  `json:"base_url"`
+	Model       string  `json:"model"`
+	Temperature float64 `json:"temperature"`
+	TimeoutMS   int64   `json:"timeout_ms"`
+}
+
+// OpenAIAdapter calls an OpenAI-compatible chat-completions endpoint.
+// Its runtime configuration is copied at construction and cannot be mutated by callers.
+type OpenAIAdapter struct {
+	endpoint    string
+	model       string
+	temperature float64
+	timeout     time.Duration
+	apiKey      string
+	client      *http.Client
+	provenance  Provenance
+}
+
+func NewOpenAIAdapter(config Config, credentials Credentials, client *http.Client) (*OpenAIAdapter, error) {
+	base := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
+	parsed, err := url.Parse(base)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, errors.New("model base_url must be an absolute HTTP URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, errors.New("model base_url must use HTTP or HTTPS")
+	}
+	if strings.TrimSpace(config.Model) == "" {
+		return nil, errors.New("model is required")
+	}
+	if config.Temperature < 0 || config.Temperature > 2 {
+		return nil, errors.New("temperature must be between 0 and 2")
+	}
+	if config.Timeout <= 0 {
+		return nil, errors.New("timeout must be positive")
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return &OpenAIAdapter{
+		endpoint:    base + "/chat/completions",
+		model:       config.Model,
+		temperature: config.Temperature,
+		timeout:     config.Timeout,
+		apiKey:      credentials.APIKey,
+		client:      client,
+		provenance: Provenance{
+			Adapter:     "openai-chat-completions",
+			BaseURL:     base,
+			Model:       config.Model,
+			Temperature: config.Temperature,
+			TimeoutMS:   config.Timeout.Milliseconds(),
+		},
+	}, nil
+}
+
+func (a *OpenAIAdapter) Provenance() Provenance { return a.provenance }
+
+type chatRequest struct {
+	Model          string         `json:"model"`
+	Messages       []chatMessage  `json:"messages"`
+	Temperature    float64        `json:"temperature"`
+	ResponseFormat responseFormat `json:"response_format"`
+}
+type chatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+type responseFormat struct {
+	Type string `json:"type"`
+}
+
+const systemPrompt = `You convert one FRP RenderPacket into exactly one CognitiveEmission JSON object.
+Return JSON only (no Markdown or commentary), conforming to this required skeleton:
+{"schema":"frp.cognitive-emission.v1","emission_id":"<new non-empty id>","frame_id":"<exact frame_id from RenderPacket>","observation":[],"reasoning":[],"claims":[],"attention":[],"actions":[],"frame_ops":[],"completion":null}
+All listed fields are required. observation items require ref and interpretation; reasoning items require kind and text; claims require proposition, confidence (0..1), and status "candidate"; attention supports {"op":"attend","target":{"type":"query","text":"..."}} or a typed target id; actions require affordance and args; frame_ops supports pin/unpin with a typed ref.
+Use only information present in the RenderPacket. You have no tools, external access, credentials, secrets, or permission to infer or request them. Never output secrets.`
+
+type chatResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+}
+
+func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cognition.CognitiveEmission, error) {
+	packetJSON, err := json.Marshal(packet)
+	if err != nil {
+		return cognition.CognitiveEmission{}, fmt.Errorf("marshal render packet: %w", err)
+	}
+	body, err := json.Marshal(chatRequest{
+		Model:       a.model,
+		Temperature: a.temperature,
+		Messages: []chatMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: string(packetJSON)},
+		},
+		ResponseFormat: responseFormat{Type: "json_object"},
+	})
+	if err != nil {
+		return cognition.CognitiveEmission{}, fmt.Errorf("marshal model request: %w", err)
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, a.timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, a.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return cognition.CognitiveEmission{}, fmt.Errorf("create model request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if a.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+a.apiKey)
+	}
+	response, err := a.client.Do(req)
+	if err != nil {
+		return cognition.CognitiveEmission{}, fmt.Errorf("model request: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
+		return cognition.CognitiveEmission{}, fmt.Errorf("model request returned HTTP %d", response.StatusCode)
+	}
+	var decoded chatResponse
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 8<<20))
+	if err := decoder.Decode(&decoded); err != nil {
+		return cognition.CognitiveEmission{}, fmt.Errorf("decode model response: %w", err)
+	}
+	if len(decoded.Choices) == 0 {
+		return cognition.CognitiveEmission{}, errors.New("model response has no choices")
+	}
+	content, err := stripJSONFence(decoded.Choices[0].Message.Content)
+	if err != nil {
+		return cognition.CognitiveEmission{}, err
+	}
+	var emission cognition.CognitiveEmission
+	if err := json.Unmarshal([]byte(content), &emission); err != nil {
+		return cognition.CognitiveEmission{}, fmt.Errorf("decode cognitive emission: %w", err)
+	}
+	if err := emission.Validate(); err != nil {
+		return cognition.CognitiveEmission{}, fmt.Errorf("validate cognitive emission: %w", err)
+	}
+	if emission.FrameID != packet.FrameID {
+		return cognition.CognitiveEmission{}, fmt.Errorf("emission frame_id %q does not match packet frame_id %q", emission.FrameID, packet.FrameID)
+	}
+	return emission, nil
+}
+
+func stripJSONFence(content string) (string, error) {
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, "```") {
+		return trimmed, nil
+	}
+	lineEnd := strings.IndexByte(trimmed, '\n')
+	if lineEnd < 0 {
+		return "", errors.New("malformed fenced model JSON")
+	}
+	language := strings.TrimSpace(strings.TrimPrefix(trimmed[:lineEnd], "```"))
+	if language != "" && !strings.EqualFold(language, "json") {
+		return "", fmt.Errorf("unsupported model content fence %q", language)
+	}
+	rest := trimmed[lineEnd+1:]
+	closing := strings.LastIndex(rest, "```")
+	if closing < 0 || strings.TrimSpace(rest[closing+3:]) != "" {
+		return "", errors.New("malformed fenced model JSON")
+	}
+	return strings.TrimSpace(rest[:closing]), nil
+}
+
+// RecordedAdapter replays emissions without network access.
+type RecordedAdapter struct {
+	Emissions []cognition.CognitiveEmission
+	index     int
+}
+
+func (a *RecordedAdapter) Emit(_ context.Context, packet render.Packet) (cognition.CognitiveEmission, error) {
+	if a.index >= len(a.Emissions) {
+		return cognition.CognitiveEmission{}, errors.New("recorded model trace exhausted")
+	}
+	emission := a.Emissions[a.index]
+	a.index++
+	if err := emission.Validate(); err != nil {
+		return cognition.CognitiveEmission{}, fmt.Errorf("validate recorded cognitive emission: %w", err)
+	}
+	if emission.FrameID != packet.FrameID {
+		return cognition.CognitiveEmission{}, errors.New("recorded emission frame_id does not match packet frame_id")
+	}
+	return emission, nil
+}
