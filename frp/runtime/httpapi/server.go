@@ -40,6 +40,7 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/claims/{id}", s.getClaim)
 	mux.HandleFunc("POST /v1/frames", s.createFrame)
 	mux.HandleFunc("POST /v1/frames/{id}/transitions", s.transitionFrame)
+	mux.HandleFunc("POST /v1/frames/{id}/emissions", s.reduceEmission)
 	mux.HandleFunc("GET /v1/frames/{id}", s.getFrame)
 	mux.HandleFunc("GET /metrics", s.metrics.handler)
 	return s.metrics.count(mux)
@@ -188,6 +189,48 @@ func (s *Server) transitionFrame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, result)
+}
+
+func (s *Server) reduceEmission(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(frame.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("frames are not supported"))
+		return
+	}
+	var emission cognition.CognitiveEmission
+	if err := decodeJSON(r, &emission); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	emission.ApplyDefaults()
+	current, err := store.GetFrame(r.Context(), r.PathValue("id"))
+	if errors.Is(err, frame.ErrFrameNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("internal error"))
+		return
+	}
+	decision, err := cognition.ReduceEmission(current, emission)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	if len(decision.Claims) > 0 || len(decision.Actions) > 0 {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("claims and actions require atomic runtime orchestration not available in M2"))
+		return
+	}
+	now := s.now().UTC()
+	event := protocol.Event{EventID: newUUID(), ValidTime: now, Type: "frame.transitioned", EpisodeID: current.EpisodeID, BranchID: current.BranchID, Payload: map[string]any{"parent_frame_id": current.FrameID, "emission_id": emission.EmissionID}, Provenance: map[string]any{"source": "cognitive_emission", "emission_schema": emission.Schema}}
+	event.ApplyDefaults(now)
+	result, err := store.TransitionFrame(r.Context(), current.FrameID, decision.Transition, event)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	decision.Frame = result.Frame
+	writeJSON(w, http.StatusCreated, map[string]any{"decision": decision, "event": result.Event})
 }
 
 func (s *Server) getFrame(w http.ResponseWriter, r *http.Request) {

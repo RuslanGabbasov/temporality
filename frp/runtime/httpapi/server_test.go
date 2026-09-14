@@ -131,6 +131,20 @@ func TestFrameCreateTransitionGetAndReplay(t *testing.T) {
 	if result.Frame.ParentFrameID != initial.Frame.FrameID || result.Frame.Revision != 1 || result.Frame.Mode != frame.ModeVerify {
 		t.Fatalf("unexpected transition: %s", transitioned.Body.String())
 	}
+	emissionBody := []byte(`{"schema":"frp.cognitive-emission.v1","emission_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b20","frame_id":"` + result.Frame.FrameID + `","attention":[{"op":"attend","target":{"type":"query","text":"evidence against current hypothesis"}}],"frame_ops":[{"op":"unpin","ref":"claim:018f47a7-34b2-7d10-a932-4f3ff37a4b10"}]}`)
+	reduced := serve(handler, http.MethodPost, "/v1/frames/"+result.Frame.FrameID+"/emissions", emissionBody)
+	if reduced.Code != http.StatusCreated {
+		t.Fatalf("emission status=%d body=%s", reduced.Code, reduced.Body.String())
+	}
+	var emissionResult struct {
+		Decision cognition.Decision `json:"decision"`
+	}
+	if err := json.Unmarshal(reduced.Body.Bytes(), &emissionResult); err != nil {
+		t.Fatal(err)
+	}
+	if emissionResult.Decision.Frame.Revision != 2 || emissionResult.Decision.Frame.Focus.Query != "evidence against current hypothesis" {
+		t.Fatalf("unexpected emission decision: %s", reduced.Body.String())
+	}
 	gotInitial := serve(handler, http.MethodGet, "/v1/frames/"+initial.Frame.FrameID, nil)
 	var unchanged frame.Frame
 	if err := json.Unmarshal(gotInitial.Body.Bytes(), &unchanged); err != nil {
@@ -146,8 +160,8 @@ func TestFrameCreateTransitionGetAndReplay(t *testing.T) {
 	if err := json.Unmarshal(replayed.Body.Bytes(), &replayResult); err != nil {
 		t.Fatal(err)
 	}
-	if len(replayResult.Events) != 2 {
-		t.Fatalf("expected frame create and transition events: %s", replayed.Body.String())
+	if len(replayResult.Events) != 3 {
+		t.Fatalf("expected frame create, direct transition, and emission transition events: %s", replayed.Body.String())
 	}
 }
 

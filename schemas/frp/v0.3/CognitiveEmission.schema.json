@@ -1,0 +1,12 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://temporality.dev/schemas/frp/v0.3/CognitiveEmission.schema.json",
+  "title":"FRP CognitiveEmission",
+  "type":"object",
+  "required":["schema","emission_id","frame_id","observation","reasoning","claims","attention","actions","frame_ops","completion"],
+  "properties":{
+    "schema":{"const":"frp.cognitive-emission.v1"},"emission_id":{"type":"string"},"frame_id":{"type":"string"},
+    "observation":{"type":"array"},"reasoning":{"type":"array"},"claims":{"type":"array"},"attention":{"type":"array"},"actions":{"type":"array"},"frame_ops":{"type":"array"},"completion":{"type":["string","null"]}
+  },
+  "additionalProperties":false
+}
