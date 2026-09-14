@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/substrate"
 	"github.com/temporality-project/temporality/frp/substrate/postgres"
@@ -123,6 +124,52 @@ func TestPostgresCursorPagination(t *testing.T) {
 	if first.Events[1].EventID == second.Events[0].EventID {
 		t.Fatal("cursor returned a duplicate event")
 	}
+}
+
+func TestClaimCommitIsAtomic(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	store, err := postgres.Open(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, migration := range []string{"../../../migrations/000001_event_store.up.sql", "../../../migrations/000002_claims.up.sql"} {
+		if err = store.Migrate(ctx, migration); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	base := claimCommit("Base claim", nil)
+	if err = store.CommitClaim(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetClaim(ctx, base.Claim.ClaimID)
+	if err != nil || got.Proposition != base.Claim.Proposition {
+		t.Fatalf("unexpected persisted claim: %#v, %v", got, err)
+	}
+
+	invalid := claimCommit("Derived claim", []cognition.ClaimRelation{{DestinationClaim: newTestUUID(), Type: cognition.RelationSupports, Weight: 0.8}})
+	invalid.Relations[0].SourceClaim = invalid.Claim.ClaimID
+	invalid.Relations[0].EvidenceEvent = invalid.Event.EventID
+	if err = store.CommitClaim(ctx, invalid); err == nil {
+		t.Fatal("commit with missing destination claim succeeded")
+	}
+	if _, err = store.Get(ctx, invalid.Event.EventID); err != substrate.ErrNotFound {
+		t.Fatalf("event was not rolled back: %v", err)
+	}
+	if _, err = store.GetClaim(ctx, invalid.Claim.ClaimID); err != cognition.ErrClaimNotFound {
+		t.Fatalf("claim was not rolled back: %v", err)
+	}
+}
+
+func claimCommit(proposition string, relations []cognition.ClaimRelation) cognition.Commit {
+	now := time.Now().UTC()
+	eventID, claimID := newTestUUID(), newTestUUID()
+	return cognition.Commit{Event: protocol.Event{Protocol: protocol.Name, Version: protocol.Version, EventID: eventID, TransactionTime: now, ValidTime: now, Type: "claim.candidate", Payload: map[string]any{}, Provenance: map[string]any{"source": "integration-test"}}, Claim: cognition.Claim{Protocol: protocol.Name, Version: protocol.Version, ClaimID: claimID, Proposition: proposition, Confidence: 0.5, Status: cognition.ClaimCandidate, CreatedEvent: eventID, ValidFrom: now}, Relations: relations}
 }
 
 func newTestUUID() string {

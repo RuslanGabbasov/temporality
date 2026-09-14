@@ -4,7 +4,7 @@ Reference implementation of **Frame Runtime Protocol (FRP) v0.3**.
 
 ## Status
 
-Work has started with **M0 — Event Log + replay**:
+Implemented foundations for **M0 — Event Log + replay** and **M1 — Claims**:
 
 - versioned FRP `Event` protocol object and JSON Schema;
 - append-only PostgreSQL event store;
@@ -13,7 +13,9 @@ Work has started with **M0 — Event Log + replay**:
 - versioned replay manifests included in deterministic digests;
 - HTTP/JSON API with opaque cursor pagination;
 - Prometheus-compatible runtime metrics;
-- in-memory adapter for deterministic tests.
+- in-memory adapter for deterministic tests;
+- versioned Claims and evidence relations;
+- atomic Event + Claim + relations persistence.
 
 See [`ROADMAP.md`](ROADMAP.md) for subsequent milestones.
 
@@ -39,6 +41,10 @@ curl -X POST http://localhost:8080/v1/replay \
 
 curl 'http://localhost:8080/v1/events?episode_id=018f47a7-34b2-7d10-a932-4f3ff37a4a02&limit=100'
 curl http://localhost:8080/metrics
+
+curl -X POST http://localhost:8080/v1/claims \
+  -H 'content-type: application/json' \
+  -d '{"event":{"payload":{},"provenance":{"source":"user"}},"claim":{"proposition":"The build is reproducible","confidence":0.9}}'
 ```
 
 ## Development

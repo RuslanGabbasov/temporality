@@ -6,16 +6,21 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/substrate"
 )
 
 type Store struct {
-	mu     sync.RWMutex
-	events map[string]protocol.Event
+	mu        sync.RWMutex
+	events    map[string]protocol.Event
+	claims    map[string]cognition.Claim
+	relations []cognition.ClaimRelation
 }
 
-func New() *Store { return &Store{events: make(map[string]protocol.Event)} }
+func New() *Store {
+	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim)}
+}
 
 func (s *Store) Append(_ context.Context, event protocol.Event) error {
 	if err := event.Validate(); err != nil {
@@ -65,6 +70,51 @@ func (s *Store) List(_ context.Context, filter substrate.EventFilter) ([]protoco
 		}
 		return result[i].EventID < result[j].EventID
 	})
+	return result, nil
+}
+
+func (s *Store) CommitClaim(_ context.Context, commit cognition.Commit) error {
+	if err := commit.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.events[commit.Event.EventID]; exists {
+		return errors.New("event already exists")
+	}
+	if _, exists := s.claims[commit.Claim.ClaimID]; exists {
+		return errors.New("claim already exists")
+	}
+	for _, relation := range commit.Relations {
+		if _, exists := s.claims[relation.DestinationClaim]; !exists {
+			return cognition.ErrClaimNotFound
+		}
+	}
+	s.events[commit.Event.EventID] = commit.Event
+	s.claims[commit.Claim.ClaimID] = commit.Claim
+	s.relations = append(s.relations, commit.Relations...)
+	return nil
+}
+
+func (s *Store) GetClaim(_ context.Context, id string) (cognition.Claim, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	claim, exists := s.claims[id]
+	if !exists {
+		return cognition.Claim{}, cognition.ErrClaimNotFound
+	}
+	return claim, nil
+}
+
+func (s *Store) ListRelations(_ context.Context, id string) ([]cognition.ClaimRelation, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]cognition.ClaimRelation, 0)
+	for _, relation := range s.relations {
+		if relation.SourceClaim == id || relation.DestinationClaim == id {
+			result = append(result, relation)
+		}
+	}
 	return result, nil
 }
 

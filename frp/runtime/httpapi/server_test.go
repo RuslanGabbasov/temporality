@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/runtime/httpapi"
 	"github.com/temporality-project/temporality/frp/substrate/memory"
 )
@@ -80,6 +81,25 @@ func TestEventPaginationAndMetrics(t *testing.T) {
 	metrics := serve(handler, http.MethodGet, "/metrics", nil)
 	if metrics.Code != http.StatusOK || !strings.Contains(metrics.Body.String(), "temporality_events_appended_total 3") {
 		t.Fatalf("unexpected metrics: %s", metrics.Body.String())
+	}
+}
+
+func TestCommitAndGetClaim(t *testing.T) {
+	handler := httpapi.New(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	created := serve(handler, http.MethodPost, "/v1/claims", []byte(`{"event":{"payload":{},"provenance":{"source":"test"}},"claim":{"proposition":"The build is reproducible","confidence":0.9}}`))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create claim status=%d body=%s", created.Code, created.Body.String())
+	}
+	var commit cognition.Commit
+	if err := json.Unmarshal(created.Body.Bytes(), &commit); err != nil {
+		t.Fatal(err)
+	}
+	if commit.Event.Type != "claim.candidate" || commit.Claim.CreatedEvent != commit.Event.EventID {
+		t.Fatalf("invalid atomic commit: %#v", commit)
+	}
+	got := serve(handler, http.MethodGet, "/v1/claims/"+commit.Claim.ClaimID, nil)
+	if got.Code != http.StatusOK {
+		t.Fatalf("get claim status=%d body=%s", got.Code, got.Body.String())
 	}
 }
 

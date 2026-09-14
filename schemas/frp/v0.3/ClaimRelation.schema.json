@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://temporality.dev/schemas/frp/v0.3/ClaimRelation.schema.json",
+  "title": "FRP Claim Relation",
+  "type": "object",
+  "required": ["src_claim", "dst_claim", "type", "weight", "evidence_event"],
+  "properties": {
+    "src_claim": { "type": "string", "format": "uuid" },
+    "dst_claim": { "type": "string", "format": "uuid" },
+    "type": { "enum": ["supports", "contradicts", "derived_from", "supersedes"] },
+    "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+    "evidence_event": { "type": "string", "format": "uuid" }
+  },
+  "additionalProperties": false
+}

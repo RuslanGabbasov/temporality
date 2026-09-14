@@ -47,9 +47,11 @@ func openStore(ctx context.Context, log *slog.Logger) (substrate.EventStore, fun
 	if err != nil {
 		return nil, nil, err
 	}
-	if err = store.Migrate(ctx, "migrations/000001_event_store.up.sql"); err != nil {
-		store.Close()
-		return nil, nil, err
+	for _, migration := range []string{"migrations/000001_event_store.up.sql", "migrations/000002_claims.up.sql"} {
+		if err = store.Migrate(ctx, migration); err != nil {
+			store.Close()
+			return nil, nil, err
+		}
 	}
 	return store, store.Close, nil
 }

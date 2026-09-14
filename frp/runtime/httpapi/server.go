@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/replay"
 	"github.com/temporality-project/temporality/frp/substrate"
@@ -33,6 +34,8 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/events", s.listEvents)
 	mux.HandleFunc("GET /v1/events/{id}", s.getEvent)
 	mux.HandleFunc("POST /v1/replay", s.replayEvents)
+	mux.HandleFunc("POST /v1/claims", s.commitClaim)
+	mux.HandleFunc("GET /v1/claims/{id}", s.getClaim)
 	mux.HandleFunc("GET /metrics", s.metrics.handler)
 	return s.metrics.count(mux)
 }
@@ -106,6 +109,71 @@ func (s *Server) getEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, event)
+}
+
+type claimRequest struct {
+	Event     protocol.Event            `json:"event"`
+	Claim     cognition.Claim           `json:"claim"`
+	Relations []cognition.ClaimRelation `json:"relations,omitempty"`
+}
+
+func (s *Server) commitClaim(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(cognition.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("claims are not supported"))
+		return
+	}
+	var request claimRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	now := s.now()
+	if request.Event.EventID == "" {
+		request.Event.EventID = newUUID()
+	}
+	if request.Claim.ClaimID == "" {
+		request.Claim.ClaimID = newUUID()
+	}
+	request.Claim.ApplyDefaults(now)
+	request.Event.ApplyDefaults(now)
+	request.Event.Type = "claim." + string(request.Claim.Status)
+	request.Claim.CreatedEvent = request.Event.EventID
+	for i := range request.Relations {
+		request.Relations[i].SourceClaim = request.Claim.ClaimID
+		request.Relations[i].EvidenceEvent = request.Event.EventID
+	}
+	commit := cognition.Commit{Event: request.Event, Claim: request.Claim, Relations: request.Relations}
+	if err := store.CommitClaim(r.Context(), commit); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, commit)
+}
+
+func (s *Server) getClaim(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(cognition.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("claims are not supported"))
+		return
+	}
+	claim, err := store.GetClaim(r.Context(), r.PathValue("id"))
+	if errors.Is(err, cognition.ErrClaimNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		s.log.Error("get claim", "error", err)
+		writeError(w, http.StatusInternalServerError, errors.New("internal error"))
+		return
+	}
+	relations, err := store.ListRelations(r.Context(), claim.ClaimID)
+	if err != nil {
+		s.log.Error("list claim relations", "error", err)
+		writeError(w, http.StatusInternalServerError, errors.New("internal error"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"claim": claim, "relations": relations})
 }
 
 type replayRequest struct {
