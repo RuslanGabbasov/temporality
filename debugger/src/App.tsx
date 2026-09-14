@@ -4,7 +4,7 @@ import { extractClaims, extractModelAnswer } from './answer'
 import { eventKey, eventLabel, eventTime, executionIdOf, frameIdOf, unwrapEvents } from './timeline'
 import { formatDuration, isAbortError, modelProgress, modelTimeoutMs } from './modelProgress'
 import type { Execution, ForkGroup, Frame, FrameSection, FrpEvent, ModelConfig, ModelStepResponse, RenderResponse } from './types'
-import { childFrameId, continueWithModel, EpisodeWorkflowError, renderRequest, runEpisodeWorkflow, twoBranchForkRequest, type EpisodeDraft, type EpisodeWorkflowResult, type WorkflowStage } from './workflow'
+import { childFrameId, continueWithModel, EpisodeWorkflowError, FollowUpWorkflowError, renderRequest, runEpisodeWorkflow, runFollowUpWorkflow, twoBranchForkRequest, type EpisodeDraft, type EpisodeWorkflowResult, type FollowUpResult, type FollowUpStage, type WorkflowStage } from './workflow'
 
 const SECTIONS: FrameSection[] = ['focus', 'map', 'periphery', 'procedures', 'recent']
 const DEFAULT_DRAFT: EpisodeDraft = { prompt: '', successConditions: [], tokenBudget: 4000, mode: 'explore', trustMin: 0.5, rebuildRegions: false }
@@ -49,7 +49,9 @@ function App() {
   const [dialogOpen, setDialogOpen] = useState(false); const [draft, setDraft] = useState(DEFAULT_DRAFT); const [conditionsText, setConditionsText] = useState('')
   const [workflowBusy, setWorkflowBusy] = useState(false); const [workflowStage, setWorkflowStage] = useState<WorkflowStage | ''>(''); const [workflowError, setWorkflowError] = useState(''); const [pending, setPending] = useState<EpisodeWorkflowResult | null>(null); const [summary, setSummary] = useState<ModelStepResponse | null>(null)
   const [modelRun, setModelRun] = useState<{ controller: AbortController; startedAt: number; now: number; operation: string } | null>(null)
+  const [followUpOpen, setFollowUpOpen] = useState(false); const [followUpText, setFollowUpText] = useState(''); const [followUpStage, setFollowUpStage] = useState<FollowUpStage | ''>(''); const [savedFollowUp, setSavedFollowUp] = useState<FollowUpResult | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const followUpDialogRef = useRef<HTMLDialogElement>(null)
   const answerPanelRef = useRef<HTMLElement>(null)
 
   const loadEvents = useCallback(async (id: string) => {
@@ -67,6 +69,7 @@ function App() {
   useEffect(() => { if (!episodeId || modelRun) return; const timer = window.setInterval(() => void loadEvents(episodeId), 5000); return () => window.clearInterval(timer) }, [episodeId, loadEvents, modelRun])
   useEffect(() => { if (!modelRun) return; const timer = window.setInterval(() => setModelRun((run) => run ? { ...run, now: Date.now() } : null), 1000); return () => window.clearInterval(timer) }, [modelRun?.startedAt])
   useEffect(() => { if (dialogOpen) dialogRef.current?.showModal(); else dialogRef.current?.close() }, [dialogOpen])
+  useEffect(() => { if (followUpOpen) followUpDialogRef.current?.showModal(); else followUpDialogRef.current?.close() }, [followUpOpen])
   useEffect(() => {
     if (!summary || frameBusy) return
     const frame = window.requestAnimationFrame(() => {
@@ -122,9 +125,35 @@ function App() {
   }
   function continueSelected() {
     if (!frameId || !objectiveId || actionBusy) return
-    const controller = new AbortController(); const startedAt = Date.now(); setActionBusy('Calling model'); setActionError(''); setModelRun({ controller, startedAt, now: startedAt, operation: 'Continue' })
-    void (async () => { try { const result = await continueWithModel(api, frameId, objectiveId, frameBudget(frame), controller.signal); setSummary(withDuration(result, startedAt)); if (episodeId) await loadEvents(episodeId); const child = childFrameId(result); if (child) await openFrame(child) } catch (error) { setActionError(isAbortError(error) ? `Model step cancelled. Episode ${episodeId || 'ID'} and frame ${frameId} are unchanged; Continue can be retried.` : errorText(error, 'Model step failed')) } finally { setActionBusy(''); setModelRun(null) } })()
+    setFollowUpText(''); setSavedFollowUp(null); setActionError(''); setFollowUpOpen(true)
   }
+  async function submitFollowUp(event?: FormEvent) {
+    event?.preventDefault()
+    if (!frameId || !objectiveId || actionBusy || !followUpText.trim()) return
+    const input = { sourceFrameId: frameId, text: followUpText, objectiveId, budgetTokens: frameBudget(frame) }
+    const controller = new AbortController(); let startedAt = 0
+    setActionBusy(savedFollowUp ? 'Calling model' : 'Saving follow-up'); setActionError('')
+    try {
+      const result = await runFollowUpWorkflow(api, input, (stage) => {
+        setFollowUpStage(stage); setActionBusy(stage)
+        if (stage === 'Calling model') { startedAt = Date.now(); setModelRun({ controller, startedAt, now: startedAt, operation: savedFollowUp ? 'Retry follow-up' : 'Continue' }) }
+      }, savedFollowUp ?? undefined, controller.signal)
+      setSavedFollowUp(null); setFollowUpOpen(false)
+      if (result.modelResult) setSummary(withDuration(result.modelResult, startedAt))
+      if (episodeId) await loadEvents(episodeId)
+      const child = result.modelResult && childFrameId(result.modelResult)
+      await openFrame(child ?? result.instructionFrameId)
+    } catch (error) {
+      const workflowError = error instanceof FollowUpWorkflowError ? error : undefined
+      if (workflowError?.result) {
+        setSavedFollowUp(workflowError.result); setFollowUpOpen(false)
+        if (episodeId) await loadEvents(episodeId)
+        await openFrame(workflowError.result.instructionFrameId)
+        setActionError(isAbortError(workflowError.cause) ? 'Follow-up saved. Model step cancelled; retry runs the model only.' : `Follow-up saved. ${errorText(workflowError, 'Model step failed')}`)
+      } else setActionError(errorText(error, 'Unable to save follow-up'))
+    } finally { setActionBusy(''); setFollowUpStage(''); setModelRun(null) }
+  }
+  function retryFollowUp() { if (savedFollowUp) { setFollowUpText(savedFollowUp.text); setFollowUpOpen(true) } }
 
   const provenance = modelConfig?.provenance; const modelName = provenance?.model ?? modelConfig?.model; const baseUrl = provenance?.base_url ?? modelConfig?.base_url
   const provider = provenance?.provider ?? modelConfig?.provider ?? (baseUrl ? (() => { try { return new URL(baseUrl).host } catch { return baseUrl } })() : 'provider')
@@ -141,7 +170,7 @@ function App() {
       </aside>
 
       <section className="inspector panel" aria-label="Frame inspector"><div className="panel-heading inspector-heading"><div><span className="eyebrow">SELECTED FRAME</span><h2>{selectedFrameId || 'No frame selected'}</h2></div>{objectiveId && <div className="objective"><span>Objective</span><code>{objectiveId}</code></div>}</div>
-        <Status loading={frameBusy} error={frameError}>{!frame ? <div className="hero-empty"><div className="frame-glyph">⌗</div><h3>Create a task or select a frame</h3><p>Run cognition with a configured model, or inspect an existing episode’s boundaries, evidence, token use, and provenance.</p><button className="primary" onClick={() => setDialogOpen(true)}>New Episode</button></div> : <><div className="actionbar" aria-label="Frame actions"><button onClick={continueSelected} disabled={!!actionBusy || !modelConfig?.configured}>Continue with model</button><button onClick={renderSelected} disabled={!!actionBusy || !objectiveId} title="Render the selected Frame using its objective and token budget (default 4000)">Render selected frame</button><button onClick={() => void runAction('replay', async () => setReplay(await api.replay(frameId)))} disabled={!!actionBusy}>↶ Replay from here</button><button onClick={fork} disabled={!!actionBusy}>⑂ Fork ×2</button>{actionBusy && <span className="muted" role="status"><span className="spinner" /> {actionBusy}…</span>}</div>{actionError && <div className="status error" role="alert">{actionError}</div>}
+        <Status loading={frameBusy} error={frameError}>{!frame ? <div className="hero-empty"><div className="frame-glyph">⌗</div><h3>Create a task or select a frame</h3><p>Run cognition with a configured model, or inspect an existing episode’s boundaries, evidence, token use, and provenance.</p><button className="primary" onClick={() => setDialogOpen(true)}>New Episode</button></div> : <><div className="actionbar" aria-label="Frame actions"><button onClick={continueSelected} disabled={!!actionBusy || !modelConfig?.configured}>Continue with model</button><button onClick={renderSelected} disabled={!!actionBusy || !objectiveId} title="Render the selected Frame using its objective and token budget (default 4000)">Render selected frame</button><button onClick={() => void runAction('replay', async () => setReplay(await api.replay(frameId)))} disabled={!!actionBusy}>↶ Replay from here</button><button onClick={fork} disabled={!!actionBusy}>⑂ Fork ×2</button>{actionBusy && <span className="muted" role="status"><span className="spinner" /> {actionBusy}…</span>}</div>{actionError && <div className={savedFollowUp ? 'status warning' : 'status error'} role="alert"><strong>{actionError}</strong>{savedFollowUp && <><small>Instruction Frame <code>{savedFollowUp.instructionFrameId}</code> is the retry source. Your follow-up text is preserved.</small><button onClick={retryFollowUp} disabled={!!actionBusy || !modelConfig?.configured}>Retry model only</button></>}</div>}
           {summary && <ModelResult response={summary} panelRef={answerPanelRef} />}
           <div className="section-grid">{SECTIONS.map((section) => <article className={`data-card ${section === 'focus' ? 'featured' : ''}`} key={section}><h3><span>{section === 'focus' ? '◎' : '◇'}</span>{section}</h3><JsonView value={frame.sections?.[section] ?? frame[section]} /></article>)}</div><div className="evidence-grid"><article className="data-card warning"><h3><span>↗</span>outside_frame</h3><JsonView value={frame.outside_frame} /></article><article className="data-card"><h3><span>⌁</span>provenance</h3><JsonView value={frame.provenance} /></article><article className="data-card"><h3><span>◴</span>token usage</h3><JsonView value={frame.token_usage ?? frame.usage} /></article></div>
           {(rendered || replay) && <div className="result-grid">{rendered && <article className="result-card"><h3>Rendered cognition</h3><JsonView value={rendered.rendered ?? rendered.output ?? rendered.content ?? rendered} /></article>}{replay !== null && <article className="result-card"><h3>Replay result</h3><JsonView value={replay} /></article>}</div>}
@@ -149,6 +178,8 @@ function App() {
       </section>
       <aside className={`execution-drawer panel ${execution || executionBusy || executionError ? 'open' : ''}`} aria-label="Execution details"><div className="panel-heading"><div><span className="eyebrow">EXECUTION</span><h2>Details</h2></div><button className="icon-button" onClick={() => { setExecution(null); setExecutionError('') }} aria-label="Close execution details">×</button></div><Status loading={executionBusy} error={executionError}><JsonView value={execution} /></Status></aside>
     </main>
+
+    <dialog ref={followUpDialogRef} onCancel={(event) => { if (actionBusy) event.preventDefault(); else setFollowUpOpen(false) }} aria-labelledby="follow-up-title"><form className="episode-dialog" onSubmit={(event) => void submitFollowUp(event)}><div className="dialog-heading"><div><span className="eyebrow">MODEL FOLLOW-UP</span><h2 id="follow-up-title">Continue with model</h2></div><button type="button" className="icon-button" onClick={() => setFollowUpOpen(false)} disabled={!!actionBusy} aria-label="Close follow-up">×</button></div><div className="follow-up-context"><div><span>Current Objective</span><code>{savedFollowUp?.objectiveId ?? objectiveId}</code></div><div><span>{savedFollowUp ? 'Instruction Frame' : 'Selected Frame'}</span><code>{savedFollowUp?.instructionFrameId ?? frameId}</code></div></div><label className="follow-up-field">Follow-up <span aria-hidden="true">*</span><textarea autoFocus required value={followUpText} onChange={(event) => setFollowUpText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} placeholder="What should the model attend to next?" /></label>{actionBusy && <div className="status" role="status"><span className="spinner" /> {followUpStage}…</div>}<div className="dialog-actions"><button type="button" onClick={() => setFollowUpOpen(false)} disabled={!!actionBusy}>Cancel</button><button className="primary" type="submit" disabled={!!actionBusy || !followUpText.trim()}>{savedFollowUp ? 'Retry model' : 'Send & continue'}</button></div></form></dialog>
 
     <dialog ref={dialogRef} onCancel={() => !workflowBusy && setDialogOpen(false)} aria-labelledby="new-episode-title"><form className="episode-dialog" onSubmit={createEpisode}><div className="dialog-heading"><div><span className="eyebrow">OPERATIONAL WORKFLOW</span><h2 id="new-episode-title">New Episode</h2></div><button type="button" className="icon-button" onClick={() => setDialogOpen(false)} disabled={workflowBusy} aria-label="Close">×</button></div><div className="form-grid"><label className="wide">Prompt <span aria-hidden="true">*</span><textarea autoFocus value={draft.prompt} onChange={(e) => setDraft({ ...draft, prompt: e.target.value })} required placeholder="What should the cognitive agent accomplish?" /></label><label className="wide">Success conditions <small>optional, one per line</small><textarea value={conditionsText} onChange={(e) => setConditionsText(e.target.value)} placeholder={'Evidence gathered\nDecision justified'} /></label><label>Token budget<input type="number" min="1" step="1" value={draft.tokenBudget} onChange={(e) => setDraft({ ...draft, tokenBudget: Number(e.target.value) })} required /></label><label>Max cost <small>optional</small><input type="number" min="0" step="0.01" value={draft.maxCost ?? ''} onChange={(e) => setDraft({ ...draft, maxCost: e.target.value === '' ? undefined : Number(e.target.value) })} /></label><label>Mode<select value={draft.mode} onChange={(e) => setDraft({ ...draft, mode: e.target.value })}><option value="explore">explore</option><option value="exploit">exploit</option><option value="verify">verify</option><option value="recover">recover</option></select></label><label>Trust minimum<input type="number" min="0" max="1" step="0.05" value={draft.trustMin} onChange={(e) => setDraft({ ...draft, trustMin: Number(e.target.value) })} required /></label><label className="checkbox wide"><input type="checkbox" checked={draft.rebuildRegions} onChange={(e) => setDraft({ ...draft, rebuildRegions: e.target.checked })} /> Rebuild region projections before cognition</label></div>{workflowBusy && <div className="status" role="status"><span className="spinner" /> {workflowStage}…</div>}<div className="dialog-actions"><button type="button" onClick={() => setDialogOpen(false)} disabled={workflowBusy}>Cancel</button><button className="primary" type="submit" disabled={workflowBusy || !draft.prompt.trim()}>{workflowBusy ? workflowStage : 'Create and run'}</button></div></form></dialog>
   </div>

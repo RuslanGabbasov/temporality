@@ -108,6 +108,16 @@ export interface CreateFrameRequest {
   event: { payload: Record<string, Json>; provenance: Record<string, Json> }
 }
 
+export interface TransitionFrameRequest {
+  transition: { operations: [{ op: 'attend'; focus: { type: 'query'; query: string } }] }
+  event: { payload: {}; provenance: { source: 'debugger'; kind: 'user_follow_up' } }
+}
+
+export interface TransitionFrameResponse {
+  frame: Frame
+  event: FrpEvent
+}
+
 export interface ModelStepRequest {
   frame_id: string
   objective_id: string

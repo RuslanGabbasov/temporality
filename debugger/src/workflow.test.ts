@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { continueWithModel, EpisodeWorkflowError, renderRequest, runEpisodeWorkflow, twoBranchForkRequest, type EpisodeDraft, type EpisodeIds, type WorkflowApi } from './workflow'
+import { continueWithModel, EpisodeWorkflowError, FollowUpWorkflowError, renderRequest, runEpisodeWorkflow, runFollowUpWorkflow, twoBranchForkRequest, type EpisodeDraft, type EpisodeIds, type FollowUpApi, type WorkflowApi } from './workflow'
 
 const ids: EpisodeIds = { episodeId: 'episode', objectiveId: 'objective', agentId: 'agent', branchId: 'branch', frameId: 'parent' }
 const draft: EpisodeDraft = { prompt: 'Investigate', successConditions: ['Done'], tokenBudget: 1200, maxCost: 2, mode: 'explore', trustMin: 0.6, rebuildRegions: true }
@@ -57,6 +57,40 @@ describe('episode workflow', () => {
     const client = mockApi()
     await continueWithModel(client, 'selected-frame', 'selected-objective', 777)
     expect(client.modelStep).toHaveBeenCalledWith({ frame_id: 'selected-frame', objective_id: 'selected-objective', budget_tokens: 777, definitions: [] }, undefined)
+  })
+
+  it('runs follow-up transition then model with the instruction Frame', async () => {
+    const calls: string[] = []
+    const client: FollowUpApi = {
+      transitionFrame: vi.fn().mockImplementation(async () => { calls.push('transition'); return { frame: { frame_id: 'instruction' }, event: {} } }),
+      modelStep: vi.fn().mockImplementation(async () => { calls.push('model'); return { step: { frame: { frame_id: 'child' } } } }),
+    }
+    const stages: string[] = []
+    const result = await runFollowUpWorkflow(client, { sourceFrameId: 'selected', text: '  clarify this  ', objectiveId: 'objective', budgetTokens: 777 }, (stage) => stages.push(stage))
+    expect(calls).toEqual(['transition', 'model'])
+    expect(stages).toEqual(['Saving follow-up', 'Calling model'])
+    expect(result).toMatchObject({ instructionFrameId: 'instruction', text: 'clarify this', modelResult: { step: { frame: { frame_id: 'child' } } } })
+    expect(client.modelStep).toHaveBeenCalledWith({ frame_id: 'instruction', objective_id: 'objective', budget_tokens: 777, definitions: [] }, undefined)
+  })
+
+  it('does not call model when follow-up transition fails', async () => {
+    const client: FollowUpApi = { transitionFrame: vi.fn().mockRejectedValue(new Error('transition failed')), modelStep: vi.fn() }
+    await expect(runFollowUpWorkflow(client, { sourceFrameId: 'selected', text: 'question', objectiveId: 'objective', budgetTokens: 777 })).rejects.toMatchObject({ result: undefined } satisfies Partial<FollowUpWorkflowError>)
+    expect(client.modelStep).not.toHaveBeenCalled()
+  })
+
+  it('preserves instruction Frame and retries model without a duplicate transition', async () => {
+    const client: FollowUpApi = {
+      transitionFrame: vi.fn().mockResolvedValue({ frame: { frame_id: 'instruction' }, event: {} }),
+      modelStep: vi.fn().mockRejectedValueOnce(new Error('model failed')).mockResolvedValueOnce({ step: { frame: { frame_id: 'child' } } }),
+    }
+    const input = { sourceFrameId: 'selected', text: 'question', objectiveId: 'objective', budgetTokens: 777 }
+    let saved
+    try { await runFollowUpWorkflow(client, input) } catch (error) { saved = (error as FollowUpWorkflowError).result }
+    expect(saved).toMatchObject({ instructionFrameId: 'instruction', text: 'question' })
+    await runFollowUpWorkflow(client, input, undefined, saved)
+    expect(client.transitionFrame).toHaveBeenCalledOnce()
+    expect(client.modelStep).toHaveBeenCalledTimes(2)
   })
 
   it('builds render input only from the selected Frame and falls back to 4000 tokens', () => {

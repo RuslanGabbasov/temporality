@@ -27,6 +27,19 @@ describe('operational API', () => {
     expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toEqual({ frame_id: 'f', objective_id: 'o', budget_tokens: 1000, definitions: [] })
   })
 
+  it('sends the exact frame transition contract', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ frame: { frame_id: 'instruction' }, event: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.transitionFrame('frame/one', {
+      transition: { operations: [{ op: 'attend', focus: { type: 'query', query: 'What next?' } }] },
+      event: { payload: {}, provenance: { source: 'debugger', kind: 'user_follow_up' } },
+    })
+    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/v1/frames/frame%2Fone/transitions`, expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ transition: { operations: [{ op: 'attend', focus: { type: 'query', query: 'What next?' } }] }, event: { payload: {}, provenance: { source: 'debugger', kind: 'user_follow_up' } } }),
+    }))
+  })
+
   it('sends the exact render, blame, and atomic fork contracts', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ fork_group_id: 'group', source_frame_id: 'frame', branches: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
     vi.stubGlobal('fetch', fetchMock)

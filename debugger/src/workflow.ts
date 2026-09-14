@@ -1,4 +1,4 @@
-import type { CreateFrameRequest, CreateFrameResponse, CreateObjectiveRequest, ForkRequest, Frame, ModelConfig, ModelStepRequest, ModelStepResponse, RenderRequest } from './types'
+import type { CreateFrameRequest, CreateFrameResponse, CreateObjectiveRequest, ForkRequest, Frame, ModelConfig, ModelStepRequest, ModelStepResponse, RenderRequest, TransitionFrameRequest, TransitionFrameResponse } from './types'
 
 export type WorkflowStage = 'Creating objective' | 'Creating frame' | 'Rebuilding regions' | 'Calling model'
 
@@ -33,6 +33,29 @@ export interface WorkflowApi {
   createFrame(body: CreateFrameRequest): Promise<CreateFrameResponse>
   rebuildRegions(episodeId: string, branchId: string): Promise<unknown>
   modelStep(body: ModelStepRequest, signal?: AbortSignal): Promise<ModelStepResponse>
+}
+
+export interface FollowUpApi {
+  transitionFrame(frameId: string, body: TransitionFrameRequest): Promise<TransitionFrameResponse>
+  modelStep(body: ModelStepRequest, signal?: AbortSignal): Promise<ModelStepResponse>
+}
+
+export interface FollowUpResult {
+  sourceFrameId: string
+  instructionFrameId: string
+  text: string
+  objectiveId: string
+  budgetTokens: number
+  modelResult?: ModelStepResponse
+}
+
+export type FollowUpStage = 'Saving follow-up' | 'Calling model'
+
+export class FollowUpWorkflowError extends Error {
+  constructor(message: string, public readonly result?: FollowUpResult, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'FollowUpWorkflowError'
+  }
 }
 
 export class EpisodeWorkflowError extends Error {
@@ -121,4 +144,34 @@ export async function runEpisodeWorkflow(
 
 export function continueWithModel(client: Pick<WorkflowApi, 'modelStep'>, frameId: string, objectiveId: string, budgetTokens: number, signal?: AbortSignal) {
   return client.modelStep({ frame_id: frameId, objective_id: objectiveId, budget_tokens: budgetTokens, definitions: [] }, signal)
+}
+
+export async function runFollowUpWorkflow(
+  client: FollowUpApi,
+  input: Omit<FollowUpResult, 'instructionFrameId' | 'modelResult'>,
+  onStage: (stage: FollowUpStage) => void = () => undefined,
+  saved?: FollowUpResult,
+  signal?: AbortSignal,
+): Promise<FollowUpResult> {
+  let retained = saved
+  try {
+    if (!retained) {
+      const text = input.text.trim()
+      if (!text) throw new Error('Follow-up is required')
+      onStage('Saving follow-up')
+      const transitioned = await client.transitionFrame(input.sourceFrameId, {
+        transition: { operations: [{ op: 'attend', focus: { type: 'query', query: text } }] },
+        event: { payload: {}, provenance: { source: 'debugger', kind: 'user_follow_up' } },
+      })
+      const instructionFrameId = transitioned.frame.frame_id ?? transitioned.frame.id
+      if (!instructionFrameId) throw new Error('Transition response did not include a Frame ID')
+      retained = { ...input, text, instructionFrameId }
+    }
+    onStage('Calling model')
+    const modelResult = await continueWithModel(client, retained.instructionFrameId, retained.objectiveId, retained.budgetTokens, signal)
+    return { ...retained, modelResult }
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : 'Follow-up workflow failed'
+    throw new FollowUpWorkflowError(message, retained, { cause })
+  }
 }

@@ -1,4 +1,4 @@
-import type { BlameRequest, CreateFrameRequest, CreateFrameResponse, CreateObjectiveRequest, CreateObjectiveResponse, Execution, ForkGroup, ForkRequest, Frame, FrpEvent, ModelConfig, ModelStepRequest, ModelStepResponse, RenderRequest, RenderResponse } from './types'
+import type { BlameRequest, CreateFrameRequest, CreateFrameResponse, CreateObjectiveRequest, CreateObjectiveResponse, Execution, ForkGroup, ForkRequest, Frame, FrpEvent, ModelConfig, ModelStepRequest, ModelStepResponse, RenderRequest, RenderResponse, TransitionFrameRequest, TransitionFrameResponse } from './types'
 
 export const API_BASE = (import.meta.env.VITE_FRP_API_URL || '/api').replace(/\/$/, '')
 
@@ -37,6 +37,7 @@ export const api = {
   fork: (body: ForkRequest) => post<ForkGroup>('/v1/fork', body),
   createObjective: (body: CreateObjectiveRequest) => post<CreateObjectiveResponse>('/v1/objectives', body),
   createFrame: (body: CreateFrameRequest) => post<CreateFrameResponse>('/v1/frames', body),
+  transitionFrame: (frameId: string, body: TransitionFrameRequest) => post<TransitionFrameResponse>(`/v1/frames/${encodeURIComponent(frameId)}/transitions`, body),
   modelStep: (body: ModelStepRequest, signal?: AbortSignal) => post<ModelStepResponse>('/v1/model-step', body, signal),
   modelConfig: () => request<ModelConfig>('/v1/model/config'),
   rebuildRegions: (episodeId: string, branchId: string) => post<unknown>('/v1/projections/regions/rebuild', { episode_id: episodeId, branch_id: branchId }),
