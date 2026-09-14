@@ -33,6 +33,22 @@ func TestObservationObjectRefNormalizesToCanonicalString(t *testing.T) {
 	}
 }
 
+func TestObservationQueryRefsAreTransientButValid(t *testing.T) {
+	for _, raw := range []string{`"query:Что ты можешь?"`, `{"type":"query","text":"Что ты можешь?"}`} {
+		data := []byte(`{"schema":"frp.cognitive-emission.v1","emission_id":"e","frame_id":"f","observation":[{"ref":` + raw + `,"interpretation":"visible focus"}],"reasoning":[],"claims":[],"attention":[],"actions":[],"frame_ops":[],"completion":null}`)
+		var emission cognition.CognitiveEmission
+		if err := json.Unmarshal(data, &emission); err != nil {
+			t.Fatal(err)
+		}
+		if err := emission.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		if emission.Observation[0].Ref != "query:Что ты можешь?" {
+			t.Fatalf("unexpected query ref: %q", emission.Observation[0].Ref)
+		}
+	}
+}
+
 func TestObservationRejectsArbitraryObjectRef(t *testing.T) {
 	var emission cognition.CognitiveEmission
 	if err := json.Unmarshal([]byte(`{"observation":[{"ref":{"event_id":"123"},"interpretation":"seen"}]}`), &emission); err == nil {

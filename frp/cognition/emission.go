@@ -32,11 +32,19 @@ func (o *Observation) UnmarshalJSON(data []byte) error {
 		var object struct {
 			Type frame.RefType `json:"type"`
 			ID   string        `json:"id"`
+			Text string        `json:"text"`
 		}
-		if objectErr := json.Unmarshal(wire.Ref, &object); objectErr != nil || object.Type == "" || object.ID == "" {
-			return errors.New("observation ref must be a canonical string or {type,id} object")
+		if objectErr := json.Unmarshal(wire.Ref, &object); objectErr != nil || object.Type == "" {
+			return errors.New("observation ref must be a canonical string or typed object")
 		}
-		ref = string(object.Type) + ":" + object.ID
+		value := object.ID
+		if object.Type == frame.RefQuery {
+			value = object.Text
+		}
+		if value == "" {
+			return errors.New("observation ref object requires id, or text for query")
+		}
+		ref = string(object.Type) + ":" + value
 	}
 	o.Ref = ref
 	o.Interpretation = wire.Interpretation
@@ -197,7 +205,7 @@ func ParseRef(value string, workingSet bool) (frame.Ref, error) {
 		return ref, ref.Validate()
 	}
 	switch ref.Type {
-	case frame.RefRegion, frame.RefClaim, frame.RefEvent, frame.RefExecution:
+	case frame.RefRegion, frame.RefClaim, frame.RefEvent, frame.RefExecution, frame.RefQuery:
 		return ref, nil
 	default:
 		return frame.Ref{}, fmt.Errorf("invalid ref type %q", kind)
