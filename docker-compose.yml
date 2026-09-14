@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: temporality
+      POSTGRES_USER: temporality
+      POSTGRES_PASSWORD: temporality
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporality -d temporality"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - temporality-postgres:/var/lib/postgresql/data
+
+volumes:
+  temporality-postgres:

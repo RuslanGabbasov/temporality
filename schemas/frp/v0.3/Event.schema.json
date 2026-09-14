@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://temporality.dev/schemas/frp/v0.3/Event.schema.json",
+  "title": "FRP Event",
+  "type": "object",
+  "required": ["protocol", "version", "event_id", "tx_time", "valid_time", "type", "payload", "provenance"],
+  "properties": {
+    "protocol": { "const": "frp" },
+    "version": { "const": "0.3" },
+    "event_id": { "type": "string", "format": "uuid" },
+    "tx_time": { "type": "string", "format": "date-time" },
+    "valid_time": { "type": "string", "format": "date-time" },
+    "agent_id": { "type": "string", "format": "uuid" },
+    "episode_id": { "type": "string", "format": "uuid" },
+    "branch_id": { "type": "string", "format": "uuid" },
+    "parent_id": { "type": "string", "format": "uuid" },
+    "type": { "type": "string", "minLength": 1 },
+    "payload": { "type": "object" },
+    "provenance": { "type": "object" }
+  },
+  "additionalProperties": false
+}
