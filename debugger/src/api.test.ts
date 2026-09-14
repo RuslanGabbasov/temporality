@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
-import { API_BASE, apiUrl } from './api'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { API_BASE, api, apiUrl } from './api'
+
+afterEach(() => vi.unstubAllGlobals())
 
 describe('apiUrl', () => {
   it('uses the configured base and encodes query values', () => {
@@ -8,5 +10,39 @@ describe('apiUrl', () => {
 
   it('omits empty and undefined values', () => {
     expect(apiUrl('v1/events', { episode_id: '', limit: undefined })).toBe(`${API_BASE}/v1/events`)
+  })
+})
+
+describe('operational API', () => {
+  it('uses typed endpoint methods and JSON request bodies', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ configured: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.createObjective({ objective: { objective_id: 'o', episode_id: 'e', text: 'work', success_conditions: [], constraints: {} }, event: { payload: {}, provenance: {} } })
+    await api.createFrame({ frame: { frame_id: 'f', agent_id: 'a', episode_id: 'e', branch_id: 'b', objective_id: 'o', focus: { type: 'query', query: 'work' }, mode: 'explore', attention: { policy: 'balanced', deliberate: true, ambient: true, max_candidates: 32 }, filters: { trust_min: 0.5 }, budget: { tokens: 1000 } }, event: { payload: {}, provenance: {} } })
+    await api.rebuildRegions('e', 'b')
+    await api.modelStep({ frame_id: 'f', objective_id: 'o', budget_tokens: 1000, definitions: [] })
+    await api.modelConfig()
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([`${API_BASE}/v1/objectives`, `${API_BASE}/v1/frames`, `${API_BASE}/v1/projections/regions/rebuild`, `${API_BASE}/v1/model-step`, `${API_BASE}/v1/model/config`])
+    expect(fetchMock.mock.calls.slice(0, 4).every(([, init]) => init.method === 'POST')).toBe(true)
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toEqual({ frame_id: 'f', objective_id: 'o', budget_tokens: 1000, definitions: [] })
+  })
+
+  it('sends the exact render, blame, and atomic fork contracts', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ fork_group_id: 'group', source_frame_id: 'frame', branches: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.render({ frame_id: 'frame', objective_id: 'objective', budget_tokens: 4000 })
+    await api.blame({ root_id: 'claim-or-event-or-frame', max_depth: 8 })
+    await api.fork({ source_frame_id: 'frame', branches: [{ branch_id: 'a', label: 'A', model_config: {} }, { branch_id: 'b', label: 'B', model_config: { model: 'test' } }] })
+
+    expect(fetchMock.mock.calls.map(([url, init]) => ({ url, method: init.method, body: JSON.parse(init.body) }))).toEqual([
+      { url: `${API_BASE}/v1/render`, method: 'POST', body: { frame_id: 'frame', objective_id: 'objective', budget_tokens: 4000 } },
+      { url: `${API_BASE}/v1/blame`, method: 'POST', body: { root_id: 'claim-or-event-or-frame', max_depth: 8 } },
+      { url: `${API_BASE}/v1/fork`, method: 'POST', body: { source_frame_id: 'frame', branches: [{ branch_id: 'a', label: 'A', model_config: {} }, { branch_id: 'b', label: 'B', model_config: { model: 'test' } }] } },
+    ])
+  })
+
+  it('includes HTTP response details in errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"error":"bad model"}', { status: 502, statusText: 'Bad Gateway' })))
+    await expect(api.modelStep({ frame_id: 'f', objective_id: 'o', budget_tokens: 1, definitions: [] })).rejects.toThrow('502 Bad Gateway — {"error":"bad model"}')
   })
 })

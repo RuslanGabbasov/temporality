@@ -46,8 +46,87 @@ export interface RenderResponse {
   [key: string]: unknown
 }
 
-export interface Branch {
+export interface RenderRequest {
+  frame_id: string
+  objective_id: string
+  budget_tokens: number
+}
+
+export interface BlameRequest {
+  root_id: string
+  max_depth: number
+}
+
+export interface ForkBranchRequest {
   branch_id: string
   label: string
-  response: unknown
+  model_config: Record<string, Json>
 }
+
+export interface ForkRequest {
+  source_frame_id: string
+  branches: ForkBranchRequest[]
+}
+
+export interface ForkBranch extends Record<string, unknown> {
+  branch_id: string
+  label?: string
+}
+
+export interface ForkGroup extends Record<string, unknown> {
+  fork_group_id: string
+  source_frame_id: string
+  branches: ForkBranch[]
+}
+
+export interface Objective {
+  objective_id: string
+  episode_id: string
+  text: string
+  success_conditions: string[]
+  constraints: { max_cost?: number }
+}
+
+export interface CreateObjectiveRequest {
+  objective: Objective
+  event: { payload: Record<string, Json>; provenance: Record<string, Json> }
+}
+
+export interface CreateFrameRequest {
+  frame: Frame & {
+    frame_id: string
+    agent_id: string
+    episode_id: string
+    branch_id: string
+    objective_id: string
+    focus: { type: 'query'; query: string }
+    mode: string
+    attention: { policy: string; deliberate: boolean; ambient: boolean; max_candidates: number }
+    filters: { trust_min: number }
+    budget: { tokens: number }
+  }
+  event: { payload: Record<string, Json>; provenance: Record<string, Json> }
+}
+
+export interface ModelStepRequest {
+  frame_id: string
+  objective_id: string
+  budget_tokens: number
+  definitions: []
+}
+
+export interface ModelStepResponse {
+  step?: { frame?: Frame; events?: FrpEvent[] }
+  model_provenance?: Json
+  [key: string]: unknown
+}
+
+export interface ModelConfig {
+  configured: boolean
+  provenance?: { model?: string; base_url?: string; [key: string]: Json | undefined }
+  model?: string
+  base_url?: string
+}
+
+export interface CreateFrameResponse { frame: Frame }
+export interface CreateObjectiveResponse { objective: Objective }

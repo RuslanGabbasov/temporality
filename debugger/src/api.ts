@@ -1,4 +1,4 @@
-import type { Execution, Frame, FrpEvent, RenderResponse } from './types'
+import type { BlameRequest, CreateFrameRequest, CreateFrameResponse, CreateObjectiveRequest, CreateObjectiveResponse, Execution, ForkGroup, ForkRequest, Frame, FrpEvent, ModelConfig, ModelStepRequest, ModelStepResponse, RenderRequest, RenderResponse } from './types'
 
 export const API_BASE = (import.meta.env.VITE_FRP_API_URL || '/api').replace(/\/$/, '')
 
@@ -31,8 +31,13 @@ export const api = {
   events: (episodeId: string, limit: number) => request<FrpEvent[] | { events: FrpEvent[] }>('/v1/events', undefined, { episode_id: episodeId, limit }),
   frame: (frameId: string) => request<Frame>(`/v1/frames/${encodeURIComponent(frameId)}`),
   execution: (executionId: string) => request<Execution>(`/v1/executions/${encodeURIComponent(executionId)}`),
-  render: (frameId: string, objectiveId?: string) => post<RenderResponse>('/v1/render', { frame_id: frameId, ...(objectiveId ? { objective_id: objectiveId } : {}) }),
+  render: (body: RenderRequest) => post<RenderResponse>('/v1/render', body),
   replay: (frameId: string) => post<unknown>('/v1/replay', { frame_id: frameId }),
-  blame: (frameId: string, query: string) => post<unknown>('/v1/blame', { frame_id: frameId, query }),
-  fork: (frameId: string, branchId: string, label: string) => post<unknown>('/v1/fork', { frame_id: frameId, branch_id: branchId, label }),
+  blame: (body: BlameRequest) => post<unknown>('/v1/blame', body),
+  fork: (body: ForkRequest) => post<ForkGroup>('/v1/fork', body),
+  createObjective: (body: CreateObjectiveRequest) => post<CreateObjectiveResponse>('/v1/objectives', body),
+  createFrame: (body: CreateFrameRequest) => post<CreateFrameResponse>('/v1/frames', body),
+  modelStep: (body: ModelStepRequest) => post<ModelStepResponse>('/v1/model-step', body),
+  modelConfig: () => request<ModelConfig>('/v1/model/config'),
+  rebuildRegions: (episodeId: string, branchId: string) => post<unknown>('/v1/projections/regions/rebuild', { episode_id: episodeId, branch_id: branchId }),
 }
