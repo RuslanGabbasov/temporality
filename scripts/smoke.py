@@ -9,6 +9,7 @@ import uuid
 
 BASE = os.environ.get("TEMPORALITY_URL", "http://127.0.0.1:18080")
 BINARY = os.environ.get("TEMPORALITY_BINARY", "./bin/temporality-runtime")
+EXECUTOR_BINARY = os.environ.get("TEMPORALITY_EXECUTOR_BINARY", "./bin/temporality-executor")
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgres://temporality:temporality@localhost:5432/temporality?sslmode=disable")
 
 
@@ -34,6 +35,7 @@ def main():
     env = os.environ.copy()
     env.update({"DATABASE_URL": DATABASE_URL, "HTTP_ADDR": "127.0.0.1:18080"})
     runtime = subprocess.Popen([BINARY], env=env)
+    executor = None
     try:
         wait_until_ready()
         episode_id = str(uuid.uuid4())
@@ -67,16 +69,22 @@ def main():
         map_items = next(section for section in first_render["sections"] if section["kind"] == "map")["items"]
         assert map_items and any(item["candidate"]["ref"]["type"] == "region" for item in map_items)
         definition = {"id": "inspect_environment", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
-        emission = {"schema": "frp.cognitive-emission.v1", "emission_id": str(uuid.uuid4()), "frame_id": initial["frame_id"], "claims": [{"proposition": "Temporality step is atomic", "confidence": 0.95, "status": "candidate"}], "attention": [{"op": "attend", "target": {"type": "query", "text": "evidence that validates Temporality"}}], "frame_ops": [{"op": "pin", "ref": f"event:{created['event']['event_id']}"}], "actions": [{"affordance": "inspect_environment", "args": {"path": "/workspace"}}]}
+        emission = {"schema": "frp.cognitive-emission.v1", "emission_id": str(uuid.uuid4()), "frame_id": initial["frame_id"], "claims": [{"proposition": "Temporality step is atomic", "confidence": 0.95, "status": "candidate"}], "attention": [{"op": "attend", "target": {"type": "query", "text": "evidence that validates Temporality"}}], "frame_ops": [{"op": "pin", "ref": f"event:{created['event']['event_id']}"}], "actions": [{"affordance": "inspect_environment", "args": {"path": "."}}]}
         _, stepped = request("POST", "/v1/step", {"frame_id": initial["frame_id"], "emission": emission, "definitions": [definition]})
         next_frame = stepped["frame"]
         assert len(stepped["claims"]) == 1 and len(stepped["executions"]) == 1
         _, restored = request("GET", f"/v1/frames/{next_frame['frame_id']}")
         execution_id = stepped["executions"][0]["execution_id"]
-        request("POST", f"/internal/v1/executions/{execution_id}/transitions", {"status": "running"})
-        request("POST", f"/internal/v1/executions/{execution_id}/transitions", {"status": "completed"})
-        _, final_execution = request("GET", f"/v1/executions/{execution_id}")
-        assert final_execution["status"] == "completed"
+        executor_env = os.environ.copy()
+        executor_env.update({"DATABASE_URL": DATABASE_URL, "EPISODE_ID": episode_id})
+        executor = subprocess.Popen([EXECUTOR_BINARY], env=executor_env)
+        final_execution = None
+        for _ in range(50):
+            _, final_execution = request("GET", f"/v1/executions/{execution_id}")
+            if final_execution["status"] in ("completed", "failed"):
+                break
+            time.sleep(0.1)
+        assert final_execution and final_execution["status"] == "completed"
         _, replay = request("POST", "/v1/replay", {"episode_id": episode_id})
         assert restored["parent_frame_id"] == initial["frame_id"]
         assert restored["focus"]["query"] == "evidence that validates Temporality" and restored["revision"] == 1
@@ -84,6 +92,12 @@ def main():
         assert len(replay["events"]) == 9 and replay["digest"]
         print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "execution_id": execution_id, "execution_status": final_execution["status"], "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
     finally:
+        if executor is not None:
+            executor.terminate()
+            try:
+                executor.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                executor.kill()
         runtime.terminate()
         try:
             runtime.wait(timeout=5)

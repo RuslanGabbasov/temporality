@@ -60,7 +60,7 @@ With the Compose PostgreSQL healthy, run:
 make smoke
 ```
 
-This builds and starts `temporality-runtime`, creates an initial Frame, creates an Objective, verifies two identical deterministic RenderPackets, submits a validated `CognitiveEmission`, reduces its attention/frame operations into an immutable transition, restores the next Frame from PostgreSQL, atomically reduces CognitiveEmission into Frame/Claims/Attention/Executions and then runs the durable Execution lifecycle, verifies replay, prints the IDs/digest, and stops the runtime.
+This builds and starts `temporality-runtime` plus the separate `temporality-executor` process, creates an initial Frame, creates an Objective, verifies two identical deterministic RenderPackets, submits a validated `CognitiveEmission`, reduces its attention/frame operations into an immutable transition, restores the next Frame from PostgreSQL, atomically reduces CognitiveEmission into Frame/Claims/Attention/Executions and then runs the durable Execution lifecycle, verifies replay, prints the IDs/digest, and stops the runtime.
 
 Render packets expose the attention engine version, scored Event/Region ambient map, selected periphery, and an outside-frame candidate count. `/metrics` includes render totals/errors, focus switches, ambient hit rate, attention entropy, missed candidates, and attention collapse score. Deliberate `attend()` operations bypass ambient hysteresis.
 
@@ -99,7 +99,7 @@ GET  /v1/executions/{id}
 POST /internal/v1/executions/{id}/transitions
 ```
 
-Execution requests and `execution.created` are committed before the internal Executor boundary can move an execution to `running`.
+Execution requests and `execution.created` are committed before the Executor can move an execution to `running`. The PoC executor supports the versioned `inspect_environment` deterministic workflow through a safe Go filesystem adapter; it does not embed shell execution in the Runtime.
 
 Frame endpoints:
 

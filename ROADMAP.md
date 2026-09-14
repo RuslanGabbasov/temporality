@@ -36,13 +36,13 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Attention entropy, focus switches, ambient hit rate, missed candidates, and collapse metrics.
   - [x] Canonical `attention.selected` Events in the atomic Step transaction.
   - [ ] `attention.suggested` recording when a rendered packet is consumed by a model step.
-- [ ] **M5 — Affordance registry and deterministic Executor:**
+- [x] **M5 — Affordance registry and deterministic Executor:**
   - [x] Versioned affordance definitions/requests, capability and limit validation.
   - [x] Execution state machine, normalized failures, canonical event helpers, declarative workflows.
   - [x] PostgreSQL frozen registry, durable requests/executions, atomic intent Events, lifecycle API and restart tests.
   - [x] Persist-before-effect smoke lifecycle through the separate internal Executor boundary.
   - [x] Atomic CognitiveEmission Step integration across Frame, Claims, Attention and Executions.
-  - [ ] Separate physical executor worker.
+  - [x] Separate executor process with declarative workflows, effect-boundary validation, and safe filesystem adapter.
 - [ ] **M6 — Adaptive Planner:**
   - [x] Bounded planner context/state, capability checks, step limits, recorded replay adapter.
   - [ ] Durable child planner episode and executor integration.
