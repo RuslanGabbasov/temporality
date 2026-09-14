@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://temporality.dev/schemas/frp/v0.3/Trajectory.schema.json",
+  "title": "FRP Branch Trajectory",
+  "type": "object",
+  "required": ["branch_id", "episode_id", "objective_id", "source_frame_id", "attention", "claims", "affordances", "executions", "missed_evidence", "cost", "success"],
+  "properties": {
+    "branch_id": {"type": "string", "minLength": 1},
+    "episode_id": {"type": "string", "minLength": 1},
+    "objective_id": {"type": "string", "minLength": 1},
+    "source_frame_id": {"type": "string", "minLength": 1},
+    "attention": {"$ref": "#/$defs/idSet"},
+    "claims": {"$ref": "#/$defs/idSet"},
+    "affordances": {"$ref": "#/$defs/idSet"},
+    "executions": {"$ref": "#/$defs/idSet"},
+    "missed_evidence": {"$ref": "#/$defs/idSet"},
+    "cost": {"type": "number", "minimum": 0},
+    "success": {"type": "boolean"}
+  },
+  "$defs": {
+    "idSet": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+  },
+  "additionalProperties": false
+}

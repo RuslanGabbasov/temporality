@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://temporality.dev/schemas/frp/v0.3/ComparisonResult.schema.json",
+  "title": "FRP Branch Comparison Result",
+  "type": "object",
+  "required": ["protocol", "version", "comparator_version", "comparison_id", "fork_group_id", "left_branch_id", "right_branch_id", "attention", "claims", "affordances", "executions", "missed_evidence", "left_cost", "right_cost", "cost_delta", "left_success", "right_success"],
+  "properties": {
+    "protocol": {"const": "frp"},
+    "version": {"const": "0.3"},
+    "comparator_version": {"const": "branch-comparator-0.3.1"},
+    "comparison_id": {"type": "string", "minLength": 1},
+    "fork_group_id": {"type": "string", "minLength": 1},
+    "left_branch_id": {"type": "string", "minLength": 1},
+    "right_branch_id": {"type": "string", "minLength": 1},
+    "attention": {"$ref": "#/$defs/setComparison"},
+    "claims": {"$ref": "#/$defs/setComparison"},
+    "affordances": {"$ref": "#/$defs/setComparison"},
+    "executions": {"$ref": "#/$defs/setComparison"},
+    "missed_evidence": {"$ref": "#/$defs/setComparison"},
+    "left_cost": {"type": "number", "minimum": 0},
+    "right_cost": {"type": "number", "minimum": 0},
+    "cost_delta": {"type": "number"},
+    "left_success": {"type": "boolean"},
+    "right_success": {"type": "boolean"}
+  },
+  "$defs": {
+    "idSet": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "setComparison": {
+      "type": "object",
+      "required": ["shared", "only_left", "only_right"],
+      "properties": {
+        "shared": {"$ref": "#/$defs/idSet"},
+        "only_left": {"$ref": "#/$defs/idSet"},
+        "only_right": {"$ref": "#/$defs/idSet"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"FRP Planner State","type":"object","required":["version","context","steps","complete"],"properties":{"version":{"type":"string"},"context":{"type":"object"},"steps":{"type":"array"},"complete":{"type":"boolean"},"summary":{"type":"string"}},"additionalProperties":false}

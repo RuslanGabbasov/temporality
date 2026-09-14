@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://temporality.dev/schemas/frp/v0.3/ForkGroup.schema.json",
+  "title": "FRP Fork Group",
+  "type": "object",
+  "required": ["protocol", "version", "fork_version", "fork_group_id", "episode_id", "objective_id", "source_frame_id", "source_branch_id", "branches"],
+  "properties": {
+    "protocol": {"const": "frp"},
+    "version": {"const": "0.3"},
+    "fork_version": {"const": "fork-0.3.1"},
+    "fork_group_id": {"type": "string", "minLength": 1},
+    "episode_id": {"type": "string", "minLength": 1},
+    "objective_id": {"type": "string", "minLength": 1},
+    "source_frame_id": {"type": "string", "minLength": 1},
+    "source_branch_id": {"type": "string", "minLength": 1},
+    "branches": {"type": "array", "minItems": 2, "items": {"$ref": "Branch.schema.json"}}
+  },
+  "additionalProperties": false
+}

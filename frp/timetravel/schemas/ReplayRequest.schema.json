@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://temporality.dev/schemas/frp/v0.3/timetravel/ReplayRequest.schema.json",
+  "title": "FRP Pure Replay Request",
+  "type": "object",
+  "required": ["episode_id", "selection", "contract"],
+  "properties": {
+    "episode_id": { "type": "string", "minLength": 1 },
+    "selection": {
+      "type": "object",
+      "required": ["as_of", "cursor", "available_at"],
+      "properties": {
+        "as_of": { "type": "string", "format": "date-time" },
+        "available_at": { "type": "string", "format": "date-time" },
+        "cursor": {
+          "type": "object",
+          "required": ["tx_time", "event_id"],
+          "properties": {
+            "tx_time": { "type": "string", "format": "date-time" },
+            "event_id": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "contract": {
+      "type": "object",
+      "required": ["version", "deterministic", "read_only", "side_effects_allowed", "irreversible_effects_run", "external_inputs_from_trace"],
+      "properties": {
+        "version": { "const": "1" },
+        "deterministic": { "const": true },
+        "read_only": { "const": true },
+        "side_effects_allowed": { "const": false },
+        "irreversible_effects_run": { "const": false },
+        "external_inputs_from_trace": { "const": true }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

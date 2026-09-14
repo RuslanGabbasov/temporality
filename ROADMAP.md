@@ -35,10 +35,19 @@ The milestone order follows FRP v0.3 section 38.
   - [ ] Graph proximity projection and edges.
   - [x] Attention entropy, focus switches, ambient hit rate, missed candidates, and collapse metrics.
   - [ ] Canonical `attention.selected` / `attention.suggested` Events in the atomic Step transaction.
-- [ ] **M5:** Affordance registry and deterministic Executor.
-- [ ] **M6:** Adaptive Planner.
-- [ ] **M7:** Time travel, snapshots, and blame.
-- [ ] **M8:** Fork and A/B cognition.
+- [ ] **M5 — Affordance registry and deterministic Executor:**
+  - [x] Versioned affordance definitions/requests, capability and limit validation.
+  - [x] Execution state machine, normalized failures, canonical event helpers, declarative workflows.
+  - [ ] PostgreSQL registry/execution store, atomic Step integration, and separate executor worker.
+- [ ] **M6 — Adaptive Planner:**
+  - [x] Bounded planner context/state, capability checks, step limits, recorded replay adapter.
+  - [ ] Durable child planner episode and executor integration.
+- [ ] **M7 — Time travel, snapshots, and blame:**
+  - [x] Pure snapshot metadata/hash/selection, replay purity contract, deterministic blame traversal.
+  - [ ] Event cursors, PostgreSQL snapshots/provenance edges, replay/blame APIs.
+- [ ] **M8 — Fork and A/B cognition:**
+  - [x] Branch/ForkGroup models, deterministic immutable fork roots, trajectory comparator.
+  - [ ] PostgreSQL branch heads/fork transaction, branch APIs, persisted comparisons and isolation tests.
 - [ ] **M9:** Procedures.
 - [ ] **M10:** Human Cognitive Debugger.
 

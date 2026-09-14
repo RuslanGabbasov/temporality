@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://temporality.dev/schemas/frp/v0.3/Branch.schema.json",
+  "title": "FRP Branch",
+  "type": "object",
+  "required": ["protocol", "version", "branch_id", "fork_group_id", "episode_id", "objective_id", "source_frame_id", "root_frame_id", "head_frame_id", "status"],
+  "properties": {
+    "protocol": {"const": "frp"},
+    "version": {"const": "0.3"},
+    "branch_id": {"type": "string", "minLength": 1},
+    "fork_group_id": {"type": "string", "minLength": 1},
+    "episode_id": {"type": "string", "minLength": 1},
+    "objective_id": {"type": "string", "minLength": 1},
+    "source_frame_id": {"type": "string", "minLength": 1},
+    "root_frame_id": {"type": "string", "minLength": 1},
+    "head_frame_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["active", "completed", "failed", "abandoned"]}
+  },
+  "additionalProperties": false
+}
