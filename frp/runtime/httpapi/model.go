@@ -65,6 +65,7 @@ func (s *Server) modelStep(w http.ResponseWriter, r *http.Request) {
 		}
 		definitions[definition.ID] = definition
 	}
+	startedAt := time.Now()
 	result, err := (modelstep.Service{
 		Store:           store,
 		Adapter:         adapter,
@@ -78,9 +79,11 @@ func (s *Server) modelStep(w http.ResponseWriter, r *http.Request) {
 		Definitions:  definitions,
 	})
 	if err == nil {
+		s.log.Info("model step completed", "frame_id", request.FrameID, "model", adapter.Provenance().Model, "duration_ms", time.Since(startedAt).Milliseconds())
 		writeJSON(w, http.StatusCreated, result)
 		return
 	}
+	s.log.Warn("model step failed", "frame_id", request.FrameID, "model", adapter.Provenance().Model, "duration_ms", time.Since(startedAt).Milliseconds(), "error", err)
 	if strings.HasPrefix(err.Error(), "model emit:") {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -110,7 +113,7 @@ func modelAdapterFromEnv() (*model.OpenAIAdapter, error) {
 		}
 		temperature = parsed
 	}
-	timeout := 60 * time.Second
+	timeout := 180 * time.Second
 	if value := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_TIMEOUT")); value != "" {
 		parsed, err := time.ParseDuration(value)
 		if err != nil {

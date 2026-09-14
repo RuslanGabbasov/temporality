@@ -57,7 +57,7 @@ cp .env.example .env
 - `TEMPORALITY_MODEL_ID` — идентификатор модели у провайдера;
 - `TEMPORALITY_MODEL_API_KEY` — ключ (может быть пустым для Ollama; ключ никогда не возвращается в provenance);
 - `TEMPORALITY_MODEL_TEMPERATURE` — температура `0..2`, по умолчанию `0`;
-- `TEMPORALITY_MODEL_TIMEOUT` — Go duration, например `60s`.
+- `TEMPORALITY_MODEL_TIMEOUT` — Go duration, например `180s` (по умолчанию `180s`). Proxy ждёт до 10 минут, поэтому Runtime успевает вернуть структурированную JSON-ошибку вместо HTML `504`.
 
 Compose передаёт эти значения в runtime. Примеры провайдеров:
 

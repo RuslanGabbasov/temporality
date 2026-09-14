@@ -70,7 +70,7 @@ func TestModelStepFromEnvironment(t *testing.T) {
 	if err = json.Unmarshal(config.Body.Bytes(), &publicConfig); err != nil {
 		t.Fatal(err)
 	}
-	if !publicConfig.Configured || publicConfig.Provenance.Model != "test-model" || publicConfig.Provenance.Temperature != 0 || publicConfig.Provenance.TimeoutMS != 60000 {
+	if !publicConfig.Configured || publicConfig.Provenance.Model != "test-model" || publicConfig.Provenance.Temperature != 0 || publicConfig.Provenance.TimeoutMS != 180000 {
 		t.Fatalf("unexpected config: %s", config.Body.String())
 	}
 
