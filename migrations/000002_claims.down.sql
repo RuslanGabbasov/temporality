@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS claim_relations;
+DROP TABLE IF EXISTS claims;

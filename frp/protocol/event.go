@@ -34,20 +34,38 @@ type Event struct {
 }
 
 func (e *Event) ApplyDefaults(now time.Time) {
-	if e.Protocol == "" { e.Protocol = Name }
-	if e.Version == "" { e.Version = Version }
-	if e.TransactionTime.IsZero() { e.TransactionTime = now.UTC() }
-	if e.ValidTime.IsZero() { e.ValidTime = e.TransactionTime }
-	if e.Payload == nil { e.Payload = map[string]any{} }
-	if e.Provenance == nil { e.Provenance = map[string]any{} }
+	if e.Protocol == "" {
+		e.Protocol = Name
+	}
+	if e.Version == "" {
+		e.Version = Version
+	}
+	if e.TransactionTime.IsZero() {
+		e.TransactionTime = now.UTC()
+	}
+	if e.ValidTime.IsZero() {
+		e.ValidTime = e.TransactionTime
+	}
+	if e.Payload == nil {
+		e.Payload = map[string]any{}
+	}
+	if e.Provenance == nil {
+		e.Provenance = map[string]any{}
+	}
 }
 
 func (e Event) Validate() error {
 	if e.Protocol != Name || e.Version != Version {
 		return fmt.Errorf("unsupported protocol version %q/%q", e.Protocol, e.Version)
 	}
-	if e.EventID == "" { return errors.New("event_id is required") }
-	if e.Type == "" { return errors.New("type is required") }
-	if e.TransactionTime.IsZero() || e.ValidTime.IsZero() { return errors.New("tx_time and valid_time are required") }
+	if e.EventID == "" {
+		return errors.New("event_id is required")
+	}
+	if e.Type == "" {
+		return errors.New("type is required")
+	}
+	if e.TransactionTime.IsZero() || e.ValidTime.IsZero() {
+		return errors.New("tx_time and valid_time are required")
+	}
 	return nil
 }

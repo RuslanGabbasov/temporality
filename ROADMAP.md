@@ -3,7 +3,12 @@
 The milestone order follows FRP v0.3 section 38.
 
 - [x] **M0 foundation:** Event protocol, append-only log, deterministic replay, PostgreSQL and memory adapters, HTTP API.
-- [ ] **M0 hardening:** PostgreSQL integration tests, cursor pagination, replay manifests, metrics, crash-recovery test.
+- [ ] **M0 hardening:**
+  - [x] PostgreSQL integration test for persistence, duplicate rejection, and append-only enforcement.
+  - [x] Versioned replay manifests included in replay digests.
+  - [x] Opaque cursor pagination for memory and PostgreSQL event streams.
+  - [x] Prometheus-compatible HTTP, append, and replay metrics.
+  - [ ] Crash-recovery killer test.
 - [ ] **M1:** Claims and evidence relations.
 - [ ] **M2:** Immutable Frame and deterministic reducer.
 - [ ] **M3:** RenderPacket and Objective.

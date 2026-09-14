@@ -10,7 +10,9 @@ Work has started with **M0 — Event Log + replay**:
 - append-only PostgreSQL event store;
 - deterministic replay ordered by valid time, transaction time, and event ID;
 - replay boundaries by episode, branch, and `as_of`;
-- HTTP/JSON API;
+- versioned replay manifests included in deterministic digests;
+- HTTP/JSON API with opaque cursor pagination;
+- Prometheus-compatible runtime metrics;
 - in-memory adapter for deterministic tests.
 
 See [`ROADMAP.md`](ROADMAP.md) for subsequent milestones.
@@ -34,6 +36,9 @@ curl -X POST http://localhost:8080/v1/events \
 curl -X POST http://localhost:8080/v1/replay \
   -H 'content-type: application/json' \
   -d '{"episode_id":"018f47a7-34b2-7d10-a932-4f3ff37a4a02"}'
+
+curl 'http://localhost:8080/v1/events?episode_id=018f47a7-34b2-7d10-a932-4f3ff37a4a02&limit=100'
+curl http://localhost:8080/metrics
 ```
 
 ## Development
@@ -41,6 +46,12 @@ curl -X POST http://localhost:8080/v1/replay \
 ```sh
 make fmt
 make test
+make race
+
+# With a running PostgreSQL instance:
+TEST_DATABASE_URL='postgres://temporality:temporality@localhost:5432/temporality?sslmode=disable' make integration
 ```
+
+Pagination responses contain `next_cursor` when another page exists. Pass it back as the `cursor` query parameter; clients must treat it as opaque.
 
 The runtime/executor boundary is preserved: this service records runtime facts and does not execute external side effects.

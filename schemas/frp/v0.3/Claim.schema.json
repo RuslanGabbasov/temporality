@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://temporality.dev/schemas/frp/v0.3/Claim.schema.json",
+  "title": "FRP Claim",
+  "type": "object",
+  "required": ["protocol", "version", "claim_id", "proposition", "confidence", "status", "created_event", "valid_from"],
+  "properties": {
+    "protocol": { "const": "frp" },
+    "version": { "const": "0.3" },
+    "claim_id": { "type": "string", "format": "uuid" },
+    "proposition": { "type": "string", "minLength": 1 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "status": { "enum": ["candidate", "supported", "refuted", "superseded"] },
+    "created_event": { "type": "string", "format": "uuid" },
+    "valid_from": { "type": "string", "format": "date-time" },
+    "valid_to": { "type": ["string", "null"], "format": "date-time" }
+  },
+  "additionalProperties": false
+}
