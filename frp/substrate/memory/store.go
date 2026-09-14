@@ -17,24 +17,26 @@ import (
 	"github.com/temporality-project/temporality/frp/objective"
 	"github.com/temporality-project/temporality/frp/projection"
 	"github.com/temporality-project/temporality/frp/protocol"
+	stepRuntime "github.com/temporality-project/temporality/frp/runtime/step"
 	"github.com/temporality-project/temporality/frp/substrate"
 )
 
 type Store struct {
-	mu          sync.RWMutex
-	events      map[string]protocol.Event
-	claims      map[string]cognition.Claim
-	relations   []cognition.ClaimRelation
-	frames      map[string]frame.Frame
-	objectives  map[string]objective.Objective
-	regions     []projection.Region
-	definitions map[string]affordance.Definition
-	requests    map[string]affordance.Request
-	executions  map[string]execution.Execution
+	mu             sync.RWMutex
+	events         map[string]protocol.Event
+	claims         map[string]cognition.Claim
+	relations      []cognition.ClaimRelation
+	frames         map[string]frame.Frame
+	objectives     map[string]objective.Objective
+	regions        []projection.Region
+	definitions    map[string]affordance.Definition
+	requests       map[string]affordance.Request
+	executions     map[string]execution.Execution
+	cognitiveSteps map[string]stepRuntime.Prepared
 }
 
 func New() *Store {
-	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective), definitions: make(map[string]affordance.Definition), requests: make(map[string]affordance.Request), executions: make(map[string]execution.Execution)}
+	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective), definitions: make(map[string]affordance.Definition), requests: make(map[string]affordance.Request), executions: make(map[string]execution.Execution), cognitiveSteps: make(map[string]stepRuntime.Prepared)}
 }
 
 func (s *Store) Append(_ context.Context, event protocol.Event) error {
@@ -290,9 +292,9 @@ func (s *Store) GetFrame(_ context.Context, id string) (frame.Frame, error) {
 }
 func copyFrame(value frame.Frame) frame.Frame {
 	result := value
-	result.WorkingSet = append([]frame.Ref(nil), value.WorkingSet...)
-	result.Filters.AgentIDs = append([]string(nil), value.Filters.AgentIDs...)
-	result.Filters.RegionKinds = append([]string(nil), value.Filters.RegionKinds...)
+	result.WorkingSet = append(make([]frame.Ref, 0, len(value.WorkingSet)), value.WorkingSet...)
+	result.Filters.AgentIDs = append(make([]string, 0, len(value.Filters.AgentIDs)), value.Filters.AgentIDs...)
+	result.Filters.RegionKinds = append(make([]string, 0, len(value.Filters.RegionKinds)), value.Filters.RegionKinds...)
 	return result
 }
 
@@ -388,6 +390,126 @@ func (s *Store) ListActiveExecutions(_ context.Context, episodeID string) ([]exe
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ExecutionID < result[j].ExecutionID })
 	return result, nil
+}
+
+func (s *Store) CommitStep(_ context.Context, prepared stepRuntime.Prepared) (stepRuntime.Result, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	persisted, ok := s.frames[prepared.Current.FrameID]
+	if !ok {
+		return stepRuntime.Result{}, frame.ErrFrameNotFound
+	}
+	if !reflect.DeepEqual(persisted, prepared.Current) {
+		return stepRuntime.Result{}, stepRuntime.ErrCurrentFrameChanged
+	}
+	for _, candidate := range s.frames {
+		if candidate.ParentFrameID == prepared.Current.FrameID {
+			return stepRuntime.Result{}, stepRuntime.ErrCurrentFrameChanged
+		}
+	}
+	if _, ok = s.cognitiveSteps[prepared.Emission.EmissionID]; ok {
+		return stepRuntime.Result{}, errors.New("cognitive step already exists")
+	}
+	if _, ok = s.frames[prepared.Decision.Frame.FrameID]; ok {
+		return stepRuntime.Result{}, frame.ErrFrameExists
+	}
+	if err := s.validateStepRefsLocked(prepared); err != nil {
+		return stepRuntime.Result{}, err
+	}
+	for _, event := range prepared.Events {
+		if _, exists := s.events[event.EventID]; exists {
+			return stepRuntime.Result{}, errors.New("event already exists")
+		}
+	}
+	for _, candidate := range prepared.Claims {
+		if _, exists := s.claims[candidate.Value.ClaimID]; exists {
+			return stepRuntime.Result{}, errors.New("claim already exists")
+		}
+	}
+	for _, action := range prepared.Actions {
+		if existing, exists := s.definitions[action.Definition.ID]; exists && !reflect.DeepEqual(existing, action.Definition) {
+			return stepRuntime.Result{}, affordance.ErrDefinitionFrozen
+		}
+		if _, exists := s.requests[action.Request.RequestID]; exists {
+			return stepRuntime.Result{}, errors.New("affordance request already exists")
+		}
+		if _, exists := s.executions[action.Execution.ExecutionID]; exists {
+			return stepRuntime.Result{}, errors.New("execution already exists")
+		}
+	}
+
+	s.cognitiveSteps[prepared.Emission.EmissionID] = clone(prepared)
+	claims := make([]cognition.Claim, 0, len(prepared.Claims))
+	for _, candidate := range prepared.Claims {
+		s.events[candidate.Event.EventID] = clone(candidate.Event)
+		s.claims[candidate.Value.ClaimID] = clone(candidate.Value)
+		claims = append(claims, clone(candidate.Value))
+	}
+	claimEvents := len(prepared.Claims)
+	actionEvents := len(prepared.Actions) * 2
+	attentionEnd := len(prepared.Events) - actionEvents - 1
+	for i := claimEvents; i < attentionEnd; i++ {
+		s.events[prepared.Events[i].EventID] = clone(prepared.Events[i])
+	}
+	executions := make([]execution.Execution, 0, len(prepared.Actions))
+	for _, action := range prepared.Actions {
+		s.definitions[action.Definition.ID] = clone(action.Definition)
+		s.requests[action.Request.RequestID] = clone(action.Request)
+		s.executions[action.Execution.ExecutionID] = clone(action.Execution)
+		s.events[action.Requested.EventID] = clone(action.Requested)
+		s.events[action.Created.EventID] = clone(action.Created)
+		executions = append(executions, clone(action.Execution))
+	}
+	s.events[prepared.Transition.EventID] = clone(prepared.Transition)
+	s.frames[prepared.Decision.Frame.FrameID] = copyFrame(prepared.Decision.Frame)
+	return stepRuntime.Result{Decision: clone(prepared.Decision), Frame: copyFrame(prepared.Decision.Frame), Claims: claims, Executions: executions, Events: clone(prepared.Events)}, nil
+}
+
+func (s *Store) validateStepRefsLocked(prepared stepRuntime.Prepared) error {
+	check := func(ref frame.Ref) error {
+		var exists bool
+		switch ref.Type {
+		case frame.RefEvent:
+			_, exists = s.events[ref.ID]
+		case frame.RefClaim:
+			_, exists = s.claims[ref.ID]
+		case frame.RefExecution:
+			_, exists = s.executions[ref.ID]
+		case frame.RefRegion:
+			for _, region := range s.regions {
+				if region.RegionID == ref.ID {
+					exists = true
+					break
+				}
+			}
+		default:
+			return fmt.Errorf("unsupported ref type %q", ref.Type)
+		}
+		if !exists {
+			return errors.New("reference not found")
+		}
+		return nil
+	}
+	for _, observation := range prepared.Emission.Observation {
+		ref, _ := cognition.ParseRef(observation.Ref, false)
+		if err := check(ref); err != nil {
+			return fmt.Errorf("observation ref %s: %w", observation.Ref, err)
+		}
+	}
+	for _, operation := range prepared.Decision.Transition.Operations {
+		if operation.Ref != nil {
+			if err := check(*operation.Ref); err != nil {
+				return fmt.Errorf("frame ref %s:%s: %w", operation.Ref.Type, operation.Ref.ID, err)
+			}
+		}
+		if operation.Focus != nil && operation.Focus.Type != frame.RefQuery {
+			if err := check(frame.Ref{Type: operation.Focus.Type, ID: operation.Focus.ID}); err != nil {
+				return fmt.Errorf("attention ref %s:%s: %w", operation.Focus.Type, operation.Focus.ID, err)
+			}
+		}
+	}
+	return nil
 }
 
 func clone[T any](value T) T {

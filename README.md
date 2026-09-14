@@ -60,7 +60,7 @@ With the Compose PostgreSQL healthy, run:
 make smoke
 ```
 
-This builds and starts `temporality-runtime`, creates an initial Frame, creates an Objective, verifies two identical deterministic RenderPackets, submits a validated `CognitiveEmission`, reduces its attention/frame operations into an immutable transition, restores the next Frame from PostgreSQL, runs a durable deterministic Execution lifecycle, verifies replay, prints the IDs/digest, and stops the runtime.
+This builds and starts `temporality-runtime`, creates an initial Frame, creates an Objective, verifies two identical deterministic RenderPackets, submits a validated `CognitiveEmission`, reduces its attention/frame operations into an immutable transition, restores the next Frame from PostgreSQL, atomically reduces CognitiveEmission into Frame/Claims/Attention/Executions and then runs the durable Execution lifecycle, verifies replay, prints the IDs/digest, and stops the runtime.
 
 Render packets expose the attention engine version, scored Event/Region ambient map, selected periphery, and an outside-frame candidate count. `/metrics` includes render totals/errors, focus switches, ambient hit rate, attention entropy, missed candidates, and attention collapse score. Deliberate `attend()` operations bypass ambient hysteresis.
 
@@ -82,6 +82,14 @@ POST /v1/objectives
 GET  /v1/objectives/{id}
 POST /v1/render
 ```
+
+Atomic cognition endpoint:
+
+```text
+POST /v1/step
+```
+
+A Step commits the validated CognitiveEmission record/hash, candidate Claims, deliberate attention Events, affordance requests, created Executions, `frame.transitioned`, and the next immutable Frame in one transaction. The emission itself is not an Event.
 
 Execution endpoints:
 

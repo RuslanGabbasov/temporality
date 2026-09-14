@@ -21,6 +21,7 @@ import (
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/render"
 	"github.com/temporality-project/temporality/frp/replay"
+	runtimeStep "github.com/temporality-project/temporality/frp/runtime/step"
 	"github.com/temporality-project/temporality/frp/substrate"
 )
 
@@ -40,6 +41,7 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/events", s.listEvents)
 	mux.HandleFunc("GET /v1/events/{id}", s.getEvent)
 	mux.HandleFunc("POST /v1/replay", s.replayEvents)
+	mux.HandleFunc("POST /v1/step", s.step)
 	mux.HandleFunc("POST /v1/render", s.renderFrame)
 	mux.HandleFunc("POST /v1/objectives", s.createObjective)
 	mux.HandleFunc("GET /v1/objectives/{id}", s.getObjective)
@@ -128,6 +130,58 @@ func (s *Server) getEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, event)
+}
+
+type stepRequest struct {
+	FrameID     string                      `json:"frame_id"`
+	Emission    cognition.CognitiveEmission `json:"emission"`
+	Definitions []affordance.Definition     `json:"definitions"`
+}
+
+func (s *Server) step(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(runtimeStep.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("atomic step is not supported"))
+		return
+	}
+	frames, ok := s.store.(frame.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("frames are not supported"))
+		return
+	}
+	var request stepRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	current, err := frames.GetFrame(r.Context(), request.FrameID)
+	if errors.Is(err, frame.ErrFrameNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	definitions := make(map[string]affordance.Definition, len(request.Definitions))
+	for _, definition := range request.Definitions {
+		definition.ApplyDefaults()
+		if _, exists := definitions[definition.ID]; exists {
+			writeError(w, http.StatusBadRequest, errors.New("duplicate affordance definition"))
+			return
+		}
+		definitions[definition.ID] = definition
+	}
+	result, err := runtimeStep.Run(r.Context(), store, runtimeStep.Input{Current: current, Emission: request.Emission, Definitions: definitions, NewID: newUUID, Now: func() time.Time { return s.now().UTC() }})
+	if errors.Is(err, runtimeStep.ErrCurrentFrameChanged) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
 }
 
 type executionCreateRequest struct {
