@@ -1,6 +1,7 @@
-import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { api, API_BASE } from './api'
-import { extractClaims, extractModelAnswer } from './answer'
+import { extractClaims } from './answer'
+import { assistantMessage, conversationReducer, initialConversationState, userMessage } from './conversation'
 import { eventKey, eventLabel, eventTime, executionIdOf, frameIdOf, unwrapEvents } from './timeline'
 import { formatDuration, isAbortError, modelProgress, modelTimeoutMs } from './modelProgress'
 import type { Execution, ForkGroup, Frame, FrameSection, FrpEvent, ModelConfig, ModelStepResponse, RenderPacket, TokenUsage } from './types'
@@ -19,15 +20,10 @@ function TokenUsageCard({ title, usage, renderId }: { title: string; usage?: Tok
   const hasUsage = view.estimated !== undefined || view.budget !== undefined
   return <article className={`data-card token-card ${view.warning ? 'warning' : ''}`}><h3><span>◴</span>{title}</h3>{renderId && <code className="render-id">render {renderId}</code>}{!hasUsage ? <p className="muted empty">No token usage reported</p> : <><strong className="token-total">{view.estimated ?? '—'} / {view.budget ?? '—'}</strong><span className="token-percent">{view.percent === undefined ? 'Percentage unavailable' : `${Math.round(view.percent)}%`}</span><div className="token-track" role="progressbar" aria-label={title} aria-valuemin={0} aria-valuemax={100} aria-valuenow={view.percent === undefined ? undefined : Math.min(100, Math.round(view.percent))}><span style={{ width: `${Math.min(100, view.percent ?? 0)}%` }} /></div><small>{view.remaining === undefined ? 'Remaining unavailable' : `${view.remaining} remaining`}{view.warning && ' · Warning: over 85%'}</small></>}</article>
 }
-function ModelResult({ response, panelRef }: { response: ModelStepResponse; panelRef: React.RefObject<HTMLElement | null> }) {
-  const answer = extractModelAnswer(response)
+function ModelResultDetails({ response }: { response: ModelStepResponse }) {
   const claims = extractClaims(response)
   const protocol = { render_packet: response.render_packet, emission: response.emission, step: response.step }
-  return <section className="model-result" aria-label="Model result">
-    <article className={`answer-panel ${answer.kind === 'empty' ? 'answer-empty' : ''}`} ref={panelRef} tabIndex={-1} aria-labelledby="model-answer-title">
-      <span className="eyebrow">MODEL OUTPUT</span><h3 id="model-answer-title">{answer.label}</h3>
-      {answer.text ? <div className="answer-text">{answer.text}</div> : <div className="empty-answer" role="status"><strong>No model answer was returned.</strong><span>Inspect Protocol details below, then retry “Continue with model” or revise the objective.</span></div>}
-    </article>
+  return <section className="model-result" aria-label="Latest model result details">
     <article className="claims-panel"><h3>Claims <span>{claims.length}</span></h3>{claims.length ? <ul>{claims.map((claim, index) => <li key={`${claim.proposition}-${index}`}><span>{claim.proposition}</span><small>{claim.confidence !== undefined && <data value={claim.confidence}>confidence {Math.round(claim.confidence * 100)}%</data>}{claim.status && <span className="claim-status">{claim.status}</span>}</small></li>)}</ul> : <p className="muted">No claims emitted.</p>}</article>
     {response.render_packet && <div className="model-input-usage"><TokenUsageCard title="Model input usage" usage={response.render_packet.token_usage} renderId={response.render_packet.render_id} /></div>}
     <details className="protocol-details"><summary>Protocol details: RenderPacket / Emission / Step</summary><JsonView value={protocol} /></details>
@@ -55,11 +51,13 @@ function App() {
   const [modelConfig, setModelConfig] = useState<ModelConfig | null>(null); const [configBusy, setConfigBusy] = useState(false); const [configError, setConfigError] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false); const [draft, setDraft] = useState(DEFAULT_DRAFT); const [conditionsText, setConditionsText] = useState('')
   const [workflowBusy, setWorkflowBusy] = useState(false); const [workflowStage, setWorkflowStage] = useState<WorkflowStage | ''>(''); const [workflowError, setWorkflowError] = useState(''); const [pending, setPending] = useState<EpisodeWorkflowResult | null>(null); const [summary, setSummary] = useState<ModelStepResponse | null>(null)
+  const [conversation, dispatchConversation] = useReducer(conversationReducer, initialConversationState)
   const [modelRun, setModelRun] = useState<{ controller: AbortController; startedAt: number; now: number; operation: string } | null>(null)
   const [followUpOpen, setFollowUpOpen] = useState(false); const [followUpText, setFollowUpText] = useState(''); const [followUpStage, setFollowUpStage] = useState<FollowUpStage | ''>(''); const [savedFollowUp, setSavedFollowUp] = useState<FollowUpResult | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const followUpDialogRef = useRef<HTMLDialogElement>(null)
-  const answerPanelRef = useRef<HTMLElement>(null)
+  const latestAssistantRef = useRef<HTMLElement>(null)
+  const followUpTurnIdRef = useRef('')
   const renderControllerRef = useRef<AbortController | null>(null)
   const renderGenerationRef = useRef(0)
 
@@ -81,13 +79,13 @@ function App() {
   useEffect(() => { if (followUpOpen) followUpDialogRef.current?.showModal(); else followUpDialogRef.current?.close() }, [followUpOpen])
   useEffect(() => () => { renderGenerationRef.current += 1; renderControllerRef.current?.abort() }, [])
   useEffect(() => {
-    if (!summary || frameBusy) return
+    if (!conversation.messages.length || conversation.messages.at(-1)?.role !== 'assistant') return
     const frame = window.requestAnimationFrame(() => {
-      answerPanelRef.current?.focus({ preventScroll: true })
-      answerPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      latestAssistantRef.current?.focus({ preventScroll: true })
+      latestAssistantRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [summary, frameBusy])
+  }, [conversation.messages])
 
   async function loadSelectedRender(value: Frame, fallbackId: string) {
     const request = renderRequest(value, fallbackId)
@@ -120,7 +118,7 @@ function App() {
   async function runAction(name: string, operation: () => Promise<void>) { setActionBusy(name); setActionError(''); try { await operation() } catch (error) { setActionError(errorText(error, `Unable to ${name}`)) } finally { setActionBusy('') } }
 
   const objectiveId = frame?.objective_id; const frameId = frame?.frame_id ?? frame?.id ?? selectedFrameId
-  function submitEpisode(event: FormEvent) { event.preventDefault(); const id = episodeInput.trim(); setEpisodeId(id); void loadEvents(id) }
+  function submitEpisode(event: FormEvent) { event.preventDefault(); const id = episodeInput.trim(); setEpisodeId(id); setSummary(null); dispatchConversation({ type: 'switchEpisode' }); void loadEvents(id) }
   function submitBlame(event: FormEvent) { event.preventDefault(); const rootId = blameRootId.trim(); if (rootId) void runAction('blame', async () => setBlame(await api.blame({ root_id: rootId, max_depth: blameMaxDepth }))) }
   function fork() { if (!frameId) return; void runAction('fork', async () => setForkGroup(await api.fork(twoBranchForkRequest(frameId)))) }
   function renderSelected() { if (frame) void loadSelectedRender(frame, selectedFrameId) }
@@ -130,14 +128,16 @@ function App() {
     return { ...result, debugger_summary: { duration_ms: durationMs, duration: formatDuration(durationMs) } }
   }
   async function finishModel(result: EpisodeWorkflowResult, modelResult?: ModelStepResponse) {
-    setPending(null); setSummary(modelResult ?? result.modelResult ?? null); setEpisodeId(result.ids.episodeId); setEpisodeInput(result.ids.episodeId)
+    const response = modelResult ?? result.modelResult
+    setPending(null); setEpisodeId(result.ids.episodeId); setEpisodeInput(result.ids.episodeId)
+    if (response) { setSummary(response); dispatchConversation({ type: 'appendAssistant', message: assistantMessage('initial:assistant', response, childFrameId(response)) }) }
     await loadEvents(result.ids.episodeId)
     const child = modelResult ? childFrameId(modelResult) : result.childFrameId
     await openFrame(child ?? result.parentFrameId)
   }
   async function createEpisode(event: FormEvent) {
     event.preventDefault(); if (workflowBusy || !draft.prompt.trim()) return
-    setWorkflowBusy(true); setWorkflowError(''); setSummary(null)
+    setWorkflowBusy(true); setWorkflowError(''); setSummary(null); dispatchConversation({ type: 'start', user: userMessage('initial:user', draft.prompt) })
     const controller = new AbortController(); let modelStartedAt = 0
     try {
       const result = await runEpisodeWorkflow(api, { ...draft, successConditions: conditionsText.split('\n').map((value) => value.trim()).filter(Boolean) }, modelConfig ?? { configured: false }, (stage) => { setWorkflowStage(stage); if (stage === 'Calling model') { modelStartedAt = Date.now(); setModelRun({ controller, startedAt: modelStartedAt, now: modelStartedAt, operation: 'New Episode' }) } }, undefined, controller.signal)
@@ -156,14 +156,20 @@ function App() {
     const controller = new AbortController(); const startedAt = Date.now(); setModelRun({ controller, startedAt, now: startedAt, operation: 'Retry' })
     try { const result = await continueWithModel(api, pending.parentFrameId, pending.ids.objectiveId, draft.tokenBudget, controller.signal); await finishModel(pending, withDuration(result, startedAt)) } catch (error) { setWorkflowError(isAbortError(error) ? 'Model step cancelled. Episode and frame IDs are retained and ready to retry.' : errorText(error, 'Model step failed; IDs are retained for retry.')) } finally { setWorkflowBusy(false); setWorkflowStage(''); setModelRun(null) }
   }
+  function openNewEpisode() {
+    setSummary(null); setPending(null); setWorkflowError(''); dispatchConversation({ type: 'switchEpisode' }); setDialogOpen(true)
+  }
   function continueSelected() {
     if (!frameId || !objectiveId || actionBusy) return
-    setFollowUpText(''); setSavedFollowUp(null); setActionError(''); setFollowUpOpen(true)
+    setFollowUpText(''); setSavedFollowUp(null); setActionError(''); followUpTurnIdRef.current = ''; setFollowUpOpen(true)
   }
   async function submitFollowUp(event?: FormEvent) {
     event?.preventDefault()
     if (!frameId || !objectiveId || actionBusy || !followUpText.trim()) return
     const input = { sourceFrameId: frameId, text: followUpText, objectiveId, budgetTokens: frameBudget(frame) }
+    const turnId = followUpTurnIdRef.current || `follow-up:${frameId}:${Date.now()}`
+    followUpTurnIdRef.current = turnId
+    dispatchConversation({ type: 'ensureUser', message: userMessage(`${turnId}:user`, followUpText, frameId) })
     const controller = new AbortController(); let startedAt = 0
     setActionBusy(savedFollowUp ? 'Calling model' : 'Saving follow-up'); setActionError('')
     try {
@@ -172,7 +178,12 @@ function App() {
         if (stage === 'Calling model') { startedAt = Date.now(); setModelRun({ controller, startedAt, now: startedAt, operation: savedFollowUp ? 'Retry follow-up' : 'Continue' }) }
       }, savedFollowUp ?? undefined, controller.signal)
       setSavedFollowUp(null); setFollowUpOpen(false)
-      if (result.modelResult) setSummary(withDuration(result.modelResult, startedAt))
+      if (result.modelResult) {
+        const response = withDuration(result.modelResult, startedAt)
+        setSummary(response)
+        dispatchConversation({ type: 'appendAssistant', message: assistantMessage(`${turnId}:assistant`, response, childFrameId(response)) })
+        followUpTurnIdRef.current = ''
+      }
       if (episodeId) await loadEvents(episodeId)
       const child = result.modelResult && childFrameId(result.modelResult)
       await openFrame(child ?? result.instructionFrameId)
@@ -192,7 +203,7 @@ function App() {
   const provider = provenance?.provider ?? modelConfig?.provider ?? (baseUrl ? (() => { try { return new URL(baseUrl).host } catch { return baseUrl } })() : 'provider')
   const progress = modelRun ? modelProgress(modelRun.startedAt, modelRun.now, modelTimeoutMs(modelConfig)) : null
   return <div className="app-shell">
-    <header className="topbar"><div><span className="eyebrow">TEMPORALITY / FRP</span><h1>Cognitive Debugger</h1></div><div className="header-actions"><div className={`model-badge ${modelConfig?.configured ? 'ready' : 'offline'}`} title={configError || undefined}><span className="pulse" />{configBusy ? 'Checking model…' : modelConfig?.configured ? `Configured · ${modelName ?? 'model'} · ${baseUrl ?? 'base URL set'}` : 'Model not configured'}</div><button className="icon-button" onClick={() => void refreshConfig()} disabled={configBusy} aria-label="Refresh model configuration">↻</button><span className="connection">API <code>{API_BASE}</code></span><button className="primary" onClick={() => setDialogOpen(true)}>＋ New Episode</button></div></header>
+    <header className="topbar"><div><span className="eyebrow">TEMPORALITY / FRP</span><h1>Cognitive Debugger</h1></div><div className="header-actions"><div className={`model-badge ${modelConfig?.configured ? 'ready' : 'offline'}`} title={configError || undefined}><span className="pulse" />{configBusy ? 'Checking model…' : modelConfig?.configured ? `Configured · ${modelName ?? 'model'} · ${baseUrl ?? 'base URL set'}` : 'Model not configured'}</div><button className="icon-button" onClick={() => void refreshConfig()} disabled={configBusy} aria-label="Refresh model configuration">↻</button><span className="connection">API <code>{API_BASE}</code></span><button className="primary" onClick={openNewEpisode}>＋ New Episode</button></div></header>
 
     {modelRun && progress && <section className="model-progress" role="status" aria-live="polite"><div className="model-activity" aria-hidden="true"><span /><span /><span /></div><div className="model-progress-copy"><span className="eyebrow">{modelRun.operation.toUpperCase()} · CALLING MODEL</span><h2>{modelName ?? 'Configured model'} <small>via {provider}</small></h2><p>The provider is processing this frame. The result commits atomically only when the model step completes.</p></div><div className="model-timing"><strong>{progress.elapsed}</strong><span>elapsed</span>{progress.timeout !== undefined && <small>{progress.timedOut ? 'Configured timeout reached' : `timeout in ${progress.timeout}`}</small>}</div><button className="cancel-model" onClick={() => modelRun.controller.abort()}>Cancel model step</button></section>}
     <main className="workspace">
@@ -203,8 +214,9 @@ function App() {
       </aside>
 
       <section className="inspector panel" aria-label="Frame inspector"><div className="panel-heading inspector-heading"><div><span className="eyebrow">SELECTED FRAME</span><h2>{selectedFrameId || 'No frame selected'}</h2></div>{objectiveId && <div className="objective"><span>Objective</span><code>{objectiveId}</code></div>}</div>
-        <Status loading={frameBusy} error={frameError}>{!frame ? <div className="hero-empty"><div className="frame-glyph">⌗</div><h3>Create a task or select a frame</h3><p>Run cognition with a configured model, or inspect an existing episode’s boundaries, evidence, token use, and provenance.</p><button className="primary" onClick={() => setDialogOpen(true)}>New Episode</button></div> : <><div className="actionbar" aria-label="Frame actions"><button onClick={continueSelected} disabled={!!actionBusy || !modelConfig?.configured}>Continue with model</button><button onClick={renderSelected} disabled={renderBusy || !objectiveId} title="Render the selected Frame using its objective and token budget (default 4000)">{renderBusy ? 'Rendering context…' : 'Render selected frame'}</button><button onClick={() => void runAction('replay', async () => setReplay(await api.replay(frameId)))} disabled={!!actionBusy}>↶ Replay from here</button><button onClick={fork} disabled={!!actionBusy}>⑂ Fork ×2</button>{actionBusy && <span className="muted" role="status"><span className="spinner" /> {actionBusy}…</span>}</div>{actionError && <div className={savedFollowUp ? 'status warning' : 'status error'} role="alert"><strong>{actionError}</strong>{savedFollowUp && <><small>Instruction Frame <code>{savedFollowUp.instructionFrameId}</code> is the retry source. Your follow-up text is preserved.</small><button onClick={retryFollowUp} disabled={!!actionBusy || !modelConfig?.configured}>Retry model only</button></>}</div>}
-          {summary && <ModelResult response={summary} panelRef={answerPanelRef} />}
+        <section className="conversation" aria-labelledby="conversation-title"><div className="conversation-heading"><div><span className="eyebrow">CONVERSATION</span><h2 id="conversation-title">Model conversation</h2></div>{conversation.messages.length > 0 && <button onClick={() => { setSummary(null); dispatchConversation({ type: 'switchEpisode' }) }}>Clear</button>}</div>{conversation.messages.map((message, index) => { const latestAssistant = message.role === 'assistant' && index === conversation.messages.length - 1; return <article key={message.id} className={`conversation-message ${message.role}`} ref={latestAssistant ? latestAssistantRef : undefined} tabIndex={latestAssistant ? -1 : undefined}><header><strong>{message.role === 'user' ? 'You' : message.label ?? 'Assistant'}</strong>{message.duration && <span>{message.duration}</span>}</header><div className="conversation-text">{message.text}</div>{message.frameId && <small>Frame <code>{message.frameId}</code></small>}{latestAssistant && summary && <ModelResultDetails response={summary} />}</article> })}{!conversation.messages.length && <p className="conversation-empty">{conversation.unavailableHistory && episodeId ? 'Conversation history is unavailable for existing episodes.' : 'No conversation yet. Start a New Episode to talk to the model.'}</p>}</section>
+        <Status loading={frameBusy} error={frameError}>{!frame ? <div className="hero-empty"><div className="frame-glyph">⌗</div><h3>Create a task or select a frame</h3><p>Run cognition with a configured model, or inspect an existing episode’s boundaries, evidence, token use, and provenance.</p><button className="primary" onClick={openNewEpisode}>New Episode</button></div> : <><div className="actionbar" aria-label="Frame actions"><button onClick={continueSelected} disabled={!!actionBusy || !modelConfig?.configured}>Continue with model</button><button onClick={renderSelected} disabled={renderBusy || !objectiveId} title="Render the selected Frame using its objective and token budget (default 4000)">{renderBusy ? 'Rendering context…' : 'Render selected frame'}</button><button onClick={() => void runAction('replay', async () => setReplay(await api.replay(frameId)))} disabled={!!actionBusy}>↶ Replay from here</button><button onClick={fork} disabled={!!actionBusy}>⑂ Fork ×2</button>{actionBusy && <span className="muted" role="status"><span className="spinner" /> {actionBusy}…</span>}</div>{actionError && <div className={savedFollowUp ? 'status warning' : 'status error'} role="alert"><strong>{actionError}</strong>{savedFollowUp && <><small>Instruction Frame <code>{savedFollowUp.instructionFrameId}</code> is the retry source. Your follow-up text is preserved.</small><button onClick={retryFollowUp} disabled={!!actionBusy || !modelConfig?.configured}>Retry model only</button></>}</div>}
+
           <div className="frame-meta"><article className="data-card"><h3>Frame identity / mode / revision</h3><JsonView value={{ identity: frame.identity ?? { frame_id: frameId, objective_id: frame.objective_id, episode_id: frame.episode_id }, mode: frame.mode, revision: frame.revision }} /></article></div>
           {renderBusy && <div className="render-status" role="status"><span className="spinner" /> Rendering context…</div>}{renderError && <div className="render-status error" role="alert"><span>{renderError}</span><button onClick={renderSelected}>Retry Render</button></div>}
           <div className="section-grid">{SECTIONS.map((section) => <article className={`data-card ${section === 'focus' ? 'featured' : ''}`} key={section}><h3><span>{section === 'focus' ? '◎' : '◇'}</span>{section}</h3><JsonView value={renderSection(selectedRender, section)?.items} empty={renderBusy ? 'Rendering context…' : 'No rendered data'} /></article>)}</div><div className="evidence-grid"><article className="data-card warning"><h3><span>↗</span>outside_frame</h3><JsonView value={selectedRender?.outside_frame} empty={renderBusy ? 'Rendering context…' : 'No rendered data'} /></article><article className="data-card"><h3><span>⌁</span>provenance</h3><JsonView value={selectedRender?.provenance} empty={renderBusy ? 'Rendering context…' : 'No rendered data'} /></article><TokenUsageCard title="Selected frame usage" usage={selectedRender?.token_usage} renderId={selectedRender?.render_id} /></div>
@@ -214,7 +226,7 @@ function App() {
       <aside className={`execution-drawer panel ${execution || executionBusy || executionError ? 'open' : ''}`} aria-label="Execution details"><div className="panel-heading"><div><span className="eyebrow">EXECUTION</span><h2>Details</h2></div><button className="icon-button" onClick={() => { setExecution(null); setExecutionError('') }} aria-label="Close execution details">×</button></div><Status loading={executionBusy} error={executionError}><JsonView value={execution} /></Status></aside>
     </main>
 
-    <dialog ref={followUpDialogRef} onCancel={(event) => { if (actionBusy) event.preventDefault(); else setFollowUpOpen(false) }} aria-labelledby="follow-up-title"><form className="episode-dialog" onSubmit={(event) => void submitFollowUp(event)}><div className="dialog-heading"><div><span className="eyebrow">MODEL FOLLOW-UP</span><h2 id="follow-up-title">Continue with model</h2></div><button type="button" className="icon-button" onClick={() => setFollowUpOpen(false)} disabled={!!actionBusy} aria-label="Close follow-up">×</button></div><div className="follow-up-context"><div><span>Current Objective</span><code>{savedFollowUp?.objectiveId ?? objectiveId}</code></div><div><span>{savedFollowUp ? 'Instruction Frame' : 'Selected Frame'}</span><code>{savedFollowUp?.instructionFrameId ?? frameId}</code></div></div><label className="follow-up-field">Follow-up <span aria-hidden="true">*</span><textarea autoFocus required value={followUpText} onChange={(event) => setFollowUpText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} placeholder="What should the model attend to next?" /></label>{actionBusy && <div className="status" role="status"><span className="spinner" /> {followUpStage}…</div>}<div className="dialog-actions"><button type="button" onClick={() => setFollowUpOpen(false)} disabled={!!actionBusy}>Cancel</button><button className="primary" type="submit" disabled={!!actionBusy || !followUpText.trim()}>{savedFollowUp ? 'Retry model' : 'Send & continue'}</button></div></form></dialog>
+    <dialog ref={followUpDialogRef} onCancel={(event) => { if (actionBusy) event.preventDefault(); else setFollowUpOpen(false) }} aria-labelledby="follow-up-title"><form className="episode-dialog" onSubmit={(event) => void submitFollowUp(event)}><div className="dialog-heading"><div><span className="eyebrow">MODEL FOLLOW-UP</span><h2 id="follow-up-title">Continue with model</h2></div><button type="button" className="icon-button" onClick={() => setFollowUpOpen(false)} disabled={!!actionBusy} aria-label="Close follow-up">×</button></div><div className="follow-up-context"><div><span>Current Objective</span><code>{savedFollowUp?.objectiveId ?? objectiveId}</code></div><div><span>{savedFollowUp ? 'Instruction Frame' : 'Selected Frame'}</span><code>{savedFollowUp?.instructionFrameId ?? frameId}</code></div></div>{conversation.messages.length > 0 && <details className="recent-conversation"><summary>Recent conversation</summary>{conversation.messages.slice(-4).map((message) => <p key={message.id}><strong>{message.role === 'user' ? 'You' : 'Assistant'}:</strong> {message.text}</p>)}</details>}<label className="follow-up-field">Follow-up <span aria-hidden="true">*</span><textarea autoFocus required value={followUpText} onChange={(event) => setFollowUpText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} placeholder="What should the model attend to next?" /></label>{actionBusy && <div className="status" role="status"><span className="spinner" /> {followUpStage}…</div>}<div className="dialog-actions"><button type="button" onClick={() => setFollowUpOpen(false)} disabled={!!actionBusy}>Cancel</button><button className="primary" type="submit" disabled={!!actionBusy || !followUpText.trim()}>{savedFollowUp ? 'Retry model' : 'Send & continue'}</button></div></form></dialog>
 
     <dialog ref={dialogRef} onCancel={() => !workflowBusy && setDialogOpen(false)} aria-labelledby="new-episode-title"><form className="episode-dialog" onSubmit={createEpisode}><div className="dialog-heading"><div><span className="eyebrow">OPERATIONAL WORKFLOW</span><h2 id="new-episode-title">New Episode</h2></div><button type="button" className="icon-button" onClick={() => setDialogOpen(false)} disabled={workflowBusy} aria-label="Close">×</button></div><div className="form-grid"><label className="wide">Prompt <span aria-hidden="true">*</span><textarea autoFocus value={draft.prompt} onChange={(e) => setDraft({ ...draft, prompt: e.target.value })} required placeholder="What should the cognitive agent accomplish?" /></label><label className="wide">Success conditions <small>optional, one per line</small><textarea value={conditionsText} onChange={(e) => setConditionsText(e.target.value)} placeholder={'Evidence gathered\nDecision justified'} /></label><label>Token budget<input type="number" min="1" step="1" value={draft.tokenBudget} onChange={(e) => setDraft({ ...draft, tokenBudget: Number(e.target.value) })} required /></label><label>Max cost <small>optional</small><input type="number" min="0" step="0.01" value={draft.maxCost ?? ''} onChange={(e) => setDraft({ ...draft, maxCost: e.target.value === '' ? undefined : Number(e.target.value) })} /></label><label>Mode<select value={draft.mode} onChange={(e) => setDraft({ ...draft, mode: e.target.value })}><option value="explore">explore</option><option value="exploit">exploit</option><option value="verify">verify</option><option value="recover">recover</option></select></label><label>Trust minimum<input type="number" min="0" max="1" step="0.05" value={draft.trustMin} onChange={(e) => setDraft({ ...draft, trustMin: Number(e.target.value) })} required /></label><label className="checkbox wide"><input type="checkbox" checked={draft.rebuildRegions} onChange={(e) => setDraft({ ...draft, rebuildRegions: e.target.checked })} /> Rebuild region projections before cognition</label></div>{workflowBusy && <div className="status" role="status"><span className="spinner" /> {workflowStage}…</div>}<div className="dialog-actions"><button type="button" onClick={() => setDialogOpen(false)} disabled={workflowBusy}>Cancel</button><button className="primary" type="submit" disabled={workflowBusy || !draft.prompt.trim()}>{workflowBusy ? workflowStage : 'Create and run'}</button></div></form></dialog>
   </div>

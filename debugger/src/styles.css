@@ -53,6 +53,21 @@ h3 { font-size: .84rem; }
 .empty-state, .hero-empty { color: var(--muted); text-align: center; padding: 3rem 1rem; font-size: .82rem; }
 .empty-state { display: flex !important; flex-direction: column; gap: .5rem; }.empty-state strong { color: var(--text); }
 .inspector { min-width: 0; background: linear-gradient(#0c1118f5, #090d13f5); }
+.conversation { border-bottom: 1px solid var(--line); background: #090e15; }
+.conversation-heading { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem; border-bottom: 1px solid var(--line); }
+.conversation-heading h2 { margin: .2rem 0 0; font-size: 1rem; }
+.conversation-message { margin: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: 8px; scroll-margin-top: 140px; }
+.conversation-message.user { margin-left: max(1rem, 12%); background: #171527; border-color: #413968; }
+.conversation-message.assistant { margin-right: max(1rem, 8%); background: #0f1922; border-left: 3px solid var(--cyan); }
+.conversation-message:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.conversation-message header { display: flex; justify-content: space-between; gap: 1rem; margin-bottom: .7rem; color: #fff; }
+.conversation-message header span, .conversation-message small { color: var(--muted); font-size: .7rem; }
+.conversation-message small { display: block; margin-top: .75rem; }.conversation-message small code { color: var(--violet); }
+.conversation-text { color: #edf4f8; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.conversation-empty { margin: 0; padding: 1.25rem; color: var(--muted); font-size: .78rem; }
+.conversation-message .model-result { margin: 1rem -1rem -1rem; border-radius: 0 0 8px 8px; overflow: hidden; border-top: 1px solid var(--line); border-bottom: 0; }
+.recent-conversation { margin: 1rem 1.25rem 0; padding: .75rem; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: .75rem; }
+.recent-conversation p { white-space: pre-wrap; overflow-wrap: anywhere; }.recent-conversation strong { color: var(--text); }
 .inspector-heading { position: sticky; top: 68px; background: #0c1118ed; backdrop-filter: blur(10px); z-index: 3; }
 .objective { text-align: right; font-size: .68rem; }
 .objective span { display: block; color: var(--muted); margin-bottom: .2rem; }
