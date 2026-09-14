@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/temporality-project/temporality/frp/cognition"
+	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/substrate"
 )
@@ -17,10 +18,11 @@ type Store struct {
 	events    map[string]protocol.Event
 	claims    map[string]cognition.Claim
 	relations []cognition.ClaimRelation
+	frames    map[string]frame.Frame
 }
 
 func New() *Store {
-	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim)}
+	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame)}
 }
 
 func (s *Store) Append(_ context.Context, event protocol.Event) error {
@@ -149,6 +151,71 @@ func (s *Store) ListRelations(_ context.Context, id string) ([]cognition.ClaimRe
 		}
 	}
 	return result, nil
+}
+
+func (s *Store) CreateFrame(_ context.Context, value frame.Frame, event protocol.Event) error {
+	if err := frame.ValidateCreate(value, event); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.frames[value.FrameID]; exists {
+		return frame.ErrFrameExists
+	}
+	if _, exists := s.events[event.EventID]; exists {
+		return errors.New("event already exists")
+	}
+	s.events[event.EventID] = event
+	s.frames[value.FrameID] = copyFrame(value)
+	return nil
+}
+
+func (s *Store) TransitionFrame(_ context.Context, parentID string, transition frame.Transition, event protocol.Event) (frame.TransitionResult, error) {
+	if err := frame.ValidateTransition(parentID, transition, event); err != nil {
+		return frame.TransitionResult{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	parent, exists := s.frames[parentID]
+	if !exists {
+		return frame.TransitionResult{}, frame.ErrFrameNotFound
+	}
+	if _, exists = s.events[event.EventID]; exists {
+		return frame.TransitionResult{}, errors.New("event already exists")
+	}
+	next, err := frame.Reduce(copyFrame(parent), transition)
+	if err != nil {
+		return frame.TransitionResult{}, err
+	}
+	event.Payload["frame_id"] = next.FrameID
+	event.EpisodeID = next.EpisodeID
+	event.BranchID = next.BranchID
+	if err = frame.ValidateCreateEventForTransition(next, event); err != nil {
+		return frame.TransitionResult{}, err
+	}
+	if _, exists = s.frames[next.FrameID]; exists {
+		return frame.TransitionResult{}, frame.ErrFrameExists
+	}
+	s.events[event.EventID] = event
+	s.frames[next.FrameID] = copyFrame(next)
+	return frame.TransitionResult{Frame: copyFrame(next), Event: event}, nil
+}
+
+func (s *Store) GetFrame(_ context.Context, id string) (frame.Frame, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.frames[id]
+	if !exists {
+		return frame.Frame{}, frame.ErrFrameNotFound
+	}
+	return copyFrame(value), nil
+}
+func copyFrame(value frame.Frame) frame.Frame {
+	result := value
+	result.WorkingSet = append([]frame.Ref(nil), value.WorkingSet...)
+	result.Filters.AgentIDs = append([]string(nil), value.Filters.AgentIDs...)
+	result.Filters.RegionKinds = append([]string(nil), value.Filters.RegionKinds...)
+	return result
 }
 
 func (s *Store) ListPage(ctx context.Context, request substrate.PageRequest) (substrate.EventPage, error) {

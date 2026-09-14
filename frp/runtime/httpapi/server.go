@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/temporality-project/temporality/frp/cognition"
+	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/replay"
 	"github.com/temporality-project/temporality/frp/substrate"
@@ -37,6 +38,9 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /v1/claims", s.commitClaim)
 	mux.HandleFunc("POST /v1/claims/{id}/transitions", s.transitionClaim)
 	mux.HandleFunc("GET /v1/claims/{id}", s.getClaim)
+	mux.HandleFunc("POST /v1/frames", s.createFrame)
+	mux.HandleFunc("POST /v1/frames/{id}/transitions", s.transitionFrame)
+	mux.HandleFunc("GET /v1/frames/{id}", s.getFrame)
 	mux.HandleFunc("GET /metrics", s.metrics.handler)
 	return s.metrics.count(mux)
 }
@@ -110,6 +114,99 @@ func (s *Server) getEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, event)
+}
+
+type frameCreateRequest struct {
+	Frame frame.Frame    `json:"frame"`
+	Event protocol.Event `json:"event"`
+}
+
+func (s *Server) createFrame(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(frame.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("frames are not supported"))
+		return
+	}
+	var request frameCreateRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	now := s.now().UTC()
+	request.Frame.ApplyDefaults()
+	if request.Frame.FrameID == "" {
+		request.Frame.FrameID = newUUID()
+	}
+	if request.Frame.AsOf.IsZero() {
+		request.Frame.AsOf = now
+	}
+	if request.Event.EventID == "" {
+		request.Event.EventID = newUUID()
+	}
+	request.Event.ApplyDefaults(now)
+	request.Event.Type = "frame.created"
+	request.Event.EpisodeID = request.Frame.EpisodeID
+	request.Event.BranchID = request.Frame.BranchID
+	request.Event.Payload["frame_id"] = request.Frame.FrameID
+	if err := store.CreateFrame(r.Context(), request.Frame, request.Event); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, request)
+}
+
+type frameTransitionRequest struct {
+	Transition frame.Transition `json:"transition"`
+	Event      protocol.Event   `json:"event"`
+}
+
+func (s *Server) transitionFrame(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(frame.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("frames are not supported"))
+		return
+	}
+	var request frameTransitionRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	now := s.now().UTC()
+	if request.Event.EventID == "" {
+		request.Event.EventID = newUUID()
+	}
+	request.Event.ApplyDefaults(now)
+	request.Event.Type = "frame.transitioned"
+	request.Event.Payload["parent_frame_id"] = r.PathValue("id")
+	result, err := store.TransitionFrame(r.Context(), r.PathValue("id"), request.Transition, request.Event)
+	if errors.Is(err, frame.ErrFrameNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (s *Server) getFrame(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(frame.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("frames are not supported"))
+		return
+	}
+	value, err := store.GetFrame(r.Context(), r.PathValue("id"))
+	if errors.Is(err, frame.ErrFrameNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		s.log.Error("get frame", "error", err)
+		writeError(w, http.StatusInternalServerError, errors.New("internal error"))
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 
 type claimRequest struct {

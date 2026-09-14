@@ -51,6 +51,24 @@ curl -X POST http://localhost:8080/v1/claims/CLAIM_ID/transitions \
   -d '{"event":{"payload":{},"provenance":{"source":"verification"}},"to_status":"supported","confidence":0.98}'
 ```
 
+## Runnable smoke scenario
+
+With the Compose PostgreSQL healthy, run:
+
+```sh
+make smoke
+```
+
+This builds and starts `temporality-runtime`, creates an initial Frame, applies an immutable transition, restores the next Frame from PostgreSQL, verifies replay, prints the IDs/digest, and stops the runtime.
+
+Frame endpoints:
+
+```text
+POST /v1/frames
+POST /v1/frames/{id}/transitions
+GET  /v1/frames/{id}
+```
+
 ## Development
 
 ```sh

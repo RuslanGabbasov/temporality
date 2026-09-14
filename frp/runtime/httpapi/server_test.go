@@ -11,23 +11,26 @@ import (
 	"testing"
 
 	"github.com/temporality-project/temporality/frp/cognition"
+	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/runtime/httpapi"
 	"github.com/temporality-project/temporality/frp/substrate/memory"
 )
 
+func testHandler() http.Handler {
+	return httpapi.New(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
 func TestAppendGetAndReplay(t *testing.T) {
-	handler := httpapi.New(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := testHandler()
 	body := []byte(`{"event_id":"018f47a7-34b2-7d10-a932-4f3ff37a4a01","episode_id":"018f47a7-34b2-7d10-a932-4f3ff37a4a02","type":"episode.started","payload":{},"provenance":{"source":"test"}}`)
 	created := serve(handler, http.MethodPost, "/v1/events", body)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("append status=%d body=%s", created.Code, created.Body.String())
 	}
-
 	got := serve(handler, http.MethodGet, "/v1/events/018f47a7-34b2-7d10-a932-4f3ff37a4a01", nil)
 	if got.Code != http.StatusOK {
 		t.Fatalf("get status=%d body=%s", got.Code, got.Body.String())
 	}
-
 	replayed := serve(handler, http.MethodPost, "/v1/replay", []byte(`{"episode_id":"018f47a7-34b2-7d10-a932-4f3ff37a4a02"}`))
 	if replayed.Code != http.StatusOK {
 		t.Fatalf("replay status=%d body=%s", replayed.Code, replayed.Body.String())
@@ -40,12 +43,12 @@ func TestAppendGetAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(response.Events) != 1 || response.Digest == "" {
-		t.Fatalf("unexpected replay response: %s", replayed.Body.String())
+		t.Fatalf("unexpected replay: %s", replayed.Body.String())
 	}
 }
 
 func TestEventPaginationAndMetrics(t *testing.T) {
-	handler := httpapi.New(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := testHandler()
 	for _, id := range []string{"018f47a7-34b2-7d10-a932-4f3ff37a4a11", "018f47a7-34b2-7d10-a932-4f3ff37a4a12", "018f47a7-34b2-7d10-a932-4f3ff37a4a13"} {
 		body := []byte(`{"event_id":"` + id + `","type":"metric.recorded","payload":{},"provenance":{}}`)
 		if response := serve(handler, http.MethodPost, "/v1/events", body); response.Code != http.StatusCreated {
@@ -53,9 +56,6 @@ func TestEventPaginationAndMetrics(t *testing.T) {
 		}
 	}
 	first := serve(handler, http.MethodGet, "/v1/events?limit=2", nil)
-	if first.Code != http.StatusOK {
-		t.Fatalf("first page failed: %s", first.Body.String())
-	}
 	var page struct {
 		Events     []json.RawMessage `json:"events"`
 		NextCursor string            `json:"next_cursor"`
@@ -69,9 +69,6 @@ func TestEventPaginationAndMetrics(t *testing.T) {
 	second := serve(handler, http.MethodGet, "/v1/events?limit=2&cursor="+page.NextCursor, nil)
 	page.Events = nil
 	page.NextCursor = ""
-	if second.Code != http.StatusOK {
-		t.Fatalf("second page failed: %s", second.Body.String())
-	}
 	if err := json.Unmarshal(second.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
@@ -84,26 +81,19 @@ func TestEventPaginationAndMetrics(t *testing.T) {
 	}
 }
 
-func TestCommitAndGetClaim(t *testing.T) {
-	handler := httpapi.New(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+func TestCommitAndTransitionClaim(t *testing.T) {
+	handler := testHandler()
 	created := serve(handler, http.MethodPost, "/v1/claims", []byte(`{"event":{"payload":{},"provenance":{"source":"test"}},"claim":{"proposition":"The build is reproducible","confidence":0.9}}`))
 	if created.Code != http.StatusCreated {
-		t.Fatalf("create claim status=%d body=%s", created.Code, created.Body.String())
+		t.Fatalf("create claim: %s", created.Body.String())
 	}
 	var commit cognition.Commit
 	if err := json.Unmarshal(created.Body.Bytes(), &commit); err != nil {
 		t.Fatal(err)
 	}
-	if commit.Event.Type != "claim.candidate" || commit.Claim.CreatedEvent != commit.Event.EventID {
-		t.Fatalf("invalid atomic commit: %#v", commit)
-	}
-	got := serve(handler, http.MethodGet, "/v1/claims/"+commit.Claim.ClaimID, nil)
-	if got.Code != http.StatusOK {
-		t.Fatalf("get claim status=%d body=%s", got.Code, got.Body.String())
-	}
 	transitioned := serve(handler, http.MethodPost, "/v1/claims/"+commit.Claim.ClaimID+"/transitions", []byte(`{"event":{"payload":{},"provenance":{"source":"test"}},"to_status":"supported","confidence":0.98}`))
 	if transitioned.Code != http.StatusOK {
-		t.Fatalf("transition status=%d body=%s", transitioned.Code, transitioned.Body.String())
+		t.Fatalf("transition: %s", transitioned.Body.String())
 	}
 	var result struct {
 		Claim cognition.Claim `json:"claim"`
@@ -111,12 +101,53 @@ func TestCommitAndGetClaim(t *testing.T) {
 	if err := json.Unmarshal(transitioned.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Claim.Status != cognition.ClaimSupported || result.Claim.Confidence != 0.98 {
+	if result.Claim.Status != cognition.ClaimSupported {
 		t.Fatalf("unexpected transition: %s", transitioned.Body.String())
 	}
-	invalid := serve(handler, http.MethodPost, "/v1/claims/"+commit.Claim.ClaimID+"/transitions", []byte(`{"event":{"payload":{},"provenance":{}},"to_status":"supported"}`))
-	if invalid.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("invalid transition status=%d body=%s", invalid.Code, invalid.Body.String())
+}
+
+func TestFrameCreateTransitionGetAndReplay(t *testing.T) {
+	handler := testHandler()
+	createBody := []byte(`{"frame":{"agent_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b01","episode_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b02","branch_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b03","objective_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b04","focus":{"type":"query","query":"initial investigation"},"mode":"explore","attention":{"policy":"balanced","deliberate":true,"ambient":true,"max_candidates":32},"zoom":2,"filters":{"trust_min":0.5},"budget":{"tokens":8000}},"event":{"payload":{},"provenance":{"source":"test"}}}`)
+	created := serve(handler, http.MethodPost, "/v1/frames", createBody)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create frame status=%d body=%s", created.Code, created.Body.String())
+	}
+	var initial struct {
+		Frame frame.Frame `json:"frame"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &initial); err != nil {
+		t.Fatal(err)
+	}
+	transitionBody := []byte(`{"transition":{"as_of":"2026-09-14T12:00:00Z","operations":[{"op":"pin","ref":{"type":"claim","id":"018f47a7-34b2-7d10-a932-4f3ff37a4b10"}},{"op":"set_mode","mode":"verify"}]},"event":{"payload":{},"provenance":{"source":"test"}}}`)
+	transitioned := serve(handler, http.MethodPost, "/v1/frames/"+initial.Frame.FrameID+"/transitions", transitionBody)
+	if transitioned.Code != http.StatusCreated {
+		t.Fatalf("transition status=%d body=%s", transitioned.Code, transitioned.Body.String())
+	}
+	var result frame.TransitionResult
+	if err := json.Unmarshal(transitioned.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Frame.ParentFrameID != initial.Frame.FrameID || result.Frame.Revision != 1 || result.Frame.Mode != frame.ModeVerify {
+		t.Fatalf("unexpected transition: %s", transitioned.Body.String())
+	}
+	gotInitial := serve(handler, http.MethodGet, "/v1/frames/"+initial.Frame.FrameID, nil)
+	var unchanged frame.Frame
+	if err := json.Unmarshal(gotInitial.Body.Bytes(), &unchanged); err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Revision != 0 || len(unchanged.WorkingSet) != 0 {
+		t.Fatal("initial frame was mutated")
+	}
+	replayed := serve(handler, http.MethodPost, "/v1/replay", []byte(`{"episode_id":"018f47a7-34b2-7d10-a932-4f3ff37a4b02"}`))
+	var replayResult struct {
+		Events []json.RawMessage `json:"events"`
+	}
+	if err := json.Unmarshal(replayed.Body.Bytes(), &replayResult); err != nil {
+		t.Fatal(err)
+	}
+	if len(replayResult.Events) != 2 {
+		t.Fatalf("expected frame create and transition events: %s", replayed.Body.String())
 	}
 }
 

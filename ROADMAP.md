@@ -19,7 +19,7 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Versioned Frame value object and JSON Schema.
   - [x] Deterministic, side-effect-free reducer with content-derived frame IDs.
   - [x] Deep immutability and transition graph tests.
-  - [ ] Atomic Frame + `frame.transitioned` Event persistence.
+  - [x] Atomic Frame + `frame.transitioned` Event persistence with PostgreSQL restart/replay coverage.
   - [ ] CognitiveEmission validation and reduction into Frame operations.
 - [ ] **M3:** RenderPacket and Objective.
 - [ ] **M4:** Deliberate and ambient Attention.
