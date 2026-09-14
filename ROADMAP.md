@@ -32,7 +32,8 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Deliberate semantic jumps remain independent from ambient hysteresis.
   - [x] RenderPacket scored map, periphery, outside-frame count, and attention provenance.
   - [ ] Region/graph projection candidates.
-  - [ ] Canonical `attention.selected` / `attention.suggested` telemetry and attention metrics.
+  - [x] Attention entropy, focus switches, ambient hit rate, missed candidates, and collapse metrics.
+  - [ ] Canonical `attention.selected` / `attention.suggested` Events in the atomic Step transaction.
 - [ ] **M5:** Affordance registry and deterministic Executor.
 - [ ] **M6:** Adaptive Planner.
 - [ ] **M7:** Time travel, snapshots, and blame.

@@ -174,25 +174,31 @@ func (s *Server) getObjective(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, value)
 }
 func (s *Server) renderFrame(w http.ResponseWriter, r *http.Request) {
+	s.metrics.renders.Add(1)
 	stores, ok := s.store.(render.Stores)
 	if !ok {
+		s.metrics.renderErrors.Add(1)
 		writeError(w, http.StatusNotImplemented, errors.New("render is not supported"))
 		return
 	}
 	var request render.Request
 	if err := decodeJSON(r, &request); err != nil {
+		s.metrics.renderErrors.Add(1)
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	packet, err := render.New(stores).Render(r.Context(), request)
 	if errors.Is(err, frame.ErrFrameNotFound) || errors.Is(err, objective.ErrNotFound) {
+		s.metrics.renderErrors.Add(1)
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
 	if err != nil {
+		s.metrics.renderErrors.Add(1)
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
+	s.metrics.observeRender(packet)
 	writeJSON(w, http.StatusOK, packet)
 }
 
@@ -307,6 +313,9 @@ func (s *Server) reduceEmission(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
+	}
+	if result.Frame.Focus != current.Focus {
+		s.metrics.focusSwitches.Add(1)
 	}
 	decision.Frame = result.Frame
 	writeJSON(w, http.StatusCreated, map[string]any{"decision": decision, "event": result.Event})

@@ -173,6 +173,12 @@ func TestFrameCreateTransitionGetAndReplay(t *testing.T) {
 	if len(replayResult.Events) != 4 {
 		t.Fatalf("expected objective, frame create, direct transition, and emission transition events: %s", replayed.Body.String())
 	}
+	metrics := serve(handler, http.MethodGet, "/metrics", nil).Body.String()
+	for _, expected := range []string{"temporality_renders_total 2", "temporality_focus_switches_total 1", "temporality_ambient_hit_rate", "temporality_attention_entropy", "temporality_attention_collapse_score"} {
+		if !strings.Contains(metrics, expected) {
+			t.Fatalf("missing %q in metrics: %s", expected, metrics)
+		}
+	}
 }
 
 func serve(handler http.Handler, method, path string, body []byte) *httptest.ResponseRecorder {
