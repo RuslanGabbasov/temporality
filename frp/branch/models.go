@@ -6,6 +6,7 @@ import (
 
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/protocol"
+	"github.com/temporality-project/temporality/frp/timetravel"
 )
 
 const (
@@ -23,16 +24,19 @@ const (
 )
 
 type Branch struct {
-	Protocol      string `json:"protocol"`
-	Version       string `json:"version"`
-	BranchID      string `json:"branch_id"`
-	ForkGroupID   string `json:"fork_group_id"`
-	EpisodeID     string `json:"episode_id"`
-	ObjectiveID   string `json:"objective_id"`
-	SourceFrameID string `json:"source_frame_id"`
-	RootFrameID   string `json:"root_frame_id"`
-	HeadFrameID   string `json:"head_frame_id"`
-	Status        Status `json:"status"`
+	Protocol       string                 `json:"protocol"`
+	Version        string                 `json:"version"`
+	BranchID       string                 `json:"branch_id"`
+	ForkGroupID    string                 `json:"fork_group_id"`
+	EpisodeID      string                 `json:"episode_id"`
+	ObjectiveID    string                 `json:"objective_id"`
+	SourceFrameID  string                 `json:"source_frame_id"`
+	ParentBranchID string                 `json:"parent_branch_id"`
+	SourceCursor   timetravel.EventCursor `json:"source_cursor"`
+	RootFrameID    string                 `json:"root_frame_id"`
+	HeadFrameID    string                 `json:"head_frame_id"`
+	Status         Status                 `json:"status"`
+	ModelConfig    map[string]any         `json:"model_config"`
 }
 
 func (b Branch) Validate() error {
@@ -52,15 +56,16 @@ func (b Branch) Validate() error {
 }
 
 type ForkGroup struct {
-	Protocol       string   `json:"protocol"`
-	Version        string   `json:"version"`
-	ForkVersion    string   `json:"fork_version"`
-	ForkGroupID    string   `json:"fork_group_id"`
-	EpisodeID      string   `json:"episode_id"`
-	ObjectiveID    string   `json:"objective_id"`
-	SourceFrameID  string   `json:"source_frame_id"`
-	SourceBranchID string   `json:"source_branch_id"`
-	Branches       []Branch `json:"branches"`
+	Protocol       string                 `json:"protocol"`
+	Version        string                 `json:"version"`
+	ForkVersion    string                 `json:"fork_version"`
+	ForkGroupID    string                 `json:"fork_group_id"`
+	EpisodeID      string                 `json:"episode_id"`
+	ObjectiveID    string                 `json:"objective_id"`
+	SourceFrameID  string                 `json:"source_frame_id"`
+	SourceBranchID string                 `json:"source_branch_id"`
+	SourceCursor   timetravel.EventCursor `json:"source_cursor"`
+	Branches       []Branch               `json:"branches"`
 }
 
 func (g ForkGroup) Validate() error {

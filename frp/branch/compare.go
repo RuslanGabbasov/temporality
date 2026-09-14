@@ -64,6 +64,8 @@ type ComparisonResult struct {
 	ForkGroupID       string        `json:"fork_group_id"`
 	LeftBranchID      string        `json:"left_branch_id"`
 	RightBranchID     string        `json:"right_branch_id"`
+	LeftFrameID       string        `json:"left_frame_id"`
+	RightFrameID      string        `json:"right_frame_id"`
 	Attention         SetComparison `json:"attention"`
 	Claims            SetComparison `json:"claims"`
 	Affordances       SetComparison `json:"affordances"`
@@ -93,6 +95,7 @@ func Compare(group ForkGroup, left, right Trajectory) (ComparisonResult, error) 
 	result := ComparisonResult{
 		Protocol: protocol.Name, Version: protocol.Version, ComparatorVersion: ComparatorVersion,
 		ForkGroupID: group.ForkGroupID, LeftBranchID: left.BranchID, RightBranchID: right.BranchID,
+		LeftFrameID: branchHead(group, left.BranchID), RightFrameID: branchHead(group, right.BranchID),
 		Attention:      compareSets(left.Attention, right.Attention),
 		Claims:         compareSets(left.Claims, right.Claims),
 		Affordances:    compareSets(left.Affordances, right.Affordances),
@@ -107,6 +110,15 @@ func Compare(group ForkGroup, left, right Trajectory) (ComparisonResult, error) 
 	}
 	result.ComparisonID = uuidFromDigest(sha256.Sum256(encoded))
 	return result, nil
+}
+
+func branchHead(group ForkGroup, branchID string) string {
+	for _, value := range group.Branches {
+		if value.BranchID == branchID {
+			return value.HeadFrameID
+		}
+	}
+	return ""
 }
 
 func validateTrajectoryIsolation(group ForkGroup, trajectory Trajectory) error {

@@ -11,9 +11,15 @@ import (
 	"github.com/temporality-project/temporality/frp/protocol"
 )
 
+type BranchSpec struct {
+	BranchID    string         `json:"branch_id"`
+	ModelConfig map[string]any `json:"model_config"`
+}
+
 type ForkRequest struct {
-	ForkGroupID string   `json:"fork_group_id"`
-	BranchIDs   []string `json:"branch_ids"`
+	ForkGroupID string       `json:"fork_group_id"`
+	BranchIDs   []string     `json:"branch_ids,omitempty"`
+	Branches    []BranchSpec `json:"branches,omitempty"`
 }
 
 // Fork deterministically creates branch-local root frames without mutating source.
@@ -24,19 +30,21 @@ func Fork(source frame.Frame, request ForkRequest) (ForkGroup, []frame.Frame, er
 	if request.ForkGroupID == "" {
 		return ForkGroup{}, nil, errors.New("fork_group_id is required")
 	}
-	if len(request.BranchIDs) < 2 {
-		return ForkGroup{}, nil, errors.New("at least two branch_ids are required")
+	specs, err := request.branchSpecs()
+	if err != nil {
+		return ForkGroup{}, nil, err
 	}
 
 	group := ForkGroup{
 		Protocol: protocol.Name, Version: protocol.Version, ForkVersion: ForkVersion,
 		ForkGroupID: request.ForkGroupID, EpisodeID: source.EpisodeID,
 		ObjectiveID: source.ObjectiveID, SourceFrameID: source.FrameID,
-		SourceBranchID: source.BranchID, Branches: make([]Branch, 0, len(request.BranchIDs)),
+		SourceBranchID: source.BranchID, Branches: make([]Branch, 0, len(specs)),
 	}
-	roots := make([]frame.Frame, 0, len(request.BranchIDs))
-	seen := make(map[string]struct{}, len(request.BranchIDs))
-	for _, branchID := range request.BranchIDs {
+	roots := make([]frame.Frame, 0, len(specs))
+	seen := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		branchID := spec.BranchID
 		if branchID == "" {
 			return ForkGroup{}, nil, errors.New("branch_id is required")
 		}
@@ -59,8 +67,8 @@ func Fork(source frame.Frame, request ForkRequest) (ForkGroup, []frame.Frame, er
 		branch := Branch{
 			Protocol: protocol.Name, Version: protocol.Version, BranchID: branchID,
 			ForkGroupID: request.ForkGroupID, EpisodeID: source.EpisodeID,
-			ObjectiveID: source.ObjectiveID, SourceFrameID: source.FrameID,
-			RootFrameID: root.FrameID, HeadFrameID: root.FrameID, Status: StatusActive,
+			ObjectiveID: source.ObjectiveID, SourceFrameID: source.FrameID, ParentBranchID: source.BranchID,
+			RootFrameID: root.FrameID, HeadFrameID: root.FrameID, Status: StatusActive, ModelConfig: cloneMap(spec.ModelConfig),
 		}
 		group.Branches = append(group.Branches, branch)
 		roots = append(roots, root)
@@ -69,6 +77,36 @@ func Fork(source frame.Frame, request ForkRequest) (ForkGroup, []frame.Frame, er
 		return ForkGroup{}, nil, err
 	}
 	return group, roots, nil
+}
+
+func (r ForkRequest) branchSpecs() ([]BranchSpec, error) {
+	if len(r.Branches) > 0 && len(r.BranchIDs) > 0 {
+		return nil, errors.New("supply branches or branch_ids, not both")
+	}
+	if len(r.Branches) > 0 {
+		if len(r.Branches) < 2 {
+			return nil, errors.New("at least two branches are required")
+		}
+		return r.Branches, nil
+	}
+	if len(r.BranchIDs) < 2 {
+		return nil, errors.New("at least two branch_ids are required")
+	}
+	specs := make([]BranchSpec, len(r.BranchIDs))
+	for i, id := range r.BranchIDs {
+		specs[i] = BranchSpec{BranchID: id, ModelConfig: map[string]any{}}
+	}
+	return specs, nil
+}
+
+func cloneMap(value map[string]any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	data, _ := json.Marshal(value)
+	var result map[string]any
+	_ = json.Unmarshal(data, &result)
+	return result
 }
 
 func forkRootID(sourceFrameID, forkGroupID, branchID string) string {

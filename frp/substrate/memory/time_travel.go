@@ -69,9 +69,14 @@ func (s *Store) ListEventsThrough(_ context.Context, episodeID, branchID string,
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]timetravel.CursorEvent, 0)
+	value, forked := s.branches[branchID]
 	for id, event := range s.events {
 		seq := s.eventSeq[id]
-		if seq <= target.EventSeq && event.EpisodeID == episodeID && (branchID == "" || event.BranchID == "" || event.BranchID == branchID) {
+		visible := branchID == "" || event.BranchID == "" || event.BranchID == branchID
+		if forked && event.BranchID == value.ParentBranchID && seq <= value.SourceCursor.EventSeq {
+			visible = true
+		}
+		if seq <= target.EventSeq && event.EpisodeID == episodeID && visible {
 			result = append(result, timetravel.CursorEvent{Cursor: timetravel.EventCursor{EventSeq: seq, TransactionTime: event.TransactionTime, EventID: id}, Event: clone(event)})
 		}
 	}

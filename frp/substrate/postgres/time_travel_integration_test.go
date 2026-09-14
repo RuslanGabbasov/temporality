@@ -24,7 +24,7 @@ func TestTimeTravelEventOrderSnapshotFallbackAndNoFutureLeakage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	for _, migration := range []string{"../../../migrations/000001_event_store.up.sql", "../../../migrations/000010_time_travel.up.sql"} {
+	for _, migration := range []string{"../../../migrations/000001_event_store.up.sql", "../../../migrations/000004_frames.up.sql", "../../../migrations/000010_time_travel.up.sql", "../../../migrations/000011_branches.up.sql"} {
 		if err = store.Migrate(ctx, migration); err != nil {
 			t.Fatal(err)
 		}

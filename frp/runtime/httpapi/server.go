@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/temporality-project/temporality/frp/affordance"
+	"github.com/temporality-project/temporality/frp/branch"
 	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/execution"
 	"github.com/temporality-project/temporality/frp/frame"
@@ -61,12 +62,216 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /v1/frames/{id}/transitions", s.transitionFrame)
 	mux.HandleFunc("POST /v1/frames/{id}/emissions", s.reduceEmission)
 	mux.HandleFunc("GET /v1/frames/{id}", s.getFrame)
+	mux.HandleFunc("POST /v1/fork", s.fork)
+	mux.HandleFunc("GET /v1/branches/{id}", s.getBranch)
+	mux.HandleFunc("GET /v1/fork-groups/{id}", s.getForkGroup)
+	mux.HandleFunc("POST /v1/branches/{id}/head", s.updateBranchHead)
+	mux.HandleFunc("POST /v1/branch-comparisons", s.compareBranches)
+	mux.HandleFunc("GET /v1/branch-comparisons/{id}", s.getBranchComparison)
 	mux.HandleFunc("GET /metrics", s.metrics.handler)
 	return s.metrics.count(mux)
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "protocol": protocol.Name, "version": protocol.Version})
+}
+
+type forkRequest struct {
+	SourceFrameID string `json:"source_frame_id"`
+	ForkGroupID   string `json:"fork_group_id"`
+	Branches      []struct {
+		BranchID    string         `json:"branch_id"`
+		Label       string         `json:"label,omitempty"`
+		ModelConfig map[string]any `json:"model_config"`
+	} `json:"branches"`
+}
+
+func (s *Server) fork(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(branch.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("branches are not supported"))
+		return
+	}
+	replayStore, ok := s.store.(timetravel.ReplayStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("frame replay is not supported"))
+		return
+	}
+	var input forkRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if input.SourceFrameID == "" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("source_frame_id is required"))
+		return
+	}
+	if _, err := timetravel.ReplayFrame(r.Context(), replayStore, input.SourceFrameID); errors.Is(err, frame.ErrFrameNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	} else if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	if input.ForkGroupID == "" {
+		input.ForkGroupID = newUUID()
+	}
+	request := branch.ForkRequest{ForkGroupID: input.ForkGroupID, Branches: make([]branch.BranchSpec, len(input.Branches))}
+	for i, spec := range input.Branches {
+		if spec.BranchID == "" {
+			spec.BranchID = newUUID()
+		}
+		request.Branches[i] = branch.BranchSpec{BranchID: spec.BranchID, ModelConfig: spec.ModelConfig}
+	}
+	group, err := store.Fork(r.Context(), input.SourceFrameID, request)
+	if errors.Is(err, frame.ErrFrameNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, group)
+}
+
+func (s *Server) getBranch(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(branch.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("branches are not supported"))
+		return
+	}
+	value, err := store.GetBranch(r.Context(), r.PathValue("id"))
+	if errors.Is(err, branch.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) getForkGroup(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(branch.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("branches are not supported"))
+		return
+	}
+	value, err := store.GetForkGroup(r.Context(), r.PathValue("id"))
+	if errors.Is(err, branch.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+type branchHeadRequest struct {
+	ExpectedFrameID string `json:"expected_frame_id"`
+	NextFrameID     string `json:"next_frame_id"`
+}
+
+func (s *Server) updateBranchHead(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(branch.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("branches are not supported"))
+		return
+	}
+	var input branchHeadRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	value, err := store.UpdateHead(r.Context(), r.PathValue("id"), input.ExpectedFrameID, input.NextFrameID)
+	if errors.Is(err, branch.ErrCASConflict) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	if errors.Is(err, branch.ErrNotFound) || errors.Is(err, frame.ErrFrameNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+type branchComparisonRequest struct {
+	ForkGroupID string            `json:"fork_group_id"`
+	ForkGroup   *branch.ForkGroup `json:"fork_group,omitempty"`
+	Left        branch.Trajectory `json:"left"`
+	Right       branch.Trajectory `json:"right"`
+}
+
+func (s *Server) compareBranches(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(branch.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("branches are not supported"))
+		return
+	}
+	var input branchComparisonRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	var group branch.ForkGroup
+	var err error
+	if input.ForkGroup != nil {
+		group = *input.ForkGroup
+	} else {
+		groupID := input.ForkGroupID
+		if groupID == "" && input.Left.BranchID != "" {
+			var value branch.Branch
+			value, err = store.GetBranch(r.Context(), input.Left.BranchID)
+			groupID = value.ForkGroupID
+		}
+		if err == nil {
+			group, err = store.GetForkGroup(r.Context(), groupID)
+		}
+	}
+	if errors.Is(err, branch.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	if _, err = branch.Compare(group, input.Left, input.Right); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	result, err := store.PutComparison(r.Context(), group, input.Left, input.Right)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (s *Server) getBranchComparison(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(branch.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("branches are not supported"))
+		return
+	}
+	value, err := store.GetComparison(r.Context(), r.PathValue("id"))
+	if errors.Is(err, branch.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 
 func (s *Server) appendEvent(w http.ResponseWriter, r *http.Request) {

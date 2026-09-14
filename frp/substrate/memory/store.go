@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/temporality-project/temporality/frp/affordance"
+	"github.com/temporality-project/temporality/frp/branch"
 	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/execution"
 	"github.com/temporality-project/temporality/frp/frame"
@@ -41,10 +42,13 @@ type Store struct {
 	nextEventSeq   int64
 	frameEvents    map[string]string
 	snapshots      map[string]timetravel.Snapshot
+	forkGroups     map[string]branch.ForkGroup
+	branches       map[string]branch.Branch
+	comparisons    map[string]branch.ComparisonResult
 }
 
 func New() *Store {
-	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective), definitions: make(map[string]affordance.Definition), requests: make(map[string]affordance.Request), executions: make(map[string]execution.Execution), plannerRuns: make(map[string]planner.Run), plannerSteps: make(map[string][]planner.DurableStep), cognitiveSteps: make(map[string]stepRuntime.Prepared), eventSeq: make(map[string]int64), frameEvents: make(map[string]string), snapshots: make(map[string]timetravel.Snapshot)}
+	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective), definitions: make(map[string]affordance.Definition), requests: make(map[string]affordance.Request), executions: make(map[string]execution.Execution), plannerRuns: make(map[string]planner.Run), plannerSteps: make(map[string][]planner.DurableStep), cognitiveSteps: make(map[string]stepRuntime.Prepared), eventSeq: make(map[string]int64), frameEvents: make(map[string]string), snapshots: make(map[string]timetravel.Snapshot), forkGroups: make(map[string]branch.ForkGroup), branches: make(map[string]branch.Branch), comparisons: make(map[string]branch.ComparisonResult)}
 }
 
 func (s *Store) putEvent(event protocol.Event) {

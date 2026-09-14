@@ -80,7 +80,7 @@ func (s *Store) GetReplayFrame(ctx context.Context, id string) (frame.Frame, tim
 }
 
 func (s *Store) ListEventsThrough(ctx context.Context, episodeID, branchID string, target timetravel.EventCursor) ([]timetravel.CursorEvent, error) {
-	rows, err := s.pool.Query(ctx, `SELECT event_seq,`+selectFields+` FROM events WHERE episode_id=$1 AND ($2='' OR branch_id IS NULL OR branch_id=$2::uuid) AND event_seq <= $3 ORDER BY event_seq`, episodeID, branchID, target.EventSeq)
+	rows, err := s.pool.Query(ctx, `SELECT e.event_seq,`+selectFields+` FROM events e WHERE e.episode_id=$1 AND e.event_seq <= $3 AND ($2='' OR e.branch_id IS NULL OR e.branch_id=$2::uuid OR EXISTS (SELECT 1 FROM branches b WHERE b.branch_id=$2::uuid AND e.branch_id=b.parent_branch_id AND e.event_seq <= b.source_event_seq)) ORDER BY e.event_seq`, episodeID, branchID, target.EventSeq)
 	if err != nil {
 		return nil, err
 	}

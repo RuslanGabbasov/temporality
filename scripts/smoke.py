@@ -95,14 +95,21 @@ def main():
         _, frame_replay = request("POST", "/v1/replay", {"frame_id": restored["frame_id"]})
         assert frame_replay["snapshot"]["snapshot_id"] == snapshot["metadata"]["snapshot_id"]
         assert frame_replay["deterministic_hash"] and len(frame_replay["events"]) == 9
+        _, fork_group = request("POST", "/v1/fork", {"source_frame_id": restored["frame_id"], "branches": [{"label": "model-a", "model_config": {"model_id": "A"}}, {"label": "model-b", "model_config": {"model_id": "B"}}]})
+        assert len(fork_group["branches"]) == 2
+        left_branch, right_branch = fork_group["branches"]
+        assert left_branch["root_frame_id"] != right_branch["root_frame_id"]
+        assert left_branch["source_frame_id"] == right_branch["source_frame_id"] == restored["frame_id"]
+        _, persisted_left = request("GET", f"/v1/branches/{left_branch['branch_id']}")
+        assert persisted_left["head_frame_id"] == left_branch["root_frame_id"]
         _, blame = request("POST", "/v1/blame", {"root_id": claim_id, "max_depth": 8})
         assert blame["root_id"] == claim_id and len(blame["nodes"]) >= 2
         _, replay = request("POST", "/v1/replay", {"episode_id": episode_id})
         assert restored["parent_frame_id"] == initial["frame_id"]
         assert restored["focus"]["query"] == "evidence that validates Temporality" and restored["revision"] == 1
         assert len(restored["working_set"]) == 1
-        assert len(replay["events"]) == 13 and replay["digest"]
-        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "execution_id": execution_id, "execution_status": final_execution["status"], "snapshot_id": snapshot["metadata"]["snapshot_id"], "frame_hash": frame_replay["frame_hash"], "frame_replay_events": len(frame_replay["events"]), "blame_nodes": len(blame["nodes"]), "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
+        assert len(replay["events"]) >= 17 and replay["digest"]
+        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "execution_id": execution_id, "execution_status": final_execution["status"], "snapshot_id": snapshot["metadata"]["snapshot_id"], "frame_hash": frame_replay["frame_hash"], "frame_replay_events": len(frame_replay["events"]), "blame_nodes": len(blame["nodes"]), "fork_group_id": fork_group["fork_group_id"], "fork_branches": len(fork_group["branches"]), "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
     finally:
         if executor is not None:
             executor.terminate()

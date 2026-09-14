@@ -60,11 +60,24 @@ With the Compose PostgreSQL healthy, run:
 make smoke
 ```
 
-This builds and starts `temporality-runtime` plus the separate `temporality-executor` process, creates an initial Frame, creates an Objective, verifies two identical deterministic RenderPackets, submits a validated `CognitiveEmission`, reduces its attention/frame operations into an immutable transition, restores the next Frame from PostgreSQL, atomically reduces CognitiveEmission into Frame/Claims/Attention/Executions and then runs the durable Execution lifecycle, verifies replay, prints the IDs/digest, and stops the runtime.
+This builds and starts `temporality-runtime` plus the separate `temporality-executor` process, creates an initial Frame, creates an Objective, verifies two identical deterministic RenderPackets, submits a validated `CognitiveEmission`, reduces its attention/frame operations into an immutable transition, restores the next Frame from PostgreSQL, atomically reduces CognitiveEmission into Frame/Claims/Attention/Executions and then runs the durable Execution lifecycle, verifies cursor replay/snapshot/blame, forks two A/B branches, prints the IDs/digest, and stops the runtime.
 
 Render packets expose the attention engine version, scored Event/Region ambient map, selected periphery, and an outside-frame candidate count. `/metrics` includes render totals/errors, focus switches, ambient hit rate, attention entropy, missed candidates, and attention collapse score. Deliberate `attend()` operations bypass ambient hysteresis.
 
 The M2 emission endpoint rejects emissions containing claims or actions until those intents can be committed atomically with Frame and Execution state; they are never silently dropped.
+
+Fork and A/B cognition endpoints:
+
+```text
+POST /v1/fork
+GET  /v1/branches/{id}
+GET  /v1/fork-groups/{id}
+POST /v1/branches/{id}/head
+POST /v1/branch-comparisons
+GET  /v1/branch-comparisons/{id}
+```
+
+Fork creates two or more isolated root Frames atomically from one source Frame and exact event cursor. Branch heads use compare-and-swap, and comparisons pin both branch/frame endpoints plus comparator version.
 
 Time-travel and provenance endpoints:
 
