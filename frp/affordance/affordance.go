@@ -1,6 +1,7 @@
 package affordance
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -15,6 +16,19 @@ const (
 	ModeDeterministic ExecutionMode = "deterministic"
 	ModeAdaptive      ExecutionMode = "adaptive"
 )
+
+const EventRequested = "affordance.requested"
+
+var (
+	ErrDefinitionNotFound = errors.New("affordance definition not found")
+	ErrRequestNotFound    = errors.New("affordance request not found")
+	ErrDefinitionFrozen   = errors.New("affordance definition is frozen")
+)
+
+type Store interface {
+	GetDefinition(context.Context, string) (Definition, error)
+	GetRequest(context.Context, string) (Request, error)
+}
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$`)
 

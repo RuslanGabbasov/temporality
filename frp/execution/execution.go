@@ -1,6 +1,7 @@
 package execution
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,6 +20,15 @@ const (
 	StatusFailed    Status = "failed"
 	StatusCancelled Status = "cancelled"
 )
+
+var ErrNotFound = errors.New("execution not found")
+
+type Store interface {
+	CreateExecution(context.Context, affordance.Definition, affordance.Request, Execution, protocol.Event, protocol.Event) error
+	TransitionExecution(context.Context, string, Status, time.Time, *ExecutionError, protocol.Event) (Execution, error)
+	GetExecution(context.Context, string) (Execution, error)
+	ListActiveExecutions(context.Context, string) ([]Execution, error)
+}
 
 var transitions = map[Status]map[Status]struct{}{
 	StatusCreated: {StatusRunning: {}, StatusCancelled: {}},
@@ -126,6 +136,55 @@ func (e Execution) Validate() error {
 	return nil
 }
 
+func ValidateCreate(def affordance.Definition, request affordance.Request, value Execution, requested, created protocol.Event) error {
+	if err := affordance.ValidateRequest(def, request); err != nil {
+		return err
+	}
+	if err := value.Validate(); err != nil {
+		return err
+	}
+	if value.Status != StatusCreated || value.RequestID != request.RequestID || value.EpisodeID != request.EpisodeID || value.AffordanceID != def.ID {
+		return errors.New("execution does not match request or is not created")
+	}
+	if err := validateEvent(requested, affordance.EventRequested, request.EpisodeID, request.RequestID, "request_id"); err != nil {
+		return fmt.Errorf("requested event: %w", err)
+	}
+	if err := validateEvent(created, EventExecutionCreated, value.EpisodeID, value.ExecutionID, "execution_id"); err != nil {
+		return fmt.Errorf("created event: %w", err)
+	}
+	if value.CreatedEventID != created.EventID || !value.IntentPersistedAt.Equal(created.TransactionTime) {
+		return errors.New("execution durable intent must reference creation event transaction time")
+	}
+	return nil
+}
+
+func ValidateTransitionEvent(value Execution, next Status, at time.Time, event protocol.Event) error {
+	typeName, ok := EventTypeForStatus(next)
+	if !ok || next == StatusCreated {
+		return errors.New("transition has no canonical event type")
+	}
+	if err := validateEvent(event, typeName, value.EpisodeID, value.ExecutionID, "execution_id"); err != nil {
+		return err
+	}
+	if !event.ValidTime.Equal(at) {
+		return errors.New("event valid_time must equal transition time")
+	}
+	return nil
+}
+
+func validateEvent(event protocol.Event, eventType, episodeID, entityID, payloadKey string) error {
+	if err := event.Validate(); err != nil {
+		return err
+	}
+	if event.Type != eventType || event.EpisodeID != episodeID {
+		return fmt.Errorf("expected canonical %s event for episode", eventType)
+	}
+	if id, ok := event.Payload[payloadKey].(string); !ok || id != entityID {
+		return fmt.Errorf("event payload %s does not match", payloadKey)
+	}
+	return nil
+}
+
 func (e Execution) Transition(next Status, at time.Time, executionError *ExecutionError) (Execution, error) {
 	if err := e.Validate(); err != nil {
 		return Execution{}, err
@@ -135,6 +194,9 @@ func (e Execution) Transition(next Status, at time.Time, executionError *Executi
 	}
 	if at.IsZero() {
 		return Execution{}, errors.New("transition time is required")
+	}
+	if at.Before(e.IntentPersistedAt) || (e.StartedAt != nil && at.Before(*e.StartedAt)) {
+		return Execution{}, errors.New("transition time cannot precede execution lifecycle")
 	}
 	if next == StatusFailed {
 		if executionError == nil {

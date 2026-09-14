@@ -2,12 +2,17 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"sync"
+	"time"
 
+	"github.com/temporality-project/temporality/frp/affordance"
 	"github.com/temporality-project/temporality/frp/cognition"
+	"github.com/temporality-project/temporality/frp/execution"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
 	"github.com/temporality-project/temporality/frp/projection"
@@ -16,17 +21,20 @@ import (
 )
 
 type Store struct {
-	mu         sync.RWMutex
-	events     map[string]protocol.Event
-	claims     map[string]cognition.Claim
-	relations  []cognition.ClaimRelation
-	frames     map[string]frame.Frame
-	objectives map[string]objective.Objective
-	regions    []projection.Region
+	mu          sync.RWMutex
+	events      map[string]protocol.Event
+	claims      map[string]cognition.Claim
+	relations   []cognition.ClaimRelation
+	frames      map[string]frame.Frame
+	objectives  map[string]objective.Objective
+	regions     []projection.Region
+	definitions map[string]affordance.Definition
+	requests    map[string]affordance.Request
+	executions  map[string]execution.Execution
 }
 
 func New() *Store {
-	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective)}
+	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective), definitions: make(map[string]affordance.Definition), requests: make(map[string]affordance.Request), executions: make(map[string]execution.Execution)}
 }
 
 func (s *Store) Append(_ context.Context, event protocol.Event) error {
@@ -285,6 +293,107 @@ func copyFrame(value frame.Frame) frame.Frame {
 	result.WorkingSet = append([]frame.Ref(nil), value.WorkingSet...)
 	result.Filters.AgentIDs = append([]string(nil), value.Filters.AgentIDs...)
 	result.Filters.RegionKinds = append([]string(nil), value.Filters.RegionKinds...)
+	return result
+}
+
+func (s *Store) CreateExecution(_ context.Context, def affordance.Definition, request affordance.Request, value execution.Execution, requested, created protocol.Event) error {
+	if err := execution.ValidateCreate(def, request, value, requested, created); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.definitions[def.ID]; ok && !reflect.DeepEqual(existing, def) {
+		return affordance.ErrDefinitionFrozen
+	}
+	if _, ok := s.requests[request.RequestID]; ok {
+		return errors.New("affordance request already exists")
+	}
+	if _, ok := s.executions[value.ExecutionID]; ok {
+		return errors.New("execution already exists")
+	}
+	if _, ok := s.events[requested.EventID]; ok {
+		return errors.New("event already exists")
+	}
+	if _, ok := s.events[created.EventID]; ok {
+		return errors.New("event already exists")
+	}
+	s.definitions[def.ID] = clone(def)
+	s.requests[request.RequestID] = clone(request)
+	s.executions[value.ExecutionID] = clone(value)
+	s.events[requested.EventID] = clone(requested)
+	s.events[created.EventID] = clone(created)
+	return nil
+}
+
+func (s *Store) TransitionExecution(_ context.Context, id string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event) (execution.Execution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.executions[id]
+	if !ok {
+		return execution.Execution{}, execution.ErrNotFound
+	}
+	updated, err := current.Transition(next, at, executionError)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	if err = execution.ValidateTransitionEvent(current, next, at, event); err != nil {
+		return execution.Execution{}, err
+	}
+	if _, ok = s.events[event.EventID]; ok {
+		return execution.Execution{}, errors.New("event already exists")
+	}
+	s.events[event.EventID] = clone(event)
+	s.executions[id] = clone(updated)
+	return clone(updated), nil
+}
+
+func (s *Store) GetDefinition(_ context.Context, id string) (affordance.Definition, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.definitions[id]
+	if !ok {
+		return affordance.Definition{}, affordance.ErrDefinitionNotFound
+	}
+	return clone(value), nil
+}
+
+func (s *Store) GetRequest(_ context.Context, id string) (affordance.Request, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.requests[id]
+	if !ok {
+		return affordance.Request{}, affordance.ErrRequestNotFound
+	}
+	return clone(value), nil
+}
+
+func (s *Store) GetExecution(_ context.Context, id string) (execution.Execution, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.executions[id]
+	if !ok {
+		return execution.Execution{}, execution.ErrNotFound
+	}
+	return clone(value), nil
+}
+
+func (s *Store) ListActiveExecutions(_ context.Context, episodeID string) ([]execution.Execution, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]execution.Execution, 0)
+	for _, value := range s.executions {
+		if (episodeID == "" || value.EpisodeID == episodeID) && !value.Status.Terminal() {
+			result = append(result, clone(value))
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ExecutionID < result[j].ExecutionID })
+	return result, nil
+}
+
+func clone[T any](value T) T {
+	data, _ := json.Marshal(value)
+	var result T
+	_ = json.Unmarshal(data, &result)
 	return result
 }
 

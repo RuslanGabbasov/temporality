@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/temporality-project/temporality/frp/affordance"
 	"github.com/temporality-project/temporality/frp/cognition"
+	"github.com/temporality-project/temporality/frp/execution"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
 	"github.com/temporality-project/temporality/frp/projection"
@@ -46,6 +48,9 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /v1/claims", s.commitClaim)
 	mux.HandleFunc("POST /v1/claims/{id}/transitions", s.transitionClaim)
 	mux.HandleFunc("GET /v1/claims/{id}", s.getClaim)
+	mux.HandleFunc("POST /v1/executions", s.createExecution)
+	mux.HandleFunc("GET /v1/executions/{id}", s.getExecution)
+	mux.HandleFunc("POST /internal/v1/executions/{id}/transitions", s.transitionExecution)
 	mux.HandleFunc("POST /v1/frames", s.createFrame)
 	mux.HandleFunc("POST /v1/frames/{id}/transitions", s.transitionFrame)
 	mux.HandleFunc("POST /v1/frames/{id}/emissions", s.reduceEmission)
@@ -123,6 +128,98 @@ func (s *Server) getEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, event)
+}
+
+type executionCreateRequest struct {
+	Definition affordance.Definition `json:"definition"`
+	EpisodeID  string                `json:"episode_id"`
+	Arguments  map[string]any        `json:"arguments"`
+}
+
+func (s *Server) createExecution(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(execution.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("executions are not supported"))
+		return
+	}
+	var input executionCreateRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	input.Definition.ApplyDefaults()
+	now := s.now().UTC()
+	request := affordance.Request{RequestID: newUUID(), EpisodeID: input.EpisodeID, AffordanceID: input.Definition.ID, Arguments: input.Arguments}
+	request.ApplyDefaults()
+	requested := protocol.Event{EventID: newUUID(), ValidTime: now, EpisodeID: input.EpisodeID, Type: affordance.EventRequested, Payload: map[string]any{"request_id": request.RequestID, "affordance": request.AffordanceID}, Provenance: map[string]any{"source": "runtime"}}
+	requested.ApplyDefaults(now)
+	created := protocol.Event{EventID: newUUID(), ValidTime: now, EpisodeID: input.EpisodeID, Type: execution.EventExecutionCreated, Payload: map[string]any{}, Provenance: map[string]any{"source": "runtime"}}
+	created.ApplyDefaults(now)
+	value := execution.Execution{Protocol: protocol.Name, Version: protocol.Version, ExecutionID: newUUID(), RequestID: request.RequestID, EpisodeID: input.EpisodeID, AffordanceID: input.Definition.ID, Status: execution.StatusCreated, CreatedEventID: created.EventID, IntentPersistedAt: created.TransactionTime}
+	created.Payload["execution_id"] = value.ExecutionID
+	if err := store.CreateExecution(r.Context(), input.Definition, request, value, requested, created); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"request": request, "execution": value, "events": []protocol.Event{requested, created}})
+}
+
+type executionTransitionRequest struct {
+	Status execution.Status          `json:"status"`
+	Error  *execution.ExecutionError `json:"error,omitempty"`
+}
+
+func (s *Server) transitionExecution(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(execution.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("executions are not supported"))
+		return
+	}
+	var input executionTransitionRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	current, err := store.GetExecution(r.Context(), r.PathValue("id"))
+	if errors.Is(err, execution.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	eventType, ok := execution.EventTypeForStatus(input.Status)
+	if !ok {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("invalid execution status"))
+		return
+	}
+	now := s.now().UTC()
+	event := protocol.Event{EventID: newUUID(), ValidTime: now, EpisodeID: current.EpisodeID, Type: eventType, Payload: map[string]any{"execution_id": current.ExecutionID}, Provenance: map[string]any{"source": "executor"}}
+	event.ApplyDefaults(now)
+	updated, err := store.TransitionExecution(r.Context(), current.ExecutionID, input.Status, now, input.Error, event)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"execution": updated, "event": event})
+}
+func (s *Server) getExecution(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(execution.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("executions are not supported"))
+		return
+	}
+	value, err := store.GetExecution(r.Context(), r.PathValue("id"))
+	if errors.Is(err, execution.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 
 type regionRebuildRequest struct {

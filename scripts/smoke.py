@@ -76,12 +76,19 @@ def main():
         _, reduced = request("POST", f"/v1/frames/{initial['frame_id']}/emissions", emission)
         next_frame = reduced["decision"]["frame"]
         _, restored = request("GET", f"/v1/frames/{next_frame['frame_id']}")
+        execution_request = {"definition": {"id": "inspect_environment", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}, "episode_id": episode_id, "arguments": {"path": "/workspace"}}
+        _, execution_created = request("POST", "/v1/executions", execution_request)
+        execution_id = execution_created["execution"]["execution_id"]
+        request("POST", f"/internal/v1/executions/{execution_id}/transitions", {"status": "running"})
+        request("POST", f"/internal/v1/executions/{execution_id}/transitions", {"status": "completed"})
+        _, final_execution = request("GET", f"/v1/executions/{execution_id}")
+        assert final_execution["status"] == "completed"
         _, replay = request("POST", "/v1/replay", {"episode_id": episode_id})
         assert restored["parent_frame_id"] == initial["frame_id"]
         assert restored["focus"]["query"] == "evidence that validates Temporality" and restored["revision"] == 1
         assert len(restored["working_set"]) == 1
-        assert len(replay["events"]) == 3 and replay["digest"]
-        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
+        assert len(replay["events"]) == 7 and replay["digest"]
+        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "execution_id": execution_id, "execution_status": final_execution["status"], "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
     finally:
         runtime.terminate()
         try:

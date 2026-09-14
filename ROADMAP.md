@@ -38,7 +38,9 @@ The milestone order follows FRP v0.3 section 38.
 - [ ] **M5 — Affordance registry and deterministic Executor:**
   - [x] Versioned affordance definitions/requests, capability and limit validation.
   - [x] Execution state machine, normalized failures, canonical event helpers, declarative workflows.
-  - [ ] PostgreSQL registry/execution store, atomic Step integration, and separate executor worker.
+  - [x] PostgreSQL frozen registry, durable requests/executions, atomic intent Events, lifecycle API and restart tests.
+  - [x] Persist-before-effect smoke lifecycle through the separate internal Executor boundary.
+  - [ ] Atomic CognitiveEmission Step integration and separate physical executor worker.
 - [ ] **M6 — Adaptive Planner:**
   - [x] Bounded planner context/state, capability checks, step limits, recorded replay adapter.
   - [ ] Durable child planner episode and executor integration.
