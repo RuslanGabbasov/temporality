@@ -13,6 +13,7 @@ import (
 	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
+	"github.com/temporality-project/temporality/frp/projection"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/substrate"
 )
@@ -110,7 +111,14 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	for _, event := range events {
 		recent = append(recent, event)
 	}
-	ambient, err := selectAmbient(current, goal, events)
+	regions := []projection.Region{}
+	if regionStore, ok := any(r.stores).(projection.RegionStore); ok {
+		regions, err = regionStore.ListRegions(ctx, projection.RegionFilter{EpisodeID: current.EpisodeID, BranchID: current.BranchID, AsOf: &current.AsOf})
+		if err != nil {
+			return Packet{}, err
+		}
+	}
+	ambient, err := selectAmbient(current, goal, events, regions)
 	if err != nil {
 		return Packet{}, err
 	}
@@ -138,7 +146,7 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	packet.RenderID = contentID(packet)
 	return packet, nil
 }
-func selectAmbient(current frame.Frame, goal objective.Objective, events []protocol.Event) (attention.Result, error) {
+func selectAmbient(current frame.Frame, goal objective.Objective, events []protocol.Event, regions []projection.Region) (attention.Result, error) {
 	if !current.Attention.Ambient {
 		return attention.Result{Version: attention.Version, Selected: []attention.ScoredCandidate{}}, nil
 	}
@@ -146,7 +154,7 @@ func selectAmbient(current frame.Frame, goal objective.Objective, events []proto
 	for _, ref := range current.WorkingSet {
 		pins[string(ref.Type)+":"+ref.ID] = struct{}{}
 	}
-	candidates := make([]attention.Candidate, 0, len(events))
+	candidates := make([]attention.Candidate, 0, len(events)+len(regions))
 	focusText := current.Focus.Query
 	for i, event := range events {
 		trust := .5
@@ -172,6 +180,17 @@ func selectAmbient(current frame.Frame, goal objective.Objective, events []proto
 		}
 		recency := float64(i+1) / float64(len(events))
 		candidates = append(candidates, attention.Candidate{Ref: frame.Ref{Type: frame.RefEvent, ID: event.EventID}, Features: attention.Features{SemanticRelevance: overlap(focusText, text), Recency: recency, Trust: trust, TaskRelevance: overlap(goal.Text, text), Surprise: surprise, AgentRelevance: agent, Pin: pin}, Payload: event})
+	}
+	for _, region := range regions {
+		trust := .5
+		if trust < float64(current.Filters.TrustMin) {
+			continue
+		}
+		pin := 0.0
+		if _, ok := pins["region:"+region.RegionID]; ok {
+			pin = 1
+		}
+		candidates = append(candidates, attention.Candidate{Ref: frame.Ref{Type: frame.RefRegion, ID: region.RegionID}, Features: attention.Features{SemanticRelevance: overlap(focusText, region.Label), Activation: region.Activation, Trust: trust, TaskRelevance: overlap(goal.Text, region.Label), Pin: pin}, Payload: region})
 	}
 	engine, err := attention.New(attention.DefaultPolicy())
 	if err != nil {

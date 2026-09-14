@@ -10,6 +10,7 @@ import (
 	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
+	"github.com/temporality-project/temporality/frp/projection"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/substrate"
 )
@@ -21,6 +22,7 @@ type Store struct {
 	relations  []cognition.ClaimRelation
 	frames     map[string]frame.Frame
 	objectives map[string]objective.Objective
+	regions    []projection.Region
 }
 
 func New() *Store {
@@ -152,6 +154,45 @@ func (s *Store) ListRelations(_ context.Context, id string) ([]cognition.ClaimRe
 			result = append(result, relation)
 		}
 	}
+	return result, nil
+}
+
+func (s *Store) ReplaceRegions(_ context.Context, episodeID, branchID string, regions []projection.Region) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make([]projection.Region, 0, len(s.regions)+len(regions))
+	for _, region := range s.regions {
+		if region.EpisodeID != episodeID || region.BranchID != branchID {
+			kept = append(kept, region)
+		}
+	}
+	for _, region := range regions {
+		copy := region
+		copy.MemberEventIDs = append([]string(nil), region.MemberEventIDs...)
+		kept = append(kept, copy)
+	}
+	s.regions = kept
+	return nil
+}
+func (s *Store) ListRegions(_ context.Context, filter projection.RegionFilter) ([]projection.Region, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]projection.Region, 0)
+	for _, region := range s.regions {
+		if filter.EpisodeID != "" && region.EpisodeID != filter.EpisodeID {
+			continue
+		}
+		if filter.BranchID != "" && region.BranchID != filter.BranchID {
+			continue
+		}
+		if filter.AsOf != nil && region.ValidFrom.After(*filter.AsOf) {
+			continue
+		}
+		copy := region
+		copy.MemberEventIDs = append([]string(nil), region.MemberEventIDs...)
+		result = append(result, copy)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].RegionID < result[j].RegionID })
 	return result, nil
 }
 

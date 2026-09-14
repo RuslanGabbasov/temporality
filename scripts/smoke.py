@@ -57,12 +57,15 @@ def main():
         }
         _, created = request("POST", "/v1/frames", create)
         initial = created["frame"]
+        _, projection = request("POST", "/v1/projections/regions/rebuild", {"episode_id": episode_id, "branch_id": initial["branch_id"]})
+        assert projection["projection_version"] == "region-event-type.v1" and projection["regions"]
         render_request = {"frame_id": initial["frame_id"], "objective_id": objective_id, "budget_tokens": 2000}
         _, first_render = request("POST", "/v1/render", render_request)
         _, repeated_render = request("POST", "/v1/render", render_request)
         assert first_render == repeated_render
         assert first_render["provenance"]["attention_version"] == "attention-0.3.1"
-        assert next(section for section in first_render["sections"] if section["kind"] == "map")["items"]
+        map_items = next(section for section in first_render["sections"] if section["kind"] == "map")["items"]
+        assert map_items and any(item["candidate"]["ref"]["type"] == "region" for item in map_items)
         emission = {
             "schema": "frp.cognitive-emission.v1",
             "emission_id": str(uuid.uuid4()),
@@ -78,7 +81,7 @@ def main():
         assert restored["focus"]["query"] == "evidence that validates Temporality" and restored["revision"] == 1
         assert len(restored["working_set"]) == 1
         assert len(replay["events"]) == 3 and replay["digest"]
-        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "next_frame_id": restored["frame_id"], "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
+        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
     finally:
         runtime.terminate()
         try:

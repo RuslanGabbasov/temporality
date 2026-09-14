@@ -62,9 +62,18 @@ make smoke
 
 This builds and starts `temporality-runtime`, creates an initial Frame, creates an Objective, verifies two identical deterministic RenderPackets, submits a validated `CognitiveEmission`, reduces its attention/frame operations into an immutable transition, restores the next Frame from PostgreSQL, verifies replay, prints the IDs/digest, and stops the runtime.
 
-Render packets expose the attention engine version, scored ambient map, selected periphery, and an outside-frame candidate count. `/metrics` includes render totals/errors, focus switches, ambient hit rate, attention entropy, missed candidates, and attention collapse score. Deliberate `attend()` operations bypass ambient hysteresis.
+Render packets expose the attention engine version, scored Event/Region ambient map, selected periphery, and an outside-frame candidate count. `/metrics` includes render totals/errors, focus switches, ambient hit rate, attention entropy, missed candidates, and attention collapse score. Deliberate `attend()` operations bypass ambient hysteresis.
 
 The M2 emission endpoint rejects emissions containing claims or actions until those intents can be committed atomically with Frame and Execution state; they are never silently dropped.
+
+Rebuildable projection endpoints:
+
+```text
+POST /v1/projections/regions/rebuild
+GET  /v1/regions
+```
+
+Regions are derived from the canonical Event Log by the versioned `region-event-type.v1` projector and can be deleted/rebuilt without memory loss.
 
 Objective and render endpoints:
 

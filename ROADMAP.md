@@ -31,7 +31,8 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Stable tie-breaking, trust filters, explicit pins, and ambient-only hysteresis.
   - [x] Deliberate semantic jumps remain independent from ambient hysteresis.
   - [x] RenderPacket scored map, periphery, outside-frame count, and attention provenance.
-  - [ ] Region/graph projection candidates.
+  - [x] Rebuildable versioned Region projection and region-based ambient candidates.
+  - [ ] Graph proximity projection and edges.
   - [x] Attention entropy, focus switches, ambient hit rate, missed candidates, and collapse metrics.
   - [ ] Canonical `attention.selected` / `attention.suggested` Events in the atomic Step transaction.
 - [ ] **M5:** Affordance registry and deterministic Executor.

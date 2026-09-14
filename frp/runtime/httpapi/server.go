@@ -15,6 +15,7 @@ import (
 	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
+	"github.com/temporality-project/temporality/frp/projection"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/render"
 	"github.com/temporality-project/temporality/frp/replay"
@@ -40,6 +41,8 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /v1/render", s.renderFrame)
 	mux.HandleFunc("POST /v1/objectives", s.createObjective)
 	mux.HandleFunc("GET /v1/objectives/{id}", s.getObjective)
+	mux.HandleFunc("POST /v1/projections/regions/rebuild", s.rebuildRegions)
+	mux.HandleFunc("GET /v1/regions", s.listRegions)
 	mux.HandleFunc("POST /v1/claims", s.commitClaim)
 	mux.HandleFunc("POST /v1/claims/{id}/transitions", s.transitionClaim)
 	mux.HandleFunc("GET /v1/claims/{id}", s.getClaim)
@@ -120,6 +123,62 @@ func (s *Server) getEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, event)
+}
+
+type regionRebuildRequest struct {
+	EpisodeID string     `json:"episode_id"`
+	BranchID  string     `json:"branch_id"`
+	AsOf      *time.Time `json:"as_of,omitempty"`
+}
+
+func (s *Server) rebuildRegions(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(projection.RegionStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("region projections are not supported"))
+		return
+	}
+	var request regionRebuildRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if request.EpisodeID == "" || request.BranchID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("episode_id and branch_id are required"))
+		return
+	}
+	events, err := s.store.List(r.Context(), substrate.EventFilter{EpisodeID: request.EpisodeID, BranchID: request.BranchID, AsOf: request.AsOf})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	regions := projection.BuildRegions(request.EpisodeID, request.BranchID, events)
+	if err = store.ReplaceRegions(r.Context(), request.EpisodeID, request.BranchID, regions); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"projection_version": projection.RegionProjectorVersion, "regions": regions})
+}
+func (s *Server) listRegions(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(projection.RegionStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("region projections are not supported"))
+		return
+	}
+	var asOf *time.Time
+	if value := r.URL.Query().Get("as_of"); value != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, errors.New("as_of must be RFC3339"))
+			return
+		}
+		asOf = &parsed
+	}
+	regions, err := store.ListRegions(r.Context(), projection.RegionFilter{EpisodeID: r.URL.Query().Get("episode_id"), BranchID: r.URL.Query().Get("branch_id"), AsOf: asOf})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"regions": regions})
 }
 
 type objectiveCreateRequest struct {
