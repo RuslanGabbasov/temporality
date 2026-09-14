@@ -41,13 +41,16 @@ func TestOpenAIAdapterSuccessAndDeterministicRequest(t *testing.T) {
 		if format["type"] != "json_object" {
 			t.Errorf("response_format = %#v", format)
 		}
+		if len(body) != 5 || body["model"] != "test-model" || body["temperature"] != 0.25 || body["max_tokens"] != float64(2048) {
+			t.Errorf("exact wire body fields = %#v", body)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		content := "```json\n{\"schema\":\"frp.cognitive-emission.v1\",\"emission_id\":\"e-1\",\"frame_id\":\"frame-1\",\"observation\":[],\"reasoning\":[],\"claims\":[],\"attention\":[],\"actions\":[],\"frame_ops\":[],\"completion\":null}\n```"
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}}}})
 	}))
 	defer server.Close()
 
-	adapter, err := model.NewOpenAIAdapter(model.Config{BaseURL: server.URL + "/v1/", Model: "test-model", Temperature: 0.25, Timeout: time.Second}, model.Credentials{APIKey: key}, server.Client())
+	adapter, err := model.NewOpenAIAdapter(model.Config{BaseURL: server.URL + "/v1/", Model: "test-model", Temperature: 0.25, Timeout: time.Second, MaxOutputTokens: 2048}, model.Credentials{APIKey: key}, server.Client())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,8 +61,11 @@ func TestOpenAIAdapterSuccessAndDeterministicRequest(t *testing.T) {
 	if emission.EmissionID != "e-1" {
 		t.Fatalf("emission = %#v", emission)
 	}
-	if !strings.Contains(requestBody, `"model":"test-model"`) || !strings.Contains(requestBody, `"temperature":0.25`) {
+	if !strings.Contains(requestBody, `"model":"test-model"`) || !strings.Contains(requestBody, `"temperature":0.25`) || !strings.Contains(requestBody, `"max_tokens":2048`) {
 		t.Fatalf("request = %s", requestBody)
+	}
+	if got := adapter.Provenance().MaxOutputTokens; got != 2048 {
+		t.Fatalf("max output tokens provenance = %d", got)
 	}
 }
 
@@ -118,6 +124,9 @@ func TestSecretAbsentFromProvenance(t *testing.T) {
 	adapter, err := model.NewOpenAIAdapter(model.Config{BaseURL: "http://localhost:11434/v1", Model: "llama3", Timeout: 3 * time.Second}, model.Credentials{APIKey: secret}, http.DefaultClient)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if adapter.Provenance().MaxOutputTokens != 1024 {
+		t.Fatalf("default max output tokens = %d", adapter.Provenance().MaxOutputTokens)
 	}
 	for _, value := range []any{adapter.Provenance(), model.Credentials{APIKey: secret}} {
 		encoded, err := json.Marshal(value)

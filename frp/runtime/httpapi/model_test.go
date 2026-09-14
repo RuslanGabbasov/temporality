@@ -39,6 +39,7 @@ func TestModelStepFromEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var maxTokens float64
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Errorf("model path = %q", r.URL.Path)
@@ -46,6 +47,11 @@ func TestModelStepFromEnvironment(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer "+apiKey {
 			t.Errorf("authorization = %q", got)
 		}
+		var requestBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Error(err)
+		}
+		maxTokens, _ = requestBody["max_tokens"].(float64)
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(content)}}}})
 	}))
 	defer modelServer.Close()
@@ -54,6 +60,7 @@ func TestModelStepFromEnvironment(t *testing.T) {
 	t.Setenv("TEMPORALITY_MODEL_API_KEY", apiKey)
 	t.Setenv("TEMPORALITY_MODEL_TEMPERATURE", "")
 	t.Setenv("TEMPORALITY_MODEL_TIMEOUT", "")
+	t.Setenv("TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS", "")
 	t.Setenv("TEMPORALITY_MODEL_LOG_PAYLOADS", "false")
 	t.Setenv("TEMPORALITY_MODEL_LOG_MAX_BYTES", "")
 
@@ -66,21 +73,22 @@ func TestModelStepFromEnvironment(t *testing.T) {
 	var publicConfig struct {
 		Configured bool `json:"configured"`
 		Provenance struct {
-			Model       string  `json:"model"`
-			Temperature float64 `json:"temperature"`
-			TimeoutMS   int64   `json:"timeout_ms"`
+			Model           string  `json:"model"`
+			Temperature     float64 `json:"temperature"`
+			TimeoutMS       int64   `json:"timeout_ms"`
+			MaxOutputTokens int     `json:"max_output_tokens"`
 		} `json:"provenance"`
 	}
 	if err = json.Unmarshal(config.Body.Bytes(), &publicConfig); err != nil {
 		t.Fatal(err)
 	}
-	if !publicConfig.Configured || publicConfig.Provenance.Model != "test-model" || publicConfig.Provenance.Temperature != 0 || publicConfig.Provenance.TimeoutMS != 180000 {
+	if !publicConfig.Configured || publicConfig.Provenance.Model != "test-model" || publicConfig.Provenance.Temperature != 0 || publicConfig.Provenance.TimeoutMS != 180000 || publicConfig.Provenance.MaxOutputTokens != 1024 {
 		t.Fatalf("unexpected config: %s", config.Body.String())
 	}
 
 	body := []byte(`{"frame_id":"` + current.FrameID + `","objective_id":"` + goal.ObjectiveID + `","budget_tokens":8000,"definitions":[]}`)
 	response := serve(handler, http.MethodPost, "/v1/model-step", body)
-	if response.Code != http.StatusCreated || strings.Contains(response.Body.String(), apiKey) {
+	if response.Code != http.StatusCreated || strings.Contains(response.Body.String(), apiKey) || maxTokens != 1024 {
 		t.Fatalf("model step: status=%d body=%s", response.Code, response.Body.String())
 	}
 	var result modelstep.Result
@@ -136,6 +144,27 @@ func TestModelStepUnavailableAndBadGateway(t *testing.T) {
 	}
 }
 
+func TestModelStepProviderTimeoutReturnsJSON(t *testing.T) {
+	store, current, goal := modelStepStore(t)
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(50 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{}})
+	}))
+	defer modelServer.Close()
+	t.Setenv("TEMPORALITY_MODEL_BASE_URL", modelServer.URL+"/v1")
+	t.Setenv("TEMPORALITY_MODEL_ID", "slow-model")
+	t.Setenv("TEMPORALITY_MODEL_TIMEOUT", "10ms")
+	t.Setenv("TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS", "1024")
+	t.Setenv("TEMPORALITY_MODEL_LOG_PAYLOADS", "false")
+	t.Setenv("TEMPORALITY_MODEL_LOG_MAX_BYTES", "")
+	handler := httpapi.New(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	body := []byte(`{"frame_id":"` + current.FrameID + `","objective_id":"` + goal.ObjectiveID + `","budget_tokens":8000,"definitions":[]}`)
+	response := serve(handler, http.MethodPost, "/v1/model-step", body)
+	if response.Code != http.StatusGatewayTimeout || response.Header().Get("Content-Type") != "application/json" || !strings.Contains(response.Body.String(), "provider did not respond within configured timeout") {
+		t.Fatalf("timeout response: status=%d content-type=%q body=%s", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+}
+
 func TestModelPayloadLoggingAndInvalidConfiguration(t *testing.T) {
 	const apiKey = "authorization-secret-never-logged"
 	store, current, goal := modelStepStore(t)
@@ -154,6 +183,7 @@ func TestModelPayloadLoggingAndInvalidConfiguration(t *testing.T) {
 	t.Setenv("TEMPORALITY_MODEL_API_KEY", apiKey)
 	t.Setenv("TEMPORALITY_MODEL_TEMPERATURE", "")
 	t.Setenv("TEMPORALITY_MODEL_TIMEOUT", "")
+	t.Setenv("TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS", "")
 	t.Setenv("TEMPORALITY_MODEL_LOG_PAYLOADS", "true")
 	t.Setenv("TEMPORALITY_MODEL_LOG_MAX_BYTES", "1024")
 	var logs bytes.Buffer
@@ -183,8 +213,15 @@ func TestModelPayloadLoggingAndInvalidConfiguration(t *testing.T) {
 		t.Fatalf("invalid boolean was not actionable: status=%d body=%s", invalid.Code, invalid.Body.String())
 	}
 	invalidConfig := serve(handler, http.MethodGet, "/v1/model/config", nil)
-	if invalidConfig.Code != http.StatusOK || !strings.Contains(invalidConfig.Body.String(), `"configured":false`) || strings.Contains(invalidConfig.Body.String(), apiKey) {
-		t.Fatalf("invalid public config: %s", invalidConfig.Body.String())
+	if invalidConfig.Code != http.StatusServiceUnavailable || !strings.Contains(invalidConfig.Body.String(), `"configured":false`) || strings.Contains(invalidConfig.Body.String(), apiKey) {
+		t.Fatalf("invalid public config: status=%d body=%s", invalidConfig.Code, invalidConfig.Body.String())
+	}
+
+	t.Setenv("TEMPORALITY_MODEL_LOG_PAYLOADS", "false")
+	t.Setenv("TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS", "63")
+	invalidTokens := serve(handler, http.MethodGet, "/v1/model/config", nil)
+	if invalidTokens.Code != http.StatusServiceUnavailable || !strings.Contains(invalidTokens.Body.String(), "between 64 and 16384") {
+		t.Fatalf("invalid max output tokens: status=%d body=%s", invalidTokens.Code, invalidTokens.Body.String())
 	}
 }
 

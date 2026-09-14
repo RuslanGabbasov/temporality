@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,11 +18,16 @@ import (
 )
 
 const (
-	modelConfigHint      = "set TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID"
-	modelLogDefaultBytes = 65536
-	modelLogMinBytes     = 1024
-	modelLogMaxBytes     = 1024 * 1024
+	modelConfigHint             = "set TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID"
+	modelLogDefaultBytes        = 65536
+	modelLogMinBytes            = 1024
+	modelLogMaxBytes            = 1024 * 1024
+	modelMaxOutputTokensDefault = 1024
+	modelMaxOutputTokensMin     = 64
+	modelMaxOutputTokensMax     = 16384
 )
+
+var errModelNotConfigured = errors.New("TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID are required")
 
 type modelStepRequest struct {
 	FrameID      string                  `json:"frame_id"`
@@ -35,6 +41,7 @@ type modelConfigResponse struct {
 	PayloadLogging bool              `json:"payload_logging"`
 	LogMaxBytes    int               `json:"log_max_bytes"`
 	Provenance     *model.Provenance `json:"provenance,omitempty"`
+	Error          string            `json:"error,omitempty"`
 }
 
 type modelRuntimeConfig struct {
@@ -48,12 +55,18 @@ func (s *Server) modelConfig(w http.ResponseWriter, _ *http.Request) {
 	config, err := modelConfigFromEnv()
 	response := modelConfigResponse{PayloadLogging: config.payloadLogging, LogMaxBytes: config.logMaxBytes}
 	if err != nil {
-		writeJSON(w, http.StatusOK, response)
+		if errors.Is(err, errModelNotConfigured) {
+			writeJSON(w, http.StatusOK, response)
+			return
+		}
+		response.Error = err.Error()
+		writeJSON(w, http.StatusServiceUnavailable, response)
 		return
 	}
 	adapter, err := model.NewOpenAIAdapter(config.Config, config.credentials, nil)
 	if err != nil {
-		writeJSON(w, http.StatusOK, response)
+		response.Error = err.Error()
+		writeJSON(w, http.StatusServiceUnavailable, response)
 		return
 	}
 	provenance := adapter.Provenance()
@@ -117,6 +130,10 @@ func (s *Server) modelStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Warn("model step failed", "frame_id", request.FrameID, "model", adapter.Provenance().Model, "duration_ms", time.Since(startedAt).Milliseconds(), "error", err)
+	if errors.Is(err, context.DeadlineExceeded) {
+		writeError(w, http.StatusGatewayTimeout, fmt.Errorf("model provider did not respond within configured timeout of %s", config.Timeout))
+		return
+	}
 	if strings.HasPrefix(err.Error(), "model emit:") {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -151,7 +168,7 @@ func modelConfigFromEnv() (modelRuntimeConfig, error) {
 	baseURL := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL"))
 	modelID := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID"))
 	if baseURL == "" || modelID == "" {
-		return config, errors.New("TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID are required")
+		return config, errModelNotConfigured
 	}
 	temperature := 0.0
 	if value := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_TEMPERATURE")); value != "" {
@@ -169,11 +186,20 @@ func modelConfigFromEnv() (modelRuntimeConfig, error) {
 		}
 		timeout = parsed
 	}
+	maxOutputTokens := modelMaxOutputTokensDefault
+	if value := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < modelMaxOutputTokensMin || parsed > modelMaxOutputTokensMax {
+			return config, fmt.Errorf("invalid TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS: must be an integer between %d and %d", modelMaxOutputTokensMin, modelMaxOutputTokensMax)
+		}
+		maxOutputTokens = parsed
+	}
 	config.Config = model.Config{
-		BaseURL:     baseURL,
-		Model:       modelID,
-		Temperature: temperature,
-		Timeout:     timeout,
+		BaseURL:         baseURL,
+		Model:           modelID,
+		Temperature:     temperature,
+		Timeout:         timeout,
+		MaxOutputTokens: maxOutputTokens,
 	}
 	config.credentials = model.Credentials{APIKey: os.Getenv("TEMPORALITY_MODEL_API_KEY")}
 	return config, nil

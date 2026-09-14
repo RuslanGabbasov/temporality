@@ -58,6 +58,7 @@ cp .env.example .env
 - `TEMPORALITY_MODEL_API_KEY` — ключ (может быть пустым для Ollama; ключ никогда не возвращается в provenance);
 - `TEMPORALITY_MODEL_TEMPERATURE` — температура `0..2`, по умолчанию `0`;
 - `TEMPORALITY_MODEL_TIMEOUT` — Go duration, например `180s` (по умолчанию `180s`). Proxy ждёт до 10 минут, поэтому Runtime успевает вернуть структурированную JSON-ошибку вместо HTML `504`;
+- `TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS` — максимум токенов ответа, отправляемый провайдеру как OpenAI-compatible `max_tokens`; по умолчанию `1024`, допустимо `64..16384`;
 - `TEMPORALITY_MODEL_LOG_PAYLOADS` — opt-in логирование JSON-запросов и сырого `message.content` ответов (`true` или `false`, по умолчанию `false`);
 - `TEMPORALITY_MODEL_LOG_MAX_BYTES` — лимит каждого залогированного payload, по умолчанию `65536`, допустимо `1024..1048576`. Метаданные указывают исходный размер и факт усечения.
 
@@ -104,7 +105,9 @@ docker compose up --build -d runtime executor debugger
 curl http://localhost:8080/v1/model/config
 ```
 
-Провайдер должен поддерживать `response_format: {"type":"json_object"}` и возвращать один валидный объект `CognitiveEmission` со всеми обязательными полями схемы. Модели без надёжного JSON object mode могут приводить к ответу `502` на `/v1/model-step`.
+Провайдер должен поддерживать `response_format: {"type":"json_object"}` и `max_tokens`, а также возвращать один валидный объект `CognitiveEmission` со всеми обязательными полями схемы. Модели без надёжного JSON object mode могут приводить к ответу `502` на `/v1/model-step`.
+
+Если провайдер отвечает медленно, debugger продолжает показывать elapsed time, настроенный timeout и лимит output tokens. По истечении `TEMPORALITY_MODEL_TIMEOUT` Runtime возвращает JSON `504` с сообщением, что провайдер не ответил за настроенное время (Nginx не подменяет его HTML-страницей). Сначала проверьте состояние и очередь провайдера; затем увеличьте timeout либо переключите `TEMPORALITY_MODEL_ID`/`TEMPORALITY_MODEL_BASE_URL` на более быструю модель и пересоздайте Runtime.
 
 End-to-end проверка с локальным mock OpenAI-compatible сервером (нужен запущенный PostgreSQL, например `docker compose up -d postgres`):
 

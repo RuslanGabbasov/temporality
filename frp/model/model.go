@@ -25,11 +25,12 @@ type Adapter interface {
 // Config is non-secret model configuration and may safely be retained as provenance.
 // BaseURL is the OpenAI-compatible API root, normally ending in /v1.
 type Config struct {
-	BaseURL     string        `json:"base_url"`
-	Model       string        `json:"model"`
-	Temperature float64       `json:"temperature"`
-	Timeout     time.Duration `json:"timeout"`
-	Trace       *TraceConfig  `json:"-"`
+	BaseURL         string        `json:"base_url"`
+	Model           string        `json:"model"`
+	Temperature     float64       `json:"temperature"`
+	Timeout         time.Duration `json:"timeout"`
+	MaxOutputTokens int           `json:"max_output_tokens"`
+	Trace           *TraceConfig  `json:"-"`
 }
 
 // TraceConfig enables bounded payload tracing for one adapter instance.
@@ -53,27 +54,32 @@ type Credentials struct {
 
 // Provenance describes the public configuration used for a model call.
 type Provenance struct {
-	Adapter     string  `json:"adapter"`
-	BaseURL     string  `json:"base_url"`
-	Model       string  `json:"model"`
-	Temperature float64 `json:"temperature"`
-	TimeoutMS   int64   `json:"timeout_ms"`
+	Adapter         string  `json:"adapter"`
+	BaseURL         string  `json:"base_url"`
+	Model           string  `json:"model"`
+	Temperature     float64 `json:"temperature"`
+	TimeoutMS       int64   `json:"timeout_ms"`
+	MaxOutputTokens int     `json:"max_output_tokens"`
 }
 
 // OpenAIAdapter calls an OpenAI-compatible chat-completions endpoint.
 // Its runtime configuration is copied at construction and cannot be mutated by callers.
 type OpenAIAdapter struct {
-	endpoint    string
-	model       string
-	temperature float64
-	timeout     time.Duration
-	apiKey      string
-	client      *http.Client
-	provenance  Provenance
-	trace       TraceConfig
+	endpoint        string
+	model           string
+	temperature     float64
+	timeout         time.Duration
+	maxOutputTokens int
+	apiKey          string
+	client          *http.Client
+	provenance      Provenance
+	trace           TraceConfig
 }
 
 func NewOpenAIAdapter(config Config, credentials Credentials, client *http.Client) (*OpenAIAdapter, error) {
+	if config.MaxOutputTokens == 0 {
+		config.MaxOutputTokens = 1024
+	}
 	base := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
 	parsed, err := url.Parse(base)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -91,6 +97,9 @@ func NewOpenAIAdapter(config Config, credentials Credentials, client *http.Clien
 	if config.Timeout <= 0 {
 		return nil, errors.New("timeout must be positive")
 	}
+	if config.MaxOutputTokens < 64 || config.MaxOutputTokens > 16384 {
+		return nil, errors.New("max_output_tokens must be between 64 and 16384")
+	}
 	if config.Trace != nil && (config.Trace.MaxBytes <= 0 || config.Trace.Hook == nil) {
 		return nil, errors.New("model trace requires a positive max_bytes and hook")
 	}
@@ -102,19 +111,21 @@ func NewOpenAIAdapter(config Config, credentials Credentials, client *http.Clien
 		trace = *config.Trace
 	}
 	return &OpenAIAdapter{
-		endpoint:    base + "/chat/completions",
-		model:       config.Model,
-		temperature: config.Temperature,
-		timeout:     config.Timeout,
-		apiKey:      credentials.APIKey,
-		client:      client,
-		trace:       trace,
+		endpoint:        base + "/chat/completions",
+		model:           config.Model,
+		temperature:     config.Temperature,
+		timeout:         config.Timeout,
+		maxOutputTokens: config.MaxOutputTokens,
+		apiKey:          credentials.APIKey,
+		client:          client,
+		trace:           trace,
 		provenance: Provenance{
-			Adapter:     "openai-chat-completions",
-			BaseURL:     base,
-			Model:       config.Model,
-			Temperature: config.Temperature,
-			TimeoutMS:   config.Timeout.Milliseconds(),
+			Adapter:         "openai-chat-completions",
+			BaseURL:         base,
+			Model:           config.Model,
+			Temperature:     config.Temperature,
+			TimeoutMS:       config.Timeout.Milliseconds(),
+			MaxOutputTokens: config.MaxOutputTokens,
 		},
 	}, nil
 }
@@ -137,6 +148,7 @@ type chatRequest struct {
 	Model          string         `json:"model"`
 	Messages       []chatMessage  `json:"messages"`
 	Temperature    float64        `json:"temperature"`
+	MaxTokens      int            `json:"max_tokens"`
 	ResponseFormat responseFormat `json:"response_format"`
 }
 type chatMessage struct {
@@ -169,6 +181,7 @@ func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cogniti
 	body, err := json.Marshal(chatRequest{
 		Model:       a.model,
 		Temperature: a.temperature,
+		MaxTokens:   a.maxOutputTokens,
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: string(packetJSON)},
