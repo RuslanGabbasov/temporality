@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/temporality-project/temporality/frp/affordance"
@@ -158,6 +159,12 @@ func insertStepAction(ctx context.Context, tx pgx.Tx, action stepRuntime.Action)
 func validateStepRefsPostgres(ctx context.Context, tx pgx.Tx, prepared stepRuntime.Prepared) error {
 	for _, observation := range prepared.Emission.Observation {
 		ref, _ := cognition.ParseRef(observation.Ref, false)
+		if ref.Type == frame.RefQuery {
+			if prepared.Current.Focus.Type != frame.RefQuery || !strings.EqualFold(strings.TrimSpace(prepared.Current.Focus.Query), strings.TrimSpace(ref.ID)) {
+				return fmt.Errorf("observation ref %s: query is not the current focus", observation.Ref)
+			}
+			continue
+		}
 		if err := stepRefExists(ctx, tx, ref); err != nil {
 			return fmt.Errorf("observation ref %s: %w", observation.Ref, err)
 		}

@@ -33,7 +33,7 @@ func TestMemoryStepSuccessAndReferenceRollback(t *testing.T) {
 	def := testDefinition()
 	emission := cognition.CognitiveEmission{
 		EmissionID: "emission-success", FrameID: current.FrameID,
-		Observation: []cognition.Observation{{Ref: "event:" + seed.EventID, Interpretation: "available"}},
+		Observation: []cognition.Observation{{Ref: "event:" + seed.EventID, Interpretation: "available"}, {Ref: "query:WORK", Interpretation: "visible focus query"}},
 		Claims:      []cognition.EmittedClaim{{Proposition: "work is available", Confidence: 0.9}},
 		Attention:   []cognition.AttentionOperation{{Op: "attend", Target: cognition.AttentionTarget{Type: frame.RefQuery, Text: "next work"}}},
 		Actions:     []cognition.ActionRequest{{Affordance: def.ID, Args: map[string]any{"task": "test"}}},

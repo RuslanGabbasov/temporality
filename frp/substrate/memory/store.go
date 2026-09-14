@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -712,6 +713,8 @@ func (s *Store) validateStepRefsLocked(prepared stepRuntime.Prepared) error {
 			_, exists = s.claims[ref.ID]
 		case frame.RefExecution:
 			_, exists = s.executions[ref.ID]
+		case frame.RefQuery:
+			exists = prepared.Current.Focus.Type == frame.RefQuery && strings.EqualFold(strings.TrimSpace(prepared.Current.Focus.Query), strings.TrimSpace(ref.ID))
 		case frame.RefRegion:
 			for _, region := range s.regions {
 				if region.RegionID == ref.ID {
