@@ -57,9 +57,21 @@ cp .env.example .env
 - `TEMPORALITY_MODEL_ID` — идентификатор модели у провайдера;
 - `TEMPORALITY_MODEL_API_KEY` — ключ (может быть пустым для Ollama; ключ никогда не возвращается в provenance);
 - `TEMPORALITY_MODEL_TEMPERATURE` — температура `0..2`, по умолчанию `0`;
-- `TEMPORALITY_MODEL_TIMEOUT` — Go duration, например `180s` (по умолчанию `180s`). Proxy ждёт до 10 минут, поэтому Runtime успевает вернуть структурированную JSON-ошибку вместо HTML `504`.
+- `TEMPORALITY_MODEL_TIMEOUT` — Go duration, например `180s` (по умолчанию `180s`). Proxy ждёт до 10 минут, поэтому Runtime успевает вернуть структурированную JSON-ошибку вместо HTML `504`;
+- `TEMPORALITY_MODEL_LOG_PAYLOADS` — opt-in логирование JSON-запросов и сырого `message.content` ответов (`true` или `false`, по умолчанию `false`);
+- `TEMPORALITY_MODEL_LOG_MAX_BYTES` — лимит каждого залогированного payload, по умолчанию `65536`, допустимо `1024..1048576`. Метаданные указывают исходный размер и факт усечения.
 
-Compose передаёт эти значения в runtime. Примеры провайдеров:
+Compose передаёт эти значения в runtime.
+
+> **Внимание:** payload logging может записывать prompts, RenderPacket, ответы модели и любые содержащиеся в них пользовательские или чувствительные данные. Включайте его только для контролируемой диагностики, защищайте доступ к логам и выключайте после завершения. HTTP headers и `Authorization` не логируются; API key может встретиться в payload только если он буквально был частью пользовательских данных.
+
+Для временного включения добавьте в `.env` `TEMPORALITY_MODEL_LOG_PAYLOADS=true`, пересоздайте runtime и смотрите записи так:
+
+```sh
+docker compose logs -f runtime
+```
+
+Примеры провайдеров:
 
 ```dotenv
 # OpenAI

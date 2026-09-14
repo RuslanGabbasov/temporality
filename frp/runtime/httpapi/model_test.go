@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -53,8 +54,11 @@ func TestModelStepFromEnvironment(t *testing.T) {
 	t.Setenv("TEMPORALITY_MODEL_API_KEY", apiKey)
 	t.Setenv("TEMPORALITY_MODEL_TEMPERATURE", "")
 	t.Setenv("TEMPORALITY_MODEL_TIMEOUT", "")
+	t.Setenv("TEMPORALITY_MODEL_LOG_PAYLOADS", "false")
+	t.Setenv("TEMPORALITY_MODEL_LOG_MAX_BYTES", "")
 
-	handler := httpapi.New(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	var logs bytes.Buffer
+	handler := httpapi.New(store, slog.New(slog.NewTextHandler(&logs, nil)))
 	config := serve(handler, http.MethodGet, "/v1/model/config", nil)
 	if config.Code != http.StatusOK || strings.Contains(config.Body.String(), apiKey) {
 		t.Fatalf("unsafe model config: status=%d body=%s", config.Code, config.Body.String())
@@ -83,6 +87,9 @@ func TestModelStepFromEnvironment(t *testing.T) {
 	if err = json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(logs.String(), "model request payload") || strings.Contains(logs.String(), "model response payload") || strings.Contains(logs.String(), apiKey) {
+		t.Fatalf("disabled logging leaked payload or key: %s", logs.String())
+	}
 	if len(result.Step.Claims) != 1 || result.Step.Frame.Revision != current.Revision+1 {
 		t.Fatalf("atomic output was not committed: %#v", result.Step)
 	}
@@ -105,8 +112,10 @@ func TestModelStepUnavailableAndBadGateway(t *testing.T) {
 	handler := httpapi.New(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Setenv("TEMPORALITY_MODEL_BASE_URL", "")
 	t.Setenv("TEMPORALITY_MODEL_ID", "")
+	t.Setenv("TEMPORALITY_MODEL_LOG_PAYLOADS", "false")
+	t.Setenv("TEMPORALITY_MODEL_LOG_MAX_BYTES", "")
 	config := serve(handler, http.MethodGet, "/v1/model/config", nil)
-	if config.Code != http.StatusOK || config.Body.String() != "{\"configured\":false}\n" {
+	if config.Code != http.StatusOK || config.Body.String() != "{\"configured\":false,\"payload_logging\":false,\"log_max_bytes\":65536}\n" {
 		t.Fatalf("unconfigured config: status=%d body=%s", config.Code, config.Body.String())
 	}
 	unavailable := serve(handler, http.MethodPost, "/v1/model-step", []byte(`{}`))
@@ -124,6 +133,58 @@ func TestModelStepUnavailableAndBadGateway(t *testing.T) {
 	badGateway := serve(handler, http.MethodPost, "/v1/model-step", body)
 	if badGateway.Code != http.StatusBadGateway {
 		t.Fatalf("bad gateway response: status=%d body=%s", badGateway.Code, badGateway.Body.String())
+	}
+}
+
+func TestModelPayloadLoggingAndInvalidConfiguration(t *testing.T) {
+	const apiKey = "authorization-secret-never-logged"
+	store, current, goal := modelStepStore(t)
+	emission := cognition.CognitiveEmission{Schema: cognition.EmissionSchema, EmissionID: "logged-emission", FrameID: current.FrameID}
+	content, err := json.Marshal(emission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = append(content, []byte(strings.Repeat(" ", 2000))...)
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(content)}}}})
+	}))
+	defer modelServer.Close()
+	t.Setenv("TEMPORALITY_MODEL_BASE_URL", modelServer.URL+"/v1")
+	t.Setenv("TEMPORALITY_MODEL_ID", "logged-model")
+	t.Setenv("TEMPORALITY_MODEL_API_KEY", apiKey)
+	t.Setenv("TEMPORALITY_MODEL_TEMPERATURE", "")
+	t.Setenv("TEMPORALITY_MODEL_TIMEOUT", "")
+	t.Setenv("TEMPORALITY_MODEL_LOG_PAYLOADS", "true")
+	t.Setenv("TEMPORALITY_MODEL_LOG_MAX_BYTES", "1024")
+	var logs bytes.Buffer
+	handler := httpapi.New(store, slog.New(slog.NewJSONHandler(&logs, nil)))
+	config := serve(handler, http.MethodGet, "/v1/model/config", nil)
+	if !strings.Contains(config.Body.String(), `"payload_logging":true`) || !strings.Contains(config.Body.String(), `"log_max_bytes":1024`) || strings.Contains(config.Body.String(), apiKey) {
+		t.Fatalf("unsafe config: %s", config.Body.String())
+	}
+	body := []byte(`{"frame_id":"` + current.FrameID + `","objective_id":"` + goal.ObjectiveID + `","budget_tokens":8000,"definitions":[]}`)
+	response := serve(handler, http.MethodPost, "/v1/model-step", body)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("model step: status=%d body=%s", response.Code, response.Body.String())
+	}
+	logged := logs.String()
+	for _, want := range []string{"model request payload", "model response payload", `"frame_id":"` + current.FrameID + `"`, `"model":"logged-model"`, `"truncated":true`, `"original_bytes":`} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("log lacks %q: %s", want, logged)
+		}
+	}
+	if strings.Contains(logged, apiKey) || strings.Contains(logged, "Authorization") {
+		t.Fatalf("credential leaked: %s", logged)
+	}
+
+	t.Setenv("TEMPORALITY_MODEL_LOG_PAYLOADS", "1")
+	invalid := serve(handler, http.MethodPost, "/v1/model-step", body)
+	if invalid.Code != http.StatusServiceUnavailable || !strings.Contains(invalid.Body.String(), "exactly true or false") {
+		t.Fatalf("invalid boolean was not actionable: status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
+	invalidConfig := serve(handler, http.MethodGet, "/v1/model/config", nil)
+	if invalidConfig.Code != http.StatusOK || !strings.Contains(invalidConfig.Body.String(), `"configured":false`) || strings.Contains(invalidConfig.Body.String(), apiKey) {
+		t.Fatalf("invalid public config: %s", invalidConfig.Body.String())
 	}
 }
 

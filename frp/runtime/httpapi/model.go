@@ -16,7 +16,12 @@ import (
 	runtimeStep "github.com/temporality-project/temporality/frp/runtime/step"
 )
 
-const modelConfigHint = "set TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID"
+const (
+	modelConfigHint      = "set TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID"
+	modelLogDefaultBytes = 65536
+	modelLogMinBytes     = 1024
+	modelLogMaxBytes     = 1024 * 1024
+)
 
 type modelStepRequest struct {
 	FrameID      string                  `json:"frame_id"`
@@ -26,18 +31,35 @@ type modelStepRequest struct {
 }
 
 type modelConfigResponse struct {
-	Configured bool              `json:"configured"`
-	Provenance *model.Provenance `json:"provenance,omitempty"`
+	Configured     bool              `json:"configured"`
+	PayloadLogging bool              `json:"payload_logging"`
+	LogMaxBytes    int               `json:"log_max_bytes"`
+	Provenance     *model.Provenance `json:"provenance,omitempty"`
+}
+
+type modelRuntimeConfig struct {
+	model.Config
+	credentials    model.Credentials
+	payloadLogging bool
+	logMaxBytes    int
 }
 
 func (s *Server) modelConfig(w http.ResponseWriter, _ *http.Request) {
-	adapter, err := modelAdapterFromEnv()
+	config, err := modelConfigFromEnv()
+	response := modelConfigResponse{PayloadLogging: config.payloadLogging, LogMaxBytes: config.logMaxBytes}
 	if err != nil {
-		writeJSON(w, http.StatusOK, modelConfigResponse{Configured: false})
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	adapter, err := model.NewOpenAIAdapter(config.Config, config.credentials, nil)
+	if err != nil {
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 	provenance := adapter.Provenance()
-	writeJSON(w, http.StatusOK, modelConfigResponse{Configured: true, Provenance: &provenance})
+	response.Configured = true
+	response.Provenance = &provenance
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) modelStep(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +68,7 @@ func (s *Server) modelStep(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotImplemented, errors.New("model step is not supported by this store"))
 		return
 	}
-	adapter, err := modelAdapterFromEnv()
+	config, err := modelConfigFromEnv()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("model is not configured: %w; %s", err, modelConfigHint))
 		return
@@ -54,6 +76,16 @@ func (s *Server) modelStep(w http.ResponseWriter, r *http.Request) {
 	var request modelStepRequest
 	if err = decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if config.payloadLogging {
+		config.Trace = &model.TraceConfig{MaxBytes: config.logMaxBytes, Hook: func(trace model.Trace) {
+			s.log.Info("model "+trace.Direction+" payload", "frame_id", request.FrameID, "model", config.Model, "payload", trace.Payload, "truncated", trace.Truncated, "original_bytes", trace.OriginalBytes)
+		}}
+	}
+	adapter, err := model.NewOpenAIAdapter(config.Config, config.credentials, nil)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("model is not configured: %w; %s", err, modelConfigHint))
 		return
 	}
 	definitions := make(map[string]affordance.Definition, len(request.Definitions))
@@ -100,17 +132,32 @@ func (s *Server) modelStep(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusUnprocessableEntity, err)
 }
 
-func modelAdapterFromEnv() (*model.OpenAIAdapter, error) {
+func modelConfigFromEnv() (modelRuntimeConfig, error) {
+	config := modelRuntimeConfig{logMaxBytes: modelLogDefaultBytes}
+	loggingValue := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_LOG_PAYLOADS"))
+	if loggingValue != "" {
+		if loggingValue != "true" && loggingValue != "false" {
+			return config, errors.New("invalid TEMPORALITY_MODEL_LOG_PAYLOADS: use exactly true or false")
+		}
+		config.payloadLogging = loggingValue == "true"
+	}
+	if value := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_LOG_MAX_BYTES")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < modelLogMinBytes || parsed > modelLogMaxBytes {
+			return config, fmt.Errorf("invalid TEMPORALITY_MODEL_LOG_MAX_BYTES: must be an integer between %d and %d", modelLogMinBytes, modelLogMaxBytes)
+		}
+		config.logMaxBytes = parsed
+	}
 	baseURL := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL"))
 	modelID := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID"))
 	if baseURL == "" || modelID == "" {
-		return nil, errors.New("TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID are required")
+		return config, errors.New("TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID are required")
 	}
 	temperature := 0.0
 	if value := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_TEMPERATURE")); value != "" {
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			return nil, fmt.Errorf("invalid TEMPORALITY_MODEL_TEMPERATURE: %w", err)
+			return config, fmt.Errorf("invalid TEMPORALITY_MODEL_TEMPERATURE: %w", err)
 		}
 		temperature = parsed
 	}
@@ -118,14 +165,16 @@ func modelAdapterFromEnv() (*model.OpenAIAdapter, error) {
 	if value := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_TIMEOUT")); value != "" {
 		parsed, err := time.ParseDuration(value)
 		if err != nil {
-			return nil, fmt.Errorf("invalid TEMPORALITY_MODEL_TIMEOUT: %w", err)
+			return config, fmt.Errorf("invalid TEMPORALITY_MODEL_TIMEOUT: %w", err)
 		}
 		timeout = parsed
 	}
-	return model.NewOpenAIAdapter(model.Config{
+	config.Config = model.Config{
 		BaseURL:     baseURL,
 		Model:       modelID,
 		Temperature: temperature,
 		Timeout:     timeout,
-	}, model.Credentials{APIKey: os.Getenv("TEMPORALITY_MODEL_API_KEY")}, nil)
+	}
+	config.credentials = model.Credentials{APIKey: os.Getenv("TEMPORALITY_MODEL_API_KEY")}
+	return config, nil
 }

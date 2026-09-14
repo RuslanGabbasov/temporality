@@ -63,6 +63,33 @@ func TestOpenAIAdapterSuccessAndDeterministicRequest(t *testing.T) {
 	}
 }
 
+func TestOpenAIAdapterTrace(t *testing.T) {
+	const responseContent = `{"schema":"frp.cognitive-emission.v1","emission_id":"e","frame_id":"frame-1","observation":[],"reasoning":[],"claims":[],"attention":[],"actions":[],"frame_ops":[],"completion":null}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": responseContent}}}})
+	}))
+	defer server.Close()
+	var traces []model.Trace
+	adapter, err := model.NewOpenAIAdapter(model.Config{BaseURL: server.URL + "/v1", Model: "m", Timeout: time.Second, Trace: &model.TraceConfig{MaxBytes: 32, Hook: func(trace model.Trace) { traces = append(traces, trace) }}}, model.Credentials{APIKey: "header-only-secret"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(traces) != 2 || traces[0].Direction != "request" || traces[1].Direction != "response" {
+		t.Fatalf("traces = %#v", traces)
+	}
+	for _, trace := range traces {
+		if !trace.Truncated || len(trace.Payload) != 32 || trace.OriginalBytes <= 32 {
+			t.Fatalf("unbounded trace = %#v", trace)
+		}
+		if strings.Contains(trace.Payload, "header-only-secret") {
+			t.Fatalf("credential leaked in trace: %#v", trace)
+		}
+	}
+}
+
 func TestOpenAIAdapterRejectsMalformedAndInvalidEmission(t *testing.T) {
 	tests := []struct{ name, content string }{
 		{"malformed JSON", `{not-json}`},

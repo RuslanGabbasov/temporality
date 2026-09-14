@@ -29,6 +29,21 @@ type Config struct {
 	Model       string        `json:"model"`
 	Temperature float64       `json:"temperature"`
 	Timeout     time.Duration `json:"timeout"`
+	Trace       *TraceConfig  `json:"-"`
+}
+
+// TraceConfig enables bounded payload tracing for one adapter instance.
+type TraceConfig struct {
+	MaxBytes int
+	Hook     func(Trace)
+}
+
+// Trace describes one bounded model payload. It never contains HTTP headers.
+type Trace struct {
+	Direction     string
+	Payload       string
+	Truncated     bool
+	OriginalBytes int
 }
 
 // Credentials are deliberately separate from serializable model provenance.
@@ -55,6 +70,7 @@ type OpenAIAdapter struct {
 	apiKey      string
 	client      *http.Client
 	provenance  Provenance
+	trace       TraceConfig
 }
 
 func NewOpenAIAdapter(config Config, credentials Credentials, client *http.Client) (*OpenAIAdapter, error) {
@@ -75,8 +91,15 @@ func NewOpenAIAdapter(config Config, credentials Credentials, client *http.Clien
 	if config.Timeout <= 0 {
 		return nil, errors.New("timeout must be positive")
 	}
+	if config.Trace != nil && (config.Trace.MaxBytes <= 0 || config.Trace.Hook == nil) {
+		return nil, errors.New("model trace requires a positive max_bytes and hook")
+	}
 	if client == nil {
 		client = http.DefaultClient
+	}
+	var trace TraceConfig
+	if config.Trace != nil {
+		trace = *config.Trace
 	}
 	return &OpenAIAdapter{
 		endpoint:    base + "/chat/completions",
@@ -85,6 +108,7 @@ func NewOpenAIAdapter(config Config, credentials Credentials, client *http.Clien
 		timeout:     config.Timeout,
 		apiKey:      credentials.APIKey,
 		client:      client,
+		trace:       trace,
 		provenance: Provenance{
 			Adapter:     "openai-chat-completions",
 			BaseURL:     base,
@@ -96,6 +120,18 @@ func NewOpenAIAdapter(config Config, credentials Credentials, client *http.Clien
 }
 
 func (a *OpenAIAdapter) Provenance() Provenance { return a.provenance }
+
+func (a *OpenAIAdapter) emitTrace(direction string, payload []byte) {
+	if a.trace.Hook == nil {
+		return
+	}
+	originalBytes := len(payload)
+	truncated := originalBytes > a.trace.MaxBytes
+	if truncated {
+		payload = payload[:a.trace.MaxBytes]
+	}
+	a.trace.Hook(Trace{Direction: direction, Payload: string(payload), Truncated: truncated, OriginalBytes: originalBytes})
+}
 
 type chatRequest struct {
 	Model          string         `json:"model"`
@@ -153,6 +189,7 @@ func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cogniti
 	if a.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+a.apiKey)
 	}
+	a.emitTrace("request", body)
 	response, err := a.client.Do(req)
 	if err != nil {
 		return cognition.CognitiveEmission{}, fmt.Errorf("model request: %w", err)
@@ -170,6 +207,7 @@ func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cogniti
 	if len(decoded.Choices) == 0 {
 		return cognition.CognitiveEmission{}, errors.New("model response has no choices")
 	}
+	a.emitTrace("response", []byte(decoded.Choices[0].Message.Content))
 	content, err := stripJSONFence(decoded.Choices[0].Message.Content)
 	if err != nil {
 		return cognition.CognitiveEmission{}, err
