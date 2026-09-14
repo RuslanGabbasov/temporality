@@ -17,20 +17,14 @@ export interface Frame {
   frame_id?: string
   objective_id?: string
   episode_id?: string
-  focus?: Json
-  map?: Json
-  periphery?: Json
-  procedures?: Json
-  recent?: Json
-  sections?: Partial<Record<FrameSection, Json>>
-  outside_frame?: Json
-  provenance?: Json
-  token_usage?: Json
-  usage?: Json
+  identity?: Json
+  mode?: string
+  revision?: Json
+  budget?: { tokens?: number }
   [key: string]: unknown
 }
 
-export type FrameSection = 'focus' | 'map' | 'periphery' | 'procedures' | 'recent'
+export type FrameSection = 'focus' | 'map' | 'periphery' | 'working_set' | 'procedures' | 'recent'
 
 export interface Execution {
   id?: string
@@ -39,10 +33,27 @@ export interface Execution {
   [key: string]: unknown
 }
 
-export interface RenderResponse {
-  rendered?: string
-  output?: string
-  content?: string
+export interface RenderSection {
+  kind: FrameSection | 'identity' | 'objective' | string
+  attention?: 'ambient' | 'deliberate' | string
+  items: Json[]
+  [key: string]: unknown
+}
+
+export interface TokenUsage {
+  estimated?: number
+  budget?: number
+}
+
+export interface RenderPacket {
+  render_id: string
+  frame_id: string
+  memory_version?: string
+  renderer_version?: string
+  sections: RenderSection[]
+  outside_frame?: Json
+  provenance?: Json
+  token_usage?: TokenUsage
   [key: string]: unknown
 }
 
@@ -126,8 +137,11 @@ export interface ModelStepRequest {
 }
 
 export interface ModelStepResponse {
+  render_packet?: RenderPacket
+  emission?: unknown
   step?: { frame?: Frame; events?: FrpEvent[] }
   model_provenance?: Json
+  debugger_summary?: Json
   [key: string]: unknown
 }
 

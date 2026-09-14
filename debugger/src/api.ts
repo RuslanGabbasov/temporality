@@ -1,4 +1,4 @@
-import type { BlameRequest, CreateFrameRequest, CreateFrameResponse, CreateObjectiveRequest, CreateObjectiveResponse, Execution, ForkGroup, ForkRequest, Frame, FrpEvent, ModelConfig, ModelStepRequest, ModelStepResponse, RenderRequest, RenderResponse, TransitionFrameRequest, TransitionFrameResponse } from './types'
+import type { BlameRequest, CreateFrameRequest, CreateFrameResponse, CreateObjectiveRequest, CreateObjectiveResponse, Execution, ForkGroup, ForkRequest, Frame, FrpEvent, ModelConfig, ModelStepRequest, ModelStepResponse, RenderPacket, RenderRequest, TransitionFrameRequest, TransitionFrameResponse } from './types'
 
 export const API_BASE = (import.meta.env.VITE_FRP_API_URL || '/api').replace(/\/$/, '')
 
@@ -31,7 +31,7 @@ export const api = {
   events: (episodeId: string, limit: number) => request<FrpEvent[] | { events: FrpEvent[] }>('/v1/events', undefined, { episode_id: episodeId, limit }),
   frame: (frameId: string) => request<Frame>(`/v1/frames/${encodeURIComponent(frameId)}`),
   execution: (executionId: string) => request<Execution>(`/v1/executions/${encodeURIComponent(executionId)}`),
-  render: (body: RenderRequest) => post<RenderResponse>('/v1/render', body),
+  render: (body: RenderRequest, signal?: AbortSignal) => post<RenderPacket>('/v1/render', body, signal),
   replay: (frameId: string) => post<unknown>('/v1/replay', { frame_id: frameId }),
   blame: (body: BlameRequest) => post<unknown>('/v1/blame', body),
   fork: (body: ForkRequest) => post<ForkGroup>('/v1/fork', body),

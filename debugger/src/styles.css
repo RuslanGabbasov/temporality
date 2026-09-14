@@ -71,6 +71,10 @@ h3 { font-size: .84rem; }
 .evidence-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .evidence-grid .data-card { min-height: 145px; }
 .result-card { background: #0d151d; }
+.frame-meta { border-bottom: 1px solid var(--line); }.frame-meta .data-card { min-height: 100px; }
+.render-status { display: flex; align-items: center; gap: .5rem; padding: .7rem 1rem; color: var(--muted); font-size: .75rem; border-bottom: 1px solid var(--line); }.render-status.error { color: #ff9baa; background: #281219; }.render-status.error button { margin-left: auto; }
+.token-card { display: flex; flex-direction: column; }.render-id { color: var(--violet); font-size: .64rem; overflow-wrap: anywhere; }.token-total { margin-top: .7rem; font: 1.15rem "SFMono-Regular", monospace; }.token-percent { color: var(--muted); font-size: .7rem; margin-top: .15rem; }.token-track { height: 7px; margin: .65rem 0 .45rem; overflow: hidden; background: #202a38; border-radius: 999px; }.token-track span { display: block; height: 100%; background: var(--cyan); border-radius: inherit; }.token-card.warning .token-track span { background: var(--amber); }.token-card small { color: var(--muted); }.token-card.warning small { color: #f0d59c; }
+.model-input-usage { grid-column: 1 / -1; background: var(--line); }.model-input-usage .data-card { min-height: 140px; }
 .model-result { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); scroll-margin-top: 136px; }
 .answer-panel, .claims-panel, .protocol-details, .model-meta article { min-width: 0; background: #101923; padding: 1.25rem; }
 .answer-panel { border: 1px solid transparent; border-left: 3px solid var(--cyan); }

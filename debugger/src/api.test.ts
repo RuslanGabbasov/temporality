@@ -54,12 +54,14 @@ describe('operational API', () => {
     ])
   })
 
-  it('passes an AbortSignal to the model-step fetch contract', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+  it('passes AbortSignals to model-step and render fetch contracts', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response('{"render_id":"r","frame_id":"f","sections":[]}', { status: 200, headers: { 'Content-Type': 'application/json' } })))
     vi.stubGlobal('fetch', fetchMock)
-    const controller = new AbortController()
-    await api.modelStep({ frame_id: 'f', objective_id: 'o', budget_tokens: 1, definitions: [] }, controller.signal)
-    expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal)
+    const modelController = new AbortController(); const renderController = new AbortController()
+    await api.modelStep({ frame_id: 'f', objective_id: 'o', budget_tokens: 1, definitions: [] }, modelController.signal)
+    await api.render({ frame_id: 'f', objective_id: 'o', budget_tokens: 1 }, renderController.signal)
+    expect(fetchMock.mock.calls[0][1].signal).toBe(modelController.signal)
+    expect(fetchMock.mock.calls[1][1].signal).toBe(renderController.signal)
   })
 
   it('includes HTTP response details in errors', async () => {

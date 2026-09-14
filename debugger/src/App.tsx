@@ -3,15 +3,21 @@ import { api, API_BASE } from './api'
 import { extractClaims, extractModelAnswer } from './answer'
 import { eventKey, eventLabel, eventTime, executionIdOf, frameIdOf, unwrapEvents } from './timeline'
 import { formatDuration, isAbortError, modelProgress, modelTimeoutMs } from './modelProgress'
-import type { Execution, ForkGroup, Frame, FrameSection, FrpEvent, ModelConfig, ModelStepResponse, RenderResponse } from './types'
+import type { Execution, ForkGroup, Frame, FrameSection, FrpEvent, ModelConfig, ModelStepResponse, RenderPacket, TokenUsage } from './types'
+import { renderSection, tokenUsageView } from './tokenUsage'
 import { childFrameId, continueWithModel, EpisodeWorkflowError, FollowUpWorkflowError, renderRequest, runEpisodeWorkflow, runFollowUpWorkflow, twoBranchForkRequest, type EpisodeDraft, type EpisodeWorkflowResult, type FollowUpResult, type FollowUpStage, type WorkflowStage } from './workflow'
 
-const SECTIONS: FrameSection[] = ['focus', 'map', 'periphery', 'procedures', 'recent']
+const SECTIONS: FrameSection[] = ['focus', 'map', 'periphery', 'working_set', 'procedures', 'recent']
 const DEFAULT_DRAFT: EpisodeDraft = { prompt: '', successConditions: [], tokenBudget: 4000, mode: 'explore', trustMin: 0.5, rebuildRegions: false }
 
 function JsonView({ value, empty = 'No data' }: { value: unknown; empty?: string }) {
   if (value === undefined || value === null) return <p className="muted empty">{empty}</p>
   return <pre>{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</pre>
+}
+function TokenUsageCard({ title, usage, renderId }: { title: string; usage?: TokenUsage; renderId?: string }) {
+  const view = tokenUsageView(usage)
+  const hasUsage = view.estimated !== undefined || view.budget !== undefined
+  return <article className={`data-card token-card ${view.warning ? 'warning' : ''}`}><h3><span>◴</span>{title}</h3>{renderId && <code className="render-id">render {renderId}</code>}{!hasUsage ? <p className="muted empty">No token usage reported</p> : <><strong className="token-total">{view.estimated ?? '—'} / {view.budget ?? '—'}</strong><span className="token-percent">{view.percent === undefined ? 'Percentage unavailable' : `${Math.round(view.percent)}%`}</span><div className="token-track" role="progressbar" aria-label={title} aria-valuemin={0} aria-valuemax={100} aria-valuenow={view.percent === undefined ? undefined : Math.min(100, Math.round(view.percent))}><span style={{ width: `${Math.min(100, view.percent ?? 0)}%` }} /></div><small>{view.remaining === undefined ? 'Remaining unavailable' : `${view.remaining} remaining`}{view.warning && ' · Warning: over 85%'}</small></>}</article>
 }
 function ModelResult({ response, panelRef }: { response: ModelStepResponse; panelRef: React.RefObject<HTMLElement | null> }) {
   const answer = extractModelAnswer(response)
@@ -23,6 +29,7 @@ function ModelResult({ response, panelRef }: { response: ModelStepResponse; pane
       {answer.text ? <div className="answer-text">{answer.text}</div> : <div className="empty-answer" role="status"><strong>No model answer was returned.</strong><span>Inspect Protocol details below, then retry “Continue with model” or revise the objective.</span></div>}
     </article>
     <article className="claims-panel"><h3>Claims <span>{claims.length}</span></h3>{claims.length ? <ul>{claims.map((claim, index) => <li key={`${claim.proposition}-${index}`}><span>{claim.proposition}</span><small>{claim.confidence !== undefined && <data value={claim.confidence}>confidence {Math.round(claim.confidence * 100)}%</data>}{claim.status && <span className="claim-status">{claim.status}</span>}</small></li>)}</ul> : <p className="muted">No claims emitted.</p>}</article>
+    {response.render_packet && <div className="model-input-usage"><TokenUsageCard title="Model input usage" usage={response.render_packet.token_usage} renderId={response.render_packet.render_id} /></div>}
     <details className="protocol-details"><summary>Protocol details: RenderPacket / Emission / Step</summary><JsonView value={protocol} /></details>
     {(response.model_provenance !== undefined || response.debugger_summary !== undefined) && <div className="model-meta">{response.model_provenance !== undefined && <article><h3>Model provenance</h3><JsonView value={response.model_provenance} /></article>}{response.debugger_summary !== undefined && <article><h3>Debugger summary</h3><JsonView value={response.debugger_summary} /></article>}</div>}
   </section>
@@ -43,7 +50,7 @@ function App() {
   const [events, setEvents] = useState<FrpEvent[]>([]); const [eventsBusy, setEventsBusy] = useState(false); const [eventsError, setEventsError] = useState('')
   const [frame, setFrame] = useState<Frame | null>(null); const [frameBusy, setFrameBusy] = useState(false); const [frameError, setFrameError] = useState(''); const [selectedFrameId, setSelectedFrameId] = useState('')
   const [execution, setExecution] = useState<Execution | null>(null); const [executionBusy, setExecutionBusy] = useState(false); const [executionError, setExecutionError] = useState('')
-  const [rendered, setRendered] = useState<RenderResponse | null>(null); const [actionBusy, setActionBusy] = useState(''); const [actionError, setActionError] = useState(''); const [replay, setReplay] = useState<unknown>(null)
+  const [selectedRender, setSelectedRender] = useState<RenderPacket | null>(null); const [renderBusy, setRenderBusy] = useState(false); const [renderError, setRenderError] = useState(''); const [actionBusy, setActionBusy] = useState(''); const [actionError, setActionError] = useState(''); const [replay, setReplay] = useState<unknown>(null)
   const [blameRootId, setBlameRootId] = useState(''); const [blameMaxDepth, setBlameMaxDepth] = useState(8); const [blame, setBlame] = useState<unknown>(null); const [forkGroup, setForkGroup] = useState<ForkGroup | null>(null)
   const [modelConfig, setModelConfig] = useState<ModelConfig | null>(null); const [configBusy, setConfigBusy] = useState(false); const [configError, setConfigError] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false); const [draft, setDraft] = useState(DEFAULT_DRAFT); const [conditionsText, setConditionsText] = useState('')
@@ -53,6 +60,8 @@ function App() {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const followUpDialogRef = useRef<HTMLDialogElement>(null)
   const answerPanelRef = useRef<HTMLElement>(null)
+  const renderControllerRef = useRef<AbortController | null>(null)
+  const renderGenerationRef = useRef(0)
 
   const loadEvents = useCallback(async (id: string) => {
     if (!id.trim()) return []
@@ -70,6 +79,7 @@ function App() {
   useEffect(() => { if (!modelRun) return; const timer = window.setInterval(() => setModelRun((run) => run ? { ...run, now: Date.now() } : null), 1000); return () => window.clearInterval(timer) }, [modelRun?.startedAt])
   useEffect(() => { if (dialogOpen) dialogRef.current?.showModal(); else dialogRef.current?.close() }, [dialogOpen])
   useEffect(() => { if (followUpOpen) followUpDialogRef.current?.showModal(); else followUpDialogRef.current?.close() }, [followUpOpen])
+  useEffect(() => () => { renderGenerationRef.current += 1; renderControllerRef.current?.abort() }, [])
   useEffect(() => {
     if (!summary || frameBusy) return
     const frame = window.requestAnimationFrame(() => {
@@ -79,9 +89,32 @@ function App() {
     return () => window.cancelAnimationFrame(frame)
   }, [summary, frameBusy])
 
+  async function loadSelectedRender(value: Frame, fallbackId: string) {
+    const request = renderRequest(value, fallbackId)
+    if (!request) { setSelectedRender(null); setRenderError('Frame does not include an objective ID.'); return }
+    renderControllerRef.current?.abort()
+    const controller = new AbortController(); const generation = ++renderGenerationRef.current
+    renderControllerRef.current = controller; setRenderBusy(true); setRenderError('')
+    try {
+      const packet = await api.render(request, controller.signal)
+      if (generation === renderGenerationRef.current && !controller.signal.aborted) setSelectedRender(packet)
+    } catch (error) {
+      if (generation === renderGenerationRef.current && !isAbortError(error)) setRenderError(errorText(error, 'Unable to render context'))
+    } finally {
+      if (generation === renderGenerationRef.current) { setRenderBusy(false); renderControllerRef.current = null }
+    }
+  }
   async function openFrame(id: string) {
-    setSelectedFrameId(id); setFrameBusy(true); setFrameError(''); setFrame(null); setRendered(null); setReplay(null); setBlame(null); setForkGroup(null); setActionError('')
-    try { setFrame(await api.frame(id)) } catch (error) { setFrameError(errorText(error, 'Unable to load frame')) } finally { setFrameBusy(false) }
+    renderControllerRef.current?.abort(); const generation = ++renderGenerationRef.current
+    setSelectedFrameId(id); setFrameBusy(true); setFrameError(''); setFrame(null); setSelectedRender(null); setRenderBusy(false); setRenderError(''); setReplay(null); setBlame(null); setForkGroup(null); setActionError('')
+    try {
+      const loaded = await api.frame(id)
+      if (generation !== renderGenerationRef.current) return
+      setFrame(loaded); setFrameBusy(false)
+      await loadSelectedRender(loaded, id)
+    } catch (error) {
+      if (generation === renderGenerationRef.current) setFrameError(errorText(error, 'Unable to load frame'))
+    } finally { if (generation === renderGenerationRef.current) setFrameBusy(false) }
   }
   async function openExecution(id: string) { setExecutionBusy(true); setExecutionError(''); setExecution(null); try { setExecution(await api.execution(id)) } catch (error) { setExecutionError(errorText(error, 'Unable to load execution')) } finally { setExecutionBusy(false) } }
   async function runAction(name: string, operation: () => Promise<void>) { setActionBusy(name); setActionError(''); try { await operation() } catch (error) { setActionError(errorText(error, `Unable to ${name}`)) } finally { setActionBusy('') } }
@@ -90,7 +123,7 @@ function App() {
   function submitEpisode(event: FormEvent) { event.preventDefault(); const id = episodeInput.trim(); setEpisodeId(id); void loadEvents(id) }
   function submitBlame(event: FormEvent) { event.preventDefault(); const rootId = blameRootId.trim(); if (rootId) void runAction('blame', async () => setBlame(await api.blame({ root_id: rootId, max_depth: blameMaxDepth }))) }
   function fork() { if (!frameId) return; void runAction('fork', async () => setForkGroup(await api.fork(twoBranchForkRequest(frameId)))) }
-  function renderSelected() { if (!frame) return; const request = renderRequest(frame, selectedFrameId); if (request) void runAction('render', async () => setRendered(await api.render(request))) }
+  function renderSelected() { if (frame) void loadSelectedRender(frame, selectedFrameId) }
 
   function withDuration(result: ModelStepResponse, startedAt: number): ModelStepResponse {
     const durationMs = Date.now() - startedAt
@@ -170,10 +203,12 @@ function App() {
       </aside>
 
       <section className="inspector panel" aria-label="Frame inspector"><div className="panel-heading inspector-heading"><div><span className="eyebrow">SELECTED FRAME</span><h2>{selectedFrameId || 'No frame selected'}</h2></div>{objectiveId && <div className="objective"><span>Objective</span><code>{objectiveId}</code></div>}</div>
-        <Status loading={frameBusy} error={frameError}>{!frame ? <div className="hero-empty"><div className="frame-glyph">⌗</div><h3>Create a task or select a frame</h3><p>Run cognition with a configured model, or inspect an existing episode’s boundaries, evidence, token use, and provenance.</p><button className="primary" onClick={() => setDialogOpen(true)}>New Episode</button></div> : <><div className="actionbar" aria-label="Frame actions"><button onClick={continueSelected} disabled={!!actionBusy || !modelConfig?.configured}>Continue with model</button><button onClick={renderSelected} disabled={!!actionBusy || !objectiveId} title="Render the selected Frame using its objective and token budget (default 4000)">Render selected frame</button><button onClick={() => void runAction('replay', async () => setReplay(await api.replay(frameId)))} disabled={!!actionBusy}>↶ Replay from here</button><button onClick={fork} disabled={!!actionBusy}>⑂ Fork ×2</button>{actionBusy && <span className="muted" role="status"><span className="spinner" /> {actionBusy}…</span>}</div>{actionError && <div className={savedFollowUp ? 'status warning' : 'status error'} role="alert"><strong>{actionError}</strong>{savedFollowUp && <><small>Instruction Frame <code>{savedFollowUp.instructionFrameId}</code> is the retry source. Your follow-up text is preserved.</small><button onClick={retryFollowUp} disabled={!!actionBusy || !modelConfig?.configured}>Retry model only</button></>}</div>}
+        <Status loading={frameBusy} error={frameError}>{!frame ? <div className="hero-empty"><div className="frame-glyph">⌗</div><h3>Create a task or select a frame</h3><p>Run cognition with a configured model, or inspect an existing episode’s boundaries, evidence, token use, and provenance.</p><button className="primary" onClick={() => setDialogOpen(true)}>New Episode</button></div> : <><div className="actionbar" aria-label="Frame actions"><button onClick={continueSelected} disabled={!!actionBusy || !modelConfig?.configured}>Continue with model</button><button onClick={renderSelected} disabled={renderBusy || !objectiveId} title="Render the selected Frame using its objective and token budget (default 4000)">{renderBusy ? 'Rendering context…' : 'Render selected frame'}</button><button onClick={() => void runAction('replay', async () => setReplay(await api.replay(frameId)))} disabled={!!actionBusy}>↶ Replay from here</button><button onClick={fork} disabled={!!actionBusy}>⑂ Fork ×2</button>{actionBusy && <span className="muted" role="status"><span className="spinner" /> {actionBusy}…</span>}</div>{actionError && <div className={savedFollowUp ? 'status warning' : 'status error'} role="alert"><strong>{actionError}</strong>{savedFollowUp && <><small>Instruction Frame <code>{savedFollowUp.instructionFrameId}</code> is the retry source. Your follow-up text is preserved.</small><button onClick={retryFollowUp} disabled={!!actionBusy || !modelConfig?.configured}>Retry model only</button></>}</div>}
           {summary && <ModelResult response={summary} panelRef={answerPanelRef} />}
-          <div className="section-grid">{SECTIONS.map((section) => <article className={`data-card ${section === 'focus' ? 'featured' : ''}`} key={section}><h3><span>{section === 'focus' ? '◎' : '◇'}</span>{section}</h3><JsonView value={frame.sections?.[section] ?? frame[section]} /></article>)}</div><div className="evidence-grid"><article className="data-card warning"><h3><span>↗</span>outside_frame</h3><JsonView value={frame.outside_frame} /></article><article className="data-card"><h3><span>⌁</span>provenance</h3><JsonView value={frame.provenance} /></article><article className="data-card"><h3><span>◴</span>token usage</h3><JsonView value={frame.token_usage ?? frame.usage} /></article></div>
-          {(rendered || replay) && <div className="result-grid">{rendered && <article className="result-card"><h3>Rendered cognition</h3><JsonView value={rendered.rendered ?? rendered.output ?? rendered.content ?? rendered} /></article>}{replay !== null && <article className="result-card"><h3>Replay result</h3><JsonView value={replay} /></article>}</div>}
+          <div className="frame-meta"><article className="data-card"><h3>Frame identity / mode / revision</h3><JsonView value={{ identity: frame.identity ?? { frame_id: frameId, objective_id: frame.objective_id, episode_id: frame.episode_id }, mode: frame.mode, revision: frame.revision }} /></article></div>
+          {renderBusy && <div className="render-status" role="status"><span className="spinner" /> Rendering context…</div>}{renderError && <div className="render-status error" role="alert"><span>{renderError}</span><button onClick={renderSelected}>Retry Render</button></div>}
+          <div className="section-grid">{SECTIONS.map((section) => <article className={`data-card ${section === 'focus' ? 'featured' : ''}`} key={section}><h3><span>{section === 'focus' ? '◎' : '◇'}</span>{section}</h3><JsonView value={renderSection(selectedRender, section)?.items} empty={renderBusy ? 'Rendering context…' : 'No rendered data'} /></article>)}</div><div className="evidence-grid"><article className="data-card warning"><h3><span>↗</span>outside_frame</h3><JsonView value={selectedRender?.outside_frame} empty={renderBusy ? 'Rendering context…' : 'No rendered data'} /></article><article className="data-card"><h3><span>⌁</span>provenance</h3><JsonView value={selectedRender?.provenance} empty={renderBusy ? 'Rendering context…' : 'No rendered data'} /></article><TokenUsageCard title="Selected frame usage" usage={selectedRender?.token_usage} renderId={selectedRender?.render_id} /></div>
+          {replay !== null && <div className="result-grid"><article className="result-card"><h3>Replay result</h3><JsonView value={replay} /></article></div>}
           <article className="tool-card"><div><span className="eyebrow">CAUSAL REFERENCE</span><h3>Blame analysis</h3><p>Enter the exact Claim, Event, or Frame reference ID to trace—not a natural-language question.</p></div><form onSubmit={submitBlame}><label>Claim / Event / Frame reference ID<input value={blameRootId} onChange={(e) => setBlameRootId(e.target.value)} placeholder="Reference ID" aria-label="Blame root reference ID" required /></label><label>Maximum traversal depth<input type="number" min="1" step="1" value={blameMaxDepth} onChange={(e) => setBlameMaxDepth(Number(e.target.value))} aria-label="Blame maximum depth" required /></label><button disabled={!!actionBusy}>Trace reference</button></form>{blame !== null && <JsonView value={blame} />}</article>{forkGroup && <article className="tool-card"><span className="eyebrow">COUNTERFACTUAL GROUP</span><h3>Forked branches</h3><p>Fork group <code>{forkGroup.fork_group_id}</code></p><div className="branch-grid">{forkGroup.branches.map((branch) => <div className="branch" key={branch.branch_id}><strong>{branch.label ?? 'Branch'}</strong><code>{branch.branch_id}</code><JsonView value={branch} /></div>)}</div></article>}</>}</Status>
       </section>
       <aside className={`execution-drawer panel ${execution || executionBusy || executionError ? 'open' : ''}`} aria-label="Execution details"><div className="panel-heading"><div><span className="eyebrow">EXECUTION</span><h2>Details</h2></div><button className="icon-button" onClick={() => { setExecution(null); setExecutionError('') }} aria-label="Close execution details">×</button></div><Status loading={executionBusy} error={executionError}><JsonView value={execution} /></Status></aside>
