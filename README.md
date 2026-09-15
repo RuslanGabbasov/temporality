@@ -260,6 +260,16 @@ GET  /v1/claims/{id}/evidence
 
 `POST /v1/ingest` runs one bounded knowledge import over a declared world resource (M13). The runtime observes the source through the same read-only world adapter (capability grants, path containment, and world limits all apply) and commits every observation as a canonical `world.observation` Event with provenance source `ingestion`. Filesystem and git resources are walked breadth-first within `depth` (default 2, max 5) and a per-run observation budget (`max_events`, default 100, max 500), reading recognized descriptors (`go.mod`, `package.json`, `Cargo.toml`, `pyproject.toml`, `README.md`); git resources add status/log observations; HTTP endpoints are fetched once. Deterministic extractors then turn observations into candidate Claims whose confidence stays below 1 and whose evidence cites the observation Events, keeping "what was found" separable from "what the substrate believes". Claim evidence is queryable via `GET /v1/claims/{id}/evidence`. Pointing ingestion at an empty substrate is the bootstrap import: there is no separate knowledge base, and observations enter memory only through the Event Log, where regions/attention pick them up after a rebuild.
 
+Entity endpoints (M14):
+
+```text
+POST /v1/projections/entities/rebuild
+GET  /v1/entities?type=&name=
+GET  /v1/entities/{id}
+```
+
+Claims may carry an optional `subject`/`predicate`/`object` triple (`"module:example.com/app"`, `depends_on`, `"library:github.com/x/y"`) validated against frozen registries of entity types and predicates. Ingest extractors emit such triples: manifests bind packages/modules to their files and dependencies (`declared_in`, `depends_on`, `targets`, `contains`), git status binds repositories to branches (`on_branch`). `POST /v1/projections/entities/rebuild` scans every claim and atomically replaces the global entity graph — entities and typed relations are a pure projection over claims (deterministic content-derived ids, refuted/superseded claims stop projecting), never a separately maintained knowledge base. Entities are world knowledge rather than episode state: during render, entities with relevance to the frame (focus/objective overlap, graph proximity to a pinned entity) compete with events and regions for ambient attention, bounded to the most relevant candidates so a large graph cannot flood every frame. `frame.Ref` accepts `entity` refs in focus and working set, and the entity's confidence is the strongest confidence among the claims asserting it.
+
 Frame endpoints:
 
 ```text

@@ -18,6 +18,7 @@ const (
 	RefEvent     RefType = "event"
 	RefQuery     RefType = "query"
 	RefExecution RefType = "execution"
+	RefEntity    RefType = "entity"
 )
 
 type Focus struct {
@@ -150,7 +151,7 @@ func (f Focus) Validate() error {
 		}
 		return nil
 	}
-	if f.Type != RefRegion && f.Type != RefClaim && f.Type != RefEvent {
+	if f.Type != RefRegion && f.Type != RefClaim && f.Type != RefEvent && f.Type != RefEntity {
 		return fmt.Errorf("invalid focus type %q", f.Type)
 	}
 	if f.ID == "" || f.Query != "" {
@@ -163,7 +164,7 @@ func (r Ref) Validate() error {
 		return errors.New("working set ref id is required")
 	}
 	switch r.Type {
-	case RefRegion, RefClaim, RefEvent, RefExecution:
+	case RefRegion, RefClaim, RefEvent, RefExecution, RefEntity:
 		return nil
 	default:
 		return fmt.Errorf("invalid working set ref type %q", r.Type)

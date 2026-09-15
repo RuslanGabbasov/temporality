@@ -102,17 +102,18 @@ def world_scenario():
 
 
 def ingestion_scenario():
-    """M13: bootstrap knowledge. An empty substrate is populated from a real
+    """M13+M14: bootstrap knowledge. An empty substrate is populated from a real
     workspace through one bounded ingestion run: observations become
-    world.observation events and deterministic extractors create candidate
-    claims citing those events as evidence."""
+    world.observation events, deterministic extractors create candidate claims
+    citing those events as evidence, and triple-bearing claims project into the
+    entity knowledge graph that render can attend over."""
     import shutil
     import tempfile
 
     workspace = tempfile.mkdtemp(prefix="temporality-ingest-")
     try:
         with open(os.path.join(workspace, "go.mod"), "w") as handle:
-            handle.write("module example.com/smoke-demo\n\ngo 1.23\n")
+            handle.write("module example.com/smoke-demo\n\ngo 1.23\n\nrequire (\n\tgithub.com/smoke/dep v1.2.3\n)\n")
         with open(os.path.join(workspace, "README.md"), "w") as handle:
             handle.write("# Smoke Demo\n")
         os.makedirs(os.path.join(workspace, "cmd", "demo"), exist_ok=True)
@@ -147,7 +148,46 @@ def ingestion_scenario():
         _, projection = request("POST", "/v1/projections/regions/rebuild", {"episode_id": episode_id, "branch_id": branch_id})
         assert projection["regions"], "regions missing after ingestion"
         assert any(region["label"] == "world.observation" for region in projection["regions"])
-        return {"world_id": world_id, "observations": len(result["observations"]), "claims": len(result["claims"]), "regions": len(projection["regions"])}
+
+        # M14: rebuild the entity graph from the triple-bearing claims.
+        _, entities = request("POST", "/v1/projections/entities/rebuild", {})
+        assert entities["projection_version"] == "entity-claims.v1"
+        assert entities["entities"] and entities["relations"]
+        predicates = {relation["predicate"] for relation in entities["relations"]}
+        assert {"declared_in", "targets", "depends_on", "contains"} <= predicates, predicates
+        _, modules = request("GET", "/v1/entities?type=module")
+        module_entity = next(item for item in modules["entities"] if item["name"] == "example.com/smoke-demo")
+        assert module_entity["mention_count"] >= 3
+        _, module_detail = request("GET", f"/v1/entities/{module_entity['entity_id']}")
+        module_predicates = {relation["predicate"] for relation in module_detail["relations"]}
+        assert {"declared_in", "targets", "depends_on"} <= module_predicates, module_predicates
+
+        # M14.3: entities compete for attention inside a render of a frame in
+        # the ingested episode.
+        objective_id = str(uuid.uuid4())
+        request("POST", "/v1/objectives", {"objective": {"objective_id": objective_id, "episode_id": episode_id, "text": "Understand the smoke demo module and its dependencies", "success_conditions": ["map_contains_entities"], "constraints": {}}, "event": {"payload": {}, "provenance": {"source": "smoke"}}})
+        create = {
+            "frame": {
+                "agent_id": str(uuid.uuid4()),
+                "episode_id": episode_id,
+                "branch_id": branch_id,
+                "objective_id": objective_id,
+                "focus": {"type": "query", "query": "smoke demo module dependencies"},
+                "mode": "explore",
+                "attention": {"policy": "balanced", "deliberate": True, "ambient": True, "max_candidates": 32},
+                "zoom": 2,
+                "filters": {"trust_min": 0.0},
+                "budget": {"tokens": 8000},
+            },
+            "event": {"payload": {}, "provenance": {"source": "smoke"}},
+        }
+        _, created = request("POST", "/v1/frames", create)
+        frame = created["frame"]
+        _, rendered = request("POST", "/v1/render", {"frame_id": frame["frame_id"], "objective_id": objective_id, "budget_tokens": 16000})
+        map_items = next(section for section in rendered["sections"] if section["kind"] == "map")["items"]
+        entity_refs = [item["candidate"]["ref"] for item in map_items if item["candidate"]["ref"]["type"] == "entity"]
+        assert entity_refs, "render map contains no entity candidates"
+        return {"world_id": world_id, "observations": len(result["observations"]), "claims": len(result["claims"]), "regions": len(projection["regions"]), "entities": len(entities["entities"]), "entity_relations": len(entities["relations"]), "render_entity_candidates": len(entity_refs)}
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
 

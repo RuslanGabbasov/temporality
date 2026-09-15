@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/temporality-project/temporality/frp/attention"
 	"github.com/temporality-project/temporality/frp/cognition"
+	"github.com/temporality-project/temporality/frp/entity"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
 	"github.com/temporality-project/temporality/frp/procedure"
@@ -24,6 +26,10 @@ const Version = "render-0.3.1"
 const (
 	procedureMatchThreshold = 0.1
 	maxProcedureMatches     = 8
+	// maxEntityCandidates bounds how many global entities may enter one
+	// render's ambient pool (M14.3): entities are world knowledge, not
+	// episode state, so a large graph must not flood every frame.
+	maxEntityCandidates = 16
 )
 
 type Request struct {
@@ -139,7 +145,17 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 			return Packet{}, err
 		}
 	}
-	ambient, err := selectAmbient(current, goal, events, regions, edges)
+	entities := []entity.Entity{}
+	entityRelations := []entity.EntityRelation{}
+	if entityStore, ok := any(r.stores).(entity.Store); ok {
+		if entities, err = entityStore.ListEntities(ctx, entity.Filter{}); err != nil {
+			return Packet{}, err
+		}
+		if entityRelations, err = entityStore.ListEntityRelations(ctx, entity.RelationFilter{}); err != nil {
+			return Packet{}, err
+		}
+	}
+	ambient, err := selectAmbient(current, goal, events, regions, edges, entities, entityRelations)
 	if err != nil {
 		return Packet{}, err
 	}
@@ -182,22 +198,30 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	packet.RenderID = contentID(packet)
 	return packet, nil
 }
-func selectAmbient(current frame.Frame, goal objective.Objective, events []protocol.Event, regions []projection.Region, edges []projection.Edge) (attention.Result, error) {
+func selectAmbient(current frame.Frame, goal objective.Objective, events []protocol.Event, regions []projection.Region, edges []projection.Edge, entities []entity.Entity, entityRelations []entity.EntityRelation) (attention.Result, error) {
 	if !current.Attention.Ambient {
 		return attention.Result{Version: attention.Version, Selected: []attention.ScoredCandidate{}}, nil
 	}
 	pins := map[string]struct{}{}
 	anchorRegions := map[string]struct{}{}
+	anchorEntities := map[string]struct{}{}
 	if current.Focus.Type == frame.RefRegion {
 		anchorRegions[current.Focus.ID] = struct{}{}
+	}
+	if current.Focus.Type == frame.RefEntity {
+		anchorEntities[current.Focus.ID] = struct{}{}
 	}
 	for _, ref := range current.WorkingSet {
 		pins[string(ref.Type)+":"+ref.ID] = struct{}{}
 		if ref.Type == frame.RefRegion {
 			anchorRegions[ref.ID] = struct{}{}
 		}
+		if ref.Type == frame.RefEntity {
+			anchorEntities[ref.ID] = struct{}{}
+		}
 	}
 	graphProximity := regionGraphProximity(anchorRegions, edges)
+	entityProximity := entityGraphProximity(anchorEntities, entityRelations)
 	candidates := make([]attention.Candidate, 0, len(events)+len(regions))
 	focusText := current.Focus.Query
 	for i, event := range events {
@@ -236,6 +260,41 @@ func selectAmbient(current frame.Frame, goal objective.Objective, events []proto
 		}
 		candidates = append(candidates, attention.Candidate{Ref: frame.Ref{Type: frame.RefRegion, ID: region.RegionID}, Features: attention.Features{SemanticRelevance: overlap(focusText, region.Label), GraphProximity: graphProximity[region.RegionID], Activation: region.Activation, Trust: trust, TaskRelevance: overlap(goal.Text, region.Label), Pin: pin}, Payload: region})
 	}
+	// M14.3: entities join the ambient candidate pool as world knowledge. They
+	// are global (not episode-scoped), so an unrelated world must not flood the
+	// frame: only entities with some relevance to the frame (focus overlap,
+	// task overlap, graph proximity to a pinned entity, or pinned themselves)
+	// compete, bounded by maxEntityCandidates strongest first.
+	entityCandidates := make([]attention.Candidate, 0, len(entities))
+	for _, value := range entities {
+		pin := 0.0
+		if _, ok := pins["entity:"+value.EntityID]; ok {
+			pin = 1
+		}
+		label := value.Type + " " + value.Name
+		semantic := overlap(focusText, label)
+		task := overlap(goal.Text, label)
+		proximity := entityProximity[value.EntityID]
+		if pin == 0 && semantic == 0 && task == 0 && proximity == 0 {
+			continue
+		}
+		activation := float64(value.MentionCount) / 10
+		if activation > 1 {
+			activation = 1
+		}
+		entityCandidates = append(entityCandidates, attention.Candidate{Ref: frame.Ref{Type: frame.RefEntity, ID: value.EntityID}, Features: attention.Features{SemanticRelevance: semantic, GraphProximity: proximity, Activation: activation, Trust: float64(value.Confidence), TaskRelevance: task, Pin: pin}, Payload: value})
+	}
+	sort.SliceStable(entityCandidates, func(i, j int) bool {
+		a, b := entityCandidates[i].Features, entityCandidates[j].Features
+		relevance := func(f attention.Features) float64 {
+			return f.SemanticRelevance + f.TaskRelevance + f.GraphProximity + f.Pin
+		}
+		return relevance(a) > relevance(b)
+	})
+	if len(entityCandidates) > maxEntityCandidates {
+		entityCandidates = entityCandidates[:maxEntityCandidates]
+	}
+	candidates = append(candidates, entityCandidates...)
 	engine, err := attention.New(attention.DefaultPolicy())
 	if err != nil {
 		return attention.Result{}, err
@@ -251,6 +310,24 @@ func regionGraphProximity(anchors map[string]struct{}, edges []projection.Edge) 
 		}
 		if _, ok := anchors[edge.TargetRegionID]; ok && edge.Weight > result[edge.SourceRegionID] {
 			result[edge.SourceRegionID] = edge.Weight
+		}
+	}
+	return result
+}
+
+// entityGraphProximity maps entity ids to their strongest relation confidence
+// from any anchored entity; anchored entities themselves are excluded so the
+// proximity feature rewards neighbours, not the anchors.
+func entityGraphProximity(anchors map[string]struct{}, relations []entity.EntityRelation) map[string]float64 {
+	result := make(map[string]float64)
+	for _, relation := range relations {
+		_, sourceAnchored := anchors[relation.SourceID]
+		_, targetAnchored := anchors[relation.TargetID]
+		if sourceAnchored && !targetAnchored && float64(relation.Confidence) > result[relation.TargetID] {
+			result[relation.TargetID] = float64(relation.Confidence)
+		}
+		if targetAnchored && !sourceAnchored && float64(relation.Confidence) > result[relation.SourceID] {
+			result[relation.SourceID] = float64(relation.Confidence)
 		}
 	}
 	return result
@@ -296,6 +373,11 @@ func (r *Renderer) refItem(ctx context.Context, ref frame.Ref) (any, error) {
 		return r.stores.GetClaim(ctx, ref.ID)
 	case frame.RefEvent:
 		return r.stores.Get(ctx, ref.ID)
+	case frame.RefEntity:
+		if entityStore, ok := any(r.stores).(entity.Store); ok {
+			return entityStore.GetEntity(ctx, ref.ID)
+		}
+		return map[string]any{"type": ref.Type, "id": ref.ID}, nil
 	default:
 		return map[string]any{"type": ref.Type, "id": ref.ID}, nil
 	}

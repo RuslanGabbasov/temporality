@@ -74,6 +74,12 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Deterministic extractors (`gomod.v1`, `npm.v1`, `cargo.v1`, `python.v1`, `readme.v1`, `git.v1`, `http.v1`, `listing.v1`) turn observations into candidate Claims with confidence below 1.
   - [x] Claims cite the observation Events as evidence: `Commit.Evidence` with a `claim_evidence` table, unknown evidence rejected, provenance chain readable via `GET /v1/claims/{id}/evidence`.
   - [x] `POST /v1/ingest` bootstrap flow over filesystem/git/http resources with depth and event budgets, truncation reporting, and smoke coverage against an empty substrate.
+- [x] **M14 — Entity / knowledge graph:**
+  - [x] Claim triples: optional `subject`/`predicate`/`object` (entity refs like `module:example.com/app`) validated all-or-none against frozen registries of entity types and predicates; persisted in the claims table and exposed through `GET /v1/claims/{id}`.
+  - [x] Ingest extractors emit triples: manifests bind packages/modules to files (`declared_in`), dependencies (`depends_on`, bounded per manifest), toolchains (`targets`), and root ownership (`contains`); git status binds repositories to branches (`on_branch`).
+  - [x] Entity projection (`projection.BuildEntities`): global rebuildable graph over triple-bearing claims with deterministic content-derived ids, mention counts, max-confidence entity trust, and refuted/superseded claims excluded; `entities`/`entity_relations` tables replaced atomically on rebuild.
+  - [x] Entity-aware attention (M14.3): `entity` refs in frame focus/working set, entity candidates in the ambient pool gated by frame relevance (focus/objective overlap, graph proximity, pins) and bounded so a large world graph cannot flood every render.
+  - [x] Entity HTTP API (`POST /v1/projections/entities/rebuild`, `GET /v1/entities?type=`, `GET /v1/entities/{id}` with relations) plus postgres/memory store coverage, integration tests, and smoke coverage asserting entities appear in the render map.
 
 ## Architectural constraints
 

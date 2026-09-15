@@ -14,6 +14,7 @@ import (
 	"github.com/temporality-project/temporality/frp/affordance"
 	"github.com/temporality-project/temporality/frp/branch"
 	"github.com/temporality-project/temporality/frp/cognition"
+	"github.com/temporality-project/temporality/frp/entity"
 	"github.com/temporality-project/temporality/frp/execution"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
@@ -28,30 +29,32 @@ import (
 )
 
 type Store struct {
-	mu             sync.RWMutex
-	events         map[string]protocol.Event
-	claims         map[string]cognition.Claim
-	relations      []cognition.ClaimRelation
-	claimEvidence  map[string][]string
-	frames         map[string]frame.Frame
-	objectives     map[string]objective.Objective
-	regions        []projection.Region
-	edges          []projection.Edge
-	procedures     []procedure.Procedure
-	definitions    map[string]affordance.Definition
-	requests       map[string]affordance.Request
-	executions     map[string]execution.Execution
-	plannerRuns    map[string]planner.Run
-	plannerSteps   map[string][]planner.DurableStep
-	cognitiveSteps map[string]stepRuntime.Prepared
-	worlds         map[string]world.World
-	eventSeq       map[string]int64
-	nextEventSeq   int64
-	frameEvents    map[string]string
-	snapshots      map[string]timetravel.Snapshot
-	forkGroups     map[string]branch.ForkGroup
-	branches       map[string]branch.Branch
-	comparisons    map[string]branch.ComparisonResult
+	mu                 sync.RWMutex
+	events             map[string]protocol.Event
+	claims             map[string]cognition.Claim
+	relations          []cognition.ClaimRelation
+	claimEvidence      map[string][]string
+	frames             map[string]frame.Frame
+	objectives         map[string]objective.Objective
+	regions            []projection.Region
+	edges              []projection.Edge
+	procedures         []procedure.Procedure
+	definitions        map[string]affordance.Definition
+	requests           map[string]affordance.Request
+	executions         map[string]execution.Execution
+	plannerRuns        map[string]planner.Run
+	plannerSteps       map[string][]planner.DurableStep
+	cognitiveSteps     map[string]stepRuntime.Prepared
+	worlds             map[string]world.World
+	entityRows         []entity.Entity
+	entityRelationRows []entity.EntityRelation
+	eventSeq           map[string]int64
+	nextEventSeq       int64
+	frameEvents        map[string]string
+	snapshots          map[string]timetravel.Snapshot
+	forkGroups         map[string]branch.ForkGroup
+	branches           map[string]branch.Branch
+	comparisons        map[string]branch.ComparisonResult
 }
 
 func New() *Store {
@@ -188,6 +191,17 @@ func (s *Store) GetClaim(_ context.Context, id string) (cognition.Claim, error) 
 	return claim, nil
 }
 
+func (s *Store) ListClaims(_ context.Context) ([]cognition.Claim, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]cognition.Claim, 0, len(s.claims))
+	for _, claim := range s.claims {
+		result = append(result, claim)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ClaimID < result[j].ClaimID })
+	return result, nil
+}
+
 func (s *Store) ListRelations(_ context.Context, id string) ([]cognition.ClaimRelation, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -207,6 +221,72 @@ func (s *Store) ListClaimEvidence(_ context.Context, id string) ([]string, error
 		return nil, cognition.ErrClaimNotFound
 	}
 	return append([]string(nil), s.claimEvidence[id]...), nil
+}
+
+func (s *Store) ReplaceAllEntities(_ context.Context, entities []entity.Entity, relations []entity.EntityRelation) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entityRows = append([]entity.Entity(nil), entities...)
+	s.entityRelationRows = append([]entity.EntityRelation(nil), relations...)
+	return nil
+}
+
+func (s *Store) ListEntities(_ context.Context, filter entity.Filter) ([]entity.Entity, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]entity.Entity, 0, len(s.entityRows))
+	for _, e := range s.entityRows {
+		if filter.Type != "" && e.Type != filter.Type {
+			continue
+		}
+		if filter.Name != "" && e.Name != filter.Name {
+			continue
+		}
+		result = append(result, e)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Type != result[j].Type {
+			return result[i].Type < result[j].Type
+		}
+		return result[i].Name < result[j].Name
+	})
+	return result, nil
+}
+
+func (s *Store) GetEntity(_ context.Context, id string) (entity.Entity, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, e := range s.entityRows {
+		if e.EntityID == id {
+			return e, nil
+		}
+	}
+	return entity.Entity{}, entity.ErrEntityNotFound
+}
+
+func (s *Store) ListEntityRelations(_ context.Context, filter entity.RelationFilter) ([]entity.EntityRelation, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]entity.EntityRelation, 0, len(s.entityRelationRows))
+	for _, r := range s.entityRelationRows {
+		if filter.EntityID != "" && r.SourceID != filter.EntityID && r.TargetID != filter.EntityID {
+			continue
+		}
+		result = append(result, r)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].SourceID != result[j].SourceID {
+			return result[i].SourceID < result[j].SourceID
+		}
+		if result[i].TargetID != result[j].TargetID {
+			return result[i].TargetID < result[j].TargetID
+		}
+		if result[i].Predicate != result[j].Predicate {
+			return result[i].Predicate < result[j].Predicate
+		}
+		return result[i].ClaimID < result[j].ClaimID
+	})
+	return result, nil
 }
 
 func (s *Store) ReplaceRegions(_ context.Context, episodeID, branchID string, regions []projection.Region) error {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/temporality-project/temporality/frp/entity"
 	"github.com/temporality-project/temporality/frp/protocol"
 )
 
@@ -28,6 +29,12 @@ type Claim struct {
 	CreatedEvent string      `json:"created_event"`
 	ValidFrom    time.Time   `json:"valid_from"`
 	ValidTo      *time.Time  `json:"valid_to,omitempty"`
+	// Triple optionally binds the claim to the M14 knowledge graph: subject and
+	// object are entity refs ("type:name"), predicate is a registered relation
+	// predicate. All three fields are validated together (all-or-none).
+	Subject   string `json:"subject,omitempty"`
+	Predicate string `json:"predicate,omitempty"`
+	Object    string `json:"object,omitempty"`
 }
 
 func (c *Claim) ApplyDefaults(now time.Time) {
@@ -43,6 +50,28 @@ func (c *Claim) ApplyDefaults(now time.Time) {
 	if c.ValidFrom.IsZero() {
 		c.ValidFrom = now.UTC()
 	}
+}
+
+func (c Claim) HasTriple() bool {
+	return c.Subject != "" || c.Predicate != "" || c.Object != ""
+}
+
+// Triple returns the parsed entity refs and predicate when the claim carries
+// a knowledge-graph triple.
+func (c Claim) Triple() (subject entity.Ref, predicate string, object entity.Ref, err error) {
+	subject, err = entity.ParseRef(c.Subject)
+	if err != nil {
+		return
+	}
+	predicate = c.Predicate
+	if err = entity.ValidatePredicate(predicate); err != nil {
+		return
+	}
+	object, err = entity.ParseRef(c.Object)
+	if err != nil {
+		return
+	}
+	return
 }
 
 func (c Claim) Validate() error {
@@ -71,6 +100,14 @@ func (c Claim) Validate() error {
 	}
 	if c.ValidTo != nil && c.ValidTo.Before(c.ValidFrom) {
 		return errors.New("valid_to cannot precede valid_from")
+	}
+	if (c.Subject == "") != (c.Predicate == "") || (c.Subject == "") != (c.Object == "") {
+		return errors.New("claim triple fields subject/predicate/object must be set together")
+	}
+	if c.HasTriple() {
+		if _, _, _, err := c.Triple(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

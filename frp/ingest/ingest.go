@@ -153,7 +153,7 @@ func (r *Runner) Run(ctx context.Context, request Request) (Result, error) {
 	result := Result{RunID: r.NewID(), WorldID: r.World.WorldID, WorldVersion: r.World.StateVersion, ResourceID: resource.ID, ResourceType: resource.Type, Observations: []ObservationRecord{}, Claims: []ClaimRecord{}}
 
 	observations, walkErr := r.observeResource(ctx, &result, resource, request)
-	extractions := Extract(resource.ID, observations)
+	extractions := Extract(resource, observations)
 	claims, claimErr := r.commitClaims(ctx, request, result.RunID, extractions)
 	result.Claims = claims
 	if walkErr != nil {
@@ -214,8 +214,13 @@ func (r *Runner) commitClaims(ctx context.Context, request Request, runID string
 			},
 			Provenance: map[string]any{"source": "ingestion", "extractor": extraction.Extractor, "run_id": runID},
 		}
+		if extraction.Subject != "" {
+			event.Payload["subject"] = extraction.Subject
+			event.Payload["predicate"] = extraction.Predicate
+			event.Payload["object"] = extraction.Object
+		}
 		event.ApplyDefaults(at)
-		claim := cognition.Claim{Protocol: protocol.Name, Version: protocol.Version, ClaimID: claimID, Proposition: extraction.Proposition, Confidence: extraction.Confidence, Status: cognition.ClaimCandidate, CreatedEvent: eventID, ValidFrom: at}
+		claim := cognition.Claim{Protocol: protocol.Name, Version: protocol.Version, ClaimID: claimID, Proposition: extraction.Proposition, Confidence: extraction.Confidence, Status: cognition.ClaimCandidate, CreatedEvent: eventID, ValidFrom: at, Subject: extraction.Subject, Predicate: extraction.Predicate, Object: extraction.Object}
 		commit := cognition.Commit{Event: event, Claim: claim, Evidence: extraction.Evidence}
 		if err := r.Claims.CommitClaim(ctx, commit); err != nil {
 			return claims, fmt.Errorf("commit extracted claim: %w", err)

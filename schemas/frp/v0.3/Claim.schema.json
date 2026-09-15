@@ -13,7 +13,10 @@
     "status": { "enum": ["candidate", "supported", "refuted", "superseded"] },
     "created_event": { "type": "string", "format": "uuid" },
     "valid_from": { "type": "string", "format": "date-time" },
-    "valid_to": { "type": ["string", "null"], "format": "date-time" }
+    "valid_to": { "type": ["string", "null"], "format": "date-time" },
+    "subject": { "type": "string", "pattern": "^[a-z_]+:.+$" },
+    "predicate": { "type": "string", "minLength": 1 },
+    "object": { "type": "string", "pattern": "^[a-z_]+:.+$" }
   },
   "additionalProperties": false
 }

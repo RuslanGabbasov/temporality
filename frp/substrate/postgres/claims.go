@@ -25,7 +25,7 @@ func (s *Store) CommitClaim(ctx context.Context, commit cognition.Commit) error 
 		return err
 	}
 	c := commit.Claim
-	_, err = tx.Exec(ctx, `INSERT INTO claims (claim_id,protocol,version,proposition,confidence,status,created_event,valid_from,valid_to) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, c.ClaimID, c.Protocol, c.Version, c.Proposition, c.Confidence, c.Status, c.CreatedEvent, c.ValidFrom, c.ValidTo)
+	_, err = tx.Exec(ctx, `INSERT INTO claims (claim_id,protocol,version,proposition,confidence,status,created_event,valid_from,valid_to,subject,predicate,object) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,''),NULLIF($11,''),NULLIF($12,''))`, c.ClaimID, c.Protocol, c.Version, c.Proposition, c.Confidence, c.Status, c.CreatedEvent, c.ValidFrom, c.ValidTo, c.Subject, c.Predicate, c.Object)
 	if err != nil {
 		return err
 	}
@@ -65,6 +65,14 @@ func insertEvent(ctx context.Context, tx pgx.Tx, e protocol.Event) error {
 	return err
 }
 
+const claimColumns = `protocol,version,claim_id::text,proposition,confidence,status,created_event::text,valid_from,valid_to,COALESCE(subject,''),COALESCE(predicate,''),COALESCE(object,'')`
+
+func scanClaim(row pgx.Row) (cognition.Claim, error) {
+	var claim cognition.Claim
+	err := row.Scan(&claim.Protocol, &claim.Version, &claim.ClaimID, &claim.Proposition, &claim.Confidence, &claim.Status, &claim.CreatedEvent, &claim.ValidFrom, &claim.ValidTo, &claim.Subject, &claim.Predicate, &claim.Object)
+	return claim, err
+}
+
 func (s *Store) TransitionClaim(ctx context.Context, transition cognition.Transition) (cognition.Claim, error) {
 	if err := transition.Validate(); err != nil {
 		return cognition.Claim{}, err
@@ -75,7 +83,7 @@ func (s *Store) TransitionClaim(ctx context.Context, transition cognition.Transi
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var claim cognition.Claim
-	err = tx.QueryRow(ctx, `SELECT protocol,version,claim_id::text,proposition,confidence,status,created_event::text,valid_from,valid_to FROM claims WHERE claim_id=$1 FOR UPDATE`, transition.ClaimID).Scan(&claim.Protocol, &claim.Version, &claim.ClaimID, &claim.Proposition, &claim.Confidence, &claim.Status, &claim.CreatedEvent, &claim.ValidFrom, &claim.ValidTo)
+	claim, err = scanClaim(tx.QueryRow(ctx, `SELECT `+claimColumns+` FROM claims WHERE claim_id=$1 FOR UPDATE`, transition.ClaimID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return cognition.Claim{}, cognition.ErrClaimNotFound
 	}
@@ -115,12 +123,28 @@ func (s *Store) TransitionClaim(ctx context.Context, transition cognition.Transi
 }
 
 func (s *Store) GetClaim(ctx context.Context, id string) (cognition.Claim, error) {
-	var claim cognition.Claim
-	err := s.pool.QueryRow(ctx, `SELECT protocol,version,claim_id::text,proposition,confidence,status,created_event::text,valid_from,valid_to FROM claims WHERE claim_id=$1`, id).Scan(&claim.Protocol, &claim.Version, &claim.ClaimID, &claim.Proposition, &claim.Confidence, &claim.Status, &claim.CreatedEvent, &claim.ValidFrom, &claim.ValidTo)
+	claim, err := scanClaim(s.pool.QueryRow(ctx, `SELECT `+claimColumns+` FROM claims WHERE claim_id=$1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return claim, cognition.ErrClaimNotFound
 	}
 	return claim, err
+}
+
+func (s *Store) ListClaims(ctx context.Context) ([]cognition.Claim, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+claimColumns+` FROM claims ORDER BY claim_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]cognition.Claim, 0)
+	for rows.Next() {
+		var claim cognition.Claim
+		if err = rows.Scan(&claim.Protocol, &claim.Version, &claim.ClaimID, &claim.Proposition, &claim.Confidence, &claim.Status, &claim.CreatedEvent, &claim.ValidFrom, &claim.ValidTo, &claim.Subject, &claim.Predicate, &claim.Object); err != nil {
+			return nil, err
+		}
+		result = append(result, claim)
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) ListRelations(ctx context.Context, id string) ([]cognition.ClaimRelation, error) {

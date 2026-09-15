@@ -64,6 +64,7 @@ type Store interface {
 	CommitClaim(context.Context, Commit) error
 	TransitionClaim(context.Context, Transition) (Claim, error)
 	GetClaim(context.Context, string) (Claim, error)
+	ListClaims(context.Context) ([]Claim, error)
 	ListRelations(context.Context, string) ([]ClaimRelation, error)
 	// ListClaimEvidence returns the event ids backing a claim, excluding the
 	// claim's own created_event (M13 provenance chain).

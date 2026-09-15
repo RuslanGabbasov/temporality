@@ -218,7 +218,12 @@ func TestRunnerFileResource(t *testing.T) {
 	if len(result.Observations) != 2 {
 		t.Fatalf("observations = %d, want stat+read", len(result.Observations))
 	}
-	if len(result.Claims) != 1 || !strings.Contains(result.Claims[0].Proposition, "example.com/single") {
+	if len(result.Claims) != 2 {
 		t.Fatalf("claims = %+v", result.Claims)
+	}
+	for _, claim := range result.Claims {
+		if !strings.Contains(claim.Proposition, "example.com/single") {
+			t.Fatalf("unexpected claim %q", claim.Proposition)
+		}
 	}
 }
