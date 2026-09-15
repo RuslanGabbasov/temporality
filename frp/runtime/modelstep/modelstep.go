@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/temporality-project/temporality/frp/affordance"
 	"github.com/temporality-project/temporality/frp/attention"
@@ -48,7 +49,14 @@ func (s Service) Run(ctx context.Context, input Input) (Result, error) {
 	if s.Store == nil || s.Adapter == nil {
 		return Result{}, errors.New("store and model adapter are required")
 	}
-	packet, err := render.New(s.Store).Render(ctx, render.Request{FrameID: input.FrameID, ObjectiveID: input.ObjectiveID, BudgetTokens: input.BudgetTokens})
+	// Definitions travel with the render packet so the model sees the actions
+	// it may request; map iteration order must not leak into the packet.
+	definitions := make([]affordance.Definition, 0, len(input.Definitions))
+	for _, definition := range input.Definitions {
+		definitions = append(definitions, definition)
+	}
+	sort.Slice(definitions, func(i, j int) bool { return definitions[i].ID < definitions[j].ID })
+	packet, err := render.New(s.Store).Render(ctx, render.Request{FrameID: input.FrameID, ObjectiveID: input.ObjectiveID, BudgetTokens: input.BudgetTokens, Affordances: definitions})
 	if err != nil {
 		return Result{}, fmt.Errorf("render model input: %w", err)
 	}

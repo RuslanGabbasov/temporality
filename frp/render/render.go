@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/temporality-project/temporality/frp/affordance"
 	"github.com/temporality-project/temporality/frp/attention"
 	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/entity"
@@ -33,9 +34,10 @@ const (
 )
 
 type Request struct {
-	FrameID      string `json:"frame_id"`
-	ObjectiveID  string `json:"objective_id"`
-	BudgetTokens int    `json:"budget_tokens"`
+	FrameID      string                  `json:"frame_id"`
+	ObjectiveID  string                  `json:"objective_id"`
+	BudgetTokens int                     `json:"budget_tokens"`
+	Affordances  []affordance.Definition `json:"affordances,omitempty"`
 }
 type Section struct {
 	Kind      string `json:"kind"`
@@ -183,6 +185,14 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	outside := ambient.Considered - len(ambient.Selected)
 	hint := fmt.Sprintf("%d attention candidates are outside the frame", outside)
 	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{map[string]any{"agent_id": current.AgentID, "episode_id": current.EpisodeID, "branch_id": current.BranchID}}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: mapItems}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "periphery", Attention: "ambient", Items: periphery}, {Kind: "working_set", Attention: "deliberate", Items: working}, {Kind: "procedures", Attention: "ambient", Items: procedureItems}, {Kind: "recent", Attention: "ambient", Items: recent}}
+	// The affordances section closes the cognition→action loop: the model can
+	// only request actions it can see, so available definitions travel with the
+	// packet (deterministically ordered) instead of reaching step validation
+	// unseen. Omitted entirely when the caller declares none.
+	if items := affordanceItems(request.Affordances); len(items) > 0 {
+		rest := append([]Section{{Kind: "affordances", Items: items}}, sections[2:]...)
+		sections = append(sections[:2:2], rest...)
+	}
 	packet := Packet{Protocol: protocol.Name, ProtocolVersion: protocol.Version, FrameID: current.FrameID, MemoryVersion: memoryVersion, RendererVersion: Version, Sections: sections, OutsideFrame: OutsideFrame{NearbyRegions: outside, Hint: hint}, Provenance: Provenance{ProjectionVersion: "event-candidates.v1", AttentionVersion: attention.Version, EmbeddingModel: "none", AsOf: current.AsOf.Format("2006-01-02T15:04:05.999999999Z07:00")}, TokenUsage: TokenUsage{Budget: request.BudgetTokens}}
 	for {
 		packet.TokenUsage.Estimated = estimate(packet)
@@ -300,6 +310,27 @@ func selectAmbient(current frame.Frame, goal objective.Objective, events []proto
 		return attention.Result{}, err
 	}
 	return engine.SelectAmbient(candidates, pins, current.Attention.MaxCandidates)
+}
+
+// affordanceItems renders the compact affordance listing for the packet:
+// id, execution mode, capabilities and (when declared) the input schema, so
+// the model can form valid action requests without guessing.
+func affordanceItems(definitions []affordance.Definition) []any {
+	if len(definitions) == 0 {
+		return nil
+	}
+	ordered := make([]affordance.Definition, len(definitions))
+	copy(ordered, definitions)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	items := make([]any, 0, len(ordered))
+	for _, definition := range ordered {
+		item := map[string]any{"id": definition.ID, "execution_mode": definition.ExecutionMode, "capabilities": definition.Capabilities}
+		if len(definition.InputSchema) > 0 {
+			item["input_schema"] = definition.InputSchema
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func regionGraphProximity(anchors map[string]struct{}, edges []projection.Edge) map[string]float64 {
