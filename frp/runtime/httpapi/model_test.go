@@ -220,7 +220,7 @@ func TestModelPayloadLoggingAndInvalidConfiguration(t *testing.T) {
 	t.Setenv("TEMPORALITY_MODEL_LOG_PAYLOADS", "false")
 	t.Setenv("TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS", "63")
 	invalidTokens := serve(handler, http.MethodGet, "/v1/model/config", nil)
-	if invalidTokens.Code != http.StatusServiceUnavailable || !strings.Contains(invalidTokens.Body.String(), "between 64 and 16384") {
+	if invalidTokens.Code != http.StatusServiceUnavailable || !strings.Contains(invalidTokens.Body.String(), "between 64 and 65536") {
 		t.Fatalf("invalid max output tokens: status=%d body=%s", invalidTokens.Code, invalidTokens.Body.String())
 	}
 }

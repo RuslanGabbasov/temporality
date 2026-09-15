@@ -58,7 +58,8 @@ cp .env.example .env
 - `TEMPORALITY_MODEL_API_KEY` — ключ (может быть пустым для Ollama; ключ никогда не возвращается в provenance);
 - `TEMPORALITY_MODEL_TEMPERATURE` — температура `0..2`, по умолчанию `0`;
 - `TEMPORALITY_MODEL_TIMEOUT` — Go duration, например `180s` (по умолчанию `180s`). Proxy ждёт до 10 минут, поэтому Runtime успевает вернуть структурированную JSON-ошибку вместо HTML `504`;
-- `TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS` — максимум токенов ответа, отправляемый провайдеру как OpenAI-compatible `max_tokens`; по умолчанию `1024`, допустимо `64..16384`;
+- `TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS` — максимум токенов ответа, отправляемый провайдеру как OpenAI-compatible `max_tokens`; по умолчанию `1024`, допустимо `64..65536`. Для reasoning-моделей помните: CoT считается в этом же бюджете, поэтому ставьте с запасом (например `16384`), иначе ответ может остаться пустым с `finish_reason=length`;
+- `TEMPORALITY_MODEL_REASONING` — управление ризонингом модели: `off` (запросить отключение, отправляется как `reasoning: {"enabled": false}`), `exclude` (ризонинг считается, но не возвращается в ответе — токены всё равно биллятся), `low`/`medium`/`high` (усилие ризонинга `reasoning: {"effort": ...}`). Пусто (по умолчанию) — поле не отправляется вовсе. Актуально прежде всего для OpenRouter; другие OpenAI-compatible серверы обычно игнорируют поле. Важно: у моделей, которые рассуждают всегда (DeepSeek-R1 и т.п.), ризонинг выключить нельзя — выберите неризонинг-вариант модели (например, `deepseek/deepseek-chat-v3.1` вместо R1);
 - `TEMPORALITY_MODEL_LOG_PAYLOADS` — opt-in логирование JSON-запросов и сырого `message.content` ответов (`true` или `false`, по умолчанию `false`);
 - `TEMPORALITY_MODEL_LOG_MAX_BYTES` — лимит каждого залогированного payload, по умолчанию `65536`, допустимо `1024..1048576`. Метаданные указывают исходный размер и факт усечения.
 
@@ -84,6 +85,8 @@ TEMPORALITY_MODEL_API_KEY=your-key
 TEMPORALITY_MODEL_BASE_URL=https://openrouter.ai/api/v1
 TEMPORALITY_MODEL_ID=openai/gpt-4.1-mini
 TEMPORALITY_MODEL_API_KEY=your-openrouter-key
+# отключить ризонинг у переключаемых моделей
+TEMPORALITY_MODEL_REASONING=off
 
 # Локальный Ollama, доступный из Compose-контейнера
 TEMPORALITY_MODEL_BASE_URL=http://host.docker.internal:11434/v1

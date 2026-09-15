@@ -24,12 +24,16 @@ type Adapter interface {
 
 // Config is non-secret model configuration and may safely be retained as provenance.
 // BaseURL is the OpenAI-compatible API root, normally ending in /v1.
+// Reasoning controls provider reasoning parameters (OpenRouter-style):
+// "" sends nothing, "off" disables reasoning, "exclude" hides it from the
+// response, and "low"/"medium"/"high" set the reasoning effort.
 type Config struct {
 	BaseURL         string        `json:"base_url"`
 	Model           string        `json:"model"`
 	Temperature     float64       `json:"temperature"`
 	Timeout         time.Duration `json:"timeout"`
 	MaxOutputTokens int           `json:"max_output_tokens"`
+	Reasoning       string        `json:"reasoning,omitempty"`
 	Trace           *TraceConfig  `json:"-"`
 }
 
@@ -60,6 +64,7 @@ type Provenance struct {
 	Temperature     float64 `json:"temperature"`
 	TimeoutMS       int64   `json:"timeout_ms"`
 	MaxOutputTokens int     `json:"max_output_tokens"`
+	Reasoning       string  `json:"reasoning,omitempty"`
 }
 
 // OpenAIAdapter calls an OpenAI-compatible chat-completions endpoint.
@@ -70,6 +75,7 @@ type OpenAIAdapter struct {
 	temperature     float64
 	timeout         time.Duration
 	maxOutputTokens int
+	reasoning       map[string]any
 	apiKey          string
 	client          *http.Client
 	provenance      Provenance
@@ -79,6 +85,10 @@ type OpenAIAdapter struct {
 func NewOpenAIAdapter(config Config, credentials Credentials, client *http.Client) (*OpenAIAdapter, error) {
 	if config.MaxOutputTokens == 0 {
 		config.MaxOutputTokens = 1024
+	}
+	reasoning, err := reasoningRequest(config.Reasoning)
+	if err != nil {
+		return nil, err
 	}
 	base := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
 	parsed, err := url.Parse(base)
@@ -97,8 +107,8 @@ func NewOpenAIAdapter(config Config, credentials Credentials, client *http.Clien
 	if config.Timeout <= 0 {
 		return nil, errors.New("timeout must be positive")
 	}
-	if config.MaxOutputTokens < 64 || config.MaxOutputTokens > 16384 {
-		return nil, errors.New("max_output_tokens must be between 64 and 16384")
+	if config.MaxOutputTokens < 64 || config.MaxOutputTokens > 65536 {
+		return nil, errors.New("max_output_tokens must be between 64 and 65536")
 	}
 	if config.Trace != nil && (config.Trace.MaxBytes <= 0 || config.Trace.Hook == nil) {
 		return nil, errors.New("model trace requires a positive max_bytes and hook")
@@ -116,6 +126,7 @@ func NewOpenAIAdapter(config Config, credentials Credentials, client *http.Clien
 		temperature:     config.Temperature,
 		timeout:         config.Timeout,
 		maxOutputTokens: config.MaxOutputTokens,
+		reasoning:       reasoning,
 		apiKey:          credentials.APIKey,
 		client:          client,
 		trace:           trace,
@@ -126,8 +137,27 @@ func NewOpenAIAdapter(config Config, credentials Credentials, client *http.Clien
 			Temperature:     config.Temperature,
 			TimeoutMS:       config.Timeout.Milliseconds(),
 			MaxOutputTokens: config.MaxOutputTokens,
+			Reasoning:       config.Reasoning,
 		},
 	}, nil
+}
+
+// reasoningRequest maps a Config.Reasoning preset to the provider request
+// object. OpenRouter accepts {"enabled":bool}, {"effort":string} and
+// {"exclude":bool}; other OpenAI-compatible servers ignore the field.
+func reasoningRequest(preset string) (map[string]any, error) {
+	switch preset {
+	case "":
+		return nil, nil
+	case "off":
+		return map[string]any{"enabled": false}, nil
+	case "exclude":
+		return map[string]any{"exclude": true}, nil
+	case "low", "medium", "high":
+		return map[string]any{"effort": preset}, nil
+	default:
+		return nil, fmt.Errorf("reasoning must be one of off, exclude, low, medium, high")
+	}
 }
 
 func (a *OpenAIAdapter) Provenance() Provenance { return a.provenance }
@@ -149,6 +179,7 @@ type chatRequest struct {
 	Messages       []chatMessage  `json:"messages"`
 	Temperature    float64        `json:"temperature"`
 	MaxTokens      int            `json:"max_tokens"`
+	Reasoning      map[string]any `json:"reasoning,omitempty"`
 	ResponseFormat responseFormat `json:"response_format"`
 }
 type chatMessage struct {
@@ -168,8 +199,12 @@ Use only information present in the RenderPacket. You have no tools, external ac
 type chatResponse struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content          string `json:"content"`
+			Refusal          string `json:"refusal"`
+			Reasoning        string `json:"reasoning"`         // OpenRouter-normalized reasoning field
+			ReasoningContent string `json:"reasoning_content"` // DeepSeek-style native field
 		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 }
 
@@ -182,6 +217,7 @@ func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cogniti
 		Model:       a.model,
 		Temperature: a.temperature,
 		MaxTokens:   a.maxOutputTokens,
+		Reasoning:   a.reasoning,
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: string(packetJSON)},
@@ -220,14 +256,47 @@ func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cogniti
 	if len(decoded.Choices) == 0 {
 		return cognition.CognitiveEmission{}, errors.New("model response has no choices")
 	}
-	a.emitTrace("response", []byte(decoded.Choices[0].Message.Content))
-	content, err := stripJSONFence(decoded.Choices[0].Message.Content)
+	choice := decoded.Choices[0]
+	if strings.TrimSpace(choice.Message.Content) == "" && choice.Message.Refusal != "" {
+		return cognition.CognitiveEmission{}, fmt.Errorf("model refused to answer: %s", boundedSnippet(choice.Message.Refusal))
+	}
+	a.emitTrace("response", []byte(choice.Message.Content))
+	content, err := stripJSONFence(choice.Message.Content)
 	if err != nil {
 		return cognition.CognitiveEmission{}, err
 	}
 	var emission cognition.CognitiveEmission
-	if err := json.Unmarshal([]byte(content), &emission); err != nil {
-		return cognition.CognitiveEmission{}, fmt.Errorf("decode cognitive emission: %w", err)
+	err = json.Unmarshal([]byte(content), &emission)
+	if err != nil {
+		// Reasoning-style models prepend chain-of-thought prose to the answer
+		// (and some backends ignore response_format). Rescue the outermost JSON
+		// object when present; validation below stays strict either way.
+		if extracted := outermostJSON(content); extracted != "" {
+			var rescued cognition.CognitiveEmission
+			if rescueErr := json.Unmarshal([]byte(extracted), &rescued); rescueErr == nil {
+				emission, err = rescued, nil
+			}
+		}
+	}
+	if err != nil {
+		message := fmt.Sprintf("decode cognitive emission: %v", err)
+		if choice.FinishReason == "length" {
+			if strings.TrimSpace(choice.Message.Content) == "" {
+				// Empty content with finish_reason=length: reasoning tokens consumed
+				// the whole budget before the answer began.
+				message += fmt.Sprintf("; model produced no content within the token budget (finish_reason=length) — reasoning tokens likely consumed it: raise TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS above %d, set TEMPORALITY_MODEL_REASONING=off for toggleable models, or use a non-reasoning model", a.maxOutputTokens)
+				reasoning := choice.Message.Reasoning
+				if reasoning == "" {
+					reasoning = choice.Message.ReasoningContent
+				}
+				if reasoning != "" {
+					message += fmt.Sprintf("; model reasoning: %q", boundedSnippet(reasoning))
+				}
+			} else {
+				message += fmt.Sprintf("; model output was truncated (finish_reason=length), raise TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS above %d", a.maxOutputTokens)
+			}
+		}
+		return cognition.CognitiveEmission{}, fmt.Errorf("%s; model content: %q", message, boundedSnippet(choice.Message.Content))
 	}
 	if err := emission.Validate(); err != nil {
 		return cognition.CognitiveEmission{}, fmt.Errorf("validate cognitive emission: %w", err)
@@ -257,6 +326,27 @@ func stripJSONFence(content string) (string, error) {
 		return "", errors.New("malformed fenced model JSON")
 	}
 	return strings.TrimSpace(rest[:closing]), nil
+}
+
+// outermostJSON returns the substring from the first '{' to the last '}' so a
+// JSON object wrapped in model commentary can still be decoded.
+func outermostJSON(content string) string {
+	start := strings.IndexByte(content, '{')
+	end := strings.LastIndexByte(content, '}')
+	if start < 0 || end <= start {
+		return ""
+	}
+	return content[start : end+1]
+}
+
+// boundedSnippet returns a rune-safe diagnostic fragment of model output.
+func boundedSnippet(value string) string {
+	const limit = 256
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit]) + "...(truncated)"
 }
 
 // RecordedAdapter replays emissions without network access.

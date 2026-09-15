@@ -24,7 +24,7 @@ const (
 	modelLogMaxBytes            = 1024 * 1024
 	modelMaxOutputTokensDefault = 1024
 	modelMaxOutputTokensMin     = 64
-	modelMaxOutputTokensMax     = 16384
+	modelMaxOutputTokensMax     = 65536
 )
 
 var errModelNotConfigured = errors.New("TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID are required")
@@ -200,6 +200,7 @@ func modelConfigFromEnv() (modelRuntimeConfig, error) {
 		Temperature:     temperature,
 		Timeout:         timeout,
 		MaxOutputTokens: maxOutputTokens,
+		Reasoning:       strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_REASONING")),
 	}
 	config.credentials = model.Credentials{APIKey: os.Getenv("TEMPORALITY_MODEL_API_KEY")}
 	return config, nil
