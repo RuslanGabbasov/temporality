@@ -2,10 +2,10 @@ package render_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/temporality-project/temporality/frp/attention"
 	"github.com/temporality-project/temporality/frp/entity"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
@@ -45,14 +45,17 @@ func TestRenderAttendsOverEntities(t *testing.T) {
 	}
 	found, unexpected := false, false
 	for _, item := range mapSection.Items {
-		candidate, ok := item.(attention.ScoredCandidate)
-		if !ok || candidate.Candidate.Ref.Type != frame.RefEntity {
+		candidate, ok := item.(render.MapItem)
+		if !ok {
+			t.Fatalf("unexpected map item type %T", item)
+		}
+		if !strings.HasPrefix(candidate.Ref, "entity:") {
 			continue
 		}
-		if candidate.Candidate.Ref.ID == relevant.EntityID {
+		if candidate.Ref == "entity:"+relevant.EntityID {
 			found = true
 		}
-		if candidate.Candidate.Ref.ID == unrelated.EntityID {
+		if candidate.Ref == "entity:"+unrelated.EntityID {
 			unexpected = true
 		}
 	}

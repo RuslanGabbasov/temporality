@@ -359,7 +359,7 @@ def ingestion_scenario():
         frame = created["frame"]
         _, rendered = request("POST", "/v1/render", {"frame_id": frame["frame_id"], "objective_id": objective_id, "budget_tokens": 16000})
         map_items = next(section for section in rendered["sections"] if section["kind"] == "map")["items"]
-        entity_refs = [item["candidate"]["ref"] for item in map_items if item["candidate"]["ref"]["type"] == "entity"]
+        entity_refs = [item["ref"] for item in map_items if isinstance(item.get("ref"), str) and item["ref"].startswith("entity:")]
         assert entity_refs, "render map contains no entity candidates"
         return {"world_id": world_id, "observations": len(result["observations"]), "claims": len(result["claims"]), "regions": len(projection["regions"]), "entities": len(entities["entities"]), "entity_relations": len(entities["relations"]), "render_entity_candidates": len(entity_refs)}
     finally:
@@ -401,8 +401,9 @@ def main():
         _, repeated_render = request("POST", "/v1/render", render_request)
         assert first_render == repeated_render
         assert first_render["provenance"]["attention_version"] == "attention-0.3.1"
+        assert first_render["renderer_version"] == "render-0.4.0"
         map_items = next(section for section in first_render["sections"] if section["kind"] == "map")["items"]
-        assert map_items and any(item["candidate"]["ref"]["type"] == "region" for item in map_items)
+        assert map_items and any(item["ref"].startswith("region:") for item in map_items)
         definition = {"id": "inspect_environment", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
         adaptive_definition = {"id": "adaptive_inspection", "execution_mode": "adaptive", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {"enabled": True, "model": "recorded", "max_steps": 2}, "failure_policy": {"retry_transient": False, "allow_strategy_change": True, "max_retries": 0}}
         planner_trace = [{"step": {"id": "inspect", "capability": "filesystem.read", "operation": "stat", "input": {"path": "."}}}, {"complete": True, "summary": "environment inspected"}]

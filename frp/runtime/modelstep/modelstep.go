@@ -10,7 +10,6 @@ import (
 	"sort"
 
 	"github.com/temporality-project/temporality/frp/affordance"
-	"github.com/temporality-project/temporality/frp/attention"
 	"github.com/temporality-project/temporality/frp/cognition"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/model"
@@ -95,11 +94,15 @@ func ambientSuggestions(packet render.Packet) ([]frame.Ref, error) {
 			continue
 		}
 		for _, item := range section.Items {
-			selected, ok := item.(attention.ScoredCandidate)
+			selected, ok := item.(render.MapItem)
 			if !ok {
 				return nil, errors.New("render map contains an invalid attention candidate")
 			}
-			result = append(result, selected.Candidate.Ref)
+			ref, err := cognition.ParseRef(selected.Ref, false)
+			if err != nil {
+				return nil, fmt.Errorf("render map ref %q: %w", selected.Ref, err)
+			}
+			result = append(result, ref)
 		}
 		break
 	}

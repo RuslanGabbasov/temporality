@@ -2,10 +2,10 @@ package render_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/temporality-project/temporality/frp/attention"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
 	"github.com/temporality-project/temporality/frp/projection"
@@ -42,20 +42,16 @@ func TestGraphProximityChangesAmbientRegionRanking(t *testing.T) {
 		t.Fatal(err)
 	}
 	positions := map[string]int{}
-	var near attention.ScoredCandidate
 	for i, item := range packet.Sections[2].Items {
-		scored := item.(attention.ScoredCandidate)
-		if scored.Candidate.Ref.Type == frame.RefRegion {
-			positions[scored.Candidate.Ref.ID] = i
-			if scored.Candidate.Ref.ID == "z-near" {
-				near = scored
-			}
+		candidate := item.(render.MapItem)
+		kind, id, _ := strings.Cut(candidate.Ref, ":")
+		if kind == string(frame.RefRegion) {
+			positions[id] = i
 		}
 	}
 	if positions["z-near"] >= positions["a-far"] {
 		t.Fatalf("graph-near region did not outrank deterministic ID tie-break: %#v", positions)
 	}
-	if near.Candidate.Features.GraphProximity != 1 {
-		t.Fatalf("unexpected graph proximity: %#v", near.Candidate.Features)
-	}
+	// The raw graph-proximity feature behind this ranking is asserted in the
+	// white-box selectAmbient test (ambient_test.go).
 }

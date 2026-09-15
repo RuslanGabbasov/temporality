@@ -11,6 +11,11 @@ import (
 
 const Version = "attention-0.3.1"
 
+// MaxRunnersUp bounds how many near-miss candidates (ranked just below the
+// selection cut) are reported alongside the selection. The scoring policy is
+// untouched — runners-up are already computed, they were simply discarded.
+const MaxRunnersUp = 8
+
 type Features struct {
 	SemanticRelevance float64 `json:"semantic_relevance"`
 	GraphProximity    float64 `json:"graph_proximity"`
@@ -47,6 +52,10 @@ type Result struct {
 	Version    string            `json:"version"`
 	Considered int               `json:"considered"`
 	Selected   []ScoredCandidate `json:"selected"`
+	// RunnersUp are the strongest candidates that did NOT make the cut, in
+	// ranked order. The renderer exposes them as the frame's periphery: a
+	// honest view of what sits just outside attention's selection.
+	RunnersUp []ScoredCandidate `json:"runners_up"`
 }
 type Engine struct{ policy Policy }
 
@@ -94,10 +103,16 @@ func (e *Engine) SelectAmbient(candidates []Candidate, previous map[string]struc
 		}
 		return a.ID < b.ID
 	})
+	runners := []ScoredCandidate{}
 	if len(scored) > limit {
+		next := len(scored) - limit
+		if next > MaxRunnersUp {
+			next = MaxRunnersUp
+		}
+		runners = scored[limit : limit+next]
 		scored = scored[:limit]
 	}
-	return Result{Version: e.policy.Version, Considered: len(candidates), Selected: scored}, nil
+	return Result{Version: e.policy.Version, Considered: len(candidates), Selected: scored, RunnersUp: runners}, nil
 }
 func (e *Engine) SelectDeliberate(target frame.Focus) (frame.Focus, error) {
 	if err := target.Validate(); err != nil {

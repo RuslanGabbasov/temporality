@@ -23,7 +23,7 @@ import (
 	"github.com/temporality-project/temporality/frp/substrate"
 )
 
-const Version = "render-0.3.1"
+const Version = "render-0.4.0"
 
 const (
 	procedureMatchThreshold = 0.1
@@ -35,13 +35,20 @@ const (
 )
 
 // ambientHiddenEvents are attention's own bookkeeping: recording what was
-// suggested or selected is an audit trail, not content. Letting them compete
-// in the ambient pool makes attention chase its own output — one step's
-// suggestions spawn dozens of events that crowd out world.observations and
-// claims in every later render. They stay visible in the recent section.
+// suggested or selected is an audit trail, not content. Letting them into the
+// packet makes attention chase its own output — one step's suggestions spawn
+// dozens of events that crowd out world.observations and claims in every
+// later render (they once were 58% of an episode's events). They stay in the
+// substrate for audit, replay and the M10 debugger; the model never sees
+// them. Event-type regions aggregating them are filtered by label too.
 var ambientHiddenEvents = map[string]struct{}{
 	"attention.suggested": {},
 	"attention.selected":  {},
+}
+
+func bookkeepingEvent(typeName string) bool {
+	_, hidden := ambientHiddenEvents[typeName]
+	return hidden
 }
 
 type Request struct {
@@ -61,6 +68,18 @@ type Section struct {
 	Kind      string `json:"kind"`
 	Attention string `json:"attention,omitempty"`
 	Items     []any  `json:"items"`
+}
+
+// MapItem is the packet-facing form of an attention candidate. Ref is the
+// canonical string ("event:UUID", "region:UUID", ...) the model copies
+// verbatim into emissions, and Payload is compact: protocol envelopes
+// (version, agent/branch ids, provenance maps, feature vectors) carry no
+// cognitive signal for the model but previously cost ~a third of the packet.
+// The full envelopes stay in the substrate and the M10 debugger.
+type MapItem struct {
+	Ref     string  `json:"ref"`
+	Score   float64 `json:"score"`
+	Payload any     `json:"payload"`
 }
 type OutsideFrame struct {
 	NearbyRegions       int    `json:"nearby_regions"`
@@ -156,7 +175,13 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	}
 	recent := make([]any, 0, len(events))
 	for _, event := range events {
-		recent = append(recent, event)
+		// The packet is the model's view of memory; attention bookkeeping is
+		// audit structure (see ambientHiddenEvents) and would dominate recent
+		// as step count grows.
+		if bookkeepingEvent(event.Type) {
+			continue
+		}
+		recent = append(recent, compactEvent(event, true))
 	}
 	regions := []projection.Region{}
 	if regionStore, ok := any(r.stores).(projection.RegionStore); ok {
@@ -187,10 +212,15 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 		return Packet{}, err
 	}
 	mapItems := make([]any, 0, len(ambient.Selected))
-	periphery := make([]any, 0, len(ambient.Selected))
 	for _, selected := range ambient.Selected {
-		mapItems = append(mapItems, selected)
-		periphery = append(periphery, selected.Candidate.Payload)
+		mapItems = append(mapItems, mapItem(selected))
+	}
+	// Periphery is NOT a re-render of the map: it holds the near-miss
+	// candidates attention ranked just below the cut, so the model sees what
+	// sits right outside its frame without paying for the same content twice.
+	periphery := make([]any, 0, len(ambient.RunnersUp))
+	for _, runner := range ambient.RunnersUp {
+		periphery = append(periphery, mapItem(runner))
 	}
 	procedureItems := []any{}
 	if procedureStore, ok := any(r.stores).(procedure.Store); ok {
@@ -224,11 +254,10 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	}
 	packet := Packet{Protocol: protocol.Name, ProtocolVersion: protocol.Version, FrameID: current.FrameID, MemoryVersion: memoryVersion, RendererVersion: Version, Sections: sections, OutsideFrame: OutsideFrame{NearbyRegions: outside, Hint: hint}, Provenance: Provenance{ProjectionVersion: "event-candidates.v1", AttentionVersion: attention.Version, EmbeddingModel: "none", AsOf: provenanceAsOf.Format("2006-01-02T15:04:05.999999999Z07:00")}, TokenUsage: TokenUsage{Budget: request.BudgetTokens}}
 	// Budget degradation ladder: drop the cheapest information first — old
-	// recent events, then periphery payloads (they duplicate map candidates),
-	// then the weakest map candidates, then procedure matches (recorded
-	// patterns matter less than live world data). Sections the model acts
-	// from (identity, objective, focus, affordances, working set) are never
-	// trimmed.
+	// recent events, then periphery near-misses, then the weakest map
+	// candidates, then procedure matches (recorded patterns matter less than
+	// live world data). Sections the model acts from (identity, objective,
+	// focus, affordances, working set) are never trimmed.
 	trimOrder := []string{"recent", "periphery", "map", "procedures"}
 	for {
 		packet.TokenUsage.Estimated = estimate(packet)
@@ -264,7 +293,7 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 }
 func selectAmbient(current frame.Frame, goal objective.Objective, events []protocol.Event, regions []projection.Region, edges []projection.Edge, entities []entity.Entity, entityRelations []entity.EntityRelation) (attention.Result, error) {
 	if !current.Attention.Ambient {
-		return attention.Result{Version: attention.Version, Selected: []attention.ScoredCandidate{}}, nil
+		return attention.Result{Version: attention.Version, Selected: []attention.ScoredCandidate{}, RunnersUp: []attention.ScoredCandidate{}}, nil
 	}
 	pins := map[string]struct{}{}
 	anchorRegions := map[string]struct{}{}
@@ -320,6 +349,11 @@ func selectAmbient(current frame.Frame, goal objective.Objective, events []proto
 		candidates = append(candidates, attention.Candidate{Ref: frame.Ref{Type: frame.RefEvent, ID: event.EventID}, Features: attention.Features{SemanticRelevance: overlap(focusText, text), Recency: recency, Trust: trust, TaskRelevance: overlap(goal.Text, text), Surprise: surprise, AgentRelevance: agent, Pin: pin}, Payload: event})
 	}
 	for _, region := range regions {
+		// Event-type regions aggregating attention bookkeeping are audit
+		// structure, not content — same rule as the events themselves.
+		if region.Kind == "event_type" && bookkeepingEvent(region.Label) {
+			continue
+		}
 		trust := .5
 		if trust < float64(current.Filters.TrustMin) {
 			continue
@@ -463,15 +497,57 @@ func (r *Renderer) refItem(ctx context.Context, ref frame.Ref) (any, error) {
 	case frame.RefClaim:
 		return r.stores.GetClaim(ctx, ref.ID)
 	case frame.RefEvent:
-		return r.stores.Get(ctx, ref.ID)
+		event, err := r.stores.Get(ctx, ref.ID)
+		if err != nil {
+			return nil, err
+		}
+		return compactEvent(event, false), nil
 	case frame.RefEntity:
 		if entityStore, ok := any(r.stores).(entity.Store); ok {
-			return entityStore.GetEntity(ctx, ref.ID)
+			value, err := entityStore.GetEntity(ctx, ref.ID)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"ref": canonicalRef(ref), "type": value.Type, "name": value.Name}, nil
 		}
 		return map[string]any{"type": ref.Type, "id": ref.ID}, nil
 	default:
 		return map[string]any{"type": ref.Type, "id": ref.ID}, nil
 	}
+}
+
+// canonicalRef is the string form the model copies into emission refs.
+func canonicalRef(ref frame.Ref) string { return string(ref.Type) + ":" + ref.ID }
+
+// mapItem compacts an attention candidate for the packet: canonical string
+// ref, the score, and the content itself. Region and entity projections shed
+// their bookkeeping fields; events shed the protocol envelope entirely.
+func mapItem(candidate attention.ScoredCandidate) MapItem {
+	var payload any
+	switch value := candidate.Candidate.Payload.(type) {
+	case protocol.Event:
+		payload = map[string]any{"type": value.Type, "payload": value.Payload}
+	case projection.Region:
+		payload = map[string]any{"kind": value.Kind, "label": value.Label, "activation": value.Activation}
+	case entity.Entity:
+		payload = map[string]any{"type": value.Type, "name": value.Name}
+	default:
+		payload = candidate.Candidate.Payload
+	}
+	return MapItem{Ref: canonicalRef(candidate.Candidate.Ref), Score: candidate.Score, Payload: payload}
+}
+
+// compactEvent strips the protocol envelope (version, agent/branch/episode
+// ids, provenance) down to what cognition needs: the canonical ref, the type
+// and the content. The envelope remains in the substrate for audit and
+// time-travel. withTime keeps valid_time where chronology is the point of the
+// section (recent); map items already carry attention's recency score.
+func compactEvent(event protocol.Event, withTime bool) map[string]any {
+	item := map[string]any{"ref": canonicalRef(frame.Ref{Type: frame.RefEvent, ID: event.EventID}), "type": event.Type, "payload": event.Payload}
+	if withTime {
+		item["valid_time"] = event.ValidTime
+	}
+	return item
 }
 func estimate(value any) int {
 	data, _ := json.Marshal(value)

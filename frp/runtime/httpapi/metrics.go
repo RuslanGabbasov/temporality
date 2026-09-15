@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"sync/atomic"
 
-	"github.com/temporality-project/temporality/frp/attention"
 	"github.com/temporality-project/temporality/frp/render"
 )
 
@@ -28,29 +27,28 @@ type metrics struct {
 }
 
 func (m *metrics) observeRender(packet render.Packet) {
-	selected := make([]attention.ScoredCandidate, 0)
+	scores := make([]float64, 0)
 	for _, section := range packet.Sections {
 		if section.Kind != "map" {
 			continue
 		}
 		for _, item := range section.Items {
-			if candidate, ok := item.(attention.ScoredCandidate); ok {
-				selected = append(selected, candidate)
+			if candidate, ok := item.(render.MapItem); ok {
+				scores = append(scores, candidate.Score)
 			}
 		}
 	}
-	considered := len(selected) + packet.OutsideFrame.NearbyRegions
+	considered := len(scores) + packet.OutsideFrame.NearbyRegions
 	m.ambientConsidered.Add(uint64(considered))
-	m.ambientSelected.Add(uint64(len(selected)))
+	m.ambientSelected.Add(uint64(len(scores)))
 	m.missedCandidates.Add(uint64(packet.OutsideFrame.NearbyRegions))
-	entropy, collapse := attentionDistribution(selected)
+	entropy, collapse := attentionDistribution(scores)
 	m.attentionEntropy.Store(math.Float64bits(entropy))
 	m.attentionCollapse.Store(math.Float64bits(collapse))
 }
-func attentionDistribution(selected []attention.ScoredCandidate) (float64, float64) {
+func attentionDistribution(scores []float64) (float64, float64) {
 	sum, max := 0.0, 0.0
-	for _, candidate := range selected {
-		score := candidate.Score
+	for _, score := range scores {
 		if score < 0 {
 			score = 0
 		}
@@ -63,11 +61,11 @@ func attentionDistribution(selected []attention.ScoredCandidate) (float64, float
 		return 0, 0
 	}
 	entropy := 0.0
-	for _, candidate := range selected {
-		if candidate.Score <= 0 {
+	for _, score := range scores {
+		if score <= 0 {
 			continue
 		}
-		p := candidate.Score / sum
+		p := score / sum
 		entropy -= p * math.Log(p)
 	}
 	return entropy, max / sum

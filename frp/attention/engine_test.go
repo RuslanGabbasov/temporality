@@ -46,3 +46,27 @@ func TestInvalidFeaturesRejected(t *testing.T) {
 		t.Fatal("invalid feature accepted")
 	}
 }
+
+func TestRunnersUpAreNearMisses(t *testing.T) {
+	engine, _ := attention.New(attention.DefaultPolicy())
+	candidate := func(id string) attention.Candidate {
+		return attention.Candidate{Ref: frame.Ref{Type: frame.RefEvent, ID: id}, Features: attention.Features{SemanticRelevance: .5, Trust: .5}}
+	}
+	result, err := engine.SelectAmbient([]attention.Candidate{candidate("a"), candidate("b"), candidate("c"), candidate("d")}, nil, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Selected) != 2 || result.Selected[0].Candidate.Ref.ID != "a" || result.Selected[1].Candidate.Ref.ID != "b" {
+		t.Fatalf("unexpected selection: %#v", result.Selected)
+	}
+	if len(result.RunnersUp) != 2 || result.RunnersUp[0].Candidate.Ref.ID != "c" || result.RunnersUp[1].Candidate.Ref.ID != "d" {
+		t.Fatalf("runners-up must be the ranked near-misses: %#v", result.RunnersUp)
+	}
+	all, err := engine.SelectAmbient([]attention.Candidate{candidate("a"), candidate("b")}, nil, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.RunnersUp) != 0 {
+		t.Fatalf("no runners-up expected without a cut: %#v", all.RunnersUp)
+	}
+}

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/temporality-project/temporality/frp/affordance"
-	"github.com/temporality-project/temporality/frp/attention"
 	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/objective"
 	"github.com/temporality-project/temporality/frp/procedure"
@@ -183,7 +182,7 @@ func recentContains(packet render.Packet, eventID string) bool {
 			continue
 		}
 		for _, item := range section.Items {
-			if event, ok := item.(protocol.Event); ok && event.EventID == eventID {
+			if compact, ok := item.(map[string]any); ok && compact["ref"] == "event:"+eventID {
 				return true
 			}
 		}
@@ -227,13 +226,12 @@ func TestAmbientHidesAttentionBookkeeping(t *testing.T) {
 		case "map":
 			mapTypes = map[string]int{}
 			for _, item := range section.Items {
-				candidate, _ := item.(attention.ScoredCandidate)
-				mapTypes[candidate.Candidate.Payload.(protocol.Event).Type]++
+				candidate := item.(render.MapItem)
+				mapTypes[candidate.Payload.(map[string]any)["type"].(string)]++
 			}
 		case "recent":
 			for _, item := range section.Items {
-				event, _ := item.(protocol.Event)
-				recentTypes[event.Type]++
+				recentTypes[item.(map[string]any)["type"].(string)]++
 			}
 		}
 	}
@@ -243,11 +241,101 @@ func TestAmbientHidesAttentionBookkeeping(t *testing.T) {
 	if mapTypes["world.observation"] == 0 {
 		t.Fatalf("world observation missing from ambient map: %#v", mapTypes)
 	}
-	if recentTypes["attention.suggested"] != 12 {
-		t.Fatalf("audit trail must stay in recent section: %#v", recentTypes)
+	if recentTypes["attention.suggested"] != 0 {
+		t.Fatalf("bookkeeping events must not enter the model packet: %#v", recentTypes)
+	}
+	if recentTypes["world.observation"] == 0 {
+		t.Fatalf("world observation missing from recent section: %#v", recentTypes)
 	}
 }
 
 func renderEvent(id, eventType string, now time.Time, payload map[string]any) protocol.Event {
 	return protocol.Event{Protocol: protocol.Name, Version: protocol.Version, EventID: id, TransactionTime: now, ValidTime: now, EpisodeID: "episode", BranchID: "branch", Type: eventType, Payload: payload, Provenance: map[string]any{"source": "test"}}
+}
+
+// TestPacketIsCompactAndPeripheryIsNearMiss locks the token-efficiency
+// contract of render-0.4: map items carry canonical string refs and compact
+// payloads (no protocol envelope, no attention feature vectors), recent events
+// shed their envelope, and periphery holds near-miss candidates instead of
+// re-rendering what the map already contains.
+func TestPacketIsCompactAndPeripheryIsNearMiss(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	base := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	goal := objective.Objective{Protocol: protocol.Name, Version: protocol.Version, ObjectiveID: "objective", EpisodeID: "episode", Text: "find the failing test", SuccessConditions: []string{}}
+	current := frame.Frame{Protocol: protocol.Name, Version: protocol.Version, FrameID: "frame", AgentID: "agent", EpisodeID: "episode", BranchID: "branch", ObjectiveID: goal.ObjectiveID, AsOf: base, Focus: frame.Focus{Type: frame.RefQuery, Query: "failing test"}, WorkingSet: []frame.Ref{}, Mode: frame.ModeExplore, Attention: frame.Attention{Policy: "balanced", Ambient: true, MaxCandidates: 2}, Filters: frame.Filters{AgentIDs: []string{}, RegionKinds: []string{}}, Budget: frame.Budget{Tokens: 8000}}
+	if err := store.CreateObjective(ctx, goal, renderEvent("objective-event", "episode.started", base, map[string]any{"objective_id": goal.ObjectiveID})); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateFrame(ctx, current, renderEvent("frame-event", "frame.created", base, map[string]any{"frame_id": current.FrameID})); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 3; i++ {
+		event := renderEvent(fmt.Sprintf("observation-%d", i), "world.observation", base.Add(time.Duration(i)*time.Second), map[string]any{"resource": fmt.Sprintf("filesystem:file-%d.go", i), "observation_type": "file_content"})
+		if err := store.Append(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	packet, err := render.New(store).Render(ctx, render.Request{FrameID: current.FrameID, ObjectiveID: goal.ObjectiveID, BudgetTokens: 100000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapSection := packetSection(packet, "map")
+	peripherySection := packetSection(packet, "periphery")
+	if mapSection == nil || peripherySection == nil {
+		t.Fatalf("map/periphery missing: %#v", packet.Sections)
+	}
+	if len(mapSection.Items) != 2 {
+		t.Fatalf("map must respect max_candidates: %#v", mapSection.Items)
+	}
+	mapRefs := map[string]struct{}{}
+	for _, item := range mapSection.Items {
+		candidate := item.(render.MapItem)
+		if candidate.Ref == "" {
+			t.Fatalf("map item missing canonical ref: %#v", candidate)
+		}
+		payload := candidate.Payload.(map[string]any)
+		if _, ok := payload["protocol"]; ok {
+			t.Fatal("map item leaks protocol envelope")
+		}
+		if _, ok := payload["features"]; ok {
+			t.Fatal("map item leaks attention features")
+		}
+		mapRefs[candidate.Ref] = struct{}{}
+	}
+	// Five visible events (objective, frame.created, three observations), two
+	// selected: the three near-misses form the periphery — and none of them
+	// may duplicate a map ref.
+	if len(peripherySection.Items) != 3 {
+		t.Fatalf("periphery must hold near-misses, got %#v", peripherySection.Items)
+	}
+	peripheryRefs := map[string]struct{}{}
+	for _, item := range peripherySection.Items {
+		nearMiss := item.(render.MapItem)
+		if _, duplicate := mapRefs[nearMiss.Ref]; duplicate {
+			t.Fatalf("periphery duplicates map ref %q", nearMiss.Ref)
+		}
+		peripheryRefs[nearMiss.Ref] = struct{}{}
+		for _, forbidden := range []string{"protocol", "version", "agent_id", "branch_id", "episode_id", "provenance"} {
+			if _, ok := nearMiss.Payload.(map[string]any)[forbidden]; ok {
+				t.Fatalf("periphery payload leaks %q", forbidden)
+			}
+		}
+	}
+	if len(peripheryRefs) != 3 {
+		t.Fatalf("periphery refs must be distinct: %#v", peripheryRefs)
+	}
+	recentSection := packetSection(packet, "recent")
+	for _, item := range recentSection.Items {
+		compact := item.(map[string]any)
+		for _, forbidden := range []string{"protocol", "version", "agent_id", "branch_id", "episode_id", "provenance", "tx_time", "event_id"} {
+			if _, ok := compact[forbidden]; ok {
+				t.Fatalf("recent item leaks %q: %#v", forbidden, compact)
+			}
+		}
+		if compact["ref"] == "" || compact["type"] == "" {
+			t.Fatalf("recent item missing ref/type: %#v", compact)
+		}
+	}
 }
