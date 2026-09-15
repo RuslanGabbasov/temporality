@@ -7,12 +7,20 @@ import (
 	"github.com/temporality-project/temporality/frp/protocol"
 )
 
-var ErrClaimNotFound = errors.New("claim not found")
+var (
+	ErrClaimNotFound    = errors.New("claim not found")
+	ErrEvidenceNotFound = errors.New("evidence event not found")
+)
 
 type Commit struct {
 	Event     protocol.Event  `json:"event"`
 	Claim     Claim           `json:"claim"`
 	Relations []ClaimRelation `json:"relations,omitempty"`
+	// Evidence references pre-existing events (typically world observations)
+	// that back the claim. Unlike relations, evidence links a claim to runtime
+	// facts rather than to other claims; stores must reject unknown event ids
+	// so a claim can never cite evidence that was never observed (M13).
+	Evidence []string `json:"evidence,omitempty"`
 }
 
 func (c Commit) Validate() error {
@@ -36,6 +44,19 @@ func (c Commit) Validate() error {
 			return errors.New("relation evidence_event must reference commit event")
 		}
 	}
+	seen := make(map[string]struct{}, len(c.Evidence))
+	for _, id := range c.Evidence {
+		if id == "" {
+			return errors.New("evidence event id must not be empty")
+		}
+		if id == c.Event.EventID {
+			return errors.New("evidence must not reference the commit event; created_event already does")
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return errors.New("evidence event ids must be unique")
+		}
+		seen[id] = struct{}{}
+	}
 	return nil
 }
 
@@ -44,4 +65,7 @@ type Store interface {
 	TransitionClaim(context.Context, Transition) (Claim, error)
 	GetClaim(context.Context, string) (Claim, error)
 	ListRelations(context.Context, string) ([]ClaimRelation, error)
+	// ListClaimEvidence returns the event ids backing a claim, excluding the
+	// claim's own created_event (M13 provenance chain).
+	ListClaimEvidence(context.Context, string) ([]string, error)
 }

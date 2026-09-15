@@ -61,6 +61,19 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Attention, outside-frame, provenance, Claims, Events and Executions views.
   - [x] Time travel, replay, blame, fork and branch inspection operations.
   - [x] Production static container and full Compose deployment.
+- [x] **M11 — World interface (read-only):**
+  - [x] Frozen capability registry (`observe/read/write/execute/communicate/navigate`) separated from affordances; worlds grant capabilities, definitions only reference them.
+  - [x] Versioned World protocol object (resources, capabilities, identities, credential refs, limits, policies) with `world.registered`/`world.state_updated` Events carrying full snapshots; worlds table is a projection.
+  - [x] Read-only world adapter: filesystem stat/list/read with path containment, pure-Go git status/log (no shell-out), and HTTP reads restricted to declared endpoints.
+  - [x] Standard read affordances (`inspect_environment`, `inspect_workspace`, `list_files`, `read_file`, `git_status`, `git_log`, `inspect_http`) as deterministic Executor workflows.
+  - [x] `world.observation` Events committed atomically with execution transitions; observations enter memory only through the Execution/Event pipeline.
+  - [x] Intent-time and effect-time world re-authorization: capability denial fails the execution (`permission_denied`) and world version divergence is recorded.
+  - [x] World CRUD HTTP API, `world_id` on executions and steps, `WORLD_ID` executor binding, World JSON Schema, and smoke coverage.
+- [x] **M13 — Bootstrap knowledge:**
+  - [x] Generic ingestion pipeline: bounded read-only observation of declared world resources through the world adapter, committed as canonical `world.observation` Events with `ingestion` provenance (no context-injection path, no separate knowledge base).
+  - [x] Deterministic extractors (`gomod.v1`, `npm.v1`, `cargo.v1`, `python.v1`, `readme.v1`, `git.v1`, `http.v1`, `listing.v1`) turn observations into candidate Claims with confidence below 1.
+  - [x] Claims cite the observation Events as evidence: `Commit.Evidence` with a `claim_evidence` table, unknown evidence rejected, provenance chain readable via `GET /v1/claims/{id}/evidence`.
+  - [x] `POST /v1/ingest` bootstrap flow over filesystem/git/http resources with depth and event budgets, truncation reporting, and smoke coverage against an empty substrate.
 
 ## Architectural constraints
 

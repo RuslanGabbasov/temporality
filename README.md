@@ -237,6 +237,29 @@ POST /internal/v1/executions/{id}/transitions
 
 Execution requests and `execution.created` are committed before the Executor can move an execution to `running`. The PoC executor supports the versioned `inspect_environment` deterministic workflow and bounded adaptive executions through durable recorded planner traces through a safe Go filesystem adapter; Every adaptive proposal is persisted before its effect and checked against capabilities/max steps. The recorded adapter performs no inference or network calls, and shell execution is not embedded in the Runtime.
 
+Executions and steps accept an optional `world_id` binding. When present, the runtime validates requested capabilities against the world's grants at intent time and snapshots the world state version; the executor re-authorizes before every effect, so a stale or narrowed world fails the execution with `permission_denied` instead of acting.
+
+World endpoints:
+
+```text
+POST /v1/worlds
+GET  /v1/worlds
+GET  /v1/worlds/{id}
+```
+
+A World describes the physical environment: resources (`filesystem`, `git_repository`, `http_endpoint`, `browser`, `mcp_server`), granted capabilities (`filesystem.read`, `git.read`, `http.read`, ... from the frozen registry), identities, credential references (secrets never inline), limits, and deny policies. The first save registers `world.registered` (version 1); every later save must strictly increase `state_version` and emits `world.state_updated`. Events carry the full world snapshot, so the worlds table is a rebuildable projection and replay knows in which environment an action happened.
+
+Executors bind to a world with the `WORLD_ID` environment variable (Compose passes `TEMPORALITY_WORLD_ID` through). A bound executor serves the standard read-only affordances — `inspect_environment`, `inspect_workspace`, `list_files`, `read_file`, `git_status`, `git_log`, `inspect_http` — through the world adapter instead of the legacy safe filesystem adapter. Reads are bounded by world limits (default 64 KiB reads, 1000 directory entries, 30s), filesystem paths are contained inside declared resources (including symlink resolution), git inspection is pure Go without shell-out, and HTTP reads only reach declared `http_endpoint` resources. Every observation becomes a canonical `world.observation` Event committed atomically with the execution transition and carrying `world_id`/`world_version`/`execution_id`/`affordance_id`/`resource`/`observation_type`; there is no separate context-injection path. When the world changed since intent, the observation records the divergence via `intent_world_version`. Write capabilities (`filesystem.write`, `process.execute`, `git.write`, `http.write`, `browser.*`) are part of the frozen registry but intentionally have no adapter yet; they arrive with M12 after the observation pipeline matures.
+
+Ingestion endpoints:
+
+```text
+POST /v1/ingest
+GET  /v1/claims/{id}/evidence
+```
+
+`POST /v1/ingest` runs one bounded knowledge import over a declared world resource (M13). The runtime observes the source through the same read-only world adapter (capability grants, path containment, and world limits all apply) and commits every observation as a canonical `world.observation` Event with provenance source `ingestion`. Filesystem and git resources are walked breadth-first within `depth` (default 2, max 5) and a per-run observation budget (`max_events`, default 100, max 500), reading recognized descriptors (`go.mod`, `package.json`, `Cargo.toml`, `pyproject.toml`, `README.md`); git resources add status/log observations; HTTP endpoints are fetched once. Deterministic extractors then turn observations into candidate Claims whose confidence stays below 1 and whose evidence cites the observation Events, keeping "what was found" separable from "what the substrate believes". Claim evidence is queryable via `GET /v1/claims/{id}/evidence`. Pointing ingestion at an empty substrate is the bootstrap import: there is no separate knowledge base, and observations enter memory only through the Event Log, where regions/attention pick them up after a rebuild.
+
 Frame endpoints:
 
 ```text

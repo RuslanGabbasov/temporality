@@ -31,6 +31,127 @@ def wait_until_ready():
     raise RuntimeError("runtime did not become ready")
 
 
+def request_status(method, path, body=None):
+    """Like request() but returns (status, payload) instead of raising on 4xx."""
+    try:
+        status, payload = request(method, path, body)
+        return status, payload
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read().decode() or "{}")
+
+
+def world_scenario():
+    """M11: register a World, bind executions to it, and verify that read-only
+    observations flow back through the event log as world.observation events."""
+    import shutil
+    import tempfile
+
+    workspace = tempfile.mkdtemp(prefix="temporality-world-")
+    try:
+        with open(os.path.join(workspace, "README.md"), "w") as handle:
+            handle.write("# world workspace\n")
+        episode_id = str(uuid.uuid4())
+        branch_id = str(uuid.uuid4())
+        world_id = "smoke-" + uuid.uuid4().hex[:12]
+        world = {
+            "world_id": world_id,
+            "state_version": 1,
+            "resources": [{"id": "workspace", "type": "filesystem", "path": workspace}],
+            "capabilities": ["filesystem.read", "git.read"],
+            "limits": {"max_read_bytes": 4096, "max_entries": 100, "timeout_sec": 10},
+        }
+        _, registered = request("POST", "/v1/worlds", world)
+        assert registered["world"]["world_id"] == world_id
+        stale_status, _ = request_status("POST", "/v1/worlds", world)
+        assert stale_status == 422, "stale world state was accepted"
+        definition = {"id": "list_files", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
+        denied_definition = dict(definition, id="run_tests", capabilities=["process.execute"])
+        denied_status, _ = request_status("POST", "/v1/executions", {"definition": denied_definition, "episode_id": episode_id, "branch_id": branch_id, "world_id": world_id, "arguments": {}})
+        assert denied_status == 422, "capability not granted by world was accepted"
+        _, created = request("POST", "/v1/executions", {"definition": definition, "episode_id": episode_id, "branch_id": branch_id, "world_id": world_id, "arguments": {"path": "."}})
+        assert created["execution"]["world_id"] == world_id and created["execution"]["world_version"] == 1
+        executor_env = os.environ.copy()
+        executor_env.update({"DATABASE_URL": DATABASE_URL, "EPISODE_ID": episode_id, "WORLD_ID": world_id})
+        executor = subprocess.Popen([EXECUTOR_BINARY], env=executor_env)
+        try:
+            final = None
+            for _ in range(80):
+                _, final = request("GET", f"/v1/executions/{created['execution']['execution_id']}")
+                if final["status"] in ("completed", "failed"):
+                    break
+                time.sleep(0.1)
+            assert final["status"] == "completed", f"world execution status={final['status']}"
+            _, events = request("GET", f"/v1/events?episode_id={episode_id}&limit=100")
+            observations = [item for item in events["events"] if item["type"] == "world.observation"]
+            assert observations, "world.observation events were not committed"
+            first = observations[0]["payload"]
+            assert first["world_id"] == world_id and first["execution_id"] == created["execution"]["execution_id"]
+            assert first["observation_type"] in ("stat", "directory_listing")
+            _, projection = request("POST", "/v1/projections/regions/rebuild", {"episode_id": episode_id, "branch_id": branch_id})
+            kinds = {region["label"] for region in projection["regions"]}
+            assert "world.observation" in kinds, f"observations missing from regions: {kinds}"
+            return {"world_id": world_id, "observations": len(observations), "execution_status": final["status"], "region_kinds": len(kinds)}
+        finally:
+            executor.terminate()
+            try:
+                executor.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                executor.kill()
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
+def ingestion_scenario():
+    """M13: bootstrap knowledge. An empty substrate is populated from a real
+    workspace through one bounded ingestion run: observations become
+    world.observation events and deterministic extractors create candidate
+    claims citing those events as evidence."""
+    import shutil
+    import tempfile
+
+    workspace = tempfile.mkdtemp(prefix="temporality-ingest-")
+    try:
+        with open(os.path.join(workspace, "go.mod"), "w") as handle:
+            handle.write("module example.com/smoke-demo\n\ngo 1.23\n")
+        with open(os.path.join(workspace, "README.md"), "w") as handle:
+            handle.write("# Smoke Demo\n")
+        os.makedirs(os.path.join(workspace, "cmd", "demo"), exist_ok=True)
+        with open(os.path.join(workspace, "cmd", "demo", "main.go"), "w") as handle:
+            handle.write("package main\n")
+        episode_id = str(uuid.uuid4())
+        branch_id = str(uuid.uuid4())
+        world_id = "smoke-ingest-" + uuid.uuid4().hex[:10]
+        world = {
+            "world_id": world_id,
+            "state_version": 1,
+            "resources": [{"id": "repo", "type": "filesystem", "path": workspace}],
+            "capabilities": ["filesystem.read"],
+        }
+        _, registered = request("POST", "/v1/worlds", world)
+        assert registered["world"]["world_id"] == world_id
+        _, result = request("POST", "/v1/ingest", {"world_id": world_id, "resource_id": "repo", "episode_id": episode_id, "branch_id": branch_id, "depth": 2})
+        assert result["observations"], "ingestion produced no observations"
+        propositions = {claim["proposition"]: claim for claim in result["claims"]}
+        module_claim = propositions.get('Go module "example.com/smoke-demo" is declared at go.mod')
+        assert module_claim, f"module claim missing: {list(propositions)}"
+        assert 0 < module_claim["confidence"] < 1, "extraction confidence must stay below 1"
+        assert module_claim["evidence"], "extracted claim carries no evidence"
+        _, evidence = request("GET", f"/v1/claims/{module_claim['claim_id']}/evidence")
+        assert evidence["events"], "evidence endpoint returned no events"
+        assert all(item["type"] == "world.observation" for item in evidence["events"])
+        assert any(item["payload"]["observation_type"] == "file_content" for item in evidence["events"])
+        _, events = request("GET", f"/v1/events?episode_id={episode_id}&limit=100")
+        observations = [item for item in events["events"] if item["type"] == "world.observation"]
+        assert len(observations) == len(result["observations"]), "committed observations differ from run result"
+        assert all(item["provenance"]["source"] == "ingestion" for item in observations)
+        _, projection = request("POST", "/v1/projections/regions/rebuild", {"episode_id": episode_id, "branch_id": branch_id})
+        assert projection["regions"], "regions missing after ingestion"
+        assert any(region["label"] == "world.observation" for region in projection["regions"])
+        return {"world_id": world_id, "observations": len(result["observations"]), "claims": len(result["claims"]), "regions": len(projection["regions"])}
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
 def main():
     env = os.environ.copy()
     env.update({"DATABASE_URL": DATABASE_URL, "HTTP_ADDR": "127.0.0.1:18080"})
@@ -114,7 +235,9 @@ def main():
         assert restored["focus"]["query"] == "evidence that validates Temporality" and restored["revision"] == 1
         assert len(restored["working_set"]) == 1
         assert len(replay["events"]) >= 17 and replay["digest"]
-        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "execution_id": execution_id, "execution_status": final_execution["status"], "snapshot_id": snapshot["metadata"]["snapshot_id"], "frame_hash": frame_replay["frame_hash"], "frame_replay_events": len(frame_replay["events"]), "blame_nodes": len(blame["nodes"]), "fork_group_id": fork_group["fork_group_id"], "fork_branches": len(fork_group["branches"]), "procedure_count": len(procedure_projection["procedures"]), "matched_procedures": len(procedure_items), "replay_events": len(replay["events"]), "replay_digest": replay["digest"]}, indent=2))
+        world_result = world_scenario()
+        ingest_result = ingestion_scenario()
+        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "execution_id": execution_id, "execution_status": final_execution["status"], "snapshot_id": snapshot["metadata"]["snapshot_id"], "frame_hash": frame_replay["frame_hash"], "frame_replay_events": len(frame_replay["events"]), "blame_nodes": len(blame["nodes"]), "fork_group_id": fork_group["fork_group_id"], "fork_branches": len(fork_group["branches"]), "procedure_count": len(procedure_projection["procedures"]), "matched_procedures": len(procedure_items), "replay_events": len(replay["events"]), "replay_digest": replay["digest"], "world": world_result, "ingestion": ingest_result}, indent=2))
     finally:
         if executor is not None:
             executor.terminate()

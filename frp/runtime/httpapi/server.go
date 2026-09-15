@@ -25,6 +25,7 @@ import (
 	runtimeStep "github.com/temporality-project/temporality/frp/runtime/step"
 	"github.com/temporality-project/temporality/frp/substrate"
 	"github.com/temporality-project/temporality/frp/timetravel"
+	"github.com/temporality-project/temporality/frp/world"
 )
 
 type Server struct {
@@ -61,9 +62,14 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /v1/claims", s.commitClaim)
 	mux.HandleFunc("POST /v1/claims/{id}/transitions", s.transitionClaim)
 	mux.HandleFunc("GET /v1/claims/{id}", s.getClaim)
+	mux.HandleFunc("GET /v1/claims/{id}/evidence", s.claimEvidence)
 	mux.HandleFunc("POST /v1/executions", s.createExecution)
 	mux.HandleFunc("GET /v1/executions/{id}", s.getExecution)
 	mux.HandleFunc("POST /internal/v1/executions/{id}/transitions", s.transitionExecution)
+	mux.HandleFunc("POST /v1/worlds", s.saveWorld)
+	mux.HandleFunc("GET /v1/worlds", s.listWorlds)
+	mux.HandleFunc("GET /v1/worlds/{id}", s.getWorld)
+	mux.HandleFunc("POST /v1/ingest", s.ingestSource)
 	mux.HandleFunc("POST /v1/frames", s.createFrame)
 	mux.HandleFunc("POST /v1/frames/{id}/transitions", s.transitionFrame)
 	mux.HandleFunc("POST /v1/frames/{id}/emissions", s.reduceEmission)
@@ -351,6 +357,7 @@ type stepRequest struct {
 	FrameID     string                      `json:"frame_id"`
 	Emission    cognition.CognitiveEmission `json:"emission"`
 	Definitions []affordance.Definition     `json:"definitions"`
+	WorldID     string                      `json:"world_id"`
 }
 
 func (s *Server) step(w http.ResponseWriter, r *http.Request) {
@@ -387,7 +394,16 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 		}
 		definitions[definition.ID] = definition
 	}
-	result, err := runtimeStep.Run(r.Context(), store, runtimeStep.Input{Current: current, Emission: request.Emission, Definitions: definitions, NewID: newUUID, Now: func() time.Time { return s.now().UTC() }})
+	boundWorld, err := s.worldForExecution(r, request.WorldID, requestCapabilities(definitions))
+	if errors.Is(err, world.ErrWorldNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	result, err := runtimeStep.Run(r.Context(), store, runtimeStep.Input{Current: current, Emission: request.Emission, Definitions: definitions, WorldID: boundWorld.WorldID, WorldVersion: boundWorld.StateVersion, NewID: newUUID, Now: func() time.Time { return s.now().UTC() }})
 	if errors.Is(err, runtimeStep.ErrCurrentFrameChanged) {
 		writeError(w, http.StatusConflict, err)
 		return
@@ -402,6 +418,8 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 type executionCreateRequest struct {
 	Definition affordance.Definition `json:"definition"`
 	EpisodeID  string                `json:"episode_id"`
+	BranchID   string                `json:"branch_id"`
+	WorldID    string                `json:"world_id"`
 	Arguments  map[string]any        `json:"arguments"`
 }
 
@@ -417,14 +435,23 @@ func (s *Server) createExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.Definition.ApplyDefaults()
+	boundWorld, err := s.worldForExecution(r, input.WorldID, input.Definition.Capabilities)
+	if errors.Is(err, world.ErrWorldNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
 	now := s.now().UTC()
 	request := affordance.Request{RequestID: newUUID(), EpisodeID: input.EpisodeID, AffordanceID: input.Definition.ID, Arguments: input.Arguments}
 	request.ApplyDefaults()
-	requested := protocol.Event{EventID: newUUID(), ValidTime: now, EpisodeID: input.EpisodeID, Type: affordance.EventRequested, Payload: map[string]any{"request_id": request.RequestID, "affordance": request.AffordanceID}, Provenance: map[string]any{"source": "runtime"}}
+	requested := protocol.Event{EventID: newUUID(), ValidTime: now, EpisodeID: input.EpisodeID, BranchID: input.BranchID, Type: affordance.EventRequested, Payload: map[string]any{"request_id": request.RequestID, "affordance": request.AffordanceID}, Provenance: map[string]any{"source": "runtime"}}
 	requested.ApplyDefaults(now)
-	created := protocol.Event{EventID: newUUID(), ValidTime: now, EpisodeID: input.EpisodeID, Type: execution.EventExecutionCreated, Payload: map[string]any{}, Provenance: map[string]any{"source": "runtime"}}
+	created := protocol.Event{EventID: newUUID(), ValidTime: now, EpisodeID: input.EpisodeID, BranchID: input.BranchID, Type: execution.EventExecutionCreated, Payload: map[string]any{}, Provenance: map[string]any{"source": "runtime"}}
 	created.ApplyDefaults(now)
-	value := execution.Execution{Protocol: protocol.Name, Version: protocol.Version, ExecutionID: newUUID(), RequestID: request.RequestID, EpisodeID: input.EpisodeID, AffordanceID: input.Definition.ID, Status: execution.StatusCreated, CreatedEventID: created.EventID, IntentPersistedAt: created.TransactionTime}
+	value := execution.Execution{Protocol: protocol.Name, Version: protocol.Version, ExecutionID: newUUID(), RequestID: request.RequestID, EpisodeID: input.EpisodeID, BranchID: input.BranchID, AffordanceID: input.Definition.ID, WorldID: boundWorld.WorldID, WorldVersion: boundWorld.StateVersion, Status: execution.StatusCreated, CreatedEventID: created.EventID, IntentPersistedAt: created.TransactionTime}
 	created.Payload["execution_id"] = value.ExecutionID
 	if err := store.CreateExecution(r.Context(), input.Definition, request, value, requested, created); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)

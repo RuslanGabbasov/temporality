@@ -9,16 +9,37 @@ import (
 	"github.com/temporality-project/temporality/frp/affordance"
 	"github.com/temporality-project/temporality/frp/execution"
 	"github.com/temporality-project/temporality/frp/protocol"
+	"github.com/temporality-project/temporality/frp/world"
 )
 
 type Store interface {
 	execution.Store
 	affordance.Store
 }
+
 type Adapter interface {
 	Execute(context.Context, execution.Step) (map[string]any, error)
 }
+
+// ObservingAdapter is implemented by world adapters that surface what was
+// observed so the worker can persist world.observation events.
+type ObservingAdapter interface {
+	Observe(context.Context, execution.Step) (world.Result, error)
+}
+
+// WorldStore provides the current world state for effect-boundary checks.
+type WorldStore interface {
+	GetWorld(context.Context, string) (world.World, error)
+}
+
+// ObservationTransitionStore commits a terminal transition and its
+// observations atomically.
+type ObservationTransitionStore interface {
+	TransitionExecutionWithObservations(context.Context, string, execution.Status, time.Time, *execution.ExecutionError, protocol.Event, []protocol.Event) (execution.Execution, error)
+}
+
 type IDProvider func() string
+
 type Worker struct {
 	Store         Store
 	Workflows     map[string]execution.DeterministicWorkflow
@@ -45,6 +66,7 @@ func (w *Worker) RunOnce(ctx context.Context, episodeID string) (int, error) {
 	}
 	return processed, nil
 }
+
 func (w *Worker) process(ctx context.Context, value execution.Execution) error {
 	definition, err := w.Store.GetDefinition(ctx, value.AffordanceID)
 	if err != nil {
@@ -92,35 +114,123 @@ func (w *Worker) process(ctx context.Context, value execution.Execution) error {
 	if err = execution.ValidateEffectBoundary(running); err != nil {
 		return err
 	}
+	// M11 effect boundary: authorize the planned capabilities against the
+	// current world state before any physical step runs. Denials fail the
+	// execution after its intent was durably persisted.
+	currentWorld, err := w.bindWorld(ctx, running, plan)
+	if err != nil {
+		return w.failExecution(ctx, running, err)
+	}
 	if definition.ExecutionMode == affordance.ModeAdaptive {
 		if err = w.PlannerRunner.Run(ctx, running, definition, request); err != nil {
 			return w.failExecution(ctx, running, err)
 		}
+		return w.complete(ctx, running, currentWorld, nil)
+	}
+	observations := make([]protocol.Event, 0, len(plan.Steps))
+	if observing, ok := w.Adapter.(ObservingAdapter); ok {
+		for _, step := range plan.Steps {
+			result, observeErr := observing.Observe(ctx, step)
+			if observeErr != nil {
+				return w.failExecution(ctx, running, observeErr)
+			}
+			if result.ObservationType == "" {
+				continue
+			}
+			observationEvent, eventErr := world.ObservationEvent(currentWorld, running.ExecutionID, running.AffordanceID, world.Observation{Resource: result.Resource, ObservationType: result.ObservationType, Payload: result.Output, Truncated: result.Truncated}, w.NewID(), w.Now().UTC(), running.EpisodeID, running.BranchID, running.WorldVersion)
+			if eventErr != nil {
+				return eventErr
+			}
+			observations = append(observations, observationEvent)
+		}
 	} else {
 		for _, step := range plan.Steps {
 			if _, err = w.Adapter.Execute(ctx, step); err != nil {
-				failure := &execution.ExecutionError{Class: execution.ErrorProcessFailed, Message: err.Error(), Retryable: false}
-				at := w.Now().UTC()
-				event, eventErr := w.event(running, execution.StatusFailed, at, failure)
-				if eventErr != nil {
-					return eventErr
-				}
-				_, transitionErr := w.Store.TransitionExecution(ctx, running.ExecutionID, execution.StatusFailed, at, failure, event)
-				return transitionErr
+				return w.failExecution(ctx, running, err)
 			}
 		}
 	}
+	return w.complete(ctx, running, currentWorld, observations)
+}
+
+// complete commits the terminal completed transition, attaching observations
+// atomically when the store supports it.
+func (w *Worker) complete(ctx context.Context, value execution.Execution, currentWorld world.World, observations []protocol.Event) error {
 	at := w.Now().UTC()
-	event, err := w.event(running, execution.StatusCompleted, at, nil)
+	event, err := w.event(value, execution.StatusCompleted, at, nil)
 	if err != nil {
 		return err
 	}
-	_, err = w.Store.TransitionExecution(ctx, running.ExecutionID, execution.StatusCompleted, at, nil, event)
+	if len(observations) > 0 {
+		if store, ok := w.Store.(ObservationTransitionStore); ok {
+			_, err = store.TransitionExecutionWithObservations(ctx, value.ExecutionID, execution.StatusCompleted, at, nil, event, observations)
+			return err
+		}
+		for _, observation := range observations {
+			if appendErr := w.append(observation); appendErr != nil {
+				return appendErr
+			}
+		}
+	}
+	_, err = w.Store.TransitionExecution(ctx, value.ExecutionID, execution.StatusCompleted, at, nil, event)
 	return err
+}
+
+// bindWorld enforces the M11 effect boundary at effect time: when an
+// execution is bound to a world, every planned capability must still be
+// authorized by the current world state.
+func (w *Worker) bindWorld(ctx context.Context, value execution.Execution, plan execution.Plan) (world.World, error) {
+	if value.WorldID == "" {
+		return world.World{}, nil
+	}
+	worldStore, ok := w.Store.(WorldStore)
+	if !ok {
+		return world.World{}, &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: "execution requires a world but the store cannot resolve worlds", Retryable: false}
+	}
+	current, err := worldStore.GetWorld(ctx, value.WorldID)
+	if err != nil {
+		return world.World{}, &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: fmt.Sprintf("world %q is not available: %v", value.WorldID, err), Retryable: false}
+	}
+	capabilities := make(map[string]struct{}, len(plan.Steps))
+	for _, step := range plan.Steps {
+		capabilities[step.Capability] = struct{}{}
+	}
+	names := make([]string, 0, len(capabilities))
+	for capability := range capabilities {
+		names = append(names, capability)
+	}
+	if err = current.AuthorizeAll(names); err != nil {
+		return world.World{}, &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: err.Error(), Retryable: false}
+	}
+	if bound, ok := w.Adapter.(WorldBoundAdapter); ok {
+		bound.SetWorld(current)
+	}
+	return current, nil
+}
+
+// WorldBoundAdapter is implemented by adapters that re-bind the current
+// world snapshot before effects run.
+type WorldBoundAdapter interface {
+	SetWorld(world.World)
+}
+
+func (w *Worker) append(event protocol.Event) error {
+	appender, ok := w.Store.(eventAppender)
+	if !ok {
+		return errors.New("store cannot append observation events")
+	}
+	return appender.Append(context.Background(), event)
+}
+
+type eventAppender interface {
+	Append(context.Context, protocol.Event) error
 }
 
 func (w *Worker) failExecution(ctx context.Context, value execution.Execution, cause error) error {
 	failure := &execution.ExecutionError{Class: execution.ErrorProcessFailed, Message: cause.Error(), Retryable: false}
+	if normalized, ok := cause.(*execution.ExecutionError); ok {
+		failure = normalized
+	}
 	at := w.Now().UTC()
 	event, err := w.event(value, execution.StatusFailed, at, failure)
 	if err != nil {

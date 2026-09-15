@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://temporality.dev/schemas/frp/v0.3/World.schema.json",
+  "title": "FRP World",
+  "description": "Versioned description of the external environment an agent acts in (M11).",
+  "type": "object",
+  "required": ["protocol", "version", "world_id", "state_version", "resources", "capabilities", "limits"],
+  "properties": {
+    "protocol": { "const": "frp" },
+    "version": { "const": "0.3" },
+    "world_id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+    "state_version": { "type": "integer", "minimum": 1 },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+          "type": { "enum": ["filesystem", "git_repository", "http_endpoint", "browser", "mcp_server"] },
+          "path": { "type": "string" },
+          "endpoint": { "type": "string" },
+          "read_only": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "filesystem.observe",
+          "filesystem.read",
+          "filesystem.write",
+          "process.observe",
+          "process.execute",
+          "http.read",
+          "http.write",
+          "git.read",
+          "git.write",
+          "browser.navigate",
+          "browser.read",
+          "browser.interact",
+          "mcp.call"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "identities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+          "kind": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "credentials": {
+      "type": "array",
+      "description": "Secret references only; secret values are never part of a World.",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "ref"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+          "identity_id": { "type": "string" },
+          "kind": { "type": "string" },
+          "ref": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "limits": {
+      "type": "object",
+      "required": ["max_read_bytes", "max_entries", "timeout_sec"],
+      "properties": {
+        "max_read_bytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "max_entries": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "timeout_sec": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "policies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["effect", "capability"],
+        "properties": {
+          "effect": { "enum": ["allow", "deny"] },
+          "capability": { "type": "string" },
+          "resource_id": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

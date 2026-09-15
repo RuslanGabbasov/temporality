@@ -35,6 +35,20 @@ func (s *Store) CommitClaim(ctx context.Context, commit cognition.Commit) error 
 			return err
 		}
 	}
+	if len(commit.Evidence) > 0 {
+		var found int
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE event_id = ANY($1::uuid[])`, commit.Evidence).Scan(&found); err != nil {
+			return err
+		}
+		if found != len(commit.Evidence) {
+			return cognition.ErrEvidenceNotFound
+		}
+		for _, id := range commit.Evidence {
+			if _, err = tx.Exec(ctx, `INSERT INTO claim_evidence (claim_id,evidence_event) VALUES ($1,$2) ON CONFLICT DO NOTHING`, c.ClaimID, id); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit(ctx)
 }
 
@@ -124,4 +138,27 @@ func (s *Store) ListRelations(ctx context.Context, id string) ([]cognition.Claim
 		result = append(result, relation)
 	}
 	return result, rows.Err()
+}
+
+func (s *Store) ListClaimEvidence(ctx context.Context, id string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT evidence_event::text FROM claim_evidence WHERE claim_id=$1 ORDER BY evidence_event`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]string, 0)
+	for rows.Next() {
+		var eventID string
+		if err = rows.Scan(&eventID); err != nil {
+			return nil, err
+		}
+		result = append(result, eventID)
+	}
+	if rows.Err() != nil {
+		return nil, rows.Err()
+	}
+	if _, err = s.GetClaim(ctx, id); err != nil {
+		return nil, err
+	}
+	return result, nil
 }

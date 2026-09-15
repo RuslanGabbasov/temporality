@@ -64,6 +64,16 @@ func (s *Store) CreateExecution(ctx context.Context, def affordance.Definition, 
 }
 
 func (s *Store) TransitionExecution(ctx context.Context, id string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event) (execution.Execution, error) {
+	return s.transitionExecution(ctx, id, next, at, executionError, event, nil)
+}
+
+// TransitionExecutionWithObservations commits a terminal transition together
+// with the world.observation events produced by its steps in one transaction.
+func (s *Store) TransitionExecutionWithObservations(ctx context.Context, id string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event, observations []protocol.Event) (execution.Execution, error) {
+	return s.transitionExecution(ctx, id, next, at, executionError, event, observations)
+}
+
+func (s *Store) transitionExecution(ctx context.Context, id string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event, observations []protocol.Event) (execution.Execution, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return execution.Execution{}, err
@@ -85,6 +95,14 @@ func (s *Store) TransitionExecution(ctx context.Context, id string, next executi
 	}
 	if err = execution.ValidateTransitionEvent(current, next, at, event); err != nil {
 		return execution.Execution{}, err
+	}
+	for _, observation := range observations {
+		if err = observation.Validate(); err != nil {
+			return execution.Execution{}, err
+		}
+		if err = insertEvent(ctx, tx, observation); err != nil {
+			return execution.Execution{}, err
+		}
 	}
 	if err = insertEvent(ctx, tx, event); err != nil {
 		return execution.Execution{}, err

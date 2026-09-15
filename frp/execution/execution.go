@@ -82,13 +82,22 @@ func (e ExecutionError) Validate() error {
 	return nil
 }
 
+// Error makes normalized execution errors usable as Go errors so adapters can
+// return typed failures (for example permission denials) through the worker.
+func (e ExecutionError) Error() string { return e.Class.String() + ": " + e.Message }
+
+func (c ErrorClass) String() string { return string(c) }
+
 type Execution struct {
 	Protocol          string          `json:"protocol"`
 	Version           string          `json:"version"`
 	ExecutionID       string          `json:"execution_id"`
 	RequestID         string          `json:"request_id"`
 	EpisodeID         string          `json:"episode_id"`
+	BranchID          string          `json:"branch_id,omitempty"`
 	AffordanceID      string          `json:"affordance_id"`
+	WorldID           string          `json:"world_id,omitempty"`
+	WorldVersion      int             `json:"world_version,omitempty"`
 	Status            Status          `json:"status"`
 	Phase             string          `json:"phase,omitempty"`
 	CreatedEventID    string          `json:"created_event_id"`
@@ -110,6 +119,9 @@ func (e Execution) Validate() error {
 	}
 	if e.CreatedEventID == "" || e.IntentPersistedAt.IsZero() {
 		return errors.New("persist-before-effect invariant violated: durable intent and creation event are required")
+	}
+	if (e.WorldID == "") != (e.WorldVersion == 0) {
+		return errors.New("world_id and world_version must be set together")
 	}
 	if e.Status == StatusCreated && (e.StartedAt != nil || e.FinishedAt != nil || e.Error != nil) {
 		return errors.New("created execution cannot have runtime outcome")

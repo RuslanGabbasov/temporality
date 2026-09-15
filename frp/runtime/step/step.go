@@ -36,6 +36,11 @@ type Input struct {
 	NewID       IDProvider
 	Now         TimeProvider
 
+	// World binding (M11): when set, executions created by this step snapshot
+	// the world state so replay knows which environment the intent targeted.
+	WorldID      string
+	WorldVersion int
+
 	// SuggestedAttention and render metadata are optional for compatibility with
 	// callers that commit an already-produced emission.
 	SuggestedAttention []frame.Ref
@@ -183,7 +188,7 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 		if eventErr != nil {
 			return Result{}, eventErr
 		}
-		value := execution.Execution{Protocol: protocol.Name, Version: protocol.Version, ExecutionID: executionID, RequestID: requestID, EpisodeID: input.Current.EpisodeID, AffordanceID: def.ID, Status: execution.StatusCreated, CreatedEventID: created.EventID, IntentPersistedAt: now}
+		value := execution.Execution{Protocol: protocol.Name, Version: protocol.Version, ExecutionID: executionID, RequestID: requestID, EpisodeID: input.Current.EpisodeID, BranchID: input.Current.BranchID, AffordanceID: def.ID, WorldID: input.WorldID, WorldVersion: input.WorldVersion, Status: execution.StatusCreated, CreatedEventID: created.EventID, IntentPersistedAt: now}
 		if err = execution.ValidateCreate(def, request, value, requested, created); err != nil {
 			return Result{}, fmt.Errorf("action %q: %w", requestedAction.Affordance, err)
 		}

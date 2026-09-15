@@ -24,6 +24,7 @@ import (
 	stepRuntime "github.com/temporality-project/temporality/frp/runtime/step"
 	"github.com/temporality-project/temporality/frp/substrate"
 	"github.com/temporality-project/temporality/frp/timetravel"
+	"github.com/temporality-project/temporality/frp/world"
 )
 
 type Store struct {
@@ -31,6 +32,7 @@ type Store struct {
 	events         map[string]protocol.Event
 	claims         map[string]cognition.Claim
 	relations      []cognition.ClaimRelation
+	claimEvidence  map[string][]string
 	frames         map[string]frame.Frame
 	objectives     map[string]objective.Objective
 	regions        []projection.Region
@@ -42,6 +44,7 @@ type Store struct {
 	plannerRuns    map[string]planner.Run
 	plannerSteps   map[string][]planner.DurableStep
 	cognitiveSteps map[string]stepRuntime.Prepared
+	worlds         map[string]world.World
 	eventSeq       map[string]int64
 	nextEventSeq   int64
 	frameEvents    map[string]string
@@ -52,7 +55,7 @@ type Store struct {
 }
 
 func New() *Store {
-	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective), definitions: make(map[string]affordance.Definition), requests: make(map[string]affordance.Request), executions: make(map[string]execution.Execution), plannerRuns: make(map[string]planner.Run), plannerSteps: make(map[string][]planner.DurableStep), cognitiveSteps: make(map[string]stepRuntime.Prepared), eventSeq: make(map[string]int64), frameEvents: make(map[string]string), snapshots: make(map[string]timetravel.Snapshot), forkGroups: make(map[string]branch.ForkGroup), branches: make(map[string]branch.Branch), comparisons: make(map[string]branch.ComparisonResult)}
+	return &Store{events: make(map[string]protocol.Event), claims: make(map[string]cognition.Claim), claimEvidence: make(map[string][]string), frames: make(map[string]frame.Frame), objectives: make(map[string]objective.Objective), definitions: make(map[string]affordance.Definition), requests: make(map[string]affordance.Request), executions: make(map[string]execution.Execution), plannerRuns: make(map[string]planner.Run), plannerSteps: make(map[string][]planner.DurableStep), cognitiveSteps: make(map[string]stepRuntime.Prepared), worlds: make(map[string]world.World), eventSeq: make(map[string]int64), frameEvents: make(map[string]string), snapshots: make(map[string]timetravel.Snapshot), forkGroups: make(map[string]branch.ForkGroup), branches: make(map[string]branch.Branch), comparisons: make(map[string]branch.ComparisonResult)}
 }
 
 func (s *Store) putEvent(event protocol.Event) {
@@ -129,9 +132,17 @@ func (s *Store) CommitClaim(_ context.Context, commit cognition.Commit) error {
 			return cognition.ErrClaimNotFound
 		}
 	}
+	for _, id := range commit.Evidence {
+		if _, exists := s.events[id]; !exists {
+			return cognition.ErrEvidenceNotFound
+		}
+	}
 	s.putEvent(commit.Event)
 	s.claims[commit.Claim.ClaimID] = commit.Claim
 	s.relations = append(s.relations, commit.Relations...)
+	if len(commit.Evidence) > 0 {
+		s.claimEvidence[commit.Claim.ClaimID] = append([]string(nil), commit.Evidence...)
+	}
 	return nil
 }
 
@@ -187,6 +198,15 @@ func (s *Store) ListRelations(_ context.Context, id string) ([]cognition.ClaimRe
 		}
 	}
 	return result, nil
+}
+
+func (s *Store) ListClaimEvidence(_ context.Context, id string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, exists := s.claims[id]; !exists {
+		return nil, cognition.ErrClaimNotFound
+	}
+	return append([]string(nil), s.claimEvidence[id]...), nil
 }
 
 func (s *Store) ReplaceRegions(_ context.Context, episodeID, branchID string, regions []projection.Region) error {
@@ -460,6 +480,16 @@ func (s *Store) CreateExecution(_ context.Context, def affordance.Definition, re
 }
 
 func (s *Store) TransitionExecution(_ context.Context, id string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event) (execution.Execution, error) {
+	return s.transitionExecution(id, next, at, executionError, event, nil)
+}
+
+// TransitionExecutionWithObservations commits a terminal transition together
+// with the world.observation events produced by its steps in one atomic write.
+func (s *Store) TransitionExecutionWithObservations(_ context.Context, id string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event, observations []protocol.Event) (execution.Execution, error) {
+	return s.transitionExecution(id, next, at, executionError, event, observations)
+}
+
+func (s *Store) transitionExecution(id string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event, observations []protocol.Event) (execution.Execution, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current, ok := s.executions[id]
@@ -475,6 +505,14 @@ func (s *Store) TransitionExecution(_ context.Context, id string, next execution
 	}
 	if _, ok = s.events[event.EventID]; ok {
 		return execution.Execution{}, errors.New("event already exists")
+	}
+	for _, observation := range observations {
+		if _, exists := s.events[observation.EventID]; exists {
+			return execution.Execution{}, errors.New("event already exists")
+		}
+	}
+	for _, observation := range observations {
+		s.putEvent(clone(observation))
 	}
 	s.putEvent(clone(event))
 	s.executions[id] = clone(updated)

@@ -48,6 +48,10 @@ services:
       target: executor
     environment:
       DATABASE_URL: postgres://temporality:temporality@postgres:5432/temporality?sslmode=disable
+      # Bind the executor to a World registered via POST /v1/worlds. When set,
+      # read-only steps run through the world adapter and produce
+      # world.observation events; when empty the safe filesystem adapter is used.
+      WORLD_ID: ${TEMPORALITY_WORLD_ID:-}
     depends_on:
       runtime:
         condition: service_healthy
