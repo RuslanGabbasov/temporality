@@ -73,6 +73,7 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/entities", s.listEntities)
 	mux.HandleFunc("GET /v1/entities/{id}", s.getEntity)
 	mux.HandleFunc("POST /v1/ingest", s.ingestSource)
+	mux.HandleFunc("POST /v1/bootstrap", s.bootstrap)
 	mux.HandleFunc("POST /v1/frames", s.createFrame)
 	mux.HandleFunc("POST /v1/frames/{id}/transitions", s.transitionFrame)
 	mux.HandleFunc("POST /v1/frames/{id}/emissions", s.reduceEmission)

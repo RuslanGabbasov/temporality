@@ -101,6 +101,151 @@ def world_scenario():
         shutil.rmtree(workspace, ignore_errors=True)
 
 
+def write_world_scenario():
+    """M12: grant write capabilities, execute a write_file affordance through
+    the executor worker, and verify the physical change plus the canonical
+    world.effect event entered the substrate."""
+    import shutil
+    import tempfile
+
+    workspace = tempfile.mkdtemp(prefix="temporality-write-")
+    try:
+        episode_id = str(uuid.uuid4())
+        branch_id = str(uuid.uuid4())
+        world_id = "smoke-write-" + uuid.uuid4().hex[:12]
+        world = {
+            "world_id": world_id,
+            "state_version": 1,
+            "resources": [{"id": "workspace", "type": "filesystem", "path": workspace}],
+            "capabilities": ["filesystem.read", "filesystem.write", "process.execute"],
+            "limits": {"max_read_bytes": 4096, "max_entries": 100, "timeout_sec": 10},
+            "policies": [{"effect": "allow", "capability": "process.execute", "commands": ["echo"]}],
+        }
+        _, registered = request("POST", "/v1/worlds", world)
+        assert registered["world"]["world_id"] == world_id
+        definition = {"id": "write_file", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.write"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
+        command_definition = dict(definition, id="run_command", capabilities=["process.execute"])
+        _, created = request("POST", "/v1/executions", {"definition": definition, "episode_id": episode_id, "branch_id": branch_id, "world_id": world_id, "arguments": {"path": "notes/agent.md", "content": "# agent effect"}})
+        assert created["execution"]["world_id"] == world_id
+        _, command_created = request("POST", "/v1/executions", {"definition": command_definition, "episode_id": episode_id, "branch_id": branch_id, "world_id": world_id, "arguments": {"command": "echo", "args": ["smoke"]}})
+        # A command outside the world allowlist must fail at effect time.
+        _, denied_created = request("POST", "/v1/executions", {"definition": command_definition, "episode_id": episode_id, "branch_id": branch_id, "world_id": world_id, "arguments": {"command": "sh", "args": ["-c", "echo blocked"]}})
+        executor_env = os.environ.copy()
+        executor_env.update({"DATABASE_URL": DATABASE_URL, "EPISODE_ID": episode_id, "WORLD_ID": world_id})
+        executor = subprocess.Popen([EXECUTOR_BINARY], env=executor_env)
+        try:
+            outcomes = {}
+            for _ in range(80):
+                _, events = request("GET", f"/v1/events?episode_id={episode_id}&limit=100")
+                for name, execution_id in (("write", created["execution"]["execution_id"]), ("command", command_created["execution"]["execution_id"]), ("denied", denied_created["execution"]["execution_id"])):
+                    if name in outcomes:
+                        continue
+                    _, final = request("GET", f"/v1/executions/{execution_id}")
+                    if final["status"] in ("completed", "failed"):
+                        outcomes[name] = final["status"]
+                if len(outcomes) == 3:
+                    break
+                time.sleep(0.1)
+            assert outcomes.get("write") == "completed", f"write execution outcome={outcomes}"
+            assert outcomes.get("command") == "completed", f"command execution outcome={outcomes}"
+            assert outcomes.get("denied") == "failed", f"allowlist-denied command outcome={outcomes}"
+            with open(os.path.join(workspace, "notes", "agent.md")) as handle:
+                assert handle.read() == "# agent effect"
+            effects = [item for item in events["events"] if item["type"] == "world.effect"]
+            kinds = {item["payload"]["effect_type"] for item in effects}
+            assert "file_written" in kinds and "process_run" in kinds, f"world.effect events missing: {kinds}"
+            assert all(item["payload"]["world_id"] == world_id for item in effects)
+            return {"world_id": world_id, "effects": len(effects), "kinds": sorted(kinds)}
+        finally:
+            executor.terminate()
+            try:
+                executor.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                executor.kill()
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
+def bootstrap_scenario():
+    """M15: first contact. A fresh agent with an empty substrate meets a real
+    git repository; one bootstrap call maps the world through the normal
+    observation pipeline, and the agent's first real action closes the loop
+    WORLD -> OBSERVE -> MEMORY -> ATTENTION -> FRAME -> ACTION -> WORLD."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    workspace = tempfile.mkdtemp(prefix="temporality-bootstrap-")
+    try:
+        with open(os.path.join(workspace, "go.mod"), "w") as handle:
+            handle.write("module example.com/firstcontact\n\ngo 1.23\n\nrequire github.com/demo/dep v1.0.0\n")
+        with open(os.path.join(workspace, "README.md"), "w") as handle:
+            handle.write("# First Contact\n")
+        os.makedirs(os.path.join(workspace, "cmd", "app"), exist_ok=True)
+        with open(os.path.join(workspace, "cmd", "app", "main.go"), "w") as handle:
+            handle.write("package main\n")
+        # A real git repository when the binary exists; plain workspace otherwise.
+        git_available = subprocess.run(["git", "--version"], capture_output=True).returncode == 0
+        if git_available:
+            subprocess.run(["git", "-c", "init.defaultBranch=main", "init", "-q", workspace], check=False)
+            subprocess.run(["git", "-C", workspace, "add", "."], check=False)
+            subprocess.run(["git", "-C", workspace, "-c", "user.email=smoke@temporality.dev", "-c", "user.name=Smoke", "commit", "-q", "-m", "initial"], check=False)
+        resource_type = "git_repository" if git_available else "filesystem"
+        world_id = "smoke-boot-" + uuid.uuid4().hex[:10]
+        world = {
+            "world_id": world_id,
+            "state_version": 1,
+            "resources": [{"id": "repo", "type": resource_type, "path": workspace}],
+            "capabilities": ["filesystem.read", "git.read"],
+        }
+        _, registered = request("POST", "/v1/worlds", world)
+        assert registered["world"]["world_id"] == world_id
+        _, boot = request("POST", "/v1/bootstrap", {"world_id": world_id, "objective_text": "Найди причину failing test и предложи исправление", "budget_tokens": 16000})
+        assert boot["summary"]["observations"] > 0 and boot["summary"]["claims"] > 0, f"bootstrap discovered nothing: {boot['summary']}"
+        assert boot["render"] and boot["render"]["frame_id"] == boot["frame_id"], "first render missing"
+        assert boot["summary"]["entities"] > 0, f"entity graph empty: {boot['summary']}"
+        if git_available:
+            kinds = {item["observation_type"] for item in boot["ingestions"][0]["result"]["observations"]}
+            assert "git_status" in kinds or "git_log" in kinds, f"git repository not observed: {kinds}"
+        # The agent acts from the bootstrap frame: read a manifest it just discovered.
+        definition = {"id": "read_file", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
+        emission = {
+            "schema": "frp.cognitive-emission.v1",
+            "emission_id": str(uuid.uuid4()),
+            "frame_id": boot["frame_id"],
+            "claims": [{"proposition": "The workspace is a Go module named example.com/firstcontact", "confidence": 0.8, "status": "candidate"}],
+            "attention": [{"op": "attend", "target": {"type": "query", "text": "module manifest and failing test"}}],
+            "frame_ops": [],
+            "actions": [{"affordance": "read_file", "args": {"path": "go.mod"}}],
+        }
+        _, stepped = request("POST", "/v1/step", {"frame_id": boot["frame_id"], "emission": emission, "definitions": [definition], "world_id": world_id})
+        execution_id = stepped["executions"][0]["execution_id"]
+        assert stepped["executions"][0]["world_id"] == world_id
+        executor_env = os.environ.copy()
+        executor_env.update({"DATABASE_URL": DATABASE_URL, "EPISODE_ID": boot["episode_id"], "WORLD_ID": world_id})
+        executor = subprocess.Popen([EXECUTOR_BINARY], env=executor_env)
+        try:
+            final = None
+            for _ in range(80):
+                _, final = request("GET", f"/v1/executions/{execution_id}")
+                if final["status"] in ("completed", "failed"):
+                    break
+                time.sleep(0.1)
+            assert final["status"] == "completed", f"post-bootstrap action status={final['status']}"
+            _, events = request("GET", f"/v1/events?episode_id={boot['episode_id']}&limit=200")
+            observations = [item for item in events["events"] if item["type"] == "world.observation"]
+            assert any(item["payload"].get("execution_id") == execution_id for item in observations), "agent action observation missing"
+            return {"world_id": world_id, "episode_id": boot["episode_id"], "observations": boot["summary"]["observations"], "claims": boot["summary"]["claims"], "entities": boot["summary"]["entities"], "regions": boot["summary"]["regions"], "git": git_available}
+        finally:
+            executor.terminate()
+            try:
+                executor.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                executor.kill()
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
 def ingestion_scenario():
     """M13+M14: bootstrap knowledge. An empty substrate is populated from a real
     workspace through one bounded ingestion run: observations become
@@ -276,8 +421,10 @@ def main():
         assert len(restored["working_set"]) == 1
         assert len(replay["events"]) >= 17 and replay["digest"]
         world_result = world_scenario()
+        write_result = write_world_scenario()
         ingest_result = ingestion_scenario()
-        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "execution_id": execution_id, "execution_status": final_execution["status"], "snapshot_id": snapshot["metadata"]["snapshot_id"], "frame_hash": frame_replay["frame_hash"], "frame_replay_events": len(frame_replay["events"]), "blame_nodes": len(blame["nodes"]), "fork_group_id": fork_group["fork_group_id"], "fork_branches": len(fork_group["branches"]), "procedure_count": len(procedure_projection["procedures"]), "matched_procedures": len(procedure_items), "replay_events": len(replay["events"]), "replay_digest": replay["digest"], "world": world_result, "ingestion": ingest_result}, indent=2))
+        boot_result = bootstrap_scenario()
+        print(json.dumps({"status": "ok", "objective_id": objective_id, "initial_frame_id": initial["frame_id"], "render_id": first_render["render_id"], "attention_version": first_render["provenance"]["attention_version"], "region_count": len(projection["regions"]), "next_frame_id": restored["frame_id"], "execution_id": execution_id, "execution_status": final_execution["status"], "snapshot_id": snapshot["metadata"]["snapshot_id"], "frame_hash": frame_replay["frame_hash"], "frame_replay_events": len(frame_replay["events"]), "blame_nodes": len(blame["nodes"]), "fork_group_id": fork_group["fork_group_id"], "fork_branches": len(fork_group["branches"]), "procedure_count": len(procedure_projection["procedures"]), "matched_procedures": len(procedure_items), "replay_events": len(replay["events"]), "replay_digest": replay["digest"], "world": world_result, "world_write": write_result, "ingestion": ingest_result, "bootstrap": boot_result}, indent=2))
     finally:
         if executor is not None:
             executor.terminate()

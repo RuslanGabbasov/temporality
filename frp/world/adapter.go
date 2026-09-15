@@ -29,13 +29,29 @@ const (
 	ObservationHTTPResponse     = "http_response"
 )
 
-// Result is the outcome of one adapter step. Whenever ObservationType is set
-// the step produced a world observation that must be committed to the event
-// log by the executor worker.
+// Effect types produced by the write adapter (M12). Each one records a
+// physical change the agent made to the external world.
+const (
+	EffectFileWritten = "file_written"
+	EffectFileCreated = "file_created"
+	EffectFilePatched = "file_patched"
+	EffectFileMoved   = "file_moved"
+	EffectFileDeleted = "file_deleted"
+	EffectDirCreated  = "dir_created"
+	EffectProcessRun  = "process_run"
+	EffectGitBranch   = "git_branch_created"
+	EffectGitCommit   = "git_commit"
+	EffectHTTPPosted  = "http_posted"
+)
+
+// Result is the outcome of one adapter step. ObservationType marks a read
+// observation; EffectType marks a physical change. The executor worker turns
+// either into the matching canonical world event.
 type Result struct {
 	Output          map[string]any `json:"output"`
 	Resource        string         `json:"resource,omitempty"`
 	ObservationType string         `json:"observation_type,omitempty"`
+	EffectType      string         `json:"effect_type,omitempty"`
 	Truncated       bool           `json:"truncated,omitempty"`
 }
 
@@ -70,13 +86,23 @@ func (a *Adapter) SetWorld(value World) {
 }
 
 // Execute satisfies the executor worker Adapter contract and discards
-// observation metadata; Observe is the richer entry point.
+// observation and effect metadata; Observe and Effect are the richer entry
+// points.
 func (a *Adapter) Execute(ctx context.Context, step execution.Step) (map[string]any, error) {
-	result, err := a.Observe(ctx, step)
-	if err != nil {
+	if result, err := a.perform(ctx, step); err != nil {
 		return nil, err
+	} else {
+		return result.Output, nil
 	}
-	return result.Output, nil
+}
+
+// perform routes a step by its capability category: write and execute
+// categories produce effects, everything else produces observations.
+func (a *Adapter) perform(ctx context.Context, step execution.Step) (Result, error) {
+	if category, ok := CapabilityCategory(step.Capability); ok && (category == CategoryWrite || category == CategoryExecute) {
+		return a.Effect(ctx, step)
+	}
+	return a.Observe(ctx, step)
 }
 
 // Observe validates the step against the world, executes it, and returns the
@@ -100,6 +126,31 @@ func (a *Adapter) Observe(ctx context.Context, step execution.Step) (Result, err
 		return a.observeHTTP(ctx, world, step)
 	default:
 		return Result{}, &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: fmt.Sprintf("capability %q has no read-only adapter", step.Capability), Retryable: false}
+	}
+}
+
+// Effect validates a write step against the world, performs it, and returns
+// the effect the executor must persist (M12). Steps reach this path only when
+// the world still grants the capability at effect time.
+func (a *Adapter) Effect(ctx context.Context, step execution.Step) (Result, error) {
+	world := a.World()
+	if err := world.Authorize(step.Capability); err != nil {
+		return Result{}, &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: err.Error(), Retryable: false}
+	}
+	if step.Input == nil {
+		return Result{}, &execution.ExecutionError{Class: execution.ErrorInvalidResult, Message: "step input is required", Retryable: false}
+	}
+	switch step.Capability {
+	case "filesystem.write":
+		return a.effectFilesystem(world, step)
+	case "process.execute":
+		return a.effectProcess(ctx, world, step)
+	case "git.write":
+		return a.effectGit(world, step)
+	case "http.write":
+		return a.effectHTTP(ctx, world, step)
+	default:
+		return Result{}, &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: fmt.Sprintf("capability %q has no write adapter", step.Capability), Retryable: false}
 	}
 }
 
@@ -214,7 +265,7 @@ func (a *Adapter) observeGit(step execution.Step) (Result, error) {
 			return Result{}, &execution.ExecutionError{Class: execution.ErrorInvalidResult, Message: gitErr.Error(), Retryable: false}
 		}
 		_, head, _, headErr := ReadHead(gitDir)
-		if headErr != nil {
+		if headErr != nil && !errors.Is(headErr, ErrUnbornHead) {
 			return Result{}, &execution.ExecutionError{Class: execution.ErrorInvalidResult, Message: headErr.Error(), Retryable: false}
 		}
 		if head == "" {
@@ -294,9 +345,20 @@ func (a *Adapter) observeHTTP(ctx context.Context, world World, step execution.S
 // resolvePath resolves a step path inside a declared filesystem root and
 // rejects anything escaping it, including through symlinks.
 func (a *Adapter) resolvePath(world World, input map[string]any) (root string, relative string, resource string, err error) {
+	_, root, relative, err = resolveRootResource(world, input)
+	if err != nil {
+		return "", "", "", err
+	}
+	return root, relative, "filesystem:" + root, nil
+}
+
+// resolveRootResource is the shared containment core: it maps a step path to
+// the declared resource that owns it, the resolved root, and the relative
+// path inside that root.
+func resolveRootResource(world World, input map[string]any) (resource Resource, root string, relative string, err error) {
 	raw, _ := input["path"].(string)
 	if strings.TrimSpace(raw) == "" {
-		return "", "", "", &execution.ExecutionError{Class: execution.ErrorInvalidResult, Message: "path is required", Retryable: false}
+		return Resource{}, "", "", &execution.ExecutionError{Class: execution.ErrorInvalidResult, Message: "path is required", Retryable: false}
 	}
 	if filepath.IsAbs(raw) {
 		for _, candidate := range world.Roots() {
@@ -305,10 +367,10 @@ func (a *Adapter) resolvePath(world World, input map[string]any) (root string, r
 				continue
 			}
 			if rel, relErr := filepath.Rel(resolvedRoot, filepath.Clean(raw)); relErr == nil && !strings.HasPrefix(rel, "..") {
-				return resolvedRoot, rel, "filesystem:" + resolvedRoot, nil
+				return candidate, resolvedRoot, rel, nil
 			}
 		}
-		return "", "", "", &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: fmt.Sprintf("path %q is outside declared world resources", raw), Retryable: false}
+		return Resource{}, "", "", &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: fmt.Sprintf("path %q is outside declared world resources", raw), Retryable: false}
 	}
 	// Relative paths resolve against the single declared root when there is
 	// exactly one; otherwise the caller must be explicit.
@@ -316,15 +378,15 @@ func (a *Adapter) resolvePath(world World, input map[string]any) (root string, r
 	if len(roots) == 1 {
 		resolvedRoot, resolveErr := resolveRoot(roots[0].Path)
 		if resolveErr != nil {
-			return "", "", "", &execution.ExecutionError{Class: execution.ErrorInvalidResult, Message: resolveErr.Error(), Retryable: false}
+			return Resource{}, "", "", &execution.ExecutionError{Class: execution.ErrorInvalidResult, Message: resolveErr.Error(), Retryable: false}
 		}
 		relative = filepath.Clean(raw)
 		if strings.HasPrefix(relative, "..") {
-			return "", "", "", &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: fmt.Sprintf("path %q escapes the declared resource root", raw), Retryable: false}
+			return Resource{}, "", "", &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: fmt.Sprintf("path %q escapes the declared resource root", raw), Retryable: false}
 		}
-		return resolvedRoot, relative, "filesystem:" + resolvedRoot, nil
+		return roots[0], resolvedRoot, relative, nil
 	}
-	return "", "", "", &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: "multiple filesystem resources declared: path must be absolute", Retryable: false}
+	return Resource{}, "", "", &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: "multiple filesystem resources declared: path must be absolute", Retryable: false}
 }
 
 func resolveRoot(root string) (string, error) {

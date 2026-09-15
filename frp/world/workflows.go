@@ -40,9 +40,10 @@ func StandardReadDefinitions() []affordance.Definition {
 	}
 }
 
-// StandardWorkflows maps affordance ids to deterministic planners.
+// StandardWorkflows maps affordance ids to deterministic planners, covering
+// the M11 read registry and the M12 write registry.
 func StandardWorkflows() map[string]execution.DeterministicWorkflow {
-	return map[string]execution.DeterministicWorkflow{
+	workflows := map[string]execution.DeterministicWorkflow{
 		AffordanceInspectEnvironment: InspectEnvironmentWorkflow{},
 		AffordanceInspectWorkspace:   InspectWorkspaceWorkflow{},
 		AffordanceListFiles:          ListFilesWorkflow{},
@@ -51,6 +52,10 @@ func StandardWorkflows() map[string]execution.DeterministicWorkflow {
 		AffordanceGitLog:             GitLogWorkflow{},
 		AffordanceInspectHTTP:        InspectHTTPWorkflow{},
 	}
+	for id, workflow := range writeWorkflows() {
+		workflows[id] = workflow
+	}
+	return workflows
 }
 
 func argumentString(request affordance.Request, key string) (string, error) {

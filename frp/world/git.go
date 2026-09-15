@@ -24,6 +24,7 @@ var (
 	ErrNotAGitRepository = errors.New("not a git repository")
 	ErrGitIndexVersion   = errors.New("unsupported git index version")
 	ErrPackedObject      = errors.New("git object is packed")
+	ErrUnbornHead        = errors.New("git HEAD points at a ref with no commits")
 )
 
 type Remote struct {
@@ -79,7 +80,8 @@ func GitDir(root string) (string, error) {
 	return gitdir, nil
 }
 
-// ReadHead resolves HEAD to a branch name and commit SHA.
+// ReadHead resolves HEAD to a branch name and commit SHA. A symref whose
+// target ref does not exist yet reports ErrUnbornHead with an empty commit.
 func ReadHead(gitDir string) (branch string, commit string, detached bool, err error) {
 	raw, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
 	if err != nil {
@@ -93,7 +95,7 @@ func ReadHead(gitDir string) (branch string, commit string, detached bool, err e
 	branch = strings.TrimPrefix(ref, "refs/heads/")
 	commit, err = readRef(gitDir, ref)
 	if err != nil {
-		return branch, "", detached, err
+		return branch, "", detached, ErrUnbornHead
 	}
 	return branch, commit, false, nil
 }
@@ -356,7 +358,7 @@ func InspectRepository(root string, maxEntries int) (Status, error) {
 	}
 	status := Status{Remotes: []Remote{}}
 	branch, head, detached, err := ReadHead(gitDir)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrUnbornHead) {
 		return Status{}, err
 	}
 	status.Branch = branch

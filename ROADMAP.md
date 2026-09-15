@@ -74,12 +74,23 @@ The milestone order follows FRP v0.3 section 38.
   - [x] Deterministic extractors (`gomod.v1`, `npm.v1`, `cargo.v1`, `python.v1`, `readme.v1`, `git.v1`, `http.v1`, `listing.v1`) turn observations into candidate Claims with confidence below 1.
   - [x] Claims cite the observation Events as evidence: `Commit.Evidence` with a `claim_evidence` table, unknown evidence rejected, provenance chain readable via `GET /v1/claims/{id}/evidence`.
   - [x] `POST /v1/ingest` bootstrap flow over filesystem/git/http resources with depth and event budgets, truncation reporting, and smoke coverage against an empty substrate.
+- [x] **M12 — Write/action world (after the read pipeline matured):**
+  - [x] Write adapter behind `filesystem.write`, `process.execute`, `git.write`, `http.write`: file write/create/patch/move/delete/mkdir, bounded command execution, and HTTP POST against declared writable endpoints; every handler refuses `read_only` resources and world limits bound content, output capture, timeouts, and budgets.
+  - [x] Effect routing by capability category: the executor worker sends `write`/`execute` steps to `Adapter.Effect` and `read`/`observe` steps to `Adapter.Observe`, so effects and observations share one execution pipeline.
+  - [x] Canonical `world.effect` Events (same shape and atomic commit as observations) recording `resource`/`effect_type`/`payload` plus world and execution linkage, with world version divergence recorded at effect time — replay can answer what changed in the world and why.
+  - [x] Command-scoped policies: `Policy.Commands` on `process.execute` allow/deny rules (allowlist/denylist), enforced at effect time so an unlisted command fails with `permission_denied` before it runs.
+  - [x] Pure-Go git writes (no shell-out): branch creation as ref writes and worktree-snapshot commits as loose objects with git tree ordering, modes, and symlinks (verified against the real git CLI: `fsck`/`log`/`ls-tree`/`rev-parse`); packed repos, checkout, and staged-index commits remain out of scope.
+  - [x] Standard write affordances (`write_file`, `create_file`, `patch_file`, `delete_file`, `move_file`, `create_dir`, `run_command`, `git_create_branch`, `git_commit`, `http_post`) as deterministic workflows; primitive operations stay Executor building blocks for semantic affordances (M15).
 - [x] **M14 — Entity / knowledge graph:**
   - [x] Claim triples: optional `subject`/`predicate`/`object` (entity refs like `module:example.com/app`) validated all-or-none against frozen registries of entity types and predicates; persisted in the claims table and exposed through `GET /v1/claims/{id}`.
   - [x] Ingest extractors emit triples: manifests bind packages/modules to files (`declared_in`), dependencies (`depends_on`, bounded per manifest), toolchains (`targets`), and root ownership (`contains`); git status binds repositories to branches (`on_branch`).
   - [x] Entity projection (`projection.BuildEntities`): global rebuildable graph over triple-bearing claims with deterministic content-derived ids, mention counts, max-confidence entity trust, and refuted/superseded claims excluded; `entities`/`entity_relations` tables replaced atomically on rebuild.
   - [x] Entity-aware attention (M14.3): `entity` refs in frame focus/working set, entity candidates in the ambient pool gated by frame relevance (focus/objective overlap, graph proximity, pins) and bounded so a large world graph cannot flood every render.
   - [x] Entity HTTP API (`POST /v1/projections/entities/rebuild`, `GET /v1/entities?type=`, `GET /v1/entities/{id}` with relations) plus postgres/memory store coverage, integration tests, and smoke coverage asserting entities appear in the render map.
+- [x] **M15 — Agent bootstrap / first contact:**
+  - [x] `POST /v1/bootstrap`: one call creates the bootstrap episode (`episode.started` carrying world binding), the initial explore frame focused on the objective, and runs bounded discovery over every declared filesystem/git resource — reusing the M13 ingestion pipeline so nothing enters memory outside the Event Log.
+  - [x] Bootstrap rebuilds region/edge/entity projections and returns the first render of the first frame; the agent starts inside a world map built purely from real observation (no separate knowledge base, no context injection).
+  - [x] Closed-loop smoke against a fresh git repository: after bootstrap the agent acts from its first frame (`read_file`), the executor processes the world-bound action, and its `world.observation` event lands in the same episode — WORLD → OBSERVE → MEMORY → ATTENTION → FRAME → ACTION → WORLD.
 
 ## Architectural constraints
 

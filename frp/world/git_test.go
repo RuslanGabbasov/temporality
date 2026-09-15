@@ -101,6 +101,9 @@ func writeIndex(t *testing.T, gitDir string, entries []IndexEntry) {
 			buf.WriteByte(0)
 		}
 	}
+	// git index v2 ends with the SHA-1 of everything before it.
+	sum := sha1.Sum(buf.Bytes())
+	buf.Write(sum[:])
 	if err := os.WriteFile(filepath.Join(gitDir, "index"), buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -27,6 +27,13 @@ type ObservingAdapter interface {
 	Observe(context.Context, execution.Step) (world.Result, error)
 }
 
+// EffectingAdapter is implemented by world adapters that can physically
+// change the external world. Steps whose capability category is write or
+// execute route here so the worker can persist world.effect events (M12).
+type EffectingAdapter interface {
+	Effect(context.Context, execution.Step) (world.Result, error)
+}
+
 // WorldStore provides the current world state for effect-boundary checks.
 type WorldStore interface {
 	GetWorld(context.Context, string) (world.World, error)
@@ -128,29 +135,49 @@ func (w *Worker) process(ctx context.Context, value execution.Execution) error {
 		return w.complete(ctx, running, currentWorld, nil)
 	}
 	observations := make([]protocol.Event, 0, len(plan.Steps))
-	if observing, ok := w.Adapter.(ObservingAdapter); ok {
-		for _, step := range plan.Steps {
-			result, observeErr := observing.Observe(ctx, step)
-			if observeErr != nil {
-				return w.failExecution(ctx, running, observeErr)
-			}
-			if result.ObservationType == "" {
-				continue
-			}
-			observationEvent, eventErr := world.ObservationEvent(currentWorld, running.ExecutionID, running.AffordanceID, world.Observation{Resource: result.Resource, ObservationType: result.ObservationType, Payload: result.Output, Truncated: result.Truncated}, w.NewID(), w.Now().UTC(), running.EpisodeID, running.BranchID, running.WorldVersion)
+	for _, step := range plan.Steps {
+		result, stepErr := w.performStep(ctx, step)
+		if stepErr != nil {
+			return w.failExecution(ctx, running, stepErr)
+		}
+		if result.EffectType != "" {
+			effectEvent, eventErr := world.EffectEvent(currentWorld, running.ExecutionID, running.AffordanceID, world.Effect{Resource: result.Resource, EffectType: result.EffectType, Payload: result.Output, Truncated: result.Truncated}, w.NewID(), w.Now().UTC(), running.EpisodeID, running.BranchID, running.WorldVersion)
 			if eventErr != nil {
 				return eventErr
 			}
-			observations = append(observations, observationEvent)
+			observations = append(observations, effectEvent)
+			continue
 		}
-	} else {
-		for _, step := range plan.Steps {
-			if _, err = w.Adapter.Execute(ctx, step); err != nil {
-				return w.failExecution(ctx, running, err)
-			}
+		if result.ObservationType == "" {
+			continue
 		}
+		observationEvent, eventErr := world.ObservationEvent(currentWorld, running.ExecutionID, running.AffordanceID, world.Observation{Resource: result.Resource, ObservationType: result.ObservationType, Payload: result.Output, Truncated: result.Truncated}, w.NewID(), w.Now().UTC(), running.EpisodeID, running.BranchID, running.WorldVersion)
+		if eventErr != nil {
+			return eventErr
+		}
+		observations = append(observations, observationEvent)
 	}
 	return w.complete(ctx, running, currentWorld, observations)
+}
+
+// performStep routes one planned step to the adapter by capability category:
+// write and execute categories are physical effects, everything else is an
+// observation.
+func (w *Worker) performStep(ctx context.Context, step execution.Step) (world.Result, error) {
+	if category, ok := world.CapabilityCategory(step.Capability); ok && (category == world.CategoryWrite || category == world.CategoryExecute) {
+		if effecting, implemented := w.Adapter.(EffectingAdapter); implemented {
+			return effecting.Effect(ctx, step)
+		}
+		return world.Result{}, &execution.ExecutionError{Class: execution.ErrorPermissionDenied, Message: fmt.Sprintf("adapter cannot perform capability %q", step.Capability), Retryable: false}
+	}
+	if observing, implemented := w.Adapter.(ObservingAdapter); implemented {
+		return observing.Observe(ctx, step)
+	}
+	output, err := w.Adapter.Execute(ctx, step)
+	if err != nil {
+		return world.Result{}, err
+	}
+	return world.Result{Output: output}, nil
 }
 
 // complete commits the terminal completed transition, attaching observations

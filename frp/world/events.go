@@ -7,16 +7,18 @@ import (
 )
 
 // Canonical world event types (M11). world.observation records what the agent
-// observed in the external world; registration events record the environment
-// state a replay must attribute effects to.
+// observed in the external world; world.effect (M12) records what the agent
+// changed in it; registration events record the environment state a replay
+// must attribute effects to.
 const (
 	EventWorldRegistered   = "world.registered"
 	EventWorldStateUpdated = "world.state_updated"
 	EventWorldObservation  = "world.observation"
+	EventWorldEffect       = "world.effect"
 )
 
 func CanonicalEventTypes() []string {
-	return []string{EventWorldRegistered, EventWorldStateUpdated, EventWorldObservation}
+	return []string{EventWorldRegistered, EventWorldStateUpdated, EventWorldObservation, EventWorldEffect}
 }
 
 func IsCanonicalEventType(eventType string) bool {
@@ -97,6 +99,56 @@ func ObservationEvent(value World, executionID, affordanceID string, observation
 	}
 	event := protocol.Event{EventID: eventID, TransactionTime: at.UTC(), ValidTime: at.UTC(), EpisodeID: episodeID, BranchID: branchID, Type: EventWorldObservation, Payload: payload, Provenance: map[string]any{"source": "temporality-executor", "execution_id": executionID, "affordance_id": affordanceID}}
 	trust := float32(0.9)
+	event.EvidenceStrength = &trust
+	event.ApplyDefaults(at.UTC())
+	return event, event.Validate()
+}
+
+// Effect is a single change the agent made to the external world, produced
+// by a world adapter write step and always committed through the execution
+// pipeline so replay can answer what happened and why (M12.5).
+type Effect struct {
+	Resource   string         `json:"resource"`
+	EffectType string         `json:"effect_type"`
+	Payload    map[string]any `json:"payload"`
+	Truncated  bool           `json:"truncated,omitempty"`
+}
+
+func (e Effect) Validate() error {
+	if e.Resource == "" || e.EffectType == "" {
+		return ErrObservationInvalid
+	}
+	if e.Payload == nil {
+		return ErrObservationInvalid
+	}
+	return nil
+}
+
+// EffectEvent builds a canonical world.effect event. Effects never mutate
+// silently: every physical change is persisted as an event linked to the
+// execution that intended it, in the same shape as observations so attention,
+// regions, and replay treat both uniformly.
+func EffectEvent(value World, executionID, affordanceID string, effect Effect, eventID string, at time.Time, episodeID, branchID string, intentWorldVersion int) (protocol.Event, error) {
+	if err := effect.Validate(); err != nil {
+		return protocol.Event{}, err
+	}
+	payload := map[string]any{
+		"world_id":      value.WorldID,
+		"world_version": value.StateVersion,
+		"execution_id":  executionID,
+		"affordance_id": affordanceID,
+		"resource":      effect.Resource,
+		"effect_type":   effect.EffectType,
+		"payload":       effect.Payload,
+	}
+	if effect.Truncated {
+		payload["truncated"] = true
+	}
+	if intentWorldVersion > 0 && intentWorldVersion != value.StateVersion {
+		payload["intent_world_version"] = intentWorldVersion
+	}
+	event := protocol.Event{EventID: eventID, TransactionTime: at.UTC(), ValidTime: at.UTC(), EpisodeID: episodeID, BranchID: branchID, Type: EventWorldEffect, Payload: payload, Provenance: map[string]any{"source": "temporality-executor", "execution_id": executionID, "affordance_id": affordanceID}}
+	trust := float32(1.0)
 	event.EvidenceStrength = &trust
 	event.ApplyDefaults(at.UTC())
 	return event, event.Validate()

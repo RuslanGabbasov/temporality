@@ -207,18 +207,34 @@ const (
 )
 
 // Policy is an explicit allow/deny rule scoped to a capability and optionally
-// to a single resource.
+// to a single resource. For process.execute the optional Commands list scopes
+// the rule to specific command names (M12.2): an allow rule with Commands
+// forms an allowlist, a deny rule with Commands blocks only those names.
 type Policy struct {
 	Effect     PolicyEffect `json:"effect"`
 	Capability string       `json:"capability"`
 	ResourceID string       `json:"resource_id,omitempty"`
+	Commands   []string     `json:"commands,omitempty"`
 }
 
 func (p Policy) Validate() error {
 	if p.Effect != PolicyAllow && p.Effect != PolicyDeny {
 		return fmt.Errorf("policy effect must be %q or %q", PolicyAllow, PolicyDeny)
 	}
-	return ValidateCapability(p.Capability)
+	if err := ValidateCapability(p.Capability); err != nil {
+		return err
+	}
+	if len(p.Commands) > 0 {
+		if p.Capability != "process.execute" {
+			return fmt.Errorf("policy commands are only valid for process.execute, not %q", p.Capability)
+		}
+		for _, command := range p.Commands {
+			if strings.TrimSpace(command) == "" {
+				return errors.New("policy command name cannot be empty")
+			}
+		}
+	}
+	return nil
 }
 
 var (
@@ -350,7 +366,8 @@ func (w World) Grants(capability string) bool {
 }
 
 // Authorize enforces the M11 effect boundary at intent and effect time: the
-// capability must be granted and no deny policy may match it.
+// capability must be granted and no capability-scoped deny policy may match
+// it. Command-scoped policies are refined by AuthorizeProcess.
 func (w World) Authorize(capability string) error {
 	if err := ValidateCapability(capability); err != nil {
 		return err
@@ -359,7 +376,7 @@ func (w World) Authorize(capability string) error {
 		return fmt.Errorf("%w: %s", ErrCapabilityDenied, capability)
 	}
 	for _, policy := range w.Policies {
-		if policy.Effect == PolicyDeny && policy.Capability == capability {
+		if policy.Effect == PolicyDeny && policy.Capability == capability && len(policy.Commands) == 0 {
 			return fmt.Errorf("%w: %s denied by policy", ErrCapabilityDenied, capability)
 		}
 	}
@@ -374,6 +391,52 @@ func (w World) AuthorizeAll(capabilities []string) error {
 		}
 	}
 	return nil
+}
+
+// AuthorizeProcess enforces the command-level policy layer for
+// process.execute (M12.2). When any allow policy carries an allowlist the
+// command name must appear in one of them; deny policies with a matching
+// command (or without a command scope at all) always block.
+func (w World) AuthorizeProcess(command string) error {
+	const capability = "process.execute"
+	if err := w.Authorize(capability); err != nil {
+		return err
+	}
+	allowlist := map[string]struct{}{}
+	scoped := false
+	for _, policy := range w.Policies {
+		if policy.Capability != capability {
+			continue
+		}
+		switch policy.Effect {
+		case PolicyDeny:
+			if len(policy.Commands) == 0 || containsCommand(policy.Commands, command) {
+				return fmt.Errorf("%w: %s denied by policy", ErrCapabilityDenied, command)
+			}
+		case PolicyAllow:
+			if len(policy.Commands) > 0 {
+				scoped = true
+				for _, name := range policy.Commands {
+					allowlist[name] = struct{}{}
+				}
+			}
+		}
+	}
+	if scoped {
+		if _, ok := allowlist[command]; !ok {
+			return fmt.Errorf("%w: %s is not on the process allowlist", ErrCapabilityDenied, command)
+		}
+	}
+	return nil
+}
+
+func containsCommand(commands []string, command string) bool {
+	for _, name := range commands {
+		if name == command {
+			return true
+		}
+	}
+	return false
 }
 
 // Resource returns the declared resource by id.
