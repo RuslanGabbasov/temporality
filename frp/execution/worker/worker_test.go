@@ -12,6 +12,7 @@ import (
 	"github.com/temporality-project/temporality/frp/planner"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/substrate/memory"
+	"github.com/temporality-project/temporality/frp/world"
 )
 
 func TestWorkerRunsOnlyAfterDurableCreate(t *testing.T) {
@@ -38,6 +39,67 @@ func TestWorkerRunsOnlyAfterDurableCreate(t *testing.T) {
 	}
 	if processed != 1 || final.Status != execution.StatusCompleted {
 		t.Fatalf("unexpected worker result: %d %#v", processed, final)
+	}
+}
+
+func TestWorkerFailsUnknownAffordanceWithoutBlockingQueue(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	now := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	// The client persisted an execution for an affordance this executor has no
+	// workflow for (e.g. an inline definition with an arbitrary id).
+	unknown := affordance.Definition{Protocol: "frp", Version: "0.3", ID: "step.execute", ExecutionMode: affordance.ModeDeterministic, InputSchema: map[string]any{}, Capabilities: []string{"step.execute"}, Limits: affordance.Limits{TimeoutSec: 10, CPU: 1, MemoryMB: 64, DiskMB: 64}}
+	unknownRequest := affordance.Request{Protocol: "frp", Version: "0.3", RequestID: "r-unknown", EpisodeID: "episode-poison", AffordanceID: unknown.ID, Arguments: map[string]any{}}
+	if err := store.CreateExecution(ctx, unknown, unknownRequest, execution.Execution{Protocol: "frp", Version: "0.3", ExecutionID: "x-unknown", RequestID: unknownRequest.RequestID, EpisodeID: "episode-poison", AffordanceID: unknown.ID, Status: execution.StatusCreated, CreatedEventID: "ec-unknown", IntentPersistedAt: now}, fixtureEvent("er-unknown", affordance.EventRequested, now, "episode-poison", "request_id", unknownRequest.RequestID), fixtureEvent("ec-unknown", execution.EventExecutionCreated, now, "episode-poison", "execution_id", "x-unknown")); err != nil {
+		t.Fatal(err)
+	}
+	// A healthy execution behind it in the same episode.
+	known := affordance.Definition{Protocol: "frp", Version: "0.3", ID: "inspect_environment", ExecutionMode: affordance.ModeDeterministic, InputSchema: map[string]any{}, Capabilities: []string{"filesystem.read"}, Limits: affordance.Limits{TimeoutSec: 30, CPU: 1, MemoryMB: 64, DiskMB: 64}}
+	knownRequest := affordance.Request{Protocol: "frp", Version: "0.3", RequestID: "r-known", EpisodeID: "episode-poison", AffordanceID: known.ID, Arguments: map[string]any{"path": "."}}
+	if err := store.CreateExecution(ctx, known, knownRequest, execution.Execution{Protocol: "frp", Version: "0.3", ExecutionID: "x-known", RequestID: knownRequest.RequestID, EpisodeID: "episode-poison", AffordanceID: known.ID, Status: execution.StatusCreated, CreatedEventID: "ec-known", IntentPersistedAt: now}, fixtureEvent("er-known", affordance.EventRequested, now, "episode-poison", "request_id", knownRequest.RequestID), fixtureEvent("ec-known", execution.EventExecutionCreated, now, "episode-poison", "execution_id", "x-known")); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	w := worker.Worker{Store: store, Workflows: world.StandardWorkflows(), Adapter: worker.SafeAdapter{}, NewID: func() string { n++; return fmt.Sprintf("poison-event-%d", n) }, Now: func() time.Time { now = now.Add(time.Second); return now }}
+	if _, err := w.RunOnce(ctx, "episode-poison"); err != nil {
+		t.Fatalf("poison execution blocked the worker cycle: %v", err)
+	}
+	poison, err := store.GetExecution(ctx, "x-unknown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if poison.Status != execution.StatusFailed || poison.Error == nil || poison.Error.Class != execution.ErrorUnavailable {
+		t.Fatalf("unknown affordance did not fail durably: %#v", poison)
+	}
+	healthy, err := store.GetExecution(ctx, "x-known")
+	if err != nil || healthy.Status != execution.StatusCompleted {
+		t.Fatalf("healthy execution behind poison did not complete: %#v %v", healthy, err)
+	}
+	// Second cycle finds nothing active — the poison pill is drained, not retried.
+	processed, err := w.RunOnce(ctx, "episode-poison")
+	if err != nil || processed != 0 {
+		t.Fatalf("failed execution was retried: %d %v", processed, err)
+	}
+}
+
+func TestWorkerPlanErrorFailsExecution(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	now := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	definition := affordance.Definition{Protocol: "frp", Version: "0.3", ID: "read_file", ExecutionMode: affordance.ModeDeterministic, InputSchema: map[string]any{}, Capabilities: []string{"filesystem.read"}, Limits: affordance.Limits{TimeoutSec: 30, CPU: 1, MemoryMB: 64, DiskMB: 64}}
+	// read_file workflow requires a path argument; the emission omitted it.
+	request := affordance.Request{Protocol: "frp", Version: "0.3", RequestID: "r-plan", EpisodeID: "episode-plan", AffordanceID: definition.ID, Arguments: map[string]any{}}
+	if err := store.CreateExecution(ctx, definition, request, execution.Execution{Protocol: "frp", Version: "0.3", ExecutionID: "x-plan", RequestID: request.RequestID, EpisodeID: "episode-plan", AffordanceID: definition.ID, Status: execution.StatusCreated, CreatedEventID: "ec-plan", IntentPersistedAt: now}, fixtureEvent("er-plan", affordance.EventRequested, now, "episode-plan", "request_id", request.RequestID), fixtureEvent("ec-plan", execution.EventExecutionCreated, now, "episode-plan", "execution_id", "x-plan")); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	w := worker.Worker{Store: store, Workflows: world.StandardWorkflows(), Adapter: worker.SafeAdapter{}, NewID: func() string { n++; return fmt.Sprintf("plan-event-%d", n) }, Now: func() time.Time { now = now.Add(time.Second); return now }}
+	if _, err := w.RunOnce(ctx, "episode-plan"); err != nil {
+		t.Fatal(err)
+	}
+	final, err := store.GetExecution(ctx, "x-plan")
+	if err != nil || final.Status != execution.StatusFailed || final.Error == nil || final.Error.Class != execution.ErrorInvalidResult {
+		t.Fatalf("plan error did not fail execution durably: %#v %v", final, err)
 	}
 }
 

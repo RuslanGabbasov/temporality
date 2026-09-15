@@ -83,25 +83,11 @@ func (w *Worker) process(ctx context.Context, value execution.Execution) error {
 	if err != nil {
 		return err
 	}
-	var plan execution.Plan
-	if definition.ExecutionMode == affordance.ModeDeterministic {
-		if value.Status != execution.StatusCreated {
-			return nil
-		}
-		workflow, ok := w.Workflows[value.AffordanceID]
-		if !ok {
-			return fmt.Errorf("no deterministic workflow for %s", value.AffordanceID)
-		}
-		plan, err = workflow.Plan(request)
-		if err != nil {
-			return err
-		}
-		if err = plan.Validate(definition); err != nil {
-			return err
-		}
-	} else if w.PlannerRunner == nil {
-		return errors.New("adaptive execution requires planner runner")
+	if value.Status != execution.StatusCreated && value.Status != execution.StatusRunning {
+		return nil
 	}
+	// Claim the execution before planning: the running→failed trail records that
+	// the runtime picked the intent up before it proved unexecutable.
 	var running execution.Execution
 	if value.Status == execution.StatusCreated {
 		now := w.Now().UTC()
@@ -113,10 +99,26 @@ func (w *Worker) process(ctx context.Context, value execution.Execution) error {
 		if err != nil {
 			return err
 		}
-	} else if value.Status == execution.StatusRunning {
-		running = value
 	} else {
-		return nil
+		running = value
+	}
+	var plan execution.Plan
+	if definition.ExecutionMode == affordance.ModeDeterministic {
+		// Planning failures are permanent: the intent is already durable, so
+		// failing the execution drains the queue instead of retrying forever.
+		workflow, ok := w.Workflows[value.AffordanceID]
+		if !ok {
+			return w.failExecution(ctx, running, &execution.ExecutionError{Class: execution.ErrorUnavailable, Message: fmt.Sprintf("no deterministic workflow for affordance %q in this executor", value.AffordanceID), Retryable: false})
+		}
+		plan, err = workflow.Plan(request)
+		if err != nil {
+			return w.failExecution(ctx, running, &execution.ExecutionError{Class: execution.ErrorInvalidResult, Message: "plan: " + err.Error(), Retryable: false})
+		}
+		if err = plan.Validate(definition); err != nil {
+			return w.failExecution(ctx, running, &execution.ExecutionError{Class: execution.ErrorInvalidResult, Message: "plan validation: " + err.Error(), Retryable: false})
+		}
+	} else if w.PlannerRunner == nil {
+		return w.failExecution(ctx, running, &execution.ExecutionError{Class: execution.ErrorUnavailable, Message: "adaptive execution requires planner runner", Retryable: false})
 	}
 	if err = execution.ValidateEffectBoundary(running); err != nil {
 		return err
