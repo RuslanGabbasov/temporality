@@ -23,6 +23,11 @@ type Input struct {
 	ObjectiveID  string
 	BudgetTokens int
 	Definitions  map[string]affordance.Definition
+
+	// World binding (M11): forwarded to the committed step so its executions
+	// snapshot the world the model's actions target.
+	WorldID      string
+	WorldVersion int
 }
 
 type Store interface {
@@ -76,7 +81,7 @@ func (s Service) Run(ctx context.Context, input Input) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal model provenance: %w", err)
 	}
-	committed, err := step.Run(ctx, s.Store, step.Input{Current: current, Emission: emission, Definitions: input.Definitions, NewID: s.NewID, Now: s.Now, SuggestedAttention: suggestions, RenderPacket: &packet, ModelProvenance: provenance})
+	committed, err := step.Run(ctx, s.Store, step.Input{Current: current, Emission: emission, Definitions: input.Definitions, WorldID: input.WorldID, WorldVersion: input.WorldVersion, NewID: s.NewID, Now: s.Now, SuggestedAttention: suggestions, RenderPacket: &packet, ModelProvenance: provenance})
 	if err != nil {
 		return Result{}, err
 	}

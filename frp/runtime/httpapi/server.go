@@ -69,6 +69,7 @@ func New(store substrate.EventStore, log *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /v1/worlds", s.saveWorld)
 	mux.HandleFunc("GET /v1/worlds", s.listWorlds)
 	mux.HandleFunc("GET /v1/worlds/{id}", s.getWorld)
+	mux.HandleFunc("GET /v1/affordances", s.listAffordances)
 	mux.HandleFunc("POST /v1/projections/entities/rebuild", s.rebuildEntities)
 	mux.HandleFunc("GET /v1/entities", s.listEntities)
 	mux.HandleFunc("GET /v1/entities/{id}", s.getEntity)
@@ -761,7 +762,8 @@ func (s *Server) reduceEmission(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, errors.New("internal error"))
 		return
 	}
-	decision, err := cognition.ReduceEmission(current, emission)
+	now := s.now().UTC()
+	decision, err := cognition.ReduceEmission(current, emission, now)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
@@ -770,7 +772,6 @@ func (s *Server) reduceEmission(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, errors.New("claims and actions require atomic runtime orchestration not available in M2"))
 		return
 	}
-	now := s.now().UTC()
 	event := protocol.Event{EventID: newUUID(), ValidTime: now, Type: "frame.transitioned", EpisodeID: current.EpisodeID, BranchID: current.BranchID, Payload: map[string]any{"parent_frame_id": current.FrameID, "emission_id": emission.EmissionID}, Provenance: map[string]any{"source": "cognitive_emission", "emission_schema": emission.Schema}}
 	event.ApplyDefaults(now)
 	result, err := store.TransitionFrame(r.Context(), current.FrameID, decision.Transition, event)

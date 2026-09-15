@@ -15,6 +15,7 @@ import (
 	"github.com/temporality-project/temporality/frp/model"
 	"github.com/temporality-project/temporality/frp/runtime/modelstep"
 	runtimeStep "github.com/temporality-project/temporality/frp/runtime/step"
+	"github.com/temporality-project/temporality/frp/world"
 )
 
 const (
@@ -34,6 +35,7 @@ type modelStepRequest struct {
 	ObjectiveID  string                  `json:"objective_id"`
 	BudgetTokens int                     `json:"budget_tokens"`
 	Definitions  []affordance.Definition `json:"definitions"`
+	WorldID      string                  `json:"world_id"`
 }
 
 type modelConfigResponse struct {
@@ -110,6 +112,17 @@ func (s *Server) modelStep(w http.ResponseWriter, r *http.Request) {
 		}
 		definitions[definition.ID] = definition
 	}
+	// Intent-time world validation, mirroring /v1/step: the model's actions run
+	// against the world only if it grants every declared capability.
+	boundWorld, err := s.worldForExecution(r, request.WorldID, requestCapabilities(definitions))
+	if errors.Is(err, world.ErrWorldNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
 	startedAt := time.Now()
 	s.log.Info("model step started", "frame_id", request.FrameID, "model", adapter.Provenance().Model, "timeout_ms", adapter.Provenance().TimeoutMS)
 	result, err := (modelstep.Service{
@@ -123,6 +136,8 @@ func (s *Server) modelStep(w http.ResponseWriter, r *http.Request) {
 		ObjectiveID:  request.ObjectiveID,
 		BudgetTokens: request.BudgetTokens,
 		Definitions:  definitions,
+		WorldID:      boundWorld.WorldID,
+		WorldVersion: boundWorld.StateVersion,
 	})
 	if err == nil {
 		s.log.Info("model step completed", "frame_id", request.FrameID, "model", adapter.Provenance().Model, "duration_ms", time.Since(startedAt).Milliseconds())

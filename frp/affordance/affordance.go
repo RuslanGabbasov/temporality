@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -122,6 +123,18 @@ func (d Definition) Validate() error {
 		return errors.New("adaptive affordance requires an enabled planner with model and positive max_steps")
 	}
 	return nil
+}
+
+// MatchesRegistry reports whether two definitions of the same affordance id
+// share the frozen identity: execution semantics, capabilities, limits, and
+// policies must be byte-identical. InputSchema is deliberately excluded — it
+// documents the argument surface shown to the model boundary and may be
+// refined (e.g. richer hints) without changing what an execution does, so
+// registries and replays stay compatible across hint evolution.
+func (d Definition) MatchesRegistry(other Definition) bool {
+	left, right := d, other
+	left.InputSchema, right.InputSchema = nil, nil
+	return reflect.DeepEqual(left, right)
 }
 
 // Request is model intent expressed in semantic terms, never a runtime event or physical command.

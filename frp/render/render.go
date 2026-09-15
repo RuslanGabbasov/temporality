@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/temporality-project/temporality/frp/affordance"
 	"github.com/temporality-project/temporality/frp/attention"
@@ -33,12 +34,29 @@ const (
 	maxEntityCandidates = 16
 )
 
+// ambientHiddenEvents are attention's own bookkeeping: recording what was
+// suggested or selected is an audit trail, not content. Letting them compete
+// in the ambient pool makes attention chase its own output — one step's
+// suggestions spawn dozens of events that crowd out world.observations and
+// claims in every later render. They stay visible in the recent section.
+var ambientHiddenEvents = map[string]struct{}{
+	"attention.suggested": {},
+	"attention.selected":  {},
+}
+
 type Request struct {
 	FrameID      string                  `json:"frame_id"`
 	ObjectiveID  string                  `json:"objective_id"`
 	BudgetTokens int                     `json:"budget_tokens"`
 	Affordances  []affordance.Definition `json:"affordances,omitempty"`
+	// AsOf is an optional memory cutoff. The agent loop renders with nil so the
+	// frame sees everything committed so far — including observations produced
+	// by its own previous actions after that frame was created. Time-travel
+	// inspection passes an explicit cutoff to reproduce exactly what a frame
+	// could see at a historical moment.
+	AsOf *time.Time `json:"as_of,omitempty"`
 }
+
 type Section struct {
 	Kind      string `json:"kind"`
 	Attention string `json:"attention,omitempty"`
@@ -109,13 +127,20 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	if current.ObjectiveID != goal.ObjectiveID || current.EpisodeID != goal.EpisodeID {
 		return Packet{}, errors.New("objective does not belong to frame episode")
 	}
-	events, err := r.stores.List(ctx, substrate.EventFilter{EpisodeID: current.EpisodeID, BranchID: current.BranchID, AsOf: &current.AsOf})
+	events, err := r.stores.List(ctx, substrate.EventFilter{EpisodeID: current.EpisodeID, BranchID: current.BranchID, AsOf: request.AsOf})
 	if err != nil {
 		return Packet{}, err
 	}
 	memoryVersion := "event:none"
+	cutoff := request.AsOf
 	if len(events) > 0 {
 		memoryVersion = "event:" + events[len(events)-1].EventID
+		if cutoff == nil {
+			// The honest cutoff of a latest-memory render is the frontier of what
+			// it saw: the valid time of the newest event in the packet.
+			frontier := events[len(events)-1].ValidTime
+			cutoff = &frontier
+		}
 	}
 	focus, err := r.focusItem(ctx, current.Focus)
 	if err != nil {
@@ -135,7 +160,7 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	}
 	regions := []projection.Region{}
 	if regionStore, ok := any(r.stores).(projection.RegionStore); ok {
-		regions, err = regionStore.ListRegions(ctx, projection.RegionFilter{EpisodeID: current.EpisodeID, BranchID: current.BranchID, AsOf: &current.AsOf})
+		regions, err = regionStore.ListRegions(ctx, projection.RegionFilter{EpisodeID: current.EpisodeID, BranchID: current.BranchID, AsOf: request.AsOf})
 		if err != nil {
 			return Packet{}, err
 		}
@@ -193,17 +218,46 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 		rest := append([]Section{{Kind: "affordances", Items: items}}, sections[2:]...)
 		sections = append(sections[:2:2], rest...)
 	}
-	packet := Packet{Protocol: protocol.Name, ProtocolVersion: protocol.Version, FrameID: current.FrameID, MemoryVersion: memoryVersion, RendererVersion: Version, Sections: sections, OutsideFrame: OutsideFrame{NearbyRegions: outside, Hint: hint}, Provenance: Provenance{ProjectionVersion: "event-candidates.v1", AttentionVersion: attention.Version, EmbeddingModel: "none", AsOf: current.AsOf.Format("2006-01-02T15:04:05.999999999Z07:00")}, TokenUsage: TokenUsage{Budget: request.BudgetTokens}}
+	provenanceAsOf := current.AsOf
+	if cutoff != nil {
+		provenanceAsOf = *cutoff
+	}
+	packet := Packet{Protocol: protocol.Name, ProtocolVersion: protocol.Version, FrameID: current.FrameID, MemoryVersion: memoryVersion, RendererVersion: Version, Sections: sections, OutsideFrame: OutsideFrame{NearbyRegions: outside, Hint: hint}, Provenance: Provenance{ProjectionVersion: "event-candidates.v1", AttentionVersion: attention.Version, EmbeddingModel: "none", AsOf: provenanceAsOf.Format("2006-01-02T15:04:05.999999999Z07:00")}, TokenUsage: TokenUsage{Budget: request.BudgetTokens}}
+	// Budget degradation ladder: drop the cheapest information first — old
+	// recent events, then periphery payloads (they duplicate map candidates),
+	// then the weakest map candidates, then procedure matches (recorded
+	// patterns matter less than live world data). Sections the model acts
+	// from (identity, objective, focus, affordances, working set) are never
+	// trimmed.
+	trimOrder := []string{"recent", "periphery", "map", "procedures"}
 	for {
 		packet.TokenUsage.Estimated = estimate(packet)
 		if packet.TokenUsage.Estimated <= request.BudgetTokens {
 			break
 		}
-		recentSection := &packet.Sections[len(packet.Sections)-1]
-		if len(recentSection.Items) == 0 {
+		trimmed := false
+		for _, kind := range trimOrder {
+			for i := range packet.Sections {
+				if packet.Sections[i].Kind != kind || len(packet.Sections[i].Items) == 0 {
+					continue
+				}
+				if kind == "recent" {
+					// Events are chronological: drop the oldest first.
+					packet.Sections[i].Items = packet.Sections[i].Items[1:]
+				} else {
+					// Map/periphery are ranked best-first: drop the weakest.
+					packet.Sections[i].Items = packet.Sections[i].Items[:len(packet.Sections[i].Items)-1]
+				}
+				trimmed = true
+				break
+			}
+			if trimmed {
+				break
+			}
+		}
+		if !trimmed {
 			return Packet{}, fmt.Errorf("budget %d is insufficient for required render sections", request.BudgetTokens)
 		}
-		recentSection.Items = recentSection.Items[1:]
 	}
 	packet.RenderID = contentID(packet)
 	return packet, nil
@@ -234,7 +288,13 @@ func selectAmbient(current frame.Frame, goal objective.Objective, events []proto
 	entityProximity := entityGraphProximity(anchorEntities, entityRelations)
 	candidates := make([]attention.Candidate, 0, len(events)+len(regions))
 	focusText := current.Focus.Query
-	for i, event := range events {
+	visible := make([]protocol.Event, 0, len(events))
+	for _, event := range events {
+		if _, hidden := ambientHiddenEvents[event.Type]; !hidden {
+			visible = append(visible, event)
+		}
+	}
+	for i, event := range visible {
 		trust := .5
 		if event.SourceTrust != nil {
 			trust = float64(*event.SourceTrust)

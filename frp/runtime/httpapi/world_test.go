@@ -3,8 +3,10 @@ package httpapi_test
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 
+	"github.com/temporality-project/temporality/frp/affordance"
 	"github.com/temporality-project/temporality/frp/world"
 )
 
@@ -52,6 +54,42 @@ func TestWorldLifecycleAPI(t *testing.T) {
 	}
 	if len(listResponse.Worlds) != 1 {
 		t.Fatalf("unexpected world list: %#v", listResponse.Worlds)
+	}
+}
+
+func TestCanonicalAffordancesEndpoint(t *testing.T) {
+	response := serve(testHandler(), http.MethodGet, "/v1/affordances", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("list affordances: %s", response.Body.String())
+	}
+	var payload struct {
+		Definitions []affordance.Definition `json:"definitions"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(payload.Definitions))
+	for _, definition := range payload.Definitions {
+		ids = append(ids, definition.ID)
+		if err := definition.Validate(); err != nil {
+			t.Fatalf("canonical definition %s invalid: %v", definition.ID, err)
+		}
+	}
+	for _, want := range []string{"list_files", "read_file", "git_status", "git_log", "inspect_repository", "write_file", "run_tests"} {
+		if !slices.Contains(ids, want) {
+			t.Fatalf("canonical registry missing %s: %v", want, ids)
+		}
+	}
+	if !slices.IsSorted(ids) {
+		t.Fatalf("canonical registry not sorted: %v", ids)
+	}
+	// Path-scoped affordances declare argument hints for the model boundary.
+	byID := make(map[string]affordance.Definition, len(payload.Definitions))
+	for _, definition := range payload.Definitions {
+		byID[definition.ID] = definition
+	}
+	if _, ok := byID["read_file"].InputSchema["properties"].(map[string]any)["path"]; !ok {
+		t.Fatalf("read_file input schema lacks path hint: %#v", byID["read_file"].InputSchema)
 	}
 }
 

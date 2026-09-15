@@ -294,6 +294,39 @@ POST /v1/frames/{id}/emissions
 GET  /v1/frames/{id}
 ```
 
+Model endpoints:
+
+```text
+GET  /v1/model/config             # безопасная конфигурация (без секретов)
+POST /v1/model-step               # render -> LLM -> атомарный cognitive step
+```
+
+`POST /v1/model-step` принимает `frame_id`, `objective_id`, `budget_tokens`, `definitions` и опциональный `world_id`: рендер-пакет (включая раздел affordances с input_schema) уходит в OpenAI-совместимый провайдер, декодированный CognitiveEmission коммитится атомарно тем же шагом, а при world-привязке исполнения снапшотят версию мира. Ошибки провайдера возвращаются как JSON с actionable-подсказками (обрезка по `finish_reason=length`, пустой ответ при включённом reasoning и т.п.).
+
+## Сценарий: first contact (сквозная проверка)
+
+`scripts/first_contact.py` — автоматический рассказ о полном контуре M11–M15 с живой LLM: агент с пустой памятью приходит в свежий git-репозиторий (там спрятан баг: `Sum` вычитает вместо сложения, и тест `TestSum` падает) и должен сам разобраться в проекте.
+
+```sh
+docker compose up --build -d     # postgres + debugger + runtime
+docker compose stop executor     # обязательно: compose-executor перехватывает исполнения
+make first-contact               # или: python3 scripts/first_contact.py --max-steps 4
+```
+
+Скрипт поднимает собственный локальный runtime (`bin/temporality-runtime`, тот же PostgreSQL): bootstrap-ingestion выполняется внутри runtime, и пути мира должны быть видны процессу — локальный runtime видит хост-пути, а контейнер — нет. Флаг `--runtime URL` подключается к внешнему runtime, если его окружение видит пути репозитория.
+
+Что происходит (и что это доказывает):
+
+1. **Declare the world** — репозиторий регистрируется как World с ресурсом `git_repository` и правами `filesystem.read` + `git.read`: агент ничего не может трогать кроме объявленного (M11).
+2. **Bootstrap** — `POST /v1/bootstrap` заселяет пустой substrate через обычный ingestion-pipeline: наблюдения → claims с provenance → regions → entity graph. Никакой отдельной «базы знаний» — карта мира возникает из реальных событий (M13+M14+M15).
+3. **Cognition loop** — каждый `/v1/model-step` показывает: модель видит affordances в render packet, выбирает действия (`inspect_repository`, `read_file`, `git_log`…), Runtime валидирует намерение, executor выполняет его в мире, наблюдение возвращается событием `world.observation`, regions пересобираются — и следующий кадр уже знает больше. Это и есть замкнутый контур WORLD → OBSERVE → MEMORY → ATTENTION → FRAME → COGNITION → AFFORDANCE → EXECUTION → WORLD.
+4. **What the agent knows** — счётчики событий по типам и рост entity graph показывают, что память — побочный продукт взаимодействия с миром, а не подкачка контекста.
+5. **Result** — финальный ответ модели + ссылки: debugger (`http://localhost:3000`, вставьте episode id), `/v1/events?episode_id=…`, `/v1/replay` любого кадра. Каждое «что агент знал на этом шаге?» отвечает реальным сохранённым RenderPacket, а не реконструкцией задним числом (M10).
+
+Критерий успеха: за несколько шагов модель находит `cmd/app/main.go`, указывает на `a - b` вместо `a + b` и формулирует исправление — не имея на старте ничего, кроме объективы и прав на чтение. На `deepseek/deepseek-v4.1-flash` сценарий обычно сходится за два шага: разведка структуры → чтение файлов → диагноз с `completion`.
+
+Неудачный `/v1/model-step` ничего не фиксирует (render/emit идут до персистентности, а CommitStep транзакционен), поэтому скрипт безопасно повторяет шаг до 4 раз на 422/5xx — живые модели недетерминированы и иногда шлют невалидные emission (пустые refs, объектные completion); Runtime нормализует типовые огрехи на границе декодирования, а семантика остаётся строгой.
+
 ## Debugger development
 
 ```sh

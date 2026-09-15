@@ -106,3 +106,11 @@ func (s *Server) listWorlds(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"worlds": values})
 }
+
+// listAffordances serves the canonical affordance registry (read, write, and
+// semantic definitions). External callers should submit these definitions
+// verbatim: the substrate freezes definitions by id, so hand-crafted variants
+// of a standard id are rejected as frozen rather than silently redefined.
+func (s *Server) listAffordances(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"definitions": world.StandardDefinitions()})
+}

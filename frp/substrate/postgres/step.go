@@ -136,7 +136,7 @@ func insertStepAction(ctx context.Context, tx pgx.Tx, action stepRuntime.Action)
 		_, err = tx.Exec(ctx, `INSERT INTO affordance_definitions(affordance_id,protocol,version,data) VALUES($1,$2,$3,$4)`, action.Definition.ID, action.Definition.Protocol, action.Definition.Version, definitionData)
 	} else if err == nil {
 		var existing affordance.Definition
-		if err = json.Unmarshal(existingData, &existing); err == nil && !reflect.DeepEqual(existing, action.Definition) {
+		if err = json.Unmarshal(existingData, &existing); err == nil && !existing.MatchesRegistry(action.Definition) {
 			err = affordance.ErrDefinitionFrozen
 		}
 	}

@@ -2,6 +2,7 @@ package world
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/temporality-project/temporality/frp/affordance"
 	"github.com/temporality-project/temporality/frp/execution"
@@ -21,23 +22,51 @@ const (
 	AffordanceInspectHTTP        = "inspect_http"
 )
 
+// pathSchema is the shared input schema of the path-scoped read affordances:
+// it is what the render packet's affordances section shows the model so it can
+// name arguments without guessing.
+func pathSchema(extra map[string]any) map[string]any {
+	properties := map[string]any{"path": map[string]any{"type": "string", "description": "path relative to the declared resource root, e.g. ."}}
+	for key, value := range extra {
+		properties[key] = value
+	}
+	return map[string]any{"type": "object", "properties": properties, "required": []string{"path"}}
+}
+
 func standardDefinition(id string, capabilities ...string) affordance.Definition {
 	return affordance.Definition{Protocol: protocol.Name, Version: protocol.Version, ID: id, ExecutionMode: affordance.ModeDeterministic, InputSchema: map[string]any{}, Capabilities: capabilities, Limits: affordance.Limits{TimeoutSec: 30, CPU: 1, MemoryMB: 128, DiskMB: 64}, Planner: affordance.Planner{}, FailurePolicy: affordance.FailurePolicy{}}
 }
 
+func schemaDefinition(id string, schema map[string]any, capabilities ...string) affordance.Definition {
+	definition := standardDefinition(id, capabilities...)
+	definition.InputSchema = schema
+	return definition
+}
+
 // StandardReadDefinitions returns the canonical M11 read-only affordance
-// definitions. Values match the definitions already frozen in existing smoke
-// flows so registries stay compatible.
+// definitions. Path-scoped affordances declare their input schema so the model
+// boundary (render affordances section) can show argument hints; registries
+// frozen with the older empty schemas must be migrated once.
 func StandardReadDefinitions() []affordance.Definition {
 	return []affordance.Definition{
 		standardDefinition(AffordanceInspectEnvironment, "filesystem.read"),
 		standardDefinition(AffordanceInspectWorkspace, "filesystem.read"),
-		standardDefinition(AffordanceListFiles, "filesystem.read"),
-		standardDefinition(AffordanceReadFile, "filesystem.read"),
-		standardDefinition(AffordanceGitStatus, "git.read"),
-		standardDefinition(AffordanceGitLog, "git.read"),
+		schemaDefinition(AffordanceListFiles, pathSchema(nil), "filesystem.read"),
+		schemaDefinition(AffordanceReadFile, pathSchema(nil), "filesystem.read"),
+		schemaDefinition(AffordanceGitStatus, pathSchema(nil), "git.read"),
+		schemaDefinition(AffordanceGitLog, pathSchema(map[string]any{"limit": map[string]any{"type": "number"}}), "git.read"),
 		standardDefinition(AffordanceInspectHTTP, "http.read"),
 	}
+}
+
+// StandardDefinitions returns every canonical affordance definition (read,
+// write, semantic), sorted by id. It is the single source of truth served by
+// GET /v1/affordances so external callers submit byte-compatible definitions
+// and never trip the frozen registry.
+func StandardDefinitions() []affordance.Definition {
+	all := append(append(StandardReadDefinitions(), StandardWriteDefinitions()...), StandardSemanticDefinitions()...)
+	sort.Slice(all, func(i, j int) bool { return all[i].ID < all[j].ID })
+	return all
 }
 
 // StandardWorkflows maps affordance ids to deterministic planners, covering

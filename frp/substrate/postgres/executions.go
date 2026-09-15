@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -41,7 +40,7 @@ func (s *Store) CreateExecution(ctx context.Context, def affordance.Definition, 
 		_, err = tx.Exec(ctx, `INSERT INTO affordance_definitions(affordance_id,protocol,version,data) VALUES ($1,$2,$3,$4)`, def.ID, def.Protocol, def.Version, definitionData)
 	} else if err == nil {
 		var existing affordance.Definition
-		if err = json.Unmarshal(existingDefinition, &existing); err == nil && !reflect.DeepEqual(existing, def) {
+		if err = json.Unmarshal(existingDefinition, &existing); err == nil && !existing.MatchesRegistry(def) {
 			err = affordance.ErrDefinitionFrozen
 		}
 	}

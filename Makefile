@@ -1,4 +1,4 @@
-.PHONY: test race integration build debugger-test debugger-build stack-up stack-stop smoke model-smoke run fmt
+.PHONY: test race integration build debugger-test debugger-build stack-up stack-stop smoke model-smoke first-contact run fmt
 
 test:
 	go test ./...
@@ -32,6 +32,9 @@ smoke: build
 
 model-smoke: build
 	python3 scripts/model_smoke.py
+
+first-contact: build
+	python3 scripts/first_contact.py
 
 run:
 	go run ./cmd/temporality-runtime

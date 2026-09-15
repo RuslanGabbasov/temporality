@@ -2,6 +2,7 @@ package cognition
 
 import (
 	"errors"
+	"time"
 
 	"github.com/temporality-project/temporality/frp/frame"
 )
@@ -19,13 +20,16 @@ type Decision struct {
 	Warnings   []string         `json:"warnings"`
 }
 
-func ReduceEmission(current frame.Frame, emission CognitiveEmission) (Decision, error) {
+func ReduceEmission(current frame.Frame, emission CognitiveEmission, now time.Time) (Decision, error) {
 	emission.ApplyDefaults()
 	if err := emission.Validate(); err != nil {
 		return Decision{}, err
 	}
 	if emission.FrameID != current.FrameID {
 		return Decision{}, errors.New("emission frame_id does not match current frame")
+	}
+	if now.IsZero() {
+		return Decision{}, errors.New("commit time is required")
 	}
 	operations := make([]frame.Operation, 0, len(emission.Attention)+len(emission.FrameOps))
 	for _, attention := range emission.Attention {
@@ -46,7 +50,10 @@ func ReduceEmission(current frame.Frame, emission CognitiveEmission) (Decision, 
 		}
 		operations = append(operations, frame.Operation{Kind: kind, Ref: &ref})
 	}
-	transition := frame.Transition{Operations: operations}
+	// The child frame advances to the commit time: a frame frozen at its
+	// parent's as_of would forever exclude every later observation from
+	// time-travel renders of it.
+	transition := frame.Transition{Operations: operations, AsOf: now.UTC().Format(time.RFC3339Nano)}
 	next, err := frame.Reduce(current, transition)
 	if err != nil {
 		return Decision{}, err

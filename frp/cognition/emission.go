@@ -16,9 +16,41 @@ type Observation struct {
 	Interpretation string `json:"interpretation"`
 }
 
+// refFromWire accepts the canonical string ref ("event:UUID") or the common
+// model mistake of copying a RenderPacket ref object {type,id,text} and
+// returns the canonical string form. Empty input yields "" so callers can
+// decide how unanchored items are handled.
+func refFromWire(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	var ref string
+	if err := json.Unmarshal(raw, &ref); err == nil {
+		return ref, nil
+	}
+	var object struct {
+		Type frame.RefType `json:"type"`
+		ID   string        `json:"id"`
+		Text string        `json:"text"`
+	}
+	if objectErr := json.Unmarshal(raw, &object); objectErr != nil || object.Type == "" {
+		return "", errors.New("ref must be a canonical string or typed object")
+	}
+	value := object.ID
+	if object.Type == frame.RefQuery {
+		value = object.Text
+	}
+	if value == "" {
+		return "", errors.New("ref object requires id, or text for query")
+	}
+	return string(object.Type) + ":" + value, nil
+}
+
 // UnmarshalJSON accepts the canonical string ref and normalizes the common
 // model mistake of copying a RenderPacket ref object {type,id}. Marshal output
-// remains canonical because Ref is always stored as a string.
+// remains canonical because Ref is always stored as a string. An absent or
+// empty ref decodes to ""; Validate tolerates it and ApplyDefaults drops the
+// unanchored item — its interpretation belongs in reasoning.
 func (o *Observation) UnmarshalJSON(data []byte) error {
 	var wire struct {
 		Ref            json.RawMessage `json:"ref"`
@@ -27,24 +59,9 @@ func (o *Observation) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
-	var ref string
-	if err := json.Unmarshal(wire.Ref, &ref); err != nil {
-		var object struct {
-			Type frame.RefType `json:"type"`
-			ID   string        `json:"id"`
-			Text string        `json:"text"`
-		}
-		if objectErr := json.Unmarshal(wire.Ref, &object); objectErr != nil || object.Type == "" {
-			return errors.New("observation ref must be a canonical string or typed object")
-		}
-		value := object.ID
-		if object.Type == frame.RefQuery {
-			value = object.Text
-		}
-		if value == "" {
-			return errors.New("observation ref object requires id, or text for query")
-		}
-		ref = string(object.Type) + ":" + value
+	ref, err := refFromWire(wire.Ref)
+	if err != nil {
+		return fmt.Errorf("observation %s", err)
 	}
 	o.Ref = ref
 	o.Interpretation = wire.Interpretation
@@ -73,9 +90,69 @@ type ActionRequest struct {
 	Affordance string         `json:"affordance"`
 	Args       map[string]any `json:"args"`
 }
+
+// UnmarshalJSON accepts the canonical {"affordance","args"} action shape and
+// normalizes the common model mistake of tool-call style {"id","arguments"}
+// or {"name","params"} items. Marshal output stays canonical, and validation
+// still rejects affordance ids outside the step's definitions.
+func (a *ActionRequest) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Affordance string         `json:"affordance"`
+		Args       map[string]any `json:"args"`
+		ID         string         `json:"id"`
+		Name       string         `json:"name"`
+		Arguments  map[string]any `json:"arguments"`
+		Params     map[string]any `json:"params"`
+		Parameters map[string]any `json:"parameters"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	a.Affordance = firstNonEmpty(wire.Affordance, wire.ID, wire.Name)
+	a.Args = wire.Args
+	if a.Args == nil {
+		a.Args = wire.Arguments
+	}
+	if a.Args == nil {
+		a.Args = wire.Params
+	}
+	if a.Args == nil {
+		a.Args = wire.Parameters
+	}
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 type FrameOperation struct {
 	Op  string `json:"op"`
 	Ref string `json:"ref"`
+}
+
+// UnmarshalJSON accepts the canonical string ref and normalizes the common
+// model mistake of a typed ref object {type,id}, mirroring Observation.
+func (f *FrameOperation) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Op  string          `json:"op"`
+		Ref json.RawMessage `json:"ref"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	ref, err := refFromWire(wire.Ref)
+	if err != nil {
+		return fmt.Errorf("frame op %s", err)
+	}
+	f.Op = wire.Op
+	f.Ref = ref
+	return nil
 }
 
 type CognitiveEmission struct {
@@ -91,12 +168,75 @@ type CognitiveEmission struct {
 	Completion  *string              `json:"completion"`
 }
 
+// UnmarshalJSON keeps field-level normalization (observation/action/frame op
+// shapes) and additionally accepts completion as {text|answer|summary|content}
+// — a common model shortcut for the final answer. Canonical output remains a
+// plain string or null.
+func (e *CognitiveEmission) UnmarshalJSON(data []byte) error {
+	type emissionWire CognitiveEmission
+	var wire struct {
+		emissionWire
+		// Shadows the embedded *string so an object completion reaches
+		// completionFromWire instead of failing the whole decode.
+		Completion json.RawMessage `json:"completion"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	completion, err := completionFromWire(wire.Completion)
+	if err != nil {
+		return err
+	}
+	*e = CognitiveEmission(wire.emissionWire)
+	e.Completion = completion
+	return nil
+}
+
+func completionFromWire(raw json.RawMessage) (*string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		if strings.TrimSpace(text) == "" {
+			return nil, nil
+		}
+		return &text, nil
+	}
+	var object struct {
+		Text    string `json:"text"`
+		Answer  string `json:"answer"`
+		Summary string `json:"summary"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, errors.New("completion must be a string, an object with text/answer/summary/content, or null")
+	}
+	for _, value := range []string{object.Text, object.Answer, object.Summary, object.Content} {
+		if strings.TrimSpace(value) != "" {
+			return &value, nil
+		}
+	}
+	return nil, nil
+}
+
 func (e *CognitiveEmission) ApplyDefaults() {
 	if e.Schema == "" {
 		e.Schema = EmissionSchema
 	}
 	if e.Observation == nil {
 		e.Observation = []Observation{}
+	} else {
+		// Unanchored observations (empty ref) are model commentary, not
+		// substrate interpretations; their interpretation belongs to reasoning.
+		kept := make([]Observation, 0, len(e.Observation))
+		for _, observation := range e.Observation {
+			if strings.TrimSpace(observation.Ref) == "" {
+				continue
+			}
+			kept = append(kept, observation)
+		}
+		e.Observation = kept
 	}
 	if e.Reasoning == nil {
 		e.Reasoning = []Reasoning{}
@@ -117,6 +257,15 @@ func (e *CognitiveEmission) ApplyDefaults() {
 	}
 	if e.FrameOps == nil {
 		e.FrameOps = []FrameOperation{}
+	} else {
+		kept := make([]FrameOperation, 0, len(e.FrameOps))
+		for _, op := range e.FrameOps {
+			if strings.TrimSpace(op.Ref) == "" {
+				continue
+			}
+			kept = append(kept, op)
+		}
+		e.FrameOps = kept
 	}
 }
 
@@ -130,12 +279,19 @@ func (e CognitiveEmission) Validate() error {
 	if e.FrameID == "" {
 		return errors.New("frame_id is required")
 	}
-	for _, o := range e.Observation {
+	for i, o := range e.Observation {
+		// Empty refs are tolerated here and dropped by ApplyDefaults before
+		// anything is persisted: an unanchored observation carries no
+		// substrate meaning, and failing the whole emission for it would make
+		// the cognition loop brittle against sloppy models.
+		if strings.TrimSpace(o.Ref) == "" {
+			continue
+		}
 		if _, err := ParseRef(o.Ref, false); err != nil {
-			return fmt.Errorf("invalid observation ref: %w", err)
+			return fmt.Errorf("observation[%d]: invalid ref: %w", i, err)
 		}
 		if strings.TrimSpace(o.Interpretation) == "" {
-			return errors.New("observation interpretation is required")
+			return fmt.Errorf("observation[%d]: interpretation is required", i)
 		}
 	}
 	for _, r := range e.Reasoning {
@@ -176,6 +332,12 @@ func (e CognitiveEmission) Validate() error {
 	for _, op := range e.FrameOps {
 		if op.Op != "pin" && op.Op != "unpin" {
 			return fmt.Errorf("unsupported frame operation %q", op.Op)
+		}
+		// Empty refs are tolerated here and dropped by ApplyDefaults: pinning
+		// nothing is a no-op, and failing the emission for it would stall the
+		// cognition loop on a recoverable model slip.
+		if strings.TrimSpace(op.Ref) == "" {
+			continue
 		}
 		if _, err := ParseRef(op.Ref, true); err != nil {
 			return err

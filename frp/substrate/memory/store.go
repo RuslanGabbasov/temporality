@@ -536,7 +536,7 @@ func (s *Store) CreateExecution(_ context.Context, def affordance.Definition, re
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if existing, ok := s.definitions[def.ID]; ok && !reflect.DeepEqual(existing, def) {
+	if existing, ok := s.definitions[def.ID]; ok && !existing.MatchesRegistry(def) {
 		return affordance.ErrDefinitionFrozen
 	}
 	if _, ok := s.requests[request.RequestID]; ok {
@@ -772,7 +772,7 @@ func (s *Store) CommitStep(_ context.Context, prepared stepRuntime.Prepared) (st
 		}
 	}
 	for _, action := range prepared.Actions {
-		if existing, exists := s.definitions[action.Definition.ID]; exists && !reflect.DeepEqual(existing, action.Definition) {
+		if existing, exists := s.definitions[action.Definition.ID]; exists && !existing.MatchesRegistry(action.Definition) {
 			return stepRuntime.Result{}, affordance.ErrDefinitionFrozen
 		}
 		if _, exists := s.requests[action.Request.RequestID]; exists {

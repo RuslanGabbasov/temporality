@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -13,11 +14,22 @@ EXECUTOR_BINARY = os.environ.get("TEMPORALITY_EXECUTOR_BINARY", "./bin/temporali
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgres://temporality:temporality@localhost:5432/temporality?sslmode=disable")
 
 
-def request(method, path, body=None):
+def _request_raw(method, path, body=None):
+    """Perform one HTTP call; returns (status, payload) and never raises on 4xx/5xx."""
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(BASE + path, data=data, method=method, headers={"content-type": "application/json"})
-    with urllib.request.urlopen(req, timeout=5) as response:
-        return response.status, json.load(response)
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read().decode(errors="replace") or "{}")
+
+
+def request(method, path, body=None):
+    status, payload = _request_raw(method, path, body)
+    if status >= 400:
+        raise RuntimeError(f"{method} {path} -> {status}: {json.dumps(payload, ensure_ascii=False)[:400]}")
+    return status, payload
 
 
 def wait_until_ready():
@@ -33,11 +45,17 @@ def wait_until_ready():
 
 def request_status(method, path, body=None):
     """Like request() but returns (status, payload) instead of raising on 4xx."""
-    try:
-        status, payload = request(method, path, body)
-        return status, payload
-    except urllib.error.HTTPError as error:
-        return error.code, json.loads(error.read().decode() or "{}")
+    return _request_raw(method, path, body)
+
+
+def canonical_definition(definition_id, **overrides):
+    """Fetch a canonical affordance definition from the runtime so smoke never
+    drifts from the frozen registry."""
+    _, payload = request("GET", "/v1/affordances")
+    for item in payload.get("definitions") or []:
+        if item.get("id") == definition_id:
+            return dict(item, **overrides)
+    raise AssertionError(f"canonical affordance not served: {definition_id}")
 
 
 def world_scenario():
@@ -64,8 +82,8 @@ def world_scenario():
         assert registered["world"]["world_id"] == world_id
         stale_status, _ = request_status("POST", "/v1/worlds", world)
         assert stale_status == 422, "stale world state was accepted"
-        definition = {"id": "list_files", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
-        denied_definition = dict(definition, id="run_tests", capabilities=["process.execute"])
+        definition = canonical_definition("list_files")
+        denied_definition = dict(definition, id="run_tests_denied_probe", capabilities=["process.execute"])
         denied_status, _ = request_status("POST", "/v1/executions", {"definition": denied_definition, "episode_id": episode_id, "branch_id": branch_id, "world_id": world_id, "arguments": {}})
         assert denied_status == 422, "capability not granted by world was accepted"
         _, created = request("POST", "/v1/executions", {"definition": definition, "episode_id": episode_id, "branch_id": branch_id, "world_id": world_id, "arguments": {"path": "."}})
@@ -212,10 +230,10 @@ def bootstrap_scenario():
         # one execution composes stat, directory listing, git status and git
         # log from primitive capabilities. Otherwise fall back to read_file.
         if git_available:
-            definition = {"id": "inspect_repository", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read", "git.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
+            definition = canonical_definition("inspect_repository")
             action = {"affordance": "inspect_repository", "args": {"path": ".", "log_limit": 5}}
         else:
-            definition = {"id": "read_file", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
+            definition = canonical_definition("read_file")
             action = {"affordance": "read_file", "args": {"path": "go.mod"}}
         emission = {
             "schema": "frp.cognitive-emission.v1",

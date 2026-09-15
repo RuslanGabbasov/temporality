@@ -95,17 +95,17 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 	if store == nil || input.NewID == nil || input.Now == nil {
 		return Result{}, errors.New("store, ID provider, and time provider are required")
 	}
-	decision, err := cognition.ReduceEmission(input.Current, input.Emission)
+	now := input.Now().UTC()
+	if now.IsZero() {
+		return Result{}, errors.New("time provider returned zero time")
+	}
+	decision, err := cognition.ReduceEmission(input.Current, input.Emission, now)
 	if err != nil {
 		return Result{}, err
 	}
 	// ReduceEmission applies defaults to a copy; retain that canonical form for durable storage.
 	emission := input.Emission
 	emission.ApplyDefaults()
-	now := input.Now().UTC()
-	if now.IsZero() {
-		return Result{}, errors.New("time provider returned zero time")
-	}
 	emissionJSON, err := json.Marshal(emission)
 	if err != nil {
 		return Result{}, err
@@ -138,7 +138,7 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 		if claimID == "" {
 			return Result{}, errors.New("ID provider returned an empty ID")
 		}
-		event, eventErr := newEvent(EventClaimCandidate, map[string]any{"claim_id": claimID, "emission_id": emission.EmissionID})
+		event, eventErr := newEvent(EventClaimCandidate, map[string]any{"claim_id": claimID, "proposition": emitted.Proposition, "confidence": emitted.Confidence, "emission_id": emission.EmissionID})
 		if eventErr != nil {
 			return Result{}, eventErr
 		}

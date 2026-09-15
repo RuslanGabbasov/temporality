@@ -225,6 +225,94 @@ func TestModelPayloadLoggingAndInvalidConfiguration(t *testing.T) {
 	}
 }
 
+func TestModelStepWorldBinding(t *testing.T) {
+	store, current, goal := modelStepStore(t)
+	handler := httpapi.New(store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	register := map[string]any{
+		"world_id":      "model-world",
+		"state_version": 3,
+		"resources":     []map[string]any{{"id": "workspace", "type": "filesystem", "path": t.TempDir()}},
+		"capabilities":  []string{"filesystem.read"},
+		"limits":        map[string]any{"max_read_bytes": 4096, "max_entries": 100, "timeout_sec": 10},
+	}
+	registerBody, _ := json.Marshal(register)
+	if created := serve(handler, http.MethodPost, "/v1/worlds", registerBody); created.Code != http.StatusCreated {
+		t.Fatalf("register world: %s", created.Body.String())
+	}
+	emission := cognition.CognitiveEmission{
+		Schema:     cognition.EmissionSchema,
+		EmissionID: "model-emission-world",
+		FrameID:    current.FrameID,
+		Actions:    []cognition.ActionRequest{{Affordance: "list_files", Args: map[string]any{"path": "."}}},
+	}
+	content, err := json.Marshal(emission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(content)}}}})
+	}))
+	defer modelServer.Close()
+	t.Setenv("TEMPORALITY_MODEL_BASE_URL", modelServer.URL+"/v1")
+	t.Setenv("TEMPORALITY_MODEL_ID", "test-model")
+	t.Setenv("TEMPORALITY_MODEL_LOG_PAYLOADS", "false")
+	t.Setenv("TEMPORALITY_MODEL_LOG_MAX_BYTES", "")
+	t.Setenv("TEMPORALITY_MODEL_TIMEOUT", "")
+	t.Setenv("TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS", "")
+
+	definition := map[string]any{
+		"id": "list_files", "execution_mode": "deterministic", "input_schema": map[string]any{},
+		"capabilities": []string{"filesystem.read"},
+		"limits":       map[string]any{"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64},
+		"planner":      map[string]any{}, "failure_policy": map[string]any{"retry_transient": false, "allow_strategy_change": false, "max_retries": 0},
+	}
+	base := map[string]any{"frame_id": current.FrameID, "objective_id": goal.ObjectiveID, "budget_tokens": 8000, "definitions": []any{definition}}
+
+	// Unknown world is rejected before the model is called.
+	missing := cloneMap(base)
+	missing["world_id"] = "missing-world"
+	missingBody, _ := json.Marshal(missing)
+	if response := serve(handler, http.MethodPost, "/v1/model-step", missingBody); response.Code != http.StatusNotFound {
+		t.Fatalf("unknown world: status=%d body=%s", response.Code, response.Body.String())
+	}
+	// A capability the world never granted is rejected at intent time.
+	denied := cloneMap(base)
+	denied["world_id"] = "model-world"
+	denied["definitions"] = []any{cloneMap(definition, map[string]any{"capabilities": []string{"process.execute"}})}
+	deniedBody, _ := json.Marshal(denied)
+	if response := serve(handler, http.MethodPost, "/v1/model-step", deniedBody); response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("ungranted capability accepted: status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	granted := cloneMap(base)
+	granted["world_id"] = "model-world"
+	grantedBody, _ := json.Marshal(granted)
+	response := serve(handler, http.MethodPost, "/v1/model-step", grantedBody)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("model step with world: status=%d body=%s", response.Code, response.Body.String())
+	}
+	var result modelstep.Result
+	if err = json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Step.Executions) != 1 || result.Step.Executions[0].WorldID != "model-world" || result.Step.Executions[0].WorldVersion != 3 {
+		t.Fatalf("execution not bound to world state: %#v", result.Step.Executions)
+	}
+}
+
+func cloneMap(source map[string]any, overrides ...map[string]any) map[string]any {
+	clone := make(map[string]any, len(source))
+	for key, value := range source {
+		clone[key] = value
+	}
+	for _, override := range overrides {
+		for key, value := range override {
+			clone[key] = value
+		}
+	}
+	return clone
+}
+
 func modelStepStore(t *testing.T) (*memory.Store, frame.Frame, objective.Objective) {
 	t.Helper()
 	ctx := context.Background()

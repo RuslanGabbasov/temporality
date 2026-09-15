@@ -19,13 +19,27 @@ const (
 )
 
 // StandardSemanticDefinitions returns the canonical semantic affordance
-// definitions. Each declares the union of capabilities its workflow may plan.
+// definitions. Each declares the union of capabilities its workflow may plan
+// plus the input schema its workflow plans from.
 func StandardSemanticDefinitions() []affordance.Definition {
 	return []affordance.Definition{
-		standardDefinition(AffordanceInspectRepository, "filesystem.read", "git.read"),
-		standardDefinition(AffordanceRunTests, "process.execute"),
-		standardDefinition(AffordanceReproduceIssue, "process.execute"),
-		standardDefinition(AffordanceUpdateConfiguration, "filesystem.read", "filesystem.write"),
+		schemaDefinition(AffordanceInspectRepository, pathSchema(map[string]any{"log_limit": map[string]any{"type": "number"}}), "filesystem.read", "git.read"),
+		schemaDefinition(AffordanceRunTests, map[string]any{"type": "object", "properties": map[string]any{
+			"command": map[string]any{"type": "string", "description": "test runner binary, default go"},
+			"args":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "runner arguments, default [test ./...]"},
+			"path":    map[string]any{"type": "string", "description": "working directory inside the resource"},
+		}}, "process.execute"),
+		schemaDefinition(AffordanceReproduceIssue, map[string]any{"type": "object", "required": []string{"command"}, "properties": map[string]any{
+			"command": map[string]any{"type": "string", "description": "binary to run"},
+			"args":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"path":    map[string]any{"type": "string", "description": "working directory inside the resource"},
+		}}, "process.execute"),
+		schemaDefinition(AffordanceUpdateConfiguration, map[string]any{"type": "object", "required": []string{"path", "find", "replace"}, "properties": map[string]any{
+			"path":    map[string]any{"type": "string"},
+			"find":    map[string]any{"type": "string", "description": "exact text to find"},
+			"replace": map[string]any{"type": "string", "description": "replacement text"},
+			"all":     map[string]any{"type": "boolean"},
+		}}, "filesystem.read", "filesystem.write"),
 	}
 }
 

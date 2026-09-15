@@ -44,6 +44,26 @@ func TestDefinitionValidation(t *testing.T) {
 	}
 }
 
+func TestMatchesRegistryAllowsSchemaEvolutionOnly(t *testing.T) {
+	base := validDefinition(affordance.ModeDeterministic)
+	base.ApplyDefaults()
+	withRicherSchema := base
+	withRicherSchema.InputSchema = map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}}
+	if !base.MatchesRegistry(withRicherSchema) || !withRicherSchema.MatchesRegistry(base) {
+		t.Fatal("input schema evolution must not trip the frozen registry")
+	}
+	mutated := withRicherSchema
+	mutated.Capabilities = append([]string{"process.execute"}, mutated.Capabilities...)
+	if base.MatchesRegistry(mutated) {
+		t.Fatal("capability change must stay frozen")
+	}
+	mutatedLimits := withRicherSchema
+	mutatedLimits.Limits.TimeoutSec = 99
+	if base.MatchesRegistry(mutatedLimits) {
+		t.Fatal("limits change must stay frozen")
+	}
+}
+
 func TestSemanticRequest(t *testing.T) {
 	d := validDefinition(affordance.ModeDeterministic)
 	r := affordance.Request{RequestID: "request-1", EpisodeID: "episode-1", AffordanceID: "run_test", Arguments: map[string]any{"suite": "unit"}}
