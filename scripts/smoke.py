@@ -207,8 +207,16 @@ def bootstrap_scenario():
         if git_available:
             kinds = {item["observation_type"] for item in boot["ingestions"][0]["result"]["observations"]}
             assert "git_status" in kinds or "git_log" in kinds, f"git repository not observed: {kinds}"
-        # The agent acts from the bootstrap frame: read a manifest it just discovered.
-        definition = {"id": "read_file", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
+        # The agent acts from the bootstrap frame. When the workspace is a git
+        # repository the action is the semantic affordance inspect_repository:
+        # one execution composes stat, directory listing, git status and git
+        # log from primitive capabilities. Otherwise fall back to read_file.
+        if git_available:
+            definition = {"id": "inspect_repository", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read", "git.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
+            action = {"affordance": "inspect_repository", "args": {"path": ".", "log_limit": 5}}
+        else:
+            definition = {"id": "read_file", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
+            action = {"affordance": "read_file", "args": {"path": "go.mod"}}
         emission = {
             "schema": "frp.cognitive-emission.v1",
             "emission_id": str(uuid.uuid4()),
@@ -216,7 +224,7 @@ def bootstrap_scenario():
             "claims": [{"proposition": "The workspace is a Go module named example.com/firstcontact", "confidence": 0.8, "status": "candidate"}],
             "attention": [{"op": "attend", "target": {"type": "query", "text": "module manifest and failing test"}}],
             "frame_ops": [],
-            "actions": [{"affordance": "read_file", "args": {"path": "go.mod"}}],
+            "actions": [action],
         }
         _, stepped = request("POST", "/v1/step", {"frame_id": boot["frame_id"], "emission": emission, "definitions": [definition], "world_id": world_id})
         execution_id = stepped["executions"][0]["execution_id"]
@@ -233,8 +241,11 @@ def bootstrap_scenario():
                 time.sleep(0.1)
             assert final["status"] == "completed", f"post-bootstrap action status={final['status']}"
             _, events = request("GET", f"/v1/events?episode_id={boot['episode_id']}&limit=200")
-            observations = [item for item in events["events"] if item["type"] == "world.observation"]
-            assert any(item["payload"].get("execution_id") == execution_id for item in observations), "agent action observation missing"
+            linked = [item for item in events["events"] if item["type"] == "world.observation" and item["payload"].get("execution_id") == execution_id]
+            assert linked, "agent action observation missing"
+            if git_available:
+                kinds = {item["payload"].get("observation_type") for item in linked}
+                assert "git_status" in kinds and "directory_listing" in kinds, f"inspect_repository did not compose observation kinds: {kinds}"
             return {"world_id": world_id, "episode_id": boot["episode_id"], "observations": boot["summary"]["observations"], "claims": boot["summary"]["claims"], "entities": boot["summary"]["entities"], "regions": boot["summary"]["regions"], "git": git_available}
         finally:
             executor.terminate()

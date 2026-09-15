@@ -20,7 +20,10 @@ func TestStandardWriteRegistryCoversWorkflows(t *testing.T) {
 		if _, ok := definitionIDs[id]; ok {
 			continue
 		}
-		if _, ok := readDefinitionIDs()[id]; !ok {
+		if _, ok := readDefinitionIDs()[id]; ok {
+			continue
+		}
+		if _, ok := semanticDefinitionIDs()[id]; !ok {
 			t.Fatalf("workflow %q has no definition", id)
 		}
 	}

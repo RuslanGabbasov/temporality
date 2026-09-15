@@ -154,3 +154,85 @@ func TestWorkerFailsUngrantedWriteCapability(t *testing.T) {
 		t.Fatal("write happened despite revoked capability")
 	}
 }
+
+// TestWorkerCommitsMixedObservationAndEffect proves a semantic affordance
+// (update_configuration) commits a read observation and a write effect within
+// one atomic execution: both events carry the same execution linkage and the
+// terminal transition persists them together.
+func TestWorkerCommitsMixedObservationAndEffect(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("debug: true\nreplicas: 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bound := world.World{
+		Protocol: "frp", Version: "0.3", WorldID: "workspace-semantic", StateVersion: 3,
+		Resources:    []world.Resource{{ID: "workspace", Type: world.ResourceFilesystem, Path: root}},
+		Capabilities: []string{"filesystem.read", "filesystem.write"},
+		Limits:       world.Limits{MaxReadBytes: 4096, MaxEntries: 100, TimeoutSec: 10},
+	}
+	if err := bound.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	var definition affordance.Definition
+	for _, candidate := range world.StandardSemanticDefinitions() {
+		if candidate.ID == world.AffordanceUpdateConfiguration {
+			definition = candidate
+		}
+	}
+	if definition.ID == "" {
+		t.Fatal("update_configuration definition missing")
+	}
+	stateEvent, err := world.StateEvent(bound, "world-event-mixed", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.SaveWorld(ctx, bound, stateEvent); err != nil {
+		t.Fatal(err)
+	}
+	createWorldExecution(t, store, bound, definition, "episode-mixed", "x-mixed", "r-mixed", map[string]any{
+		"path": "config.yaml", "find": "debug: true", "replace": "debug: false",
+	}, now)
+	w := newTestWorker(store, world.NewAdapter(bound), "mixed", func() time.Time { now = now.Add(time.Second); return now })
+	if _, err = w.RunOnce(ctx, "episode-mixed"); err != nil {
+		t.Fatal(err)
+	}
+	final, err := store.GetExecution(ctx, "x-mixed")
+	if err != nil || final.Status != execution.StatusCompleted {
+		t.Fatalf("unexpected execution: %#v %v", final, err)
+	}
+	raw, readErr := os.ReadFile(filepath.Join(root, "config.yaml"))
+	if readErr != nil || string(raw) != "debug: false\nreplicas: 2\n" {
+		t.Fatalf("configuration not patched: %q %v", raw, readErr)
+	}
+	events, err := store.List(ctx, substrate.EventFilter{EpisodeID: "episode-mixed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observations, effects := 0, 0
+	for _, event := range events {
+		if event.Type == world.EventWorldObservation {
+			observations++
+			if event.Payload["observation_type"] != world.ObservationFileContent {
+				t.Fatalf("unexpected observation: %#v", event.Payload)
+			}
+			if event.Payload["execution_id"] != "x-mixed" {
+				t.Fatalf("observation missing execution linkage: %#v", event.Payload)
+			}
+		}
+		if event.Type == world.EventWorldEffect {
+			effects++
+			if event.Payload["effect_type"] != world.EffectFilePatched {
+				t.Fatalf("unexpected effect: %#v", event.Payload)
+			}
+			if event.Payload["execution_id"] != "x-mixed" {
+				t.Fatalf("effect missing execution linkage: %#v", event.Payload)
+			}
+		}
+	}
+	if observations != 1 || effects != 1 {
+		t.Fatalf("expected 1 observation + 1 effect, got %d + %d", observations, effects)
+	}
+}
