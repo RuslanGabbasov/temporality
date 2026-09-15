@@ -11,6 +11,7 @@ import (
 	"github.com/temporality-project/temporality/frp/execution/worker"
 	"github.com/temporality-project/temporality/frp/planner"
 	"github.com/temporality-project/temporality/frp/protocol"
+	"github.com/temporality-project/temporality/frp/substrate"
 	"github.com/temporality-project/temporality/frp/substrate/memory"
 	"github.com/temporality-project/temporality/frp/world"
 )
@@ -204,4 +205,170 @@ func plannerStep(id, capability string) *execution.Step {
 
 func event(id, kind string, at time.Time, key, value string) protocol.Event {
 	return protocol.Event{Protocol: "frp", Version: "0.3", EventID: id, TransactionTime: at, ValidTime: at, EpisodeID: "episode", Type: kind, Payload: map[string]any{key: value}, Provenance: map[string]any{}}
+}
+
+// leaseFixture persists a created inspect_environment execution owned by the
+// store so tests can script lease state directly.
+func leaseFixture(t *testing.T, store *memory.Store, executionID string) time.Time {
+	t.Helper()
+	now := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	def := affordance.Definition{Protocol: "frp", Version: "0.3", ID: "inspect_environment", ExecutionMode: affordance.ModeDeterministic, InputSchema: map[string]any{}, Capabilities: []string{"filesystem.read"}, Limits: affordance.Limits{TimeoutSec: 1, CPU: 1, MemoryMB: 64, DiskMB: 64}}
+	req := affordance.Request{Protocol: "frp", Version: "0.3", RequestID: "lease-request-" + executionID, EpisodeID: "episode-lease", AffordanceID: def.ID, Arguments: map[string]any{"path": "."}}
+	if err := store.CreateExecution(context.Background(), def, req, execution.Execution{Protocol: "frp", Version: "0.3", ExecutionID: executionID, RequestID: req.RequestID, EpisodeID: "episode-lease", AffordanceID: def.ID, Status: execution.StatusCreated, CreatedEventID: "lease-created-" + executionID, IntentPersistedAt: now}, fixtureEvent("lease-requested-"+executionID, affordance.EventRequested, now, "episode-lease", "request_id", req.RequestID), fixtureEvent("lease-created-"+executionID, execution.EventExecutionCreated, now, "episode-lease", "execution_id", executionID)); err != nil {
+		t.Fatal(err)
+	}
+	return now
+}
+
+func leaseWorker(store *memory.Store, executorID string, now time.Time, maxAttempts int) worker.Worker {
+	n := 0
+	return worker.Worker{Store: store, Workflows: map[string]execution.DeterministicWorkflow{"inspect_environment": worker.InspectEnvironmentWorkflow{}}, Adapter: worker.SafeAdapter{}, NewID: func() string { n++; return fmt.Sprintf("lease-event-%s-%d", executorID, n) }, Now: func() time.Time { now = now.Add(time.Second); return now }, ExecutorID: executorID, MaxAttempts: maxAttempts}
+}
+
+func claimAs(t *testing.T, store *memory.Store, executionID, executorID string, at time.Time, lease time.Duration) execution.Execution {
+	t.Helper()
+	event := fixtureEvent("claim-"+executorID+"-"+at.Format("15:04:05"), execution.EventExecutionStarted, at, "episode-lease", "execution_id", executionID)
+	claimed, err := store.ClaimExecution(context.Background(), executionID, executorID, at, lease, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return claimed
+}
+
+func TestWorkerSkipsExecutionLeasedByLivePeer(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	start := leaseFixture(t, store, "x-live-lease")
+	claimAs(t, store, "x-live-lease", "executor-a", start, 60*time.Second)
+	peer := leaseWorker(store, "executor-b", start.Add(time.Second), 0)
+	processed, err := peer.RunOnce(ctx, "episode-lease")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 0 {
+		t.Fatalf("peer must skip a live lease, processed %d", processed)
+	}
+	final, err := store.GetExecution(ctx, "x-live-lease")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Status != execution.StatusRunning || final.ExecutorID != "executor-a" || final.Attempts != 1 {
+		t.Fatalf("peer mutated a leased execution: %#v", final)
+	}
+}
+
+func TestWorkerReclaimsExpiredLeaseAndCompletes(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	start := leaseFixture(t, store, "x-reclaim")
+	claimAs(t, store, "x-reclaim", "executor-a", start, 30*time.Second)
+	// The crashed executor's lease expired at start+30; the peer picks the
+	// execution up one second later.
+	successor := leaseWorker(store, "executor-b", start.Add(31*time.Second), 0)
+	processed, err := successor.RunOnce(ctx, "episode-lease")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("successor did not process the reclaimed execution: %d", processed)
+	}
+	final, err := store.GetExecution(ctx, "x-reclaim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Status != execution.StatusCompleted || final.ExecutorID != "executor-b" || final.Attempts != 2 {
+		t.Fatalf("reclaim did not preserve attempt history: %#v", final)
+	}
+}
+
+func TestWorkerFailsCrashLoopAfterMaxAttempts(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	start := leaseFixture(t, store, "x-crash-loop")
+	claimAs(t, store, "x-crash-loop", "executor-a", start, 30*time.Second)
+	claimAs(t, store, "x-crash-loop", "executor-b", start.Add(31*time.Second), 30*time.Second)
+	// Two executors already died mid-execution; the third claim exceeds
+	// MaxAttempts=2 and must fail the execution instead of retrying forever.
+	third := leaseWorker(store, "executor-c", start.Add(62*time.Second), 2)
+	processed, err := third.RunOnce(ctx, "episode-lease")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("crash-loop guard did not drain the execution: %d", processed)
+	}
+	final, err := store.GetExecution(ctx, "x-crash-loop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Status != execution.StatusFailed || final.Error == nil || final.Error.Class != execution.ErrorTimeout {
+		t.Fatalf("crash loop must fail with timeout: %#v", final)
+	}
+	if final.Attempts != 3 || final.ExecutorID != "executor-c" {
+		t.Fatalf("crash-loop failure lost attempt history: %#v", final)
+	}
+	// The drained execution must not be retried on the next cycle.
+	if processed, err = third.RunOnce(ctx, "episode-lease"); err != nil || processed != 0 {
+		t.Fatalf("crash-loop failure was retried: %d %v", processed, err)
+	}
+}
+
+// reclaimingAdapter simulates the race the fencing exists for: while
+// executor A is mid-step, a peer reclaims the execution (A's short lease
+// already expired). Everything A commits afterwards must be fenced.
+type reclaimingAdapter struct {
+	store     *memory.Store
+	value     execution.Execution
+	reclaimed bool
+}
+
+func (a *reclaimingAdapter) Observe(_ context.Context, step execution.Step) (world.Result, error) {
+	if !a.reclaimed {
+		a.reclaimed = true
+		at := a.value.IntentPersistedAt.Add(200 * time.Second)
+		reclaim := fixtureEvent("race-reclaim", execution.EventExecutionStarted, at, a.value.EpisodeID, "execution_id", a.value.ExecutionID)
+		if _, err := a.store.ClaimExecution(context.Background(), a.value.ExecutionID, "executor-b", at, 30*time.Second, reclaim); err != nil {
+			return world.Result{}, err
+		}
+	}
+	return world.Result{Output: map[string]any{"step": step.ID}, Resource: "filesystem:.", ObservationType: "stat"}, nil
+}
+
+func (a *reclaimingAdapter) Execute(_ context.Context, step execution.Step) (map[string]any, error) {
+	return map[string]any{"step": step.ID}, nil
+}
+
+func TestFencedCompletionLosesRaceWithoutSideEffects(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	start := leaseFixture(t, store, "x-race")
+	value, err := store.GetExecution(ctx, "x-race")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	slow := worker.Worker{Store: store, Workflows: map[string]execution.DeterministicWorkflow{"inspect_environment": worker.InspectEnvironmentWorkflow{}}, Adapter: &reclaimingAdapter{store: store, value: value}, NewID: func() string { n++; return fmt.Sprintf("race-event-%d", n) }, Now: func() time.Time { start = start.Add(time.Second); return start }, ExecutorID: "executor-a", LeaseTTL: time.Second}
+	processed, err := slow.RunOnce(ctx, "episode-lease")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("fenced completion must not error the cycle: %d", processed)
+	}
+	final, err := store.GetExecution(ctx, "x-race")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Status != execution.StatusRunning || final.ExecutorID != "executor-b" || final.Attempts != 2 {
+		t.Fatalf("stale executor overwrote the reclaiming owner: %#v", final)
+	}
+	events, err := store.List(ctx, substrate.EventFilter{EpisodeID: "episode-lease"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type == world.EventWorldObservation || event.Type == execution.EventExecutionCompleted {
+			t.Fatalf("fenced executor leaked %s: %#v", event.Type, event)
+		}
+	}
 }

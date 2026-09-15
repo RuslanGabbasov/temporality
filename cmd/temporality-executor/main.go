@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -26,6 +28,25 @@ func main() {
 	}
 	episode := os.Getenv("EPISODE_ID")
 	worldID := os.Getenv("WORLD_ID")
+	// M16 lease fencing: identifies this executor so claims, reclaims after
+	// crashes, and terminal transitions can be fenced between replicas.
+	executorID := os.Getenv("EXECUTOR_ID")
+	if executorID == "" {
+		host, hostErr := os.Hostname()
+		if hostErr != nil {
+			host = "localhost"
+		}
+		executorID = fmt.Sprintf("%s-%d", host, os.Getpid())
+	}
+	leaseTTL := worker.DefaultLeaseTTL
+	if raw := os.Getenv("EXECUTOR_LEASE_SECONDS"); raw != "" {
+		if seconds, parseErr := strconv.Atoi(raw); parseErr == nil && seconds > 0 {
+			leaseTTL = time.Duration(seconds) * time.Second
+		} else {
+			log.Error("EXECUTOR_LEASE_SECONDS must be a positive integer", "value", raw)
+			os.Exit(1)
+		}
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	store, err := postgres.Open(ctx, url)
@@ -48,10 +69,10 @@ func main() {
 	}
 	plannerRunner := &worker.DurablePlannerRunner{Store: store, Planner: &planner.ArgumentAdapter{}, Adapter: adapter, Now: time.Now}
 	workflows := world.StandardWorkflows()
-	runner := worker.Worker{Store: store, Workflows: workflows, Adapter: adapter, NewID: newID, Now: time.Now, PlannerRunner: plannerRunner}
+	runner := worker.Worker{Store: store, Workflows: workflows, Adapter: adapter, NewID: newID, Now: time.Now, PlannerRunner: plannerRunner, ExecutorID: executorID, LeaseTTL: leaseTTL}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	log.Info("Temporality executor started", "world_bound", worldID != "", "workflows", len(workflows))
+	log.Info("Temporality executor started", "world_bound", worldID != "", "workflows", len(workflows), "executor_id", executorID, "lease_ttl", leaseTTL.String())
 	for {
 		select {
 		case <-ctx.Done():

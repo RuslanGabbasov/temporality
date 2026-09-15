@@ -28,7 +28,10 @@ func TestWorldStatePersistsAndVersions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	value := world.World{Protocol: protocol.Name, Version: protocol.Version, WorldID: "integration-world", StateVersion: 1, Resources: []world.Resource{{ID: "repo", Type: world.ResourceGitRepository, Path: "/workspace/repo"}}, Capabilities: []string{"filesystem.read", "git.read"}}
+	// A unique world id keeps the test idempotent against a shared, persistent
+	// test database that already carries worlds from earlier runs.
+	worldID := "integration-world-" + newTestUUID()
+	value := world.World{Protocol: protocol.Name, Version: protocol.Version, WorldID: worldID, StateVersion: 1, Resources: []world.Resource{{ID: "repo", Type: world.ResourceGitRepository, Path: "/workspace/repo"}}, Capabilities: []string{"filesystem.read", "git.read"}}
 	value.ApplyDefaults()
 	if err = value.Validate(); err != nil {
 		t.Fatal(err)
@@ -55,7 +58,7 @@ func TestWorldStatePersistsAndVersions(t *testing.T) {
 	if err = store.SaveWorld(ctx, bumped, bumpedEvent); err != nil {
 		t.Fatal(err)
 	}
-	stored, err := store.GetWorld(ctx, "integration-world")
+	stored, err := store.GetWorld(ctx, worldID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +69,13 @@ func TestWorldStatePersistsAndVersions(t *testing.T) {
 		t.Fatalf("expected world not found, got %v", err)
 	}
 	listed, err := store.ListWorlds(ctx)
-	if err != nil || len(listed) != 1 {
-		t.Fatalf("unexpected world list: %#v %v", listed, err)
+	found := false
+	for _, candidate := range listed {
+		if candidate.WorldID == worldID {
+			found = true
+		}
+	}
+	if err != nil || !found {
+		t.Fatalf("saved world missing from list: %v", err)
 	}
 }

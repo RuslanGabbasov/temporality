@@ -560,21 +560,61 @@ func (s *Store) CreateExecution(_ context.Context, def affordance.Definition, re
 }
 
 func (s *Store) TransitionExecution(_ context.Context, id string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event) (execution.Execution, error) {
-	return s.transitionExecution(id, next, at, executionError, event, nil)
+	return s.transitionExecution(id, "", next, at, executionError, event, nil)
 }
 
-// TransitionExecutionWithObservations commits a terminal transition together
-// with the world.observation events produced by its steps in one atomic write.
-func (s *Store) TransitionExecutionWithObservations(_ context.Context, id string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event, observations []protocol.Event) (execution.Execution, error) {
-	return s.transitionExecution(id, next, at, executionError, event, observations)
-}
-
-func (s *Store) transitionExecution(id string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event, observations []protocol.Event) (execution.Execution, error) {
+// ClaimExecution mirrors the postgres lease claim under the store mutex.
+func (s *Store) ClaimExecution(_ context.Context, id, executorID string, at time.Time, lease time.Duration, event protocol.Event) (execution.Execution, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current, ok := s.executions[id]
 	if !ok {
 		return execution.Execution{}, execution.ErrNotFound
+	}
+	claimed, err := current.Claim(executorID, at, lease)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	if err = execution.ValidateClaimEvent(current, at, event); err != nil {
+		return execution.Execution{}, err
+	}
+	if _, exists := s.events[event.EventID]; exists {
+		return execution.Execution{}, errors.New("event already exists")
+	}
+	s.putEvent(clone(event))
+	s.executions[id] = clone(claimed)
+	return clone(claimed), nil
+}
+
+// TransitionExecutionOwned fences terminal transitions by lease ownership.
+func (s *Store) TransitionExecutionOwned(_ context.Context, id, executorID string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event) (execution.Execution, error) {
+	return s.transitionExecution(id, executorID, next, at, executionError, event, nil)
+}
+
+// TransitionExecutionWithObservations commits a terminal transition together
+// with the world.observation events produced by its steps in one atomic write.
+func (s *Store) TransitionExecutionWithObservations(_ context.Context, id string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event, observations []protocol.Event) (execution.Execution, error) {
+	return s.transitionExecution(id, "", next, at, executionError, event, observations)
+}
+
+// TransitionExecutionOwnedWithObservations is the fenced flavor of the atomic
+// terminal-transition-plus-observations commit: stale executors can neither
+// overwrite the outcome nor leak duplicate observations.
+func (s *Store) TransitionExecutionOwnedWithObservations(_ context.Context, id, executorID string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event, observations []protocol.Event) (execution.Execution, error) {
+	return s.transitionExecution(id, executorID, next, at, executionError, event, observations)
+}
+
+func (s *Store) transitionExecution(id, owner string, next execution.Status, at time.Time, executionError *execution.ExecutionError, event protocol.Event, observations []protocol.Event) (execution.Execution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.executions[id]
+	if !ok {
+		return execution.Execution{}, execution.ErrNotFound
+	}
+	if owner != "" {
+		if err := current.ValidateOwnedBy(owner); err != nil {
+			return execution.Execution{}, err
+		}
 	}
 	updated, err := current.Transition(next, at, executionError)
 	if err != nil {

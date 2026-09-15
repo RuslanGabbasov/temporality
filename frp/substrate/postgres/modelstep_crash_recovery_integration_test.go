@@ -134,7 +134,16 @@ func TestModelStepFullCrashRecovery(t *testing.T) {
 			t.Fatalf("child event leaked into parent replay: %#v", event.Event)
 		}
 	}
-	rerendered, err := render.New(reopened).Render(ctx, request)
+	// Reproduce the recorded parent render through the documented time-travel
+	// semantics: an explicit as-of cutoff equal to the recorded packet's memory
+	// frontier must yield the identical packet (the debugger's “what did the
+	// agent know at this step” guarantee). A nil cutoff legitimately sees the
+	// step's own committed events, so it is not expected to match.
+	frontier, err := time.Parse(time.RFC3339Nano, recordedRender.Provenance.AsOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rerendered, err := render.New(reopened).Render(ctx, render.Request{FrameID: parent.FrameID, ObjectiveID: goal.ObjectiveID, BudgetTokens: request.BudgetTokens, AsOf: &frontier})
 	if err != nil {
 		t.Fatal(err)
 	}

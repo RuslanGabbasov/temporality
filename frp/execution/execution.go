@@ -23,11 +23,32 @@ const (
 
 var ErrNotFound = errors.New("execution not found")
 
+var (
+	// ErrLeaseHeld is returned when an execution's lease is still valid and
+	// owned by another executor: the caller must skip it, not error the cycle.
+	ErrLeaseHeld = errors.New("execution lease is held by another executor")
+	// ErrFenced is returned when a transition is rejected because the caller
+	// no longer owns the execution — a faster executor already reclaimed it.
+	ErrFenced = errors.New("execution is fenced by another executor")
+)
+
 type Store interface {
 	CreateExecution(context.Context, affordance.Definition, affordance.Request, Execution, protocol.Event, protocol.Event) error
 	TransitionExecution(context.Context, string, Status, time.Time, *ExecutionError, protocol.Event) (Execution, error)
 	GetExecution(context.Context, string) (Execution, error)
 	ListActiveExecutions(context.Context, string) ([]Execution, error)
+}
+
+// ClaimingStore is implemented by stores supporting M16 lease recovery:
+// atomic claim/reclaim of executions with fencing against live owners.
+type ClaimingStore interface {
+	ClaimExecution(context.Context, string, string, time.Time, time.Duration, protocol.Event) (Execution, error)
+}
+
+// FencingStore is implemented by stores that verify lease ownership before
+// committing a terminal transition.
+type FencingStore interface {
+	TransitionExecutionOwned(context.Context, string, string, Status, time.Time, *ExecutionError, protocol.Event) (Execution, error)
 }
 
 var transitions = map[Status]map[Status]struct{}{
@@ -105,6 +126,14 @@ type Execution struct {
 	StartedAt         *time.Time      `json:"started_at,omitempty"`
 	FinishedAt        *time.Time      `json:"finished_at,omitempty"`
 	Error             *ExecutionError `json:"error,omitempty"`
+	// M16 recovery: lease-based fencing. A crashed executor's running
+	// execution becomes reclaimable once its lease expires, while a live
+	// executor's in-flight execution cannot be stolen. Attempts counts claims
+	// (the initial claim plus every reclaim) so a crash-looping execution is
+	// eventually failed instead of retried forever.
+	ExecutorID string     `json:"executor_id,omitempty"`
+	LeaseUntil *time.Time `json:"lease_until,omitempty"`
+	Attempts   int        `json:"attempts,omitempty"`
 }
 
 func (e Execution) Validate() error {
@@ -122,6 +151,9 @@ func (e Execution) Validate() error {
 	}
 	if (e.WorldID == "") != (e.WorldVersion == 0) {
 		return errors.New("world_id and world_version must be set together")
+	}
+	if e.LeaseUntil != nil && e.ExecutorID == "" {
+		return errors.New("lease_until requires executor_id")
 	}
 	if e.Status == StatusCreated && (e.StartedAt != nil || e.FinishedAt != nil || e.Error != nil) {
 		return errors.New("created execution cannot have runtime outcome")
@@ -242,6 +274,76 @@ func ValidateEffectBoundary(e Execution) error {
 	}
 	if e.StartedAt.Before(e.IntentPersistedAt) {
 		return errors.New("physical effect cannot precede persisted intent")
+	}
+	return nil
+}
+
+// LeaseHeld reports whether a valid lease still guards the execution.
+func (e Execution) LeaseHeld(now time.Time) bool {
+	return e.LeaseUntil != nil && e.LeaseUntil.After(now)
+}
+
+// Claim computes the lease-fenced claim of an execution (M16 recovery):
+//
+//   - created → running: the initial claim, equivalent to the classic start
+//     transition plus lease and attempt bookkeeping;
+//   - running with an expired (or absent) lease: a reclaim after executor
+//     death — the execution state survives, the attempt counter grows;
+//   - running with a valid lease held by another executor: ErrLeaseHeld.
+//
+// Claiming by the current owner extends the lease (heartbeat).
+func (e Execution) Claim(executorID string, at time.Time, lease time.Duration) (Execution, error) {
+	if err := e.Validate(); err != nil {
+		return Execution{}, err
+	}
+	if executorID == "" {
+		return Execution{}, errors.New("executor_id is required to claim")
+	}
+	if lease <= 0 {
+		return Execution{}, errors.New("lease duration must be positive")
+	}
+	if e.Status.Terminal() {
+		return Execution{}, fmt.Errorf("cannot claim terminal execution %q", e.Status)
+	}
+	if e.LeaseHeld(at) && e.ExecutorID != executorID {
+		return Execution{}, ErrLeaseHeld
+	}
+	var claimed Execution
+	if e.Status == StatusCreated {
+		var err error
+		if claimed, err = e.Transition(StatusRunning, at, nil); err != nil {
+			return Execution{}, err
+		}
+	} else {
+		claimed = e // running: re-claim keeps the existing StartedAt
+	}
+	claimed.ExecutorID = executorID
+	until := at.Add(lease).UTC()
+	claimed.LeaseUntil = &until
+	claimed.Attempts++
+	return claimed, claimed.Validate()
+}
+
+// ValidateOwnedBy fences terminal transitions: once an execution carries an
+// owner, only that executor may complete or fail it. An expired-but-unclaimed
+// lease still belongs to its owner, so slow-but-alive executors are not
+// robbed of results nobody else has duplicated.
+func (e Execution) ValidateOwnedBy(executorID string) error {
+	if e.ExecutorID != "" && e.ExecutorID != executorID {
+		return ErrFenced
+	}
+	return nil
+}
+
+// ValidateClaimEvent checks the canonical execution.started event that must
+// accompany every claim (initial or reclaim) so the audit trail records who
+// picked the work up and on which attempt.
+func ValidateClaimEvent(value Execution, at time.Time, event protocol.Event) error {
+	if err := validateEvent(event, EventExecutionStarted, value.EpisodeID, value.ExecutionID, "execution_id"); err != nil {
+		return err
+	}
+	if !event.ValidTime.Equal(at) {
+		return errors.New("claim event valid_time must equal claim time")
 	}
 	return nil
 }
