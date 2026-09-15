@@ -2,7 +2,8 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useReducer, use
 import { api, API_BASE } from './api'
 import { extractClaims } from './answer'
 import { assistantMessage, conversationReducer, initialConversationState, userMessage } from './conversation'
-import { eventKey, eventLabel, eventTime, executionIdOf, frameIdOf, unwrapEvents } from './timeline'
+import { eventKey, eventLabel, eventTime, executionIdOf, frameIdOf, newestFirst, unwrapEvents } from './timeline'
+import { ATTENTION_HINT_TYPES, describeEvent, isAttentionHint } from './eventSummary'
 import { formatDuration, isAbortError, modelProgress, modelTimeoutMs } from './modelProgress'
 import type { Execution, ForkGroup, Frame, FrameSection, FrpEvent, ModelConfig, ModelStepResponse, RenderPacket, TokenUsage } from './types'
 import { renderSection, tokenUsageView } from './tokenUsage'
@@ -30,7 +31,13 @@ function ModelResultDetails({ response }: { response: ModelStepResponse }) {
     {(response.model_provenance !== undefined || response.debugger_summary !== undefined) && <div className="model-meta">{response.model_provenance !== undefined && <article><h3>Model provenance</h3><JsonView value={response.model_provenance} /></article>}{response.debugger_summary !== undefined && <article><h3>Debugger summary</h3><JsonView value={response.debugger_summary} /></article>}</div>}
   </section>
 }
-function Status({ loading, error, children }: { loading: boolean; error?: string; children: ReactNode }) {
+function Status({ loading, error, children, keep }: { loading: boolean; error?: string; children: ReactNode; keep?: boolean }) {
+  // `keep` preserves mounted children (e.g. the scrolling event list) while a
+  // background refresh runs or a transient error occurs — unmounting the list
+  // would collapse the scroll container and throw the reader back to the top.
+  if (keep && (loading || error)) {
+    return <><div className={error ? 'status error' : 'status'} role={error ? 'alert' : 'status'}>{error ?? <><span className="spinner" /> Refreshing…</>}</div>{children}</>
+  }
   if (loading) return <div className="status" role="status"><span className="spinner" /> Loading…</div>
   if (error) return <div className="status error" role="alert">{error}</div>
   return <>{children}</>
@@ -43,7 +50,7 @@ function frameBudget(value: Frame | null) {
 
 function App() {
   const [episodeInput, setEpisodeInput] = useState(''); const [episodeId, setEpisodeId] = useState(''); const [limit, setLimit] = useState(100)
-  const [events, setEvents] = useState<FrpEvent[]>([]); const [eventsBusy, setEventsBusy] = useState(false); const [eventsError, setEventsError] = useState('')
+  const [events, setEvents] = useState<FrpEvent[]>([]); const [eventsBusy, setEventsBusy] = useState(false); const [eventsError, setEventsError] = useState(''); const [hideHints, setHideHints] = useState(true)
   const [frame, setFrame] = useState<Frame | null>(null); const [frameBusy, setFrameBusy] = useState(false); const [frameError, setFrameError] = useState(''); const [selectedFrameId, setSelectedFrameId] = useState('')
   const [execution, setExecution] = useState<Execution | null>(null); const [executionBusy, setExecutionBusy] = useState(false); const [executionError, setExecutionError] = useState('')
   const [selectedRender, setSelectedRender] = useState<RenderPacket | null>(null); const [renderBusy, setRenderBusy] = useState(false); const [renderError, setRenderError] = useState(''); const [actionBusy, setActionBusy] = useState(''); const [actionError, setActionError] = useState(''); const [replay, setReplay] = useState<unknown>(null)
@@ -61,19 +68,23 @@ function App() {
   const renderControllerRef = useRef<AbortController | null>(null)
   const renderGenerationRef = useRef(0)
 
-  const loadEvents = useCallback(async (id: string) => {
+  const loadEvents = useCallback(async (id: string, options?: { silent?: boolean }) => {
     if (!id.trim()) return []
-    setEventsBusy(true); setEventsError('')
+    // Silent mode is for background polling: it must not toggle the busy flag,
+    // because Status would otherwise unmount the list and reset its scroll.
+    const silent = options?.silent === true
+    if (!silent) setEventsBusy(true)
+    setEventsError('')
     try { const loaded = unwrapEvents(await api.events(id.trim(), limit)); setEvents(loaded); return loaded }
     catch (error) { setEventsError(errorText(error, 'Unable to load timeline')); return [] }
-    finally { setEventsBusy(false) }
+    finally { if (!silent) setEventsBusy(false) }
   }, [limit])
   const refreshConfig = useCallback(async () => {
     setConfigBusy(true); setConfigError('')
     try { setModelConfig(await api.modelConfig()) } catch (error) { setConfigError(errorText(error, 'Unable to load model config')) } finally { setConfigBusy(false) }
   }, [])
   useEffect(() => { void refreshConfig() }, [refreshConfig])
-  useEffect(() => { if (!episodeId || modelRun) return; const timer = window.setInterval(() => void loadEvents(episodeId), 5000); return () => window.clearInterval(timer) }, [episodeId, loadEvents, modelRun])
+  useEffect(() => { if (!episodeId || modelRun) return; const timer = window.setInterval(() => void loadEvents(episodeId, { silent: true }), 5000); return () => window.clearInterval(timer) }, [episodeId, loadEvents, modelRun])
   useEffect(() => { if (!modelRun) return; const timer = window.setInterval(() => setModelRun((run) => run ? { ...run, now: Date.now() } : null), 1000); return () => window.clearInterval(timer) }, [modelRun?.startedAt])
   useEffect(() => { if (dialogOpen) dialogRef.current?.showModal(); else dialogRef.current?.close() }, [dialogOpen])
   useEffect(() => { if (followUpOpen) followUpDialogRef.current?.showModal(); else followUpDialogRef.current?.close() }, [followUpOpen])
@@ -207,10 +218,10 @@ function App() {
 
     {modelRun && progress && <section className="model-progress" role="status" aria-live="polite"><div className="model-activity" aria-hidden="true"><span /><span /><span /></div><div className="model-progress-copy"><span className="eyebrow">{modelRun.operation.toUpperCase()} · CALLING MODEL</span><h2>{modelName ?? 'Configured model'} <small>via {provider}</small></h2><p>The provider is processing this frame with a maximum of {maxOutputTokens ?? '—'} output tokens. The result commits atomically only when the model step completes.</p></div><div className="model-timing"><strong>{progress.elapsed}</strong><span>elapsed</span>{progress.timeout !== undefined && <small>{progress.timedOut ? 'Configured timeout reached' : `timeout in ${progress.timeout}`}</small>}</div><button className="cancel-model" onClick={() => modelRun.controller.abort()}>Cancel model step</button></section>}
     <main className="workspace">
-      <aside className="timeline panel" aria-label="Episode timeline"><div className="panel-heading"><div><span className="eyebrow">EPISODE</span><h2>Timeline</h2></div>{episodeId && <button className="icon-button" onClick={() => void loadEvents(episodeId)} aria-label="Refresh timeline">↻</button>}</div>
+      <aside className="timeline panel" aria-label="Episode timeline"><div className="panel-heading"><div><span className="eyebrow">EPISODE</span><h2>Timeline</h2></div><div className="timeline-actions">{(() => { const hidden = events.filter((item) => isAttentionHint(item)).length; return <label className="hint-toggle" title={`Attention bookkeeping: ${ATTENTION_HINT_TYPES.join(', ')}`}><input type="checkbox" checked={hideHints} onChange={(e) => setHideHints(e.target.checked)} />attention hints{hideHints && hidden > 0 ? ` · ${hidden} hidden` : ''}</label> })()}{episodeId && <button className="icon-button" onClick={() => void loadEvents(episodeId)} aria-label="Refresh timeline">↻</button>}</div></div>
         <form className="episode-form" onSubmit={submitEpisode}><label htmlFor="episode">Episode ID</label><div className="input-row"><input id="episode" value={episodeInput} onChange={(e) => setEpisodeInput(e.target.value)} placeholder="UUID" required /><button type="submit">Open</button></div><label htmlFor="limit">Event limit <output>{limit}</output></label><input id="limit" type="range" min="10" max="500" step="10" value={limit} onChange={(e) => setLimit(Number(e.target.value))} /></form>
         {(workflowError || pending) && <div className="status warning" role="status"><strong>{workflowError || 'Model step pending.'}</strong>{pending && <><small>Episode <code>{pending.ids.episodeId}</code> and frame <code>{pending.parentFrameId}</code> are safe.</small><button onClick={() => void retryPending()} disabled={workflowBusy || !modelConfig?.configured}>{workflowBusy ? workflowStage : 'Retry model step'}</button></>}</div>}
-        <Status loading={eventsBusy} error={eventsError}><ol className="event-list">{events.map((item, index) => { const fid = frameIdOf(item); const xid = executionIdOf(item); return <li key={eventKey(item, index)} className={fid === selectedFrameId ? 'selected' : ''}><div className="event-rail"><span className="event-dot" /><span /></div><div className="event-card"><span className="event-time">{eventTime(item) ? new Date(eventTime(item)).toLocaleString() : `#${index + 1}`}</span><strong>{eventLabel(item)}</strong><div className="event-links">{fid && <button onClick={() => void openFrame(fid)}>Frame {fid}</button>}{xid && <button onClick={() => void openExecution(xid)}>Execution {xid}</button>}</div></div></li> })}{!events.length && !eventsBusy && <li className="empty-state"><strong>Start an operational trace</strong><span>Create a new task with New Episode, or paste an existing <code>episode_id</code> above.</span></li>}</ol></Status>
+        :        <Status keep loading={eventsBusy} error={eventsError}><ol className="event-list">{newestFirst(events).filter((item) => !hideHints || !isAttentionHint(item)).map((item, index) => { const fid = frameIdOf(item); const xid = executionIdOf(item); const summary = describeEvent(item); return <li key={eventKey(item, index)} className={fid === selectedFrameId ? 'selected' : ''}><div className="event-rail"><span className="event-dot" /><span /></div><div className="event-card"><span className="event-time">{eventTime(item) ? new Date(eventTime(item)).toLocaleString() : `#${index + 1}`}</span><strong>{eventLabel(item)}</strong><span className="event-summary">{summary.title}</span>{summary.detail && <span className="event-detail">{summary.detail}</span>}{summary.meta && <span className="event-meta">{summary.meta}</span>}<details className="event-raw"><summary>payload</summary><JsonView value={item.payload} empty="No payload" /></details><div className="event-links">{fid && <button onClick={() => void openFrame(fid)}>Frame {fid}</button>}{xid && <button onClick={() => void openExecution(xid)}>Execution {xid}</button>}</div></div></li> })}{!events.length && !eventsBusy && <li className="empty-state"><strong>Start an operational trace</strong><span>Create a new task with New Episode, or paste an existing <code>episode_id</code> above.</span></li>}</ol></Status>
       </aside>
 
       <section className="inspector panel" aria-label="Frame inspector"><div className="panel-heading inspector-heading"><div><span className="eyebrow">SELECTED FRAME</span><h2>{selectedFrameId || 'No frame selected'}</h2></div>{objectiveId && <div className="objective"><span>Objective</span><code>{objectiveId}</code></div>}</div>

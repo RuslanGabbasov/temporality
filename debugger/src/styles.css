@@ -48,6 +48,14 @@ h3 { font-size: .84rem; }
 .event-list li.selected .event-dot { background: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
 .event-time { display: block; color: var(--muted); font-size: .61rem; margin-bottom: .25rem; }
 .event-card strong { font-size: .78rem; overflow-wrap: anywhere; }
+.event-summary { display: block; font-size: .72rem; color: var(--text); margin-top: .2rem; overflow-wrap: anywhere; }
+.event-detail { display: block; font-size: .66rem; color: var(--muted); margin-top: .15rem; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; }
+.event-meta { display: block; font-size: .61rem; color: var(--muted); margin-top: .15rem; opacity: .8; }
+.event-raw { margin-top: .3rem; font-size: .64rem; }
+.event-raw summary { color: var(--muted); cursor: pointer; user-select: none; }
+.event-raw[open] summary { margin-bottom: .25rem; }
+.timeline-actions { display: flex; align-items: center; gap: .5rem; }
+.hint-toggle { display: flex; align-items: center; gap: .3rem; font-size: .64rem; color: var(--muted); cursor: pointer; }
 .event-links { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .4rem; }
 .event-links button { border: 0; background: transparent; color: var(--cyan); font: .66rem "SFMono-Regular", monospace; padding: .15rem .25rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .empty-state, .hero-empty { color: var(--muted); text-align: center; padding: 3rem 1rem; font-size: .82rem; }

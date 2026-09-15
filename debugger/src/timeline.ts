@@ -27,3 +27,11 @@ export function eventLabel(event: FrpEvent): string {
 export function eventKey(event: FrpEvent, index: number): string {
   return event.id ?? event.event_id ?? `${eventTime(event)}-${eventLabel(event)}-${index}`
 }
+
+/** Newest-first view order for the timeline: readers watch the live end of the
+ * episode, so fresh events belong at the top. Falls back to the given order
+ * when timestamps are missing; ties keep their original relative order. */
+export function newestFirst(events: FrpEvent[]): FrpEvent[] {
+  const stamp = (event: FrpEvent) => { const parsed = Date.parse(eventTime(event)); return Number.isNaN(parsed) ? 0 : parsed }
+  return events.map((event, index) => ({ event, index })).sort((left, right) => stamp(right.event) - stamp(left.event) || left.index - right.index).map(({ event }) => event)
+}
