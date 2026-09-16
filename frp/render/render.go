@@ -1,6 +1,7 @@
 package render
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -940,13 +941,15 @@ func compactEvent(event protocol.Event, withTime bool) map[string]any {
 	}
 	return item
 }
-// estimate approximates the token weight of a marshalled packet section.
-// Plain ASCII prose averages ~4 bytes/token, but multibyte UTF-8 (Cyrillic
-// propositions, non-English objectives) is closer to ~2 bytes/token, and the
-// raw bytes/4 form once under-counted a real prompt by a third — the ladder
-// then "fit" a budget the model provider charged well over it.
+// estimate approximates the token weight of a marshalled packet. Measured
+// against a real tokenizer on benchmark packets (deepseek via OpenRouter):
+// JSON-dense ASCII — hex UUID refs, short quoted keys — averages ~3 bytes per
+// token, not the prose-grade 4; multibyte UTF-8 (Cyrillic propositions) is
+// closer to ~2 bytes per token. The old bytes/4 form under-counted a real
+// prompt by a third, so the budget ladder "fit" budgets the provider charged
+// well over.
 func estimate(value any) int {
-	data, _ := json.Marshal(value)
+	data, _ := marshalCanonical(value)
 	ascii, multibyte := 0, 0
 	for _, b := range data {
 		if b < 0x80 {
@@ -955,15 +958,34 @@ func estimate(value any) int {
 			multibyte++
 		}
 	}
-	tokens := ascii/4 + multibyte/2
+	tokens := ascii/3 + multibyte/2
 	if tokens < 1 {
 		return 1
 	}
 	return tokens
 }
+
+// marshalCanonical is the wire form of a packet: JSON without HTML escaping.
+// The default marshaller turns every <, > and & into six-byte \u003c sequences —
+// file contents in world observations are full of them, and the model pays
+// real tokens for the escape noise instead of the content. One canonical form
+// is shared by the adapter request, the persisted render_packet_raw and the
+// content id, so what was hashed and replayed is exactly what the model saw.
+func marshalCanonical(value any) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buffer.Bytes(), "\n"), nil
+}
+
+// MarshalPacket renders the canonical wire bytes of a packet.
+func MarshalPacket(packet Packet) ([]byte, error) { return marshalCanonical(packet) }
 func contentID(packet Packet) string {
 	packet.RenderID = ""
-	data, _ := json.Marshal(packet)
+	data, _ := marshalCanonical(packet)
 	sum := sha256.Sum256(data)
 	raw := sum[:16]
 	raw[6] = (raw[6] & 0x0f) | 0x50

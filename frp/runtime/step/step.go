@@ -121,7 +121,7 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 	sum := sha256.Sum256(emissionJSON)
 	prepared := Prepared{Current: input.Current, Emission: emission, EmissionJSON: emissionJSON, EmissionHash: hex.EncodeToString(sum[:]), Decision: decision, Claims: []Claim{}, Actions: []Action{}, Events: []protocol.Event{}, SuggestedAttention: append([]frame.Ref(nil), input.SuggestedAttention...), ModelProvenance: append(json.RawMessage(nil), input.ModelProvenance...)}
 	if input.RenderPacket != nil {
-		prepared.RenderPacketJSON, err = json.Marshal(input.RenderPacket)
+		prepared.RenderPacketJSON, err = render.MarshalPacket(*input.RenderPacket)
 		if err != nil {
 			return Result{}, fmt.Errorf("marshal render packet: %w", err)
 		}

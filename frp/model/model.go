@@ -224,7 +224,7 @@ type chatUsage struct {
 }
 
 func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cognition.CognitiveEmission, Usage, error) {
-	packetJSON, err := json.Marshal(packet)
+	packetJSON, err := render.MarshalPacket(packet)
 	if err != nil {
 		return cognition.CognitiveEmission{}, Usage{}, fmt.Errorf("marshal render packet: %w", err)
 	}
