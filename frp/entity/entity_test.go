@@ -98,4 +98,24 @@ func TestRegistries(t *testing.T) {
 	if err := ValidatePredicate("bogus"); err == nil {
 		t.Error("ValidatePredicate must reject unknown predicates")
 	}
+	// Functional predicates gate M16 contradiction detection: they must be a
+	// subset of the registry, and the set must stay conservative — flagging a
+	// one-to-many relation as functional would report false contradictions.
+	functional := map[string]bool{}
+	for _, name := range preds {
+		functional[name] = FunctionalPredicate(name)
+		if functional[name] && ValidatePredicate(name) != nil {
+			t.Errorf("functional predicate %q not registered", name)
+		}
+	}
+	for _, name := range []string{PredicateDeclaredIn, PredicateOnBranch, PredicateAuthoredBy} {
+		if !functional[name] {
+			t.Errorf("predicate %q must be functional", name)
+		}
+	}
+	for _, name := range []string{PredicateContains, PredicateDependsOn, PredicateUses, PredicateIntegrates, PredicateTargets, PredicateDocuments, PredicateServes} {
+		if functional[name] {
+			t.Errorf("predicate %q must not be functional", name)
+		}
+	}
 }

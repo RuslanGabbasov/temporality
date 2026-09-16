@@ -128,6 +128,73 @@ func TestStepPersistsAttentionGuardDiagnostics(t *testing.T) {
 	}
 }
 
+// TestStepSurfacesMemoryTensionOnDuplicateClaims checks the M16 memory
+// reliability wiring: a step that re-emits a proposition memory already
+// holds must not merge or drop anything silently — the duplicate travels
+// with the persisted frame.transitioned event, so replay and the debugger
+// see what the emission did to memory.
+func TestStepSurfacesMemoryTensionOnDuplicateClaims(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	current := testFrame(now)
+	created := testEvent("00000000-0000-4000-8000-000000000006", "frame.created", now, current)
+	created.Payload["frame_id"] = current.FrameID
+	if err := store.CreateFrame(ctx, current, created); err != nil {
+		t.Fatal(err)
+	}
+	seed := testEvent("00000000-0000-4000-8000-000000000007", "observation.recorded", now, current)
+	if err := store.Append(ctx, seed); err != nil {
+		t.Fatal(err)
+	}
+	base := cognition.CognitiveEmission{
+		EmissionID: "emission-first", FrameID: current.FrameID,
+		Observation: []cognition.Observation{{Ref: "event:" + seed.EventID, Interpretation: "available"}},
+		Claims:      []cognition.EmittedClaim{{Proposition: "Repository contains a Go module", Confidence: 0.9}},
+	}
+	first, err := step.Run(ctx, store, step.Input{Current: current, Emission: base, NewID: uuidSequence(400), Now: func() time.Time { return now.Add(time.Second) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Claims) != 1 {
+		t.Fatalf("first step must create one claim: %#v", first.Claims)
+	}
+	// The model re-emits the same proposition next step — the loop noise the
+	// first-contact runs showed. The claim is still persisted (audit), but the
+	// duplicate becomes visible instead of silently doubling the substrate.
+	repeat := base
+	repeat.EmissionID = "emission-repeat"
+	repeat.FrameID = first.Frame.FrameID
+	second, err := step.Run(ctx, store, step.Input{Current: first.Frame, Emission: repeat, NewID: uuidSequence(500), Now: func() time.Time { return now.Add(2 * time.Second) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var transition *protocol.Event
+	for i := range second.Events {
+		if second.Events[i].Type == step.EventFrameTransitioned {
+			transition = &second.Events[i]
+		}
+	}
+	if transition == nil {
+		t.Fatalf("frame.transitioned missing: %#v", second.Events)
+	}
+	encoded, err := json.Marshal(transition.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "\"duplicate\"") || !strings.Contains(string(encoded), first.Claims[0].ClaimID) {
+		t.Fatalf("memory tension missing from transition payload: %s", encoded)
+	}
+	// The first step had a clean memory to enter: no tension to report.
+	firstEncoded, err := json.Marshal(first.Events[len(first.Events)-1].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(firstEncoded), "memory_tensions") {
+		t.Fatalf("first step unexpectedly reported tensions: %s", firstEncoded)
+	}
+}
+
 func testFrame(now time.Time) frame.Frame {
 	value := frame.Frame{FrameID: "00000000-0000-4000-8000-000000000001", AgentID: "00000000-0000-4000-8000-000000000002", EpisodeID: "00000000-0000-4000-8000-000000000003", BranchID: "00000000-0000-4000-8000-000000000004", ObjectiveID: "00000000-0000-4000-8000-000000000005", AsOf: now, Focus: frame.Focus{Type: frame.RefQuery, Query: "work"}, Attention: frame.Attention{Deliberate: true}}
 	value.ApplyDefaults()

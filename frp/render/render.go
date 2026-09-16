@@ -23,7 +23,7 @@ import (
 	"github.com/temporality-project/temporality/frp/substrate"
 )
 
-const Version = "render-0.4.1"
+const Version = "render-0.4.2"
 
 const (
 	procedureMatchThreshold = 0.1
@@ -36,6 +36,10 @@ const (
 	// health section (M16): diagnosing focus thrashing must stay a handful of
 	// point lookups, not a full history scan.
 	maxStabilityLookback = 8
+	// maxMemoryTensions bounds the memory_health section: a long-lived claim
+	// base can hold more tension groups than any frame needs to see at once,
+	// and diagnostics must never make a packet unrenderable.
+	maxMemoryTensions = 8
 )
 
 // ambientHiddenEvents are attention's own bookkeeping: recording what was
@@ -173,6 +177,13 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	// correction. The model sees how unstable its own attention has been so it
 	// can re-anchor; the debugger sees it in the packet, not in a reconstruction.
 	health := r.attentionHealth(ctx, current)
+	// M16 memory health: which parts of the claim base cannot be trusted
+	// blindly — duplicated propositions, functional-triple contradictions.
+	// Stated as facts with claim ids; reconciliation stays the model's move.
+	memoryItems, memErr := r.memoryHealth(ctx)
+	if memErr != nil {
+		return Packet{}, memErr
+	}
 	working := make([]any, 0, len(current.WorkingSet))
 	for _, ref := range current.WorkingSet {
 		item, resolveErr := r.refItem(ctx, ref)
@@ -247,7 +258,16 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	}
 	outside := ambient.Considered - len(ambient.Selected)
 	hint := fmt.Sprintf("%d attention candidates are outside the frame", outside)
-	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{map[string]any{"agent_id": current.AgentID, "episode_id": current.EpisodeID, "branch_id": current.BranchID}}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: mapItems}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "attention_health", Attention: "deliberate", Items: []any{health}}, {Kind: "periphery", Attention: "ambient", Items: periphery}, {Kind: "working_set", Attention: "deliberate", Items: working}, {Kind: "procedures", Attention: "ambient", Items: procedureItems}, {Kind: "recent", Attention: "ambient", Items: recent}}
+	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{map[string]any{"agent_id": current.AgentID, "episode_id": current.EpisodeID, "branch_id": current.BranchID}}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: mapItems}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "attention_health", Attention: "deliberate", Items: []any{health}}}
+	// memory_health is deliberately omitted on a clean claim base: tension
+	// diagnostics are rare by design, and an always-present empty section
+	// would tax every render's budget (a minimal packet once failed its budget
+	// by exactly that overhead). Absence means: nothing contradicts, nothing
+	// duplicates.
+	if len(memoryItems) > 0 {
+		sections = append(sections, Section{Kind: "memory_health", Attention: "deliberate", Items: memoryItems})
+	}
+	sections = append(sections, Section{Kind: "periphery", Attention: "ambient", Items: periphery}, Section{Kind: "working_set", Attention: "deliberate", Items: working}, Section{Kind: "procedures", Attention: "ambient", Items: procedureItems}, Section{Kind: "recent", Attention: "ambient", Items: recent})
 	// The affordances section closes the cognition→action loop: the model can
 	// only request actions it can see, so available definitions travel with the
 	// packet (deterministically ordered) instead of reaching step validation
@@ -262,11 +282,12 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	}
 	packet := Packet{Protocol: protocol.Name, ProtocolVersion: protocol.Version, FrameID: current.FrameID, MemoryVersion: memoryVersion, RendererVersion: Version, Sections: sections, OutsideFrame: OutsideFrame{NearbyRegions: outside, Hint: hint}, Provenance: Provenance{ProjectionVersion: "event-candidates.v1", AttentionVersion: attention.Version, EmbeddingModel: "none", AsOf: provenanceAsOf.Format("2006-01-02T15:04:05.999999999Z07:00")}, TokenUsage: TokenUsage{Budget: request.BudgetTokens}}
 	// Budget degradation ladder: drop the cheapest information first — old
-	// recent events, then periphery near-misses, then the weakest map
-	// candidates, then procedure matches (recorded patterns matter less than
-	// live world data). Sections the model acts from (identity, objective,
+	// recent events, then periphery near-misses, then memory tensions
+	// (diagnostics must never starve the map: a frame that cannot see the world
+	// cannot reconcile memory either), then the weakest map candidates, then
+	// procedure matches. Sections the model acts from (identity, objective,
 	// focus, affordances, working set) are never trimmed.
-	trimOrder := []string{"recent", "periphery", "map", "procedures"}
+	trimOrder := []string{"recent", "periphery", "memory_health", "map", "procedures"}
 	for {
 		packet.TokenUsage.Estimated = estimate(packet)
 		if packet.TokenUsage.Estimated <= request.BudgetTokens {
@@ -332,6 +353,41 @@ func (r *Renderer) attentionHealth(ctx context.Context, current frame.Frame) map
 		health["hint"] = "working set is at its cap: unpin stale refs before pinning new ones"
 	}
 	return health
+}
+
+// memoryHealth lists the tensions the claim base currently holds — duplicated
+// propositions and functional-triple contradictions — as packet facts with
+// claim ids and confidences. The renderer does not rank or resolve them:
+// reconciliation (refute, supersede, or re-assert) is the model's move.
+func (r *Renderer) memoryHealth(ctx context.Context) ([]any, error) {
+	claims, err := r.stores.ListClaims(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tensions := cognition.AllTensions(claims)
+	if len(tensions) > maxMemoryTensions {
+		tensions = tensions[:maxMemoryTensions]
+	}
+	if len(tensions) == 0 {
+		return []any{}, nil
+	}
+	byID := make(map[string]cognition.Claim, len(claims))
+	for _, claim := range claims {
+		byID[claim.ClaimID] = claim
+	}
+	items := make([]any, 0, len(tensions))
+	for _, tension := range tensions {
+		members := make([]any, 0, len(tension.ClaimIDs))
+		for _, id := range tension.ClaimIDs {
+			claim, ok := byID[id]
+			if !ok {
+				continue
+			}
+			members = append(members, map[string]any{"claim_id": claim.ClaimID, "proposition": claim.Proposition, "confidence": claim.Confidence})
+		}
+		items = append(items, map[string]any{"kind": tension.Kind, "detail": tension.Detail, "claims": members})
+	}
+	return items, nil
 }
 
 func selectAmbient(current frame.Frame, goal objective.Objective, events []protocol.Event, regions []projection.Region, edges []projection.Edge, entities []entity.Entity, entityRelations []entity.EntityRelation) (attention.Result, error) {

@@ -89,6 +89,9 @@ type Result struct {
 
 type Store interface {
 	CommitStep(context.Context, Prepared) (Result, error)
+	// ListClaims feeds M16 memory-tension detection: the step compares the
+	// claims it is about to persist against the claim base it is entering.
+	ListClaims(context.Context) ([]cognition.Claim, error)
 }
 
 func Run(ctx context.Context, store Store, input Input) (Result, error) {
@@ -150,6 +153,24 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 		prepared.Claims = append(prepared.Claims, Claim{Value: value, Event: event})
 		prepared.Events = append(prepared.Events, event)
 	}
+	// M16 memory reliability: what does this emission do to memory? Duplicated
+	// propositions and functional-triple collisions are computed before the
+	// commit, against the claim base the new claims are entering — the step is
+	// deterministic, so replay reproduces the same tensions from the same
+	// state. Nothing is merged or dropped: the tension travels with the
+	// transition event, visible to the debugger and to the next render.
+	var memoryTensions []cognition.MemoryTension
+	if len(prepared.Claims) > 0 {
+		existingClaims, listErr := store.ListClaims(ctx)
+		if listErr != nil {
+			return Result{}, listErr
+		}
+		incomingClaims := make([]cognition.Claim, 0, len(prepared.Claims))
+		for _, claim := range prepared.Claims {
+			incomingClaims = append(incomingClaims, claim.Value)
+		}
+		memoryTensions = cognition.NewTensions(existingClaims, incomingClaims)
+	}
 	for _, suggested := range input.SuggestedAttention {
 		if err = suggested.Validate(); err != nil {
 			return Result{}, fmt.Errorf("suggested attention: %w", err)
@@ -204,6 +225,9 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 	}
 	if len(decision.Warnings) > 0 {
 		transitionPayload["warnings"] = decision.Warnings
+	}
+	if len(memoryTensions) > 0 {
+		transitionPayload["memory_tensions"] = memoryTensions
 	}
 	transition, err := newEvent(EventFrameTransitioned, transitionPayload)
 	if err != nil {

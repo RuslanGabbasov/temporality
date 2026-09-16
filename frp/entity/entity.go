@@ -88,6 +88,25 @@ var predicates = map[string]struct{}{
 	PredicateServes: {},
 }
 
+// functionalPredicates are relations where one subject holds at most one
+// object at a time. Two active claims asserting different objects for the
+// same subject+functional predicate contradict each other; for one-to-many
+// relations (contains, depends_on, uses, …) different objects are normal and
+// carry no tension. The set is deliberately conservative: a false
+// "contradiction" is noise the model would have to argue with.
+var functionalPredicates = map[string]struct{}{
+	PredicateDeclaredIn: {},
+	PredicateOnBranch:   {},
+	PredicateAuthoredBy: {},
+}
+
+// FunctionalPredicate reports whether the predicate is functional: subject
+// and predicate together determine at most one object.
+func FunctionalPredicate(name string) bool {
+	_, ok := functionalPredicates[name]
+	return ok
+}
+
 // CanonicalPredicates returns the frozen predicate names in stable order.
 func CanonicalPredicates() []string {
 	names := make([]string, 0, len(predicates))
