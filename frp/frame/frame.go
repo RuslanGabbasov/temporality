@@ -10,6 +10,13 @@ import (
 
 const ReducerVersion = "frame-reducer.v1"
 
+// MaxWorkingSet bounds how many deliberate anchors a frame may carry. A
+// runaway emission pinning without evicting would grow the working set — and
+// every later packet — without limit (context thrashing, M16). The reducer
+// itself stays permissive for historical transitions; the cognitive guard in
+// cognition.ReduceEmission enforces the cap on new emissions.
+const MaxWorkingSet = 32
+
 type RefType string
 
 const (

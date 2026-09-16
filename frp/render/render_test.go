@@ -107,8 +107,8 @@ func TestRenderIncludesDeterministicProcedureMatches(t *testing.T) {
 		t.Fatalf("render is not deterministic: %q != %q", first.RenderID, second.RenderID)
 	}
 
-	section := first.Sections[6]
-	if section.Kind != "procedures" || len(section.Items) != 8 {
+	section := sectionByKind(first, "procedures")
+	if section == nil || len(section.Items) != 8 {
 		t.Fatalf("unexpected procedures section: %#v", section)
 	}
 	for i, item := range section.Items {
@@ -121,6 +121,15 @@ func TestRenderIncludesDeterministicProcedureMatches(t *testing.T) {
 			t.Fatalf("unexpected match %d: %#v", i, match)
 		}
 	}
+}
+
+func sectionByKind(packet render.Packet, kind string) *render.Section {
+	for i := range packet.Sections {
+		if packet.Sections[i].Kind == kind {
+			return &packet.Sections[i]
+		}
+	}
+	return nil
 }
 
 func TestRenderAsOfCutoffControlsMemoryVisibility(t *testing.T) {

@@ -23,7 +23,7 @@ import (
 	"github.com/temporality-project/temporality/frp/substrate"
 )
 
-const Version = "render-0.4.0"
+const Version = "render-0.4.1"
 
 const (
 	procedureMatchThreshold = 0.1
@@ -32,6 +32,10 @@ const (
 	// render's ambient pool (M14.3): entities are world knowledge, not
 	// episode state, so a large graph must not flood every frame.
 	maxEntityCandidates = 16
+	// maxStabilityLookback bounds the parent-chain walk behind the attention
+	// health section (M16): diagnosing focus thrashing must stay a handful of
+	// point lookups, not a full history scan.
+	maxStabilityLookback = 8
 )
 
 // ambientHiddenEvents are attention's own bookkeeping: recording what was
@@ -165,6 +169,10 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	if err != nil {
 		return Packet{}, err
 	}
+	// M16 attention health: honest self-diagnostics instead of silent
+	// correction. The model sees how unstable its own attention has been so it
+	// can re-anchor; the debugger sees it in the packet, not in a reconstruction.
+	health := r.attentionHealth(ctx, current)
 	working := make([]any, 0, len(current.WorkingSet))
 	for _, ref := range current.WorkingSet {
 		item, resolveErr := r.refItem(ctx, ref)
@@ -239,7 +247,7 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	}
 	outside := ambient.Considered - len(ambient.Selected)
 	hint := fmt.Sprintf("%d attention candidates are outside the frame", outside)
-	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{map[string]any{"agent_id": current.AgentID, "episode_id": current.EpisodeID, "branch_id": current.BranchID}}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: mapItems}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "periphery", Attention: "ambient", Items: periphery}, {Kind: "working_set", Attention: "deliberate", Items: working}, {Kind: "procedures", Attention: "ambient", Items: procedureItems}, {Kind: "recent", Attention: "ambient", Items: recent}}
+	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{map[string]any{"agent_id": current.AgentID, "episode_id": current.EpisodeID, "branch_id": current.BranchID}}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: mapItems}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "attention_health", Attention: "deliberate", Items: []any{health}}, {Kind: "periphery", Attention: "ambient", Items: periphery}, {Kind: "working_set", Attention: "deliberate", Items: working}, {Kind: "procedures", Attention: "ambient", Items: procedureItems}, {Kind: "recent", Attention: "ambient", Items: recent}}
 	// The affordances section closes the cognition→action loop: the model can
 	// only request actions it can see, so available definitions travel with the
 	// packet (deterministically ordered) instead of reaching step validation
@@ -291,6 +299,41 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	packet.RenderID = contentID(packet)
 	return packet, nil
 }
+// attentionHealth walks the frame's parent chain and measures how stable its
+// deliberate attention has been: how many of the recent transitions replaced
+// the focus, whether the working set has collapsed to empty, and whether the
+// working set sits at its cap. The count is over a lookback window, not a
+// consecutive run from the leaf — one stable step must not erase the fact
+// that attention was thrashing right before it. Pathological focus switching
+// and collapse are surfaced to the model as facts, not corrected by the runtime.
+func (r *Renderer) attentionHealth(ctx context.Context, current frame.Frame) map[string]any {
+	changed := 0
+	steps := 0
+	child := current
+	for i := 0; i < maxStabilityLookback && child.ParentFrameID != ""; i++ {
+		parent, err := r.stores.GetFrame(ctx, child.ParentFrameID)
+		if err != nil {
+			break
+		}
+		if parent.Focus != child.Focus {
+			changed++
+		}
+		steps++
+		child = parent
+	}
+	health := map[string]any{"focus_changed_steps": changed, "lookback_steps": steps, "working_set_size": len(current.WorkingSet), "working_set_cap": frame.MaxWorkingSet}
+	switch {
+	case len(current.WorkingSet) == 0:
+		health["collapsed"] = true
+		health["hint"] = "working set is empty: pin relevant refs to keep deliberate anchors"
+	case changed >= cognition.FocusFlapSteps:
+		health["hint"] = fmt.Sprintf("focus changed in %d of the last %d steps: stabilize focus or anchor progress with pins", changed, steps)
+	case len(current.WorkingSet) >= frame.MaxWorkingSet:
+		health["hint"] = "working set is at its cap: unpin stale refs before pinning new ones"
+	}
+	return health
+}
+
 func selectAmbient(current frame.Frame, goal objective.Objective, events []protocol.Event, regions []projection.Region, edges []projection.Edge, entities []entity.Entity, entityRelations []entity.EntityRelation) (attention.Result, error) {
 	if !current.Attention.Ambient {
 		return attention.Result{Version: attention.Version, Selected: []attention.ScoredCandidate{}, RunnersUp: []attention.ScoredCandidate{}}, nil

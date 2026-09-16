@@ -195,7 +195,17 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 		prepared.Actions = append(prepared.Actions, Action{Definition: def, Request: request, Execution: value, Requested: requested, Created: created})
 		prepared.Events = append(prepared.Events, requested, created)
 	}
-	transition, err := newEvent(EventFrameTransitioned, map[string]any{"parent_frame_id": input.Current.FrameID, "frame_id": decision.Frame.FrameID, "emission_id": emission.EmissionID})
+	// M16: guard diagnostics travel with the transition event so the audit
+	// trail answers not only what the frame became, but which parts of the
+	// emission the runtime refused — and why.
+	transitionPayload := map[string]any{"parent_frame_id": input.Current.FrameID, "frame_id": decision.Frame.FrameID, "emission_id": emission.EmissionID}
+	if len(decision.Rejections) > 0 {
+		transitionPayload["rejections"] = decision.Rejections
+	}
+	if len(decision.Warnings) > 0 {
+		transitionPayload["warnings"] = decision.Warnings
+	}
+	transition, err := newEvent(EventFrameTransitioned, transitionPayload)
 	if err != nil {
 		return Result{}, err
 	}

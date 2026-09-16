@@ -2,7 +2,9 @@ package step_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,6 +65,66 @@ func TestMemoryStepSuccessAndReferenceRollback(t *testing.T) {
 	after, listErr := store.List(ctx, substrate.EventFilter{})
 	if listErr != nil || len(after) != len(before) {
 		t.Fatalf("failed step was not rolled back: before=%d after=%d err=%v", len(before), len(after), listErr)
+	}
+}
+
+// TestStepPersistsAttentionGuardDiagnostics checks the M16 wiring end to
+// end: a no-op unpin must be rejected (and recorded) instead of silently
+// applied, and dropping the last anchor must carry a collapse warning — both
+// travel with the persisted frame.transitioned event, so replay and the
+// debugger see what the runtime refused and why.
+func TestStepPersistsAttentionGuardDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	current := testFrame(now)
+	current.WorkingSet = []frame.Ref{{Type: frame.RefEvent, ID: "00000000-0000-4000-8000-000000000007"}}
+	created := testEvent("00000000-0000-4000-8000-000000000006", "frame.created", now, current)
+	created.Payload["frame_id"] = current.FrameID
+	if err := store.CreateFrame(ctx, current, created); err != nil {
+		t.Fatal(err)
+	}
+	seed := testEvent("00000000-0000-4000-8000-000000000007", "observation.recorded", now, current)
+	if err := store.Append(ctx, seed); err != nil {
+		t.Fatal(err)
+	}
+	emission := cognition.CognitiveEmission{
+		EmissionID: "emission-guards", FrameID: current.FrameID,
+		Observation: []cognition.Observation{{Ref: "event:" + seed.EventID, Interpretation: "available"}},
+		FrameOps: []cognition.FrameOperation{
+			{Op: "unpin", Ref: "event:" + seed.EventID},                          // applied: collapses the working set
+			{Op: "unpin", Ref: "claim:00000000-0000-4000-8000-000000000099"}, // never pinned: must be rejected
+		},
+	}
+	result, err := step.Run(ctx, store, step.Input{Current: current, Emission: emission, NewID: uuidSequence(300), Now: func() time.Time { return now.Add(time.Second) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Frame.WorkingSet) != 0 {
+		t.Fatalf("applied unpin did not collapse the working set: %#v", result.Frame.WorkingSet)
+	}
+	var transition *protocol.Event
+	for i := range result.Events {
+		if result.Events[i].Type == step.EventFrameTransitioned {
+			transition = &result.Events[i]
+		}
+	}
+	if transition == nil {
+		t.Fatalf("frame.transitioned missing: %#v", result.Events)
+	}
+	persisted, err := store.Get(ctx, transition.EventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(persisted.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "unpin target is not in the working set") {
+		t.Fatalf("rejection missing from persisted transition payload: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), "collapsed to empty") {
+		t.Fatalf("collapse warning missing from persisted transition payload: %s", encoded)
 	}
 }
 
