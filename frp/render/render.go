@@ -23,7 +23,7 @@ import (
 	"github.com/temporality-project/temporality/frp/substrate"
 )
 
-const Version = "render-0.4.3"
+const Version = "render-0.4.4"
 
 const (
 	procedureMatchThreshold = 0.1
@@ -727,8 +727,13 @@ func selectAmbient(current frame.Frame, goal objective.Objective, events []proto
 }
 
 // affordanceItems renders the compact affordance listing for the packet:
-// id, execution mode, capabilities and (when declared) the input schema, so
-// the model can form valid action requests without guessing.
+// id, execution mode and (when declared) a one-line signature of the input
+// schema, so the model can form valid action requests without guessing. The
+// full JSON Schema travelled with every packet at ~4.5KB for a dozen
+// affordances; the signature form carries the same parameter names, required
+// marks, types and clipped descriptions for ~40% of that weight, and the
+// authoritative schema stays with step validation. Capabilities are policy
+// detail (enforcement is runtime-side) and are omitted.
 func affordanceItems(definitions []affordance.Definition) []any {
 	if len(definitions) == 0 {
 		return nil
@@ -738,13 +743,79 @@ func affordanceItems(definitions []affordance.Definition) []any {
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
 	items := make([]any, 0, len(ordered))
 	for _, definition := range ordered {
-		item := map[string]any{"id": definition.ID, "execution_mode": definition.ExecutionMode, "capabilities": definition.Capabilities}
-		if len(definition.InputSchema) > 0 {
-			item["input_schema"] = definition.InputSchema
+		item := map[string]any{"id": definition.ID, "execution_mode": definition.ExecutionMode}
+		if signature := compactSchemaSignature(definition.InputSchema); signature != "" {
+			item["signature"] = signature
 		}
 		items = append(items, item)
 	}
 	return items
+}
+
+// compactSchemaSignature flattens a JSON Schema into a one-line parameter
+// signature: "path*(string) path relative to the resource root; find*(string)
+// exact substring to replace". A trailing * marks required parameters, the
+// parenthesised name is the JSON type, and descriptions are clipped so a
+// verbose schema cannot silently tax every render.
+const (
+	signatureDescriptionLimit = 96
+	signatureTypeLimit        = 12
+)
+
+func compactSchemaSignature(schema map[string]any) string {
+	if len(schema) == 0 {
+		return ""
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	if len(properties) == 0 {
+		return ""
+	}
+	required := map[string]bool{}
+	switch list := schema["required"].(type) {
+	case []string:
+		for _, name := range list {
+			required[name] = true
+		}
+	case []any:
+		for _, name := range list {
+			if text, ok := name.(string); ok {
+				required[text] = true
+			}
+		}
+	}
+	names := make([]string, 0, len(properties))
+	for name := range properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		typeName := "any"
+		if property, ok := properties[name].(map[string]any); ok {
+			if text, ok := property["type"].(string); ok && text != "" && len(text) <= signatureTypeLimit {
+				typeName = text
+			}
+		}
+		entry := name
+		if required[name] {
+			entry += "*"
+		}
+		entry += "(" + typeName + ")"
+		if property, ok := properties[name].(map[string]any); ok {
+			if description, ok := property["description"].(string); ok && description != "" {
+				entry += " " + clip(description, signatureDescriptionLimit)
+			}
+		}
+		parts = append(parts, entry)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func clip(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	return text[:limit] + "…"
 }
 
 func regionGraphProximity(anchors map[string]struct{}, edges []projection.Edge) map[string]float64 {
@@ -869,9 +940,22 @@ func compactEvent(event protocol.Event, withTime bool) map[string]any {
 	}
 	return item
 }
+// estimate approximates the token weight of a marshalled packet section.
+// Plain ASCII prose averages ~4 bytes/token, but multibyte UTF-8 (Cyrillic
+// propositions, non-English objectives) is closer to ~2 bytes/token, and the
+// raw bytes/4 form once under-counted a real prompt by a third — the ladder
+// then "fit" a budget the model provider charged well over it.
 func estimate(value any) int {
 	data, _ := json.Marshal(value)
-	tokens := (len(data) + 3) / 4
+	ascii, multibyte := 0, 0
+	for _, b := range data {
+		if b < 0x80 {
+			ascii++
+		} else {
+			multibyte++
+		}
+	}
+	tokens := ascii/4 + multibyte/2
 	if tokens < 1 {
 		return 1
 	}

@@ -46,7 +46,7 @@ func StandardWriteDefinitions() []affordance.Definition {
 		schemaDefinition(AffordanceRunCommand, map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": map[string]any{"type": "string", "description": "executable name, e.g. go"},
+				"command": map[string]any{"type": "string", "description": "executable to run, e.g. grep, go, git; prefer grep -rn to locate code instead of reading many files"},
 				"args":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "command arguments"},
 				"cwd":      map[string]any{"type": "string", "description": "working directory relative to the resource root"},
 				"env":      map[string]any{"type": "object", "description": "extra environment variables"},

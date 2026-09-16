@@ -3,6 +3,7 @@ package render_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,9 +29,11 @@ func TestRenderAffordancesSection(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Deliberately unsorted: the packet must order affordances deterministically.
+	// The declared schema uses the canonical JSON Schema shape the world
+	// definitions serve (type/properties/required).
 	definitions := []affordance.Definition{
 		{Protocol: protocol.Name, Version: protocol.Version, ID: "read_file", ExecutionMode: affordance.ModeDeterministic, Capabilities: []string{"filesystem.read"}},
-		{Protocol: protocol.Name, Version: protocol.Version, ID: "inspect_repository", ExecutionMode: affordance.ModeDeterministic, Capabilities: []string{"filesystem.read", "git.read"}, InputSchema: map[string]any{"path": "string"}},
+		{Protocol: protocol.Name, Version: protocol.Version, ID: "inspect_repository", ExecutionMode: affordance.ModeDeterministic, Capabilities: []string{"filesystem.read", "git.read"}, InputSchema: map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "description": "path relative to the resource root"}, "log_limit": map[string]any{"type": "integer", "description": "max git log entries"}}, "required": []string{"path"}}},
 	}
 	renderer := render.New(store)
 	packet, err := renderer.Render(ctx, render.Request{FrameID: current.FrameID, ObjectiveID: goal.ObjectiveID, BudgetTokens: 100000, Affordances: definitions})
@@ -54,11 +57,15 @@ func TestRenderAffordancesSection(t *testing.T) {
 	if first["id"] != "inspect_repository" || second["id"] != "read_file" {
 		t.Fatalf("affordances not sorted: %#v", section.Items)
 	}
-	if _, ok := first["input_schema"]; !ok {
-		t.Fatalf("declared input_schema missing: %#v", first)
+	if _, ok := first["signature"]; !ok {
+		t.Fatalf("declared schema signature missing: %#v", first)
 	}
-	if _, ok := second["input_schema"]; ok {
-		t.Fatalf("empty input_schema must be omitted: %#v", second)
+	signature, _ := first["signature"].(string)
+	if !strings.Contains(signature, "path*(string)") || !strings.Contains(signature, "log_limit(integer)") {
+		t.Fatalf("signature lost required mark or type: %q", signature)
+	}
+	if _, ok := second["signature"]; ok {
+		t.Fatalf("empty schema signature must be omitted: %#v", second)
 	}
 	// Without definitions the packet keeps its historical shape.
 	bare, err := renderer.Render(ctx, render.Request{FrameID: current.FrameID, ObjectiveID: goal.ObjectiveID, BudgetTokens: 100000})

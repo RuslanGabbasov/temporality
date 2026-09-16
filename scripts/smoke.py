@@ -401,7 +401,7 @@ def main():
         _, repeated_render = request("POST", "/v1/render", render_request)
         assert first_render == repeated_render
         assert first_render["provenance"]["attention_version"] == "attention-0.3.1"
-        assert first_render["renderer_version"] == "render-0.4.3"
+        assert first_render["renderer_version"] == "render-0.4.4"
         map_items = next(section for section in first_render["sections"] if section["kind"] == "map")["items"]
         assert map_items and any(item["ref"].startswith("region:") for item in map_items)
         definition = {"id": "inspect_environment", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
