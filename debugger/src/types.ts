@@ -141,6 +141,7 @@ export interface ModelStepResponse {
   emission?: unknown
   step?: { frame?: Frame; events?: FrpEvent[] }
   model_provenance?: Json
+  model_usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
   debugger_summary?: Json
   [key: string]: unknown
 }

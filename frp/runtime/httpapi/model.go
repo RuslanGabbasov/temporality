@@ -140,7 +140,7 @@ func (s *Server) modelStep(w http.ResponseWriter, r *http.Request) {
 		WorldVersion: boundWorld.StateVersion,
 	})
 	if err == nil {
-		s.log.Info("model step completed", "frame_id", request.FrameID, "model", adapter.Provenance().Model, "duration_ms", time.Since(startedAt).Milliseconds())
+		s.log.Info("model step completed", "frame_id", request.FrameID, "model", adapter.Provenance().Model, "duration_ms", time.Since(startedAt).Milliseconds(), "prompt_tokens", result.ModelUsage.PromptTokens, "completion_tokens", result.ModelUsage.CompletionTokens)
 		writeJSON(w, http.StatusCreated, result)
 		return
 	}

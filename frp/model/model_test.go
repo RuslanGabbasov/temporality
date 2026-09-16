@@ -47,7 +47,7 @@ func TestOpenAIAdapterSuccessAndDeterministicRequest(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		content := "```json\n{\"schema\":\"frp.cognitive-emission.v1\",\"emission_id\":\"e-1\",\"frame_id\":\"frame-1\",\"observation\":[],\"reasoning\":[],\"claims\":[],\"attention\":[],\"actions\":[],\"frame_ops\":[],\"completion\":null}\n```"
-		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": content}}}, "usage": map[string]any{"prompt_tokens": 321, "completion_tokens": 123, "total_tokens": 444}})
 	}))
 	defer server.Close()
 
@@ -55,12 +55,15 @@ func TestOpenAIAdapterSuccessAndDeterministicRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	emission, err := adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"})
+	emission, usage, err := adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if emission.EmissionID != "e-1" {
 		t.Fatalf("emission = %#v", emission)
+	}
+	if usage != (model.Usage{PromptTokens: 321, CompletionTokens: 123, TotalTokens: 444}) {
+		t.Fatalf("usage = %#v", usage)
 	}
 	if !strings.Contains(requestBody, `"model":"test-model"`) || !strings.Contains(requestBody, `"temperature":0.25`) || !strings.Contains(requestBody, `"max_tokens":2048`) {
 		t.Fatalf("request = %s", requestBody)
@@ -81,7 +84,7 @@ func TestOpenAIAdapterTrace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"}); err != nil {
+	if _, _, err = adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(traces) != 2 || traces[0].Direction != "request" || traces[1].Direction != "response" {
@@ -113,7 +116,7 @@ func TestOpenAIAdapterRejectsMalformedAndInvalidEmission(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"}); err == nil {
+			if _, _, err = adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"}); err == nil {
 				t.Fatal("invalid response accepted")
 			}
 		})
@@ -132,7 +135,7 @@ func TestOpenAIAdapterRescuesProseWrappedEmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	emission, err := adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"})
+	emission, _, err := adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +185,7 @@ func TestOpenAIAdapterDecodeErrorIsDiagnostic(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"})
+			_, _, err = adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"})
 			if err == nil {
 				t.Fatal("invalid response accepted")
 			}
@@ -203,7 +206,7 @@ func TestOpenAIAdapterReportsRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"})
+	_, _, err = adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"})
 	if err == nil || !strings.Contains(err.Error(), "model refused to answer: I cannot fulfill this request.") {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -243,7 +246,7 @@ func TestOpenAIAdapterReasoningParameter(t *testing.T) {
 			if got := adapter.Provenance().Reasoning; got != tc.preset {
 				t.Fatalf("provenance reasoning = %q", got)
 			}
-			_, _ = adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"}) // schema mismatch error is fine
+			_, _, _ = adapter.Emit(context.Background(), render.Packet{FrameID: "frame-1"}) // schema mismatch error is fine
 			if fieldCount != tc.wantFieldCount {
 				t.Fatalf("wire body field count = %d, want %d", fieldCount, tc.wantFieldCount)
 			}
@@ -280,10 +283,10 @@ func TestSecretAbsentFromProvenance(t *testing.T) {
 func TestRecordedAdapter(t *testing.T) {
 	emission := cognition.CognitiveEmission{Schema: cognition.EmissionSchema, EmissionID: "e", FrameID: "f", Observation: []cognition.Observation{}, Reasoning: []cognition.Reasoning{}, Claims: []cognition.EmittedClaim{}, Attention: []cognition.AttentionOperation{}, Actions: []cognition.ActionRequest{}, FrameOps: []cognition.FrameOperation{}}
 	adapter := &model.RecordedAdapter{Emissions: []cognition.CognitiveEmission{emission}}
-	if got, err := adapter.Emit(context.Background(), render.Packet{FrameID: "f"}); err != nil || got.EmissionID != "e" {
+	if got, _, err := adapter.Emit(context.Background(), render.Packet{FrameID: "f"}); err != nil || got.EmissionID != "e" {
 		t.Fatalf("got %#v, %v", got, err)
 	}
-	if _, err := adapter.Emit(context.Background(), render.Packet{FrameID: "f"}); err == nil {
+	if _, _, err := adapter.Emit(context.Background(), render.Packet{FrameID: "f"}); err == nil {
 		t.Fatal("exhausted trace succeeded")
 	}
 }

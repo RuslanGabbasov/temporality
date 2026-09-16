@@ -17,9 +17,17 @@ import (
 	"github.com/temporality-project/temporality/frp/render"
 )
 
-// Adapter converts a rendered packet into a validated cognitive emission.
+// Usage is the provider-reported token accounting of one Emit call. It is
+// zero when the provider did not report usage (e.g. recorded adapters).
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+// Adapter converts a rendered FRP packet into a validated cognitive emission.
 type Adapter interface {
-	Emit(context.Context, render.Packet) (cognition.CognitiveEmission, error)
+	Emit(context.Context, render.Packet) (cognition.CognitiveEmission, Usage, error)
 }
 
 // Config is non-secret model configuration and may safely be retained as provenance.
@@ -206,12 +214,19 @@ type chatResponse struct {
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *chatUsage `json:"usage"`
 }
 
-func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cognition.CognitiveEmission, error) {
+type chatUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cognition.CognitiveEmission, Usage, error) {
 	packetJSON, err := json.Marshal(packet)
 	if err != nil {
-		return cognition.CognitiveEmission{}, fmt.Errorf("marshal render packet: %w", err)
+		return cognition.CognitiveEmission{}, Usage{}, fmt.Errorf("marshal render packet: %w", err)
 	}
 	body, err := json.Marshal(chatRequest{
 		Model:       a.model,
@@ -225,14 +240,14 @@ func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cogniti
 		ResponseFormat: responseFormat{Type: "json_object"},
 	})
 	if err != nil {
-		return cognition.CognitiveEmission{}, fmt.Errorf("marshal model request: %w", err)
+		return cognition.CognitiveEmission{}, Usage{}, fmt.Errorf("marshal model request: %w", err)
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, a.timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, a.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return cognition.CognitiveEmission{}, fmt.Errorf("create model request: %w", err)
+		return cognition.CognitiveEmission{}, Usage{}, fmt.Errorf("create model request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if a.apiKey != "" {
@@ -241,29 +256,33 @@ func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cogniti
 	a.emitTrace("request", body)
 	response, err := a.client.Do(req)
 	if err != nil {
-		return cognition.CognitiveEmission{}, fmt.Errorf("model request: %w", err)
+		return cognition.CognitiveEmission{}, Usage{}, fmt.Errorf("model request: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
-		return cognition.CognitiveEmission{}, fmt.Errorf("model request returned HTTP %d", response.StatusCode)
+		return cognition.CognitiveEmission{}, Usage{}, fmt.Errorf("model request returned HTTP %d", response.StatusCode)
 	}
 	var decoded chatResponse
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 8<<20))
 	if err := decoder.Decode(&decoded); err != nil {
-		return cognition.CognitiveEmission{}, fmt.Errorf("decode model response: %w", err)
+		return cognition.CognitiveEmission{}, Usage{}, fmt.Errorf("decode model response: %w", err)
+	}
+	usage := Usage{}
+	if decoded.Usage != nil {
+		usage = Usage{PromptTokens: decoded.Usage.PromptTokens, CompletionTokens: decoded.Usage.CompletionTokens, TotalTokens: decoded.Usage.TotalTokens}
 	}
 	if len(decoded.Choices) == 0 {
-		return cognition.CognitiveEmission{}, errors.New("model response has no choices")
+		return cognition.CognitiveEmission{}, usage, errors.New("model response has no choices")
 	}
 	choice := decoded.Choices[0]
 	if strings.TrimSpace(choice.Message.Content) == "" && choice.Message.Refusal != "" {
-		return cognition.CognitiveEmission{}, fmt.Errorf("model refused to answer: %s", boundedSnippet(choice.Message.Refusal))
+		return cognition.CognitiveEmission{}, usage, fmt.Errorf("model refused to answer: %s", boundedSnippet(choice.Message.Refusal))
 	}
 	a.emitTrace("response", []byte(choice.Message.Content))
 	content, err := stripJSONFence(choice.Message.Content)
 	if err != nil {
-		return cognition.CognitiveEmission{}, err
+		return cognition.CognitiveEmission{}, usage, err
 	}
 	var emission cognition.CognitiveEmission
 	err = json.Unmarshal([]byte(content), &emission)
@@ -296,15 +315,15 @@ func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cogniti
 				message += fmt.Sprintf("; model output was truncated (finish_reason=length), raise TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS above %d", a.maxOutputTokens)
 			}
 		}
-		return cognition.CognitiveEmission{}, fmt.Errorf("%s; model content: %q", message, boundedSnippet(choice.Message.Content))
+		return cognition.CognitiveEmission{}, usage, fmt.Errorf("%s; model content: %q", message, boundedSnippet(choice.Message.Content))
 	}
 	if err := emission.Validate(); err != nil {
-		return cognition.CognitiveEmission{}, fmt.Errorf("validate cognitive emission: %w", err)
+		return cognition.CognitiveEmission{}, usage, fmt.Errorf("validate cognitive emission: %w", err)
 	}
 	if emission.FrameID != packet.FrameID {
-		return cognition.CognitiveEmission{}, fmt.Errorf("emission frame_id %q does not match packet frame_id %q", emission.FrameID, packet.FrameID)
+		return cognition.CognitiveEmission{}, usage, fmt.Errorf("emission frame_id %q does not match packet frame_id %q", emission.FrameID, packet.FrameID)
 	}
-	return emission, nil
+	return emission, usage, nil
 }
 
 func stripJSONFence(content string) (string, error) {
@@ -355,17 +374,17 @@ type RecordedAdapter struct {
 	index     int
 }
 
-func (a *RecordedAdapter) Emit(_ context.Context, packet render.Packet) (cognition.CognitiveEmission, error) {
+func (a *RecordedAdapter) Emit(_ context.Context, packet render.Packet) (cognition.CognitiveEmission, Usage, error) {
 	if a.index >= len(a.Emissions) {
-		return cognition.CognitiveEmission{}, errors.New("recorded model trace exhausted")
+		return cognition.CognitiveEmission{}, Usage{}, errors.New("recorded model trace exhausted")
 	}
 	emission := a.Emissions[a.index]
 	a.index++
 	if err := emission.Validate(); err != nil {
-		return cognition.CognitiveEmission{}, fmt.Errorf("validate recorded cognitive emission: %w", err)
+		return cognition.CognitiveEmission{}, Usage{}, fmt.Errorf("validate recorded cognitive emission: %w", err)
 	}
 	if emission.FrameID != packet.FrameID {
-		return cognition.CognitiveEmission{}, errors.New("recorded emission frame_id does not match packet frame_id")
+		return cognition.CognitiveEmission{}, Usage{}, errors.New("recorded emission frame_id does not match packet frame_id")
 	}
-	return emission, nil
+	return emission, Usage{}, nil
 }

@@ -28,16 +28,58 @@ const (
 // definitions.
 func StandardWriteDefinitions() []affordance.Definition {
 	return []affordance.Definition{
-		standardDefinition(AffordanceWriteFile, "filesystem.write"),
-		standardDefinition(AffordanceCreateFile, "filesystem.write"),
-		standardDefinition(AffordancePatchFile, "filesystem.write"),
-		standardDefinition(AffordanceDeleteFile, "filesystem.write"),
-		standardDefinition(AffordanceMoveFile, "filesystem.write"),
-		standardDefinition(AffordanceCreateDir, "filesystem.write"),
-		standardDefinition(AffordanceRunCommand, "process.execute"),
-		standardDefinition(AffordanceGitCreateBranch, "git.write"),
-		standardDefinition(AffordanceGitCommit, "git.write"),
-		standardDefinition(AffordanceHTTPPost, "http.write"),
+		schemaDefinition(AffordanceWriteFile, pathSchema(map[string]any{"content": map[string]any{"type": "string", "description": "full file content to write (overwrites)"}}), "filesystem.write"),
+		schemaDefinition(AffordanceCreateFile, pathSchema(map[string]any{"content": map[string]any{"type": "string", "description": "file content; fails if the file already exists"}}), "filesystem.write"),
+		schemaDefinition(AffordancePatchFile, map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":    map[string]any{"type": "string", "description": "path relative to the declared resource root"},
+				"find":    map[string]any{"type": "string", "description": "exact substring to replace"},
+				"replace": map[string]any{"type": "string", "description": "replacement substring (default empty)"},
+				"all":     map[string]any{"type": "boolean", "description": "replace every occurrence (default false)"},
+			},
+			"required": []string{"path", "find"},
+		}, "filesystem.write"),
+		schemaDefinition(AffordanceDeleteFile, pathSchema(nil), "filesystem.write"),
+		schemaDefinition(AffordanceMoveFile, pathSchema(map[string]any{"target": map[string]any{"type": "string", "description": "destination path relative to the resource root"}}), "filesystem.write"),
+		schemaDefinition(AffordanceCreateDir, pathSchema(nil), "filesystem.write"),
+		schemaDefinition(AffordanceRunCommand, map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"command": map[string]any{"type": "string", "description": "executable name, e.g. go"},
+				"args":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "command arguments"},
+				"cwd":      map[string]any{"type": "string", "description": "working directory relative to the resource root"},
+				"env":      map[string]any{"type": "object", "description": "extra environment variables"},
+			},
+			"required": []string{"command"},
+		}, "process.execute"),
+		schemaDefinition(AffordanceGitCreateBranch, map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string", "description": "repository path relative to the declared resource root"},
+				"name": map[string]any{"type": "string", "description": "new branch name"},
+				"from": map[string]any{"type": "string", "description": "start point ref (default HEAD)"},
+			},
+			"required": []string{"path", "name"},
+		}, "git.write"),
+		schemaDefinition(AffordanceGitCommit, map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":    map[string]any{"type": "string", "description": "repository path relative to the declared resource root"},
+				"message": map[string]any{"type": "string", "description": "commit message"},
+				"author":  map[string]any{"type": "string", "description": "author in Name <email> form"},
+			},
+			"required": []string{"path", "message"},
+		}, "git.write"),
+		schemaDefinition(AffordanceHTTPPost, map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"url":          map[string]any{"type": "string", "description": "target endpoint URL"},
+				"body":         map[string]any{"type": "string", "description": "request body"},
+				"content_type": map[string]any{"type": "string", "description": "body content type"},
+			},
+			"required": []string{"url"},
+		}, "http.write"),
 	}
 }
 

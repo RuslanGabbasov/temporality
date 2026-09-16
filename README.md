@@ -327,6 +327,28 @@ make first-contact               # или: python3 scripts/first_contact.py --ma
 
 Неудачный `/v1/model-step` ничего не фиксирует (render/emit идут до персистентности, а CommitStep транзакционен), поэтому скрипт безопасно повторяет шаг до 4 раз на 422/5xx — живые модели недетерминированы и иногда шлют невалидные emission (пустые refs, объектные completion); Runtime нормализует типовые огрехи на границе декодирования, а семантика остаётся строгой.
 
+## Бенчмарк: FRP vs классический харнесс (State 2)
+
+`scripts/benchmark.py` — честное head-to-head сравнение двух парадигм на одной задаче, одной модели и одном инструментальном охвате:
+
+- **FRP** — render packet (с бюджетом) → CognitiveEmission → семантические affordances → executor → world events → следующий кадр;
+- **classic** — канонический tool-calling loop с полной историей: system prompt + объективa + все результаты инструментов накапливаются в каждом запросе.
+
+Обе стороны получают: одну модель (`TEMPORALITY_MODEL_*`, одинаковые temperature/max_tokens/reasoning), одинаковую объективу и равный охват инструментов (classic-инструменты зеркалят семантику executor: те же лимиты 64KB/1000 записей/60s).
+
+Фикстура — детерминированный Go-репозиторий `example.com/ledger` с двумя независимыми багами и ловушками: int32-аккумулятор в `internal/series` ломает большие суммы в `internal/calc` (distant coupling — симптом в другом пакете, чем причина); `internal/store.Remove` пишет tombstone, который `Get`/`Len` игнорируют; `make test` прогоняет только `./internal/calc` (README врёт, что это «весь набор»); ARCHITECTURE.md врёт про «lossless 64-bit accumulation»; `internal/util/format.go` выглядит подозрительно, но корректен (red herring).
+
+Независимый чекер выносит вердикт по факту: `go test ./...` зелёный, ни один `*_test.go` не изменён, `internal/store/store.go` изменён, изменено ≥ 2 non-test файлов. Расход токенов берётся из реального `usage` провайдера с обеих сторон (FRP — из `model_usage` в ответе `/v1/model-step`, который Runtime теперь возвращает и логирует).
+
+```sh
+docker compose up --build -d && docker compose stop executor
+make benchmark                   # обе стороны, бюджет 30 шагов
+make classic-benchmark           # только классический харнесс
+python3 scripts/benchmark.py --side frp --max-steps 5   # короткий отладочный прогон
+```
+
+Метрики печатаются таблицей (steps, model_calls, retries, prompt/completion/total tokens, seconds, success) и сохраняются в `benchmarks/benchmark-<ts>.json`. Сценарий отвечает на главный вопрос State 2: решает ли FRP реальные задачи лучше или дешевле conventional harness — и показывает, где именно проходит цена (плоский, но тяжёлый render packet против растущей без потолка истории).
+
 ## Debugger development
 
 ```sh

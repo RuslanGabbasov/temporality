@@ -1,4 +1,4 @@
-.PHONY: test race integration build debugger-test debugger-build stack-up stack-stop smoke model-smoke first-contact run fmt
+.PHONY: test race integration build debugger-test debugger-build stack-up stack-stop smoke model-smoke first-contact benchmark classic-benchmark run fmt
 
 test:
 	go test ./...
@@ -35,6 +35,12 @@ model-smoke: build
 
 first-contact: build
 	python3 scripts/first_contact.py
+
+benchmark: build
+	python3 scripts/benchmark.py
+
+classic-benchmark: build
+	python3 scripts/benchmark.py --side classic
 
 run:
 	go run ./cmd/temporality-runtime

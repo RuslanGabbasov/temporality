@@ -47,6 +47,7 @@ type Result struct {
 	Emission        cognition.CognitiveEmission `json:"emission"`
 	Step            step.Result                 `json:"step"`
 	ModelProvenance model.Provenance            `json:"model_provenance"`
+	ModelUsage      model.Usage                 `json:"model_usage"`
 }
 
 func (s Service) Run(ctx context.Context, input Input) (Result, error) {
@@ -72,7 +73,7 @@ func (s Service) Run(ctx context.Context, input Input) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	emission, err := s.Adapter.Emit(ctx, packet)
+	emission, usage, err := s.Adapter.Emit(ctx, packet)
 	if err != nil {
 		return Result{}, fmt.Errorf("model emit: %w", err)
 	}
@@ -84,7 +85,7 @@ func (s Service) Run(ctx context.Context, input Input) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{RenderPacket: packet, Emission: emission, Step: committed, ModelProvenance: s.ModelProvenance}, nil
+	return Result{RenderPacket: packet, Emission: emission, Step: committed, ModelProvenance: s.ModelProvenance, ModelUsage: usage}, nil
 }
 
 func ambientSuggestions(packet render.Packet) ([]frame.Ref, error) {
