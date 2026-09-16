@@ -52,6 +52,10 @@ const (
 	// (health); a pattern of retracting own positions is drift and only then
 	// worth a diagnostic section.
 	retiredChurnThreshold = 2
+	// maxTensionMembers bounds how many member claims one memory_health group
+	// lists: a pathological loop (or a polluted shared database) can grow a
+	// duplicate group far beyond what any frame needs to see to reconcile it.
+	maxTensionMembers = 8
 )
 
 // ambientHiddenEvents are attention's own bookkeeping: recording what was
@@ -196,15 +200,23 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	if err != nil {
 		return Packet{}, err
 	}
+	// The claim base the frame sees is scoped to its own memory: a claim is
+	// part of this frame's world only if its creating event belongs to the
+	// episode/branch the render lists — exactly like recent events and map
+	// candidates. The store's claim table is global (a shared database holds
+	// every episode and every test run's claims); without scoping, foreign
+	// claims flood memory_health with tensions this agent never observed and
+	// cannot meaningfully reconcile.
+	episodeClaims := claimsScopedByEvents(events, claims)
 	// The claim base is projected onto the render cutoff: a claim is part of
 	// memory from its ValidFrom until its ValidTo. Without the projection a
 	// time-travel render would mix present claim status into a historical
 	// packet — a commitment retired after the cutoff would silently vanish
 	// from the re-rendered anchor and tensions, breaking the "what did the
 	// agent know at this step" guarantee.
-	liveClaims := claims
+	liveClaims := episodeClaims
 	if cutoff != nil {
-		liveClaims = claimsLiveAt(claims, *cutoff)
+		liveClaims = claimsLiveAt(episodeClaims, *cutoff)
 	}
 	memoryItems, memErr := r.memoryHealth(ctx, liveClaims)
 	if memErr != nil {
@@ -300,7 +312,7 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	}
 	// identity_health is omitted while the agent is self-consistent: an empty
 	// diagnostic section on every frame would tax the budget for silence.
-	if identityItem, needed := identityHealth(current, events, claims, cutoff); needed {
+	if identityItem, needed := identityHealth(current, events, episodeClaims, cutoff); needed {
 		sections = append(sections, Section{Kind: "identity_health", Attention: "deliberate", Items: []any{identityItem}})
 	}
 	sections = append(sections, Section{Kind: "periphery", Attention: "ambient", Items: periphery}, Section{Kind: "working_set", Attention: "deliberate", Items: working}, Section{Kind: "procedures", Attention: "ambient", Items: procedureItems}, Section{Kind: "recent", Attention: "ambient", Items: recent})
@@ -410,16 +422,46 @@ func (r *Renderer) memoryHealth(ctx context.Context, claims []cognition.Claim) (
 	items := make([]any, 0, len(tensions))
 	for _, tension := range tensions {
 		members := make([]any, 0, len(tension.ClaimIDs))
+		omitted := 0
 		for _, id := range tension.ClaimIDs {
 			claim, ok := byID[id]
 			if !ok {
 				continue
 			}
+			if len(members) >= maxTensionMembers {
+				omitted++
+				continue
+			}
 			members = append(members, map[string]any{"claim_id": claim.ClaimID, "ref": "claim:" + claim.ClaimID, "proposition": claim.Proposition, "confidence": claim.Confidence})
 		}
-		items = append(items, map[string]any{"kind": tension.Kind, "detail": tension.Detail, "claims": members})
+		group := map[string]any{"kind": tension.Kind, "detail": tension.Detail, "claims": members}
+		if omitted > 0 {
+			group["claims_omitted"] = omitted
+		}
+		items = append(items, group)
 	}
 	return items, nil
+}
+
+// claimsScopedByEvents restricts the global claim table to the frame's own
+// memory: only claims whose creating event is among the events this render
+// lists (episode/branch, cutoff-respecting) belong to the frame's world.
+// Foreign episodes' claims — other agents, other runs, integration-test
+// fixtures in a shared database — stay in the substrate for audit without
+// leaking into every packet.
+func claimsScopedByEvents(events []protocol.Event, claims []cognition.Claim) []cognition.Claim {
+	known := make(map[string]struct{}, len(events))
+	for _, event := range events {
+		known[event.EventID] = struct{}{}
+	}
+	scoped := make([]cognition.Claim, 0, len(claims))
+	for _, claim := range claims {
+		if _, ok := known[claim.CreatedEvent]; !ok {
+			continue
+		}
+		scoped = append(scoped, claim)
+	}
+	return scoped
 }
 
 // selfAuthoredEvents maps the event ids in this frame's branch that were

@@ -2,6 +2,7 @@ package render_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -178,6 +179,107 @@ func TestRenderIdentityHealthIgnoresImportedTension(t *testing.T) {
 	}
 }
 
+// TestRenderMemoryHealthIgnoresForeignEpisodes: the claim table is global (a
+// shared database holds every episode and every integration-test fixture),
+// but a frame's memory is only what its own branch observed. Duplicate claims
+// created inside a foreign episode must not surface as this frame's tensions
+// — they once flooded memory_health with hundreds of foreign members and
+// even goaded the model into refuting claims it never saw.
+func TestRenderMemoryHealthIgnoresForeignEpisodes(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	base := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	goal := objective.Objective{Protocol: protocol.Name, Version: protocol.Version, ObjectiveID: "objective", EpisodeID: "episode", Text: "find the failing test", SuccessConditions: []string{}}
+	if err := store.CreateObjective(ctx, goal, healthEvent("objective-event", "episode.started", base, map[string]any{"objective_id": goal.ObjectiveID})); err != nil {
+		t.Fatal(err)
+	}
+	root := frame.Frame{Protocol: protocol.Name, Version: protocol.Version, FrameID: "frame-foreign", AgentID: "agent", EpisodeID: "episode", BranchID: "branch", ObjectiveID: goal.ObjectiveID, AsOf: base, Focus: frame.Focus{Type: frame.RefQuery, Query: "tests"}, WorkingSet: []frame.Ref{}, Mode: frame.ModeExplore, Attention: frame.Attention{Policy: "balanced", Deliberate: true, Ambient: true, MaxCandidates: 32}, Filters: frame.Filters{AgentIDs: []string{}, RegionKinds: []string{}}, Budget: frame.Budget{Tokens: 8000}}
+	if err := store.CreateFrame(ctx, root, healthEvent("frame-event", "frame.created", base, map[string]any{"frame_id": root.FrameID})); err != nil {
+		t.Fatal(err)
+	}
+	commitIdentityClaim(t, store, "claim-local-a", "the failing test is TestSum", "agent", base.Add(1*time.Minute))
+	commitIdentityClaim(t, store, "claim-local-b", "The failing test is TestSum", "agent", base.Add(2*time.Minute))
+	// Duplicates committed inside a foreign episode (as an integration-test
+	// fixture would be in a shared database): they must stay invisible here.
+	// Their valid times deliberately PRECEDE this episode's events — a claim
+	// from the past of another episode passes the cutoff projection, so only
+	// episode scoping can keep it out (the time filter once masked this bug).
+	foreign1 := identityEvent("event-foreign-1", base.Add(10*time.Second), "")
+	foreign1.EpisodeID, foreign1.BranchID = "foreign-episode", "foreign-branch"
+	foreignClaim1 := cognition.Claim{ClaimID: "claim-foreign-1", Proposition: "integration claim", Confidence: 0.82, Status: cognition.ClaimCandidate, CreatedEvent: foreign1.EventID, ValidFrom: foreign1.ValidTime}
+	foreignClaim1.ApplyDefaults(foreign1.ValidTime)
+	if err := store.CommitClaim(ctx, cognition.Commit{Event: foreign1, Claim: foreignClaim1}); err != nil {
+		t.Fatal(err)
+	}
+	foreign2 := identityEvent("event-foreign-2", base.Add(20*time.Second), "")
+	foreign2.EpisodeID, foreign2.BranchID = "foreign-episode", "foreign-branch"
+	foreignClaim2 := cognition.Claim{ClaimID: "claim-foreign-2", Proposition: "integration claim", Confidence: 0.82, Status: cognition.ClaimCandidate, CreatedEvent: foreign2.EventID, ValidFrom: foreign2.ValidTime}
+	foreignClaim2.ApplyDefaults(foreign2.ValidTime)
+	if err := store.CommitClaim(ctx, cognition.Commit{Event: foreign2, Claim: foreignClaim2}); err != nil {
+		t.Fatal(err)
+	}
+
+	packet, err := render.New(store).Render(ctx, render.Request{FrameID: root.FrameID, ObjectiveID: goal.ObjectiveID, BudgetTokens: 100000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := sectionItemsJSON(t, *identitySection(t, packet, "identity"))
+	for _, forbidden := range []string{"claim-foreign-1", "claim-foreign-2", "integration claim"} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("foreign episode leaked into the packet: %s", encoded)
+		}
+	}
+	// The in-episode duplicate pair still reports — scoping removed the noise,
+	// not the diagnostic — without the foreign members.
+	memory := identitySection(t, packet, "memory_health")
+	if memory == nil {
+		t.Fatal("in-episode tension must still surface in memory_health")
+	}
+	memoryEncoded := sectionItemsJSON(t, *memory)
+	if strings.Contains(memoryEncoded, "claim-foreign") || strings.Contains(memoryEncoded, "integration claim") {
+		t.Fatalf("foreign claims leaked into memory_health: %s", memoryEncoded)
+	}
+	if !strings.Contains(memoryEncoded, "claim-local-a") {
+		t.Fatalf("local tension missing from memory_health: %s", memoryEncoded)
+	}
+}
+
+// TestRenderMemoryHealthCapsGroupMembers: a pathological duplicate loop (or a
+// polluted shared database) can grow one tension group beyond what a frame
+// needs to see; the group is capped with an explicit claims_omitted count.
+func TestRenderMemoryHealthCapsGroupMembers(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	base := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	goal := objective.Objective{Protocol: protocol.Name, Version: protocol.Version, ObjectiveID: "objective", EpisodeID: "episode", Text: "find the failing test", SuccessConditions: []string{}}
+	if err := store.CreateObjective(ctx, goal, healthEvent("objective-event", "episode.started", base, map[string]any{"objective_id": goal.ObjectiveID})); err != nil {
+		t.Fatal(err)
+	}
+	root := frame.Frame{Protocol: protocol.Name, Version: protocol.Version, FrameID: "frame-capped", AgentID: "agent", EpisodeID: "episode", BranchID: "branch", ObjectiveID: goal.ObjectiveID, AsOf: base, Focus: frame.Focus{Type: frame.RefQuery, Query: "tests"}, WorkingSet: []frame.Ref{}, Mode: frame.ModeExplore, Attention: frame.Attention{Policy: "balanced", Deliberate: true, Ambient: true, MaxCandidates: 32}, Filters: frame.Filters{AgentIDs: []string{}, RegionKinds: []string{}}, Budget: frame.Budget{Tokens: 8000}}
+	if err := store.CreateFrame(ctx, root, healthEvent("frame-event", "frame.created", base, map[string]any{"frame_id": root.FrameID})); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 12; i++ {
+		commitIdentityClaim(t, store, fmt.Sprintf("claim-dup-%02d", i), "the structure is unknown", "agent", base.Add(time.Duration(i+1)*time.Minute))
+	}
+
+	packet, err := render.New(store).Render(ctx, render.Request{FrameID: root.FrameID, ObjectiveID: goal.ObjectiveID, BudgetTokens: 100000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	section := identitySection(t, packet, "memory_health")
+	if section == nil {
+		t.Fatal("memory_health section missing")
+	}
+	encoded := sectionItemsJSON(t, *section)
+	if !strings.Contains(encoded, `"claims_omitted":4`) {
+		t.Fatalf("capped group must report 4 omitted members: %s", encoded)
+	}
+	if strings.Count(encoded, `"ref":"claim:claim-dup-`) > 8 {
+		t.Fatalf("group must list at most 8 members: %s", encoded)
+	}
+}
+
 // TestRenderIdentityCommitmentsHonorAsOf: the identity anchor is projected
 // onto the render cutoff — a time-travel render of an earlier frame must show
 // the commitments as they stood then, not as they stand now. This is the
@@ -224,6 +326,7 @@ func TestRenderIdentityCommitmentsHonorAsOf(t *testing.T) {
 		t.Fatalf("current render must not list the retired commitment: %s", encoded)
 	}
 }
+
 // TestRenderIdentityHealthReportsRetiredChurn: retracting own positions in a
 // pattern (threshold and beyond) is self-model churn — the packet states it so
 // the model re-anchors instead of quietly rewriting itself step after step.
