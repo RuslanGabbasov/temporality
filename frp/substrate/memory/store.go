@@ -811,6 +811,32 @@ func (s *Store) CommitStep(_ context.Context, prepared stepRuntime.Prepared) (st
 			return stepRuntime.Result{}, errors.New("claim already exists")
 		}
 	}
+	// Claim reconciliation (M16): refute/supersede transitions ride the same
+	// atomic commit. Their events were already appended by the attention-range
+	// loop above; this block only retires the claims themselves. A guard miss
+	// here (claim missing, wrong state) fails the whole step — the runtime
+	// resolved the ops against this very state a moment before the commit.
+	for _, transition := range prepared.ClaimTransitions {
+		claim, exists := s.claims[transition.ClaimID]
+		if !exists {
+			return stepRuntime.Result{}, cognition.ErrClaimNotFound
+		}
+		if !cognition.CanTransition(claim.Status, transition.ToStatus) {
+			return stepRuntime.Result{}, fmt.Errorf("invalid claim transition %s -> %s", claim.Status, transition.ToStatus)
+		}
+		if transition.ValidAt.Before(claim.ValidFrom) {
+			return stepRuntime.Result{}, errors.New("transition valid_at cannot precede claim valid_from")
+		}
+		claim.Status = transition.ToStatus
+		if transition.Confidence != nil {
+			claim.Confidence = *transition.Confidence
+		}
+		if transition.ToStatus == cognition.ClaimRefuted || transition.ToStatus == cognition.ClaimSuperseded {
+			validTo := transition.ValidAt
+			claim.ValidTo = &validTo
+		}
+		s.claims[claim.ClaimID] = claim
+	}
 	for _, action := range prepared.Actions {
 		if existing, exists := s.definitions[action.Definition.ID]; exists && !existing.MatchesRegistry(action.Definition) {
 			return stepRuntime.Result{}, affordance.ErrDefinitionFrozen

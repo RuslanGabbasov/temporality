@@ -195,6 +195,128 @@ func TestStepSurfacesMemoryTensionOnDuplicateClaims(t *testing.T) {
 	}
 }
 
+// TestStepAppliesClaimReconciliation walks the M16 reconciliation loop end
+// to end: the model refutes a wrong claim, supersedes an outdated one with a
+// corrected claim emitted in the same step, and aims one refute at a claim
+// that does not exist. The first two retire claims atomically with the step;
+// the third becomes a visible rejection instead of an error.
+func TestStepAppliesClaimReconciliation(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	now := time.Date(2026, 9, 16, 13, 0, 0, 0, time.UTC)
+	current := testFrame(now)
+	created := testEvent("00000000-0000-4000-8000-000000000006", "frame.created", now, current)
+	created.Payload["frame_id"] = current.FrameID
+	if err := store.CreateFrame(ctx, current, created); err != nil {
+		t.Fatal(err)
+	}
+	seed := testEvent("00000000-0000-4000-8000-000000000007", "observation.recorded", now, current)
+	if err := store.Append(ctx, seed); err != nil {
+		t.Fatal(err)
+	}
+	first, err := step.Run(ctx, store, step.Input{Current: current, Emission: cognition.CognitiveEmission{
+		EmissionID: "emission-seed", FrameID: current.FrameID,
+		Observation: []cognition.Observation{{Ref: "event:" + seed.EventID, Interpretation: "available"}},
+		Claims: []cognition.EmittedClaim{
+			{Proposition: "Sum is implemented as a - b", Confidence: 0.9},
+			{Proposition: "the test lives in main_test.go", Confidence: 0.8},
+		},
+	}, NewID: uuidSequence(600), Now: func() time.Time { return now.Add(time.Second) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Claims) != 2 {
+		t.Fatalf("seed step must create two claims: %#v", first.Claims)
+	}
+	wrong, outdated := first.Claims[0], first.Claims[1]
+
+	second, err := step.Run(ctx, store, step.Input{Current: first.Frame, Emission: cognition.CognitiveEmission{
+		EmissionID: "emission-reconcile", FrameID: first.Frame.FrameID,
+		Observation: []cognition.Observation{{Ref: "event:" + seed.EventID, Interpretation: "available"}},
+		Claims: []cognition.EmittedClaim{
+			{Proposition: "the test lives in cmd/app/main_test.go", Confidence: 0.95, Supersedes: "claim:" + outdated.ClaimID},
+		},
+		ClaimOps: []cognition.ClaimOperation{
+			{Op: "refute", Claim: "claim:" + wrong.ClaimID},
+			{Op: "refute", Claim: "claim:00000000-0000-4000-8000-000000000999"},
+		},
+	}, NewID: uuidSequence(700), Now: func() time.Time { return now.Add(2 * time.Second) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refuted, err := store.GetClaim(ctx, wrong.ClaimID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refuted.Status != cognition.ClaimRefuted || refuted.ValidTo == nil {
+		t.Fatalf("claim not refuted: %#v", refuted)
+	}
+	superseded, err := store.GetClaim(ctx, outdated.ClaimID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if superseded.Status != cognition.ClaimSuperseded || superseded.ValidTo == nil {
+		t.Fatalf("claim not superseded: %#v", superseded)
+	}
+	var replacement cognition.Claim
+	for _, claim := range second.Claims {
+		if claim.Proposition == "the test lives in cmd/app/main_test.go" {
+			replacement = claim
+		}
+	}
+	if replacement.ClaimID == "" {
+		t.Fatalf("replacement claim missing: %#v", second.Claims)
+	}
+
+	var transition *protocol.Event
+	for i := range second.Events {
+		if second.Events[i].Type == step.EventFrameTransitioned {
+			transition = &second.Events[i]
+		}
+	}
+	if transition == nil {
+		t.Fatalf("frame.transitioned missing: %#v", second.Events)
+	}
+	encoded, err := json.Marshal(transition.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "claim_ops[1]") || !strings.Contains(string(encoded), "claim not found") {
+		t.Fatalf("missing-op rejection missing from payload: %s", encoded)
+	}
+	kinds := map[string]int{}
+	for _, event := range second.Events {
+		kinds[event.Type]++
+	}
+	if kinds["claim.refuted"] != 1 || kinds["claim.superseded"] != 1 {
+		t.Fatalf("reconciliation events missing: %v", kinds)
+	}
+
+	// Refuting a retired claim is well-formed but impossible — a rejection,
+	// not an error, exactly like the working-set guards.
+	third, err := step.Run(ctx, store, step.Input{Current: second.Frame, Emission: cognition.CognitiveEmission{
+		EmissionID: "emission-retry", FrameID: second.Frame.FrameID,
+		ClaimOps: []cognition.ClaimOperation{{Op: "refute", Claim: "claim:" + wrong.ClaimID}},
+	}, NewID: uuidSequence(800), Now: func() time.Time { return now.Add(3 * time.Second) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retryTransition *protocol.Event
+	for i := range third.Events {
+		if third.Events[i].Type == step.EventFrameTransitioned {
+			retryTransition = &third.Events[i]
+		}
+	}
+	retryEncoded, err := json.Marshal(retryTransition.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(retryEncoded), "is not active") {
+		t.Fatalf("inactive-claim rejection missing: %s", retryEncoded)
+	}
+}
+
 func testFrame(now time.Time) frame.Frame {
 	value := frame.Frame{FrameID: "00000000-0000-4000-8000-000000000001", AgentID: "00000000-0000-4000-8000-000000000002", EpisodeID: "00000000-0000-4000-8000-000000000003", BranchID: "00000000-0000-4000-8000-000000000004", ObjectiveID: "00000000-0000-4000-8000-000000000005", AsOf: now, Focus: frame.Focus{Type: frame.RefQuery, Query: "work"}, Attention: frame.Attention{Deliberate: true}}
 	value.ApplyDefaults()

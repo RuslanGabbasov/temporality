@@ -76,6 +76,30 @@ type EmittedClaim struct {
 	Proposition string      `json:"proposition"`
 	Confidence  float32     `json:"confidence"`
 	Status      ClaimStatus `json:"status"`
+	// Supersedes optionally names an existing claim ("claim:UUID") this claim
+	// replaces. The old claim transitions to superseded with lineage to this
+	// one — reconciliation of a seen tension without inventing new machinery.
+	Supersedes string `json:"supersedes,omitempty"`
+}
+
+// UnmarshalJSON keeps the canonical claim shape and normalizes the common
+// model mistake of a typed ref object in supersedes, mirroring FrameOperation.
+func (e *EmittedClaim) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Proposition string          `json:"proposition"`
+		Confidence  float32         `json:"confidence"`
+		Status      ClaimStatus     `json:"status"`
+		Supersedes  json.RawMessage `json:"supersedes"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	supersedes, err := refFromWire(wire.Supersedes)
+	if err != nil {
+		return fmt.Errorf("claim supersedes %s", err)
+	}
+	e.Proposition, e.Confidence, e.Status, e.Supersedes = wire.Proposition, wire.Confidence, wire.Status, supersedes
+	return nil
 }
 type AttentionTarget struct {
 	Type frame.RefType `json:"type"`
@@ -155,6 +179,33 @@ func (f *FrameOperation) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// ClaimOperation reconciles memory (M16): refute names a claim the model saw
+// — typically through memory_health — as wrong, retiring it from the active
+// base. The runtime never invents these; ids are copied from the packet.
+type ClaimOperation struct {
+	Op    string `json:"op"`
+	Claim string `json:"claim"`
+}
+
+// UnmarshalJSON accepts the canonical string ref and normalizes the common
+// model mistake of a typed ref object {type,id}, mirroring FrameOperation.
+func (c *ClaimOperation) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Op    string          `json:"op"`
+		Claim json.RawMessage `json:"claim"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	claim, err := refFromWire(wire.Claim)
+	if err != nil {
+		return fmt.Errorf("claim op %s", err)
+	}
+	c.Op = wire.Op
+	c.Claim = claim
+	return nil
+}
+
 type CognitiveEmission struct {
 	Schema      string               `json:"schema"`
 	EmissionID  string               `json:"emission_id"`
@@ -165,6 +216,7 @@ type CognitiveEmission struct {
 	Attention   []AttentionOperation `json:"attention"`
 	Actions     []ActionRequest      `json:"actions"`
 	FrameOps    []FrameOperation     `json:"frame_ops"`
+	ClaimOps    []ClaimOperation     `json:"claim_ops"`
 	Completion  *string              `json:"completion"`
 }
 
@@ -267,6 +319,23 @@ func (e *CognitiveEmission) ApplyDefaults() {
 		}
 		e.FrameOps = kept
 	}
+	if e.ClaimOps == nil {
+		e.ClaimOps = []ClaimOperation{}
+	} else {
+		// Unanchored claim ops (empty ref) are dropped, not fatal — mirroring
+		// frame_ops tolerance for recoverable model slips.
+		kept := make([]ClaimOperation, 0, len(e.ClaimOps))
+		for _, op := range e.ClaimOps {
+			if strings.TrimSpace(op.Claim) == "" {
+				continue
+			}
+			kept = append(kept, op)
+		}
+		e.ClaimOps = kept
+	}
+	for i := range e.Claims {
+		e.Claims[i].Supersedes = strings.TrimSpace(e.Claims[i].Supersedes)
+	}
 }
 
 func (e CognitiveEmission) Validate() error {
@@ -341,6 +410,33 @@ func (e CognitiveEmission) Validate() error {
 		}
 		if _, err := ParseRef(op.Ref, true); err != nil {
 			return err
+		}
+	}
+	for i, op := range e.ClaimOps {
+		if op.Op != "refute" {
+			return fmt.Errorf("unsupported claim operation %q", op.Op)
+		}
+		if strings.TrimSpace(op.Claim) == "" {
+			continue
+		}
+		ref, err := ParseRef(op.Claim, false)
+		if err != nil {
+			return fmt.Errorf("claim_ops[%d]: %w", i, err)
+		}
+		if ref.Type != frame.RefClaim {
+			return fmt.Errorf("claim_ops[%d]: must target a claim ref, got %q", i, op.Claim)
+		}
+	}
+	for i, c := range e.Claims {
+		if strings.TrimSpace(c.Supersedes) == "" {
+			continue
+		}
+		ref, err := ParseRef(c.Supersedes, false)
+		if err != nil {
+			return fmt.Errorf("claims[%d].supersedes: %w", i, err)
+		}
+		if ref.Type != frame.RefClaim {
+			return fmt.Errorf("claims[%d].supersedes: must target a claim ref, got %q", i, c.Supersedes)
 		}
 	}
 	return nil

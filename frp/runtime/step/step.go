@@ -77,6 +77,11 @@ type Prepared struct {
 	ModelProvenance    json.RawMessage
 	RendererVersion    string
 	AttentionVersion   string
+	// ClaimTransitions (M16) carries refute/supersede operations resolved by
+	// the guards below; stores apply them atomically with the step. Their
+	// events also travel in Events (between attention and action events) so
+	// the positional insert loops in stores pick them up unchanged.
+	ClaimTransitions []cognition.Transition
 }
 
 type Result struct {
@@ -153,23 +158,105 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 		prepared.Claims = append(prepared.Claims, Claim{Value: value, Event: event})
 		prepared.Events = append(prepared.Events, event)
 	}
-	// M16 memory reliability: what does this emission do to memory? Duplicated
-	// propositions and functional-triple collisions are computed before the
-	// commit, against the claim base the new claims are entering — the step is
-	// deterministic, so replay reproduces the same tensions from the same
-	// state. Nothing is merged or dropped: the tension travels with the
-	// transition event, visible to the debugger and to the next render.
+	// M16 memory reliability: what does this emission do to memory? The claim
+	// base the step enters is loaded once — tension detection (what the new
+	// claims introduce) and claim_ops guards (what the emission retires) both
+	// read it; the step stays deterministic, so replay reproduces the same
+	// outcome from the same state. Nothing is merged or dropped silently:
+	// tensions travel with the transition event, refutations carry lineage.
 	var memoryTensions []cognition.MemoryTension
-	if len(prepared.Claims) > 0 {
-		existingClaims, listErr := store.ListClaims(ctx)
+	var claimBase []cognition.Claim
+	needsClaimBase := len(prepared.Claims) > 0 || len(emission.ClaimOps) > 0
+	for _, emitted := range emission.Claims {
+		if emitted.Supersedes != "" {
+			needsClaimBase = true
+		}
+	}
+	if needsClaimBase {
+		var listErr error
+		claimBase, listErr = store.ListClaims(ctx)
 		if listErr != nil {
 			return Result{}, listErr
 		}
+	}
+	if len(prepared.Claims) > 0 {
 		incomingClaims := make([]cognition.Claim, 0, len(prepared.Claims))
 		for _, claim := range prepared.Claims {
 			incomingClaims = append(incomingClaims, claim.Value)
 		}
-		memoryTensions = cognition.NewTensions(existingClaims, incomingClaims)
+		memoryTensions = cognition.NewTensions(claimBase, incomingClaims)
+	}
+	// Claim reconciliation guards: the model may refute a claim it saw, or
+	// supersede one with a claim emitted in this same step. Schema-level
+	// failures (unknown op, malformed ref) already failed validation; here a
+	// wrong-but-well-formed target is a visible Rejection, not an error — the
+	// same contract as the working-set guards.
+	claimRejections := make([]cognition.Rejection, 0)
+	claimTransitions := make([]cognition.Transition, 0)
+	targeted := make(map[string]struct{})
+	claimByID := make(map[string]cognition.Claim, len(claimBase))
+	for _, claim := range claimBase {
+		claimByID[claim.ClaimID] = claim
+	}
+	resolveTarget := func(ref, path string) (cognition.Claim, bool) {
+		parsed, parseErr := cognition.ParseRef(ref, false)
+		if parseErr != nil {
+			claimRejections = append(claimRejections, cognition.Rejection{Path: path, Reason: fmt.Sprintf("invalid claim ref: %v", parseErr)})
+			return cognition.Claim{}, false
+		}
+		claim, exists := claimByID[parsed.ID]
+		if !exists {
+			claimRejections = append(claimRejections, cognition.Rejection{Path: path, Reason: "claim not found"})
+			return cognition.Claim{}, false
+		}
+		if _, duplicate := targeted[claim.ClaimID]; duplicate {
+			claimRejections = append(claimRejections, cognition.Rejection{Path: path, Reason: "claim already targeted by this emission"})
+			return cognition.Claim{}, false
+		}
+		if !cognition.CanTransition(claim.Status, cognition.ClaimRefuted) {
+			claimRejections = append(claimRejections, cognition.Rejection{Path: path, Reason: fmt.Sprintf("claim %q is not active", claim.Status)})
+			return cognition.Claim{}, false
+		}
+		targeted[claim.ClaimID] = struct{}{}
+		return claim, true
+	}
+	for i, op := range emission.ClaimOps {
+		claim, ok := resolveTarget(op.Claim, fmt.Sprintf("claim_ops[%d]", i))
+		if !ok {
+			continue
+		}
+		event, eventErr := newEvent("claim.refuted", map[string]any{"claim_id": claim.ClaimID, "emission_id": emission.EmissionID})
+		if eventErr != nil {
+			return Result{}, eventErr
+		}
+		transition := cognition.Transition{Event: event, ClaimID: claim.ClaimID, ToStatus: cognition.ClaimRefuted, ValidAt: now}
+		if err = transition.Validate(); err != nil {
+			return Result{}, err
+		}
+		claimTransitions = append(claimTransitions, transition)
+	}
+	for j, emitted := range emission.Claims {
+		if emitted.Supersedes == "" {
+			continue
+		}
+		path := fmt.Sprintf("claims[%d].supersedes", j)
+		claim, ok := resolveTarget(emitted.Supersedes, path)
+		if !ok {
+			continue
+		}
+		event, eventErr := newEvent("claim.superseded", map[string]any{"claim_id": claim.ClaimID, "superseded_by": prepared.Claims[j].Value.ClaimID, "emission_id": emission.EmissionID})
+		if eventErr != nil {
+			return Result{}, eventErr
+		}
+		transition := cognition.Transition{Event: event, ClaimID: claim.ClaimID, ToStatus: cognition.ClaimSuperseded, ValidAt: now}
+		if err = transition.Validate(); err != nil {
+			return Result{}, err
+		}
+		claimTransitions = append(claimTransitions, transition)
+	}
+	prepared.ClaimTransitions = claimTransitions
+	for _, transition := range claimTransitions {
+		prepared.Events = append(prepared.Events, transition.Event)
 	}
 	for _, suggested := range input.SuggestedAttention {
 		if err = suggested.Validate(); err != nil {
@@ -220,8 +307,12 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 	// trail answers not only what the frame became, but which parts of the
 	// emission the runtime refused — and why.
 	transitionPayload := map[string]any{"parent_frame_id": input.Current.FrameID, "frame_id": decision.Frame.FrameID, "emission_id": emission.EmissionID}
-	if len(decision.Rejections) > 0 {
-		transitionPayload["rejections"] = decision.Rejections
+	rejections := decision.Rejections
+	if len(claimRejections) > 0 {
+		rejections = append(append([]cognition.Rejection{}, rejections...), claimRejections...)
+	}
+	if len(rejections) > 0 {
+		transitionPayload["rejections"] = rejections
 	}
 	if len(decision.Warnings) > 0 {
 		transitionPayload["warnings"] = decision.Warnings

@@ -73,6 +73,23 @@ func TestModelStepFullCrashRecovery(t *testing.T) {
 		store.Close()
 		t.Fatal(err)
 	}
+	// Two claims the emission will reconcile (M16): one to refute, one to
+	// supersede with the corrected proposition. Propositions carry a run-unique
+	// suffix because the suite shares the claim base across runs — a repeated
+	// fixed proposition would itself accumulate duplicate tensions.
+	runID := newTestUUID()
+	commitReconciliationClaim := func(label string) cognition.Claim {
+		event := recoveryEvent(newTestUUID(), "claim.candidate", now, parent, map[string]any{"proposition": label})
+		claim := cognition.Claim{ClaimID: newTestUUID(), Proposition: label, Confidence: 0.9, Status: cognition.ClaimCandidate, CreatedEvent: event.EventID, ValidFrom: now}
+		claim.ApplyDefaults(now)
+		if err = store.CommitClaim(ctx, cognition.Commit{Event: event, Claim: claim}); err != nil {
+			store.Close()
+			t.Fatal(err)
+		}
+		return claim
+	}
+	wrongClaim := commitReconciliationClaim("wrong fact " + runID)
+	staleClaim := commitReconciliationClaim("stale fact " + runID)
 
 	request := render.Request{FrameID: parent.FrameID, ObjectiveID: goal.ObjectiveID, BudgetTokens: 8000}
 	recordedRender, err := render.New(store).Render(ctx, request)
@@ -83,11 +100,12 @@ func TestModelStepFullCrashRecovery(t *testing.T) {
 	emission := cognition.CognitiveEmission{
 		Schema: cognition.EmissionSchema, EmissionID: newTestUUID(), FrameID: parent.FrameID,
 		Observation: []cognition.Observation{{Ref: "event:" + observed.EventID, Interpretation: "ready after recovery"}},
-		Reasoning:   []cognition.Reasoning{},
-		Claims:      []cognition.EmittedClaim{{Proposition: "the model step is durable", Confidence: 0.9}},
-		Attention:   []cognition.AttentionOperation{{Op: "attend", Target: cognition.AttentionTarget{Type: frame.RefQuery, Text: "durable evidence"}}},
-		Actions:     []cognition.ActionRequest{},
-		FrameOps:    []cognition.FrameOperation{},
+		Reasoning:  []cognition.Reasoning{},
+		Claims:    []cognition.EmittedClaim{{Proposition: "the model step is durable " + runID, Confidence: 0.9, Supersedes: "claim:" + staleClaim.ClaimID}},
+		Attention: []cognition.AttentionOperation{{Op: "attend", Target: cognition.AttentionTarget{Type: frame.RefQuery, Text: "durable evidence"}}},
+		Actions:   []cognition.ActionRequest{},
+		FrameOps:  []cognition.FrameOperation{},
+		ClaimOps: []cognition.ClaimOperation{{Op: "refute", Claim: "claim:" + wrongClaim.ClaimID}},
 	}
 	provenance := model.Provenance{Adapter: "recorded", Model: "crash-recovery-fixture"}
 	service := modelstep.Service{Store: store, Adapter: &model.RecordedAdapter{Emissions: []cognition.CognitiveEmission{emission}}, ModelProvenance: provenance, NewID: newTestUUID, Now: func() time.Time { return now.Add(time.Second) }}
@@ -167,17 +185,40 @@ func TestModelStepFullCrashRecovery(t *testing.T) {
 		t.Fatalf("recovered emission differs: %#v", durable.Emission)
 	}
 
+	// Claim reconciliation must survive the crash too: the refutation and
+	// supersession were part of the step's atomic commit.
+	refutedClaim, err := reopened.GetClaim(ctx, wrongClaim.ClaimID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refutedClaim.Status != cognition.ClaimRefuted || refutedClaim.ValidTo == nil {
+		t.Fatalf("claim not durably refuted: %#v", refutedClaim)
+	}
+	supersededClaim, err := reopened.GetClaim(ctx, staleClaim.ClaimID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if supersededClaim.Status != cognition.ClaimSuperseded || supersededClaim.ValidTo == nil {
+		t.Fatalf("claim not durably superseded: %#v", supersededClaim)
+	}
+
 	events, err := reopened.List(ctx, substrate.EventFilter{EpisodeID: parent.EpisodeID, BranchID: parent.BranchID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	hasClaim, hasAttention := false, false
+	hasClaim, hasAttention, hasRefuted, hasSuperseded := false, false, false, false
 	for _, event := range events {
 		if event.Type == execution.EventExecutionStarted || event.Type == execution.EventExecutionCompleted {
 			t.Fatalf("executor event exists for action-free model step: %#v", event)
 		}
 		if event.Type == stepRuntime.EventClaimCandidate {
 			hasClaim = true
+		}
+		if event.Type == "claim.refuted" {
+			hasRefuted = true
+		}
+		if event.Type == "claim.superseded" {
+			hasSuperseded = true
 		}
 		if event.Type == stepRuntime.EventAttentionSelected || event.Type == stepRuntime.EventAttentionSuggested {
 			hasAttention = true
@@ -188,6 +229,9 @@ func TestModelStepFullCrashRecovery(t *testing.T) {
 	}
 	if !hasClaim || !hasAttention {
 		t.Fatalf("expected durable claim and attention events, claim=%v attention=%v", hasClaim, hasAttention)
+	}
+	if !hasRefuted || !hasSuperseded {
+		t.Fatalf("expected durable reconciliation events, refuted=%v superseded=%v", hasRefuted, hasSuperseded)
 	}
 }
 

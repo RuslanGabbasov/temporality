@@ -24,7 +24,7 @@ export interface Frame {
   [key: string]: unknown
 }
 
-export type FrameSection = 'focus' | 'map' | 'periphery' | 'working_set' | 'procedures' | 'recent'
+export type FrameSection = 'focus' | 'map' | 'periphery' | 'working_set' | 'procedures' | 'recent' | 'attention_health' | 'memory_health' | 'identity_health'
 
 export interface Execution {
   id?: string

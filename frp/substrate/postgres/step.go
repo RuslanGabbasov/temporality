@@ -75,6 +75,31 @@ func (s *Store) CommitStep(ctx context.Context, prepared stepRuntime.Prepared) (
 			return stepRuntime.Result{}, err
 		}
 	}
+	// Claim reconciliation (M16): refute/supersede transitions ride the same
+	// transaction. Their events were inserted by the loop above (they sit in
+	// the attention range); this block retires the claims themselves. FOR
+	// UPDATE serializes concurrent steppers against the same claim base the
+	// runtime resolved the ops against. The claim_transition GUC unlocks the
+	// canonical-transition trigger, exactly like Store.TransitionClaim.
+	if len(prepared.ClaimTransitions) > 0 {
+		if _, err = tx.Exec(ctx, `SELECT set_config('temporality.claim_transition','1',true)`); err != nil {
+			return stepRuntime.Result{}, err
+		}
+	}
+	for _, transition := range prepared.ClaimTransitions {
+		var from cognition.ClaimStatus
+		if err = tx.QueryRow(ctx, `SELECT status FROM claims WHERE claim_id=$1 FOR UPDATE`, transition.ClaimID).Scan(&from); errors.Is(err, pgx.ErrNoRows) {
+			return stepRuntime.Result{}, cognition.ErrClaimNotFound
+		} else if err != nil {
+			return stepRuntime.Result{}, err
+		}
+		if !cognition.CanTransition(from, transition.ToStatus) {
+			return stepRuntime.Result{}, fmt.Errorf("invalid claim transition %s -> %s", from, transition.ToStatus)
+		}
+		if _, err = tx.Exec(ctx, `UPDATE claims SET status=$1, confidence=COALESCE($2, confidence), valid_to=$3 WHERE claim_id=$4`, transition.ToStatus, transition.Confidence, transition.ValidAt, transition.ClaimID); err != nil {
+			return stepRuntime.Result{}, err
+		}
+	}
 	executions := make([]execution.Execution, 0, len(prepared.Actions))
 	for _, action := range prepared.Actions {
 		if err = insertStepAction(ctx, tx, action); err != nil {

@@ -23,7 +23,7 @@ import (
 	"github.com/temporality-project/temporality/frp/substrate"
 )
 
-const Version = "render-0.4.2"
+const Version = "render-0.4.3"
 
 const (
 	procedureMatchThreshold = 0.1
@@ -40,6 +40,18 @@ const (
 	// base can hold more tension groups than any frame needs to see at once,
 	// and diagnostics must never make a packet unrenderable.
 	maxMemoryTensions = 8
+	// maxCommitments bounds the identity anchor (M16 re-anchoring): the frame
+	// must show the agent its own live positions, not its entire claim history.
+	maxCommitments = 6
+	// maxIdentityTensions bounds the self-consistency groups listed in
+	// identity_health; the full detail already travels in memory_health.
+	maxIdentityTensions = 4
+	// maxIdentityDepth caps the parent-chain walk counting the agent's steps.
+	maxIdentityDepth = 128
+	// retiredChurnThreshold: retiring one own commitment is reconciliation
+	// (health); a pattern of retracting own positions is drift and only then
+	// worth a diagnostic section.
+	retiredChurnThreshold = 2
 )
 
 // ambientHiddenEvents are attention's own bookkeeping: recording what was
@@ -180,10 +192,29 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	// M16 memory health: which parts of the claim base cannot be trusted
 	// blindly — duplicated propositions, functional-triple contradictions.
 	// Stated as facts with claim ids; reconciliation stays the model's move.
-	memoryItems, memErr := r.memoryHealth(ctx)
+	claims, err := r.stores.ListClaims(ctx)
+	if err != nil {
+		return Packet{}, err
+	}
+	// The claim base is projected onto the render cutoff: a claim is part of
+	// memory from its ValidFrom until its ValidTo. Without the projection a
+	// time-travel render would mix present claim status into a historical
+	// packet — a commitment retired after the cutoff would silently vanish
+	// from the re-rendered anchor and tensions, breaking the "what did the
+	// agent know at this step" guarantee.
+	liveClaims := claims
+	if cutoff != nil {
+		liveClaims = claimsLiveAt(claims, *cutoff)
+	}
+	memoryItems, memErr := r.memoryHealth(ctx, liveClaims)
 	if memErr != nil {
 		return Packet{}, memErr
 	}
+	// M16 identity: the anchor re-grounds the agent in who it is, how deep it
+	// is into the episode, and what it has itself committed to; identity_health
+	// adds self-consistency diagnostics when the agent disagrees with its own
+	// positions. Both derive from claim provenance (authorship), not content.
+	anchor := r.identityAnchor(ctx, current, events, liveClaims)
 	working := make([]any, 0, len(current.WorkingSet))
 	for _, ref := range current.WorkingSet {
 		item, resolveErr := r.refItem(ctx, ref)
@@ -258,7 +289,7 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	}
 	outside := ambient.Considered - len(ambient.Selected)
 	hint := fmt.Sprintf("%d attention candidates are outside the frame", outside)
-	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{map[string]any{"agent_id": current.AgentID, "episode_id": current.EpisodeID, "branch_id": current.BranchID}}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: mapItems}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "attention_health", Attention: "deliberate", Items: []any{health}}}
+	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{anchor}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: mapItems}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "attention_health", Attention: "deliberate", Items: []any{health}}}
 	// memory_health is deliberately omitted on a clean claim base: tension
 	// diagnostics are rare by design, and an always-present empty section
 	// would tax every render's budget (a minimal packet once failed its budget
@@ -266,6 +297,11 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	// duplicates.
 	if len(memoryItems) > 0 {
 		sections = append(sections, Section{Kind: "memory_health", Attention: "deliberate", Items: memoryItems})
+	}
+	// identity_health is omitted while the agent is self-consistent: an empty
+	// diagnostic section on every frame would tax the budget for silence.
+	if identityItem, needed := identityHealth(current, events, claims, cutoff); needed {
+		sections = append(sections, Section{Kind: "identity_health", Attention: "deliberate", Items: []any{identityItem}})
 	}
 	sections = append(sections, Section{Kind: "periphery", Attention: "ambient", Items: periphery}, Section{Kind: "working_set", Attention: "deliberate", Items: working}, Section{Kind: "procedures", Attention: "ambient", Items: procedureItems}, Section{Kind: "recent", Attention: "ambient", Items: recent})
 	// The affordances section closes the cognition→action loop: the model can
@@ -287,7 +323,7 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	// cannot reconcile memory either), then the weakest map candidates, then
 	// procedure matches. Sections the model acts from (identity, objective,
 	// focus, affordances, working set) are never trimmed.
-	trimOrder := []string{"recent", "periphery", "memory_health", "map", "procedures"}
+	trimOrder := []string{"recent", "periphery", "memory_health", "identity_health", "map", "procedures"}
 	for {
 		packet.TokenUsage.Estimated = estimate(packet)
 		if packet.TokenUsage.Estimated <= request.BudgetTokens {
@@ -359,11 +395,7 @@ func (r *Renderer) attentionHealth(ctx context.Context, current frame.Frame) map
 // propositions and functional-triple contradictions — as packet facts with
 // claim ids and confidences. The renderer does not rank or resolve them:
 // reconciliation (refute, supersede, or re-assert) is the model's move.
-func (r *Renderer) memoryHealth(ctx context.Context) ([]any, error) {
-	claims, err := r.stores.ListClaims(ctx)
-	if err != nil {
-		return nil, err
-	}
+func (r *Renderer) memoryHealth(ctx context.Context, claims []cognition.Claim) ([]any, error) {
 	tensions := cognition.AllTensions(claims)
 	if len(tensions) > maxMemoryTensions {
 		tensions = tensions[:maxMemoryTensions]
@@ -383,11 +415,158 @@ func (r *Renderer) memoryHealth(ctx context.Context) ([]any, error) {
 			if !ok {
 				continue
 			}
-			members = append(members, map[string]any{"claim_id": claim.ClaimID, "proposition": claim.Proposition, "confidence": claim.Confidence})
+			members = append(members, map[string]any{"claim_id": claim.ClaimID, "ref": "claim:" + claim.ClaimID, "proposition": claim.Proposition, "confidence": claim.Confidence})
 		}
 		items = append(items, map[string]any{"kind": tension.Kind, "detail": tension.Detail, "claims": members})
 	}
 	return items, nil
+}
+
+// selfAuthoredEvents maps the event ids in this frame's branch that were
+// authored by the frame's own agent. Claim provenance (created_event) decides
+// authorship: a claim whose creating event carries the agent's id is the
+// agent's own commitment, while ingestion/bootstrap claims carry no agent id
+// and stay imported knowledge. This is the M16 self-model boundary: what the
+// agent asserted itself vs. what the world told it.
+func selfAuthoredEvents(current frame.Frame, events []protocol.Event) map[string]struct{} {
+	authored := make(map[string]struct{})
+	for _, event := range events {
+		if event.AgentID != "" && event.AgentID == current.AgentID {
+			authored[event.EventID] = struct{}{}
+		}
+	}
+	return authored
+}
+
+// claimsLiveAt projects the claim base onto a render cutoff: a claim is part
+// of memory from its ValidFrom until its ValidTo. The projection is what
+// makes time-travel renders honest — status columns describe the present,
+// while the packet must describe the frame's moment.
+func claimsLiveAt(claims []cognition.Claim, at time.Time) []cognition.Claim {
+	live := make([]cognition.Claim, 0, len(claims))
+	for _, claim := range claims {
+		if claim.ValidFrom.After(at) {
+			continue
+		}
+		if claim.ValidTo != nil && !claim.ValidTo.After(at) {
+			continue
+		}
+		live = append(live, claim)
+	}
+	return live
+}
+
+// identityAnchor builds the identity section item: who this agent is, how
+// deep it stands in the episode, and which of its own commitments are still
+// live. This is M16 re-anchoring — a long episode drifts not because memory
+// rots but because the model forgets what it already committed to; the anchor
+// puts those positions back into every frame, newest first, bounded. Claims
+// arrive already projected onto the render cutoff.
+func (r *Renderer) identityAnchor(ctx context.Context, current frame.Frame, events []protocol.Event, claims []cognition.Claim) map[string]any {
+	steps := 0
+	child := current
+	for child.ParentFrameID != "" && steps < maxIdentityDepth {
+		parent, err := r.stores.GetFrame(ctx, child.ParentFrameID)
+		if err != nil {
+			break
+		}
+		steps++
+		child = parent
+	}
+	authored := selfAuthoredEvents(current, events)
+	own := make([]cognition.Claim, 0)
+	for _, claim := range claims {
+		if _, ok := authored[claim.CreatedEvent]; ok {
+			own = append(own, claim)
+		}
+	}
+	sort.Slice(own, func(i, j int) bool {
+		if !own[i].ValidFrom.Equal(own[j].ValidFrom) {
+			return own[i].ValidFrom.After(own[j].ValidFrom)
+		}
+		return own[i].ClaimID < own[j].ClaimID
+	})
+	if len(own) > maxCommitments {
+		own = own[:maxCommitments]
+	}
+	commitments := make([]any, 0, len(own))
+	for _, claim := range own {
+		commitments = append(commitments, map[string]any{"ref": "claim:" + claim.ClaimID, "proposition": claim.Proposition, "confidence": claim.Confidence})
+	}
+	return map[string]any{"agent_id": current.AgentID, "episode_id": current.EpisodeID, "branch_id": current.BranchID, "objective_id": current.ObjectiveID, "steps": steps, "commitments": commitments}
+}
+
+// identityHealth reports the agent's self-consistency (M16 identity drift):
+// tension groups among its own live claims mean the agent disagrees with
+// itself, and a growing pile of retired own commitments means its self-model
+// keeps being rewritten. Both are stated as facts with claim refs;
+// reconciliation stays the model's move via claim_ops. Groups are computed
+// over the agent's own claims only — mixed groups (own claim vs imported
+// knowledge) are memory tensions to resolve against the world, not against
+// itself. The second return is false when the agent is self-consistent — no
+// section renders at all.
+func identityHealth(current frame.Frame, events []protocol.Event, claims []cognition.Claim, cutoff *time.Time) (map[string]any, bool) {
+	if cutoff == nil {
+		return nil, false
+	}
+	authored := selfAuthoredEvents(current, events)
+	if len(authored) == 0 {
+		return nil, false
+	}
+	selfLive := make([]cognition.Claim, 0)
+	retired := make([]string, 0)
+	for _, claim := range claims {
+		if _, ok := authored[claim.CreatedEvent]; !ok {
+			continue
+		}
+		if claim.ValidFrom.After(*cutoff) {
+			continue
+		}
+		if claim.ValidTo == nil || claim.ValidTo.After(*cutoff) {
+			selfLive = append(selfLive, claim)
+		} else {
+			retired = append(retired, claim.ClaimID)
+		}
+	}
+	sort.Strings(retired)
+	groups := cognition.AllTensions(selfLive)
+	if len(groups) == 0 && len(retired) < retiredChurnThreshold {
+		return nil, false
+	}
+	health := map[string]any{"self_tension_groups": len(groups), "retired_commitments": len(retired)}
+	if len(groups) > 0 {
+		listed := groups
+		if len(listed) > maxIdentityTensions {
+			listed = listed[:maxIdentityTensions]
+		}
+		tensions := make([]map[string]any, 0, len(listed))
+		for _, tension := range listed {
+			refs := make([]string, 0, len(tension.ClaimIDs))
+			for _, id := range tension.ClaimIDs {
+				refs = append(refs, "claim:"+id)
+			}
+			tensions = append(tensions, map[string]any{"kind": tension.Kind, "claim_refs": refs})
+		}
+		health["tensions"] = tensions
+	}
+	if len(retired) > 0 {
+		capped := retired
+		if len(capped) > maxIdentityTensions {
+			capped = capped[:maxIdentityTensions]
+		}
+		refs := make([]string, 0, len(capped))
+		for _, id := range capped {
+			refs = append(refs, "claim:"+id)
+		}
+		health["retired"] = refs
+	}
+	switch {
+	case len(groups) > 0:
+		health["hint"] = "some commitments contradict each other or duplicate your own position: reconcile them with claim_ops, copying refs exactly"
+	case len(retired) >= retiredChurnThreshold:
+		health["hint"] = fmt.Sprintf("you have retracted %d of your own commitments so far: re-anchor on the objective before committing further", len(retired))
+	}
+	return health, true
 }
 
 func selectAmbient(current frame.Frame, goal objective.Objective, events []protocol.Event, regions []projection.Region, edges []projection.Edge, entities []entity.Entity, entityRelations []entity.EntityRelation) (attention.Result, error) {
