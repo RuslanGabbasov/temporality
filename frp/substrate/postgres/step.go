@@ -64,6 +64,13 @@ func (s *Store) CommitStep(ctx context.Context, prepared stepRuntime.Prepared) (
 		if _, err = tx.Exec(ctx, `INSERT INTO claims(claim_id,protocol,version,proposition,confidence,status,created_event,valid_from,valid_to) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, c.ClaimID, c.Protocol, c.Version, c.Proposition, c.Confidence, c.Status, c.CreatedEvent, c.ValidFrom, c.ValidTo); err != nil {
 			return stepRuntime.Result{}, err
 		}
+		// Pivot provenance: evidence refs were verified against events by
+		// validateStepRefsPostgres, so the insert cannot cite an unobserved fact.
+		for _, evidenceID := range candidate.Evidence {
+			if _, err = tx.Exec(ctx, `INSERT INTO claim_evidence (claim_id,evidence_event) VALUES ($1,$2) ON CONFLICT DO NOTHING`, c.ClaimID, evidenceID); err != nil {
+				return stepRuntime.Result{}, err
+			}
+		}
 		claims = append(claims, c)
 	}
 
@@ -96,7 +103,13 @@ func (s *Store) CommitStep(ctx context.Context, prepared stepRuntime.Prepared) (
 		if !cognition.CanTransition(from, transition.ToStatus) {
 			return stepRuntime.Result{}, fmt.Errorf("invalid claim transition %s -> %s", from, transition.ToStatus)
 		}
-		if _, err = tx.Exec(ctx, `UPDATE claims SET status=$1, confidence=COALESCE($2, confidence), valid_to=$3 WHERE claim_id=$4`, transition.ToStatus, transition.Confidence, transition.ValidAt, transition.ClaimID); err != nil {
+		// Only retirement closes validity: a confirm keeps the claim open
+		// (valid_to NULL) exactly like Store.TransitionClaim does.
+		var validTo any
+		if transition.ToStatus == cognition.ClaimRefuted || transition.ToStatus == cognition.ClaimSuperseded {
+			validTo = transition.ValidAt
+		}
+		if _, err = tx.Exec(ctx, `UPDATE claims SET status=$1, confidence=COALESCE($2, confidence), valid_to=$3 WHERE claim_id=$4`, transition.ToStatus, transition.Confidence, validTo, transition.ClaimID); err != nil {
 			return stepRuntime.Result{}, err
 		}
 	}
@@ -194,6 +207,17 @@ func validateStepRefsPostgres(ctx context.Context, tx pgx.Tx, prepared stepRunti
 			return fmt.Errorf("observation ref %s: %w", observation.Ref, err)
 		}
 	}
+	// Evidence must cite events that already exist — a claim cannot be backed
+	// by a fact that was never observed (M13 invariant, now applied to model
+	// claims too). Same contract as observation refs: a hallucinated id fails
+	// the step.
+	for _, candidate := range prepared.Claims {
+		for _, evidenceID := range candidate.Evidence {
+			if err := stepRefExists(ctx, tx, frame.Ref{Type: frame.RefEvent, ID: evidenceID}); err != nil {
+				return fmt.Errorf("claim %s evidence %s: %w", candidate.Value.ClaimID, evidenceID, err)
+			}
+		}
+	}
 	for _, op := range prepared.Decision.Transition.Operations {
 		if op.Ref != nil {
 			if err := stepRefExists(ctx, tx, *op.Ref); err != nil {
@@ -210,7 +234,7 @@ func validateStepRefsPostgres(ctx context.Context, tx pgx.Tx, prepared stepRunti
 }
 
 func stepRefExists(ctx context.Context, tx pgx.Tx, ref frame.Ref) error {
-	queries := map[frame.RefType]string{frame.RefEvent: `SELECT 1 FROM events WHERE event_id=$1`, frame.RefClaim: `SELECT 1 FROM claims WHERE claim_id=$1`, frame.RefExecution: `SELECT 1 FROM executions WHERE execution_id=$1`, frame.RefRegion: `SELECT 1 FROM regions WHERE region_id=$1`}
+	queries := map[frame.RefType]string{frame.RefEvent: `SELECT 1 FROM events WHERE event_id=$1`, frame.RefClaim: `SELECT 1 FROM claims WHERE claim_id=$1`, frame.RefExecution: `SELECT 1 FROM executions WHERE execution_id=$1`, frame.RefRegion: `SELECT 1 FROM regions WHERE region_id=$1`, frame.RefEntity: `SELECT 1 FROM entities WHERE entity_id=$1`}
 	query, ok := queries[ref.Type]
 	if !ok {
 		return fmt.Errorf("unsupported ref type %q", ref.Type)

@@ -31,7 +31,13 @@ func TestAtomicStepAPI(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Claims) != 1 || len(result.Executions) != 1 || len(result.Events) != 5 || result.Frame.Revision != 1 {
+	focusChanged := 0
+	for _, event := range result.Events {
+		if event.Type == runtimeStep.EventFocusChanged {
+			focusChanged++
+		}
+	}
+	if len(result.Claims) != 1 || len(result.Executions) != 1 || len(result.Events) != 6 || focusChanged != 1 || result.Frame.Revision != 1 {
 		t.Fatalf("unexpected step result: %#v", result)
 	}
 }

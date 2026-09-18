@@ -233,7 +233,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	renderBudget := frameValue.Budget.Tokens
 	renderer, supported := s.store.(render.Stores)
 	if supported {
-		packet, renderErr := render.New(renderer).Render(r.Context(), render.Request{FrameID: frameID, ObjectiveID: objectiveID, BudgetTokens: renderBudget})
+		packet, renderErr := render.New(renderer).Render(r.Context(), render.Request{FrameID: frameID, ObjectiveID: objectiveID, BudgetTokens: renderBudget, WorldID: bound.WorldID})
 		if renderErr != nil {
 			s.log.Error("bootstrap render", "error", renderErr)
 		} else {

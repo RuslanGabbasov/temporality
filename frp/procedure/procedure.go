@@ -156,7 +156,14 @@ func (p Procedure) Validate() error {
 	return nil
 }
 
-type Filter struct{ EpisodeID string }
+// Filter selects procedures. EpisodeID keeps the classic single-episode read;
+// Episodes widens the scope to a set of episodes (the longitudinal path: the
+// renderer passes every episode that acted in the world so prior episodes'
+// procedures stay reusable). An empty filter selects every stored procedure.
+type Filter struct {
+	EpisodeID string
+	Episodes  []string
+}
 
 type Store interface {
 	ReplaceProcedures(context.Context, string, []Procedure) error

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -24,7 +25,7 @@ import (
 	"github.com/temporality-project/temporality/frp/substrate"
 )
 
-const Version = "render-0.4.4"
+const Version = "render-0.5.0"
 
 const (
 	procedureMatchThreshold = 0.1
@@ -57,6 +58,16 @@ const (
 	// lists: a pathological loop (or a polluted shared database) can grow a
 	// duplicate group far beyond what any frame needs to see to reconcile it.
 	maxTensionMembers = 8
+	// maxWorld* bound the world_memory groups (pivot Этап 4): compact and
+	// structured replaces the old flat top-24-by-confidence list that made
+	// speculation indistinguishable from fact. Facts matter most, so they get
+	// the largest share; trimming later drops groups from the end (hypotheses
+	// first) because sections trim from the tail.
+	maxWorldConfirmed   = 8
+	maxWorldHypotheses  = 6
+	maxWorldRefuted     = 6
+	maxWorldInvestigated = 6
+	maxWorldEvidenceRefs = 2
 )
 
 // ambientHiddenEvents are attention's own bookkeeping: recording what was
@@ -81,6 +92,11 @@ type Request struct {
 	ObjectiveID  string                  `json:"objective_id"`
 	BudgetTokens int                     `json:"budget_tokens"`
 	Affordances  []affordance.Definition `json:"affordances,omitempty"`
+	// WorldID optionally binds the render to a declared world (M11). When set,
+	// the packet additionally carries the world's durable memory — claims and
+	// procedures prior episodes built in that world — so a new episode starts
+	// on accumulated knowledge instead of an empty substrate (M13/M15).
+	WorldID string `json:"world_id,omitempty"`
 	// AsOf is an optional memory cutoff. The agent loop renders with nil so the
 	// frame sees everything committed so far — including observations produced
 	// by its own previous actions after that frame was created. Time-travel
@@ -149,11 +165,73 @@ type Stores interface {
 	objective.Store
 	cognition.Store
 }
-type Renderer struct{ stores Stores }
 
-func New(stores Stores) *Renderer { return &Renderer{stores: stores} }
+// worldEpisodeStore is the optional capability behind longitudinal procedures:
+// which episodes acted in a world. Postgres and the in-memory store implement
+// it; stores without it keep procedures episode-scoped.
+type worldEpisodeStore interface {
+	ListWorldEpisodes(context.Context, string) ([]string, error)
+}
+
+// uniqueEpisodes dedupes an episode scope while keeping the current episode
+// first (callers rely on deterministic ordering for reproducible renders).
+func uniqueEpisodes(episodes []string) []string {
+	seen := make(map[string]struct{}, len(episodes))
+	result := make([]string, 0, len(episodes))
+	for _, episode := range episodes {
+		if episode == "" {
+			continue
+		}
+		if _, duplicate := seen[episode]; duplicate {
+			continue
+		}
+		seen[episode] = struct{}{}
+		result = append(result, episode)
+	}
+	return result
+}
+// World-memory delivery modes. The default (all) is the pivot behavior:
+// prior-episode knowledge arrives grouped by state — confirmed, refuted,
+// investigated, hypotheses. The confirmed mode serves the warm-facts
+// benchmark (pivot TZ §16 C): prior FACTS only, without refuted paths,
+// investigation history or live hypotheses, so the experiment can tell the
+// value of facts apart from the value of the investigation story.
+const (
+	WorldMemoryModeAll       = "all"
+	WorldMemoryModeConfirmed = "confirmed"
+)
+
+type Renderer struct {
+	stores           Stores
+	worldMemoryMode  string
+	worldMemoryError error
+}
+
+func New(stores Stores) *Renderer { return NewWithMode(stores, WorldMemoryModeFromEnv()) }
+
+// NewWithMode builds a renderer with an explicit world-memory mode; an
+// unknown mode is remembered and fails every Render loudly rather than
+// silently degrading into a different memory policy.
+func NewWithMode(stores Stores, mode string) *Renderer {
+	switch mode {
+	case "", WorldMemoryModeAll:
+		return &Renderer{stores: stores, worldMemoryMode: WorldMemoryModeAll}
+	case WorldMemoryModeConfirmed:
+		return &Renderer{stores: stores, worldMemoryMode: WorldMemoryModeConfirmed}
+	default:
+		return &Renderer{stores: stores, worldMemoryMode: mode, worldMemoryError: fmt.Errorf("unknown TEMPORALITY_WORLD_MEMORY_MODE %q (want %q or %q)", mode, WorldMemoryModeAll, WorldMemoryModeConfirmed)}
+	}
+}
+
+// WorldMemoryModeFromEnv reads the process-wide world-memory mode. The env
+// knob exists for the benchmark's phase-scoped runtimes; a typo fails renders
+// instead of quietly running the wrong experiment arm.
+func WorldMemoryModeFromEnv() string { return os.Getenv("TEMPORALITY_WORLD_MEMORY_MODE") }
 
 func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) {
+	if r.worldMemoryError != nil {
+		return Packet{}, r.worldMemoryError
+	}
 	if request.FrameID == "" || request.ObjectiveID == "" {
 		return Packet{}, errors.New("frame_id and objective_id are required")
 	}
@@ -223,6 +301,19 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	if memErr != nil {
 		return Packet{}, memErr
 	}
+	// Longitudinal memory (pivot Этап 4): a frame bound to a world sees the
+	// durable knowledge prior episodes built there — delivered by knowledge
+	// STATE, not by confidence rank: confirmed facts first, refuted hypotheses
+	// as explicit "already checked, do not repeat" history, prior investigation
+	// targets, and only then live hypotheses. A refuted claim must never look
+	// like a fact, and a high-confidence guess must never outrank a cited fact.
+	worldMemory := []any{}
+	if request.WorldID != "" {
+		worldMemory, err = r.worldMemoryItems(ctx, request.WorldID, current, episodeClaims, cutoff)
+		if err != nil {
+			return Packet{}, err
+		}
+	}
 	// M16 identity: the anchor re-grounds the agent in who it is, how deep it
 	// is into the episode, and what it has itself committed to; identity_health
 	// adds self-consistency diagnostics when the agent disagrees with its own
@@ -287,7 +378,20 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	}
 	procedureItems := []any{}
 	if procedureStore, ok := any(r.stores).(procedure.Store); ok {
-		values, listErr := procedureStore.ListProcedures(ctx, procedure.Filter{EpisodeID: current.EpisodeID})
+		// Longitudinal procedures: episodes that acted in this world contribute
+		// their procedures alongside the current episode's, so a warm episode
+		// can reuse what prior episodes learned about acting in this world.
+		episodeScope := []string{current.EpisodeID}
+		if request.WorldID != "" {
+			if lister, supported := any(r.stores).(worldEpisodeStore); supported {
+				worldEpisodes, listErr := lister.ListWorldEpisodes(ctx, request.WorldID)
+				if listErr != nil {
+					return Packet{}, listErr
+				}
+				episodeScope = append(episodeScope, worldEpisodes...)
+			}
+		}
+		values, listErr := procedureStore.ListProcedures(ctx, procedure.Filter{Episodes: uniqueEpisodes(episodeScope)})
 		if listErr != nil {
 			return Packet{}, listErr
 		}
@@ -303,6 +407,12 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	outside := ambient.Considered - len(ambient.Selected)
 	hint := fmt.Sprintf("%d attention candidates are outside the frame", outside)
 	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{anchor}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: mapItems}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "attention_health", Attention: "deliberate", Items: []any{health}}}
+	// world_memory is omitted for frames not bound to a world and for worlds
+	// with no durable claims yet — an always-present empty section would tax
+	// every fresh-episode render for silence.
+	if len(worldMemory) > 0 {
+		sections = append(sections, Section{Kind: "world_memory", Attention: "ambient", Items: worldMemory})
+	}
 	// memory_health is deliberately omitted on a clean claim base: tension
 	// diagnostics are rare by design, and an always-present empty section
 	// would tax every render's budget (a minimal packet once failed its budget
@@ -336,7 +446,7 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	// cannot reconcile memory either), then the weakest map candidates, then
 	// procedure matches. Sections the model acts from (identity, objective,
 	// focus, affordances, working set) are never trimmed.
-	trimOrder := []string{"recent", "periphery", "memory_health", "identity_health", "map", "procedures"}
+	trimOrder := []string{"recent", "periphery", "memory_health", "identity_health", "world_memory", "map", "procedures"}
 	for {
 		packet.TokenUsage.Estimated = estimate(packet)
 		if packet.TokenUsage.Estimated <= request.BudgetTokens {
@@ -497,6 +607,174 @@ func claimsLiveAt(claims []cognition.Claim, at time.Time) []cognition.Claim {
 		live = append(live, claim)
 	}
 	return live
+}
+
+// worldMemoryItems builds the pivot-Этап-4 longitudinal memory: prior
+// episodes' knowledge delivered by state, in the order PREVIOUSLY CONFIRMED →
+// PREVIOUSLY REFUTED → PREVIOUSLY INVESTIGATED → LIVE HYPOTHESES. Trim drops
+// from the tail, so budget pressure eats speculation before facts. The frame's
+// own claims are excluded (they already travel as recent events + identity).
+func (r *Renderer) worldMemoryItems(ctx context.Context, worldID string, current frame.Frame, episodeClaims []cognition.Claim, cutoff *time.Time) ([]any, error) {
+	worldClaims, err := r.stores.ListClaimsByWorld(ctx, worldID)
+	if err != nil {
+		return nil, err
+	}
+	own := make(map[string]struct{}, len(episodeClaims))
+	for _, claim := range episodeClaims {
+		own[claim.ClaimID] = struct{}{}
+	}
+	var confirmed, hypotheses, retired []cognition.Claim
+	for _, claim := range worldClaims {
+		if _, mine := own[claim.ClaimID]; mine {
+			continue
+		}
+		if cutoff != nil && claim.ValidFrom.After(*cutoff) {
+			continue
+		}
+		switch claim.Status {
+		case cognition.ClaimSupported:
+			// Live at the cutoff unless retired before it.
+			if cutoff == nil || claim.ValidTo == nil || claim.ValidTo.After(*cutoff) {
+				confirmed = append(confirmed, claim)
+			}
+		case cognition.ClaimCandidate:
+			if cutoff == nil || claim.ValidTo == nil || claim.ValidTo.After(*cutoff) {
+				hypotheses = append(hypotheses, claim)
+			}
+		case cognition.ClaimRefuted, cognition.ClaimSuperseded:
+			// History only once the retirement was visible at the cutoff.
+			if claim.ValidTo != nil && (cutoff == nil || !claim.ValidTo.After(*cutoff)) {
+				retired = append(retired, claim)
+			}
+		}
+	}
+	sort.Slice(confirmed, func(i, j int) bool {
+		if confirmed[i].Confidence != confirmed[j].Confidence {
+			return confirmed[i].Confidence > confirmed[j].Confidence
+		}
+		return confirmed[i].ClaimID < confirmed[j].ClaimID
+	})
+	sort.Slice(hypotheses, func(i, j int) bool {
+		if hypotheses[i].Confidence != hypotheses[j].Confidence {
+			return hypotheses[i].Confidence > hypotheses[j].Confidence
+		}
+		return hypotheses[i].ClaimID < hypotheses[j].ClaimID
+	})
+	// Most recent retirements first: they reflect the latest state of the
+	// world, and old refuted paths matter less as history grows.
+	sort.Slice(retired, func(i, j int) bool {
+		if !retired[i].ValidTo.Equal(*retired[j].ValidTo) {
+			return retired[i].ValidTo.After(*retired[j].ValidTo)
+		}
+		return retired[i].ClaimID < retired[j].ClaimID
+	})
+	items := make([]any, 0, maxWorldConfirmed+maxWorldRefuted+maxWorldHypotheses+maxWorldInvestigated)
+	for i, claim := range confirmed {
+		if i == maxWorldConfirmed {
+			break
+		}
+		item := map[string]any{"ref": "claim:" + claim.ClaimID, "proposition": claim.Proposition, "state": "confirmed", "confidence": claim.Confidence, "scope": "world"}
+		if evidence, listErr := r.stores.ListClaimEvidence(ctx, claim.ClaimID); listErr == nil && len(evidence) > 0 {
+			refs := make([]string, 0, maxWorldEvidenceRefs)
+			for _, id := range evidence {
+				refs = append(refs, "event:"+id)
+				if len(refs) == maxWorldEvidenceRefs {
+					break
+				}
+			}
+			item["evidence"] = refs
+		}
+		if claim.HasTriple() {
+			item["subject"], item["predicate"], item["object"] = claim.Subject, claim.Predicate, claim.Object
+		}
+		items = append(items, item)
+	}
+	if r.worldMemoryMode == WorldMemoryModeConfirmed {
+		// Warm-facts mode: facts only. Refuted paths, investigation history
+		// and other episodes' live hypotheses stay out of the packet.
+		return items, nil
+	}
+	for i, claim := range retired {
+		if i == maxWorldRefuted {
+			break
+		}
+		items = append(items, map[string]any{"ref": "claim:" + claim.ClaimID, "proposition": claim.Proposition, "state": "refuted", "note": "previously investigated and rejected; do not re-investigate without new evidence", "scope": "world"})
+	}
+	investigated, err := r.worldInvestigated(ctx, worldID, current)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, investigated...)
+	for i, claim := range hypotheses {
+		if i == maxWorldHypotheses {
+			break
+		}
+		item := map[string]any{"ref": "claim:" + claim.ClaimID, "proposition": claim.Proposition, "state": "hypothesis", "confidence": claim.Confidence, "scope": "world"}
+		if claim.HasTriple() {
+			item["subject"], item["predicate"], item["object"] = claim.Subject, claim.Predicate, claim.Object
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// worldInvestigated derives the PREVIOUSLY INVESTIGATED group from focus.changed
+// events of the world's prior episodes: the objects a previous agent already
+// studied, latest first, deduplicated. It is episode experience delivered as
+// history — never as fact (ТЗ §11).
+func (r *Renderer) worldInvestigated(ctx context.Context, worldID string, current frame.Frame) ([]any, error) {
+	lister, supported := any(r.stores).(worldEpisodeStore)
+	if !supported {
+		return nil, nil
+	}
+	episodes, err := lister.ListWorldEpisodes(ctx, worldID)
+	if err != nil {
+		return nil, err
+	}
+	type investigation struct {
+		target  string
+		eventID string
+		at      time.Time
+	}
+	seen := make(map[string]struct{})
+	latest := make([]investigation, 0, maxWorldInvestigated)
+	for _, episode := range episodes {
+		if episode == current.EpisodeID {
+			continue
+		}
+		events, listErr := r.stores.List(ctx, substrate.EventFilter{EpisodeID: episode})
+		if listErr != nil {
+			return nil, listErr
+		}
+		for _, event := range events {
+			if event.Type != "focus.changed" {
+				continue
+			}
+			target, _ := event.Payload["to"].(string)
+			if target == "" {
+				continue
+			}
+			if _, duplicate := seen[target]; duplicate {
+				continue
+			}
+			seen[target] = struct{}{}
+			latest = append(latest, investigation{target: target, eventID: event.EventID, at: event.ValidTime})
+		}
+	}
+	sort.Slice(latest, func(i, j int) bool {
+		if !latest[i].at.Equal(latest[j].at) {
+			return latest[i].at.After(latest[j].at)
+		}
+		return latest[i].eventID < latest[j].eventID
+	})
+	if len(latest) > maxWorldInvestigated {
+		latest = latest[:maxWorldInvestigated]
+	}
+	items := make([]any, 0, len(latest))
+	for _, entry := range latest {
+		items = append(items, map[string]any{"ref": "event:" + entry.eventID, "state": "investigated", "target": entry.target, "note": "a prior episode in this world already investigated this", "scope": "world"})
+	}
+	return items, nil
 }
 
 // identityAnchor builds the identity section item: who this agent is, how

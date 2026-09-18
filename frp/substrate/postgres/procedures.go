@@ -47,7 +47,7 @@ func (s *Store) ReplaceProcedures(ctx context.Context, episodeID string, values 
 }
 
 func (s *Store) ListProcedures(ctx context.Context, filter procedure.Filter) ([]procedure.Procedure, error) {
-	rows, err := s.pool.Query(ctx, `SELECT data FROM procedures WHERE ($1='' OR episode_id=$1::uuid) ORDER BY procedure_id`, filter.EpisodeID)
+	rows, err := s.pool.Query(ctx, `SELECT data FROM procedures WHERE ($1='' OR episode_id=$1::uuid) AND (cardinality(COALESCE($2::uuid[], '{}'::uuid[]))=0 OR episode_id = ANY($2::uuid[])) ORDER BY procedure_id`, filter.EpisodeID, filter.Episodes)
 	if err != nil {
 		return nil, err
 	}

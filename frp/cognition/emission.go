@@ -80,16 +80,23 @@ type EmittedClaim struct {
 	// replaces. The old claim transitions to superseded with lineage to this
 	// one — reconciliation of a seen tension without inventing new machinery.
 	Supersedes string `json:"supersedes,omitempty"`
+	// Evidence optionally cites pre-existing events ("event:UUID") that
+	// directly back the proposition. A claim born "supported" must cite
+	// evidence — an unproven fact is a hypothesis, and warm memory must be
+	// able to distinguish facts from speculation (pivot knowledge lifecycle).
+	Evidence []string `json:"evidence,omitempty"`
 }
 
 // UnmarshalJSON keeps the canonical claim shape and normalizes the common
 // model mistake of a typed ref object in supersedes, mirroring FrameOperation.
+// Evidence items accept the same shapes: canonical strings or ref objects.
 func (e *EmittedClaim) UnmarshalJSON(data []byte) error {
 	var wire struct {
 		Proposition string          `json:"proposition"`
 		Confidence  float32         `json:"confidence"`
 		Status      ClaimStatus     `json:"status"`
 		Supersedes  json.RawMessage `json:"supersedes"`
+		Evidence    json.RawMessage `json:"evidence"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
@@ -98,8 +105,33 @@ func (e *EmittedClaim) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("claim supersedes %s", err)
 	}
-	e.Proposition, e.Confidence, e.Status, e.Supersedes = wire.Proposition, wire.Confidence, wire.Status, supersedes
+	evidence, err := refListFromWire(wire.Evidence)
+	if err != nil {
+		return fmt.Errorf("claim %s", err)
+	}
+	e.Proposition, e.Confidence, e.Status, e.Supersedes, e.Evidence = wire.Proposition, wire.Confidence, wire.Status, supersedes, evidence
 	return nil
+}
+
+// refListFromWire accepts an array of canonical string refs ("event:UUID")
+// with the common model mistake of ref objects mixed in, mirroring refFromWire.
+func refListFromWire(raw json.RawMessage) ([]string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, errors.New("evidence must be an array of event refs")
+	}
+	refs := make([]string, 0, len(items))
+	for _, item := range items {
+		ref, err := refFromWire(item)
+		if err != nil {
+			return nil, fmt.Errorf("evidence %s", err)
+		}
+		refs = append(refs, ref)
+	}
+	return refs, nil
 }
 type AttentionTarget struct {
 	Type frame.RefType `json:"type"`
@@ -179,9 +211,11 @@ func (f *FrameOperation) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ClaimOperation reconciles memory (M16): refute names a claim the model saw
-// — typically through memory_health — as wrong, retiring it from the active
-// base. The runtime never invents these; ids are copied from the packet.
+// ClaimOperation reconciles memory (M16, pivot lifecycle): refute names a
+// claim the model saw — typically through memory_health — as wrong, retiring
+// it from the active base; confirm promotes a live hypothesis (candidate) to
+// supported once the agent has verified it (e.g. an execution result proved
+// it). The runtime never invents these; ids are copied from the packet.
 type ClaimOperation struct {
 	Op    string `json:"op"`
 	Claim string `json:"claim"`
@@ -335,6 +369,28 @@ func (e *CognitiveEmission) ApplyDefaults() {
 	}
 	for i := range e.Claims {
 		e.Claims[i].Supersedes = strings.TrimSpace(e.Claims[i].Supersedes)
+		// Evidence hygiene mirrors the rest of the schema: empty entries are
+		// dropped and duplicates collapse so a sloppy model cannot smuggle
+		// noise into the provenance chain.
+		if len(e.Claims[i].Evidence) > 0 {
+			kept := make([]string, 0, len(e.Claims[i].Evidence))
+			seen := make(map[string]struct{}, len(e.Claims[i].Evidence))
+			for _, ref := range e.Claims[i].Evidence {
+				ref = strings.TrimSpace(ref)
+				if ref == "" {
+					continue
+				}
+				if _, duplicate := seen[ref]; duplicate {
+					continue
+				}
+				seen[ref] = struct{}{}
+				kept = append(kept, ref)
+			}
+			if len(kept) == 0 {
+				kept = nil
+			}
+			e.Claims[i].Evidence = kept
+		}
 	}
 }
 
@@ -368,7 +424,7 @@ func (e CognitiveEmission) Validate() error {
 			return errors.New("reasoning kind and text are required")
 		}
 	}
-	for _, c := range e.Claims {
+	for i, c := range e.Claims {
 		if strings.TrimSpace(c.Proposition) == "" {
 			return errors.New("claim proposition is required")
 		}
@@ -378,8 +434,25 @@ func (e CognitiveEmission) Validate() error {
 		if c.Status == "" {
 			c.Status = ClaimCandidate
 		}
-		if c.Status != ClaimCandidate {
-			return errors.New("emission claims must have candidate status")
+		switch c.Status {
+		case ClaimCandidate:
+			// A hypothesis may cite the events that motivated it, but only a
+			// cited fact may be born confirmed.
+		case ClaimSupported:
+			if len(c.Evidence) == 0 {
+				return fmt.Errorf("claims[%d]: supported status requires evidence refs", i)
+			}
+		default:
+			return errors.New("emission claims must have candidate or supported status")
+		}
+		for j, evidence := range c.Evidence {
+			ref, err := ParseRef(evidence, false)
+			if err != nil {
+				return fmt.Errorf("claims[%d].evidence[%d]: %w", i, j, err)
+			}
+			if ref.Type != frame.RefEvent {
+				return fmt.Errorf("claims[%d].evidence[%d]: must reference an event, got %q", i, j, evidence)
+			}
 		}
 	}
 	for _, a := range e.Attention {
@@ -413,7 +486,7 @@ func (e CognitiveEmission) Validate() error {
 		}
 	}
 	for i, op := range e.ClaimOps {
-		if op.Op != "refute" {
+		if op.Op != "refute" && op.Op != "confirm" {
 			return fmt.Errorf("unsupported claim operation %q", op.Op)
 		}
 		if strings.TrimSpace(op.Claim) == "" {

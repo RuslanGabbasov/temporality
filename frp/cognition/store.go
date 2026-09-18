@@ -65,6 +65,13 @@ type Store interface {
 	TransitionClaim(context.Context, Transition) (Claim, error)
 	GetClaim(context.Context, string) (Claim, error)
 	ListClaims(context.Context) ([]Claim, error)
+	// ListClaimsByWorld returns the durable, world-scoped claim base: claims
+	// backed by evidence observed in the world (their evidence events carry the
+	// world id) plus claims authored inside episodes that acted in that world.
+	// This is the longitudinal-memory read path (M13/M15): a new episode in the
+	// same world must see prior episodes' knowledge without transcript leakage.
+	// Refuted/superseded filtering and cutoff projection stay the renderer's job.
+	ListClaimsByWorld(context.Context, string) ([]Claim, error)
 	ListRelations(context.Context, string) ([]ClaimRelation, error)
 	// ListClaimEvidence returns the event ids backing a claim, excluding the
 	// claim's own created_event (M13 provenance chain).

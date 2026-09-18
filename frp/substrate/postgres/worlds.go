@@ -81,3 +81,24 @@ func (s *Store) ListWorlds(ctx context.Context) ([]world.World, error) {
 	}
 	return result, rows.Err()
 }
+
+// ListWorldEpisodes returns the distinct episodes that observed the world —
+// any event carrying the world id in its payload binds its episode to that
+// world. Procedures (and other episode-scoped projections) use this to become
+// reusable across episodes of the same world.
+func (s *Store) ListWorldEpisodes(ctx context.Context, worldID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT episode_id::text FROM events WHERE payload->>'world_id'=$1 AND episode_id IS NOT NULL ORDER BY 1`, worldID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]string, 0)
+	for rows.Next() {
+		var episode string
+		if err = rows.Scan(&episode); err != nil {
+			return nil, err
+		}
+		result = append(result, episode)
+	}
+	return result, rows.Err()
+}

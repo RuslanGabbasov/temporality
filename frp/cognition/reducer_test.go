@@ -1,6 +1,7 @@
 package cognition_test
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -125,5 +126,55 @@ func TestReduceEmissionRejectsNoOpUnpinAndWarnsOnCollapse(t *testing.T) {
 	}
 	if len(decision.Warnings) != 0 {
 		t.Fatalf("stay-empty produced a warning: %#v", decision.Warnings)
+	}
+}
+
+// TestReduceEmissionRejectsHallucinatedRefs pins the debugger-facing
+// contract: a pin or attend naming a ref the substrate has never seen is a
+// VISIBLE REJECTION — the step must survive instead of dying at the store
+// guard with 422 "reference not found" (a hallucinated UUID used to kill the
+// whole follow-up loop).
+func TestReduceEmissionRejectsHallucinatedRefs(t *testing.T) {
+	current := emissionFrame()
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	resolve := func(ref frame.Ref) (bool, error) {
+		return ref.ID == "real", nil
+	}
+	emission := cognition.CognitiveEmission{
+		EmissionID: "e-hallucination", FrameID: current.FrameID,
+		Attention: []cognition.AttentionOperation{
+			{Op: "attend", Target: cognition.AttentionTarget{Type: frame.RefClaim, ID: "real"}},
+			{Op: "attend", Target: cognition.AttentionTarget{Type: frame.RefEntity, ID: "ghost"}},
+		},
+		FrameOps: []cognition.FrameOperation{
+			{Op: "pin", Ref: "claim:real"},
+			{Op: "pin", Ref: "claim:8f2a7c31-0d84-4f6b-9c25-a1e7b4d90263"},
+		},
+	}
+	decision, err := cognition.ReduceEmission(current, emission, now, resolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decision.Rejections) != 2 {
+		t.Fatalf("want rejections for the hallucinated attend and pin: %#v", decision.Rejections)
+	}
+	if decision.Rejections[0].Path != "attention[1]" || !strings.Contains(decision.Rejections[0].Reason, "not found in substrate") {
+		t.Fatalf("attend rejection wrong: %#v", decision.Rejections[0])
+	}
+	if decision.Rejections[1].Path != "frame_ops[1]" || !strings.Contains(decision.Rejections[1].Reason, "pin ignored") {
+		t.Fatalf("pin rejection wrong: %#v", decision.Rejections[1])
+	}
+	// The surviving ops applied: focus moved to the real claim, the real pin
+	// anchored; the ghost ref must not leak into the working set.
+	if decision.Frame.Focus.Type != frame.RefClaim || decision.Frame.Focus.ID != "real" {
+		t.Fatalf("attend to the real claim did not apply: %#v", decision.Frame.Focus)
+	}
+	if len(decision.Frame.WorkingSet) != 1 || decision.Frame.WorkingSet[0].ID != "real" {
+		t.Fatalf("working set must hold only the resolved pin: %#v", decision.Frame.WorkingSet)
+	}
+	// A resolver failure is a store error, not a rejection.
+	failing := func(frame.Ref) (bool, error) { return false, errors.New("store down") }
+	if _, err = cognition.ReduceEmission(current, emission, now, failing); err == nil || !strings.Contains(err.Error(), "store down") {
+		t.Fatalf("resolver error must fail the reduction: %v", err)
 	}
 }

@@ -401,7 +401,7 @@ def main():
         _, repeated_render = request("POST", "/v1/render", render_request)
         assert first_render == repeated_render
         assert first_render["provenance"]["attention_version"] == "attention-0.3.1"
-        assert first_render["renderer_version"] == "render-0.4.4"
+        assert first_render["renderer_version"] == "render-0.5.0"
         map_items = next(section for section in first_render["sections"] if section["kind"] == "map")["items"]
         assert map_items and any(item["ref"].startswith("region:") for item in map_items)
         definition = {"id": "inspect_environment", "execution_mode": "deterministic", "input_schema": {}, "capabilities": ["filesystem.read"], "limits": {"timeout_sec": 30, "cpu": 1, "memory_mb": 128, "disk_mb": 64}, "planner": {}, "failure_policy": {"retry_transient": False, "allow_strategy_change": False, "max_retries": 0}}
@@ -435,7 +435,7 @@ def main():
         _, snapshot = request("POST", "/v1/snapshots", {"frame_id": restored["frame_id"]})
         _, frame_replay = request("POST", "/v1/replay", {"frame_id": restored["frame_id"]})
         assert frame_replay["snapshot"]["snapshot_id"] == snapshot["metadata"]["snapshot_id"]
-        assert frame_replay["deterministic_hash"] and len(frame_replay["events"]) == 9
+        assert frame_replay["deterministic_hash"] and len(frame_replay["events"]) == 10  # + focus.changed (pivot Этап 3)
         _, fork_group = request("POST", "/v1/fork", {"source_frame_id": restored["frame_id"], "branches": [{"label": "model-a", "model_config": {"model_id": "A"}}, {"label": "model-b", "model_config": {"model_id": "B"}}]})
         assert len(fork_group["branches"]) == 2
         left_branch, right_branch = fork_group["branches"]

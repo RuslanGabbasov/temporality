@@ -9,8 +9,35 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/temporality-project/temporality/frp/cognition"
+	"github.com/temporality-project/temporality/frp/frame"
 	"github.com/temporality-project/temporality/frp/protocol"
 )
+
+// RefExists reports whether a frame ref resolves in the substrate. It backs
+// the reducer's hallucinated-pin/attend guard (a visible rejection instead of
+// a failed step); entity refs resolve against the M14 entity graph.
+func (s *Store) RefExists(ctx context.Context, ref frame.Ref) (bool, error) {
+	queries := map[frame.RefType]string{
+		frame.RefEvent:     `SELECT 1 FROM events WHERE event_id=$1`,
+		frame.RefClaim:     `SELECT 1 FROM claims WHERE claim_id=$1`,
+		frame.RefExecution: `SELECT 1 FROM executions WHERE execution_id=$1`,
+		frame.RefRegion:    `SELECT 1 FROM regions WHERE region_id=$1`,
+		frame.RefEntity:    `SELECT 1 FROM entities WHERE entity_id=$1`,
+	}
+	query, ok := queries[ref.Type]
+	if !ok {
+		return false, fmt.Errorf("unsupported ref type %q", ref.Type)
+	}
+	var one int
+	err := s.pool.QueryRow(ctx, query, ref.ID).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
 func (s *Store) CommitClaim(ctx context.Context, commit cognition.Commit) error {
 	if err := commit.Validate(); err != nil {
@@ -132,6 +159,36 @@ func (s *Store) GetClaim(ctx context.Context, id string) (cognition.Claim, error
 
 func (s *Store) ListClaims(ctx context.Context) ([]cognition.Claim, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+claimColumns+` FROM claims ORDER BY claim_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]cognition.Claim, 0)
+	for rows.Next() {
+		var claim cognition.Claim
+		if err = rows.Scan(&claim.Protocol, &claim.Version, &claim.ClaimID, &claim.Proposition, &claim.Confidence, &claim.Status, &claim.CreatedEvent, &claim.ValidFrom, &claim.ValidTo, &claim.Subject, &claim.Predicate, &claim.Object); err != nil {
+			return nil, err
+		}
+		result = append(result, claim)
+	}
+	return result, rows.Err()
+}
+
+// ListClaimsByWorld implements the longitudinal-memory read path: a claim
+// belongs to the world when its evidence events carry the world id
+// (ingestion/observation claims) or when it was authored inside an episode
+// that observed the world (model-emitted claims carry no evidence of their
+// own, but their creating events share the episode with world observations).
+// The UNION dedupes claims reachable through both paths.
+func (s *Store) ListClaimsByWorld(ctx context.Context, worldID string) ([]cognition.Claim, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+claimColumns+` FROM claims WHERE claim_id IN (
+			SELECT ce.claim_id FROM claim_evidence ce JOIN events ev ON ev.event_id = ce.evidence_event WHERE ev.payload->>'world_id' = $1
+			UNION
+			SELECT c.claim_id FROM claims c JOIN events ev ON ev.event_id = c.created_event
+				WHERE ev.episode_id IS NOT NULL AND ev.episode_id IN (
+					SELECT DISTINCT e2.episode_id FROM events e2 WHERE e2.payload->>'world_id' = $1 AND e2.episode_id IS NOT NULL
+				)
+		) ORDER BY claim_id`, worldID)
 	if err != nil {
 		return nil, err
 	}

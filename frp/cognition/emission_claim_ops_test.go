@@ -45,10 +45,44 @@ func TestClaimOpsValidateRejectsUnknownOpAndWrongRefType(t *testing.T) {
 	if err := base.Validate(); err == nil {
 		t.Fatal("non-claim ref accepted")
 	}
+	base.ClaimOps = []cognition.ClaimOperation{{Op: "confirm", Claim: "event:00000000-0000-4000-8000-000000000001"}}
+	if err := base.Validate(); err == nil {
+		t.Fatal("confirm with non-claim ref accepted")
+	}
 	base.ClaimOps = nil
 	base.Claims = []cognition.EmittedClaim{{Proposition: "p", Confidence: 0.5, Status: cognition.ClaimCandidate, Supersedes: "event:00000000-0000-4000-8000-000000000001"}}
 	if err := base.Validate(); err == nil {
 		t.Fatal("supersedes with non-claim ref accepted")
+	}
+}
+
+// TestClaimLifecycleDecodeAndValidate pins the pivot knowledge-lifecycle
+// contract at the schema level: confirm is a first-class claim op, evidence
+// normalizes string and object refs, a born-supported claim must cite events,
+// and terminal birth statuses stay impossible.
+func TestClaimLifecycleDecodeAndValidate(t *testing.T) {
+	emission := claimOpsEmission(t, `{"schema":"frp.cognitive-emission.v1","emission_id":"e","frame_id":"f","claims":[{"proposition":"main.go contains Sum","confidence":0.95,"status":"supported","evidence":["event:00000000-0000-4000-8000-000000000001",{"type":"event","id":"00000000-0000-4000-8000-000000000002"},"event:00000000-0000-4000-8000-000000000001",""]},{"proposition":"Sum bug causes the failure","confidence":0.7,"status":"candidate","evidence":["event:00000000-0000-4000-8000-000000000001"]}],"claim_ops":[{"op":"confirm","claim":"claim:00000000-0000-4000-8000-000000000003"}]}`)
+	emission.ApplyDefaults()
+	if err := emission.Validate(); err != nil {
+		t.Fatalf("supported claim with evidence rejected: %v", err)
+	}
+	want := []string{"event:00000000-0000-4000-8000-000000000001", "event:00000000-0000-4000-8000-000000000002"}
+	if got := emission.Claims[0].Evidence; len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("evidence not normalized/deduped: %v", got)
+	}
+
+	bare := cognition.CognitiveEmission{Schema: cognition.EmissionSchema, EmissionID: "e", FrameID: "f", Claims: []cognition.EmittedClaim{{Proposition: "unsupported fact", Confidence: 0.9, Status: cognition.ClaimSupported}}}
+	if err := bare.Validate(); err == nil {
+		t.Fatal("supported claim without evidence accepted")
+	}
+	bare.Claims[0].Status = cognition.ClaimRefuted
+	if err := bare.Validate(); err == nil {
+		t.Fatal("terminal birth status accepted")
+	}
+	bare.Claims[0].Status = cognition.ClaimCandidate
+	bare.Claims[0].Evidence = []string{"claim:00000000-0000-4000-8000-000000000004"}
+	if err := bare.Validate(); err == nil {
+		t.Fatal("non-event evidence ref accepted")
 	}
 }
 

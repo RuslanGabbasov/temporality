@@ -22,11 +22,18 @@ type Decision struct {
 	Transition frame.Transition `json:"transition"`
 	Claims     []EmittedClaim   `json:"claims"`
 	Actions    []ActionRequest  `json:"actions"`
-	Rejections []Rejection      `json:"rejections"`
-	Warnings   []string         `json:"warnings"`
+	Rejections []Rejection     `json:"rejections"`
+	Warnings   []string        `json:"warnings"`
 }
 
-func ReduceEmission(current frame.Frame, emission CognitiveEmission, now time.Time) (Decision, error) {
+// RefResolver reports whether a frame ref resolves in the substrate. The
+// reducer uses it to reject hallucinated pins/attends visibly (a Rejection,
+// the step survives) instead of failing the whole commit downstream — the
+// same contract as claim_ops guards. A resolver error is a real store
+// failure and fails the reduction.
+type RefResolver func(frame.Ref) (bool, error)
+
+func ReduceEmission(current frame.Frame, emission CognitiveEmission, now time.Time, resolve ...RefResolver) (Decision, error) {
 	emission.ApplyDefaults()
 	if err := emission.Validate(); err != nil {
 		return Decision{}, err
@@ -37,11 +44,35 @@ func ReduceEmission(current frame.Frame, emission CognitiveEmission, now time.Ti
 	if now.IsZero() {
 		return Decision{}, errors.New("commit time is required")
 	}
+	var resolver RefResolver
+	if len(resolve) > 0 {
+		resolver = resolve[0]
+	}
+	resolves := func(ref frame.Ref) (bool, error) {
+		if resolver == nil || ref.Type == frame.RefQuery {
+			return true, nil
+		}
+		return resolver(ref)
+	}
 	operations := make([]frame.Operation, 0, len(emission.Attention)+len(emission.FrameOps))
-	for _, attention := range emission.Attention {
+	rejections := make([]Rejection, 0)
+	for i, attention := range emission.Attention {
 		focus, err := attention.Target.Focus()
 		if err != nil {
 			return Decision{}, err
+		}
+		// An attend to a target the substrate has never heard of (a hallucinated
+		// id) is a visible rejection: the focus stays where it was, the model
+		// sees why, and the step still commits.
+		if focus.Type != frame.RefQuery {
+			exists, err := resolves(frame.Ref{Type: focus.Type, ID: focus.ID})
+			if err != nil {
+				return Decision{}, err
+			}
+			if !exists {
+				rejections = append(rejections, Rejection{Path: fmt.Sprintf("attention[%d]", i), Reason: fmt.Sprintf("attend target %s:%s not found in substrate; focus unchanged", focus.Type, focus.ID)})
+				continue
+			}
 		}
 		operations = append(operations, frame.Operation{Kind: frame.OpAttend, Focus: &focus})
 	}
@@ -54,12 +85,25 @@ func ReduceEmission(current frame.Frame, emission CognitiveEmission, now time.Ti
 	for _, ref := range current.WorkingSet {
 		known[ref] = struct{}{}
 	}
-	rejections := make([]Rejection, 0)
 	warnings := make([]string, 0)
 	for i, candidate := range emission.FrameOps {
 		ref, err := ParseRef(candidate.Ref, true)
 		if err != nil {
 			return Decision{}, err
+		}
+		// A pin of a ref that resolves nowhere (hallucinated or stale id) is
+		// rejected visibly instead of failing the store commit — the model
+		// slipped, the episode should not die for it. Re-pins are checked too:
+		// a working set seeded via the API may carry a ref that never existed.
+		if candidate.Op != "unpin" {
+			exists, err := resolves(ref)
+			if err != nil {
+				return Decision{}, err
+			}
+			if !exists {
+				rejections = append(rejections, Rejection{Path: fmt.Sprintf("frame_ops[%d]", i), Reason: fmt.Sprintf("pin target %s not found in substrate (hallucinated or stale ref); pin ignored", candidate.Ref)})
+				continue
+			}
 		}
 		switch candidate.Op {
 		case "unpin":

@@ -22,6 +22,7 @@ const (
 	EventAttentionSelected  = "attention.selected"
 	EventAttentionSuggested = "attention.suggested"
 	EventFrameTransitioned  = "frame.transitioned"
+	EventFocusChanged       = "focus.changed"
 )
 
 var ErrCurrentFrameChanged = errors.New("current frame changed")
@@ -51,6 +52,11 @@ type Input struct {
 type Claim struct {
 	Value cognition.Claim
 	Event protocol.Event
+	// Evidence holds bare event ids (no "event:" prefix) backing the claim —
+	// the same shape cognition.Commit.Evidence uses. Stores persist them into
+	// claim_evidence atomically with the claim, after verifying the events
+	// exist (pivot knowledge lifecycle: model claims keep provenance).
+	Evidence []string
 }
 
 type Action struct {
@@ -107,7 +113,17 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 	if now.IsZero() {
 		return Result{}, errors.New("time provider returned zero time")
 	}
-	decision, err := cognition.ReduceEmission(input.Current, input.Emission, now)
+	// Hallucinated pin/attend refs are visible rejections, not step failures:
+	// when the store can answer ref existence, the reducer filters the ops and
+	// records why. Stores without the check keep the old behavior — the store
+	// guard still fails genuinely impossible refs at commit time.
+	var resolver cognition.RefResolver
+	if refStore, ok := store.(interface {
+		RefExists(context.Context, frame.Ref) (bool, error)
+	}); ok {
+		resolver = func(ref frame.Ref) (bool, error) { return refStore.RefExists(ctx, ref) }
+	}
+	decision, err := cognition.ReduceEmission(input.Current, input.Emission, now, resolver)
 	if err != nil {
 		return Result{}, err
 	}
@@ -146,16 +162,40 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 		if claimID == "" {
 			return Result{}, errors.New("ID provider returned an empty ID")
 		}
-		event, eventErr := newEvent(EventClaimCandidate, map[string]any{"claim_id": claimID, "proposition": emitted.Proposition, "confidence": emitted.Confidence, "emission_id": emission.EmissionID})
+		// Pivot knowledge lifecycle: a claim is born the status the model
+		// earned — candidate for hypotheses, supported only for facts whose
+		// evidence the emission cites (Validate enforces the pairing). The
+		// creation event type mirrors the status so the log alone reads as a
+		// lifecycle.
+		status := emitted.Status
+		if status == "" {
+			status = cognition.ClaimCandidate
+		}
+		claimType := EventClaimCandidate
+		if status == cognition.ClaimSupported {
+			claimType = "claim.supported"
+		}
+		payload := map[string]any{"claim_id": claimID, "proposition": emitted.Proposition, "confidence": emitted.Confidence, "emission_id": emission.EmissionID}
+		var evidenceIDs []string
+		if len(emitted.Evidence) > 0 {
+			evidenceIDs = make([]string, 0, len(emitted.Evidence))
+			for _, ref := range emitted.Evidence {
+				if parsed, parseErr := cognition.ParseRef(ref, false); parseErr == nil && parsed.Type == frame.RefEvent {
+					evidenceIDs = append(evidenceIDs, parsed.ID)
+				}
+			}
+			payload["evidence"] = append([]string(nil), emitted.Evidence...)
+		}
+		event, eventErr := newEvent(claimType, payload)
 		if eventErr != nil {
 			return Result{}, eventErr
 		}
-		value := cognition.Claim{ClaimID: claimID, Proposition: emitted.Proposition, Confidence: emitted.Confidence, Status: cognition.ClaimCandidate, CreatedEvent: event.EventID, ValidFrom: now}
+		value := cognition.Claim{ClaimID: claimID, Proposition: emitted.Proposition, Confidence: emitted.Confidence, Status: status, CreatedEvent: event.EventID, ValidFrom: now}
 		value.ApplyDefaults(now)
 		if err = value.Validate(); err != nil {
 			return Result{}, err
 		}
-		prepared.Claims = append(prepared.Claims, Claim{Value: value, Event: event})
+		prepared.Claims = append(prepared.Claims, Claim{Value: value, Event: event, Evidence: evidenceIDs})
 		prepared.Events = append(prepared.Events, event)
 	}
 	// M16 memory reliability: what does this emission do to memory? The claim
@@ -198,7 +238,7 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 	for _, claim := range claimBase {
 		claimByID[claim.ClaimID] = claim
 	}
-	resolveTarget := func(ref, path string) (cognition.Claim, bool) {
+	resolveTarget := func(ref, path string, to cognition.ClaimStatus) (cognition.Claim, bool) {
 		parsed, parseErr := cognition.ParseRef(ref, false)
 		if parseErr != nil {
 			claimRejections = append(claimRejections, cognition.Rejection{Path: path, Reason: fmt.Sprintf("invalid claim ref: %v", parseErr)})
@@ -213,23 +253,37 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 			claimRejections = append(claimRejections, cognition.Rejection{Path: path, Reason: "claim already targeted by this emission"})
 			return cognition.Claim{}, false
 		}
-		if !cognition.CanTransition(claim.Status, cognition.ClaimRefuted) {
-			claimRejections = append(claimRejections, cognition.Rejection{Path: path, Reason: fmt.Sprintf("claim %q is not active", claim.Status)})
+		if !cognition.CanTransition(claim.Status, to) {
+			reason := fmt.Sprintf("claim %q is not active", claim.Status)
+			if claim.Status == cognition.ClaimSupported {
+				reason = fmt.Sprintf("claim %q is already supported", claim.Status)
+			}
+			claimRejections = append(claimRejections, cognition.Rejection{Path: path, Reason: reason})
 			return cognition.Claim{}, false
 		}
 		targeted[claim.ClaimID] = struct{}{}
 		return claim, true
 	}
 	for i, op := range emission.ClaimOps {
-		claim, ok := resolveTarget(op.Claim, fmt.Sprintf("claim_ops[%d]", i))
+		// Pivot knowledge lifecycle: refute retires a wrong claim, confirm
+		// promotes a verified hypothesis to supported. Both ride the same
+		// transition machinery and the same guards — only the target status
+		// and event type differ.
+		toStatus := cognition.ClaimRefuted
+		eventType := "claim.refuted"
+		if op.Op == "confirm" {
+			toStatus = cognition.ClaimSupported
+			eventType = "claim.supported"
+		}
+		claim, ok := resolveTarget(op.Claim, fmt.Sprintf("claim_ops[%d]", i), toStatus)
 		if !ok {
 			continue
 		}
-		event, eventErr := newEvent("claim.refuted", map[string]any{"claim_id": claim.ClaimID, "emission_id": emission.EmissionID})
+		event, eventErr := newEvent(eventType, map[string]any{"claim_id": claim.ClaimID, "emission_id": emission.EmissionID})
 		if eventErr != nil {
 			return Result{}, eventErr
 		}
-		transition := cognition.Transition{Event: event, ClaimID: claim.ClaimID, ToStatus: cognition.ClaimRefuted, ValidAt: now}
+		transition := cognition.Transition{Event: event, ClaimID: claim.ClaimID, ToStatus: toStatus, ValidAt: now}
 		if err = transition.Validate(); err != nil {
 			return Result{}, err
 		}
@@ -240,7 +294,7 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 			continue
 		}
 		path := fmt.Sprintf("claims[%d].supersedes", j)
-		claim, ok := resolveTarget(emitted.Supersedes, path)
+		claim, ok := resolveTarget(emitted.Supersedes, path, cognition.ClaimSuperseded)
 		if !ok {
 			continue
 		}
@@ -257,6 +311,23 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 	prepared.ClaimTransitions = claimTransitions
 	for _, transition := range claimTransitions {
 		prepared.Events = append(prepared.Events, transition.Event)
+	}
+	// Pivot investigation history: a real focus change is a first-class event
+	// with from/to, a coarse trigger, and the refs that back it — the claim it
+	// retired/confirmed plus the events observed this step. It rides the same
+	// attention-range slot as the transition events, so stores, replay and the
+	// event log see it without any new machinery.
+	if from, to, changed := focusChange(input.Current.Focus, decision.Frame.Focus); changed {
+		trigger, evidence := focusTrigger(claimTransitions, emission)
+		payload := map[string]any{"from": from, "to": to, "trigger": trigger, "frame_before": input.Current.FrameID, "frame_after": decision.Frame.FrameID, "emission_id": emission.EmissionID}
+		if len(evidence) > 0 {
+			payload["evidence"] = evidence
+		}
+		focusEvent, focusErr := newEvent(EventFocusChanged, payload)
+		if focusErr != nil {
+			return Result{}, focusErr
+		}
+		prepared.Events = append(prepared.Events, focusEvent)
 	}
 	for _, suggested := range input.SuggestedAttention {
 		if err = suggested.Validate(); err != nil {
@@ -333,4 +404,50 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 	prepared.Transition = transition
 	prepared.Events = append(prepared.Events, transition)
 	return store.CommitStep(ctx, prepared)
+}
+
+// focusStringRef renders a focus as its canonical ref string so focus.changed
+// events stay comparable across frames ("query:text" / "entity:Sum").
+func focusStringRef(f frame.Focus) string {
+	if f.Type == frame.RefQuery {
+		return string(frame.RefQuery) + ":" + f.Query
+	}
+	return string(f.Type) + ":" + f.ID
+}
+
+func focusChange(current, next frame.Focus) (from, to string, changed bool) {
+	from, to = focusStringRef(current), focusStringRef(next)
+	return from, to, from != to
+}
+
+// focusTrigger classifies why attention moved. Retiring a hypothesis
+// (refute/supersede) outranks confirming one — a refutation is the stronger
+// reason to look elsewhere; anything else is a deliberate pivot, traceable to
+// the emission's own reasoning via emission_id. Evidence names the claims
+// transitioned this step plus the observed events, capped to keep the log
+// entry readable.
+func focusTrigger(transitions []cognition.Transition, emission cognition.CognitiveEmission) (string, []string) {
+	const evidenceCap = 8
+	trigger := "deliberate"
+	evidence := make([]string, 0, evidenceCap)
+	for _, transition := range transitions {
+		if len(evidence) < evidenceCap {
+			evidence = append(evidence, "claim:"+transition.ClaimID)
+		}
+		switch {
+		case transition.ToStatus == cognition.ClaimRefuted || transition.ToStatus == cognition.ClaimSuperseded:
+			trigger = "hypothesis_retired"
+		case transition.ToStatus == cognition.ClaimSupported && trigger == "deliberate":
+			trigger = "hypothesis_confirmed"
+		}
+	}
+	for _, observation := range emission.Observation {
+		if len(evidence) >= evidenceCap {
+			break
+		}
+		if ref, err := cognition.ParseRef(observation.Ref, false); err == nil && ref.Type == frame.RefEvent {
+			evidence = append(evidence, observation.Ref)
+		}
+	}
+	return trigger, evidence
 }

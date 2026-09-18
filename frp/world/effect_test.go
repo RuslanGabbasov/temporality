@@ -203,6 +203,16 @@ func TestEffectProcessRun(t *testing.T) {
 	if result.Output["cwd"] != root {
 		t.Fatalf("expected default cwd to be the declared root: %#v", result.Output)
 	}
+	// A relative cwd must resolve inside the declared resource, not against the
+	// executor's own working directory ("." once ran the command wherever the
+	// executor happened to start, silently testing the wrong repository).
+	result, err = adapter.Effect(context.Background(), execution.Step{Capability: "process.execute", Operation: "run", Input: map[string]any{"command": "sh", "args": []any{"-c", "pwd"}, "cwd": "."}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output["cwd"] != root {
+		t.Fatalf("relative cwd must resolve to the declared root: %#v", result.Output)
+	}
 	_, err = adapter.Effect(context.Background(), execution.Step{Capability: "process.execute", Operation: "run", Input: map[string]any{"command": "sh", "args": []any{"-c", "exit 3"}}})
 	if class, ok := executionErrorClass(err); !ok || class != execution.ErrorProcessFailed {
 		t.Fatalf("non-zero exit not reported as failure: %v", err)

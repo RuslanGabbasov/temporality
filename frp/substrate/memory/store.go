@@ -202,6 +202,70 @@ func (s *Store) ListClaims(_ context.Context) ([]cognition.Claim, error) {
 	return result, nil
 }
 
+// worldEpisodesLocked maps episode ids that have at least one event carrying
+// the world id in its payload (world observations, world state events, or an
+// episode start bound to the world). This is the episode↔world association
+// the longitudinal claim scope is built on.
+func (s *Store) worldEpisodesLocked(worldID string) map[string]struct{} {
+	episodes := make(map[string]struct{})
+	for _, event := range s.events {
+		if event.EpisodeID == "" {
+			continue
+		}
+		if id, _ := event.Payload["world_id"].(string); id == worldID {
+			episodes[event.EpisodeID] = struct{}{}
+		}
+	}
+	return episodes
+}
+
+// ListClaimsByWorld mirrors the postgres read path: evidence-backed claims
+// (ingestion/observation) plus claims authored inside episodes that acted in
+// the world. Ordering matches ListClaims for determinism.
+func (s *Store) ListClaimsByWorld(_ context.Context, worldID string) ([]cognition.Claim, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	episodes := s.worldEpisodesLocked(worldID)
+	result := make([]cognition.Claim, 0)
+	for _, claim := range s.claims {
+		matched := false
+		for _, id := range s.claimEvidence[claim.ClaimID] {
+			if event, ok := s.events[id]; ok {
+				if wid, _ := event.Payload["world_id"].(string); wid == worldID {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			if event, ok := s.events[claim.CreatedEvent]; ok && event.EpisodeID != "" {
+				if _, inWorld := episodes[event.EpisodeID]; inWorld {
+					matched = true
+				}
+			}
+		}
+		if matched {
+			result = append(result, claim)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ClaimID < result[j].ClaimID })
+	return result, nil
+}
+
+// ListWorldEpisodes returns the distinct episode ids that observed the world,
+	// in a deterministic order.
+func (s *Store) ListWorldEpisodes(_ context.Context, worldID string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	episodes := s.worldEpisodesLocked(worldID)
+	result := make([]string, 0, len(episodes))
+	for episode := range episodes {
+		result = append(result, episode)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
 func (s *Store) ListRelations(_ context.Context, id string) ([]cognition.ClaimRelation, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -221,6 +285,43 @@ func (s *Store) ListClaimEvidence(_ context.Context, id string) ([]string, error
 		return nil, cognition.ErrClaimNotFound
 	}
 	return append([]string(nil), s.claimEvidence[id]...), nil
+}
+
+// RefExists reports whether a frame ref resolves in the substrate. It backs
+// the reducer's hallucinated-pin/attend guard; entity refs resolve against
+// the M14 entity graph.
+func (s *Store) RefExists(_ context.Context, ref frame.Ref) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	switch ref.Type {
+	case frame.RefEvent:
+		_, exists := s.events[ref.ID]
+		return exists, nil
+	case frame.RefClaim:
+		_, exists := s.claims[ref.ID]
+		return exists, nil
+	case frame.RefExecution:
+		_, exists := s.executions[ref.ID]
+		return exists, nil
+	case frame.RefRegion:
+		for _, region := range s.regions {
+			if region.RegionID == ref.ID {
+				return true, nil
+			}
+		}
+		return false, nil
+	case frame.RefEntity:
+		for _, item := range s.entityRows {
+			if item.EntityID == ref.ID {
+				return true, nil
+			}
+		}
+		return false, nil
+	case frame.RefQuery:
+		return true, nil
+	default:
+		return false, fmt.Errorf("unsupported ref type %q", ref.Type)
+	}
 }
 
 func (s *Store) ReplaceAllEntities(_ context.Context, entities []entity.Entity, relations []entity.EntityRelation) error {
@@ -397,11 +498,21 @@ func (s *Store) ReplaceProcedures(_ context.Context, episodeID string, values []
 func (s *Store) ListProcedures(_ context.Context, filter procedure.Filter) ([]procedure.Procedure, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	allowed := make(map[string]struct{}, len(filter.Episodes))
+	for _, episode := range filter.Episodes {
+		allowed[episode] = struct{}{}
+	}
 	result := make([]procedure.Procedure, 0)
 	for _, value := range s.procedures {
-		if filter.EpisodeID == "" || value.EpisodeID == filter.EpisodeID {
-			result = append(result, clone(value))
+		if filter.EpisodeID != "" && value.EpisodeID != filter.EpisodeID {
+			continue
 		}
+		if len(allowed) > 0 {
+			if _, ok := allowed[value.EpisodeID]; !ok {
+				continue
+			}
+		}
+		result = append(result, clone(value))
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ProcedureID < result[j].ProcedureID })
 	return result, nil
@@ -854,6 +965,9 @@ func (s *Store) CommitStep(_ context.Context, prepared stepRuntime.Prepared) (st
 	for _, candidate := range prepared.Claims {
 		s.putEvent(clone(candidate.Event))
 		s.claims[candidate.Value.ClaimID] = clone(candidate.Value)
+		if len(candidate.Evidence) > 0 {
+			s.claimEvidence[candidate.Value.ClaimID] = append([]string(nil), candidate.Evidence...)
+		}
 		claims = append(claims, clone(candidate.Value))
 	}
 	claimEvents := len(prepared.Claims)
@@ -906,6 +1020,13 @@ func (s *Store) validateStepRefsLocked(prepared stepRuntime.Prepared) error {
 					break
 				}
 			}
+		case frame.RefEntity:
+			for _, item := range s.entityRows {
+				if item.EntityID == ref.ID {
+					exists = true
+					break
+				}
+			}
 		default:
 			return fmt.Errorf("unsupported ref type %q", ref.Type)
 		}
@@ -918,6 +1039,15 @@ func (s *Store) validateStepRefsLocked(prepared stepRuntime.Prepared) error {
 		ref, _ := cognition.ParseRef(observation.Ref, false)
 		if err := check(ref); err != nil {
 			return fmt.Errorf("observation ref %s: %w", observation.Ref, err)
+		}
+	}
+	// Evidence must cite events that already exist — same M13 invariant as
+	// postgres, applied to model claims (pivot knowledge lifecycle).
+	for _, candidate := range prepared.Claims {
+		for _, evidenceID := range candidate.Evidence {
+			if _, exists := s.events[evidenceID]; !exists {
+				return fmt.Errorf("claim %s evidence %s: reference not found", candidate.Value.ClaimID, evidenceID)
+			}
 		}
 	}
 	for _, operation := range prepared.Decision.Transition.Operations {

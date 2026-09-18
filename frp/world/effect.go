@@ -222,9 +222,17 @@ func (a *Adapter) effectProcess(ctx context.Context, world World, step execution
 	}
 	workingDir := inputString(step.Input, "cwd")
 	if workingDir != "" {
-		if _, _, _, err := a.resolvePath(world, map[string]any{"path": workingDir}); err != nil {
+		// A relative cwd (and an absolute one inside a declared root) must land
+		// inside the world's resource, never in the executor's own working
+		// directory: cmd.Dir is process-relative, and a bare "." would silently
+		// run the command wherever the executor happened to start — the executor
+		// binary often lives in the runtime's own repository, whose tests then
+		// masquerade as the target repo's results.
+		root, relative, _, err := a.resolvePath(world, map[string]any{"path": workingDir})
+		if err != nil {
 			return Result{}, err
 		}
+		workingDir = filepath.Join(root, relative)
 	} else if roots := world.Roots(); len(roots) > 0 {
 		resolved, resolveErr := resolveRoot(roots[0].Path)
 		if resolveErr == nil {

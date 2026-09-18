@@ -61,7 +61,7 @@ func (s Service) Run(ctx context.Context, input Input) (Result, error) {
 		definitions = append(definitions, definition)
 	}
 	sort.Slice(definitions, func(i, j int) bool { return definitions[i].ID < definitions[j].ID })
-	packet, err := render.New(s.Store).Render(ctx, render.Request{FrameID: input.FrameID, ObjectiveID: input.ObjectiveID, BudgetTokens: input.BudgetTokens, Affordances: definitions})
+	packet, err := render.New(s.Store).Render(ctx, render.Request{FrameID: input.FrameID, ObjectiveID: input.ObjectiveID, BudgetTokens: input.BudgetTokens, Affordances: definitions, WorldID: input.WorldID})
 	if err != nil {
 		return Result{}, fmt.Errorf("render model input: %w", err)
 	}

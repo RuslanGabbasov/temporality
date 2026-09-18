@@ -27,7 +27,7 @@ func StandardSemanticDefinitions() []affordance.Definition {
 		schemaDefinition(AffordanceRunTests, map[string]any{"type": "object", "properties": map[string]any{
 			"command": map[string]any{"type": "string", "description": "test runner binary, default go"},
 			"args":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "runner arguments, default [test ./...]"},
-			"path":    map[string]any{"type": "string", "description": "working directory inside the resource"},
+			"path":    map[string]any{"type": "string", "description": "working directory relative to the repository root; use \".\" for the root itself, never a resource id or absolute workspace path"},
 		}}, "process.execute"),
 		schemaDefinition(AffordanceReproduceIssue, map[string]any{"type": "object", "required": []string{"command"}, "properties": map[string]any{
 			"command": map[string]any{"type": "string", "description": "binary to run"},
