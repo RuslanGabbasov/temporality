@@ -31,10 +31,17 @@ type Claim struct {
 	ValidTo      *time.Time  `json:"valid_to,omitempty"`
 	// Triple optionally binds the claim to the M14 knowledge graph: subject and
 	// object are entity refs ("type:name"), predicate is a registered relation
-	// predicate. All three fields are validated together (all-or-none).
-	Subject   string `json:"subject,omitempty"`
+	// predicate. All three fields are validated together (all-or-nothing).
+	Subject string `json:"subject,omitempty"`
 	Predicate string `json:"predicate,omitempty"`
-	Object    string `json:"object,omitempty"`
+	Object string `json:"object,omitempty"`
+	// WorldVersion is the world state version this claim's knowledge was last
+	// verified against: the max world_version stamped on the claim's lifecycle
+	// events (creation, confirm/refute/supersede). It is derived from the event
+	// log, not persisted in the claims table, so replay computes it the same
+	// way. Pivot §21: knowledge delivered to a world at a newer state version
+	// must be marked stale instead of posing as a current fact.
+	WorldVersion int `json:"world_version,omitempty"`
 }
 
 func (c *Claim) ApplyDefaults(now time.Time) {

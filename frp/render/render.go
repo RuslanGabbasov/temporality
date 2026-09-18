@@ -23,9 +23,10 @@ import (
 	"github.com/temporality-project/temporality/frp/projection"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/substrate"
+	"github.com/temporality-project/temporality/frp/world"
 )
 
-const Version = "render-0.5.0"
+const Version = "render-0.6.0"
 
 const (
 	procedureMatchThreshold = 0.1
@@ -149,14 +150,18 @@ type ProcedureMatchProvenance struct {
 type Packet struct {
 	Protocol        string       `json:"protocol"`
 	ProtocolVersion string       `json:"protocol_version"`
-	RenderID        string       `json:"render_id"`
-	FrameID         string       `json:"frame_id"`
-	MemoryVersion   string       `json:"memory_version"`
 	RendererVersion string       `json:"renderer_version"`
 	Sections        []Section    `json:"sections"`
-	OutsideFrame    OutsideFrame `json:"outside_frame"`
-	Provenance      Provenance   `json:"provenance"`
-	TokenUsage      TokenUsage   `json:"token_usage"`
+	// FrameID, RenderID, MemoryVersion and the trailing diagnostics change on
+	// every render; field order deliberately places them after Sections so the
+	// wire form starts with the stable envelope + sections and provider-side
+	// prefix caching can reuse the unchanged head across a step sequence.
+	FrameID       string       `json:"frame_id"`
+	RenderID      string       `json:"render_id"`
+	MemoryVersion string       `json:"memory_version"`
+	OutsideFrame  OutsideFrame `json:"outside_frame"`
+	Provenance    Provenance   `json:"provenance"`
+	TokenUsage    TokenUsage   `json:"token_usage"`
 }
 
 type Stores interface {
@@ -171,6 +176,13 @@ type Stores interface {
 // it; stores without it keep procedures episode-scoped.
 type worldEpisodeStore interface {
 	ListWorldEpisodes(context.Context, string) ([]string, error)
+}
+
+// worldStateStore is the optional capability behind pivot §21 staleness:
+// the current state version of the rendered world, so memory earned against
+// an older world state can be marked stale instead of posing as current fact.
+type worldStateStore interface {
+	GetWorld(context.Context, string) (world.World, error)
 }
 
 // uniqueEpisodes dedupes an episode scope while keeping the current episode
@@ -309,7 +321,7 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	// like a fact, and a high-confidence guess must never outrank a cited fact.
 	worldMemory := []any{}
 	if request.WorldID != "" {
-		worldMemory, err = r.worldMemoryItems(ctx, request.WorldID, current, episodeClaims, cutoff)
+		worldMemory, err = r.worldMemoryItems(ctx, request.WorldID, current, goal, episodeClaims, cutoff)
 		if err != nil {
 			return Packet{}, err
 		}
@@ -406,13 +418,28 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	}
 	outside := ambient.Considered - len(ambient.Selected)
 	hint := fmt.Sprintf("%d attention candidates are outside the frame", outside)
-	sections := []Section{{Kind: "identity", Attention: "ambient", Items: []any{anchor}}, {Kind: "objective", Items: []any{goal}}, {Kind: "map", Attention: "ambient", Items: mapItems}, {Kind: "focus", Attention: "deliberate", Items: []any{focus}}, {Kind: "attention_health", Attention: "deliberate", Items: []any{health}}}
+	// Section order is a prefix-cache contract (render-0.6.0): everything the
+	// model may need to act on early — objective, affordances, durable world
+	// memory, procedures — sits in a stable head that rarely changes between a
+	// step sequence's renders, so provider-side prompt prefix caching can reuse
+	// it. Everything per-step volatile (identity's depth counter, map, focus,
+	// diagnostics, working set, periphery, recent) follows. The packet is the
+	// same information either way; only the wire order changed.
+	sections := []Section{{Kind: "objective", Items: []any{goal}}}
+	// The affordances section closes the cognition→action loop: the model can
+	// only request actions it can see, so available definitions travel with the
+	// packet (deterministically ordered) instead of reaching step validation
+	// unseen. Omitted entirely when the caller declares none.
+	if items := affordanceItems(request.Affordances); len(items) > 0 {
+		sections = append(sections, Section{Kind: "affordances", Items: items})
+	}
 	// world_memory is omitted for frames not bound to a world and for worlds
 	// with no durable claims yet — an always-present empty section would tax
 	// every fresh-episode render for silence.
 	if len(worldMemory) > 0 {
 		sections = append(sections, Section{Kind: "world_memory", Attention: "ambient", Items: worldMemory})
 	}
+	sections = append(sections, Section{Kind: "procedures", Attention: "ambient", Items: procedureItems}, Section{Kind: "identity", Attention: "ambient", Items: []any{anchor}}, Section{Kind: "map", Attention: "ambient", Items: mapItems}, Section{Kind: "focus", Attention: "deliberate", Items: []any{focus}}, Section{Kind: "attention_health", Attention: "deliberate", Items: []any{health}})
 	// memory_health is deliberately omitted on a clean claim base: tension
 	// diagnostics are rare by design, and an always-present empty section
 	// would tax every render's budget (a minimal packet once failed its budget
@@ -426,15 +453,7 @@ func (r *Renderer) Render(ctx context.Context, request Request) (Packet, error) 
 	if identityItem, needed := identityHealth(current, events, episodeClaims, cutoff); needed {
 		sections = append(sections, Section{Kind: "identity_health", Attention: "deliberate", Items: []any{identityItem}})
 	}
-	sections = append(sections, Section{Kind: "periphery", Attention: "ambient", Items: periphery}, Section{Kind: "working_set", Attention: "deliberate", Items: working}, Section{Kind: "procedures", Attention: "ambient", Items: procedureItems}, Section{Kind: "recent", Attention: "ambient", Items: recent})
-	// The affordances section closes the cognition→action loop: the model can
-	// only request actions it can see, so available definitions travel with the
-	// packet (deterministically ordered) instead of reaching step validation
-	// unseen. Omitted entirely when the caller declares none.
-	if items := affordanceItems(request.Affordances); len(items) > 0 {
-		rest := append([]Section{{Kind: "affordances", Items: items}}, sections[2:]...)
-		sections = append(sections[:2:2], rest...)
-	}
+	sections = append(sections, Section{Kind: "working_set", Attention: "deliberate", Items: working}, Section{Kind: "periphery", Attention: "ambient", Items: periphery}, Section{Kind: "recent", Attention: "ambient", Items: recent})
 	provenanceAsOf := current.AsOf
 	if cutoff != nil {
 		provenanceAsOf = *cutoff
@@ -614,7 +633,11 @@ func claimsLiveAt(claims []cognition.Claim, at time.Time) []cognition.Claim {
 // PREVIOUSLY REFUTED → PREVIOUSLY INVESTIGATED → LIVE HYPOTHESES. Trim drops
 // from the tail, so budget pressure eats speculation before facts. The frame's
 // own claims are excluded (they already travel as recent events + identity).
-func (r *Renderer) worldMemoryItems(ctx context.Context, worldID string, current frame.Frame, episodeClaims []cognition.Claim, cutoff *time.Time) ([]any, error) {
+// Within the confirmed and hypothesis groups, ranking is lexical relevance to
+// the current objective+focus first (deterministic, replay-safe — no
+// embeddings), confidence only as tie-break: a cited fact about the task at
+// hand beats a higher-confidence fact about something unrelated.
+func (r *Renderer) worldMemoryItems(ctx context.Context, worldID string, current frame.Frame, goal objective.Objective, episodeClaims []cognition.Claim, cutoff *time.Time) ([]any, error) {
 	worldClaims, err := r.stores.ListClaimsByWorld(ctx, worldID)
 	if err != nil {
 		return nil, err
@@ -648,18 +671,44 @@ func (r *Renderer) worldMemoryItems(ctx context.Context, worldID string, current
 			}
 		}
 	}
-	sort.Slice(confirmed, func(i, j int) bool {
-		if confirmed[i].Confidence != confirmed[j].Confidence {
-			return confirmed[i].Confidence > confirmed[j].Confidence
+	// Relevance base: the objective text (with success conditions) plus the
+	// focus query when the frame carries one — the two deterministic texts that
+	// describe what this episode is about. Scores are computed once; sort
+	// comparators only look them up.
+	relevanceBase := goal.Text + " " + strings.Join(goal.SuccessConditions, " ")
+	if current.Focus.Type == frame.RefQuery {
+		relevanceBase += " " + current.Focus.Query
+	}
+	baseTerms := tokenTerms(relevanceBase)
+	relevance := make(map[string]float64, len(confirmed)+len(hypotheses))
+	for _, claim := range append(append([]cognition.Claim(nil), confirmed...), hypotheses...) {
+		propositionTerms := tokenTerms(claim.Proposition)
+		if len(propositionTerms) == 0 || len(baseTerms) == 0 {
+			continue
 		}
-		return confirmed[i].ClaimID < confirmed[j].ClaimID
-	})
-	sort.Slice(hypotheses, func(i, j int) bool {
-		if hypotheses[i].Confidence != hypotheses[j].Confidence {
-			return hypotheses[i].Confidence > hypotheses[j].Confidence
+		matches := 0
+		for term := range propositionTerms {
+			if _, ok := baseTerms[term]; ok {
+				matches++
+			}
 		}
-		return hypotheses[i].ClaimID < hypotheses[j].ClaimID
-	})
+		denominator := len(propositionTerms)
+		if len(baseTerms) < denominator {
+			denominator = len(baseTerms)
+		}
+		relevance[claim.ClaimID] = float64(matches) / float64(denominator)
+	}
+	rank := func(claims []cognition.Claim, i, j int) bool {
+		if relevance[claims[i].ClaimID] != relevance[claims[j].ClaimID] {
+			return relevance[claims[i].ClaimID] > relevance[claims[j].ClaimID]
+		}
+		if claims[i].Confidence != claims[j].Confidence {
+			return claims[i].Confidence > claims[j].Confidence
+		}
+		return claims[i].ClaimID < claims[j].ClaimID
+	}
+	sort.Slice(confirmed, func(i, j int) bool { return rank(confirmed, i, j) })
+	sort.Slice(hypotheses, func(i, j int) bool { return rank(hypotheses, i, j) })
 	// Most recent retirements first: they reflect the latest state of the
 	// world, and old refuted paths matter less as history grows.
 	sort.Slice(retired, func(i, j int) bool {
@@ -669,11 +718,34 @@ func (r *Renderer) worldMemoryItems(ctx context.Context, worldID string, current
 		return retired[i].ClaimID < retired[j].ClaimID
 	})
 	items := make([]any, 0, maxWorldConfirmed+maxWorldRefuted+maxWorldHypotheses+maxWorldInvestigated)
+	// Pivot §21: knowledge is earned against a world state version. When the
+	// world has moved on, prior facts are history, not current truth — the
+	// benchmark's warm arms were poisoned by exactly that difference (a
+	// confirmed "tests are green" from v1 read as a fact about v2).
+	currentWorldVersion := 0
+	if worldStore, supported := any(r.stores).(worldStateStore); supported {
+		if value, err := worldStore.GetWorld(ctx, worldID); err == nil {
+			currentWorldVersion = value.StateVersion
+		}
+	}
+	stale := func(claim cognition.Claim) map[string]any {
+		if claim.WorldVersion <= 0 || currentWorldVersion <= 0 || claim.WorldVersion >= currentWorldVersion {
+			return nil
+		}
+		return map[string]any{
+			"stale":        true,
+			"world_version": claim.WorldVersion,
+			"note":         fmt.Sprintf("earned against world state v%d; the world is now v%d — treat as history and re-verify before relying on it", claim.WorldVersion, currentWorldVersion),
+		}
+	}
 	for i, claim := range confirmed {
 		if i == maxWorldConfirmed {
 			break
 		}
 		item := map[string]any{"ref": "claim:" + claim.ClaimID, "proposition": claim.Proposition, "state": "confirmed", "confidence": claim.Confidence, "scope": "world"}
+		for key, value := range stale(claim) {
+			item[key] = value
+		}
 		if evidence, listErr := r.stores.ListClaimEvidence(ctx, claim.ClaimID); listErr == nil && len(evidence) > 0 {
 			refs := make([]string, 0, maxWorldEvidenceRefs)
 			for _, id := range evidence {
@@ -710,6 +782,9 @@ func (r *Renderer) worldMemoryItems(ctx context.Context, worldID string, current
 			break
 		}
 		item := map[string]any{"ref": "claim:" + claim.ClaimID, "proposition": claim.Proposition, "state": "hypothesis", "confidence": claim.Confidence, "scope": "world"}
+		for key, value := range stale(claim) {
+			item[key] = value
+		}
 		if claim.HasTriple() {
 			item["subject"], item["predicate"], item["object"] = claim.Subject, claim.Predicate, claim.Object
 		}
@@ -1129,17 +1204,7 @@ func entityGraphProximity(anchors map[string]struct{}, relations []entity.Entity
 }
 
 func overlap(left, right string) float64 {
-	terms := func(value string) map[string]struct{} {
-		result := map[string]struct{}{}
-		for _, term := range strings.Fields(strings.ToLower(value)) {
-			term = strings.Trim(term, ".,:;!?()[]{}\"")
-			if len(term) > 2 {
-				result[term] = struct{}{}
-			}
-		}
-		return result
-	}
-	a, b := terms(left), terms(right)
+	a, b := tokenTerms(left), tokenTerms(right)
 	if len(a) == 0 || len(b) == 0 {
 		return 0
 	}
@@ -1154,6 +1219,18 @@ func overlap(left, right string) float64 {
 		denominator = len(b)
 	}
 	return float64(matches) / float64(denominator)
+}
+
+// tokenTerms splits text into the lowercase lexical terms overlap works on.
+func tokenTerms(value string) map[string]struct{} {
+	result := map[string]struct{}{}
+	for _, term := range strings.Fields(strings.ToLower(value)) {
+		term = strings.Trim(term, ".,:;!?()[]{}\"")
+		if len(term) > 2 {
+			result[term] = struct{}{}
+		}
+	}
+	return result
 }
 
 func (r *Renderer) focusItem(ctx context.Context, focus frame.Focus) (any, error) {
@@ -1196,7 +1273,7 @@ func mapItem(candidate attention.ScoredCandidate) MapItem {
 	var payload any
 	switch value := candidate.Candidate.Payload.(type) {
 	case protocol.Event:
-		payload = map[string]any{"type": value.Type, "payload": value.Payload}
+		payload = map[string]any{"type": value.Type, "payload": boundedDiagnostics(value.Payload)}
 	case projection.Region:
 		payload = map[string]any{"kind": value.Kind, "label": value.Label, "activation": value.Activation}
 	case entity.Entity:
@@ -1213,11 +1290,61 @@ func mapItem(candidate attention.ScoredCandidate) MapItem {
 // time-travel. withTime keeps valid_time where chronology is the point of the
 // section (recent); map items already carry attention's recency score.
 func compactEvent(event protocol.Event, withTime bool) map[string]any {
-	item := map[string]any{"ref": canonicalRef(frame.Ref{Type: frame.RefEvent, ID: event.EventID}), "type": event.Type, "payload": event.Payload}
+	item := map[string]any{"ref": canonicalRef(frame.Ref{Type: frame.RefEvent, ID: event.EventID}), "type": event.Type, "payload": boundedDiagnostics(event.Payload)}
 	if withTime {
 		item["valid_time"] = event.ValidTime
 	}
 	return item
+}
+
+// maxDiagnosticRunes bounds captured command output inside execution error
+// diagnostics. World adapters cap stdout/stderr at 64KB each, and a failed
+// test run happily produces both; unbounded, two execution.failed events once
+// dominated every later packet of an episode.
+const maxDiagnosticRunes = 4096
+
+// boundedDiagnostics truncates oversized error.diagnostics stdout/stderr
+// strings in place on a shallow-copied path, so the stored event (shared with
+// the in-memory substrate) is never mutated — the full output stays in the
+// event log for audit while the packet carries a bounded prefix.
+func boundedDiagnostics(payload map[string]any) map[string]any {
+	errMap, ok := payload["error"].(map[string]any)
+	if !ok {
+		return payload
+	}
+	diag, ok := errMap["diagnostics"].(map[string]any)
+	if !ok {
+		return payload
+	}
+	var oversized []string
+	for _, key := range []string{"stdout", "stderr"} {
+		if value, isString := diag[key].(string); isString && len([]rune(value)) > maxDiagnosticRunes {
+			oversized = append(oversized, key)
+		}
+	}
+	if oversized == nil {
+		return payload
+	}
+	// Copy-on-write: clone the three map levels the truncation touches.
+	payloadCopy := make(map[string]any, len(payload))
+	for key, value := range payload {
+		payloadCopy[key] = value
+	}
+	errCopy := make(map[string]any, len(errMap))
+	for key, value := range errMap {
+		errCopy[key] = value
+	}
+	diagCopy := make(map[string]any, len(diag))
+	for key, value := range diag {
+		diagCopy[key] = value
+	}
+	for _, key := range oversized {
+		value := diagCopy[key].(string)
+		diagCopy[key] = string([]rune(value)[:maxDiagnosticRunes]) + "…[truncated]"
+	}
+	errCopy["diagnostics"] = diagCopy
+	payloadCopy["error"] = errCopy
+	return payloadCopy
 }
 // estimate approximates the token weight of a marshalled packet. Measured
 // against a real tokenizer on benchmark packets (deepseek via OpenRouter):
@@ -1257,6 +1384,17 @@ func marshalCanonical(value any) ([]byte, error) {
 		return nil, err
 	}
 	return bytes.TrimRight(buffer.Bytes(), "\n"), nil
+}
+
+// Section returns the first section with the given kind, or nil — tests and
+// debug tooling look sections up by name, never by wire position.
+func (p Packet) Section(kind string) *Section {
+	for i := range p.Sections {
+		if p.Sections[i].Kind == kind {
+			return &p.Sections[i]
+		}
+	}
+	return nil
 }
 
 // MarshalPacket renders the canonical wire bytes of a packet.

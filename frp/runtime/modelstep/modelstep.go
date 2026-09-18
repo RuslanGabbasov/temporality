@@ -42,6 +42,13 @@ type Service struct {
 	Now             step.TimeProvider
 }
 
+// maxEmitRepairAttempts bounds the repair loop: a rejected emission is re-asked
+// with the precise rejection reason instead of blindly retrying the same
+// full-price prompt. Two repairs cover the observed failure modes (invalid
+// refs, wrong ref types, frame_id slips) without burning a step budget on a
+// model that cannot converge.
+const maxEmitRepairAttempts = 2
+
 type Result struct {
 	RenderPacket    render.Packet               `json:"render_packet"`
 	Emission        cognition.CognitiveEmission `json:"emission"`
@@ -75,7 +82,40 @@ func (s Service) Run(ctx context.Context, input Input) (Result, error) {
 	}
 	emission, usage, err := s.Adapter.Emit(ctx, packet)
 	if err != nil {
-		return Result{}, fmt.Errorf("model emit: %w", err)
+		// Repair pass: a delivered-but-invalid emission is worth one bounded
+		// re-ask with the rejection quoted back. HTTP/timeout/truncation errors
+		// are not RejectedErrors and skip straight to failure, as before.
+		var rejection *model.RejectedError
+		for attempt := 0; attempt < maxEmitRepairAttempts && errors.As(err, &rejection); attempt++ {
+			repairer, supported := s.Adapter.(model.RepairAdapter)
+			if !supported {
+				break
+			}
+			var repaired cognition.CognitiveEmission
+			var repairUsage model.Usage
+			repaired, repairUsage, err = repairer.EmitRepair(ctx, packet, rejection)
+			usage = usage.Add(repairUsage)
+			if err == nil {
+				emission = repaired
+				break
+			}
+		}
+		if err != nil {
+			return Result{}, fmt.Errorf("model emit: %w", err)
+		}
+	}
+	// The model occasionally reuses an emission_id from an earlier step of the
+	// same episode (seen after repair passes); the store would reject the
+	// duplicate cognitive step. Emission identity is runtime-authoritative, so
+	// a collision silently mints a fresh id instead of failing the step.
+	if s.NewID != nil {
+		if getter, ok := s.Store.(interface {
+			GetCognitiveStep(context.Context, string) (step.Prepared, error)
+		}); ok {
+			if _, err := getter.GetCognitiveStep(ctx, emission.EmissionID); err == nil {
+				emission.EmissionID = s.NewID()
+			}
+		}
 	}
 	provenance, err := json.Marshal(s.ModelProvenance)
 	if err != nil {

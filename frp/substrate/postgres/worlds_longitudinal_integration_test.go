@@ -2,11 +2,13 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/temporality-project/temporality/frp/cognition"
+	"github.com/temporality-project/temporality/frp/objective"
 	"github.com/temporality-project/temporality/frp/protocol"
 	"github.com/temporality-project/temporality/frp/substrate/postgres"
 )
@@ -28,6 +30,7 @@ func TestWorldScopedClaimBase(t *testing.T) {
 	for _, migration := range []string{
 		"../../../migrations/000001_event_store.up.sql",
 		"../../../migrations/000002_claims.up.sql",
+		"../../../migrations/000005_objectives.up.sql",
 		"../../../migrations/000016_claim_evidence.up.sql",
 	} {
 		if err = store.Migrate(ctx, migration); err != nil {
@@ -83,6 +86,17 @@ func TestWorldScopedClaimBase(t *testing.T) {
 	if err = store.CommitClaim(ctx, cognition.Commit{Event: event(foreignEventID, otherEpisode, newTestUUID(), "claim.candidate", map[string]any{"claim_id": foreignID}), Claim: cognition.Claim{Protocol: protocol.Name, Version: protocol.Version, ClaimID: foreignID, Proposition: "claim outside the world", Confidence: 0.7, Status: cognition.ClaimCandidate, CreatedEvent: foreignEventID, ValidFrom: now}}); err != nil {
 		t.Fatal(err)
 	}
+	// An effect-backed claim cites a world.effect event: episode experience, not
+	// durable world knowledge — it must stay out of the longitudinal base even
+	// though its evidence carries the world id.
+	effectID := newTestUUID()
+	if err = store.Append(ctx, event(effectID, worldEpisode, newTestUUID(), "world.effect", map[string]any{"world_id": worldID, "effect_type": "file.patched"})); err != nil {
+		t.Fatal(err)
+	}
+	effectClaimID := newTestUUID()
+	if err = store.CommitClaim(ctx, claim(effectClaimID, "после правок go test проходит зелёно", newTestUUID(), []string{effectID})); err != nil {
+		t.Fatal(err)
+	}
 
 	claims, err := store.ListClaimsByWorld(ctx, worldID)
 	if err != nil {
@@ -102,6 +116,9 @@ func TestWorldScopedClaimBase(t *testing.T) {
 		if value.ClaimID == foreignID {
 			t.Fatal("foreign-episode claim leaked into the world claim base")
 		}
+		if value.ClaimID == effectClaimID {
+			t.Fatal("effect-backed claim leaked into the world claim base")
+		}
 	}
 	episodes, err := store.ListWorldEpisodes(ctx, worldID)
 	if err != nil {
@@ -109,5 +126,21 @@ func TestWorldScopedClaimBase(t *testing.T) {
 	}
 	if len(episodes) != 1 || episodes[0] != worldEpisode {
 		t.Fatalf("unexpected world episodes: %v", episodes)
+	}
+	// EpisodeObjective feeds the procedure trigger seeding: the lookup must
+	// resolve the episode's objective and report absence cleanly.
+	objectiveID := newTestUUID()
+	startedAt := now.Add(-time.Hour)
+	startedEvent := event(newTestUUID(), worldEpisode, newTestUUID(), "episode.started", map[string]any{"objective_id": objectiveID, "world_id": worldID})
+	startedEvent.ValidTime, startedEvent.TransactionTime = startedAt, startedAt
+	if err = store.CreateObjective(ctx, objective.Objective{Protocol: protocol.Name, Version: protocol.Version, ObjectiveID: objectiveID, EpisodeID: worldEpisode, Text: "найти падающий тест", SuccessConditions: []string{}}, startedEvent); err != nil {
+		t.Fatal(err)
+	}
+	gotObjective, err := store.EpisodeObjective(ctx, worldEpisode)
+	if err != nil || gotObjective.ObjectiveID != objectiveID || gotObjective.Text != "найти падающий тест" {
+		t.Fatalf("EpisodeObjective mismatch: %#v %v", gotObjective, err)
+	}
+	if _, err = store.EpisodeObjective(ctx, otherEpisode); !errors.Is(err, objective.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for objective-less episode, got %v", err)
 	}
 }

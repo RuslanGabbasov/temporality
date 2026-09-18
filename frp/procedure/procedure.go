@@ -57,6 +57,14 @@ type Evidence struct {
 
 type BuildConfig struct {
 	MinimumEvidence int
+	// ObjectiveText seeds the semantic trigger with the goal the source
+	// episode pursued (text + success conditions). Procedures built from a
+	// pursuit are findable again by similar wording: the trigger used to carry
+	// only affordance-id tokens ("read file"), which never lexically overlap a
+	// natural-language goal — the renderer matched zero procedures even when a
+	// world held plenty. procedureID deliberately excludes the trigger, so
+	// re-running the projector over old episodes keeps ids stable.
+	ObjectiveText string
 }
 
 func (c BuildConfig) minimumEvidence() int {
@@ -120,6 +128,9 @@ func Build(episodeID string, evidence []Evidence, config BuildConfig) []Procedur
 		}
 		sort.Strings(required)
 		trigger := strings.Join(tokenize(affordanceID), " ")
+		if config.ObjectiveText != "" {
+			trigger += " " + strings.Join(tokenize(config.ObjectiveText), " ")
+		}
 		result = append(result, Procedure{
 			Protocol: protocol.Name, Version: protocol.Version,
 			ProcedureID: procedureID(episodeID, affordanceID, required), EpisodeID: episodeID,
@@ -173,6 +184,10 @@ type Store interface {
 
 type Source interface {
 	ListProcedureEvidence(context.Context, string) ([]Evidence, error)
+	// EpisodeObjective supplies the goal text that seeds semantic triggers;
+	// stores without an objective for the episode return ErrNotFound and the
+	// projector falls back to the affordance-only trigger.
+	EpisodeObjective(context.Context, string) (objective.Objective, error)
 }
 
 type Projector struct{ Config BuildConfig }
@@ -187,6 +202,11 @@ func (p Projector) Rebuild(ctx context.Context, episodeID string, source Source,
 	evidence, err := source.ListProcedureEvidence(ctx, episodeID)
 	if err != nil {
 		return err
+	}
+	if goal, goalErr := source.EpisodeObjective(ctx, episodeID); goalErr == nil {
+		p.Config.ObjectiveText = strings.TrimSpace(goal.Text + " " + strings.Join(goal.SuccessConditions, " "))
+	} else if !errors.Is(goalErr, objective.ErrNotFound) {
+		return goalErr
 	}
 	procedures := Build(episodeID, evidence, p.Config)
 	for _, value := range procedures {

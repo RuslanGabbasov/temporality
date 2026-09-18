@@ -46,3 +46,22 @@ func (s *Store) GetObjective(ctx context.Context, id string) (objective.Objectiv
 	}
 	return value, nil
 }
+
+// EpisodeObjective returns the objective of an episode (deterministically the
+// lowest objective id when several exist), seeding procedure semantic
+// triggers with the goal text the episode pursued.
+func (s *Store) EpisodeObjective(ctx context.Context, episodeID string) (objective.Objective, error) {
+	var data []byte
+	err := s.pool.QueryRow(ctx, `SELECT data FROM objectives WHERE episode_id=$1 ORDER BY objective_id LIMIT 1`, episodeID).Scan(&data)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return objective.Objective{}, objective.ErrNotFound
+	}
+	if err != nil {
+		return objective.Objective{}, err
+	}
+	var value objective.Objective
+	if err = json.Unmarshal(data, &value); err != nil {
+		return objective.Objective{}, err
+	}
+	return value, nil
+}

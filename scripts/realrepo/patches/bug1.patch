@@ -1,0 +1,16 @@
+diff --git a/search/levenshtein.go b/search/levenshtein.go
+index dadab252..8c201a46 100644
+--- a/search/levenshtein.go
++++ b/search/levenshtein.go
+@@ -37,9 +37,9 @@ func LevenshteinDistance(a, b string) int {
+ 				min = d[j-1] + 1
+ 			}
+ 			if a[j-1] == b[i-1] {
+-				temp = 0
+-			} else {
+ 				temp = 1
++			} else {
++				temp = 0
+ 			}
+ 			if (lastdiag + temp) < min {
+ 				min = lastdiag + temp

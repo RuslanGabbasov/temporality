@@ -1,0 +1,14 @@
+diff --git b/numeric/float.go a/numeric/float.go
+index 2004a374..2bb14d7e 100644
+--- b/numeric/float.go
++++ a/numeric/float.go
+@@ -20,6 +20,9 @@ import (
+ 
+ func Float64ToInt64(f float64) int64 {
+ 	fasint := int64(math.Float64bits(f))
++	if fasint < 0 {
++		fasint = fasint ^ 0x7fffffffffffffff
++	}
+ 	return fasint
+ }
+ 

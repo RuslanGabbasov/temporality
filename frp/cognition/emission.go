@@ -536,7 +536,7 @@ func ParseRef(value string, workingSet bool) (frame.Ref, error) {
 		return ref, ref.Validate()
 	}
 	switch ref.Type {
-	case frame.RefRegion, frame.RefClaim, frame.RefEvent, frame.RefExecution, frame.RefQuery:
+	case frame.RefRegion, frame.RefClaim, frame.RefEvent, frame.RefExecution, frame.RefEntity, frame.RefQuery:
 		return ref, nil
 	default:
 		return frame.Ref{}, fmt.Errorf("invalid ref type %q", kind)

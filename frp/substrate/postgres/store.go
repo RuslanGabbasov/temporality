@@ -83,7 +83,10 @@ func (s *Store) Get(ctx context.Context, id string) (protocol.Event, error) {
 }
 
 func (s *Store) List(ctx context.Context, f substrate.EventFilter) ([]protocol.Event, error) {
-	query := `SELECT ` + selectFields + ` FROM events WHERE ($1='' OR episode_id=$1::uuid) AND ($2='' OR branch_id=$2::uuid) AND ($3::timestamptz IS NULL OR valid_time <= $3) ORDER BY valid_time,tx_time,event_id`
+	// Branchless events are episode-global facts (executor outcomes, episode
+	// lifecycle): they are visible from every branch, matching ListEventsThrough.
+	// Without this, render on a branched frame never sees execution results.
+	query := `SELECT ` + selectFields + ` FROM events WHERE ($1='' OR episode_id=$1::uuid) AND ($2='' OR branch_id IS NULL OR branch_id=$2::uuid) AND ($3::timestamptz IS NULL OR valid_time <= $3) ORDER BY valid_time,tx_time,event_id`
 	rows, err := s.pool.Query(ctx, query, f.EpisodeID, f.BranchID, f.AsOf)
 	if err != nil {
 		return nil, err

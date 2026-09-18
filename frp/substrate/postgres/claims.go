@@ -179,15 +179,25 @@ func (s *Store) ListClaims(ctx context.Context) ([]cognition.Claim, error) {
 // (ingestion/observation claims) or when it was authored inside an episode
 // that observed the world (model-emitted claims carry no evidence of their
 // own, but their creating events share the episode with world observations).
-// The UNION dedupes claims reachable through both paths.
+// Claims citing a world.effect event are deliberately excluded: effects are
+// episode EXPERIENCE (what an episode changed and observed right after), not
+// durable world knowledge — the benchmark's warm arms were poisoned by
+// outcome claims like "tests are green after the patch" riding into a
+// recycled world as fact. The UNION dedupes claims reachable through both
+// paths. WorldVersion is derived from the event log (pivot §21): the max
+// world_version stamped on the claim's lifecycle events, so a confirm in a
+// newer world state refreshes the claim while an untested old fact stays
+// marked as old.
 func (s *Store) ListClaimsByWorld(ctx context.Context, worldID string) ([]cognition.Claim, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+claimColumns+` FROM claims WHERE claim_id IN (
+	rows, err := s.pool.Query(ctx, `SELECT `+claimColumns+`, COALESCE((SELECT max((le.payload->>'world_version')::int) FROM events le WHERE le.payload->>'claim_id' = claims.claim_id::text AND le.payload ? 'world_version'), 0) FROM claims WHERE claim_id IN (
 			SELECT ce.claim_id FROM claim_evidence ce JOIN events ev ON ev.event_id = ce.evidence_event WHERE ev.payload->>'world_id' = $1
 			UNION
 			SELECT c.claim_id FROM claims c JOIN events ev ON ev.event_id = c.created_event
 				WHERE ev.episode_id IS NOT NULL AND ev.episode_id IN (
 					SELECT DISTINCT e2.episode_id FROM events e2 WHERE e2.payload->>'world_id' = $1 AND e2.episode_id IS NOT NULL
 				)
+		) AND claim_id NOT IN (
+			SELECT ce2.claim_id FROM claim_evidence ce2 JOIN events ev2 ON ev2.event_id = ce2.evidence_event WHERE ev2.type = 'world.effect'
 		) ORDER BY claim_id`, worldID)
 	if err != nil {
 		return nil, err
@@ -196,7 +206,7 @@ func (s *Store) ListClaimsByWorld(ctx context.Context, worldID string) ([]cognit
 	result := make([]cognition.Claim, 0)
 	for rows.Next() {
 		var claim cognition.Claim
-		if err = rows.Scan(&claim.Protocol, &claim.Version, &claim.ClaimID, &claim.Proposition, &claim.Confidence, &claim.Status, &claim.CreatedEvent, &claim.ValidFrom, &claim.ValidTo, &claim.Subject, &claim.Predicate, &claim.Object); err != nil {
+		if err = rows.Scan(&claim.Protocol, &claim.Version, &claim.ClaimID, &claim.Proposition, &claim.Confidence, &claim.Status, &claim.CreatedEvent, &claim.ValidFrom, &claim.ValidTo, &claim.Subject, &claim.Predicate, &claim.Object, &claim.WorldVersion); err != nil {
 			return nil, err
 		}
 		result = append(result, claim)

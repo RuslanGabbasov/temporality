@@ -269,6 +269,43 @@ func renderEvent(id, eventType string, now time.Time, payload map[string]any) pr
 	return protocol.Event{Protocol: protocol.Name, Version: protocol.Version, EventID: id, TransactionTime: now, ValidTime: now, EpisodeID: "episode", BranchID: "branch", Type: eventType, Payload: payload, Provenance: map[string]any{"source": "test"}}
 }
 
+// TestRenderIncludesBranchlessExecutionEvents locks the episode-global
+// visibility contract: executor events (execution.started/failed) are written
+// without a branch, and a frame living on a branch must still see them.
+// Regression: postgres List used to require branch equality and rendered the
+// live cognition loop blind to failing test output (replay was not affected).
+func TestRenderIncludesBranchlessExecutionEvents(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	goal := objective.Objective{Protocol: protocol.Name, Version: protocol.Version, ObjectiveID: "objective", EpisodeID: "episode", Text: "fix the failing test", SuccessConditions: []string{}}
+	current := frame.Frame{Protocol: protocol.Name, Version: protocol.Version, FrameID: "frame", AgentID: "agent", EpisodeID: "episode", BranchID: "branch", ObjectiveID: goal.ObjectiveID, AsOf: now, Focus: frame.Focus{Type: frame.RefQuery, Query: "tests"}, WorkingSet: []frame.Ref{}, Mode: frame.ModeExplore, Attention: frame.Attention{Policy: "balanced", Deliberate: true, MaxCandidates: 32}, Filters: frame.Filters{AgentIDs: []string{}, RegionKinds: []string{}}, Budget: frame.Budget{Tokens: 8000}}
+	if err := store.CreateObjective(ctx, goal, renderEvent("objective-event", "episode.started", now, map[string]any{"objective_id": goal.ObjectiveID})); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateFrame(ctx, current, renderEvent("frame-event", "frame.created", now, map[string]any{"frame_id": current.FrameID})); err != nil {
+		t.Fatal(err)
+	}
+	// Executor writes lifecycle events without a branch (episode-global).
+	failed := renderEvent("exec-failed-event", "execution.failed", now.Add(time.Second), map[string]any{
+		"execution_id": "exec-1",
+		"error": map[string]any{"class": "non_zero_exit", "diagnostics": map[string]any{"stdout": "--- FAIL: TestSum\nexit status 1"}},
+	})
+	failed.BranchID = ""
+	if err := store.Append(ctx, failed); err != nil {
+		t.Fatal(err)
+	}
+
+	renderer := render.New(store)
+	packet, err := renderer.Render(ctx, render.Request{FrameID: current.FrameID, ObjectiveID: goal.ObjectiveID, BudgetTokens: 100000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !recentContains(packet, "exec-failed-event") {
+		t.Fatal("branchless execution.failed must be visible to a branched frame (episode-global visibility)")
+	}
+}
+
 // TestPacketIsCompactAndPeripheryIsNearMiss locks the token-efficiency
 // contract of render-0.4: map items carry canonical string refs and compact
 // payloads (no protocol envelope, no attention feature vectors), recent events

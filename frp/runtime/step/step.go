@@ -176,6 +176,12 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 			claimType = "claim.supported"
 		}
 		payload := map[string]any{"claim_id": claimID, "proposition": emitted.Proposition, "confidence": emitted.Confidence, "emission_id": emission.EmissionID}
+		if input.WorldVersion > 0 {
+			// Pivot §21: stamp the world state this knowledge was earned against;
+			// renders in later world versions mark the claim stale instead of
+			// delivering it as a current fact.
+			payload["world_version"] = input.WorldVersion
+		}
 		var evidenceIDs []string
 		if len(emitted.Evidence) > 0 {
 			evidenceIDs = make([]string, 0, len(emitted.Evidence))
@@ -283,6 +289,9 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 		if eventErr != nil {
 			return Result{}, eventErr
 		}
+		if input.WorldVersion > 0 {
+			event.Payload["world_version"] = input.WorldVersion
+		}
 		transition := cognition.Transition{Event: event, ClaimID: claim.ClaimID, ToStatus: toStatus, ValidAt: now}
 		if err = transition.Validate(); err != nil {
 			return Result{}, err
@@ -301,6 +310,9 @@ func Run(ctx context.Context, store Store, input Input) (Result, error) {
 		event, eventErr := newEvent("claim.superseded", map[string]any{"claim_id": claim.ClaimID, "superseded_by": prepared.Claims[j].Value.ClaimID, "emission_id": emission.EmissionID})
 		if eventErr != nil {
 			return Result{}, eventErr
+		}
+		if input.WorldVersion > 0 {
+			event.Payload["world_version"] = input.WorldVersion
 		}
 		transition := cognition.Transition{Event: event, ClaimID: claim.ClaimID, ToStatus: cognition.ClaimSuperseded, ValidAt: now}
 		if err = transition.Validate(); err != nil {

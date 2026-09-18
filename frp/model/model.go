@@ -30,6 +30,29 @@ type Adapter interface {
 	Emit(context.Context, render.Packet) (cognition.CognitiveEmission, Usage, error)
 }
 
+// RejectedError marks a model response that ARRIVED but could not be decoded
+// or validated. The raw output is retained so a repair pass can show the
+// model exactly what it sent and why it was rejected — a blind retry re-pays
+// the whole prompt for the same mistake.
+type RejectedError struct {
+	Reason string
+	Raw    string
+}
+
+func (e *RejectedError) Error() string { return e.Reason }
+
+// RepairAdapter is the optional capability behind repair retries: re-emit
+// with the rejected attempt quoted back to the model. Adapters without it
+// (recorded traces) simply never repair.
+type RepairAdapter interface {
+	EmitRepair(context.Context, render.Packet, *RejectedError) (cognition.CognitiveEmission, Usage, error)
+}
+
+// Add returns the summed cost of several emit attempts.
+func (u Usage) Add(other Usage) Usage {
+	return Usage{PromptTokens: u.PromptTokens + other.PromptTokens, CompletionTokens: u.CompletionTokens + other.CompletionTokens, TotalTokens: u.TotalTokens + other.TotalTokens}
+}
+
 // Config is non-secret model configuration and may safely be retained as provenance.
 // BaseURL is the OpenAI-compatible API root, normally ending in /v1.
 // Reasoning controls provider reasoning parameters (OpenRouter-style):
@@ -202,7 +225,7 @@ const systemPrompt = `You convert one FRP RenderPacket into exactly one Cognitiv
 Return JSON only (no Markdown or commentary), conforming to this required skeleton:
 {"schema":"frp.cognitive-emission.v1","emission_id":"<new non-empty id>","frame_id":"<exact frame_id from RenderPacket>","observation":[],"reasoning":[],"claims":[],"attention":[],"actions":[],"frame_ops":[],"claim_ops":[],"completion":null}
 All listed fields are required. observation items require interpretation and a canonical STRING ref; prefer durable refs such as "event:UUID" or "claim:UUID", and use "query:text" only when referring to the visible focus query (never return a ref object; omit the observation instead of sending an empty ref). Always include one reasoning item with kind "answer" whose text is a direct, helpful user-facing answer to the Objective in the same language as the Objective; other reasoning items may describe inference or constraints. Do not merely describe what the answer should say. completion is a plain string (or null) with the final answer, only for a genuinely finished Objective; never an object. claims require proposition, confidence (0..1), and status "candidate" (hypothesis) or "supported" — "supported" only for a fact directly extracted from events visible in the packet, and then it must cite them as "evidence":["event:UUID",...] copied exactly; a hypothesis may also cite motivating events in evidence; a claim that replaces a wrong or outdated claim you saw must also carry "supersedes":"claim:UUID" naming the old one. attention supports {"op":"attend","target":{"type":"query","text":"..."}} or a typed target id; frame_ops items look like {"op":"pin","ref":"claim:UUID"} or {"op":"unpin","ref":"event:UUID"} where ref is always a canonical string, never an object. claim_ops reconcile memory: retire a claim that is wrong, outdated, or an exact duplicate with {"op":"refute","claim":"claim:UUID"} — prefer superseding with a corrected claim over bare refutation, refute duplicates you do not need — and promote a hypothesis you have now verified (for example, an execution result in the packet proved it) with {"op":"confirm","claim":"claim:UUID"}; set claim_ops to [] when memory holds nothing to reconcile. The identity section anchors you in the episode: steps is your depth and commitments lists your own live positions (claims you emitted, newest first) — stay consistent with them or reconcile them explicitly via claim_ops; identity_health (when present) reports self-contradictions among your commitments and retracted commitments, so re-anchor on the objective instead of silently drifting. The world_memory section (when present) is knowledge earlier episodes built in this world, delivered by state: items with "state":"confirmed" are cited facts (evidence refs included) you may build on; "state":"refuted" are hypotheses a prior episode already investigated and rejected — do NOT re-investigate them without genuinely new evidence; "state":"investigated" names targets a prior episode already studied; "state":"hypothesis" are unverified guesses from before — treat them as leads to verify, not as facts, and confirm or refute them once you have evidence. Every id you reference (observation refs, attention targets, frame_ops refs, claim_ops claims, supersedes and evidence targets) must be copied EXACTLY from the RenderPacket — never invent, guess, or pattern an id. The affordances section (when present) lists exactly the affordance ids available in this step, each with a signature line like "path*(string) ...; find*(string) ..." where a trailing * marks required parameters and the parentheses hold the JSON type: emit each action as {"affordance":"<one listed id>","args":{...}} with exactly those parameter names — never tool-call style with id/arguments keys. Set actions to [] when the RenderPacket lists no affordances; never invent an affordance or physical tool. Work economically: reuse what the packet already shows instead of re-observing, and when run_command is listed prefer locating code with grep (run_command grep [-rn] PATTERN) over reading many files whole.
-Use only information present in the RenderPacket. You have no tools, external access, credentials, secrets, or permission to infer or request them. Never output secrets.`
+Use only information present in the RenderPacket. You have no tools, external access, credentials, secrets, or permission to infer or request them. Never output secrets. Every emission must make progress: either request at least one action, or set completion to a non-null string when the objective is genuinely finished. An emission that neither requests actions nor completes the objective wastes a cognitive step — when you are not done, request your next action(s) in the same emission together with any claims and frame_ops you want to record.`
 
 type chatResponse struct {
 	Choices []struct {
@@ -228,15 +251,38 @@ func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cogniti
 	if err != nil {
 		return cognition.CognitiveEmission{}, Usage{}, fmt.Errorf("marshal render packet: %w", err)
 	}
+	return a.emitMessages(ctx, packet, []chatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: string(packetJSON)},
+	})
+}
+
+const repairInstruction = "Your previous response (quoted above as your last message) was rejected by the runtime: %s\nReturn the corrected complete JSON object only — fix exactly what was rejected (invalid or invented ids, wrong types, malformed JSON, mismatched frame_id), keep everything else identical to your previous attempt. All refs must be copied exactly from the RenderPacket in the first user message."
+
+// EmitRepair re-asks with the rejected attempt in the conversation: the model
+// sees its own output and the precise reason, instead of gambling a fresh
+// full-price retry on the same latent mistake. The packet is unchanged, so
+// the stable prefix (system + packet) stays provider-cacheable.
+func (a *OpenAIAdapter) EmitRepair(ctx context.Context, packet render.Packet, rejection *RejectedError) (cognition.CognitiveEmission, Usage, error) {
+	packetJSON, err := render.MarshalPacket(packet)
+	if err != nil {
+		return cognition.CognitiveEmission{}, Usage{}, fmt.Errorf("marshal render packet: %w", err)
+	}
+	return a.emitMessages(ctx, packet, []chatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: string(packetJSON)},
+		{Role: "assistant", Content: rejection.Raw},
+		{Role: "user", Content: fmt.Sprintf(repairInstruction, rejection.Reason)},
+	})
+}
+
+func (a *OpenAIAdapter) emitMessages(ctx context.Context, packet render.Packet, messages []chatMessage) (cognition.CognitiveEmission, Usage, error) {
 	body, err := json.Marshal(chatRequest{
-		Model:       a.model,
-		Temperature: a.temperature,
-		MaxTokens:   a.maxOutputTokens,
-		Reasoning:   a.reasoning,
-		Messages: []chatMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: string(packetJSON)},
-		},
+		Model:          a.model,
+		Temperature:    a.temperature,
+		MaxTokens:      a.maxOutputTokens,
+		Reasoning:      a.reasoning,
+		Messages:       messages,
 		ResponseFormat: responseFormat{Type: "json_object"},
 	})
 	if err != nil {
@@ -282,7 +328,7 @@ func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cogniti
 	a.emitTrace("response", []byte(choice.Message.Content))
 	content, err := stripJSONFence(choice.Message.Content)
 	if err != nil {
-		return cognition.CognitiveEmission{}, usage, err
+		return cognition.CognitiveEmission{}, usage, &RejectedError{Reason: err.Error(), Raw: choice.Message.Content}
 	}
 	var emission cognition.CognitiveEmission
 	err = json.Unmarshal([]byte(content), &emission)
@@ -302,7 +348,8 @@ func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cogniti
 		if choice.FinishReason == "length" {
 			if strings.TrimSpace(choice.Message.Content) == "" {
 				// Empty content with finish_reason=length: reasoning tokens consumed
-				// the whole budget before the answer began.
+				// the whole budget before the answer began. Not repairable by
+				// re-asking: the budget, not the wording, is the constraint.
 				message += fmt.Sprintf("; model produced no content within the token budget (finish_reason=length) — reasoning tokens likely consumed it: raise TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS above %d, set TEMPORALITY_MODEL_REASONING=off for toggleable models, or use a non-reasoning model", a.maxOutputTokens)
 				reasoning := choice.Message.Reasoning
 				if reasoning == "" {
@@ -314,14 +361,17 @@ func (a *OpenAIAdapter) Emit(ctx context.Context, packet render.Packet) (cogniti
 			} else {
 				message += fmt.Sprintf("; model output was truncated (finish_reason=length), raise TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS above %d", a.maxOutputTokens)
 			}
+			return cognition.CognitiveEmission{}, usage, fmt.Errorf("%s; model content: %q", message, boundedSnippet(choice.Message.Content))
 		}
-		return cognition.CognitiveEmission{}, usage, fmt.Errorf("%s; model content: %q", message, boundedSnippet(choice.Message.Content))
+		// A delivered-but-malformed answer is worth repairing with feedback,
+		// not blindly retrying at full prompt price.
+		return cognition.CognitiveEmission{}, usage, &RejectedError{Reason: fmt.Sprintf("%s; model content: %q", message, boundedSnippet(choice.Message.Content)), Raw: choice.Message.Content}
 	}
 	if err := emission.Validate(); err != nil {
-		return cognition.CognitiveEmission{}, usage, fmt.Errorf("validate cognitive emission: %w", err)
+		return cognition.CognitiveEmission{}, usage, &RejectedError{Reason: fmt.Sprintf("validate cognitive emission: %v", err), Raw: choice.Message.Content}
 	}
 	if emission.FrameID != packet.FrameID {
-		return cognition.CognitiveEmission{}, usage, fmt.Errorf("emission frame_id %q does not match packet frame_id %q", emission.FrameID, packet.FrameID)
+		return cognition.CognitiveEmission{}, usage, &RejectedError{Reason: fmt.Sprintf("emission frame_id %q does not match packet frame_id %q — copy the frame_id exactly", emission.FrameID, packet.FrameID), Raw: choice.Message.Content}
 	}
 	return emission, usage, nil
 }

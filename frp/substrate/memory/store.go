@@ -98,7 +98,9 @@ func (s *Store) List(_ context.Context, filter substrate.EventFilter) ([]protoco
 		if filter.EpisodeID != "" && event.EpisodeID != filter.EpisodeID {
 			continue
 		}
-		if filter.BranchID != "" && event.BranchID != filter.BranchID {
+		// Branchless events are episode-global facts and stay visible from every
+		// branch (parity with postgres List and ListEventsThrough).
+		if filter.BranchID != "" && event.BranchID != "" && event.BranchID != filter.BranchID {
 			continue
 		}
 		if filter.AsOf != nil && event.ValidTime.After(*filter.AsOf) {
@@ -221,13 +223,38 @@ func (s *Store) worldEpisodesLocked(worldID string) map[string]struct{} {
 
 // ListClaimsByWorld mirrors the postgres read path: evidence-backed claims
 // (ingestion/observation) plus claims authored inside episodes that acted in
-// the world. Ordering matches ListClaims for determinism.
+// the world. Ordering matches ListClaims for determinism. WorldVersion
+// mirrors postgres too: the max world_version stamped on the claim's
+// lifecycle events (pivot §21). Claims citing a world.effect event are
+// excluded on both paths — effect evidence marks episode experience, not
+// durable world knowledge (see the postgres twin for the rationale).
 func (s *Store) ListClaimsByWorld(_ context.Context, worldID string) ([]cognition.Claim, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	episodes := s.worldEpisodesLocked(worldID)
+	// Lifecycle world versions, precomputed once: claim_id -> max stamped version.
+	lifecycleVersion := make(map[string]int, len(s.claims))
+	for _, event := range s.events {
+		if claimID, _ := event.Payload["claim_id"].(string); claimID != "" {
+			if version, ok := event.Payload["world_version"].(int); ok && version > lifecycleVersion[claimID] {
+				lifecycleVersion[claimID] = version
+			}
+		}
+	}
 	result := make([]cognition.Claim, 0)
 	for _, claim := range s.claims {
+		// world.effect evidence disqualifies: the claim describes what an
+		// episode did, not what the world is.
+		episodeExperience := false
+		for _, id := range s.claimEvidence[claim.ClaimID] {
+			if event, ok := s.events[id]; ok && event.Type == world.EventWorldEffect {
+				episodeExperience = true
+				break
+			}
+		}
+		if episodeExperience {
+			continue
+		}
 		matched := false
 		for _, id := range s.claimEvidence[claim.ClaimID] {
 			if event, ok := s.events[id]; ok {
@@ -245,6 +272,7 @@ func (s *Store) ListClaimsByWorld(_ context.Context, worldID string) ([]cognitio
 			}
 		}
 		if matched {
+			claim.WorldVersion = lifecycleVersion[claim.ClaimID]
 			result = append(result, claim)
 		}
 	}
@@ -572,6 +600,30 @@ func (s *Store) GetObjective(_ context.Context, id string) (objective.Objective,
 	}
 	value.SuccessConditions = append([]string(nil), value.SuccessConditions...)
 	return value, nil
+}
+
+// EpisodeObjective returns the objective of an episode (deterministically the
+// lowest objective id when several exist). The procedure projector uses its
+// text to seed semantic triggers, so a procedure built while pursuing a goal
+// can be found again by a later episode pursuing similar wording.
+func (s *Store) EpisodeObjective(_ context.Context, episodeID string) (objective.Objective, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var found *objective.Objective
+	for id, value := range s.objectives {
+		if value.EpisodeID != episodeID {
+			continue
+		}
+		if found == nil || id < found.ObjectiveID {
+			copy := value
+			found = &copy
+		}
+	}
+	if found == nil {
+		return objective.Objective{}, objective.ErrNotFound
+	}
+	found.SuccessConditions = append([]string(nil), found.SuccessConditions...)
+	return *found, nil
 }
 
 func (s *Store) CreateFrame(_ context.Context, value frame.Frame, event protocol.Event) error {

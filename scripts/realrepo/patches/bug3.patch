@@ -1,0 +1,13 @@
+diff --git a/search/edit_distance.go b/search/edit_distance.go
+index 861d8ba6..95c70db9 100644
+--- a/search/edit_distance.go
++++ b/search/edit_distance.go
+@@ -110,7 +110,7 @@ func EditDistanceMaxReuseSlice(a, b string, max int, d []int) (int, bool, []int)
+ 			lastdiag = olddiag
+ 		}
+ 		// after each row if rowmin isn't less than max stop
+-		if rowmin > max {
++		if rowmin >= max {
+ 			return max, true, d
+ 		}
+ 	}

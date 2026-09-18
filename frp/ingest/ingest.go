@@ -211,6 +211,7 @@ func (r *Runner) commitClaims(ctx context.Context, request Request, runID string
 				"extractor":        extraction.Extractor,
 				"evidence_events":  append([]string(nil), extraction.Evidence...),
 				"ingestion_run_id": runID,
+				"world_version":    r.World.StateVersion,
 			},
 			Provenance: map[string]any{"source": "ingestion", "extractor": extraction.Extractor, "run_id": runID},
 		}

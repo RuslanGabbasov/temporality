@@ -87,6 +87,99 @@ func TestModelStepPersistsRenderAndSuggestedAttention(t *testing.T) {
 	}
 }
 
+// repairAdapter rejects its first emission with a RejectedError (as the
+// OpenAI adapter does for delivered-but-invalid output) and succeeds on the
+// repair pass, recording both usages so the test can assert the summed cost.
+type repairAdapter struct {
+	calls       int
+	repairs     int
+	alwaysFail  bool
+	firstUsage  model.Usage
+	repairUsage model.Usage
+	emission    cognition.CognitiveEmission
+}
+
+func (a *repairAdapter) Emit(_ context.Context, packet render.Packet) (cognition.CognitiveEmission, model.Usage, error) {
+	a.calls++
+	if a.calls == 1 {
+		return cognition.CognitiveEmission{}, a.firstUsage, &model.RejectedError{Reason: "validate cognitive emission: invalid ref \"\"", Raw: "{\"schema\":\"broken\"}"}
+	}
+	return cognition.CognitiveEmission{}, model.Usage{}, &model.RejectedError{Reason: "still invalid", Raw: "{}"}
+}
+
+func (a *repairAdapter) EmitRepair(_ context.Context, packet render.Packet, rejection *model.RejectedError) (cognition.CognitiveEmission, model.Usage, error) {
+	a.repairs++
+	if a.alwaysFail || a.repairs > 1 {
+		return cognition.CognitiveEmission{}, model.Usage{}, &model.RejectedError{Reason: "still invalid", Raw: "{}"}
+	}
+	return a.emission, a.repairUsage, nil
+}
+
+// TestModelStepRepairsRejectedEmission locks the retry economics: a rejected
+// emission is re-asked with the precise reason (bounded to two repairs)
+// instead of failing the step, and the reported usage is the SUM of every
+// attempt — the repair pass is not free.
+func TestModelStepRepairsRejectedEmission(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	current := frame.Frame{FrameID: id(1), AgentID: id(2), EpisodeID: id(3), BranchID: id(4), ObjectiveID: id(5), AsOf: now, Focus: frame.Focus{Type: frame.RefQuery, Query: "inspect work"}, Attention: frame.Attention{Ambient: true}}
+	current.ApplyDefaults()
+	goal := objective.Objective{ObjectiveID: current.ObjectiveID, EpisodeID: current.EpisodeID, Text: "inspect work"}
+	goal.ApplyDefaults()
+	if err := store.CreateObjective(ctx, goal, event(id(6), "episode.started", now, current, map[string]any{"objective_id": goal.ObjectiveID})); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateFrame(ctx, current, event(id(7), "frame.created", now, current, map[string]any{"frame_id": current.FrameID})); err != nil {
+		t.Fatal(err)
+	}
+	completion := "done"
+	adapter := &repairAdapter{firstUsage: model.Usage{PromptTokens: 1000, CompletionTokens: 100, TotalTokens: 1100}, repairUsage: model.Usage{PromptTokens: 500, CompletionTokens: 80, TotalTokens: 580}, emission: cognition.CognitiveEmission{Schema: cognition.EmissionSchema, EmissionID: "repaired-emission", FrameID: current.FrameID, Observation: []cognition.Observation{}, Reasoning: []cognition.Reasoning{}, Claims: []cognition.EmittedClaim{}, Attention: []cognition.AttentionOperation{}, Actions: []cognition.ActionRequest{}, FrameOps: []cognition.FrameOperation{}, Completion: &completion}}
+	service := modelstep.Service{Store: store, Adapter: adapter, NewID: sequence(100), Now: func() time.Time { return now.Add(time.Second) }}
+	result, err := service.Run(ctx, modelstep.Input{FrameID: current.FrameID, ObjectiveID: goal.ObjectiveID, BudgetTokens: 8000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adapter.repairs != 1 {
+		t.Fatalf("expected exactly one repair, got %d", adapter.repairs)
+	}
+	if result.Emission.EmissionID != "repaired-emission" {
+		t.Fatalf("unexpected emission: %#v", result.Emission)
+	}
+	want := model.Usage{PromptTokens: 1500, CompletionTokens: 180, TotalTokens: 1680}
+	if result.ModelUsage != want {
+		t.Fatalf("usage must sum emit + repair: %#v want %#v", result.ModelUsage, want)
+	}
+}
+
+// TestModelStepRepairIsBounded locks the guard: a model that cannot converge
+// burns at most the two repair attempts, then the step fails with the last
+// rejection — the driver-level retry loop stays the outer safety net.
+func TestModelStepRepairIsBounded(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	current := frame.Frame{FrameID: id(1), AgentID: id(2), EpisodeID: id(3), BranchID: id(4), ObjectiveID: id(5), AsOf: now, Focus: frame.Focus{Type: frame.RefQuery, Query: "inspect work"}, Attention: frame.Attention{Ambient: true}}
+	current.ApplyDefaults()
+	goal := objective.Objective{ObjectiveID: current.ObjectiveID, EpisodeID: current.EpisodeID, Text: "inspect work"}
+	goal.ApplyDefaults()
+	if err := store.CreateObjective(ctx, goal, event(id(6), "episode.started", now, current, map[string]any{"objective_id": goal.ObjectiveID})); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateFrame(ctx, current, event(id(7), "frame.created", now, current, map[string]any{"frame_id": current.FrameID})); err != nil {
+		t.Fatal(err)
+	}
+	alwaysReject := &repairAdapter{alwaysFail: true, firstUsage: model.Usage{TotalTokens: 10}, repairUsage: model.Usage{TotalTokens: 5}}
+	service := modelstep.Service{Store: store, Adapter: alwaysReject, NewID: sequence(100), Now: func() time.Time { return now.Add(time.Second) }}
+	_, err := service.Run(ctx, modelstep.Input{FrameID: current.FrameID, ObjectiveID: goal.ObjectiveID, BudgetTokens: 8000})
+	if err == nil {
+		t.Fatal("unconverged model must fail the step")
+	}
+	if alwaysReject.repairs != 2 {
+		t.Fatalf("repair must stop after two attempts, got %d", alwaysReject.repairs)
+	}
+}
+
 func id(n int) string { return fmt.Sprintf("00000000-0000-4000-8000-%012d", n) }
 
 func sequence(n int) func() string {

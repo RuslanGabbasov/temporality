@@ -42,7 +42,11 @@ func TestGraphProximityChangesAmbientRegionRanking(t *testing.T) {
 		t.Fatal(err)
 	}
 	positions := map[string]int{}
-	for i, item := range packet.Sections[2].Items {
+	mapSection := packet.Section("map")
+	if mapSection == nil {
+		t.Fatalf("map section missing: %#v", packet.Sections)
+	}
+	for i, item := range mapSection.Items {
 		candidate := item.(render.MapItem)
 		kind, id, _ := strings.Cut(candidate.Ref, ":")
 		if kind == string(frame.RefRegion) {
