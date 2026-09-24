@@ -196,7 +196,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					action, _ = call.Args["action"].(string)
 					reason, _ = call.Args["reason"].(string)
 				}
-				if err := emit(activityCtx, state, "approval.requested", map[string]any{"operation_id": operationID, "action": action, "reason": reason}); err != nil {
+				approvalData := map[string]any{"operation_id": operationID, "action": action, "reason": reason}
+				if preview := approvalPreview(call.Name, call.Args); preview != nil {
+					preview["workspace_read_only"] = input.Role == "reviewer" || input.Role == "qa"
+					approvalData["details"] = preview
+				}
+				if err := emit(activityCtx, state, "approval.requested", approvalData); err != nil {
 					return result, err
 				}
 				approved, approval, timedOut, waitErr := awaitApproval(ctx, operationID, time.Duration(input.ApprovalTimeoutSeconds)*time.Second)

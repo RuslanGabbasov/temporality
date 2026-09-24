@@ -95,7 +95,8 @@ func main() {
 			writeError(w, 400, errors.New("project query parameter is required"))
 			return
 		}
-		response, err := temporalClient.DescribeWorkflowExecution(r.Context(), workflowIDFor(activities.SourceID, project, r.PathValue("runID")), "")
+		sourceID := querySourceID(r, activities.SourceID)
+		response, err := temporalClient.DescribeWorkflowExecution(r.Context(), workflowIDFor(sourceID, project, r.PathValue("runID")), "")
 		if err != nil {
 			writeError(w, 404, err)
 			return
@@ -107,7 +108,7 @@ func main() {
 		reply := map[string]any{"run_id": r.PathValue("runID"), "project": project, "status": status}
 		if response.WorkflowExecutionInfo != nil && response.WorkflowExecutionInfo.Status == enums.WORKFLOW_EXECUTION_STATUS_COMPLETED {
 			var result agent.RunResult
-			if err := temporalClient.GetWorkflow(r.Context(), workflowIDFor(activities.SourceID, project, r.PathValue("runID")), "").Get(r.Context(), &result); err != nil {
+			if err := temporalClient.GetWorkflow(r.Context(), workflowIDFor(sourceID, project, r.PathValue("runID")), "").Get(r.Context(), &result); err != nil {
 				writeError(w, 502, err)
 				return
 			}
@@ -130,7 +131,13 @@ func main() {
 			writeError(w, 400, errors.New("project query parameter is required"))
 			return
 		}
-		if err := temporalClient.SignalWorkflow(r.Context(), workflowIDFor(activities.SourceID, project, r.PathValue("runID")), "", agent.ApprovalSignal, approval); err != nil {
+		sourceID := querySourceID(r, activities.SourceID)
+		childRunID, _, _ := strings.Cut(approval.OperationID, "/turn/")
+		workflowID := workflowIDFor(sourceID, project, r.PathValue("runID"))
+		if childRunID != r.PathValue("runID") && strings.HasPrefix(childRunID, r.PathValue("runID")+"/") {
+			workflowID = "agent-child/" + agent.EventScope(sourceID, project, childRunID)
+		}
+		if err := temporalClient.SignalWorkflow(r.Context(), workflowID, "", agent.ApprovalSignal, approval); err != nil {
 			writeError(w, 409, err)
 			return
 		}
@@ -154,6 +161,13 @@ func main() {
 		}
 	case <-ctx.Done():
 	}
+}
+
+func querySourceID(r *http.Request, fallback string) string {
+	if sourceID := strings.TrimSpace(r.URL.Query().Get("source_id")); sourceID != "" && len(sourceID) <= 256 {
+		return sourceID
+	}
+	return fallback
 }
 
 func workflowIDFor(sourceID, project, runID string) string {

@@ -119,7 +119,7 @@ export default function Observability() {
   }
 
   return <div className="observability-shell">
-    <header className="topbar obs-topbar"><div><span className="eyebrow">TEMPORALITY / OBSERVATIONS</span><h1>Knowledge observability</h1></div><div className="header-actions"><span className="connection">API <code>{API_BASE}</code></span><a className="obs-link" href="/">FRP debugger</a></div></header>
+    <header className="topbar obs-topbar"><div><span className="eyebrow">TEMPORALITY / OBSERVATIONS</span><h1>Knowledge observability</h1></div><div className="header-actions"><span className="connection">API <code>{API_BASE}</code></span><a className="obs-link" href="/agents">Agent runs</a><a className="obs-link" href="/">FRP debugger</a></div></header>
     <form className="obs-controls" onSubmit={load}>
       <label>Project ID<input value={project} onChange={(event) => setProject(event.target.value)} placeholder="repo-a" required /></label>
       <label>Observed as of<input type="datetime-local" value={asOf} onChange={(event) => setAsOf(event.target.value)} /></label>

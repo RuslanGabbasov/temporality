@@ -10,6 +10,7 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
+      '/kernel-api': { target: 'http://localhost:8090', changeOrigin: true, rewrite: (path) => path.replace(/^\/kernel-api/, '') },
     },
   },
 })

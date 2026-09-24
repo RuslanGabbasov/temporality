@@ -76,8 +76,8 @@ async function request<T>(path: string, init?: RequestInit, query?: Record<strin
 const post = <T>(path: string, body: unknown) => request<T>(path, { method: 'POST', body: JSON.stringify(body) })
 
 export const observationApi = {
-  events: (project?: string, cursor?: string, sourceID?: string, eventID?: string) => request<{ events: ObservationEvent[]; count: number; next_cursor?: string }>(
-    '/v1/observations/events', undefined, { project, limit: 100, cursor, source_id: sourceID, event_id: eventID }),
+  events: (project?: string, cursor?: string, sourceID?: string, eventID?: string, filters?: { run?: string; type?: string; limit?: number }) => request<{ events: ObservationEvent[]; count: number; next_cursor?: string }>(
+    '/v1/observations/events', undefined, { project, limit: filters?.limit ?? 100, cursor, source_id: sourceID, event_id: eventID, run: filters?.run, type: filters?.type }),
   event: async (sourceID: string, eventID: string) => {
     const page = await request<{ events: ObservationEvent[]; count: number }>('/v1/observations/events', undefined, { source_id: sourceID, event_id: eventID, limit: 1 })
     const event = page.events[0]

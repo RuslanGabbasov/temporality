@@ -10,6 +10,7 @@ import { renderSection, tokenUsageView } from './tokenUsage'
 import { MemoryDeltaCard, TrajectoryCard } from './Investigation'
 import { childFrameId, continueWithModel, EpisodeWorkflowError, FollowUpWorkflowError, renderRequest, runEpisodeWorkflow, runFollowUpWorkflow, twoBranchForkRequest, type EpisodeDraft, type EpisodeWorkflowResult, type FollowUpResult, type FollowUpStage, type WorkflowStage } from './workflow'
 import Observability from './Observability'
+import AgentRuns from './AgentRuns'
 
 const SECTIONS: FrameSection[] = ['focus', 'map', 'periphery', 'working_set', 'procedures', 'recent', 'attention_health', 'memory_health', 'identity_health']
 const DEFAULT_DRAFT: EpisodeDraft = { prompt: '', successConditions: [], tokenBudget: 4000, mode: 'explore', trustMin: 0.5, rebuildRegions: false }
@@ -51,7 +52,9 @@ function frameBudget(value: Frame | null) {
 }
 
 function App() {
-  return window.location.pathname.startsWith('/observability') ? <Observability /> : <FRPDebuggerApp />
+  if (window.location.pathname.startsWith('/observability')) return <Observability />
+  if (window.location.pathname.startsWith('/agents')) return <AgentRuns />
+  return <FRPDebuggerApp />
 }
 
 function FRPDebuggerApp() {

@@ -123,7 +123,7 @@ func (d *Docker) ResolveWorkspace(path string) (string, error) {
 	return resolved, nil
 }
 
-func (d *Docker) Execute(parent context.Context, request Request) (Result, error) {
+func (d *Docker) Execute(parent context.Context, request Request) (result Result, runErr error) {
 	if d == nil {
 		return Result{}, errors.New("sandbox is not configured")
 	}
@@ -148,13 +148,17 @@ func (d *Docker) Execute(parent context.Context, request Request) (Result, error
 		return Result{}, err
 	}
 	args := d.arguments(workspace, request, name)
-	defer d.removeContainer(name)
+	defer func() {
+		if cleanupErr := d.removeContainer(name); cleanupErr != nil {
+			runErr = errors.Join(runErr, cleanupErr)
+		}
+	}()
 	started := time.Now()
 	var stdout, stderr limitedBuffer
 	cmd := exec.CommandContext(ctx, d.Binary, args...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()
-	result := Result{Duration: time.Since(started)}
+	result = Result{Duration: time.Since(started)}
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
 	}
@@ -187,7 +191,7 @@ func (d *Docker) arguments(workspace string, request Request, name string) []str
 	if request.ReadOnly {
 		mode = "ro"
 	}
-	args := []string{"run", "--rm", "--pull=never", "--name", name, "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(d.PIDs), "--memory", d.Memory, "--cpus", d.CPUs, "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "--volume", workspace + ":/workspace:" + mode, d.Image}
+	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(d.PIDs), "--memory", d.Memory, "--memory-swap", d.Memory, "--cpus", d.CPUs, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "--volume", workspace + ":/workspace:" + mode, d.Image}
 	return append(args, request.Command...)
 }
 
@@ -199,10 +203,18 @@ func containerName() (string, error) {
 	return "temporality-sandbox-" + hex.EncodeToString(random[:]), nil
 }
 
-func (d *Docker) removeContainer(name string) {
+func (d *Docker) removeContainer(name string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = exec.CommandContext(ctx, d.Binary, "rm", "--force", name).Run()
+	output, err := exec.CommandContext(ctx, d.Binary, "rm", "--force", name).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && strings.Contains(strings.ToLower(string(output)), "no such container") {
+		return nil
+	}
+	return fmt.Errorf("remove sandbox container: %w: %s", err, strings.TrimSpace(string(output)))
 }
 
 func validateCommand(args []string) error {

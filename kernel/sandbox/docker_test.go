@@ -33,7 +33,7 @@ func TestExecuteCapturesCommandAndAlwaysRemovesContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(log), "run --rm --pull=never") || !strings.Contains(string(log), "rm --force temporality-sandbox-") {
+	if !strings.Contains(string(log), "run --init --pull=never") || !strings.Contains(string(log), "rm --force temporality-sandbox-") {
 		t.Fatalf("expected run and forced cleanup calls, got:\n%s", log)
 	}
 }
@@ -63,7 +63,7 @@ func TestDockerArgumentsEnforceIsolation(t *testing.T) {
 	runner := &Docker{Image: "sandbox@sha256:abc", Memory: "1g", CPUs: "2", PIDs: 128, UID: 10001, GID: 10001}
 	args := runner.arguments("/srv/work/repo", Request{Command: []string{"go", "test", "./..."}, ReadOnly: true}, "temporality-sandbox-test")
 	joined := strings.Join(args, " ")
-	for _, required := range []string{"--pull=never", "--name temporality-sandbox-test", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit 128", "--memory 1g", "--cpus 2", "--user 10001:10001", "/srv/work/repo:/workspace:ro"} {
+	for _, required := range []string{"--init", "--pull=never", "--name temporality-sandbox-test", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit 128", "--memory 1g", "--memory-swap 1g", "--cpus 2", "--ulimit nofile=1024:1024", "--user 10001:10001", "/srv/work/repo:/workspace:ro"} {
 		if !strings.Contains(joined, required) {
 			t.Errorf("docker args missing %q: %s", required, joined)
 		}

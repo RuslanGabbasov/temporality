@@ -63,6 +63,8 @@ services:
       context: debugger
     ports:
       - "3000:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       runtime:
         condition: service_healthy

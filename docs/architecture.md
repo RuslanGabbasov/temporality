@@ -12,7 +12,7 @@ Status: initial architecture decision, 2026-09-24. The implementation is increme
 - Store payloads and artifacts behind references. PostgreSQL keeps bounded metadata, event identity, hashes and causal links.
 - Start with an interface-based model client compatible with OpenAI APIs. LiteLLM can be deployed as an optional gateway; the Kernel does not import or require it.
 - Use the official MCP Go SDK behind a Kernel tool interface. Require an explicit permission profile for every server/tool.
-- Keep sandbox execution behind a replaceable Runner interface. The current optional Docker CLI backend requires an image pinned by digest and a workspace under an administrator-configured root; it disables networking, drops capabilities, makes the container root read-only, sets resource limits and requires approval for commands. It has not been validated against a live daemon or adversarial workload and is not yet a production security boundary.
+- Keep sandbox execution behind a replaceable Runner interface. The current optional Docker CLI backend requires an image pinned by digest and a workspace under an administrator-configured root; it disables networking, drops capabilities, makes the container root read-only, sets resource limits and requires approval for commands. A live approved command smoke test passed on 2026-09-24. Adversarial security validation remains outstanding, so this is not a production security-boundary claim.
 
 ```mermaid
 flowchart LR

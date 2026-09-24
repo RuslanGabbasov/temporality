@@ -1697,8 +1697,8 @@ inspect timeline
 * [x] Agent Kernel запускает agent через Temporal `AgentRun`;
 * [x] выполняется model call через OpenAI-compatible клиент;
 * [x] выполняется MCP/tool call — allowlisted stdio adapter и встроенный tool; реальный MCP сервер ещё не прогонялся end-to-end;
-* [ ] работает sandbox — Docker backend и unit tests добавлены, но запуск через живой Docker daemon не проверен;
-* [ ] работает delegation в полном сценарии — child workflows и opt-in пример реализованы и проходят workflow test с моделью-заглушкой; полный сервисный прогон не выполнен;
+* [x] работает sandbox — live smoke через digest-pinned Docker image и approval выполнен 2026-09-24; adversarial security validation остаётся отдельно;
+* [x] работает delegation в полном сценарии — четыре child workflows и opt-in пример завершили live smoke run с реальной моделью, tool approvals и Docker sandbox 2026-09-24; проверка реального изменения кода отдельно не пройдена;
 * [x] работает approval — Temporal signal, обязательное ожидание и timeout;
 * [x] операции durable там, где это требуется — Workflow history и outbox; reconciliation внешних эффектов ещё не завершён.
 
@@ -1724,14 +1724,14 @@ inspect timeline
 
 ### PoC
 
-* [ ] Lead/Coder/Reviewer/QA scenario работает end-to-end с реальной моделью, tools и sandbox — orchestration тестируется с заглушками; подключается отдельно через build tag `agent_examples`;
+* [ ] Lead/Coder/Reviewer/QA coding scenario прошёл полную валидацию — все четыре child runs завершили live smoke pipeline 2026-09-24, но Coder выполнил только `printf`, Reviewer не смог запустить `git` (его нет в sandbox image), QA выполнил listing, но не build/test; корректность изменения кода не подтверждена;
 * [x] UI показывает timeline observation events;
 * [x] можно открыть provenance и source event;
 * [x] можно посмотреть evolution конкретного знания;
 * [x] можно выполнить temporal query по knowledge через `as_of`/`known_at`;
 * [ ] можно воспроизвести полный AgentRun execution из Temporality event stream.
 
-**Незакрытые блокирующие пункты:** live multi-service прогон Temporal + PostgreSQL + Temporality + Docker; sandbox security validation; полноценный Lead/Coder/Reviewer/QA run; replay AgentRun из семантических событий; reconciliation неопределённых внешних side effects. Полный `go build ./...` и целевые Kernel workflow/unit tests проходят; полный repository test suite ограничен loopback-запретом sandbox и существующими тестами путей macOS.
+**Незакрытые блокирующие пункты:** sandbox security validation на adversarial workloads; реальная code-change задача с успешным независимым Review и QA build/test; replay AgentRun из семантических событий; reconciliation неопределённых внешних side effects. Live smoke 2026-09-24 подтвердил связку Temporal + PostgreSQL + Temporality + Kernel + модель + Docker: общий AgentRun и четыре child workflows завершились, события и knowledge hints читались, tool и approval прошли, тестовая knowledge была инвалидирована, sandbox-команда выполнилась и контейнер удалён. Во время delegation smoke review/QA отчёты корректно оставили code change непроверенным. Полный `go build ./...` и целевые Kernel workflow/unit tests проходят; полный repository test suite ограничен loopback-запретом sandbox и существующими тестами путей macOS.
 
 ---
 
