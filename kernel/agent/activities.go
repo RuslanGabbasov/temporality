@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -128,7 +129,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		if err != nil {
 			return ToolResult{}, err
 		}
-		return ToolResult{Content: fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, result.Output)}, nil
+		exitCode := result.ExitCode
+		return ToolResult{Content: fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, result.Output), ExitCode: &exitCode}, nil
 	default:
 		if a.MCP != nil && a.MCP.HasTool(request.Name) {
 			content, err := a.MCP.Call(ctx, request.Name, request.Arguments)
@@ -197,6 +199,52 @@ type HintRequest struct {
 	TaskID  string `json:"task_id"`
 	ActorID string `json:"actor_id"`
 	Query   string `json:"query"`
+}
+
+// KnowledgeLookupResult reports the current projected state of one knowledge
+// item. Exists is false when the item is unknown to the project.
+type KnowledgeLookupResult struct {
+	Exists bool
+	State  string
+}
+
+// KnowledgeLookup fetches the current state of one knowledge item so the
+// workflow can reuse or confirm an existing observation instead of proposing
+// a duplicate node.
+func (a *Activities) KnowledgeLookup(ctx context.Context, request KnowledgeLookupQuery) (KnowledgeLookupResult, error) {
+	url := fmt.Sprintf("%s/v1/observations/knowledge?project=%s&knowledge_id=%s", a.TemporalityURL, url.QueryEscape(request.Project), url.QueryEscape(request.KnowledgeID))
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return KnowledgeLookupResult{}, err
+	}
+	response, err := a.HTTP.Do(httpRequest)
+	if err != nil {
+		return KnowledgeLookupResult{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return KnowledgeLookupResult{}, nil
+	}
+	if response.StatusCode != http.StatusOK {
+		return KnowledgeLookupResult{}, fmt.Errorf("Temporality knowledge lookup returned HTTP %d", response.StatusCode)
+	}
+	var reply struct {
+		Knowledge []struct {
+			State string `json:"state"`
+		} `json:"knowledge"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&reply); err != nil {
+		return KnowledgeLookupResult{}, err
+	}
+	if len(reply.Knowledge) == 0 {
+		return KnowledgeLookupResult{}, nil
+	}
+	return KnowledgeLookupResult{Exists: true, State: reply.Knowledge[0].State}, nil
+}
+
+type KnowledgeLookupQuery struct {
+	Project     string
+	KnowledgeID string
 }
 
 type Hint struct {

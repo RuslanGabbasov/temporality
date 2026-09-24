@@ -10,6 +10,7 @@ The dated live smoke report is [`benchmarks/agent-kernel-live-integration-2026-0
 
 | Area | State | Evidence / remaining gap |
 |---|---|---|
+| Execution-observation knowledge heuristic | Implemented and workflow-tested | `kernel-heuristic/execution-observation.v1`: successful (exit 0) sandbox verification/build commands emit `knowledge.proposed` (`kind: observation`, evidence = `operation_id`) with a project-scoped, run-independent identity; the Kernel looks up the projection first, so repeated successes become `knowledge.confirmed` (`execution-reverification.v1`) or `knowledge.used` (`execution-reuse.v1`) instead of duplicate nodes. Identical re-proposals are idempotent in the projection; conflicting ones are rejected. Failures stay runtime events; live multi-run evidence pending the next team run |
 | Approval operation observability | Implemented and workflow-tested | Bounded redacted display, canonical arguments hash, stable operation ID; mismatched approval hash cannot run the tool; event order/correlation checked. Sandbox `run_command` now uses auditable `approval.auto_granted` under `sandbox.workspace.v1`, with no human prompt. |
 | Code-change fixture | In progress | `examples/code-change/calculator` has an intentional defect and verified failing baseline. Live team run `calculator-e2e-20260924-01` has reached Lead's approval gate for `ls -la`; execution has not started pending a human decision. |
 | Event/provenance audit | Documented | See [`event-model.md`](event-model.md); operation/evidence artifacts and semantic lifecycle gaps remain |

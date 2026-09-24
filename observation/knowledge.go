@@ -113,10 +113,19 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 		}
 		item := byID[id]
 		if event.Type == "knowledge.proposed" {
-			if item != nil {
-				return nil, fmt.Errorf("knowledge %q was proposed more than once", id)
-			}
 			proposition := stringValue(event.Data, "proposition")
+			if item != nil {
+				if item.Proposition != proposition {
+					return nil, fmt.Errorf("knowledge %q was proposed twice with different propositions", id)
+				}
+				// An identical re-proposal is idempotent: concurrent producers may
+				// race past their lookups, and re-observing the same fact must
+				// strengthen the existing node, not duplicate it.
+				item.UpdatedAt = event.OccurredAt
+				item.Evidence = appendUniqueEvidence(item.Evidence, event.Evidence...)
+				appendKnowledgeTransition(item, event)
+				continue
+			}
 			if proposition == "" {
 				return nil, fmt.Errorf("knowledge %q has an empty proposition", id)
 			}
@@ -247,7 +256,11 @@ func markAtRisk(knowledge []Knowledge) {
 }
 
 func containsString(values []string, target string) bool {
-	for _, value := range values { if value == target { return true } }
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
 	return false
 }
 

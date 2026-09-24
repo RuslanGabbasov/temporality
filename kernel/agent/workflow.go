@@ -15,12 +15,13 @@ import (
 )
 
 const (
-	TaskQueue              = "temporality-agent-kernel"
-	ActivityRecordEvent    = "kernel.record_event"
-	ActivityCallModel      = "kernel.call_model"
-	ActivityRunTool        = "kernel.run_tool"
-	ActivityKnowledgeHints = "kernel.knowledge_hints"
-	ApprovalSignal         = "kernel.approval"
+	TaskQueue               = "temporality-agent-kernel"
+	ActivityRecordEvent     = "kernel.record_event"
+	ActivityCallModel       = "kernel.call_model"
+	ActivityRunTool         = "kernel.run_tool"
+	ActivityKnowledgeHints  = "kernel.knowledge_hints"
+	ActivityKnowledgeLookup = "kernel.knowledge_lookup"
+	ApprovalSignal          = "kernel.approval"
 )
 
 type RunInput struct {
@@ -68,6 +69,7 @@ type ToolRequest struct {
 type ToolResult struct {
 	Content  string                 `json:"content"`
 	Evidence []observation.Evidence `json:"evidence,omitempty"`
+	ExitCode *int                   `json:"exit_code,omitempty"`
 }
 
 type Approval struct {
@@ -323,6 +325,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					if eventErr := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); eventErr != nil {
 						return result, eventErr
 					}
+					if proposal := executionObservationProposal(input, call, toolResult); proposal != nil {
+						if err := emitExecutionObservation(activityCtx, state, proposal, operationID, argumentsHash); err != nil {
+							return result, err
+						}
+					}
 				}
 			}
 			if isMCP && !toolBlocked {
@@ -381,7 +388,7 @@ func toolFailureMessage(name string, err error) string {
 }
 
 func systemPromptForRole(role string) string {
-	base := "You are a careful project agent. Use tools when useful. For factual conclusions, call remember with a concise proposition and evidence refs. Treat retrieved memory as fallible and respect cautions."
+	base := "You are a careful project agent. Use tools when useful. Successful verification and build command outcomes are recorded as knowledge automatically; do not restate them with remember. Call remember only when you are highly confident in a durable conclusion that goes beyond the recorded execution results, and include evidence refs. Treat retrieved memory as fallible and respect cautions."
 	if role == "" {
 		return base
 	}
@@ -451,23 +458,62 @@ func emit(ctx workflow.Context, state *eventState, kind string, data map[string]
 }
 
 func emitKnowledge(ctx workflow.Context, state *eventState, id, proposition, operationID string, args map[string]any) error {
+	data := map[string]any{"knowledge_id": id, "proposition": proposition, "kind": "claim", "operation_id": operationID, "arguments_hash": operationArgumentsHash(args)}
+	var evidence []observation.Evidence
+	if raw, ok := args["evidence"].([]any); ok {
+		for _, value := range raw {
+			if ref, ok := value.(string); ok && ref != "" {
+				evidence = append(evidence, observation.Evidence{Ref: ref, Type: "artifact"})
+			}
+		}
+	}
+	return emitKnowledgeEvent(ctx, state, "knowledge.proposed", data, evidence)
+}
+
+// emitExecutionObservation records a heuristic knowledge event for a
+// successful verification or build command. The observation identity is
+// project-scoped and stable, so the authoritative projection decides the
+// semantics: an unknown command outcome is proposed once, a repeated success
+// of a proposed observation confirms it, and later successes record reuse.
+// Terminal states (corrected, superseded, invalidated) emit nothing: the
+// runtime tool.completed event already carries the fact.
+func emitExecutionObservation(ctx workflow.Context, state *eventState, proposal *executionObservation, operationID, argumentsHash string) error {
+	lookupCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 2}})
+	var lookup KnowledgeLookupResult
+	if err := workflow.ExecuteActivity(lookupCtx, ActivityKnowledgeLookup, KnowledgeLookupQuery{Project: state.run.Project, KnowledgeID: proposal.KnowledgeID}).Get(ctx, &lookup); err != nil {
+		// Without an authoritative lookup the kernel cannot know whether this
+		// observation already exists; proposing blindly could duplicate a node.
+		// The execution fact remains recorded as a runtime event.
+		return nil
+	}
+	evidence := []observation.Evidence{{Ref: operationID, Type: "execution"}}
+	switch {
+	case !lookup.Exists:
+		data := map[string]any{"knowledge_id": proposal.KnowledgeID, "proposition": proposal.Proposition, "kind": "observation", "policy_id": proposal.Policy, "command": proposal.Command, "command_class": proposal.Class, "exit_code": 0, "operation_id": operationID, "arguments_hash": argumentsHash}
+		return emitKnowledgeEvent(ctx, state, "knowledge.proposed", data, evidence)
+	case lookup.State == "proposed" || lookup.State == "challenged":
+		data := map[string]any{"knowledge_id": proposal.KnowledgeID, "rule": ReverificationRule, "operation_id": operationID, "arguments_hash": argumentsHash, "command": proposal.Command}
+		return emitKnowledgeEvent(ctx, state, "knowledge.confirmed", data, evidence)
+	case lookup.State == "confirmed":
+		data := map[string]any{"knowledge_id": proposal.KnowledgeID, "rule": ReuseRule, "operation_id": operationID, "arguments_hash": argumentsHash, "command": proposal.Command}
+		return emitKnowledgeEvent(ctx, state, "knowledge.used", data, evidence)
+	}
+	return nil
+}
+
+func emitKnowledgeEvent(ctx workflow.Context, state *eventState, eventType string, data map[string]any, evidence []observation.Evidence) error {
 	state.sequence++
-	data := map[string]any{"knowledge_id": id, "proposition": proposition, "kind": "claim", "operation_id": operationID, "arguments_hash": operationArgumentsHash(args), "frame_id": state.frame, "parent_frame_id": state.parentFrame, "sequence": state.sequence}
+	data["frame_id"] = state.frame
+	data["parent_frame_id"] = state.parentFrame
 	if state.run.ParentRunID != "" {
 		data["parent_run_id"] = state.run.ParentRunID
 	}
+	data["sequence"] = state.sequence
 	eventID := fmt.Sprintf("%s/event/%06d", state.eventScope, state.sequence)
 	if state.previousEventID != "" {
 		data["caused_by"] = []string{state.previousEventID}
 	}
-	item := observation.Event{Schema: observation.Schema, EventID: eventID, OccurredAt: workflow.Now(ctx).UTC(), Source: observation.Source{ID: state.run.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"}, Context: observation.Context{Project: state.run.Project, Run: state.run.RunID, Task: state.run.TaskID, Actor: observation.Actor{ID: state.run.ActorID, Type: "agent"}, ParentEventID: state.previousEventID}, Type: "knowledge.proposed", Data: data}
-	if raw, ok := args["evidence"].([]any); ok {
-		for _, value := range raw {
-			if ref, ok := value.(string); ok && ref != "" {
-				item.Evidence = append(item.Evidence, observation.Evidence{Ref: ref, Type: "artifact"})
-			}
-		}
-	}
+	item := observation.Event{Schema: observation.Schema, EventID: eventID, OccurredAt: workflow.Now(ctx).UTC(), Source: observation.Source{ID: state.run.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"}, Context: observation.Context{Project: state.run.Project, Run: state.run.RunID, Task: state.run.TaskID, Actor: observation.Actor{ID: state.run.ActorID, Type: "agent"}, ParentEventID: state.previousEventID}, Type: eventType, Data: data, Evidence: evidence}
 	if err := workflow.ExecuteActivity(ctx, ActivityRecordEvent, item).Get(ctx, nil); err != nil {
 		return err
 	}
@@ -478,7 +524,7 @@ func emitKnowledge(ctx workflow.Context, state *eventState, id, proposition, ope
 func KernelTools() []llm.ToolDef {
 	return []llm.ToolDef{
 		{Name: "echo", Description: "Return a short text value for debugging the harness tool path", Parameters: map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}, "required": []string{"text"}}},
-		{Name: "remember", Description: "Record an explicit knowledge proposition with optional evidence refs", Parameters: map[string]any{"type": "object", "properties": map[string]any{"proposition": map[string]any{"type": "string"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "required": []string{"proposition"}}},
+		{Name: "remember", Description: "Record a high-confidence durable conclusion with optional evidence refs. Verification and build outcomes are recorded automatically; use this only for conclusions you are confident in and can ground in evidence", Parameters: map[string]any{"type": "object", "properties": map[string]any{"proposition": map[string]any{"type": "string"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "required": []string{"proposition"}}},
 		{Name: "request_approval", Description: "Pause this run and request a human decision before a consequential action", Parameters: map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"}}, "required": []string{"action"}}},
 	}
 }

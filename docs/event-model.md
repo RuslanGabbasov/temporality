@@ -15,7 +15,7 @@ The implemented universal envelope is `temporality.event/1`: event ID/time, sour
 | What operation? | `data.operation_id`, tool name/hash | Approval identity is now hash-bound; no shared operation entity/lifecycle projection yet |
 | What caused it? | `context.parent_event_id`, `data.caused_by` | Immediate chain is emitted; cross-run parent links exist for delegated events |
 | What evidence appeared? | top-level `evidence[]`, `evidence.observed` data | Refs can be carried, but Kernel has no artifact store and tool results are not generally addressable evidence artifacts |
-| What knowledge changed? | `knowledge.*` event family | MVP `remember` emits `knowledge.proposed`; full discovery/assert/challenge/confirm lifecycle is not automatic |
+| What knowledge changed? | `knowledge.*` event family | Two proposal channels: model `remember` (claims) and the kernel execution-observation heuristic (`kernel-heuristic/execution-observation.v1` proposes kind `observation` after successful verification/build commands; repeats confirm via `execution-reverification.v1`); challenge/correct beyond this is not automatic |
 | Schema compatibility? | fixed envelope `temporality.event/1` | `data` is extensible; per-event data schema versions are not yet validated |
 
 ## Decision for Phase 2

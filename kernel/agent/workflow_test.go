@@ -193,13 +193,17 @@ func TestApprovedToolOperationIsVisibleAndHashBound(t *testing.T) {
 }
 
 func TestSandboxAutoApprovalIsRecordedAndRunsWithoutHumanSignal(t *testing.T) {
-	env := testsuite.NewTestWorkflowEnvironment()
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
 	var events []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error { events = append(events, event); return nil }, activity.RegisterOptions{Name: ActivityRecordEvent})
 	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	env.RegisterActivityWithOptions(func(context.Context, KnowledgeLookupQuery) (KnowledgeLookupResult, error) {
+		return KnowledgeLookupResult{}, nil
+	}, activity.RegisterOptions{Name: ActivityKnowledgeLookup})
 	calls := 0
-	env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
 		calls++
 		if calls == 1 {
 			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "sandbox-call", Name: "run_command", Args: map[string]any{"command": []any{"go", "test", "./..."}}}}}, nil
@@ -233,4 +237,103 @@ func indexEvent(events []observation.Event, kind string) int {
 		}
 	}
 	return -1
+}
+
+func knowledgeEvents(events []observation.Event, kind string) []observation.Event {
+	var matched []observation.Event
+	for _, event := range events {
+		if event.Type == kind {
+			matched = append(matched, event)
+		}
+	}
+	return matched
+}
+
+func TestSuccessfulVerificationCommandsRecordExecutionKnowledge(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var events []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		if err := event.Validate(); err != nil {
+			return err
+		}
+		events = append(events, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	lookups := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, query KnowledgeLookupQuery) (KnowledgeLookupResult, error) {
+		require.NotEmpty(t, query.Project)
+		require.True(t, strings.HasPrefix(query.KnowledgeID, "auto/"))
+		lookups++
+		switch lookups {
+		case 1:
+			return KnowledgeLookupResult{}, nil
+		case 2:
+			return KnowledgeLookupResult{Exists: true, State: "proposed"}, nil
+		}
+		return KnowledgeLookupResult{Exists: true, State: "confirmed"}, nil
+	}, activity.RegisterOptions{Name: ActivityKnowledgeLookup})
+	calls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		calls++
+		switch calls {
+		case 1:
+			return llm.Completion{ToolCalls: []llm.ToolCall{
+				{ID: "verify-1", Name: "run_command", Args: map[string]any{"command": []any{"go", "test", "./..."}}},
+				{ID: "list-1", Name: "run_command", Args: map[string]any{"command": []any{"ls", "-la"}}},
+			}}, nil
+		case 2:
+			return llm.Completion{ToolCalls: []llm.ToolCall{
+				{ID: "verify-2", Name: "run_command", Args: map[string]any{"command": []any{"go", "test", "./..."}}},
+			}}, nil
+		}
+		return llm.Completion{Content: "verification recorded"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	exit := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ToolRequest) (ToolResult, error) {
+		return ToolResult{Content: "exit_code=0\nok", ExitCode: &exit}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "knowledge-auto", Project: "repo", Prompt: "run tests", WorkspacePath: "/workspace/task", AutoApproveTools: []string{"run_command"}})
+	require.NoError(t, env.GetWorkflowError())
+	require.Equal(t, 2, lookups)
+
+	proposed := knowledgeEvents(events, "knowledge.proposed")
+	confirmed := knowledgeEvents(events, "knowledge.confirmed")
+	require.Len(t, proposed, 1)
+	require.Len(t, confirmed, 1)
+
+	first := proposed[0]
+	require.Equal(t, "observation", first.Data["kind"])
+	require.Equal(t, ExecutionObservationPolicy, first.Data["policy_id"])
+	require.Equal(t, "go test ./...", first.Data["command"])
+	require.True(t, strings.HasPrefix(first.Data["knowledge_id"].(string), "auto/"))
+	require.Contains(t, first.Data["proposition"], "`go test ./...` exited 0")
+	require.NotEmpty(t, first.Evidence)
+	require.Equal(t, "execution", first.Evidence[0].Type)
+
+	second := confirmed[0]
+	require.Equal(t, first.Data["knowledge_id"], second.Data["knowledge_id"])
+	require.Equal(t, ReverificationRule, second.Data["rule"])
+
+	// The proposal and confirmation must follow the tool executions that
+	// justify them, and the non-verification command must not produce knowledge.
+	firstTool, secondTool := -1, -1
+	for index, event := range events {
+		if event.Type != "tool.completed" {
+			continue
+		}
+		if strings.HasSuffix(event.Data["operation_id"].(string), "verify-1") {
+			firstTool = index
+		}
+		if strings.HasSuffix(event.Data["operation_id"].(string), "verify-2") {
+			secondTool = index
+		}
+	}
+	require.Greater(t, firstTool, -1)
+	require.Greater(t, secondTool, -1)
+	require.Less(t, firstTool, indexEvent(events, "knowledge.proposed"))
+	require.Less(t, secondTool, indexEvent(events, "knowledge.confirmed"))
+	require.Len(t, knowledgeEvents(events, "tool.completed"), 3)
 }
