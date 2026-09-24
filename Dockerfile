@@ -1,4 +1,5 @@
 FROM golang:1.27-alpine AS build
+ARG KERNEL_BUILD_TAGS=""
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -7,9 +8,10 @@ COPY frp ./frp
 COPY aml ./aml
 COPY observation ./observation
 COPY kernel ./kernel
+COPY examples ./examples
 RUN CGO_ENABLED=0 go build -o /out/temporality-runtime ./cmd/temporality-runtime \
  && CGO_ENABLED=0 go build -o /out/temporality-executor ./cmd/temporality-executor \
- && CGO_ENABLED=0 go build -o /out/temporality-agent-kernel ./cmd/agent-kernel
+ && CGO_ENABLED=0 go build -tags "$KERNEL_BUILD_TAGS" -o /out/temporality-agent-kernel ./cmd/agent-kernel
 
 FROM alpine:3.22 AS runtime
 RUN adduser -D -u 10001 temporality

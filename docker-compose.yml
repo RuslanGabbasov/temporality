@@ -82,6 +82,9 @@ services:
     build:
       context: .
       target: agent-kernel
+      args:
+        # The Lead/Coder/Reviewer/QA example routes are opt-in via build tag.
+        KERNEL_BUILD_TAGS: agent_examples
     # Host uid/gid keeps sandbox workspace files owned by the local user and
     # makes the kernel pass that uid to sandbox containers. The Docker socket
     # is root:root inside the container (OrbStack/Docker Desktop proxy), so the
