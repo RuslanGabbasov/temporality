@@ -33,6 +33,11 @@ type RunInput struct {
 	MaxTurns      int           `json:"max_turns,omitempty"`
 	Tools         []llm.ToolDef `json:"tools,omitempty"`
 	ApprovalTools []string      `json:"approval_tools,omitempty"`
+	Role          string        `json:"role,omitempty"`
+	ParentRunID   string        `json:"parent_run_id,omitempty"`
+	ParentFrameID string        `json:"parent_frame_id,omitempty"`
+	ParentEventID string        `json:"parent_event_id,omitempty"`
+	SourceID      string        `json:"source_id,omitempty"`
 }
 
 type RunResult struct {
@@ -75,6 +80,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if input.ActorID == "" {
 		input.ActorID = "agent"
 	}
+	if input.SourceID == "" {
+		input.SourceID = "temporality-agent-kernel"
+	}
 	if input.MaxTurns <= 0 || input.MaxTurns > 24 {
 		input.MaxTurns = 8
 	}
@@ -83,7 +91,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		ScheduleToCloseTimeout: 5 * time.Minute,
 		RetryPolicy:            &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3},
 	})
-	state := &eventState{run: input, sequence: 0, eventScope: eventScope(input.Project, input.RunID)}
+	state := &eventState{run: input, sequence: 0, eventScope: eventScope(input.SourceID, input.Project, input.RunID), parentFrame: input.ParentFrameID, previousEventID: input.ParentEventID}
 	defer func() {
 		if errors.Is(ctx.Err(), workflow.ErrCanceled) {
 			cleanupCtx, _ := workflow.NewDisconnectedContext(ctx)
@@ -91,7 +99,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			_ = emit(cleanupCtx, state, "run.cancelled", nil)
 		}
 	}()
-	if err := emit(activityCtx, state, "run.started", map[string]any{"task_id": input.TaskID}); err != nil {
+	if err := emit(activityCtx, state, "run.started", map[string]any{"task_id": input.TaskID, "role": input.Role, "parent_run_id": input.ParentRunID}); err != nil {
 		return result, err
 	}
 	var priorHints []Hint
@@ -107,7 +115,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			return result, err
 		}
 	}
-	messages := []llm.Message{{Role: "system", Content: "You are a careful project agent. Use tools when useful. For factual conclusions, call remember with a concise proposition and evidence refs. Treat retrieved memory as fallible and respect cautions."}, {Role: "user", Content: input.Prompt}}
+	messages := []llm.Message{{Role: "system", Content: systemPromptForRole(input.Role)}, {Role: "user", Content: input.Prompt}}
 	for _, hint := range priorHints {
 		messages = append(messages, llm.Message{Role: "system", Content: "Temporality context (prior knowledge, inspect provenance): " + hint.Proposition + " [" + hint.State + "] " + hint.Caution})
 		if hint.HintID != "" {
@@ -119,7 +127,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	for turn := 1; turn <= input.MaxTurns; turn++ {
 		result.Turns = turn
 		frame := fmt.Sprintf("%s/turn/%02d", input.RunID, turn)
-		state.parentFrame = state.frame
+		if state.frame != "" {
+			state.parentFrame = state.frame
+		}
 		state.frame = frame
 		if err := emit(activityCtx, state, "turn.started", map[string]any{"turn": turn}); err != nil {
 			return result, err
@@ -281,16 +291,28 @@ func contains(values []string, value string) bool {
 	return false
 }
 
-func eventScope(project, runID string) string {
-	digest := sha256.Sum256([]byte(project + "\x00" + runID))
+func eventScope(sourceID, project, runID string) string {
+	digest := sha256.Sum256([]byte(sourceID + "\x00" + project + "\x00" + runID))
 	return hex.EncodeToString(digest[:16])
 }
+
+// EventScope returns a stable source/project/run namespace for event IDs and
+// workflow identities used by optional integrations.
+func EventScope(sourceID, project, runID string) string { return eventScope(sourceID, project, runID) }
 
 func toolFailureMessage(name string, err error) string {
 	if strings.HasPrefix(name, "mcp__") {
 		return "Tool call failed; its remote effect may be uncertain. Do not repeat a consequential action without checking its status."
 	}
 	return "Tool failed: " + err.Error()
+}
+
+func systemPromptForRole(role string) string {
+	base := "You are a careful project agent. Use tools when useful. For factual conclusions, call remember with a concise proposition and evidence refs. Treat retrieved memory as fallible and respect cautions."
+	if role == "" {
+		return base
+	}
+	return base + " Your assigned team role is " + role + "; stay within that responsibility and ground handoffs in observed evidence."
 }
 
 func awaitApproval(ctx workflow.Context, operationID string) (bool, Approval, error) {
@@ -322,6 +344,9 @@ func emit(ctx workflow.Context, state *eventState, kind string, data map[string]
 	}
 	data["frame_id"] = state.frame
 	data["parent_frame_id"] = state.parentFrame
+	if state.run.ParentRunID != "" {
+		data["parent_run_id"] = state.run.ParentRunID
+	}
 	data["sequence"] = state.sequence
 	eventID := fmt.Sprintf("%s/event/%06d", state.eventScope, state.sequence)
 	if state.previousEventID != "" {
@@ -329,7 +354,7 @@ func emit(ctx workflow.Context, state *eventState, kind string, data map[string]
 	}
 	item := observation.Event{
 		Schema: observation.Schema, EventID: eventID, OccurredAt: workflow.Now(ctx).UTC(),
-		Source:  observation.Source{ID: "temporality-agent-kernel", Integration: "temporality-agent-kernel", Version: "0.1"},
+		Source:  observation.Source{ID: state.run.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
 		Context: observation.Context{Project: state.run.Project, Run: state.run.RunID, Task: state.run.TaskID, Actor: observation.Actor{ID: state.run.ActorID, Type: "agent"}, ParentEventID: state.previousEventID},
 		Type:    kind, Data: data,
 	}
@@ -343,11 +368,14 @@ func emit(ctx workflow.Context, state *eventState, kind string, data map[string]
 func emitKnowledge(ctx workflow.Context, state *eventState, id, proposition string, args map[string]any) error {
 	state.sequence++
 	data := map[string]any{"knowledge_id": id, "proposition": proposition, "kind": "claim", "frame_id": state.frame, "parent_frame_id": state.parentFrame, "sequence": state.sequence}
+	if state.run.ParentRunID != "" {
+		data["parent_run_id"] = state.run.ParentRunID
+	}
 	eventID := fmt.Sprintf("%s/event/%06d", state.eventScope, state.sequence)
 	if state.previousEventID != "" {
 		data["caused_by"] = []string{state.previousEventID}
 	}
-	item := observation.Event{Schema: observation.Schema, EventID: eventID, OccurredAt: workflow.Now(ctx).UTC(), Source: observation.Source{ID: "temporality-agent-kernel", Integration: "temporality-agent-kernel", Version: "0.1"}, Context: observation.Context{Project: state.run.Project, Run: state.run.RunID, Task: state.run.TaskID, Actor: observation.Actor{ID: state.run.ActorID, Type: "agent"}, ParentEventID: state.previousEventID}, Type: "knowledge.proposed", Data: data}
+	item := observation.Event{Schema: observation.Schema, EventID: eventID, OccurredAt: workflow.Now(ctx).UTC(), Source: observation.Source{ID: state.run.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"}, Context: observation.Context{Project: state.run.Project, Run: state.run.RunID, Task: state.run.TaskID, Actor: observation.Actor{ID: state.run.ActorID, Type: "agent"}, ParentEventID: state.previousEventID}, Type: "knowledge.proposed", Data: data}
 	if raw, ok := args["evidence"].([]any); ok {
 		for _, value := range raw {
 			if ref, ok := value.(string); ok && ref != "" {

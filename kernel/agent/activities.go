@@ -26,6 +26,7 @@ type Activities struct {
 	HTTP           *http.Client
 	TemporalityURL string
 	MCP            *mcpclient.Client
+	SourceID       string
 }
 
 func NewActivities(events EventOutbox) (*Activities, error) {
@@ -39,7 +40,7 @@ func NewActivities(events EventOutbox) (*Activities, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), MCP: mcpTools}, nil
+	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), MCP: mcpTools, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel")}, nil
 }
 
 func (a *Activities) RecordEvent(ctx context.Context, event observation.Event) error {

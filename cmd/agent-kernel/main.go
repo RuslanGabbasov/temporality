@@ -58,6 +58,7 @@ func main() {
 	temporalWorker.RegisterActivityWithOptions(activities.CallModel, activity.RegisterOptions{Name: agent.ActivityCallModel})
 	temporalWorker.RegisterActivityWithOptions(activities.RunTool, activity.RegisterOptions{Name: agent.ActivityRunTool})
 	temporalWorker.RegisterActivityWithOptions(activities.KnowledgeHints, activity.RegisterOptions{Name: agent.ActivityKnowledgeHints})
+	registerExampleWorkflow(temporalWorker)
 	workerDone := make(chan error, 1)
 	go func() { workerDone <- temporalWorker.Run(worker.InterruptCh()) }()
 	mux := http.NewServeMux()
@@ -77,7 +78,8 @@ func main() {
 		}
 		input.Tools = activities.MCP.ToolDefs()
 		input.ApprovalTools = activities.MCP.ApprovalTools()
-		workflowID := workflowIDFor(input.Project, input.RunID)
+		input.SourceID = activities.SourceID
+		workflowID := workflowIDFor(activities.SourceID, input.Project, input.RunID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
 		run, err := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
 		if err != nil {
@@ -92,7 +94,7 @@ func main() {
 			writeError(w, 400, errors.New("project query parameter is required"))
 			return
 		}
-		response, err := temporalClient.DescribeWorkflowExecution(r.Context(), workflowIDFor(project, r.PathValue("runID")), "")
+		response, err := temporalClient.DescribeWorkflowExecution(r.Context(), workflowIDFor(activities.SourceID, project, r.PathValue("runID")), "")
 		if err != nil {
 			writeError(w, 404, err)
 			return
@@ -104,7 +106,7 @@ func main() {
 		reply := map[string]any{"run_id": r.PathValue("runID"), "project": project, "status": status}
 		if response.WorkflowExecutionInfo != nil && response.WorkflowExecutionInfo.Status == enums.WORKFLOW_EXECUTION_STATUS_COMPLETED {
 			var result agent.RunResult
-			if err := temporalClient.GetWorkflow(r.Context(), workflowIDFor(project, r.PathValue("runID")), "").Get(r.Context(), &result); err != nil {
+			if err := temporalClient.GetWorkflow(r.Context(), workflowIDFor(activities.SourceID, project, r.PathValue("runID")), "").Get(r.Context(), &result); err != nil {
 				writeError(w, 502, err)
 				return
 			}
@@ -127,12 +129,13 @@ func main() {
 			writeError(w, 400, errors.New("project query parameter is required"))
 			return
 		}
-		if err := temporalClient.SignalWorkflow(r.Context(), workflowIDFor(project, r.PathValue("runID")), "", agent.ApprovalSignal, approval); err != nil {
+		if err := temporalClient.SignalWorkflow(r.Context(), workflowIDFor(activities.SourceID, project, r.PathValue("runID")), "", agent.ApprovalSignal, approval); err != nil {
 			writeError(w, 409, err)
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
 	})
+	registerExampleRoutes(mux, temporalClient, taskQueue, activities)
 	address := env("KERNEL_HTTP_ADDR", ":8090")
 	server := &http.Server{Addr: address, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { <-ctx.Done(); _ = server.Shutdown(context.Background()) }()
@@ -152,8 +155,8 @@ func main() {
 	}
 }
 
-func workflowIDFor(project, runID string) string {
-	digest := sha256.Sum256([]byte(project + "\x00" + runID))
+func workflowIDFor(sourceID, project, runID string) string {
+	digest := sha256.Sum256([]byte(sourceID + "\x00" + project + "\x00" + runID))
 	return fmt.Sprintf("agent-run/%x", digest[:16])
 }
 

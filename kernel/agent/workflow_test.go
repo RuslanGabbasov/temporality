@@ -23,11 +23,11 @@ func TestMCPToolFailureDoesNotExposeRemoteError(t *testing.T) {
 }
 
 func TestEventScopeIncludesProjectAndRun(t *testing.T) {
-	first := eventScope("project-a", "run-1")
-	if first != eventScope("project-a", "run-1") {
+	first := eventScope("source-a", "project-a", "run-1")
+	if first != eventScope("source-a", "project-a", "run-1") {
 		t.Fatal("event scope must be stable")
 	}
-	if first == eventScope("project-b", "run-1") || first == eventScope("project-a", "run-2") {
+	if first == eventScope("source-a", "project-b", "run-1") || first == eventScope("source-a", "project-a", "run-2") || first == eventScope("source-b", "project-a", "run-1") {
 		t.Fatal("event IDs must be isolated by project and run")
 	}
 }
