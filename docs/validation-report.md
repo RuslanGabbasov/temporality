@@ -1,6 +1,6 @@
 # Phase 2 validation report
 
-Status: **in progress**. This report records evidence and gaps, not planned behavior as if it had passed.
+Status: **in progress**. This report records evidence and gaps, not planned behavior as if it had passed. A cross-cutting snapshot including the model/MCP client audit against the pivot contract is in [`phase2-status-report.md`](phase2-status-report.md).
 
 ## Phase 1 inherited evidence
 
