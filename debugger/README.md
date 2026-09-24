@@ -8,6 +8,9 @@ Standalone React + TypeScript + Vite frontend for inspecting FRP episodes and fr
 - Frame sections: focus, map, periphery, procedures, and recent
 - Boundary, provenance, and token-usage inspection
 - Render, time-travel replay, blame analysis, and two-branch counterfactual fork
+- `/agents` — Agent Kernel run history with results and approvals
+- `/observability` — knowledge observability (lifecycle, hints, invalidation)
+- `/experience` — Experience Timeline: runs, model/tool trajectory and experience clusters (appeared → recalled → injected → reused → validated → contradicted → weakened → archived) over one time axis, with lens toggles, scope/role/lifecycle filters, zoom/pan and activation links
 - Loading/error/empty states, keyboard focus, reduced-motion support, and responsive layout
 
 ## Run locally
