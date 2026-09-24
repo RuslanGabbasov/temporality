@@ -101,7 +101,7 @@ If `DATABASE_URL` is omitted, the runtime uses an ephemeral in-memory store.
 
 ## Agent Kernel PoC (early)
 
-The Kernel currently implements a durable Temporal AgentRun workflow, OpenAI-compatible model calls, a read-only `echo` tool, approval signals, `remember` knowledge proposals, knowledge hint retrieval, an at-least-once PostgreSQL outbox publisher, and an optional MCP stdio adapter. MCP starts one child process per call in this PoC. Production sandboxing, delegation and the Lead/Coder/Reviewer/QA example are not implemented yet.
+The Kernel currently implements a durable Temporal AgentRun workflow, OpenAI-compatible model calls, approval signals, `remember` knowledge proposals, knowledge hint retrieval, an at-least-once PostgreSQL outbox publisher, an optional MCP stdio adapter, and an optional Docker command sandbox. MCP starts one child process per call in this PoC. The Lead/Coder/Reviewer/QA example is opt-in under a build tag; no live multi-service run has been verified yet.
 
 Start PostgreSQL, the Temporality runtime and debugger with `docker compose up -d postgres runtime debugger`, then start a Temporal development server in another terminal (for example, `temporal server start-dev`). Configure the same PostgreSQL database and model endpoint and launch the worker/API:
 
@@ -128,6 +128,10 @@ The Lead → Coder → Reviewer → QA example lives in [`examples/lead_coder_re
 Open the existing debugger at [http://localhost:3000/observability](http://localhost:3000/observability) to inspect emitted events. The Kernel API binds to `:8090` by default. Its POST returns after Temporal accepts the workflow; poll GET for status, and it includes the `RunResult` once the workflow completes. This PoC currently has workflow unit tests, not the complete multi-service integration test or the Lead/Coder/Reviewer/QA example required by the full design.
 
 To enable MCP, set `KERNEL_MCP_COMMAND` to the server executable, `KERNEL_MCP_ARGS` to a JSON string array if needed, and `KERNEL_MCP_ALLOW` to the comma-separated server tool names the Kernel may expose. Optionally set `KERNEL_MCP_APPROVAL` to the subset that must wait for a human signal. Startup fails if the server does not advertise an allowed tool. The approval list must be a subset of the allowlist. Treat the MCP process and its configured credentials as trusted deployment inputs; untrusted code still requires a real sandbox.
+
+Approval waits default to one hour. A run request may set `approval_timeout_seconds` (maximum 24 hours); expiry records `approval.timed_out` and the guarded tool is not executed.
+
+The optional command sandbox requires `KERNEL_SANDBOX_ROOT` (an administrator-managed directory containing allowed workspaces) and `KERNEL_SANDBOX_IMAGE` pinned as `name@sha256:<64 hex chars>` and preloaded in the Docker daemon (`--pull=never`). With both set, requests must include an absolute `workspace_path` beneath that root, and the model receives an approval-gated `run_command` tool. It runs with no network, a read-only container root, dropped capabilities, `no-new-privileges`, resource limits, bounded output and a read-only mount for Reviewer/QA. A uniquely named container is forcibly removed after completion, timeout or cancellation. Rootless Docker is recommended. Container isolation still depends on the Docker daemon and host kernel; this backend has not had a live-daemon integration test in this environment.
 
 The repository's separate AML agent loop also has an optional native adapter in [`aml/temporality/client.go`](aml/temporality/client.go). Configure it as the runner's `Hooks`; after each tool result it requests supplemental hints and the runner appends them as a separate user-context message. API failures degrade to no hints. Set `BaseURL`, `Project`, and a stable unique `SourceID`. Task outcome events are labeled as correlated with hint use, not as proof that a hint caused the outcome.
 

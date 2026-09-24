@@ -1,5 +1,7 @@
 # ADR-007: Replaceable sandbox interface
 
+Implementation note (2026-09-24): an opt-in Docker CLI runner now exists under `kernel/sandbox`. It pins images by digest, scopes bind mounts to a configured workspace root, disables network, drops Linux capabilities, enables `no-new-privileges`, makes the container root read-only and applies resource limits. It is an initial backend, not a verified security boundary; no live Docker daemon or adversarial workload was available for validation.
+
 ## Context
 
 Tools need filesystem and command execution, but host processes are not an isolation boundary and Daytona should not be mandatory.

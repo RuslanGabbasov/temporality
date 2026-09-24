@@ -24,20 +24,22 @@ const (
 )
 
 type RunInput struct {
-	RunID         string        `json:"run_id"`
-	Project       string        `json:"project"`
-	TaskID        string        `json:"task_id"`
-	ActorID       string        `json:"actor_id"`
-	Prompt        string        `json:"prompt"`
-	Model         string        `json:"model,omitempty"`
-	MaxTurns      int           `json:"max_turns,omitempty"`
-	Tools         []llm.ToolDef `json:"tools,omitempty"`
-	ApprovalTools []string      `json:"approval_tools,omitempty"`
-	Role          string        `json:"role,omitempty"`
-	ParentRunID   string        `json:"parent_run_id,omitempty"`
-	ParentFrameID string        `json:"parent_frame_id,omitempty"`
-	ParentEventID string        `json:"parent_event_id,omitempty"`
-	SourceID      string        `json:"source_id,omitempty"`
+	RunID                  string        `json:"run_id"`
+	Project                string        `json:"project"`
+	TaskID                 string        `json:"task_id"`
+	ActorID                string        `json:"actor_id"`
+	Prompt                 string        `json:"prompt"`
+	Model                  string        `json:"model,omitempty"`
+	MaxTurns               int           `json:"max_turns,omitempty"`
+	Tools                  []llm.ToolDef `json:"tools,omitempty"`
+	ApprovalTools          []string      `json:"approval_tools,omitempty"`
+	Role                   string        `json:"role,omitempty"`
+	ParentRunID            string        `json:"parent_run_id,omitempty"`
+	ParentFrameID          string        `json:"parent_frame_id,omitempty"`
+	ParentEventID          string        `json:"parent_event_id,omitempty"`
+	SourceID               string        `json:"source_id,omitempty"`
+	ApprovalTimeoutSeconds int           `json:"approval_timeout_seconds,omitempty"`
+	WorkspacePath          string        `json:"workspace_path,omitempty"`
 }
 
 type RunResult struct {
@@ -54,10 +56,12 @@ type ModelRequest struct {
 }
 
 type ToolRequest struct {
-	RunID       string         `json:"run_id"`
-	OperationID string         `json:"operation_id"`
-	Name        string         `json:"name"`
-	Arguments   map[string]any `json:"arguments"`
+	RunID         string         `json:"run_id"`
+	OperationID   string         `json:"operation_id"`
+	Name          string         `json:"name"`
+	Role          string         `json:"role,omitempty"`
+	WorkspacePath string         `json:"workspace_path,omitempty"`
+	Arguments     map[string]any `json:"arguments"`
 }
 
 type ToolResult struct {
@@ -85,6 +89,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	if input.MaxTurns <= 0 || input.MaxTurns > 24 {
 		input.MaxTurns = 8
+	}
+	if input.ApprovalTimeoutSeconds <= 0 {
+		input.ApprovalTimeoutSeconds = 3600
+	}
+	if input.ApprovalTimeoutSeconds > 86400 {
+		input.ApprovalTimeoutSeconds = 86400
 	}
 	activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout:    4 * time.Minute,
@@ -189,17 +199,28 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := emit(activityCtx, state, "approval.requested", map[string]any{"operation_id": operationID, "action": action, "reason": reason}); err != nil {
 					return result, err
 				}
-				approved, approval, waitErr := awaitApproval(ctx, operationID)
+				approved, approval, timedOut, waitErr := awaitApproval(ctx, operationID, time.Duration(input.ApprovalTimeoutSeconds)*time.Second)
 				if waitErr != nil {
 					return result, waitErr
 				}
-				if approved {
+				if timedOut {
+					if err := emit(activityCtx, state, "approval.timed_out", map[string]any{"operation_id": operationID, "timeout_seconds": input.ApprovalTimeoutSeconds}); err != nil {
+						return result, err
+					}
+					toolResult.Content = "Approval timed out; the action was not run."
+					toolBlocked = true
+					if isMCP {
+						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "reason": "approval_timeout"}); err != nil {
+							return result, err
+						}
+					}
+				} else if approved {
 					if err := emit(activityCtx, state, "approval.granted", map[string]any{"operation_id": operationID, "approver": approval.ActorID, "reason": approval.Reason}); err != nil {
 						return result, err
 					}
 					if call.Name == "request_approval" {
 						toolResult.Content = "Approval granted. Continue with the requested action, but perform it only through an available tool."
-					} else if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Arguments: call.Args}).Get(ctx, &toolResult); err != nil {
+					} else if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Arguments: call.Args}).Get(ctx, &toolResult); err != nil {
 						toolFailed = true
 						if eventErr := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "tool": call.Name, "error_type": "activity_failed"}); eventErr != nil {
 							return result, eventErr
@@ -240,7 +261,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					return result, err
 				}
 			} else {
-				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Arguments: call.Args}).Get(ctx, &toolResult); err != nil {
+				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Arguments: call.Args}).Get(ctx, &toolResult); err != nil {
 					toolFailed = true
 					if eventErr := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "tool": call.Name, "error_type": "activity_failed"}); eventErr != nil {
 						return result, eventErr
@@ -301,8 +322,8 @@ func eventScope(sourceID, project, runID string) string {
 func EventScope(sourceID, project, runID string) string { return eventScope(sourceID, project, runID) }
 
 func toolFailureMessage(name string, err error) string {
-	if strings.HasPrefix(name, "mcp__") {
-		return "Tool call failed; its remote effect may be uncertain. Do not repeat a consequential action without checking its status."
+	if strings.HasPrefix(name, "mcp__") || name == "run_command" {
+		return "Tool call failed; its effect may be uncertain. Do not repeat a consequential action without checking its status."
 	}
 	return "Tool failed: " + err.Error()
 }
@@ -315,17 +336,29 @@ func systemPromptForRole(role string) string {
 	return base + " Your assigned team role is " + role + "; stay within that responsibility and ground handoffs in observed evidence."
 }
 
-func awaitApproval(ctx workflow.Context, operationID string) (bool, Approval, error) {
+func awaitApproval(ctx workflow.Context, operationID string, timeout time.Duration) (bool, Approval, bool, error) {
 	channel := workflow.GetSignalChannel(ctx, ApprovalSignal)
 	var approval Approval
-	for {
-		if err := workflow.Await(ctx, func() bool { return channel.ReceiveAsync(&approval) }); err != nil {
-			return false, approval, err
+	matched := false
+	ok, err := workflow.AwaitWithTimeout(ctx, timeout, func() bool {
+		for channel.ReceiveAsync(&approval) {
+			if approval.OperationID == operationID {
+				matched = true
+				return true
+			}
 		}
-		if approval.OperationID == operationID {
-			return approval.Approved, approval, nil
-		}
+		return false
+	})
+	if err != nil {
+		return false, approval, false, err
 	}
+	if !ok {
+		return false, approval, true, nil
+	}
+	if !matched {
+		return false, approval, false, errors.New("approval wait completed without matching operation")
+	}
+	return approval.Approved, approval, false, nil
 }
 
 type eventState struct {

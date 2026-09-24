@@ -12,7 +12,7 @@ Status: initial architecture decision, 2026-09-24. The implementation is increme
 - Store payloads and artifacts behind references. PostgreSQL keeps bounded metadata, event identity, hashes and causal links.
 - Start with an interface-based model client compatible with OpenAI APIs. LiteLLM can be deployed as an optional gateway; the Kernel does not import or require it.
 - Use the official MCP Go SDK behind a Kernel tool interface. Require an explicit permission profile for every server/tool.
-- Define a Sandbox interface. A local process implementation is development-only; run model-authored or untrusted code in a container/remote backend before calling it a security boundary.
+- Keep sandbox execution behind a replaceable Runner interface. The current optional Docker CLI backend requires an image pinned by digest and a workspace under an administrator-configured root; it disables networking, drops capabilities, makes the container root read-only, sets resource limits and requires approval for commands. It has not been validated against a live daemon or adversarial workload and is not yet a production security boundary.
 
 ```mermaid
 flowchart LR
@@ -53,7 +53,7 @@ This is an eventual event delivery guarantee, not a distributed transaction betw
 
 ## Components and PoC scope
 
-First vertical: start run -> model call -> one registered tool -> event outbox -> Temporality timeline -> retrieve knowledge as separate context -> approve a write -> finish/replay. Then add MCP and Docker-backed sandbox, followed by child-workflow delegation and the Lead/Coder/Reviewer/QA example. This order isolates execution semantics before capability breadth.
+First vertical: start run -> model call -> tool/sandbox -> approval -> event outbox -> Temporality timeline -> retrieve knowledge as separate context -> finish/replay. MCP, sandbox and child-workflow example code now exist as opt-in capabilities; the complete multi-service and security validation remains outstanding.
 
 ## Relationship to the universal adapter
 

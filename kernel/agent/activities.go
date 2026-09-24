@@ -13,6 +13,7 @@ import (
 
 	"github.com/temporality-project/temporality/aml/llm"
 	"github.com/temporality-project/temporality/kernel/mcpclient"
+	"github.com/temporality-project/temporality/kernel/sandbox"
 	"github.com/temporality-project/temporality/observation"
 )
 
@@ -27,6 +28,7 @@ type Activities struct {
 	TemporalityURL string
 	MCP            *mcpclient.Client
 	SourceID       string
+	Sandbox        *sandbox.Docker
 }
 
 func NewActivities(events EventOutbox) (*Activities, error) {
@@ -40,7 +42,41 @@ func NewActivities(events EventOutbox) (*Activities, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), MCP: mcpTools, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel")}, nil
+	sandboxRunner, err := sandbox.NewFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), MCP: mcpTools, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandboxRunner}, nil
+}
+
+func (a *Activities) ToolDefs() []llm.ToolDef {
+	defs := a.MCP.ToolDefs()
+	if a.Sandbox != nil {
+		defs = append(defs, llm.ToolDef{Name: "run_command", Description: "Run a command in the configured isolated workspace container. Provide argv as an array; the command requires human approval.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}}})
+	}
+	return defs
+}
+
+func (a *Activities) ApprovalTools() []string {
+	tools := a.MCP.ApprovalTools()
+	if a.Sandbox != nil {
+		tools = append(tools, "run_command")
+	}
+	return tools
+}
+
+func (a *Activities) PrepareRun(input *RunInput) error {
+	input.SourceID = a.SourceID
+	input.Tools = a.ToolDefs()
+	input.ApprovalTools = a.ApprovalTools()
+	if a.Sandbox != nil {
+		workspace, err := a.Sandbox.ResolveWorkspace(input.WorkspacePath)
+		if err != nil {
+			return err
+		}
+		input.WorkspacePath = workspace
+	}
+	return nil
 }
 
 func (a *Activities) RecordEvent(ctx context.Context, event observation.Event) error {
@@ -78,12 +114,48 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 			return ToolResult{}, errors.New("echo requires text")
 		}
 		return ToolResult{Content: value}, nil
+	case "run_command":
+		if a.Sandbox == nil {
+			return ToolResult{}, errors.New("sandbox is not configured")
+		}
+		command, err := stringArgs(request.Arguments["command"])
+		if err != nil {
+			return ToolResult{}, err
+		}
+		timeout := 0
+		if value, ok := request.Arguments["timeout_sec"].(float64); ok {
+			timeout = int(value)
+		}
+		result, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.Role == "reviewer" || request.Role == "qa"})
+		if err != nil {
+			return ToolResult{}, err
+		}
+		return ToolResult{Content: fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, result.Output)}, nil
 	default:
 		if a.MCP != nil && a.MCP.HasTool(request.Name) {
 			content, err := a.MCP.Call(ctx, request.Name, request.Arguments)
 			return ToolResult{Content: content}, err
 		}
 		return ToolResult{}, fmt.Errorf("tool %q is not registered", request.Name)
+	}
+}
+
+func stringArgs(value any) ([]string, error) {
+	switch values := value.(type) {
+	case []string:
+		return values, nil
+	case []any:
+		result := make([]string, len(values))
+		for i, value := range values {
+			text, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("command[%d] must be a string", i)
+			}
+			result[i] = text
+		}
+		return result, nil
+	default:
+		return nil, errors.New("command must be an array of strings")
 	}
 }
 

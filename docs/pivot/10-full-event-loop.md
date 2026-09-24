@@ -1677,57 +1677,61 @@ inspect timeline
 
 Работа считается выполненной, если:
 
+Статус на 2026-09-24: `[x]` — решение или реализация есть в репозитории и покрыта доступной проверкой; `[ ]` — критерий ещё не выполнен либо требует end-to-end проверки на сервисах. Отметки не означают, что весь Definition of Done закрыт.
+
 ### Architecture
 
-* [ ] выбран durable execution substrate;
-* [ ] выбран язык;
-* [ ] определена Agent Kernel abstraction;
-* [ ] определено разделение Temporal / Temporality;
-* [ ] определена event model;
-* [ ] определена knowledge model;
-* [ ] определён provenance model;
-* [ ] определён failure model;
-* [ ] определена delivery semantics;
-* [ ] определена schema evolution strategy.
+* [x] выбран durable execution substrate — Temporal; решение в `docs/decisions/001-temporal-execution.md`;
+* [x] выбран язык — Go; `docs/decisions/010-language.md`;
+* [x] определена Agent Kernel abstraction — `docs/architecture.md`;
+* [x] определено разделение Temporal / Temporality;
+* [x] определена event model — `docs/temporality-contract.md`;
+* [x] определена knowledge model — `docs/knowledge-model.md`;
+* [x] определён provenance model;
+* [x] определён failure model — `docs/failure-model.md`;
+* [x] определена delivery semantics — PostgreSQL outbox и at-least-once доставка;
+* [x] определена schema evolution strategy.
 
 ### Runtime
 
-* [ ] Agent Kernel запускает agent;
-* [ ] выполняется model call;
-* [ ] выполняется MCP/tool call;
-* [ ] работает sandbox;
-* [ ] работает delegation;
-* [ ] работает approval;
-* [ ] операции durable там, где это требуется.
+* [x] Agent Kernel запускает agent через Temporal `AgentRun`;
+* [x] выполняется model call через OpenAI-compatible клиент;
+* [x] выполняется MCP/tool call — allowlisted stdio adapter и встроенный tool; реальный MCP сервер ещё не прогонялся end-to-end;
+* [ ] работает sandbox — Docker backend и unit tests добавлены, но запуск через живой Docker daemon не проверен;
+* [ ] работает delegation в полном сценарии — child workflows и opt-in пример реализованы и проходят workflow test с моделью-заглушкой; полный сервисный прогон не выполнен;
+* [x] работает approval — Temporal signal, обязательное ожидание и timeout;
+* [x] операции durable там, где это требуется — Workflow history и outbox; reconciliation внешних эффектов ещё не завершён.
 
 ### Temporality
 
-* [ ] runtime events генерируются автоматически;
-* [ ] knowledge events генерируются отдельно;
-* [ ] события имеют provenance;
-* [ ] события имеют causality;
-* [ ] события immutable;
-* [ ] projections восстанавливаются из event stream;
-* [ ] работает replay;
-* [ ] можно получить state at T.
+* [x] runtime events генерируются автоматически Kernel;
+* [x] knowledge events генерируются отдельно от runtime events (`knowledge.proposed`, `knowledge.used`);
+* [x] события имеют provenance — source, actor, run/task и evidence refs;
+* [x] события имеют causality — `parent_event_id`, `caused_by`, frame и sequence;
+* [x] события immutable — observation journal append-only;
+* [x] knowledge projection восстанавливается из event stream;
+* [ ] replay trajectory AgentRun из Temporality event stream — существующий FRP replay не восстанавливает полный Kernel run;
+* [x] можно получить state at T для knowledge через `as_of` и `known_at`; реконструкция полного состояния внешнего workspace ещё не реализована.
 
 ### Knowledge
 
-* [ ] knowledge nodes имеют identity;
-* [ ] knowledge имеет lifecycle;
-* [ ] evidence first-class;
-* [ ] provenance восстанавливается;
-* [ ] knowledge можно challenge/correct/supersede/invalidate;
-* [ ] memory является projection, а не отдельной магической системой.
+* [x] knowledge nodes имеют project-scoped identity;
+* [x] knowledge имеет lifecycle;
+* [x] evidence first-class в event contract;
+* [x] provenance восстанавливается из истории событий;
+* [x] knowledge можно challenge/correct/supersede/invalidate через observation contract/API;
+* [x] memory является projection Temporality и передаётся как отдельный контекст.
 
 ### PoC
 
-* [ ] Lead/Coder/Reviewer/QA scenario работает;
-* [ ] UI показывает timeline;
-* [ ] можно открыть provenance;
-* [ ] можно посмотреть evolution конкретного знания;
-* [ ] можно выполнить temporal query;
-* [ ] можно воспроизвести execution.
+* [ ] Lead/Coder/Reviewer/QA scenario работает end-to-end с реальной моделью, tools и sandbox — orchestration тестируется с заглушками; подключается отдельно через build tag `agent_examples`;
+* [x] UI показывает timeline observation events;
+* [x] можно открыть provenance и source event;
+* [x] можно посмотреть evolution конкретного знания;
+* [x] можно выполнить temporal query по knowledge через `as_of`/`known_at`;
+* [ ] можно воспроизвести полный AgentRun execution из Temporality event stream.
+
+**Незакрытые блокирующие пункты:** live multi-service прогон Temporal + PostgreSQL + Temporality + Docker; sandbox security validation; полноценный Lead/Coder/Reviewer/QA run; replay AgentRun из семантических событий; reconciliation неопределённых внешних side effects. Полный `go build ./...` и целевые Kernel workflow/unit tests проходят; полный repository test suite ограничен loopback-запретом sandbox и существующими тестами путей macOS.
 
 ---
 

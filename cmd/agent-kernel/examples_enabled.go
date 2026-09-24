@@ -32,9 +32,10 @@ func registerExampleRoutes(mux *http.ServeMux, temporalClient client.Client, tas
 			writeError(w, 422, errors.New("run_id, project and prompt are required"))
 			return
 		}
-		input.SourceID = activities.SourceID
-		input.Tools = activities.MCP.ToolDefs()
-		input.ApprovalTools = activities.MCP.ApprovalTools()
+		if err := activities.PrepareRun(&input); err != nil {
+			writeError(w, 422, err)
+			return
+		}
 		run, err := temporalClient.ExecuteWorkflow(r.Context(), client.StartWorkflowOptions{ID: workflowIDFor(activities.SourceID, input.Project, input.RunID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, team.WorkflowName, input)
 		if err != nil {
 			writeError(w, 409, err)

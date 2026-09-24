@@ -76,9 +76,10 @@ func main() {
 		if input.ActorID == "" {
 			input.ActorID = "human-requester"
 		}
-		input.Tools = activities.MCP.ToolDefs()
-		input.ApprovalTools = activities.MCP.ApprovalTools()
-		input.SourceID = activities.SourceID
+		if err := activities.PrepareRun(&input); err != nil {
+			writeError(w, 422, err)
+			return
+		}
 		workflowID := workflowIDFor(activities.SourceID, input.Project, input.RunID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
 		run, err := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)

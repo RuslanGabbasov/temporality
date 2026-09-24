@@ -85,3 +85,29 @@ func TestAgentRunRecordsApprovalAndKnowledgeTrajectory(t *testing.T) {
 		require.True(t, types[expected], "missing %s in recorded event stream", expected)
 	}
 }
+
+func TestAgentRunTimesOutAnUnansweredApproval(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error { recorded = append(recorded, event); return nil }, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	modelCalls := 0
+	env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
+		modelCalls++
+		if modelCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "approval-1", Name: "request_approval", Args: map[string]any{"action": "write"}}}}, nil
+		}
+		return llm.Completion{Content: "approval expired"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "timeout-run", Project: "repo-a", Prompt: "write", ApprovalTimeoutSeconds: 2})
+	require.NoError(t, env.GetWorkflowError())
+	types := map[string]bool{}
+	for _, event := range recorded {
+		types[event.Type] = true
+	}
+	require.True(t, types["approval.requested"])
+	require.True(t, types["approval.timed_out"])
+	require.False(t, types["approval.granted"])
+}
