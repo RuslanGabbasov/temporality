@@ -20,6 +20,8 @@ Implemented milestones span **M0 — Event Log + replay** through **M15 — Agen
 
 See [`ROADMAP.md`](ROADMAP.md) for subsequent milestones.
 
+The first-party durable Agent Kernel is being added incrementally. Its target architecture, event contract, knowledge model, failure behavior, OSS research and ADRs are documented in [`docs/architecture.md`](docs/architecture.md), [`docs/temporality-contract.md`](docs/temporality-contract.md), [`docs/knowledge-model.md`](docs/knowledge-model.md), [`docs/failure-model.md`](docs/failure-model.md), [`docs/oss-research.md`](docs/oss-research.md) and [`docs/decisions/`](docs/decisions/README.md). The universal observation API below remains usable directly by any external harness.
+
 ## Run the complete stack
 
 ```sh
@@ -96,6 +98,34 @@ The response includes a separate `context_block` and structured `hints`, each wi
 Dependency-free Python and JavaScript clients are in [`examples/python/temporality_client.py`](examples/python/temporality_client.py) and [`examples/javascript/temporality.mjs`](examples/javascript/temporality.mjs). Both return the supplemental block while leaving the tool result unchanged; a harness can attach it through its own context hook. The independent project timeline and knowledge view are available at `/observability` in the debugger.
 
 If `DATABASE_URL` is omitted, the runtime uses an ephemeral in-memory store.
+
+## Agent Kernel PoC (early)
+
+The Kernel currently implements a durable Temporal AgentRun workflow, OpenAI-compatible model calls, a read-only `echo` tool, approval signals, `remember` knowledge proposals, knowledge hint retrieval, an at-least-once PostgreSQL outbox publisher, and an optional MCP stdio adapter. MCP starts one child process per call in this PoC. Production sandboxing, delegation and the Lead/Coder/Reviewer/QA example are not implemented yet.
+
+Start PostgreSQL, the Temporality runtime and debugger with `docker compose up -d postgres runtime debugger`, then start a Temporal development server in another terminal (for example, `temporal server start-dev`). Configure the same PostgreSQL database and model endpoint and launch the worker/API:
+
+```sh
+DATABASE_URL='postgres://temporality:temporality@localhost:5432/temporality?sslmode=disable' \
+TEMPORALITY_URL=http://localhost:8080 \
+TEMPORALITY_MODEL_BASE_URL=https://api.openai.com/v1 \
+TEMPORALITY_MODEL_ID=gpt-4.1-mini \
+TEMPORALITY_MODEL_API_KEY="$OPENAI_API_KEY" \
+go run ./cmd/agent-kernel
+```
+
+Start a run and inspect its status (use a project-scoped run ID):
+
+```sh
+curl -X POST http://localhost:8090/v1/agent/runs \
+  -H 'content-type: application/json' \
+  -d '{"run_id":"demo-1","project":"repo-a","task_id":"hello","prompt":"Say hello and explain what you can do."}'
+curl 'http://localhost:8090/v1/agent/runs/demo-1?project=repo-a'
+```
+
+Open the existing debugger at [http://localhost:3000/observability](http://localhost:3000/observability) to inspect emitted events. The Kernel API binds to `:8090` by default. Its POST returns after Temporal accepts the workflow; poll GET for status, and it includes the `RunResult` once the workflow completes. This PoC currently has workflow unit tests, not the complete multi-service integration test or the Lead/Coder/Reviewer/QA example required by the full design.
+
+To enable MCP, set `KERNEL_MCP_COMMAND` to the server executable, `KERNEL_MCP_ARGS` to a JSON string array if needed, and `KERNEL_MCP_ALLOW` to the comma-separated server tool names the Kernel may expose. Optionally set `KERNEL_MCP_APPROVAL` to the subset that must wait for a human signal. Startup fails if the server does not advertise an allowed tool. The approval list must be a subset of the allowlist. Treat the MCP process and its configured credentials as trusted deployment inputs; untrusted code still requires a real sandbox.
 
 The repository's separate AML agent loop also has an optional native adapter in [`aml/temporality/client.go`](aml/temporality/client.go). Configure it as the runner's `Hooks`; after each tool result it requests supplemental hints and the runner appends them as a separate user-context message. API failures degrade to no hints. Set `BaseURL`, `Project`, and a stable unique `SourceID`. Task outcome events are labeled as correlated with hint use, not as proof that a hint caused the outcome.
 
