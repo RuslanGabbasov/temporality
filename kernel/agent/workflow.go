@@ -106,6 +106,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		RetryPolicy:            &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3},
 	})
 	state := &eventState{run: input, sequence: 0, eventScope: eventScope(input.SourceID, input.Project, input.RunID), parentFrame: input.ParentFrameID, previousEventID: input.ParentEventID}
+	var frames []string
 	defer func() {
 		if errors.Is(ctx.Err(), workflow.ErrCanceled) {
 			cleanupCtx, _ := workflow.NewDisconnectedContext(ctx)
@@ -145,6 +146,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			state.parentFrame = state.frame
 		}
 		state.frame = frame
+		frames = append(frames, frame)
 		if err := emit(activityCtx, state, "turn.started", map[string]any{"turn": turn}); err != nil {
 			return result, err
 		}
@@ -155,10 +157,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		var completion llm.Completion
 		modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 4 * time.Minute, ScheduleToCloseTimeout: 5 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 		if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, modelReq).Get(ctx, &completion); err != nil {
-			if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": turn, "error_type": "activity_failed"}); eventErr != nil {
+			failureDetail := boundedFailureDetail(err)
+			if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": turn, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
 				return result, eventErr
 			}
-			if eventErr := emit(activityCtx, state, "run.failed", map[string]any{"turn": turn, "error_type": "model_call_failed"}); eventErr != nil {
+			if eventErr := emit(activityCtx, state, "run.failed", map[string]any{"turn": turn, "error_type": "model_call_failed", "error": failureDetail}); eventErr != nil {
 				return result, eventErr
 			}
 			result.Status = "failed"
@@ -174,6 +177,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				return result, err
 			}
 			if err := emit(activityCtx, state, "run.completed", map[string]any{"turns": turn}); err != nil {
+				return result, err
+			}
+			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
 				return result, err
 			}
 			return result, nil
@@ -385,6 +391,41 @@ func toolFailureMessage(name string, err error) string {
 		return "Tool call failed; its effect may be uncertain. Do not repeat a consequential action without checking its status."
 	}
 	return "Tool failed: " + err.Error()
+}
+
+const (
+	narrativeMaxBytes  = 4096
+	failureDetailBytes = 512
+)
+
+// BoundedNarrative produces a bounded display representation of an
+// agent-authored narrative: credentials are redacted, whitespace is
+// collapsed and the text is truncated to narrativeMaxBytes. The second
+// return value reports whether truncation happened.
+func BoundedNarrative(value string) (string, bool) {
+	clean := redactProse(value)
+	if len(clean) > narrativeMaxBytes {
+		return clean[:narrativeMaxBytes] + "…", true
+	}
+	return clean, false
+}
+
+// boundedFailureDetail reduces an activity error to a bounded, redacted
+// description suitable for inclusion in failure events.
+func boundedFailureDetail(err error) string {
+	detail := redactProse(err.Error())
+	if len(detail) > failureDetailBytes {
+		return detail[:failureDetailBytes] + "…"
+	}
+	return detail
+}
+
+// emitAgentSummary records the agent-authored final answer as derived data:
+// it never replaces the execution record and always carries the frames it
+// is derived from.
+func emitAgentSummary(ctx workflow.Context, state *eventState, answer string, frames []string, turns int) error {
+	summary, truncated := BoundedNarrative(answer)
+	return emit(ctx, state, "agent.summary", map[string]any{"kind": "narrative", "answer": summary, "truncated": truncated, "turns": turns, "derived_from": frames})
 }
 
 func systemPromptForRole(role string) string {

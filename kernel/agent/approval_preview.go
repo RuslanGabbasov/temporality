@@ -158,6 +158,10 @@ func boundedApprovalValue(value any, depth int, redacted, truncated *bool) any {
 	}
 }
 
+// credentialValueKeys are the inline credential markers recognised in both
+// structured argument values and free-form agent text.
+var credentialValueKeys = []string{"authorization:", "token=", "password=", "passwd=", "secret=", "api_key=", "api-key=", "credential="}
+
 func redactApprovalText(value string, redacted *bool) string {
 	lower := strings.ToLower(value)
 	if strings.HasPrefix(lower, "bearer ") {
@@ -172,7 +176,7 @@ func redactApprovalText(value string, redacted *bool) string {
 			lower = strings.ToLower(value)
 		}
 	}
-	for _, key := range []string{"authorization:", "token=", "password=", "passwd=", "secret=", "api_key=", "api-key=", "credential="} {
+	for _, key := range credentialValueKeys {
 		if at := strings.Index(lower, key); at >= 0 {
 			*redacted = true
 			start := at + len(key)
@@ -211,6 +215,79 @@ func sensitiveFlag(value string) bool {
 		name = name[:at]
 	}
 	return sensitiveName(name)
+}
+
+// redactProse removes credentials from free-form agent-authored text such
+// as narratives and failure details. Unlike redactApprovalText it handles
+// every credential marker in the text, not only the first one. Whitespace is
+// collapsed as a side effect.
+func redactProse(value string) string {
+	fields := strings.Fields(value)
+	redactNext := false
+	for index, field := range fields {
+		if redactNext {
+			fields[index] = "[REDACTED]"
+			redactNext = false
+			continue
+		}
+		if strings.EqualFold(field, "bearer") || (sensitiveFlag(strings.ToLower(field)) && !strings.ContainsAny(field, "=:")) {
+			redactNext = true
+			continue
+		}
+		fields[index] = redactProseToken(field)
+	}
+	return strings.Join(fields, " ")
+}
+
+// redactProseToken redacts every credential marker inside a single
+// whitespace-delimited token, scanning left to right so multiple glued
+// key=value pairs are all handled.
+func redactProseToken(token string) string {
+	if at := strings.Index(token, "://"); at >= 0 {
+		start := at + 3
+		if end := strings.Index(token[start:], "@"); end >= 0 {
+			token = token[:start] + "[REDACTED]" + token[start+end:]
+		}
+	}
+	changed := false
+	offset := 0
+	for {
+		lower := strings.ToLower(token)
+		at, match := -1, ""
+		for _, key := range credentialValueKeys {
+			if i := strings.Index(lower[offset:], key); i >= 0 && (at < 0 || offset+i < at) {
+				at, match = offset+i, key
+			}
+		}
+		if at < 0 {
+			break
+		}
+		start := at + len(match)
+		end := start
+		if start < len(token) && (token[start] == '\'' || token[start] == '"') {
+			quote := token[start]
+			end = start + 1
+			for end < len(token) && token[end] != quote {
+				end++
+			}
+			if end < len(token) {
+				end++
+			}
+		} else {
+			for end < len(token) && !strings.ContainsRune(";|&,", rune(token[end])) {
+				end++
+			}
+		}
+		token = token[:start] + "[REDACTED]" + token[end:]
+		changed = true
+		offset = start + len("[REDACTED]")
+	}
+	if !changed {
+		if at := strings.IndexAny(token, "=:"); at > 0 && sensitiveName(strings.TrimLeft(strings.ToLower(token[:at]), "-")) {
+			return token[:at+1] + "[REDACTED]"
+		}
+	}
+	return token
 }
 
 func sensitiveName(value string) bool {

@@ -51,10 +51,12 @@ func Workflow(ctx workflow.Context, input agent.RunInput) (Result, error) {
 	}
 	roles := []string{"lead", "coder", "reviewer", "qa"}
 	previous := input.Prompt
+	var frames []string
 	for index, role := range roles {
 		childRunID := input.RunID + "/" + role
 		frameID := fmt.Sprintf("%s/delegation/%02d", input.RunID, index+1)
 		state.frame = frameID
+		frames = append(frames, frameID)
 		if err := state.emit(activityCtx, "delegation.started", map[string]any{"child_run_id": childRunID, "role": role, "ordinal": index + 1}); err != nil {
 			return result, err
 		}
@@ -91,6 +93,10 @@ func Workflow(ctx workflow.Context, input agent.RunInput) (Result, error) {
 	result.Answer = strings.TrimSpace(summary.String())
 	result.Status = "completed"
 	if err := state.emit(activityCtx, "run.completed", map[string]any{"stage_count": len(result.Stages), "turns": result.Turns}); err != nil {
+		return result, err
+	}
+	narrative, truncated := agent.BoundedNarrative(result.Answer)
+	if err := state.emit(activityCtx, "agent.summary", map[string]any{"kind": "narrative", "answer": narrative, "truncated": truncated, "stages": len(result.Stages), "derived_from": frames}); err != nil {
 		return result, err
 	}
 	return result, nil

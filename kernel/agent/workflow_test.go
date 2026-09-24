@@ -337,3 +337,75 @@ func TestSuccessfulVerificationCommandsRecordExecutionKnowledge(t *testing.T) {
 	require.Less(t, secondTool, indexEvent(events, "knowledge.confirmed"))
 	require.Len(t, knowledgeEvents(events, "tool.completed"), 3)
 }
+
+func TestBoundedNarrativeRedactsCollapsesAndTruncates(t *testing.T) {
+	clean, truncated := BoundedNarrative("line one\n\n   line two")
+	require.False(t, truncated)
+	require.Equal(t, "line one line two", clean)
+
+	redacted, _ := BoundedNarrative("token is Bearer abcdef123456")
+	require.NotContains(t, redacted, "abcdef123456")
+	require.Contains(t, redacted, "[REDACTED]")
+
+	redacted, _ = BoundedNarrative("used token=abc and password=hunter2")
+	require.NotContains(t, redacted, "hunter2")
+	require.Contains(t, redacted, "token=[REDACTED]")
+	require.Contains(t, redacted, "password=[REDACTED]")
+
+	_, truncated = BoundedNarrative(strings.Repeat("a", narrativeMaxBytes+10))
+	require.True(t, truncated)
+}
+
+func TestAgentSummaryIsDerivedDataWithFrameProvenance(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var events []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		events = append(events, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
+		return llm.Completion{Content: "No approval was required."}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "summary-run", Project: "repo-a", Prompt: "summarize"})
+	require.NoError(t, env.GetWorkflowError())
+
+	summaryIndex := indexEvent(events, "agent.summary")
+	require.GreaterOrEqual(t, summaryIndex, 0, "agent.summary must be recorded")
+	require.Greater(t, summaryIndex, indexEvent(events, "run.completed"), "agent.summary is derived data and follows run.completed")
+	summary := events[summaryIndex]
+	require.Equal(t, "narrative", summary.Data["kind"])
+	require.Equal(t, "No approval was required.", summary.Data["answer"])
+	require.Equal(t, false, summary.Data["truncated"])
+	derived, ok := summary.Data["derived_from"].([]any)
+	require.True(t, ok, "derived_from must be a frame list")
+	require.Equal(t, []any{"summary-run/turn/01"}, derived)
+	require.Equal(t, summary.Data["frame_id"], derived[0])
+}
+
+func TestModelFailureRecordsBoundedErrorDetail(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var events []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		events = append(events, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
+		return llm.Completion{}, errors.New("provider status 403: access denied by security policy")
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "fail-run", Project: "repo-a", Prompt: "work"})
+	require.Error(t, env.GetWorkflowError())
+
+	modelFailure := events[indexEvent(events, "model.failed")]
+	require.Contains(t, modelFailure.Data["error"], "provider status 403")
+	runFailure := events[indexEvent(events, "run.failed")]
+	require.Contains(t, runFailure.Data["error"], "provider status 403")
+	require.Less(t, indexEvent(events, "model.failed"), indexEvent(events, "run.failed"))
+}

@@ -18,7 +18,7 @@ The dated live smoke report is [`benchmarks/agent-kernel-live-integration-2026-0
 | Semantic replay/state-at-T | Audited, incomplete | FRP frame replay exists; AgentRun semantic replay and execution/knowledge `diff(T1,T2)` remain unimplemented |
 | MCP protocol adapter | Integration-tested locally | `go test ./kernel/mcpclient` launches the stdio fixture in `examples/test-mcp`, discovers all three tools, performs read/search/create calls, and verifies allowlist and workspace escape rejection. Full live AgentRun → approval → MCP → persisted Temporality evidence remains unvalidated. |
 | Adversarial sandbox | Not validated | Isolation flags and positive smoke are documented; attack/resource-exhaustion matrix remains unrun |
-| Narrative provenance | Gap confirmed | Final answer is stored in Temporal result; it is not a Temporality artifact with `derived_from` links |
+| Narrative provenance | Implemented and workflow-tested | The final answer is now recorded as a derived `agent.summary` event (bounded to 4 KiB, redacted, whitespace-collapsed) with `derived_from` frame links — every turn frame in AgentRun, every delegation frame in the team workflow. It follows `run.completed` and is never treated as an execution source of truth; `model.failed`/`run.failed` now carry a bounded redacted `error` detail. Live evidence pending the next team run |
 
 ## Verification run in this phase
 
