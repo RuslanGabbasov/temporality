@@ -26,6 +26,21 @@ func TestVerificationClass(t *testing.T) {
 		{[]string{"echo", "test"}, ""},
 		{[]string{"cat", "build.md"}, ""},
 		{[]string{"go", "run", "main.go"}, ""},
+		// Shell-wrapped commands attribute to the final script command, which is
+		// the only one that determines the recorded exit code.
+		{[]string{"sh", "-c", "cd calculator && GOCACHE=$PWD/.gocache go test ./..."}, "test"},
+		{[]string{"sh", "-c", "GOCACHE=$PWD/.gocache GOTMPDIR=$PWD/tmp go test -count=1 -v ./..."}, "test"},
+		{[]string{"bash", "-c", "npm run build"}, "build"},
+		{[]string{"sh", "-c", "cd calculator && ls -la"}, ""},
+		// The exit code belongs to the trailing echo, not to go test: a zero exit
+		// here must not become knowledge.
+		{[]string{"sh", "-c", "cd calculator && go test ./...; echo EXIT=$?"}, ""},
+		// Pipelines and command substitution have exit-code semantics the kernel
+		// cannot attribute.
+		{[]string{"sh", "-c", "go test ./... | tee test.log"}, ""},
+		{[]string{"sh", "-c", "go test $(go list ./...)"}, ""},
+		{[]string{"sh", "-c", "go test ./... > /dev/null"}, "test"},
+		{[]string{"sh", "-c", "go test ./... 2>&1"}, "test"},
 		{nil, ""},
 	}
 	for _, item := range cases {
@@ -83,5 +98,23 @@ func TestExecutionObservationProposal(t *testing.T) {
 	otherProject.Project = "repo-b"
 	if stable.KnowledgeID == executionObservationProposal(otherProject, llm.ToolCall{Name: "run_command", Args: command}, ToolResult{ExitCode: exitCode(0)}).KnowledgeID {
 		t.Fatal("knowledge id must differ between projects")
+	}
+	// Shell-wrapped and bare invocations of the same verification command map to
+	// one knowledge node: wrappers must not flood the projection.
+	wrapped := map[string]any{"command": []any{"sh", "-c", "cd calculator && GOCACHE=$PWD/.gocache go test ./..."}}
+	wrappedProposal := executionObservationProposal(run, llm.ToolCall{Name: "run_command", Args: wrapped}, ToolResult{ExitCode: exitCode(0)})
+	if wrappedProposal == nil {
+		t.Fatal("shell-wrapped successful verification must produce a proposal")
+	}
+	if wrappedProposal.Command != "go test ./..." {
+		t.Fatalf("canonical command = %q, want %q", wrappedProposal.Command, "go test ./...")
+	}
+	if wrappedProposal.KnowledgeID != stable.KnowledgeID {
+		t.Fatal("shell-wrapped and bare invocations must share one knowledge id")
+	}
+	// Exit-code masking wrappers must not produce knowledge even on exit 0.
+	masked := map[string]any{"command": []any{"sh", "-c", "cd calculator && go test ./...; echo EXIT=$?"}}
+	if proposal := executionObservationProposal(run, llm.ToolCall{Name: "run_command", Args: masked}, ToolResult{ExitCode: exitCode(0)}); proposal != nil {
+		t.Fatal("exit-code masking wrapper must not produce a proposal")
 	}
 }
