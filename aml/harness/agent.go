@@ -45,6 +45,12 @@ type Hooks interface {
 	TaskEnd(ctx context.Context, sessionID, taskID string, success bool, answer string)
 }
 
+// PostToolHintHooks can optionally return context after seeing a tool result.
+// Keeping this separate preserves compatibility with simple hook adapters.
+type PostToolHintHooks interface {
+	HintsAfterToolCall(ctx context.Context, sessionID string, call llm.ToolCall, result ToolResult) []Hint
+}
+
 // StepRecord captures one model turn for forensics.
 type StepRecord struct {
 	Step         int
@@ -149,6 +155,9 @@ func (r *Runner) Run(ctx context.Context, env Environment, hooks Hooks, sessionI
 				hooks.AfterToolCall(ctx, sessionID, call, outcome)
 			}
 			messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: outcome.Text})
+			if postTool, ok := hooks.(PostToolHintHooks); ok {
+				postHints = append(postHints, postTool.HintsAfterToolCall(ctx, sessionID, call, outcome)...)
+			}
 		}
 		result.Trace = append(result.Trace, record)
 		if len(postHints) > 0 {

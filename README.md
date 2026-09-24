@@ -97,6 +97,8 @@ Dependency-free Python and JavaScript clients are in [`examples/python/temporali
 
 If `DATABASE_URL` is omitted, the runtime uses an ephemeral in-memory store.
 
+The repository's separate AML agent loop also has an optional native adapter in [`aml/temporality/client.go`](aml/temporality/client.go). Configure it as the runner's `Hooks`; after each tool result it requests supplemental hints and the runner appends them as a separate user-context message. API failures degrade to no hints. Set `BaseURL`, `Project`, and a stable unique `SourceID`. Task outcome events are labeled as correlated with hint use, not as proof that a hint caused the outcome.
+
 ## Настройка модели (OpenAI-compatible)
 
 Runtime вызывает провайдера через OpenAI-compatible Chat Completions API. Скопируйте `.env.example` в `.env` и настройте переменные:
