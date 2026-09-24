@@ -44,14 +44,15 @@ type Runner interface {
 }
 
 type Docker struct {
-	Root   string
-	Image  string
-	Binary string
-	Memory string
-	CPUs   string
-	PIDs   int
-	UID    int
-	GID    int
+	Root        string
+	Image       string
+	Binary      string
+	Memory      string
+	CPUs        string
+	PIDs        int
+	UID         int
+	GID         int
+	ScratchSize string
 }
 
 func NewFromEnv() (*Docker, error) {
@@ -66,6 +67,9 @@ func NewFromEnv() (*Docker, error) {
 	if err := validateImage(image); err != nil {
 		return nil, err
 	}
+	if err := validateByteSize(strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_SCRATCH_SIZE"))); err != nil {
+		return nil, err
+	}
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("resolve KERNEL_SANDBOX_ROOT: %w", err)
@@ -78,7 +82,7 @@ func NewFromEnv() (*Docker, error) {
 	if err != nil || !info.IsDir() {
 		return nil, errors.New("KERNEL_SANDBOX_ROOT must be an existing directory")
 	}
-	return &Docker{Root: resolved, Image: image, Binary: env("KERNEL_DOCKER_BINARY", "docker"), Memory: env("KERNEL_SANDBOX_MEMORY", "1g"), CPUs: env("KERNEL_SANDBOX_CPUS", "2"), PIDs: 128, UID: os.Getuid(), GID: os.Getgid()}, nil
+	return &Docker{Root: resolved, Image: image, Binary: env("KERNEL_DOCKER_BINARY", "docker"), Memory: env("KERNEL_SANDBOX_MEMORY", "1g"), CPUs: env("KERNEL_SANDBOX_CPUS", "2"), PIDs: 128, UID: os.Getuid(), GID: os.Getgid(), ScratchSize: env("KERNEL_SANDBOX_SCRATCH_SIZE", "512m")}, nil
 }
 
 func validateImage(image string) error {
@@ -90,6 +94,22 @@ func validateImage(image string) error {
 		if !strings.ContainsRune("0123456789abcdefABCDEF", char) {
 			return errors.New("KERNEL_SANDBOX_IMAGE has an invalid sha256 digest")
 		}
+	}
+	return nil
+}
+
+// validateByteSize accepts docker tmpfs size values (plain bytes or a k/m/g
+// unit) so misconfiguration fails at startup instead of mid-run.
+func validateByteSize(value string) error {
+	if value == "" {
+		return nil
+	}
+	if value == "0" {
+		return errors.New("scratch size must be positive")
+	}
+	digits := strings.TrimRight(value, "bBkKmMgG")
+	if digits == "" || strings.Trim(digits, "0123456789") != "" {
+		return fmt.Errorf("size %q must be bytes or a number with a k/m/g unit, e.g. 512m", value)
 	}
 	return nil
 }
@@ -191,7 +211,16 @@ func (d *Docker) arguments(workspace string, request Request, name string) []str
 	if request.ReadOnly {
 		mode = "ro"
 	}
-	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(d.PIDs), "--memory", d.Memory, "--memory-swap", d.Memory, "--cpus", d.CPUs, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "--volume", workspace + ":/workspace:" + mode, d.Image}
+	// /scratch is the exec-capable writable area every command needs: build
+	// tools compile and execute artifacts there (go test binaries, npm/pip
+	// caches). /tmp stays noexec for plain temp files. HOME and TMPDIR point
+	// at /scratch so toolchain defaults work even when the workspace is
+	// mounted read-only (reviewer/qa roles).
+	scratchSize := d.ScratchSize
+	if scratchSize == "" {
+		scratchSize = "512m"
+	}
+	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(d.PIDs), "--memory", d.Memory, "--memory-swap", d.Memory, "--cpus", d.CPUs, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "--tmpfs", "/scratch:rw,exec,nosuid,size=" + scratchSize, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode, d.Image}
 	return append(args, request.Command...)
 }
 

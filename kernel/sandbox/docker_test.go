@@ -60,16 +60,34 @@ func TestWorkspaceMustStayWithinConfiguredRoot(t *testing.T) {
 }
 
 func TestDockerArgumentsEnforceIsolation(t *testing.T) {
-	runner := &Docker{Image: "sandbox@sha256:abc", Memory: "1g", CPUs: "2", PIDs: 128, UID: 10001, GID: 10001}
+	runner := &Docker{Image: "sandbox@sha256:abc", Memory: "1g", CPUs: "2", PIDs: 128, UID: 10001, GID: 10001, ScratchSize: "512m"}
 	args := runner.arguments("/srv/work/repo", Request{Command: []string{"go", "test", "./..."}, ReadOnly: true}, "temporality-sandbox-test")
 	joined := strings.Join(args, " ")
-	for _, required := range []string{"--init", "--pull=never", "--name temporality-sandbox-test", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit 128", "--memory 1g", "--memory-swap 1g", "--cpus 2", "--ulimit nofile=1024:1024", "--user 10001:10001", "/srv/work/repo:/workspace:ro"} {
+	for _, required := range []string{"--init", "--pull=never", "--name temporality-sandbox-test", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit 128", "--memory 1g", "--memory-swap 1g", "--cpus 2", "--ulimit nofile=1024:1024", "--user 10001:10001", "/srv/work/repo:/workspace:ro", "--tmpfs /tmp:rw,noexec,nosuid,size=64m", "--tmpfs /scratch:rw,exec,nosuid,size=512m", "--env HOME=/scratch", "--env TMPDIR=/scratch"} {
 		if !strings.Contains(joined, required) {
 			t.Errorf("docker args missing %q: %s", required, joined)
 		}
 	}
 	if strings.Contains(joined, "--privileged") {
 		t.Fatalf("unexpected privileged container: %s", joined)
+	}
+	// A Docker built without an explicit scratch size still gets a sane default.
+	defaultScratch := (&Docker{}).arguments("/w", Request{Command: []string{"ls"}, ReadOnly: true}, "n")
+	if !strings.Contains(strings.Join(defaultScratch, " "), "--tmpfs /scratch:rw,exec,nosuid,size=512m") {
+		t.Fatalf("missing default scratch tmpfs: %s", defaultScratch)
+	}
+}
+
+func TestScratchSizeMustBeAPositiveByteSize(t *testing.T) {
+	for _, valid := range []string{"", "64m", "1g", "268435456", "512M"} {
+		if err := validateByteSize(valid); err != nil {
+			t.Errorf("validateByteSize(%q) = %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"0", "m", "5x", "-1m"} {
+		if err := validateByteSize(invalid); err == nil {
+			t.Errorf("validateByteSize(%q) accepted", invalid)
+		}
 	}
 }
 
