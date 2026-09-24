@@ -47,6 +47,8 @@ All events: schema, stable event ID, occurred time, source ID/integration, event
 
 Do not put prompts, model output, tool arguments/results, credentials, or file contents in `data` by default. Store bounded metadata and references: `artifact_id`, URI, SHA-256, size, media type, created time, access classification. A URI is not an authorization token; authorization is checked when reading the artifact. Redaction occurs before artifact persistence. Event schema evolution must preserve unknown `data` fields and version the artifact format independently.
 
+For human-gated tool calls, `approval.requested.data.operation` is the exception for a bounded display projection: it carries stable `id`, `type`, `summary`, redacted/truncated `arguments`, and `arguments_hash` over canonical unredacted JSON. The canonical arguments are not stored in Temporality. `approval.granted` repeats the operation ID and hash; the workflow executes only when the human signal supplies the same hash. This makes approval bind to the displayed operation without publishing credentials.
+
 ## Projection and replay
 
 The event stream is immutable source of truth. Runtime trajectory, knowledge current state, provenance edges and UI summaries are rebuildable projections. `state(T)` filters by occurred time and received time where supplied. Replay is a semantic reconstruction from Temporality events; it is distinct from Temporal Workflow replay, which reconstructs deterministic orchestration state.

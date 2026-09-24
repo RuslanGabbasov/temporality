@@ -52,24 +52,22 @@ func NewActivities(events EventOutbox) (*Activities, error) {
 func (a *Activities) ToolDefs() []llm.ToolDef {
 	defs := a.MCP.ToolDefs()
 	if a.Sandbox != nil {
-		defs = append(defs, llm.ToolDef{Name: "run_command", Description: "Run a command in the configured isolated workspace container. Provide argv as an array; the command requires human approval.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}}})
+		defs = append(defs, llm.ToolDef{Name: "run_command", Description: "Run a command in the isolated workspace container. It is automatically authorized by the sandbox.workspace.v1 policy; it has no network and can write only to this run's workspace. Provide argv as an array.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}}})
 	}
 	return defs
 }
 
 func (a *Activities) ApprovalTools() []string {
-	tools := a.MCP.ApprovalTools()
-	if a.Sandbox != nil {
-		tools = append(tools, "run_command")
-	}
-	return tools
+	return a.MCP.ApprovalTools()
 }
 
 func (a *Activities) PrepareRun(input *RunInput) error {
 	input.SourceID = a.SourceID
 	input.Tools = a.ToolDefs()
 	input.ApprovalTools = a.ApprovalTools()
+	input.AutoApproveTools = nil
 	if a.Sandbox != nil {
+		input.AutoApproveTools = []string{"run_command"}
 		workspace, err := a.Sandbox.ResolveWorkspace(input.WorkspacePath)
 		if err != nil {
 			return err

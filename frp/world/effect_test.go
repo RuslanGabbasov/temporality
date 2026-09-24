@@ -17,6 +17,10 @@ import (
 func writeWorld(t *testing.T) (World, string) {
 	t.Helper()
 	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	value := World{
 		Protocol: "frp", Version: "0.3", WorldID: "effect-test", StateVersion: 2,
 		Resources:    []Resource{{ID: "workspace", Type: ResourceFilesystem, Path: root}},

@@ -1,5 +1,7 @@
 # Knowledge model
 
+Phase 2 audit: the Kernel currently creates `knowledge.proposed` only when the model explicitly calls `remember`. The event now includes the remember tool operation ID, frame, run actor, evidence refs, and causal parent. Automatic observation/evidence extraction and the full challenge/correct/confirm lifecycle are not implemented yet; see [`validation-report.md`](validation-report.md).
+
 ## Small semantic core
 
 Do not start with a domain ontology. A `KnowledgeNode` is a stable project-scoped identity plus proposition, kind, current lifecycle state, validity interval, and pointers to evidence and transitions. Supported initial kinds: fact, claim, hypothesis, decision, constraint, assumption, solution, observation, requirement, conclusion. Kind is descriptive and does not by itself imply truth or confidence.

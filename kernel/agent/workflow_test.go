@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -110,4 +112,125 @@ func TestAgentRunTimesOutAnUnansweredApproval(t *testing.T) {
 	require.True(t, types["approval.requested"])
 	require.True(t, types["approval.timed_out"])
 	require.False(t, types["approval.granted"])
+}
+
+func TestApprovedToolOperationIsVisibleAndHashBound(t *testing.T) {
+	run := func(t *testing.T, signalHash string) ([]observation.Event, bool) {
+		var suite testsuite.WorkflowTestSuite
+		env := suite.NewTestWorkflowEnvironment()
+		env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+		var recorded []observation.Event
+		env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+			require.NoError(t, event.Validate())
+			recorded = append(recorded, event)
+			return nil
+		}, activity.RegisterOptions{Name: ActivityRecordEvent})
+		env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+		modelCalls := 0
+		env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
+			modelCalls++
+			if modelCalls > 1 {
+				return llm.Completion{Content: "tests complete"}, nil
+			}
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "run_command", Args: map[string]any{"command": []any{"sh", "-c", "TOKEN=top-secret go test ./..."}}}}}, nil
+		}, activity.RegisterOptions{Name: ActivityCallModel})
+		executed := false
+		env.RegisterActivityWithOptions(func(_ context.Context, request ToolRequest) (ToolResult, error) {
+			executed = true
+			require.Equal(t, "run-approval/turn/01/call-1", request.OperationID)
+			return ToolResult{Content: "exit_code=0"}, nil
+		}, activity.RegisterOptions{Name: ActivityRunTool})
+		args := map[string]any{"command": []any{"sh", "-c", "TOKEN=top-secret go test ./..."}}
+		if signalHash == "<correct>" {
+			signalHash = operationArgumentsHash(args)
+		}
+		hash := signalHash
+		env.RegisterDelayedCallback(func() {
+			env.SignalWorkflow(ApprovalSignal, Approval{OperationID: "run-approval/turn/01/call-1", ArgumentsHash: hash, Approved: true, ActorID: "reviewer", Reason: "approved"})
+		}, time.Second)
+		env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-approval", Project: "repo-a", ActorID: "coder", Prompt: "run tests", ApprovalTimeoutSeconds: 3, ApprovalTools: []string{"run_command"}})
+		require.NoError(t, env.GetWorkflowError())
+		return recorded, executed
+	}
+
+	t.Run("matching approval runs the exact operation", func(t *testing.T) {
+		events, executed := run(t, "<correct>")
+		require.True(t, executed)
+		byType := map[string]observation.Event{}
+		for _, event := range events {
+			byType[event.Type] = event
+		}
+		requested, granted := byType["approval.requested"], byType["approval.granted"]
+		started, completed := byType["tool.started"], byType["tool.completed"]
+		require.NotEmpty(t, requested.EventID)
+		require.Less(t, indexEvent(events, "approval.requested"), indexEvent(events, "approval.granted"))
+		require.Less(t, indexEvent(events, "approval.granted"), indexEvent(events, "tool.started"))
+		require.Less(t, indexEvent(events, "tool.started"), indexEvent(events, "tool.completed"))
+		require.Equal(t, requested.EventID, granted.Context.ParentEventID)
+		require.Equal(t, granted.EventID, started.Context.ParentEventID)
+		require.Equal(t, started.EventID, completed.Context.ParentEventID)
+		for _, event := range []observation.Event{requested, granted, started, completed} {
+			require.Equal(t, "run-approval/turn/01/call-1", event.Data["operation_id"])
+			require.Equal(t, operationArgumentsHash(map[string]any{"command": []any{"sh", "-c", "TOKEN=top-secret go test ./..."}}), event.Data["arguments_hash"])
+			require.Equal(t, "run-approval", event.Context.Run)
+			require.Equal(t, "run-approval/turn/01", event.Data["frame_id"])
+		}
+		encoded, err := json.Marshal(requested)
+		require.NoError(t, err)
+		require.NotContains(t, string(encoded), "top-secret")
+		display := requested.Data["operation"].(map[string]any)["arguments"]
+		require.Contains(t, fmt.Sprint(display), "[REDACTED]")
+	})
+
+	t.Run("mismatched hash cannot execute", func(t *testing.T) {
+		events, executed := run(t, "sha256:not-the-requested-arguments")
+		require.False(t, executed)
+		require.Equal(t, -1, indexEvent(events, "tool.started"))
+		require.Equal(t, -1, indexEvent(events, "tool.completed"))
+		require.NotEqual(t, -1, indexEvent(events, "approval.rejected"))
+		require.NotEqual(t, -1, indexEvent(events, "tool.blocked"))
+	})
+}
+
+func TestSandboxAutoApprovalIsRecordedAndRunsWithoutHumanSignal(t *testing.T) {
+	env := testsuite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var events []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error { events = append(events, event); return nil }, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	calls := 0
+	env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
+		calls++
+		if calls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "sandbox-call", Name: "run_command", Args: map[string]any{"command": []any{"go", "test", "./..."}}}}}, nil
+		}
+		return llm.Completion{Content: "tests passed"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	run := false
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		run = true
+		return ToolResult{Content: "exit_code=0"}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "sandbox-auto", Project: "repo", Prompt: "run tests", WorkspacePath: "/workspace/task", AutoApproveTools: []string{"run_command"}})
+	require.NoError(t, env.GetWorkflowError())
+	require.True(t, run)
+	require.Equal(t, -1, indexEvent(events, "approval.requested"))
+	require.Equal(t, -1, indexEvent(events, "approval.granted"))
+	auto, started, completed := indexEvent(events, "approval.auto_granted"), indexEvent(events, "tool.started"), indexEvent(events, "tool.completed")
+	require.GreaterOrEqual(t, auto, 0)
+	require.Less(t, auto, started)
+	require.Less(t, started, completed)
+	autoEvent := events[auto]
+	require.Equal(t, "sandbox.workspace.v1", autoEvent.Data["policy_id"])
+	require.Equal(t, "sandbox-auto/turn/01/sandbox-call", autoEvent.Data["operation_id"])
+	require.Equal(t, "/workspace/task", autoEvent.Data["workspace_path"])
+}
+
+func indexEvent(events []observation.Event, kind string) int {
+	for index, event := range events {
+		if event.Type == kind {
+			return index
+		}
+	}
+	return -1
 }

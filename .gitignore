@@ -5,3 +5,4 @@ coverage.out
 __pycache__/
 *.pyc
 /benchmarks/
+/examples/code-change/calculator/.gocache

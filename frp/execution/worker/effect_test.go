@@ -37,11 +37,20 @@ func writeFixture(t *testing.T, root string) (world.World, affordance.Definition
 	return value, affordance.Definition{}
 }
 
+func resolvedTestRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func TestWorkerCommitsWorldEffects(t *testing.T) {
 	ctx := context.Background()
 	store := memory.New()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	root := t.TempDir()
+	root := resolvedTestRoot(t)
 	bound, definition := writeFixture(t, root)
 	stateEvent, err := world.StateEvent(bound, "world-event-write", now)
 	if err != nil {
@@ -93,7 +102,7 @@ func TestWorkerRejectsEffectWithoutEffectingAdapter(t *testing.T) {
 	ctx := context.Background()
 	store := memory.New()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	root := t.TempDir()
+	root := resolvedTestRoot(t)
 	bound, definition := writeFixture(t, root)
 	stateEvent, err := world.StateEvent(bound, "world-event-safeadapter", now)
 	if err != nil {
@@ -125,7 +134,7 @@ func TestWorkerFailsUngrantedWriteCapability(t *testing.T) {
 	ctx := context.Background()
 	store := memory.New()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	root := t.TempDir()
+	root := resolvedTestRoot(t)
 	bound, definition := writeFixture(t, root)
 	bound.Capabilities = []string{"filesystem.read"} // write revoked after intent shape known
 	if err := bound.Validate(); err != nil {
@@ -163,7 +172,7 @@ func TestWorkerCommitsMixedObservationAndEffect(t *testing.T) {
 	ctx := context.Background()
 	store := memory.New()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	root := t.TempDir()
+	root := resolvedTestRoot(t)
 	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("debug: true\nreplicas: 2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -88,10 +88,11 @@ export default function AgentRuns() {
     setBusy(true); setError('')
     try {
       const root = timeline.find((item) => item.type === 'run.started' && runID(item) === selected)
+      const operation = event.data?.operation as Record<string, unknown> | undefined
       const approvalQuery = new URLSearchParams({ project: project.trim(), source_id: root?.source.id ?? '' })
       const response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(selected)}/approval?${approvalQuery}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ operation_id: operationID, approved, actor_id: 'human-ui', reason: reason.trim() }),
+        body: JSON.stringify({ operation_id: operationID, arguments_hash: operation?.arguments_hash ?? '', approved, actor_id: 'human-ui', reason: reason.trim() }),
       })
       if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
       await loadRun(selected, true)
@@ -117,7 +118,7 @@ export default function AgentRuns() {
             return <article className="agent-stage" key={`${String(item.run_id ?? item.role ?? index)}`}><h3>{String(item.role ?? `Stage ${index + 1}`)} <span>{String(item.status ?? '')}</span></h3>{typeof item.answer === 'string' && <Markdown content={item.answer} />}</article>
           })}
           {result?.result !== undefined && !answer && <details open><summary>Run result</summary><pre>{json(result.result)}</pre></details>}
-          {pending.map((event) => { const details = event.data?.details as Record<string, unknown> | undefined; return <article className="agent-approval" key={event.event_id}><h2>Approval required</h2><p>{String(event.data?.reason ?? event.data?.action ?? 'Agent requested approval')}</p>{details && <><strong>{String(details.tool)}{details.workspace_read_only ? ' · read only' : ''}</strong><pre>{Array.isArray(details.argv) ? details.argv.join(' ') : json(details)}</pre><small>Workspace: {String(details.workspace ?? 'not specified')} · approval applies to this exact tool call</small></>}<label>Decision note<input value={reason} onChange={(change) => setReason(change.target.value)} /></label><div className="agent-actions"><button className="primary" disabled={busy} onClick={() => void decide(event, true)}>Approve and run</button><button disabled={busy} onClick={() => void decide(event, false)}>Reject</button></div></article> })}
+          {pending.map((event) => { const details = event.data?.details as Record<string, unknown> | undefined; const operation = event.data?.operation as Record<string, unknown> | undefined; const operationArgs = operation?.arguments as Record<string, unknown> | undefined; const command = operationArgs?.command; const risk = event.data?.risk as Record<string, unknown> | undefined; const redaction = event.data?.redaction as Record<string, unknown> | undefined; return <article className="agent-approval" key={event.event_id}><h2>Approval required</h2><p>{String(operation?.summary ?? event.data?.reason ?? event.data?.action ?? 'Agent requested approval')}</p>{details && <><strong>{String(details.tool)}{details.workspace_read_only ? ' · read only' : ''} · risk {String(risk?.level ?? 'unknown')}</strong><pre>{Array.isArray(command) ? command.join(' ') : json(operation?.arguments ?? details)}</pre><small>Workspace: {String(details.workspace ?? 'not specified')} · arguments {String(operation?.arguments_hash ?? 'hash unavailable')} · redacted {String(redaction?.applied ?? false)}{redaction?.truncated ? ' · preview truncated' : ''}</small></>}<label>Decision note<input value={reason} onChange={(change) => setReason(change.target.value)} /></label><div className="agent-actions"><button className="primary" disabled={busy} onClick={() => void decide(event, true)}>Approve and run</button><button disabled={busy} onClick={() => void decide(event, false)}>Reject</button></div></article> })}
           <ol className="agent-timeline">{[...timeline].reverse().map((event) => <li key={`${event.source.id}:${event.event_id}`}><time>{new Date(event.occurred_at).toLocaleString()}</time><strong>{event.type}</strong><details><summary>event data</summary><pre>{json(event)}</pre></details></li>)}</ol>
         </>}
       </section>

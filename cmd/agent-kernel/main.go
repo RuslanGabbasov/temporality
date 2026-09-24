@@ -122,8 +122,8 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
-		if approval.OperationID == "" || approval.ActorID == "" {
-			writeError(w, 422, errors.New("operation_id and actor_id are required"))
+		if err := validateApproval(approval); err != nil {
+			writeError(w, 422, err)
 			return
 		}
 		project := r.URL.Query().Get("project")
@@ -161,6 +161,21 @@ func main() {
 		}
 	case <-ctx.Done():
 	}
+}
+
+func validateApproval(approval agent.Approval) error {
+	if approval.OperationID == "" || approval.ActorID == "" || approval.ArgumentsHash == "" {
+		return errors.New("operation_id, arguments_hash and actor_id are required")
+	}
+	if len(approval.ArgumentsHash) != len("sha256:")+64 || !strings.HasPrefix(approval.ArgumentsHash, "sha256:") {
+		return errors.New("arguments_hash must be a sha256 digest")
+	}
+	for _, char := range strings.TrimPrefix(approval.ArgumentsHash, "sha256:") {
+		if !strings.ContainsRune("0123456789abcdef", char) {
+			return errors.New("arguments_hash must be a lowercase sha256 digest")
+		}
+	}
+	return nil
 }
 
 func querySourceID(r *http.Request, fallback string) string {

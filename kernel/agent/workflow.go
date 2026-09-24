@@ -33,6 +33,7 @@ type RunInput struct {
 	MaxTurns               int           `json:"max_turns,omitempty"`
 	Tools                  []llm.ToolDef `json:"tools,omitempty"`
 	ApprovalTools          []string      `json:"approval_tools,omitempty"`
+	AutoApproveTools       []string      `json:"auto_approve_tools,omitempty"`
 	Role                   string        `json:"role,omitempty"`
 	ParentRunID            string        `json:"parent_run_id,omitempty"`
 	ParentFrameID          string        `json:"parent_frame_id,omitempty"`
@@ -70,10 +71,11 @@ type ToolResult struct {
 }
 
 type Approval struct {
-	OperationID string `json:"operation_id"`
-	Approved    bool   `json:"approved"`
-	ActorID     string `json:"actor_id"`
-	Reason      string `json:"reason,omitempty"`
+	OperationID   string `json:"operation_id"`
+	ArgumentsHash string `json:"arguments_hash"`
+	Approved      bool   `json:"approved"`
+	ActorID       string `json:"actor_id"`
+	Reason        string `json:"reason,omitempty"`
 }
 
 func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
@@ -177,15 +179,24 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		messages = append(messages, llm.Message{Role: "assistant", Content: completion.Content, ToolCalls: completion.ToolCalls})
 		for _, call := range completion.ToolCalls {
 			operationID := fmt.Sprintf("%s/%s", frame, call.ID)
+			argumentsHash := operationArgumentsHash(call.Args)
 			toolCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 4 * time.Minute, ScheduleToCloseTimeout: 5 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
-			if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "tool": call.Name, "tool_call_id": call.ID}); err != nil {
-				return result, err
-			}
 			isMCP := strings.HasPrefix(call.Name, "mcp__")
-			if isMCP {
-				if err := emit(activityCtx, state, "mcp.call.started", map[string]any{"operation_id": operationID, "tool": call.Name, "approval_required": contains(input.ApprovalTools, call.Name)}); err != nil {
-					return result, err
+			approvalRequired := call.Name == "request_approval" || contains(input.ApprovalTools, call.Name)
+			autoApproved := call.Name == "run_command" && contains(input.AutoApproveTools, call.Name)
+			toolStarted := false
+			startTool := func() error {
+				if toolStarted {
+					return nil
 				}
+				toolStarted = true
+				return emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID})
+			}
+			startMCP := func() error {
+				if !isMCP {
+					return nil
+				}
+				return emit(activityCtx, state, "mcp.call.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "approval_required": approvalRequired})
 			}
 			var toolResult ToolResult
 			toolFailed := false
@@ -196,11 +207,10 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					action, _ = call.Args["action"].(string)
 					reason, _ = call.Args["reason"].(string)
 				}
-				approvalData := map[string]any{"operation_id": operationID, "action": action, "reason": reason}
-				if preview := approvalPreview(call.Name, call.Args); preview != nil {
-					preview["workspace_read_only"] = input.Role == "reviewer" || input.Role == "qa"
-					approvalData["details"] = preview
-				}
+				approvalDescription, details := approvalOperation(operationID, call.Name, call.Args, input.Role == "reviewer" || input.Role == "qa")
+				operation := approvalDescription["operation"].(map[string]any)
+				argumentsHash = operation["arguments_hash"].(string)
+				approvalData := map[string]any{"operation_id": operationID, "action": approvalText(action), "reason": approvalText(reason), "operation": operation, "details": details, "risk": approvalDescription["risk"], "redaction": approvalDescription["redaction"], "arguments_hash": argumentsHash}
 				if err := emit(activityCtx, state, "approval.requested", approvalData); err != nil {
 					return result, err
 				}
@@ -209,78 +219,115 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					return result, waitErr
 				}
 				if timedOut {
-					if err := emit(activityCtx, state, "approval.timed_out", map[string]any{"operation_id": operationID, "timeout_seconds": input.ApprovalTimeoutSeconds}); err != nil {
+					if err := emit(activityCtx, state, "approval.timed_out", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "timeout_seconds": input.ApprovalTimeoutSeconds}); err != nil {
 						return result, err
 					}
 					toolResult.Content = "Approval timed out; the action was not run."
 					toolBlocked = true
+					if err := emit(activityCtx, state, "tool.blocked", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "reason": "approval_timeout"}); err != nil {
+						return result, err
+					}
 					if isMCP {
-						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "reason": "approval_timeout"}); err != nil {
+						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "reason": "approval_timeout"}); err != nil {
 							return result, err
 						}
 					}
-				} else if approved {
-					if err := emit(activityCtx, state, "approval.granted", map[string]any{"operation_id": operationID, "approver": approval.ActorID, "reason": approval.Reason}); err != nil {
+				} else if approved && (call.Name == "request_approval" || approval.ArgumentsHash == argumentsHash) {
+					if err := emit(activityCtx, state, "approval.granted", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "approver": approval.ActorID, "reason": approvalText(approval.Reason)}); err != nil {
 						return result, err
 					}
 					if call.Name == "request_approval" {
+						if err := startTool(); err != nil {
+							return result, err
+						}
 						toolResult.Content = "Approval granted. Continue with the requested action, but perform it only through an available tool."
+					} else if err := startTool(); err != nil {
+						return result, err
+					} else if err := startMCP(); err != nil {
+						return result, err
 					} else if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Arguments: call.Args}).Get(ctx, &toolResult); err != nil {
 						toolFailed = true
-						if eventErr := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "tool": call.Name, "error_type": "activity_failed"}); eventErr != nil {
+						if eventErr := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "activity_failed"}); eventErr != nil {
 							return result, eventErr
 						}
 						toolResult.Content = toolFailureMessage(call.Name, err)
-					} else if eventErr := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "tool": call.Name}); eventErr != nil {
+					} else if eventErr := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); eventErr != nil {
 						return result, eventErr
 					}
 				} else {
-					if err := emit(activityCtx, state, "approval.rejected", map[string]any{"operation_id": operationID, "approver": approval.ActorID, "reason": approval.Reason}); err != nil {
+					rejectionReason := approvalText(approval.Reason)
+					if approved {
+						rejectionReason = "approved operation arguments did not match the pending operation"
+					}
+					if err := emit(activityCtx, state, "approval.rejected", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "approver": approval.ActorID, "reason": rejectionReason}); err != nil {
 						return result, err
 					}
-					toolResult.Content = "Approval rejected: " + approval.Reason
+					toolResult.Content = "Approval rejected: " + rejectionReason
 					toolBlocked = true
+					blockReason := "approval_rejected"
+					if approved {
+						blockReason = "approval_arguments_mismatch"
+					}
+					if err := emit(activityCtx, state, "tool.blocked", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "reason": blockReason}); err != nil {
+						return result, err
+					}
 					if isMCP {
-						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "reason": "approval_rejected"}); err != nil {
+						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "reason": "approval_rejected"}); err != nil {
 							return result, err
 						}
 					}
 				}
 				if call.Name == "request_approval" {
-					if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "tool": call.Name}); err != nil {
+					if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
 						return result, err
 					}
 				}
 			} else if call.Name == "remember" {
+				if err := startTool(); err != nil {
+					return result, err
+				}
 				proposition, _ := call.Args["proposition"].(string)
 				knowledgeID := fmt.Sprintf("%s/knowledge/%02d", input.RunID, state.sequence+1)
 				if proposition == "" {
 					toolResult.Content = "proposition is required"
 				} else {
-					if err := emitKnowledge(activityCtx, state, knowledgeID, proposition, call.Args); err != nil {
+					if err := emitKnowledge(activityCtx, state, knowledgeID, proposition, operationID, call.Args); err != nil {
 						return result, err
 					}
 					toolResult.Content = "Knowledge recorded with id " + knowledgeID
 				}
-				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "tool": call.Name}); err != nil {
+				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
 					return result, err
 				}
 			} else {
+				if autoApproved {
+					description, _ := approvalOperation(operationID, call.Name, call.Args, input.Role == "reviewer" || input.Role == "qa")
+					operation := description["operation"].(map[string]any)
+					if err := emit(activityCtx, state, "approval.auto_granted", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "operation": operation, "risk": description["risk"], "redaction": description["redaction"], "policy_id": "sandbox.workspace.v1", "approver": "kernel-policy", "workspace_path": input.WorkspacePath}); err != nil {
+						return result, err
+					}
+				}
+				if err := startTool(); err != nil {
+					return result, err
+				}
+				if err := startMCP(); err != nil {
+					return result, err
+				}
 				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Arguments: call.Args}).Get(ctx, &toolResult); err != nil {
 					toolFailed = true
-					if eventErr := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "tool": call.Name, "error_type": "activity_failed"}); eventErr != nil {
+					if eventErr := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "activity_failed"}); eventErr != nil {
 						return result, eventErr
 					}
 					toolResult.Content = toolFailureMessage(call.Name, err)
 				} else {
-					if eventErr := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "tool": call.Name}); eventErr != nil {
+					if eventErr := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); eventErr != nil {
 						return result, eventErr
 					}
 				}
 			}
 			if isMCP && !toolBlocked {
 				eventType := "mcp.call.completed"
-				data := map[string]any{"operation_id": operationID, "tool": call.Name}
+				data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}
 				if toolFailed {
 					eventType = "mcp.call.failed"
 					data["error_type"] = "activity_failed"
@@ -292,7 +339,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: toolResult.Content})
 			for _, evidence := range toolResult.Evidence {
-				if err := emit(activityCtx, state, "evidence.observed", map[string]any{"tool_call_id": call.ID, "ref": evidence.Ref, "type": evidence.Type}); err != nil {
+				if err := emit(activityCtx, state, "evidence.observed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool_call_id": call.ID, "ref": evidence.Ref, "type": evidence.Type}); err != nil {
 					return result, err
 				}
 			}
@@ -403,9 +450,9 @@ func emit(ctx workflow.Context, state *eventState, kind string, data map[string]
 	return nil
 }
 
-func emitKnowledge(ctx workflow.Context, state *eventState, id, proposition string, args map[string]any) error {
+func emitKnowledge(ctx workflow.Context, state *eventState, id, proposition, operationID string, args map[string]any) error {
 	state.sequence++
-	data := map[string]any{"knowledge_id": id, "proposition": proposition, "kind": "claim", "frame_id": state.frame, "parent_frame_id": state.parentFrame, "sequence": state.sequence}
+	data := map[string]any{"knowledge_id": id, "proposition": proposition, "kind": "claim", "operation_id": operationID, "arguments_hash": operationArgumentsHash(args), "frame_id": state.frame, "parent_frame_id": state.parentFrame, "sequence": state.sequence}
 	if state.run.ParentRunID != "" {
 		data["parent_run_id"] = state.run.ParentRunID
 	}
