@@ -43,6 +43,58 @@ docker compose up -d postgres
 DATABASE_URL=postgres://temporality:temporality@localhost:5432/temporality?sslmode=disable go run ./cmd/temporality-runtime
 ```
 
+## Universal observation ingestion (preview)
+
+Harnesses can send ordinary runtime events without creating FRP Frames, Objectives, or UUID identifiers. The envelope is defined by [`schemas/temporality.event.v1.schema.json`](schemas/temporality.event.v1.schema.json); external project/run/task/actor IDs remain opaque strings. The observation journal is separate from the FRP event log.
+
+```sh
+curl -X POST http://localhost:8080/v1/observations/events \
+  -H 'content-type: application/json' \
+  -d '{"events":[{
+    "schema":"temporality.event/1",
+    "event_id":"run-42-tool-1",
+    "occurred_at":"2026-09-24T10:00:00Z",
+    "source":{"id":"worker-1","integration":"example-harness","version":"1"},
+    "context":{"project":"repo-a","run":"run-42","task":"task-7","actor":{"id":"agent-a","type":"agent"}},
+    "type":"tool.completed",
+    "data":{"tool":"tests","status":"failed"}
+  }]}'
+
+curl 'http://localhost:8080/v1/observations/events?project=repo-a&run=run-42&limit=100'
+# Pass the returned next_cursor to retrieve the next page.
+```
+
+Batch requests accept 1–100 events. Re-delivery of the same `(source.id, event_id)` with identical content is reported as `repeated`; reusing that identity for different content is rejected. Unknown non-knowledge event types are retained. Event retrieval is ordered by occurrence time and uses an opaque `next_cursor` for pagination.
+
+Knowledge lifecycle events use `knowledge.proposed` with `data.knowledge_id` and `data.proposition`, followed by `knowledge.used`, `knowledge.confirmed`, `knowledge.challenged`, `knowledge.corrected`, `knowledge.superseded`, `knowledge.invalidated`, or `knowledge.disproved` referencing the same string ID. Each may carry top-level evidence references. Current state and provenance history are projected from those events:
+
+```sh
+curl 'http://localhost:8080/v1/observations/knowledge?project=repo-a'
+# Restore the state by observed time and exclude events received later.
+# knowledge_id narrows the result to one item.
+curl 'http://localhost:8080/v1/observations/knowledge?project=repo-a&as_of=2026-09-24T10:00:00Z&known_at=2026-09-24T10:01:00Z&knowledge_id=claim-42'
+
+curl -X POST http://localhost:8080/v1/observations/knowledge/invalidate \
+  -H 'content-type: application/json' \
+  -d '{"knowledge_id":"claim-42","project":"repo-a","run":"run-42","actor":{"id":"reviewer-1","type":"human"},"reason":"A later test disproved this claim","evidence":[{"ref":"test-run-918","type":"execution"}]}'
+```
+
+Manual invalidation appends `knowledge.invalidated`; it does not mutate or delete prior claims/events. For a deterministic automatic rule, a producer can append `knowledge.disproved` with `data.knowledge_id`, `data.reason`, and at least one evidence reference. The projection then moves that knowledge to `invalidated` under `explicit-evidence-disproof.v1`, retaining the disproof event as provenance. Temporality does not infer disproof from free text.
+
+Knowledge graph edges arrive as `knowledge.linked` with `data.knowledge_id`, `data.target_id`, and a relation (`supports`, `contradicts`, `derived_from`, `depends_on`, `supersedes`, or `related_to`). If a node referenced by `derived_from`/`depends_on` is invalidated, dependent nodes are marked `at_risk` with the retired source IDs. They remain visible for review and are returned as cautioned hints; Temporality does not silently invalidate a derived claim without direct evidence.
+
+The recorder can request reusable context after a tool result without modifying that result:
+
+```sh
+curl -X POST http://localhost:8080/v1/observations/hints \
+  -H 'content-type: application/json' \
+  -d '{"project":"repo-a","run":"run-42","task":"debug login","query":"Synapse login returns 401 with PAT","tool":"test-runner","tool_result":"authentication test failed with status 401","limit":8}'
+```
+
+The response includes a separate `context_block` and structured `hints`, each with lifecycle state, matched terms/entities/topics, evidence, history, and a `hint_id`. Matching is deterministic lexical/entity/topic overlap; it emits no truth score and excludes corrected, superseded, and invalidated knowledge. Proposed and challenged knowledge are labeled with cautions. The harness decides how to pass the context block to the model. It can later report `hint.used`, `hint.ignored`, or `hint.outcome` observations referring to `data.hint_id` so usefulness can be measured; the projection follows the hint ID back to its knowledge item and exposes offer/use/outcome counts.
+
+Dependency-free Python and JavaScript clients are in [`examples/python/temporality_client.py`](examples/python/temporality_client.py) and [`examples/javascript/temporality.mjs`](examples/javascript/temporality.mjs). Both return the supplemental block while leaving the tool result unchanged; a harness can attach it through its own context hook. The independent project timeline and knowledge view are available at `/observability` in the debugger.
+
 If `DATABASE_URL` is omitted, the runtime uses an ephemeral in-memory store.
 
 ## Настройка модели (OpenAI-compatible)

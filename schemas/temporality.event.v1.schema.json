@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:temporality:schema:event:1",
+  "title": "Temporality Observation Event",
+  "description": "Harness-independent event envelope. IDs are opaque source-owned strings.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "event_id", "occurred_at", "source", "type"],
+  "properties": {
+    "schema": { "const": "temporality.event/1" },
+    "event_id": { "type": "string", "minLength": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "received_at": { "type": "string", "format": "date-time", "readOnly": true },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "integration"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "integration": { "type": "string", "minLength": 1 },
+        "version": { "type": "string" }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project": { "type": "string" },
+        "run": { "type": "string" },
+        "task": { "type": "string" },
+        "actor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string" },
+            "type": { "type": "string" }
+          }
+        },
+        "parent_event_id": { "type": "string" }
+      }
+    },
+    "type": { "type": "string", "minLength": 1 },
+    "data": { "type": "object" },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref"],
+        "properties": {
+          "ref": { "type": "string", "minLength": 1 },
+          "type": { "type": "string" }
+        }
+      }
+    }
+  }
+}

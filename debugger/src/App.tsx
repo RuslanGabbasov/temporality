@@ -9,6 +9,7 @@ import type { Execution, ForkGroup, Frame, FrameSection, FrpEvent, ModelConfig, 
 import { renderSection, tokenUsageView } from './tokenUsage'
 import { MemoryDeltaCard, TrajectoryCard } from './Investigation'
 import { childFrameId, continueWithModel, EpisodeWorkflowError, FollowUpWorkflowError, renderRequest, runEpisodeWorkflow, runFollowUpWorkflow, twoBranchForkRequest, type EpisodeDraft, type EpisodeWorkflowResult, type FollowUpResult, type FollowUpStage, type WorkflowStage } from './workflow'
+import Observability from './Observability'
 
 const SECTIONS: FrameSection[] = ['focus', 'map', 'periphery', 'working_set', 'procedures', 'recent', 'attention_health', 'memory_health', 'identity_health']
 const DEFAULT_DRAFT: EpisodeDraft = { prompt: '', successConditions: [], tokenBudget: 4000, mode: 'explore', trustMin: 0.5, rebuildRegions: false }
@@ -50,6 +51,10 @@ function frameBudget(value: Frame | null) {
 }
 
 function App() {
+  return window.location.pathname.startsWith('/observability') ? <Observability /> : <FRPDebuggerApp />
+}
+
+function FRPDebuggerApp() {
   const [episodeInput, setEpisodeInput] = useState(''); const [episodeId, setEpisodeId] = useState(''); const [limit, setLimit] = useState(100)
   const [events, setEvents] = useState<FrpEvent[]>([]); const [eventsBusy, setEventsBusy] = useState(false); const [eventsError, setEventsError] = useState(''); const [hideHints, setHideHints] = useState(true)
   const [frame, setFrame] = useState<Frame | null>(null); const [frameBusy, setFrameBusy] = useState(false); const [frameError, setFrameError] = useState(''); const [selectedFrameId, setSelectedFrameId] = useState('')
@@ -215,7 +220,7 @@ function App() {
   const provider = provenance?.provider ?? modelConfig?.provider ?? (baseUrl ? (() => { try { return new URL(baseUrl).host } catch { return baseUrl } })() : 'provider')
   const progress = modelRun ? modelProgress(modelRun.startedAt, modelRun.now, modelTimeoutMs(modelConfig)) : null
   return <div className="app-shell">
-    <header className="topbar"><div><span className="eyebrow">TEMPORALITY / FRP</span><h1>Cognitive Debugger</h1></div><div className="header-actions"><div className={`model-badge ${modelConfig?.configured ? 'ready' : 'offline'}`} title={configError || undefined}><span className="pulse" />{configBusy ? 'Checking model…' : modelConfig?.configured ? `Configured · ${modelName ?? 'model'} · max ${maxOutputTokens ?? '—'} output tokens · ${baseUrl ?? 'base URL set'}` : 'Model not configured'}</div><button className="icon-button" onClick={() => void refreshConfig()} disabled={configBusy} aria-label="Refresh model configuration">↻</button><span className="connection">API <code>{API_BASE}</code></span><button className="primary" onClick={openNewEpisode}>＋ New Episode</button></div></header>
+    <header className="topbar"><div><span className="eyebrow">TEMPORALITY / FRP</span><h1>Cognitive Debugger</h1></div><div className="header-actions"><a className="obs-link" href="/observability">Knowledge observability</a><div className={`model-badge ${modelConfig?.configured ? 'ready' : 'offline'}`} title={configError || undefined}><span className="pulse" />{configBusy ? 'Checking model…' : modelConfig?.configured ? `Configured · ${modelName ?? 'model'} · max ${maxOutputTokens ?? '—'} output tokens · ${baseUrl ?? 'base URL set'}` : 'Model not configured'}</div><button className="icon-button" onClick={() => void refreshConfig()} disabled={configBusy} aria-label="Refresh model configuration">↻</button><span className="connection">API <code>{API_BASE}</code></span><button className="primary" onClick={openNewEpisode}>＋ New Episode</button></div></header>
 
     {modelRun && progress && <section className="model-progress" role="status" aria-live="polite"><div className="model-activity" aria-hidden="true"><span /><span /><span /></div><div className="model-progress-copy"><span className="eyebrow">{modelRun.operation.toUpperCase()} · CALLING MODEL</span><h2>{modelName ?? 'Configured model'} <small>via {provider}</small></h2><p>The provider is processing this frame with a maximum of {maxOutputTokens ?? '—'} output tokens. The result commits atomically only when the model step completes.</p></div><div className="model-timing"><strong>{progress.elapsed}</strong><span>elapsed</span>{progress.timeout !== undefined && <small>{progress.timedOut ? 'Configured timeout reached' : `timeout in ${progress.timeout}`}</small>}</div><button className="cancel-model" onClick={() => modelRun.controller.abort()}>Cancel model step</button></section>}
     <main className="workspace">
