@@ -249,6 +249,123 @@ func knowledgeEvents(events []observation.Event, kind string) []observation.Even
 	return matched
 }
 
+func TestAgentRunForcesFinalAnswerAtTurnLimit(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var events []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		events = append(events, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	var modelRequests []ModelRequest
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		modelRequests = append(modelRequests, request)
+		if len(request.Tools) == 0 {
+			return llm.Completion{Content: "final report"}, nil
+		}
+		return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "run_command", Args: map[string]any{"command": []any{"ls"}}}}}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	exit := 1
+	env.RegisterActivityWithOptions(func(_ context.Context, _ ToolRequest) (ToolResult, error) {
+		return ToolResult{Content: "exit_code=1\nboom", ExitCode: &exit}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "finale-run", Project: "repo", Prompt: "work", MaxTurns: 3, AutoApproveTools: []string{"run_command"}})
+	require.NoError(t, env.GetWorkflowError())
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "turn_limit", result.Status)
+	require.Equal(t, "final report", result.Answer)
+	require.Equal(t, 4, result.Turns)
+
+	// Three loop calls with tools (the last one budget-aware) plus one forced
+	// finale call without any tools.
+	require.Len(t, modelRequests, 4)
+	lastLoop, finale := modelRequests[2], modelRequests[3]
+	require.NotEmpty(t, lastLoop.Tools)
+	require.Empty(t, finale.Tools)
+	require.Contains(t, lastLoop.Messages[len(lastLoop.Messages)-1].Content, "final turn with tools")
+	require.Contains(t, finale.Messages[len(finale.Messages)-1].Content, "turn budget is exhausted")
+
+	var finaleStarted, runCompleted, summary bool
+	for _, event := range events {
+		switch event.Type {
+		case "turn.started":
+			if event.Data["forced_finale"] == true {
+				finaleStarted = true
+			}
+		case "run.completed":
+			runCompleted = event.Data["forced_finale"] == true && event.Data["final_answer"] == true && event.Data["status"] == "turn_limit"
+		case "agent.summary":
+			summary = event.Data["answer"] == "final report"
+		}
+	}
+	require.True(t, finaleStarted, "missing forced finale turn.started")
+	require.True(t, runCompleted, "run.completed must record the forced finale answer")
+	require.True(t, summary, "agent.summary must carry the forced finale answer")
+}
+
+func TestDuplicateToolCallsWithinOneResponseExecuteOnce(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var events []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		events = append(events, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	calls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, _ ModelRequest) (llm.Completion, error) {
+		calls++
+		if calls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{
+				{ID: "dup-1", Name: "run_command", Args: map[string]any{"command": []any{"go", "test", "./..."}}},
+				{ID: "dup-2", Name: "run_command", Args: map[string]any{"command": []any{"go", "test", "./..."}}},
+				{ID: "dup-3", Name: "run_command", Args: map[string]any{"command": []any{"go", "test", "./..."}}},
+			}}, nil
+		}
+		return llm.Completion{Content: "done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	executions := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, _ ToolRequest) (ToolResult, error) {
+		executions++
+		exit := 0
+		return ToolResult{Content: "exit_code=0\nok", ExitCode: &exit}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+	lookups := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, _ KnowledgeLookupQuery) (KnowledgeLookupResult, error) {
+		lookups++
+		return KnowledgeLookupResult{}, nil
+	}, activity.RegisterOptions{Name: ActivityKnowledgeLookup})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "dedup-batch", Project: "repo", Prompt: "work", MaxTurns: 2, AutoApproveTools: []string{"run_command"}})
+	require.NoError(t, env.GetWorkflowError())
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "completed", result.Status)
+	require.Equal(t, "done", result.Answer)
+	// The identical batch executed exactly once.
+	require.Equal(t, 1, executions)
+	require.Equal(t, 1, lookups)
+	var originals, duplicates int
+	for _, event := range events {
+		if event.Type != "tool.completed" {
+			continue
+		}
+		if _, ok := event.Data["duplicate_of"]; ok {
+			duplicates++
+			require.NotEmpty(t, event.Data["duplicate_of"])
+		} else {
+			originals++
+		}
+	}
+	require.Equal(t, 1, originals)
+	require.Equal(t, 2, duplicates)
+}
+
 func TestSuccessfulVerificationCommandsRecordExecutionKnowledge(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

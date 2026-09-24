@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -150,7 +151,13 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		if err := emit(activityCtx, state, "turn.started", map[string]any{"turn": turn}); err != nil {
 			return result, err
 		}
-		modelReq := ModelRequest{Model: input.Model, Messages: messages, Tools: append(KernelTools(), input.Tools...)}
+		turnMessages := messages
+		if turn == input.MaxTurns {
+			// Budget awareness: without a reminder the model reliably spends the
+			// last tool turn on more calls and the run ends with an empty handoff.
+			turnMessages = append(slices.Clone(messages), llm.Message{Role: "system", Content: "This is the final turn with tools. Complete only the remaining essential checks; your next message must be the final answer to the request."})
+		}
+		modelReq := ModelRequest{Model: input.Model, Messages: turnMessages, Tools: append(KernelTools(), input.Tools...)}
 		if err := emit(activityCtx, state, "model.started", map[string]any{"turn": turn, "model": input.Model}); err != nil {
 			return result, err
 		}
@@ -185,9 +192,30 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			return result, nil
 		}
 		messages = append(messages, llm.Message{Role: "assistant", Content: completion.Content, ToolCalls: completion.ToolCalls})
+		// Degenerate model responses emit the same call many times in one
+		// completion; live runs showed 10+ identical failing verifications per
+		// turn. Identical calls within one response are executed exactly once —
+		// side effects must not multiply — and duplicates answer with the
+		// original execution result, linked by operation id.
+		type executedCall struct {
+			operationID string
+			result      ToolResult
+		}
+		executed := map[string]executedCall{}
 		for _, call := range completion.ToolCalls {
 			operationID := fmt.Sprintf("%s/%s", frame, call.ID)
 			argumentsHash := operationArgumentsHash(call.Args)
+			callKey := call.Name + "\x00" + argumentsHash
+			if original, duplicate := executed[callKey]; duplicate {
+				if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "duplicate_of": original.operationID}); err != nil {
+					return result, err
+				}
+				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "duplicate_of": original.operationID}); err != nil {
+					return result, err
+				}
+				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: original.result.Content})
+				continue
+			}
 			toolCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 4 * time.Minute, ScheduleToCloseTimeout: 5 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 			isMCP := strings.HasPrefix(call.Name, "mcp__")
 			approvalRequired := call.Name == "request_approval" || contains(input.ApprovalTools, call.Name)
@@ -356,14 +384,65 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					return result, err
 				}
 			}
+			executed[callKey] = executedCall{operationID: operationID, result: toolResult}
 		}
 		if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "tool_calls": len(completion.ToolCalls)}); err != nil {
 			return result, err
 		}
 	}
 	result.Status = "turn_limit"
-	if err := emit(activityCtx, state, "run.completed", map[string]any{"status": "turn_limit", "turns": input.MaxTurns}); err != nil {
+	// Deterministic finale: the model spent every turn on tool calls. One more
+	// model call without tools must turn the accumulated conversation into a
+	// final answer, so a turn-limited run still produces a handoff instead of
+	// silence. The status stays honestly "turn_limit"; events record that the
+	// answer came from a forced finale.
+	finaleTurn := input.MaxTurns + 1
+	result.Turns = finaleTurn
+	if state.frame != "" {
+		state.parentFrame = state.frame
+	}
+	state.frame = fmt.Sprintf("%s/turn/%02d", input.RunID, finaleTurn)
+	frames = append(frames, state.frame)
+	if err := emit(activityCtx, state, "turn.started", map[string]any{"turn": finaleTurn, "forced_finale": true}); err != nil {
 		return result, err
+	}
+	finaleMessages := append(slices.Clone(messages), llm.Message{Role: "system", Content: "The turn budget is exhausted and no tools are available. Produce the final answer to the request now, based strictly on the conversation and tool results so far."})
+	if err := emit(activityCtx, state, "model.started", map[string]any{"turn": finaleTurn, "forced_finale": true, "model": input.Model}); err != nil {
+		return result, err
+	}
+	var finale llm.Completion
+	modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 4 * time.Minute, ScheduleToCloseTimeout: 5 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+	if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, ModelRequest{Model: input.Model, Messages: finaleMessages}).Get(ctx, &finale); err != nil {
+		failureDetail := boundedFailureDetail(err)
+		if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "forced_finale": true, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
+			return result, eventErr
+		}
+		if eventErr := emit(activityCtx, state, "run.failed", map[string]any{"turn": finaleTurn, "error_type": "finale_model_call_failed", "error": failureDetail}); eventErr != nil {
+			return result, eventErr
+		}
+		result.Status = "failed"
+		return result, err
+	}
+	if err := emit(activityCtx, state, "model.completed", map[string]any{"turn": finaleTurn, "forced_finale": true, "tool_call_count": len(finale.ToolCalls), "finish_reason": finale.Finish, "total_tokens": finale.Usage.TotalTokens}); err != nil {
+		return result, err
+	}
+	if finale.Content != "" {
+		result.Answer = finale.Content
+	}
+	if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": finaleTurn, "forced_finale": true, "tool_calls": len(finale.ToolCalls)}); err != nil {
+		return result, err
+	}
+	runData := map[string]any{"status": "turn_limit", "turns": finaleTurn, "forced_finale": true}
+	if result.Answer != "" {
+		runData["final_answer"] = true
+	}
+	if err := emit(activityCtx, state, "run.completed", runData); err != nil {
+		return result, err
+	}
+	if result.Answer != "" {
+		if err := emitAgentSummary(activityCtx, state, result.Answer, frames, finaleTurn); err != nil {
+			return result, err
+		}
 	}
 	return result, nil
 }
@@ -429,7 +508,7 @@ func emitAgentSummary(ctx workflow.Context, state *eventState, answer string, fr
 }
 
 func systemPromptForRole(role string) string {
-	base := "You are a careful project agent. Use tools when useful. Successful verification and build command outcomes are recorded as knowledge automatically; do not restate them with remember. Call remember only when you are highly confident in a durable conclusion that goes beyond the recorded execution results, and include evidence refs. Treat retrieved memory as fallible and respect cautions."
+	base := "You are a careful project agent. Use tools when useful and converge to a final answer before the turn budget runs out. Every command sandbox has a writable /scratch directory (HOME and TMPDIR point there); use it for build and package caches, and never write caches into the workspace, which may be read-only for your role. Successful verification and build command outcomes are recorded as knowledge automatically; do not restate them with remember. Call remember only when you are highly confident in a durable conclusion that goes beyond the recorded execution results, and include evidence refs. Treat retrieved memory as fallible and respect cautions."
 	if role == "" {
 		return base
 	}
