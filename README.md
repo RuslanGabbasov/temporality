@@ -30,12 +30,14 @@ Phase 2 validation is tracked in [`docs/validation-report.md`](docs/validation-r
 docker compose up --build -d
 ```
 
+This starts PostgreSQL, the Temporality runtime, the executor, the debugger, a Temporal dev server (`temporality-dev`, UI at [http://localhost:8233](http://localhost:8233)) and the Agent Kernel (`http://localhost:8090`). Model credentials and sandbox settings are read from `.env` (`TEMPORALITY_MODEL_*`; optionally `KERNEL_SANDBOX_IMAGE` and `TEMPORALITY_SANDBOX_ROOT` for the `run_command` sandbox — the sandbox root directory is bind-mounted into the kernel container at the same absolute path so sibling sandbox containers see it).
+
 Open the Human Cognitive Debugger at [http://localhost:3000](http://localhost:3000). The Runtime API remains available at `http://localhost:8080`; the debugger accesses it only through its `/api` reverse proxy and never connects to PostgreSQL directly.
 
 Stop application processes while retaining PostgreSQL data:
 
 ```sh
-docker compose stop runtime executor debugger
+docker compose stop runtime executor debugger temporal agent-kernel
 ```
 
 ## Run locally
@@ -105,7 +107,7 @@ If `DATABASE_URL` is omitted, the runtime uses an ephemeral in-memory store.
 
 The Kernel currently implements a durable Temporal AgentRun workflow, OpenAI-compatible model calls, approval signals, `remember` knowledge proposals, automatic execution-observation capture for successful verification/build commands (project-stable identity: first success proposes, repeats confirm or mark reuse — no duplicate nodes), a derived `agent.summary` event that records the final answer with `derived_from` frame provenance and never replaces the execution record, knowledge hint retrieval, an at-least-once PostgreSQL outbox publisher, an optional MCP stdio adapter, and an optional Docker command sandbox. MCP starts one child process per call in this PoC. Generic runs and the four-stage Lead/Coder/Reviewer/QA workflow completed live smoke runs across Temporal, PostgreSQL, Temporality, the model and Docker sandbox on 2026-09-24. A real code-change task with successful independent review and QA remains unverified; the example is opt-in under a build tag.
 
-Start PostgreSQL, the Temporality runtime and debugger with `docker compose up -d postgres runtime debugger`, then start a Temporal development server in another terminal (for example, `temporal server start-dev`). Configure the same PostgreSQL database and model endpoint and launch the worker/API:
+Start the full stack with `docker compose up --build -d` (includes the Kernel and a Temporal dev server; see "Run the complete stack"). To run the Kernel outside compose instead: start PostgreSQL, the Temporality runtime and debugger with `docker compose up -d postgres runtime debugger`, then start a Temporal development server in another terminal (for example, `temporal server start-dev`). Configure the same PostgreSQL database and model endpoint and launch the worker/API:
 
 ```sh
 DATABASE_URL='postgres://temporality:temporality@localhost:5432/temporality?sslmode=disable' \

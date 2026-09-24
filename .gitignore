@@ -6,3 +6,5 @@ __pycache__/
 *.pyc
 /benchmarks/
 /examples/code-change/calculator/.gocache
+
+.sandbox/

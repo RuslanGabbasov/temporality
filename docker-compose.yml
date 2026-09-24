@@ -70,5 +70,68 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  temporal:
+    image: temporalio/temporal:latest
+    container_name: temporality-dev
+    command: ["server", "start-dev", "--ip", "0.0.0.0"]
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+
+  agent-kernel:
+    build:
+      context: .
+      target: agent-kernel
+    # Host uid/gid keeps sandbox workspace files owned by the local user and
+    # makes the kernel pass that uid to sandbox containers. The Docker socket
+    # is root:root inside the container (OrbStack/Docker Desktop proxy), so the
+    # root group is required to connect.
+    user: "${TEMPORALITY_UID:-10001}:${TEMPORALITY_GID:-10001}"
+    group_add:
+      - "0"
+    environment:
+      DATABASE_URL: postgres://temporality:temporality@postgres:5432/temporality?sslmode=disable
+      TEMPORALITY_URL: http://runtime:8080
+      TEMPORAL_ADDRESS: temporal:7233
+      KERNEL_HTTP_ADDR: :8090
+      KERNEL_SOURCE_ID: ${KERNEL_SOURCE_ID:-temporality-agent-kernel}
+      TEMPORALITY_MODEL_BASE_URL: ${TEMPORALITY_MODEL_BASE_URL:-}
+      TEMPORALITY_MODEL_ID: ${TEMPORALITY_MODEL_ID:-}
+      TEMPORALITY_MODEL_API_KEY: ${TEMPORALITY_MODEL_API_KEY:-}
+      TEMPORALITY_MODEL_TEMPERATURE: ${TEMPORALITY_MODEL_TEMPERATURE:-0}
+      TEMPORALITY_MODEL_TIMEOUT: ${TEMPORALITY_MODEL_TIMEOUT:-180s}
+      TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS: ${TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS:-1024}
+      TEMPORALITY_MODEL_REASONING: ${TEMPORALITY_MODEL_REASONING:-}
+      KERNEL_MCP_COMMAND: ${KERNEL_MCP_COMMAND:-}
+      KERNEL_MCP_ARGS: ${KERNEL_MCP_ARGS:-}
+      KERNEL_MCP_ALLOW: ${KERNEL_MCP_ALLOW:-}
+      KERNEL_MCP_APPROVAL: ${KERNEL_MCP_APPROVAL:-}
+      KERNEL_SANDBOX_ROOT: ${TEMPORALITY_SANDBOX_ROOT:-}
+      KERNEL_SANDBOX_IMAGE: ${KERNEL_SANDBOX_IMAGE:-}
+    ports:
+      - "8090:8090"
+    volumes:
+      # The optional run_command sandbox shells out to the host Docker daemon;
+      # sandbox workspaces bind-mount themselves into sibling containers, so
+      # the sandbox root must exist at the same absolute path inside this
+      # container and on the host (set TEMPORALITY_SANDBOX_ROOT in .env).
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: ${TEMPORALITY_SANDBOX_ROOT:-/tmp}
+        target: ${TEMPORALITY_SANDBOX_ROOT:-/tmp}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8090/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
 volumes:
   temporality-postgres:

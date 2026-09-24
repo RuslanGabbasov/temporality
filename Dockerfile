@@ -25,6 +25,9 @@ RUN adduser -D -u 10001 temporality
 WORKDIR /app
 COPY --from=build /out/temporality-agent-kernel /usr/local/bin/temporality-agent-kernel
 COPY migrations ./migrations
+# The optional run_command sandbox shells out to the Docker CLI against the
+# host daemon socket, so the CLI must exist inside the image.
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
 USER temporality
 EXPOSE 8090
 ENTRYPOINT ["temporality-agent-kernel"]
