@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/observation/httpapi"
 	"github.com/temporality-project/temporality/observation/postgres"
 )
@@ -40,8 +41,18 @@ func main() {
 	if address == "" {
 		address = ":8080"
 	}
+	gate, err := controlplane.NewGate(os.Getenv("JOURNAL_AUTH_TOKENS"))
+	if err != nil {
+		log.Error("parse JOURNAL_AUTH_TOKENS", "error", err)
+		os.Exit(1)
+	}
+	if !gate.Enabled() {
+		log.Warn("JOURNAL_AUTH_TOKENS is empty: authentication disabled; configure tokens before sharing this instance")
+	} else {
+		log.Info("journal authentication enabled", "tokens", gate.TokenCount())
+	}
 	server := &http.Server{
-		Addr: address, Handler: httpapi.New(store, log),
+		Addr: address, Handler: httpapi.New(store, log, gate),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Info("Temporality journal started", "address", address, "schema", "temporality.event/1")

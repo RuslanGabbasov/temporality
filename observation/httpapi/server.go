@@ -16,17 +16,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/observation"
 )
 
 type Server struct {
 	store observation.Store
+	gate  *controlplane.Gate
 	log   *slog.Logger
 	now   func() time.Time
 }
 
-func New(store observation.Store, log *slog.Logger) http.Handler {
-	s := &Server{store: store, log: log, now: time.Now}
+// New serves the journal API. A nil gate disables authentication (local
+// development); team deployments pass a gate configured from
+// JOURNAL_AUTH_TOKENS.
+func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate) http.Handler {
+	s := &Server{store: store, gate: gate, log: log, now: time.Now}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("POST /v1/observations/events", s.appendObservations)
@@ -34,7 +39,7 @@ func New(store observation.Store, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/observations/knowledge", s.listObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/knowledge/invalidate", s.invalidateObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/hints", s.activateObservationHints)
-	return logRequests(log, mux)
+	return logRequests(log, s.gate.Authenticate(mux))
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -81,6 +86,17 @@ func (s *Server) appendObservations(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	projects := make([]string, 0, len(input.Events))
+	seen := map[string]bool{}
+	for _, event := range input.Events {
+		if project := event.Context.Project; project != "" && !seen[project] {
+			seen[project] = true
+			projects = append(projects, project)
+		}
+	}
+	if !s.gate.Allow(w, r, controlplane.RoleWriter, projects...) {
+		return
+	}
 	result := observationIngestResult{Results: make([]observationEventResult, 0, len(input.Events))}
 	partialFailure := false
 	for _, event := range input.Events {
@@ -113,6 +129,9 @@ func (s *Server) appendObservations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listObservations(w http.ResponseWriter, r *http.Request) {
+	if !s.gate.Allow(w, r, controlplane.RoleReader, r.URL.Query().Get("project")) {
+		return
+	}
 	limit := 100
 	if value := r.URL.Query().Get("limit"); value != "" {
 		parsed, err := strconv.Atoi(value)
@@ -183,6 +202,9 @@ func (s *Server) listObservationKnowledge(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, errors.New("project is required"))
 		return
 	}
+	if !s.gate.Allow(w, r, controlplane.RoleReader, project) {
+		return
+	}
 	var asOf, knownAt *time.Time
 	for name, target := range map[string]**time.Time{"as_of": &asOf, "known_at": &knownAt} {
 		if value := r.URL.Query().Get(name); value != "" {
@@ -232,6 +254,9 @@ func (s *Server) invalidateObservationKnowledge(w http.ResponseWriter, r *http.R
 	input.Reason = strings.TrimSpace(input.Reason)
 	if input.KnowledgeID == "" || input.Project == "" || input.Actor.ID == "" || input.Reason == "" {
 		writeError(w, http.StatusUnprocessableEntity, errors.New("knowledge_id, project, actor.id, and reason are required"))
+		return
+	}
+	if !s.gate.Allow(w, r, controlplane.RoleOperator, input.Project) {
 		return
 	}
 	projectEvents, err := s.projectKnowledge(r, input.Project, nil, nil)
@@ -308,6 +333,9 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 	queryText := strings.TrimSpace(strings.Join([]string{input.Query, input.Tool, input.ToolResult}, " "))
 	if input.Project == "" || (queryText == "" && len(input.Entities) == 0 && len(input.Topics) == 0) {
 		writeError(w, http.StatusUnprocessableEntity, errors.New("project and at least one query/entity/topic are required"))
+		return
+	}
+	if !s.gate.Allow(w, r, controlplane.RoleReader, input.Project) {
 		return
 	}
 	if input.Limit < 0 || input.Limit > 20 {

@@ -12,13 +12,56 @@ import (
 	"testing"
 	"time"
 
+	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/observation/memory"
 )
 
 func newTestServer(t *testing.T) http.Handler {
 	t.Helper()
-	return New(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return New(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+}
+
+const testTokens = "read-token-1234567890:alice:reader:lighthouse;write-token-1234567890:kernel:writer:lighthouse;op-token-1234567890:ruslan:operator:lighthouse"
+
+func newAuthTestServer(t *testing.T) http.Handler {
+	t.Helper()
+	gate, err := controlplane.NewGate(testTokens)
+	if err != nil {
+		t.Fatalf("NewGate: %v", err)
+	}
+	return New(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)), gate)
+}
+
+func doJSONWithToken(t *testing.T, handler http.Handler, method, path, token string, body any) (*http.Response, map[string]any) {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal request: %v", err)
+		}
+		reader = bytes.NewReader(raw)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	res := rec.Result()
+	defer res.Body.Close()
+	payload := map[string]any{}
+	if res.ContentLength != 0 {
+		raw, _ := io.ReadAll(res.Body)
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatalf("decode response %s: %v", path, err)
+			}
+		}
+	}
+	return res, payload
 }
 
 func doJSON(t *testing.T, handler http.Handler, method, path string, body any) (*http.Response, map[string]any) {
@@ -260,4 +303,70 @@ func isDashedUUID(value string) bool {
 		}
 	}
 	return true
+}
+
+func TestAuthEnforcedOnJournal(t *testing.T) {
+	handler := newAuthTestServer(t)
+
+	// No token: everything except healthz is 401.
+	res, _ := doJSONWithToken(t, handler, "GET", "/v1/observations/events?project=lighthouse", "", nil)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no token = %d, want 401", res.StatusCode)
+	}
+	res, _ = doJSONWithToken(t, handler, "GET", "/healthz", "", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("healthz = %d, want 200", res.StatusCode)
+	}
+
+	// Reader may list only its project.
+	res, _ = doJSONWithToken(t, handler, "GET", "/v1/observations/events?project=lighthouse", "read-token-1234567890", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("reader list own project = %d", res.StatusCode)
+	}
+	res, _ = doJSONWithToken(t, handler, "GET", "/v1/observations/events?project=forge", "read-token-1234567890", nil)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("reader list other project = %d, want 403", res.StatusCode)
+	}
+	res, _ = doJSONWithToken(t, handler, "GET", "/v1/observations/events", "read-token-1234567890", nil)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("reader unscoped list = %d, want 403", res.StatusCode)
+	}
+
+	// Reader may not ingest; writer may.
+	ingest := map[string]any{"events": []observation.Event{proposedEvent("lighthouse", "auth-1", "K1", "p")}}
+	res, _ = doJSONWithToken(t, handler, "POST", "/v1/observations/events", "read-token-1234567890", ingest)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("reader ingest = %d, want 403", res.StatusCode)
+	}
+	res, _ = doJSONWithToken(t, handler, "POST", "/v1/observations/events", "write-token-1234567890", ingest)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("writer ingest = %d", res.StatusCode)
+	}
+	// Writer scoped to lighthouse may not ingest into another project.
+	foreign := map[string]any{"events": []observation.Event{proposedEvent("forge", "auth-2", "K2", "p")}}
+	res, _ = doJSONWithToken(t, handler, "POST", "/v1/observations/events", "write-token-1234567890", foreign)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("writer ingest foreign project = %d, want 403", res.StatusCode)
+	}
+
+	// Hints are read-tier: reader allowed, foreign project denied.
+	res, _ = doJSONWithToken(t, handler, "POST", "/v1/observations/hints", "read-token-1234567890", map[string]any{"project": "lighthouse", "query": "auth"})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("reader hints = %d", res.StatusCode)
+	}
+	res, _ = doJSONWithToken(t, handler, "POST", "/v1/observations/hints", "read-token-1234567890", map[string]any{"project": "forge", "query": "auth"})
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("reader hints foreign project = %d, want 403", res.StatusCode)
+	}
+
+	// Invalidation requires operator.
+	invalidate := map[string]any{"knowledge_id": "K1", "project": "lighthouse", "actor": map[string]any{"id": "ruslan", "type": "human"}, "reason": "test"}
+	res, _ = doJSONWithToken(t, handler, "POST", "/v1/observations/knowledge/invalidate", "write-token-1234567890", invalidate)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("writer invalidate = %d, want 403", res.StatusCode)
+	}
+	res, body := doJSONWithToken(t, handler, "POST", "/v1/observations/knowledge/invalidate", "op-token-1234567890", invalidate)
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("operator invalidate = %d, body = %v", res.StatusCode, body)
+	}
 }
