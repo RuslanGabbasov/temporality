@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -242,4 +243,35 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// LoadFileSecrets resolves the <name>_FILE convention into the plain env
+// vars before any configuration reads them: when name itself is unset and
+// <name>_FILE points at a readable file, the file's trimmed content becomes
+// the value. This is how docker compose secrets (and most orchestration
+// systems) hand secrets to a process without putting them in the
+// environment. A plain env value always wins; an unreadable file is an
+// error, not a silent skip.
+func LoadFileSecrets(names ...string) error {
+	for _, name := range names {
+		if os.Getenv(name) != "" {
+			continue
+		}
+		path := strings.TrimSpace(os.Getenv(name + "_FILE"))
+		if path == "" {
+			continue
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read secret file for %s: %w", name, err)
+		}
+		value := strings.TrimSpace(string(content))
+		if value == "" {
+			return fmt.Errorf("secret file for %s is empty", name)
+		}
+		if err := os.Setenv(name, value); err != nil {
+			return fmt.Errorf("set %s from secret file: %w", name, err)
+		}
+	}
+	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/outbox"
+	"github.com/temporality-project/temporality/kernel/quota"
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
@@ -28,6 +30,10 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if err := controlplane.LoadFileSecrets("DATABASE_URL", "TEMPORALITY_MODEL_API_KEY", "TEMPORALITY_API_TOKEN", "KERNEL_AUTH_TOKENS"); err != nil {
+		log.Error("load file secrets", "error", err)
+		os.Exit(1)
+	}
 	databaseURL := requiredEnv("DATABASE_URL")
 	observationURL := env("TEMPORALITY_URL", "http://localhost:8080")
 	events, err := outbox.Open(ctx, databaseURL, observationURL)
@@ -39,6 +45,19 @@ func main() {
 	if err = events.Migrate(ctx, "migrations/000019_kernel_event_outbox.up.sql"); err != nil {
 		log.Error("migrate kernel outbox", "error", err)
 		os.Exit(1)
+	}
+	quotas, err := quota.Open(ctx, databaseURL, os.Getenv("KERNEL_RUN_QUOTAS"))
+	if err != nil {
+		log.Error("open run quotas", "error", err)
+		os.Exit(1)
+	}
+	defer quotas.Close()
+	if err = quotas.Migrate(ctx, "migrations/000020_kernel_run_quota.up.sql"); err != nil {
+		log.Error("migrate run quotas", "error", err)
+		os.Exit(1)
+	}
+	if quotas.Enabled() {
+		log.Info("run quotas enabled", "default_per_day", quotas.Default())
 	}
 	activities, err := agent.NewActivities(events)
 	if err != nil {
@@ -88,12 +107,30 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleWriter, input.Project) {
 			return
 		}
-		if input.ActorID == "" {
-			input.ActorID = "human-requester"
-		}
 		if err := activities.PrepareRun(&input); err != nil {
 			writeError(w, 422, err)
 			return
+		}
+		// Consume the quota slot only when everything else validated: an
+		// invalid request must never burn the project's daily budget.
+		if quotas.Enabled() {
+			verdict, err := quotas.Allow(r.Context(), input.Project)
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			if !verdict.Allowed {
+				retryAfter := int64(time.Until(verdict.ResetAt).Seconds())
+				if retryAfter < 1 {
+					retryAfter = 1
+				}
+				w.Header().Set("Retry-After", strconv.FormatInt(retryAfter, 10))
+				writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "daily run quota exceeded for project " + input.Project, "quota": verdict})
+				return
+			}
+		}
+		if input.ActorID == "" {
+			input.ActorID = "human-requester"
 		}
 		workflowID := workflowIDFor(activities.SourceID, input.Project, input.RunID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
@@ -174,6 +211,22 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"pending": stats.Pending, "oldest_pending_age_seconds": int64(stats.OldestPendingAge.Seconds()), "delivered": stats.Delivered, "last_error": stats.FailedAttemptsLast})
+	})
+	mux.HandleFunc("GET /v1/agent/quotas", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if project == "" {
+			writeError(w, 400, errors.New("project query parameter is required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleReader, project) {
+			return
+		}
+		verdict, err := quotas.Usage(r.Context(), project)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"project": project, "used": verdict.Used, "limit": verdict.Limit, "reset_at": verdict.ResetAt})
 	})
 	liveness := &temporalLiveness{client: temporalClient}
 	mux.HandleFunc("GET /v1/agent/operations", func(w http.ResponseWriter, r *http.Request) {

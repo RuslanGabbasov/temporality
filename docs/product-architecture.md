@@ -176,7 +176,7 @@ Timeline.** Universal observation API (migration 000018), Agent Kernel,
 | Agent Harness — Control | approval (requested/granted, redacted preview), budgets (turns) | behavioral SLO/policy enforcement — будущие стадии |
 | Agent Harness — Evidence & Observability | observation events, kernel event outbox (миграция 000019), effect semantics + operation reconciler | evidence package / replay — частично (Experience Timeline); failure/reconciliation сделана (2026-09-25) |
 | Temporality — опыт и память | `observation/` (journal, knowledge, hints) + Experience Timeline | ядро продукта |
-| Enterprise Control Plane | `controlplane/`: bearer-токены, роли reader/writer/operator/admin, project-scoping на journal и kernel API | минимум 2026-09-25: auth + RBAC готовы (JOURNAL_AUTH_TOKENS / KERNEL_AUTH_TOKENS / TEMPORALITY_API_TOKEN); остались tenants, secrets вне .env, quotas |
+| Enterprise Control Plane | `controlplane/`: bearer-токены, роли reader/writer/operator/admin, project-scoping на journal и kernel API; квоты `KERNEL_RUN_QUOTAS` (429 + Retry-After, слот только за валидный запуск, миграция 000020); секреты через `<VAR>_FILE` | осталось: tenants отложены — для одной команды project-scoping + квоты закрывают кейс, пересмотреть при нескольких орг-структурах |
 | Infrastructure | docker compose | при развёртывании заменить на целевые среды |
 
 Scheduling не выделяется в отдельный блок harness: cron/schedules/events

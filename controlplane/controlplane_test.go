@@ -3,6 +3,8 @@ package controlplane
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -154,5 +156,38 @@ func TestAdminWildcardProjects(t *testing.T) {
 	gate.Authenticate(inner).ServeHTTP(httptest.NewRecorder(), request)
 	if !allowed {
 		t.Fatal("admin wildcard must pass unscoped queries")
+	}
+}
+
+func TestLoadFileSecrets(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "model_api_key")
+	if err := os.WriteFile(path, []byte("sk-secret-123\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_SECRET_API_KEY", "")
+	t.Setenv("TEST_SECRET_API_KEY_FILE", path)
+
+	if err := LoadFileSecrets("TEST_SECRET_API_KEY"); err != nil {
+		t.Fatalf("LoadFileSecrets: %v", err)
+	}
+	if got := os.Getenv("TEST_SECRET_API_KEY"); got != "sk-secret-123" {
+		t.Fatalf("secret = %q, want trimmed file content", got)
+	}
+
+	// A plain env value always wins over the file.
+	t.Setenv("TEST_SECRET_API_KEY", "from-env")
+	if err := LoadFileSecrets("TEST_SECRET_API_KEY"); err != nil {
+		t.Fatalf("LoadFileSecrets: %v", err)
+	}
+	if got := os.Getenv("TEST_SECRET_API_KEY"); got != "from-env" {
+		t.Fatalf("plain env must win, got %q", got)
+	}
+
+	// An unreadable file is an error, not a silent skip.
+	t.Setenv("TEST_SECRET_API_KEY", "")
+	t.Setenv("TEST_SECRET_API_KEY_FILE", filepath.Join(dir, "missing"))
+	if err := LoadFileSecrets("TEST_SECRET_API_KEY"); err == nil {
+		t.Fatal("missing secret file must fail loudly")
 	}
 }

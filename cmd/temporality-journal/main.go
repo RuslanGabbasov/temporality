@@ -20,6 +20,10 @@ import (
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	ctx := context.Background()
+	if err := controlplane.LoadFileSecrets("DATABASE_URL", "JOURNAL_AUTH_TOKENS"); err != nil {
+		log.Error("load file secrets", "error", err)
+		os.Exit(1)
+	}
 
 	url := os.Getenv("DATABASE_URL")
 	if url == "" {

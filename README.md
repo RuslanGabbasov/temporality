@@ -240,6 +240,31 @@ curl -X POST http://localhost:8090/v1/agent/operations/reconcile \
 «падает», и операция честно попадает в listing как uncertain
 (см. [`docs/failure-reconciliation.md`](docs/failure-reconciliation.md)).
 
+## Control plane
+
+Auth/RBAC: bearer-токены `token:subject:role:projects` (reader < writer <
+operator < admin), project-scoping на journal и kernel API
+(`JOURNAL_AUTH_TOKENS` / `KERNEL_AUTH_TOKENS`).
+
+Квоты (kernel): `KERNEL_RUN_QUOTAS="*:50,forge:200"` — лимит запусков
+агентов в UTC-день на проект; `*` задаёт дефолт, отсутствие записи —
+безлимит. Слот расходуется только на валидно принятый запуск (422/422-класс
+ошибок квоту не жгут), превышение — 429 с `Retry-After` и телом
+`{quota: {allowed, limit, used, reset_at}}`. Текущее использование:
+
+```sh
+curl 'http://localhost:8090/v1/agent/quotas?project=repo-a' \
+  -H "Authorization: Bearer $READER_TOKEN"
+```
+
+Секреты: конвенция `<VAR>_FILE` — если переменная не задана напрямую, а
+`<VAR>_FILE` указывает на файл, значение берётся из файла (без хвостового
+переноса строки). Поддержаны `DATABASE_URL`,
+`TEMPORALITY_MODEL_API_KEY`, `TEMPORALITY_API_TOKEN`,
+`KERNEL_AUTH_TOKENS` (kernel) и `JOURNAL_AUTH_TOKENS` (journal) — так
+docker compose secrets подключаются без попадания ключей в окружение.
+Прямое env-значение всегда приоритетнее файла.
+
 ## Experience Timeline
 
 Главный экран — `/experience`: runs по горизонтали, knowledge-полосы по
