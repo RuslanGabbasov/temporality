@@ -305,7 +305,7 @@ export default function ExperienceTimeline() {
   if (!model || !view) {
     return <div className="observability-shell" ref={shellRef}>
       <Header project={project} setProject={setProject} load={load} loading={loading} />
-      {error && <div className="obs-error" role="alert">{error}<small>Проверьте, что Runtime доступен на {API_BASE}.</small></div>}
+      {error && <div className="obs-error" role="alert">{error}<small>Проверьте, что журнал доступен на {API_BASE}.</small></div>}
       {loading && <div className="status" role="status"><span className="spinner" /> Loading experience… {progress}</div>}
       {!loading && !error && <div className="obs-controls"><p className="obs-empty">Введите project ID и нажмите Open timeline.</p></div>}
     </div>
@@ -651,7 +651,6 @@ function Header({ project, setProject, load, loading }: { project: string; setPr
       <span className="connection">Events <code>{API_BASE}</code></span>
       <a className="obs-link" href="/agents">Agent runs</a>
       <a className="obs-link" href="/observability">Knowledge</a>
-      <a className="obs-link" href="/">FRP debugger</a>
     </div>
     <form className="experience-project" onSubmit={(event) => { event.preventDefault(); void load(project) }}>
       <input value={project} onChange={(change) => setProject(change.target.value)} placeholder="calculator-e2e" />
