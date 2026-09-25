@@ -172,12 +172,21 @@ export interface KnowledgeLineage {
  * chain built from the same folded stream — formation evidence, activations
  * and death. Pure derived data, no extra state. */
 export interface ForensicCommand { command: string; policy?: string; at: string; eventId: string }
+export interface ForensicEvidence {
+  ref: string
+  type: string
+  /** When and in which run the evidence was captured — lets the UI focus the
+   * timeline on the producing operation and attribute it to a run/role. */
+  at: string
+  run?: string
+  role?: string
+}
 export interface ForensicFormed {
   at: string
   run?: string
   role?: string
   actor?: string
-  evidence: { ref: string; type: string }[]
+  evidence: ForensicEvidence[]
   commands: ForensicCommand[]
 }
 export interface ForensicActivation {
@@ -802,7 +811,9 @@ export function forensicOf(row: KnowledgeRow, model: ExperienceModel): ForensicR
     run: appeared.run,
     role: appeared.role,
     actor: appeared.actor,
-    evidence: row.episodes.filter((episode) => episode.at === appeared.at).map((episode) => ({ ref: episode.ref, type: episode.kind })),
+    evidence: row.episodes
+      .filter((episode) => episode.at === appeared.at)
+      .map((episode) => ({ ref: episode.ref, type: episode.kind, at: episode.at, run: episode.run || undefined, role: episode.role })),
     commands: commandsOf(appeared.run, undefined, appeared.at),
   } : undefined
   const activations: ForensicActivation[] = model.links

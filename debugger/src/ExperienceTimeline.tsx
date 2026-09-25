@@ -690,7 +690,7 @@ function RowDetails({ row, lineage, forensic, onFocus, related }: { row: Knowled
       {forensic.formed && <div className="forensic-block">
         <p className="forensic-head clickable" title="locate on timeline" onClick={() => onFocus(forensic.formed!.at, row.points.find((point) => point.kind === 'appeared')?.eventId ?? '', `formed · ${shortKnowledge(row.knowledgeId)}`)}>formed <time>{clock(forensic.formed.at)}</time>{forensic.formed.run ? ` · ${shortRun(forensic.formed.run)}` : ''}{forensic.formed.role ? ` · ${forensic.formed.role}` : ''}{forensic.formed.actor ? ` · by ${forensic.formed.actor}` : ''}</p>
         {forensic.formed.evidence.length > 0 && <ul className="forensic-evidence">
-          {forensic.formed.evidence.map((item, index) => <li key={index} title={item.ref}>{item.ref}</li>)}
+          {forensic.formed.evidence.map((item, index) => <li key={index} className="clickable" title="locate on timeline" onClick={() => onFocus(item.at, '', `evidence · ${item.ref}`)}>{item.ref}{item.run ? <small> · {shortRun(item.run)}</small> : null}</li>)}
         </ul>}
         {forensic.formed.commands.length > 0 && <details className="forensic-commands">
           <summary>prior commands · {forensic.formed.commands.length}</summary>
@@ -732,7 +732,7 @@ function RowDetails({ row, lineage, forensic, onFocus, related }: { row: Knowled
     {row.episodes.length > 0 && <section>
       <h4>Episodes</h4>
       <ul className="cluster-episodes">
-        {row.episodes.map((episode, index) => <li key={`${episode.ref}-${index}`}><span className={`episode-kind ${episode.kind}`} />{episode.ref}<small>{episode.at}</small></li>)}
+        {row.episodes.map((episode, index) => <li key={`${episode.ref}-${index}`} className="clickable" title="locate on timeline" onClick={() => onFocus(episode.at, '', `episode · ${episode.ref}`)}><span className={`episode-kind ${episode.kind}`} />{episode.ref}<small>{episode.run ? `${shortRun(episode.run)} · ` : ''}{episode.at}</small></li>)}
       </ul>
     </section>}
     {(supersedes.length > 0 || supersededBy.length > 0) && <section>

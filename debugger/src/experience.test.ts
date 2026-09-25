@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ObservationEvent } from './observationApi'
-import { aliveRowAt, commandSegments, contentTokens, foldExperience, lifecycleKindOf, propositionMechanisms, roleOfKnowledgeId, roleOfRun, runOfEvidenceRef, scopeOfCommand, segmentSubcommand, shortKnowledge, stateBucket, windowAround } from './experience'
+import { aliveRowAt, commandSegments, contentTokens, foldExperience, forensicOf, lifecycleKindOf, propositionMechanisms, roleOfKnowledgeId, roleOfRun, runOfEvidenceRef, scopeOfCommand, segmentSubcommand, shortKnowledge, stateBucket, windowAround } from './experience'
 
 let counter = 0
 
@@ -290,5 +290,86 @@ describe('windowAround (forensic navigation)', () => {
   it('never shrinks below the minimum span', () => {
     const tight = windowAround('2026-09-25T05:00:00Z', { from: '2026-09-25T04:59:40Z', to: '2026-09-25T05:00:20Z' })
     expect(tight.t1 - tight.t0).toBeGreaterThanOrEqual(30_000)
+  })
+})
+
+describe('forensicOf (origin → activation → death reconstruction)', () => {
+  const F0 = '2026-09-25T10:00:00Z'
+  const F1 = '2026-09-25T10:05:00Z'
+  const F2 = '2026-09-25T10:12:00Z'
+  const F3 = '2026-09-25T11:00:00Z'
+  const F4 = '2026-09-25T11:30:00Z'
+  const CLAIM = 'nightly-01/knowledge/7'
+
+  function forensicScenario(): ObservationEvent[] {
+    return [
+      event('run.started', '2026-09-25T09:58:00Z', { status: 'running' }, { run: 'nightly-01' }),
+      event('approval.auto_granted', '2026-09-25T09:59:00Z', { operation: { type: 'sandbox.exec', arguments: { command: ['go', 'build', '-o', '/tmp/nb', '.'] } } }, { run: 'nightly-01' }),
+      event('approval.auto_granted', '2026-09-25T09:59:30Z', { operation: { type: 'sandbox.exec', arguments: { command: ['env', 'LH_TOKEN=t', '/tmp/nb', 'login'] } } }, { run: 'nightly-01' }),
+      event('knowledge.proposed', F0, { knowledge_id: CLAIM, proposition: 'login reads the LH_TOKEN env var', kind: 'claim' }, { run: 'nightly-01' }, [{ ref: 'nightly-01/turn/02/call_ab12', type: 'execution' }]),
+      event('knowledge.confirmed', F1, { knowledge_id: CLAIM }, { run: 'nightly-01' }),
+      event('run.completed', '2026-09-25T10:06:00Z', { status: 'completed' }, { run: 'nightly-01' }),
+      event('run.started', '2026-09-25T10:10:00Z', { status: 'running' }, { run: 'nightly-02' }),
+      event('hint.offered', F2, { hint_id: 'h1', knowledge_id: CLAIM, state: 'confirmed' }, { run: 'nightly-02' }),
+      event('knowledge.used', F2, { knowledge_id: CLAIM, hint_id: 'h1' }, { run: 'nightly-02' }),
+      event('approval.auto_granted', '2026-09-25T10:13:00Z', { operation: { type: 'sandbox.exec', arguments: { command: ['env', 'LH_TOKEN=t', '/tmp/nb', 'login'] } } }, { run: 'nightly-02' }),
+      event('run.completed', '2026-09-25T10:20:00Z', { status: 'completed' }, { run: 'nightly-02' }),
+      event('run.started', '2026-09-25T10:55:00Z', { status: 'running' }, { run: 'nightly-03' }),
+      event('hint.offered', F3, { hint_id: 'h2', knowledge_id: CLAIM, state: 'confirmed' }, { run: 'nightly-03' }),
+      event('run.completed', '2026-09-25T11:25:00Z', { status: 'turn_limit' }, { run: 'nightly-03' }),
+      event('knowledge.proposed', '2026-09-25T11:26:00Z', { knowledge_id: 'nightly-04/knowledge/9', proposition: 'login moved to the .lh-token file', kind: 'claim' }, { run: 'nightly-04' }),
+      event('knowledge.invalidated', F4, { knowledge_id: CLAIM, reason: 'superseded by nightly-04/knowledge/9' }, { run: 'nightly-04' }),
+    ]
+  }
+
+  it('reconstructs formation: run, evidence with run attribution, prior commands', () => {
+    const model = foldExperience(forensicScenario())
+    const row = model.rows.find((item) => item.knowledgeId === CLAIM)
+    const record = forensicOf(row!, model)
+    expect(record.formed!.at).toBe(F0)
+    expect(record.formed!.run).toBe('nightly-01')
+    expect(record.formed!.evidence).toHaveLength(1)
+    expect(record.formed!.evidence[0].ref).toBe('nightly-01/turn/02/call_ab12')
+    // Evidence is attributable: the ref encodes the producing run.
+    expect(record.formed!.evidence[0].run).toBe('nightly-01')
+    // Commands the agent ran before the claim appeared, in the forming run.
+    expect(record.formed!.commands.map((item) => item.command)).toEqual(['go build -o /tmp/nb .', 'env LH_TOKEN=t /tmp/nb login'])
+  })
+
+  it('reconstructs activations with outcome and unused offers separately', () => {
+    const model = foldExperience(forensicScenario())
+    const row = model.rows.find((item) => item.knowledgeId === CLAIM)
+    const record = forensicOf(row!, model)
+    expect(record.activations).toHaveLength(2)
+    const used = record.activations.find((item) => item.usedAt === F2)!
+    expect(used.usedRun).toBe('nightly-02')
+    expect(used.usedRunStatus).toBe('completed')
+    // Commands executed after the hint was used in the reusing run.
+    expect(used.commands.map((item) => item.command)).toEqual(['env LH_TOKEN=t /tmp/nb login'])
+    const unused = record.activations.find((item) => !item.usedAt)!
+    expect(unused.offeredRun).toBe('nightly-03')
+    expect(unused.commands).toEqual([])
+  })
+
+  it('reconstructs death with reason, actor and lineage successor', () => {
+    const model = foldExperience(forensicScenario())
+    const row = model.rows.find((item) => item.knowledgeId === CLAIM)
+    const record = forensicOf(row!, model)
+    expect(record.deaths).toHaveLength(1)
+    expect(record.deaths[0].kind).toBe('archived')
+    expect(record.deaths[0].at).toBe(F4)
+    expect(record.deaths[0].reason).toBe('superseded by nightly-04/knowledge/9')
+    // The inferred lineage edge names the successor, so the death is traceable
+    // to the replacement claim.
+    expect(record.deaths[0].supersededBy).toEqual(['nightly-04/knowledge/9'])
+  })
+
+  it('returns an empty record for knowledge without lifecycle events', () => {
+    const model = foldExperience([event('knowledge.proposed', F0, { knowledge_id: 'orphan/knowledge/1', proposition: 'never confirmed', kind: 'claim' }, { run: 'nightly-01' })])
+    const row = model.rows.find((item) => item.knowledgeId === 'orphan/knowledge/1')
+    const record = forensicOf(row!, model)
+    expect(record.formed).toBeDefined()
+    expect(record.activations).toEqual([])
+    expect(record.deaths).toEqual([])
   })
 })

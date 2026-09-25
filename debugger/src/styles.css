@@ -399,4 +399,8 @@ dialog::backdrop { background: #020408cc; backdrop-filter: blur(3px); }
 .forensic-head.clickable, .forensic-activations li, .cluster-points li { cursor: pointer; }
 .forensic-head.clickable:hover { color: #fff; }
 .forensic-activations li:hover, .cluster-points li:hover { background: rgba(255, 255, 255, .03); }
+.forensic-evidence li.clickable, .cluster-episodes li.clickable { cursor: pointer; }
+.forensic-evidence li.clickable:hover { color: #fff; }
+.forensic-evidence small, .cluster-episodes small { color: var(--muted); }
+.cluster-episodes li.clickable:hover { background: rgba(255, 255, 255, .03); }
 @media (max-width: 1080px) { .experience-grid { grid-template-columns: 1fr; }.experience-detail { border-left: 0; border-top: 1px solid var(--line); max-height: 50vh; } }
