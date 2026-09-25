@@ -254,6 +254,24 @@ export default function ExperienceTimeline() {
       // keep native page scrolling instead of zooming.
       const rect = element.getBoundingClientRect()
       if (wheel.clientX - rect.left < GUTTER) return
+      // Input intent: a trackpad PINCH arrives as ctrl+wheel; a real mouse
+      // wheel reports discrete deltas (line mode, or large integer pixel
+      // steps). Only those zoom. A trackpad two-finger swipe (fractional
+      // pixel deltas, no ctrl) pans the timeline horizontally and leaves
+      // vertical swipes to the native page scroll.
+      const mouseWheel = wheel.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || (Number.isInteger(wheel.deltaY) && Math.abs(wheel.deltaY) >= 10)
+      if (!wheel.ctrlKey && !mouseWheel) {
+        if (Math.abs(wheel.deltaX) <= Math.abs(wheel.deltaY)) return
+        wheel.preventDefault()
+        setWindow((current) => {
+          const state = current ?? view.full
+          const msPerPx = (state.t1 - state.t0) / Math.max(1, rect.width - GUTTER)
+          // keep the span, slide the window inside corpus bounds
+          const bounded = Math.min(view.full.t1 - state.t1, Math.max(view.full.t0 - state.t0, wheel.deltaX * msPerPx))
+          return { t0: state.t0 + bounded, t1: state.t1 + bounded }
+        })
+        return
+      }
       wheel.preventDefault()
       const x = wheel.clientX - rect.left - GUTTER
       setWindow((current) => {
@@ -261,7 +279,11 @@ export default function ExperienceTimeline() {
         const span = state.t1 - state.t0
         const ratio = Math.min(1, Math.max(0, x / Math.max(1, rect.width - GUTTER)))
         const pivot = state.t0 + span * ratio
-        const factor = wheel.deltaY > 0 ? 1.25 : 0.8
+        // pinch streams small continuous deltas — scale smoothly; discrete
+        // wheels (mouse, ctrl+mouse) keep the fixed step
+        const factor = wheel.ctrlKey && !mouseWheel
+          ? Math.min(2, Math.max(0.5, Math.exp(wheel.deltaY * 0.01)))
+          : wheel.deltaY > 0 ? 1.25 : 0.8
         let next0 = pivot - (pivot - state.t0) * factor
         let next1 = pivot + (state.t1 - pivot) * factor
         if (next1 - next0 < 5000) return state
