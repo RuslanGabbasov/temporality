@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_BASE } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
-import { foldExperience, LIFECYCLE_KINDS, type ExperienceCluster, type LifecycleKind, type RunInfo } from './experience'
+import { foldExperience, LIFECYCLE_KINDS, type ExperienceCluster, type KnowledgeLineage, type LifecycleKind, type RunInfo } from './experience'
 
 const GUTTER = 210
 const AXIS_HEIGHT = 34
@@ -208,6 +208,18 @@ export default function ExperienceTimeline() {
   }
   const selectedCluster = model.clusters.find((cluster) => cluster.id === selected)
 
+  // knowledge id → owning cluster / lifecycle points, for lineage edges.
+  // Built from all clusters (ids) but only visible clusters (points) so that
+  // filtering never leaves an edge pointing into a hidden lane.
+  const knowledgeClusterOf = new Map<string, string>()
+  for (const cluster of model.clusters) for (const member of cluster.members) knowledgeClusterOf.set(member.knowledgeId, cluster.id)
+  const knowledgePoints = new Map<string, { at: string; kind: LifecycleKind }[]>()
+  for (const cluster of view.visibleClusters) for (const point of cluster.points) {
+    const list = knowledgePoints.get(point.knowledgeId)
+    if (list) list.push(point)
+    else knowledgePoints.set(point.knowledgeId, [point])
+  }
+
   const toggleKind = (kind: LifecycleKind) => setKinds((current) => {
     const next = new Set(current)
     if (next.has(kind)) next.delete(kind)
@@ -312,7 +324,7 @@ export default function ExperienceTimeline() {
             return <g key={cluster.id} className={`cluster-lane ${selected === cluster.id ? 'selected' : ''}`} onClick={() => setSelected(cluster.id)}>
               <rect x={0} y={yLane - CLUSTER_LANE / 2} width={width} height={CLUSTER_LANE} fill="transparent" />
               <text x={8} y={yLane - 2} className="lane-label cluster-label">{cluster.title}</text>
-              <text x={8} y={yLane + 9} className="lane-sublabel">{cluster.members.length} items · {cluster.runs.length} runs · {cluster.state}</text>
+              <text x={8} y={yLane + 9} className="lane-sublabel">{cluster.members.length} items · {cluster.runs.length} runs · {model.links.filter((link) => link.clusterId === cluster.id).length} activations · {cluster.members.filter((member) => member.state === 'invalidated' || member.state === 'superseded' || member.state === 'corrected').length} retired · {cluster.state}</text>
               <rect x={Math.max(GUTTER, x0)} width={Math.max(3, Math.min(x1, GUTTER + track) - Math.max(GUTTER, x0))} y={yLane - 2.5} height={5} rx={2.5} fill={stateColor} opacity={0.25 + cluster.strength * 0.6}>
                 <title>{`${cluster.title} · ${cluster.state} · strength ${cluster.strength.toFixed(2)} (derived)`}</title>
               </rect>
@@ -325,6 +337,24 @@ export default function ExperienceTimeline() {
               })}
             </g>
           })}
+          {lens.conflicts && model.lineage.map((edge) => {
+            const y1 = view.clusterLaneY.get(knowledgeClusterOf.get(edge.fromId) ?? '')
+            const y2 = view.clusterLaneY.get(knowledgeClusterOf.get(edge.toId) ?? '')
+            if (y1 === undefined || y2 === undefined) return null
+            const fromPoints = knowledgePoints.get(edge.fromId) ?? []
+            const toPoints = knowledgePoints.get(edge.toId) ?? []
+            const fromPoint = [...fromPoints].reverse().find((point) => point.kind === 'archived' || point.kind === 'contradicted' || point.kind === 'weakened') ?? fromPoints[fromPoints.length - 1]
+            const toPoint = toPoints.find((point) => point.kind === 'appeared') ?? toPoints[0]
+            if (!fromPoint || !toPoint) return null
+            const x1 = x(fromPoint.at)
+            const x2 = x(toPoint.at)
+            if (Math.max(x1, x2) < GUTTER || Math.min(x1, x2) > GUTTER + track) return null
+            const bend = Math.max(20, Math.abs(x2 - x1) * 0.35)
+            return <g key={`${edge.eventId}-${edge.fromId}`} className="lineage-link">
+              <path d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`} fill="none" stroke="#ff9e64" strokeWidth={1.2} opacity={0.8} markerEnd="url(#lineage-arrow)" />
+              <title>{`${edge.fromId} → ${edge.toId} · ${edge.inferred ? 'inferred' : 'explicit'}${edge.reason ? `\n${edge.reason}` : ''}`}</title>
+            </g>
+          })}
           {lens.activation && model.links.map((link) => {
             if (hiddenRoots.has(link.offeredRun?.split('/')[0] ?? '')) return null
             const clusterY = view.clusterLaneY.get(link.clusterId)
@@ -333,21 +363,29 @@ export default function ExperienceTimeline() {
             const x1 = x(link.offeredAt)
             const x2 = x(link.usedAt ?? link.offeredAt)
             if (x1 < GUTTER || x1 > GUTTER + track) return null
-            return <g key={link.hintId} className="activation-link">
-              <line x1={x1} y1={clusterY} x2={x2} y2={runY} stroke="#bb9af7" strokeWidth={1} strokeDasharray="3 3" opacity={0.8} markerEnd="url(#activation-arrow)" />
-              <title>{`recall ${link.knowledgeId}\n${link.offeredRun} → ${link.usedRun}`}</title>
+            const failed = link.usedRunStatus === 'failed'
+            return <g key={link.hintId} className={`activation-link ${failed ? 'failed' : ''}`}>
+              <line x1={x1} y1={clusterY} x2={x2} y2={runY} stroke={failed ? '#f7768e' : '#bb9af7'} strokeWidth={1} strokeDasharray={failed ? '2 4' : '3 3'} opacity={0.8} markerEnd="url(#activation-arrow)" />
+              {failed && <g stroke="#f7768e" strokeWidth={1.4}>
+                <line x1={x2 - 3} y1={runY - 3} x2={x2 + 3} y2={runY + 3} />
+                <line x1={x2 - 3} y1={runY + 3} x2={x2 + 3} y2={runY - 3} />
+              </g>}
+              <title>{`recall ${link.knowledgeId}\n${link.offeredRun} → ${link.usedRun}${failed ? ` · run ${link.usedRunStatus}` : ''}`}</title>
             </g>
           })}
           <defs>
             <marker id="activation-arrow" viewBox="0 0 8 8" refX={7} refY={4} markerWidth={6} markerHeight={6} orient="auto">
               <path d="M0,0 L8,4 L0,8 z" fill="#bb9af7" />
             </marker>
+            <marker id="lineage-arrow" viewBox="0 0 8 8" refX={7} refY={4} markerWidth={6} markerHeight={6} orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#ff9e64" />
+            </marker>
           </defs>
         </svg>
         <p className="experience-hint">scroll — zoom · drag — pan · cluster click — details · bars are derived state, points are recorded events</p>
       </section>
       <aside className="obs-panel experience-detail">
-        {!selectedCluster ? <p className="obs-empty">Выберите кластер опыта на таймлайне — здесь появятся его жизненный цикл, эпизоды и цепочки активации.</p> : <ClusterDetails cluster={selectedCluster} />}
+        {!selectedCluster ? <p className="obs-empty">Выберите кластер опыта на таймлайне — здесь появятся его жизненный цикл, эпизоды и цепочки активации.</p> : <ClusterDetails cluster={selectedCluster} lineage={model.lineage} />}
       </aside>
     </main>
   </div>
@@ -379,7 +417,15 @@ function Header({ project, setProject, load, loading }: { project: string; setPr
   </header>
 }
 
-function ClusterDetails({ cluster }: { cluster: ExperienceCluster }) {
+function ClusterDetails({ cluster, lineage }: { cluster: ExperienceCluster; lineage: KnowledgeLineage[] }) {
+  const [openMember, setOpenMember] = useState<string | null>(null)
+  const countsOf = (knowledgeId: string) => {
+    const parts = LIFECYCLE_KINDS.map((kind) => {
+      const count = cluster.points.filter((point) => point.knowledgeId === knowledgeId && point.kind === kind).length
+      return count ? `${kind} ×${count}` : ''
+    }).filter(Boolean)
+    return parts.join(' · ') || 'no lifecycle points'
+  }
   return <div className="cluster-details">
     <header><span className="eyebrow">{cluster.kind === 'execution' ? `EXECUTION · ${cluster.scope}` : `CLAIM · ${cluster.scope}`}</span><strong>{cluster.title}</strong></header>
     <div className="cluster-stats">
@@ -415,7 +461,26 @@ function ClusterDetails({ cluster }: { cluster: ExperienceCluster }) {
     <section>
       <h4>Knowledge items</h4>
       <ul className="cluster-members">
-        {cluster.members.map((member) => <li key={member.knowledgeId}><code>{member.knowledgeId}</code><span className={`member-state ${member.state}`}>{member.state}</span><p>{member.proposition}</p></li>)}
+        {cluster.members.map((member) => {
+          const open = member.knowledgeId === openMember
+          const supersedes = lineage.filter((edge) => edge.fromId === member.knowledgeId)
+          const supersededBy = lineage.filter((edge) => edge.toId === member.knowledgeId)
+          const episodes = cluster.episodes.filter((episode) => episode.knowledgeId === member.knowledgeId)
+          return <li key={member.knowledgeId} className={open ? 'open' : ''} onClick={() => setOpenMember(open ? null : member.knowledgeId)}>
+            <code>{member.knowledgeId}</code><span className={`member-state ${member.state}`}>{member.state}</span>
+            <p>{member.proposition}</p>
+            {open && <div className="member-detail">
+              <p className="member-counts">{countsOf(member.knowledgeId)}</p>
+              {episodes.length > 0 && <ul className="cluster-episodes member-episodes">
+                {episodes.map((episode, index) => <li key={`${episode.ref}-${index}`}><span className={`episode-kind ${episode.kind}`} />{episode.ref}<small>{episode.at}</small></li>)}
+              </ul>}
+              {(supersedes.length > 0 || supersededBy.length > 0) && <ul className="lineage-list">
+                {supersedes.map((edge) => <li key={`out-${edge.eventId}`}>supersedes <code>{edge.toId}</code>{edge.inferred ? ' · inferred' : ''}{edge.reason ? <small>{edge.reason}</small> : null}</li>)}
+                {supersededBy.map((edge) => <li key={`in-${edge.eventId}`}>superseded by <code>{edge.fromId}</code>{edge.inferred ? ' · inferred' : ''}{edge.reason ? <small>{edge.reason}</small> : null}</li>)}
+              </ul>}
+            </div>}
+          </li>
+        })}
       </ul>
     </section>
   </div>

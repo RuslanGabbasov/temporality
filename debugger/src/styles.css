@@ -334,4 +334,16 @@ dialog::backdrop { background: #020408cc; backdrop-filter: blur(3px); }
 .member-state.invalidated, .member-state.superseded { color: #565f89; border-color: #565f89; }
 .cluster-members p { margin: .3rem 0 0; color: #aebdcc; font-size: .7rem; line-height: 1.45; }
 .activation-link line:hover { stroke-width: 2; }
+.activation-link.failed line { animation: none; }
+.lineage-link path:hover { stroke-width: 2.2; opacity: 1; }
+.cluster-members li { cursor: pointer; }
+.cluster-members li:hover { background: rgba(255, 255, 255, .02); }
+.cluster-members li.open { background: rgba(255, 255, 255, .03); }
+.member-detail { margin-top: .45rem; padding: .45rem .55rem; border-left: 2px solid var(--line-bright); }
+.member-counts { color: var(--muted); font: .62rem "SFMono-Regular", monospace; }
+.member-episodes { margin-top: .35rem; }
+.lineage-list { list-style: none; margin: .4rem 0 0; padding: 0; }
+.lineage-list li { color: #ff9e64; font: .64rem "SFMono-Regular", monospace; padding: .2rem 0; border-bottom: 1px dashed var(--line); }
+.lineage-list code { color: #b4d9ff; font: .62rem "SFMono-Regular", monospace; word-break: break-all; }
+.lineage-list small { display: block; color: var(--muted); font-size: .6rem; margin-top: .15rem; }
 @media (max-width: 1080px) { .experience-grid { grid-template-columns: 1fr; }.experience-detail { border-left: 0; border-top: 1px solid var(--line); max-height: 50vh; } }

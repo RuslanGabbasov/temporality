@@ -95,12 +95,28 @@ export interface ActivationLink {
   offeredRun?: string
   usedAt?: string
   usedRun?: string
+  /** Final status of the run that consumed the hint (joined post-fold):
+   * distinguishes “injected → reused” from “injected → run.failed”. */
+  usedRunStatus?: string
+}
+
+/** Old knowledge → replacing knowledge edge. Explicit when carried by a
+ * corrected/superseded event (replacement_id); inferred when an invalidation
+ * reason references another knowledge item of the same project. */
+export interface KnowledgeLineage {
+  fromId: string
+  toId: string
+  reason?: string
+  eventId: string
+  at: string
+  inferred: boolean
 }
 
 export interface ExperienceModel {
   runs: RunInfo[]
   clusters: ExperienceCluster[]
   links: ActivationLink[]
+  lineage: KnowledgeLineage[]
   bounds: { from: string; to: string }
   totals: { events: number; knowledge: number }
 }
@@ -216,6 +232,10 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
   const links: ActivationLink[] = []
   const offered = new Map<string, ActivationLink>()
   const clusterOfKnowledge = new Map<string, string>()
+  const lineage: KnowledgeLineage[] = []
+  // Invalidations whose reason may reference the replacing knowledge; resolved
+  // after the pass because the referenced item can appear later in the stream.
+  const pendingInferences: { fromId: string; refs: string[]; reason?: string; eventId: string; at: string }[] = []
   let first = ''
   let last = ''
 
@@ -262,6 +282,18 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
 
     const knowledgeId = stringOf(event.data?.knowledge_id)
     if (!knowledgeId) continue
+
+    if (event.type === 'knowledge.corrected' || event.type === 'knowledge.superseded') {
+      const replacement = stringOf(event.data?.replacement_id)
+      if (replacement) {
+        lineage.push({ fromId: knowledgeId, toId: replacement, reason: stringOf(event.data?.reason) || undefined, eventId: event.event_id, at: event.occurred_at, inferred: false })
+      }
+    }
+    if (event.type === 'knowledge.invalidated') {
+      const reason = stringOf(event.data?.reason)
+      const refs = reason ? [...reason.matchAll(/([A-Za-z0-9_-]+\/knowledge\/[A-Za-z0-9_-]+)/g)].map((match) => match[1]).filter((ref) => ref !== knowledgeId) : []
+      if (refs.length) pendingInferences.push({ fromId: knowledgeId, refs, reason: reason || undefined, eventId: event.event_id, at: event.occurred_at })
+    }
 
     if (event.type === 'knowledge.proposed') {
       const existing = members.get(knowledgeId)
@@ -370,6 +402,21 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
   }
   for (const link of links) link.clusterId = clusterOfKnowledge.get(link.knowledgeId) ?? ''
 
+  // Inferred lineage: an invalidation reason may name the knowledge item
+  // that replaced the invalidated one. Only refs that exist as members
+  // become edges; unknown references are ignored.
+  for (const pending of pendingInferences) {
+    for (const ref of pending.refs) {
+      if (!members.has(ref)) continue
+      lineage.push({ fromId: pending.fromId, toId: ref, reason: pending.reason, eventId: pending.eventId, at: pending.at, inferred: true })
+    }
+  }
+  // Join the consuming run's final status so the UI can distinguish
+  // “injected → reused” from “injected → run.failed”.
+  for (const link of links) {
+    if (link.usedRun) link.usedRunStatus = runs.get(link.usedRun)?.status
+  }
+
   const clusterList = [...clusters.values()].map((cluster) => {
     // Stable sort by time only: ties keep stream order (received_at), which
     // already places a hint offer before the injection that consumed it.
@@ -391,6 +438,7 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
     runs: runList,
     clusters: clusterList,
     links: links.filter((link) => link.clusterId),
+    lineage,
     bounds: { from: first, to: last },
     totals: { events: events.length, knowledge: members.size },
   }

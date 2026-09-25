@@ -169,6 +169,42 @@ describe('foldExperience', () => {
     expect(goTest?.strength).toBeLessThan(0.5)
   })
 
+  it('records explicit lineage from corrected/superseded replacement ids', () => {
+    const corrected = foldExperience([
+      event('knowledge.proposed', T0, { knowledge_id: 'auto/old', proposition: 'Verification command `go vet ./...` exited 0', kind: 'observation', policy_id: 'p', command: 'go vet ./...', command_class: 'test' }, { run: 'r/coder' }),
+      event('knowledge.proposed', T1, { knowledge_id: 'auto/new', proposition: 'Verification command `go vet ./...` exits 1 until generated', kind: 'observation', policy_id: 'p', command: 'go vet ./...', command_class: 'test' }, { run: 'r/coder' }),
+      event('knowledge.corrected', T2, { knowledge_id: 'auto/old', replacement_id: 'auto/new', reason: 'v2 vet behavior changed' }, { run: 'r/coder' }),
+    ])
+    expect(corrected.lineage).toEqual([
+      { fromId: 'auto/old', toId: 'auto/new', reason: 'v2 vet behavior changed', eventId: expect.any(String), at: T2, inferred: false },
+    ])
+  })
+
+  it('infers lineage from invalidation reasons and ignores unknown refs', () => {
+    const gatekeeper = foldExperience([
+      event('knowledge.proposed', T0, { knowledge_id: 'gk-01/knowledge/77', proposition: 'gatekeeper v2 authenticates via token file; env var rejected', kind: 'claim' }, { run: 'gk-01' }),
+      event('knowledge.proposed', T1, { knowledge_id: 'gk-02b/knowledge/88', proposition: 'gatekeeper end-to-end token file setup works', kind: 'claim' }, { run: 'gk-02b' }),
+      event('knowledge.proposed', T2, { knowledge_id: 'gk-03/knowledge/86', proposition: 'gatekeeper v3 authenticates via env var AUTH_TOKEN', kind: 'claim' }, { run: 'gk-03' }),
+      event('knowledge.invalidated', T3, { knowledge_id: 'gk-01/knowledge/77', reason: 'v2 assumptions no longer hold (see gk-03/knowledge/86 and missing/99)' }, { run: 'gk-03' }),
+      event('knowledge.invalidated', T3, { knowledge_id: 'gk-02b/knowledge/88', reason: 'superseded environment, see gk-03/knowledge/86' }, { run: 'gk-03' }),
+    ])
+    expect(gatekeeper.lineage).toHaveLength(2)
+    expect(gatekeeper.lineage.every((edge) => edge.toId === 'gk-03/knowledge/86' && edge.inferred)).toBe(true)
+    expect(gatekeeper.lineage.map((edge) => edge.fromId).sort()).toEqual(['gk-01/knowledge/77', 'gk-02b/knowledge/88'])
+  })
+
+  it('joins the consuming run status onto activation links', () => {
+    const failed = foldExperience([
+      event('knowledge.proposed', T0, { knowledge_id: 'auto/k', proposition: 'Verification command `go test ./...` exited 0', kind: 'observation', policy_id: 'p', command: 'go test ./...', command_class: 'test' }, { run: 'r01/coder' }),
+      event('run.started', '2026-09-24T14:00:00Z', {}, { run: 'r02' }),
+      event('hint.offered', T1, { hint_id: 'h1', knowledge_id: 'auto/k', state: 'confirmed' }, { run: 'r02' }),
+      event('knowledge.used', T1, { knowledge_id: 'auto/k', hint_id: 'h1' }, { run: 'r02' }),
+      event('run.failed', '2026-09-24T14:05:00Z', { status: 'failed' }, { run: 'r02' }),
+    ])
+    expect(failed.links).toHaveLength(1)
+    expect(failed.links[0]).toMatchObject({ usedRun: 'r02', usedRunStatus: 'failed' })
+  })
+
   it('marks archived knowledge and keeps usage events recordable after terminal states', () => {
     const archived = foldExperience([
       event('knowledge.proposed', T0, { knowledge_id: 'auto/x', proposition: 'Verification command `go vet ./...` exited 0', kind: 'observation', policy_id: 'p', command: 'go vet ./...', command_class: 'test' }, { run: 'r/coder' }),
