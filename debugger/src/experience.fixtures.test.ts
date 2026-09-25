@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { ObservationEvent } from './observationApi'
-import { aliveRowAt, foldExperience, forensicOf } from './experience'
+import { aliveRowAt, foldExperience, forensicOf, stateBucket } from './experience'
 import exp4 from './fixtures/experiment4-gatekeeper.json'
 import exp5 from './fixtures/experiment5-nightlybox.json'
+import exp6 from './fixtures/experiment6-relay.json'
 
 const GATEKEEPER = exp4 as unknown as ObservationEvent[]
 const NIGHTLYBOX = exp5 as unknown as ObservationEvent[]
+const RELAY = exp6 as unknown as ObservationEvent[]
 
 const K = (run: string, id: string) => `${run}/knowledge/${id}`
 
@@ -129,6 +131,79 @@ describe('Experiment 5 fixture — accumulation, selective death, recall hygiene
     const run06 = model.runs.find((run) => run.id === 'nightly-20260925-06')
     expect(run06).toBeDefined()
     expect(aliveRowAt(model.rows, run06!.startedAt)).toBe(3)
+  })
+})
+
+// Experiment 6 (§ examples/experiment6/README.md): the third acceptance
+// corpus adds two properties the earlier fixtures could not show — a
+// supersession CHAIN across two environment flips with semantic resurrection
+// (a3 restores a1's claim in a new living node), and STALE knowledge that is
+// challenged but neither confirmed nor contradicted, and therefore still
+// offered (with caution) instead of being retired.
+describe('Experiment 6 fixture — competing experiences across two flips', () => {
+  const model = foldExperience(RELAY)
+
+  const A1 = K('relay-20260925-01', '89')
+  const A2 = K('relay-20260925-04', '54')
+  const A3 = K('relay-20260925-07', '80')
+  const B1 = K('relay-20260925-02b', '76')
+  const C1 = K('relay-20260925-05b', '78')
+  const C2 = K('relay-20260925-07', '83')
+
+  const row = (id: string) => model.rows.find((item) => item.knowledgeId === id)
+
+  it('folds the recorded corpus shape', () => {
+    expect(model.totals.events).toBe(966)
+    expect(model.runs).toHaveLength(11)
+    // failure lanes stay in the history: 02 (no remember) and 05 (tool schema slip)
+    expect(model.runs.filter((run) => run.status === 'turn_limit').map((run) => run.id)).toEqual(['relay-20260925-01', 'relay-20260925-02', 'relay-20260925-05'])
+  })
+
+  it('auth experiences appear in their discovery runs and share the auth lane', () => {
+    expect(appearedIn(RELAY, A1)).toBe('relay-20260925-01')
+    expect(appearedIn(RELAY, A2)).toBe('relay-20260925-04')
+    expect(appearedIn(RELAY, A3)).toBe('relay-20260925-07')
+    expect(row(A1)?.scopes.primary).toBe('auth')
+    expect(row(A2)?.scopes.primary).toBe('auth')
+    expect(row(A3)?.scopes.primary).toBe('auth')
+  })
+
+  it('builds the full supersession chain a1 → a2 → a3 from invalidation reasons', () => {
+    expect(model.lineage.map((edge) => `${edge.fromId}->${edge.toId}`)).toEqual([`${A1}->${A2}`, `${A2}->${A3}`])
+    expect(model.lineage.every((edge) => edge.inferred)).toBe(true)
+    expect(row(A1)?.state).toBe('invalidated')
+    expect(row(A2)?.state).toBe('invalidated')
+  })
+
+  it('a3 is a living resurrection of the a1 claim', () => {
+    expect(row(A3)?.state).toBe('proposed')
+    expect(row(A3)?.terminal).toBeUndefined()
+    expect(row(A3)?.proposition).toMatch(/API_KEY/)
+    expect(row(A1)?.proposition).toMatch(/API_KEY/)
+  })
+
+  it('b1 is reused across the flips and never dies', () => {
+    expect(row(B1)?.terminal).toBeUndefined()
+    expect(row(B1)?.scopes.primary).toBe('push')
+    const reusedIn = model.links.filter((link) => link.knowledgeId === B1).map((link) => link.usedRun)
+    for (const run of ['relay-20260925-03', 'relay-20260925-06', 'relay-20260925-08', 'relay-20260925-09']) {
+      expect(reusedIn).toContain(run)
+    }
+  })
+
+  it('c1 is stale: challenged, not retired, and still offered in run 09', () => {
+    expect(row(C1)?.state).toBe('challenged')
+    expect(stateBucket(row(C1)!.state)).toBe('stale')
+    expect(row(C1)?.terminal).toBeUndefined()
+    const run09 = model.links.filter((link) => link.usedRun === 'relay-20260925-09').map((link) => link.knowledgeId)
+    expect(run09).toContain(C1)
+  })
+
+  it('run 09 recalls the living truth and neither dead auth experience', () => {
+    const run09 = model.links.filter((link) => link.usedRun === 'relay-20260925-09').map((link) => link.knowledgeId)
+    for (const id of [A3, B1, C1, C2]) expect(run09).toContain(id)
+    expect(run09).not.toContain(A1)
+    expect(run09).not.toContain(A2)
   })
 })
 

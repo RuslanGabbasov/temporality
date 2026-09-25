@@ -296,11 +296,22 @@ export function segmentSubcommand(tokens: string[]): string | undefined {
 }
 
 /** Mechanisms a proposition talks about, matched against the project's
- * executed-command vocabulary (exact word match, case-insensitive). */
+ * executed-command vocabulary. Backtick code spans are the authoritative
+ * signal — prose like "In this relay CLI build" must not read as the `build`
+ * mechanism — with a whole-text fallback for claims that never quote a
+ * command (e.g. nightly K82 mentions `nb auth` only in prose). */
 export function propositionMechanisms(proposition: string, vocabulary: Set<string>): string[] {
   if (!vocabulary.size || !proposition) return []
-  const tokens = new Set(proposition.toLowerCase().split(/[^a-z0-9_-]+/i).filter(Boolean))
-  return [...vocabulary].filter((mechanism) => tokens.has(mechanism)).sort()
+  const hit = (text: string) => {
+    const tokens = new Set(text.toLowerCase().split(/[^a-z0-9_-]+/i).filter(Boolean))
+    return [...vocabulary].filter((mechanism) => tokens.has(mechanism)).sort()
+  }
+  const spans = [...proposition.matchAll(/`([^`]*)`/g)].map((match) => match[1])
+  if (spans.length) {
+    const quoted = hit(spans.join(' '))
+    if (quoted.length) return quoted
+  }
+  return hit(proposition)
 }
 
 /** Memory population: how many experiences are alive at a moment. */
