@@ -96,6 +96,9 @@ services:
       TEMPORALITY_API_TOKEN: ${TEMPORALITY_API_TOKEN:-}
       # Optional MCP server identity recorded on mcp.call.* events.
       KERNEL_MCP_SERVER_NAME: ${KERNEL_MCP_SERVER_NAME:-}
+      # Fault injection for reconciliation drills: the named operation's effect
+      # really executes, then the worker dies before the terminal event lands.
+      KERNEL_FAULT_AFTER_EFFECT: ${KERNEL_FAULT_AFTER_EFFECT:-}
       KERNEL_SANDBOX_ROOT: ${TEMPORALITY_SANDBOX_ROOT:-}
       KERNEL_SANDBOX_IMAGE: ${KERNEL_SANDBOX_IMAGE:-}
     ports:

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/temporality-project/temporality/kernel/llm"
@@ -24,6 +25,14 @@ type EventOutbox interface {
 	Enqueue(context.Context, observation.Event) error
 }
 
+// SandboxRunner is the sandbox contract the kernel depends on: resolving a
+// workspace against the configured root and executing commands inside it.
+// It exists so failure-injection drills can fake the runner in tests.
+type SandboxRunner interface {
+	ResolveWorkspace(path string) (string, error)
+	Execute(context.Context, sandbox.Request) (sandbox.Result, error)
+}
+
 type Activities struct {
 	Events         EventOutbox
 	Model          *llm.Client
@@ -35,7 +44,7 @@ type Activities struct {
 	APIToken string
 	MCP      *mcpclient.Client
 	SourceID string
-	Sandbox  *sandbox.Docker
+	Sandbox  SandboxRunner
 }
 
 func NewActivities(events EventOutbox) (*Activities, error) {
@@ -150,7 +159,7 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		if value, ok := request.Arguments["timeout_sec"].(float64); ok {
 			timeout = int(value)
 		}
-		if fault := strings.TrimSpace(os.Getenv("KERNEL_FAULT_AFTER_EFFECT")); fault != "" && request.OperationID == fault {
+		if faultAfterEffect(request.RunID, "run_command", request.OperationID) {
 			// Fault injection for live reconciliation drills: run the command for
 			// real (the effect lands), then report a worker-style crash so the
 			// workflow records tool.failed with effect=uncertain.
@@ -167,10 +176,14 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return ToolResult{Content: fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, result.Output), ExitCode: &exitCode}, nil
 	default:
 		if a.MCP != nil && a.MCP.HasTool(request.Name) {
-			if fault := strings.TrimSpace(os.Getenv("KERNEL_FAULT_AFTER_EFFECT")); fault != "" && request.OperationID == fault {
-				// Fault injection for live reconciliation drills: the effect has
-				// committed, but the worker "dies" before reporting the result.
-				// Downstream, this is indistinguishable from a real crash window.
+			if faultAfterEffect(request.RunID, request.Name, request.OperationID) {
+				// The effect must really commit before the "crash": the drill
+				// exercises the window where the side effect landed but no
+				// terminal event will ever arrive. The idempotency key keeps a
+				// later operator-driven re-issue from duplicating it.
+				if _, err := a.MCP.Call(ctx, request.Name, request.Arguments, request.OperationID); err != nil {
+					return ToolResult{}, err
+				}
 				return ToolResult{}, fmt.Errorf("injected worker crash after effect (operation %s)", request.OperationID)
 			}
 			content, err := a.MCP.Call(ctx, request.Name, request.Arguments, request.OperationID)
@@ -197,6 +210,36 @@ func stringArgs(value any) ([]string, error) {
 	default:
 		return nil, errors.New("command must be an array of strings")
 	}
+}
+
+// faultDrilled tracks which runs already consumed the tool-name fault drill;
+// entries live for the worker's lifetime, one per drilled run.
+var (
+	faultMu      sync.Mutex
+	faultDrilled = map[string]bool{}
+)
+
+// faultAfterEffect reports whether this call should simulate a worker crash
+// after its effect lands. KERNEL_FAULT_AFTER_EFFECT holds either an exact
+// operation id, or a tool name ("run_command", "mcp__create_issue") which
+// faults the first matching execution per run — operation ids embed
+// model-generated call ids and cannot be predicted before the run starts,
+// which is what a live drill needs.
+func faultAfterEffect(runID, toolName, operationID string) bool {
+	fault := strings.TrimSpace(os.Getenv("KERNEL_FAULT_AFTER_EFFECT"))
+	if fault == "" || (fault != toolName && fault != operationID) {
+		return false
+	}
+	if fault == operationID {
+		return true
+	}
+	faultMu.Lock()
+	defer faultMu.Unlock()
+	if faultDrilled[runID] {
+		return false
+	}
+	faultDrilled[runID] = true
+	return true
 }
 
 func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([]Hint, error) {
