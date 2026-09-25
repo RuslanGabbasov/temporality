@@ -83,23 +83,32 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 	if err != nil {
 		return nil, err
 	}
-	terminals := map[string]bool{}
+	terminals := map[string]observation.Event{}
 	for _, terminalType := range []string{"tool.completed", "tool.failed", "tool.blocked"} {
 		events, err := a.toolEvents(ctx, project, terminalType)
 		if err != nil {
 			return nil, err
 		}
 		for _, event := range events {
-			terminals[eventKey(event)] = true
+			terminals[eventKey(event)] = event
 		}
 	}
 	var uncertain []UncertainOperation
 	for _, event := range started {
-		if terminals[eventKey(event)] {
-			continue
-		}
 		operation, ok := operationFromEvent(event)
 		if !ok {
+			continue
+		}
+		if terminal, settled := terminals[eventKey(event)]; settled {
+			// A failed activity does not settle the effect question: the failure
+			// happened at or after the execution boundary (effect=uncertain; legacy
+			// events without the field but with error_type=activity_failed count
+			// too). Completed/blocked operations are settled for real.
+			if terminal.Type == "tool.failed" && failedUncertain(terminal) {
+				operation.State = OperationStateUncertain
+				operation.Reason = "failed_uncertain"
+				uncertain = append(uncertain, operation)
+			}
 			continue
 		}
 		running, err := liveness.IsWorkflowRunning(ctx, event.Source.ID, event.Context.Project, event.Context.Run)
@@ -192,6 +201,19 @@ func operationFromEvent(event observation.Event) (UncertainOperation, bool) {
 func dataString(data map[string]any, key string) string {
 	value, _ := data[key].(string)
 	return value
+}
+
+// failedUncertain reports whether a tool.failed event leaves the effect
+// unresolved: explicit effect=uncertain, or a legacy activity failure
+// recorded before the field existed (effect=none rejections are settled).
+func failedUncertain(event observation.Event) bool {
+	switch dataString(event.Data, "effect") {
+	case "none":
+		return false
+	case "uncertain":
+		return true
+	}
+	return dataString(event.Data, "error_type") == "activity_failed"
 }
 
 // RecordReconciliation writes the durable operation.reconciled event. It is

@@ -61,6 +61,10 @@ func toolEvent(project, run, operationID, eventType string, occurredAt time.Time
 	if eventType == "tool.started" {
 		data["server"] = ""
 	}
+	if eventType == "tool.failed" {
+		data["error_type"] = "activity_failed"
+		data["effect"] = "uncertain"
+	}
 	return observation.Event{
 		Schema: "temporality.event/1", EventID: eventType + "/" + operationID, OccurredAt: occurredAt,
 		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel"},
@@ -72,13 +76,21 @@ func toolEvent(project, run, operationID, eventType string, occurredAt time.Time
 func TestUncertainOperationsCrashWindow(t *testing.T) {
 	old := time.Now().Add(-time.Hour)
 	recent := time.Now().Add(-time.Minute)
+	rejected := toolEvent("repo", "run-6", "op-rejected", "tool.failed", old)
+	rejected.Data["effect"] = "none"
+	rejected.Data["error_type"] = "argument_rejected"
 	server := journalStub(t,
 		toolEvent("repo", "run-1", "op-done", "tool.started", old),
 		toolEvent("repo", "run-1", "op-done", "tool.completed", old),
 		toolEvent("repo", "run-2", "op-crashed", "tool.started", old),
 		toolEvent("repo", "run-3", "op-live", "tool.started", recent),
 		toolEvent("repo", "run-4", "op-stale", "tool.started", old),
+		toolEvent("repo", "run-5", "op-failed", "tool.started", old),
+		toolEvent("repo", "run-5", "op-failed", "tool.failed", old),
+		toolEvent("repo", "run-6", "op-rejected", "tool.started", old),
+		rejected,
 	)
+	// op-rejected was refused before execution (effect=none) — settled.
 	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "writer"}
 	liveness := stubLiveness{running: map[string]bool{"run-3": true, "run-4": true}}
 
@@ -93,6 +105,9 @@ func TestUncertainOperationsCrashWindow(t *testing.T) {
 	require.Contains(t, ids, "op-crashed", "missing terminal event after workflow end is the crash window")
 	require.Equal(t, "crash_window", ids["op-crashed"].Reason)
 	require.Equal(t, UncertainOperation{State: "uncertain", Reason: "crash_window"}, UncertainOperation{State: ids["op-crashed"].State, Reason: ids["op-crashed"].Reason})
+	require.Contains(t, ids, "op-failed", "an activity failure at the execution boundary leaves the effect uncertain")
+	require.Equal(t, "failed_uncertain", ids["op-failed"].Reason)
+	require.NotContains(t, ids, "op-rejected", "pre-execution rejection (effect=none) is settled")
 	require.NotContains(t, ids, "op-live", "fresh tool.started inside a running workflow is still in flight")
 	require.Contains(t, ids, "op-stale", "a tool.started older than the activity budget inside a running workflow went uncertain")
 	require.Equal(t, "stale_in_flight", ids["op-stale"].Reason)
