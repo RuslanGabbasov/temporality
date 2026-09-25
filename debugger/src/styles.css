@@ -287,6 +287,8 @@ dialog::backdrop { background: #020408cc; backdrop-filter: blur(3px); }
 .experience-lens button:hover { color: var(--cyan); border-color: var(--cyan); }
 .kind-chip { border-radius: 999px !important; padding: .22rem .6rem !important; }
 .kind-chip.on { color: var(--chip) !important; border-color: var(--chip) !important; }
+.preset-chip { border-radius: 999px !important; padding: .22rem .65rem !important; }
+.preset-chip.on { color: #e0af68 !important; border-color: #e0af68 !important; background: rgba(224, 175, 104, .08) !important; }
 .experience-filters { display: flex; align-items: center; gap: 1rem; padding: .55rem 1.25rem; border-bottom: 1px solid var(--line); }
 .experience-filters label { display: grid; gap: .3rem; color: var(--muted); font-size: .66rem; }
 .experience-filters select { padding: .3rem .4rem; border: 1px solid var(--line-bright); border-radius: 5px; background: #0b1016; color: var(--fg); font-size: .72rem; }
@@ -374,4 +376,11 @@ dialog::backdrop { background: #020408cc; backdrop-filter: blur(3px); }
 .forensic-activations small { display: block; color: var(--muted); font-size: .6rem; }
 .forensic-reason { margin: .25rem 0 0; color: #aebdcc; font-size: .64rem; line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .forensic-successor { margin: .3rem 0 0; color: #ff9e64; font: .64rem "SFMono-Regular", monospace; }
+.focus-marker line { stroke: #e0af68; stroke-width: 1; stroke-dasharray: 4 3; opacity: .85; }
+.focus-marker circle { fill: #e0af68; animation: focus-pulse 1.4s ease-in-out infinite; }
+.point-focus-ring { fill: none; stroke: #e0af68; stroke-width: 1.2; animation: focus-pulse 1.4s ease-in-out infinite; }
+@keyframes focus-pulse { 0%, 100% { opacity: .2 } 50% { opacity: 1 } }
+.forensic-head.clickable, .forensic-activations li, .cluster-points li { cursor: pointer; }
+.forensic-head.clickable:hover { color: #fff; }
+.forensic-activations li:hover, .cluster-points li:hover { background: rgba(255, 255, 255, .03); }
 @media (max-width: 1080px) { .experience-grid { grid-template-columns: 1fr; }.experience-detail { border-left: 0; border-top: 1px solid var(--line); max-height: 50vh; } }

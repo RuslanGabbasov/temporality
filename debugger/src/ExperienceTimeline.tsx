@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_BASE } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
-import { aliveRowAt, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type RunInfo } from './experience'
+import { aliveRowAt, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type RunInfo } from './experience'
 
 const GUTTER = 210
 const AXIS_HEIGHT = 34
@@ -44,6 +44,17 @@ interface Lens {
 
 const DEFAULT_LENS: Lens = { trajectory: true, experience: true, lifecycle: true, conflicts: false, activation: false }
 
+// §12 memory-lens presets: quick ways to see only the activation chains or
+// only the conflicts, on top of the same folded event space.
+const ACTIVATION_KINDS: LifecycleKind[] = ['recalled', 'injected', 'reused']
+const CONFLICT_KINDS: LifecycleKind[] = ['contradicted', 'weakened', 'archived']
+const PRESETS = {
+  all: { lens: DEFAULT_LENS, kinds: LIFECYCLE_KINDS },
+  activation: { lens: { trajectory: true, experience: true, lifecycle: true, conflicts: false, activation: true }, kinds: ACTIVATION_KINDS },
+  conflicts: { lens: { trajectory: false, experience: true, lifecycle: true, conflicts: true, activation: false }, kinds: CONFLICT_KINDS },
+} as const
+type PresetName = keyof typeof PRESETS
+
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 function shortRun(id: string) {
   const parts = id.split('/')
@@ -83,6 +94,7 @@ export default function ExperienceTimeline() {
   const [bucketFilter, setBucketFilter] = useState<'all' | MemoryBucket>('all')
   const [hiddenRoots, setHiddenRoots] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState('')
+  const [focus, setFocus] = useState<{ at: string; eventId: string; label: string } | null>(null)
   const [window_, setWindow] = useState<{ t0: number; t1: number } | null>(null)
   const [width, setWidth] = useState(1100)
 
@@ -240,6 +252,15 @@ export default function ExperienceTimeline() {
     else next.add(root)
     return next
   })
+  const focusOn = (at: string, eventId: string, label: string) => {
+    setFocus({ at, eventId, label })
+    setWindow(windowAround(at, model.bounds))
+  }
+  const activePreset: PresetName | 'custom' = (Object.keys(PRESETS) as PresetName[]).find((name) => {
+    const preset = PRESETS[name]
+    return (Object.keys(DEFAULT_LENS) as (keyof Lens)[]).every((key) => lens[key] === preset.lens[key]) &&
+      kinds.size === preset.kinds.length && [...kinds].every((kind) => preset.kinds.includes(kind))
+  }) ?? 'custom'
 
   const step = tickStep(view.active.t1 - view.active.t0, track)
   const ticks: number[] = []
@@ -263,7 +284,11 @@ export default function ExperienceTimeline() {
         </label>
       ))}
       <span className="lens-sep" />
-      <button onClick={() => setWindow(null)}>fit</button>
+      {(Object.keys(PRESETS) as PresetName[]).map((name) => (
+        <button key={name} className={`preset-chip ${activePreset === name ? 'on' : ''}`} onClick={() => { setLens(PRESETS[name].lens); setKinds(new Set(PRESETS[name].kinds)) }}>{name === 'all' ? 'all' : `${name} only`}</button>
+      ))}
+      <span className="lens-sep" />
+      <button onClick={() => { setWindow(null); setFocus(null) }}>fit</button>
       <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 0.6))}>zoom +</button>
       <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 1.6))}>zoom −</button>
       <span className="lens-sep" />
@@ -381,9 +406,13 @@ export default function ExperienceTimeline() {
                     const px = x(point.at)
                     if (px < GUTTER || px > GUTTER + track) return null
                     const hollow = point.kind === 'contradicted' || point.kind === 'weakened'
-                    return <circle key={point.eventId} cx={px} cy={yLane} r={point.kind === 'appeared' ? 4.5 : 3.4} fill={hollow ? '#0b1016' : LIFECYCLE_COLORS[point.kind]} fillOpacity={point.kind === 'appeared' ? 0.25 : 0.95} stroke={LIFECYCLE_COLORS[point.kind]} strokeWidth={1.4}>
-                      <title>{`${point.kind} · ${point.at} · ${point.run ?? ''}${point.role ? ` (${point.role})` : ''}${point.rule ? ` · ${point.rule}` : ''}`}</title>
-                    </circle>
+                    const isFocus = focus?.eventId === point.eventId
+                    return <g key={point.eventId}>
+                      {isFocus && <circle cx={px} cy={yLane} r={8} className="point-focus-ring" />}
+                      <circle cx={px} cy={yLane} r={point.kind === 'appeared' ? 4.5 : 3.4} fill={hollow ? '#0b1016' : LIFECYCLE_COLORS[point.kind]} fillOpacity={point.kind === 'appeared' ? 0.25 : 0.95} stroke={LIFECYCLE_COLORS[point.kind]} strokeWidth={isFocus ? 2.4 : 1.4}>
+                        <title>{`${point.kind} · ${point.at} · ${point.run ?? ''}${point.role ? ` (${point.role})` : ''}${point.rule ? ` · ${point.rule}` : ''}`}</title>
+                      </circle>
+                    </g>
                   })}
                   {row.terminal && (() => {
                     const px = x(row.terminal.at)
@@ -436,6 +465,15 @@ export default function ExperienceTimeline() {
               <title>{`recall ${link.knowledgeId}\n${link.offeredRun} → ${link.usedRun}${failed ? ` · run ${link.usedRunStatus}` : ''}`}</title>
             </g>
           })}
+          {focus && (() => {
+            const px = x(focus.at)
+            if (px < GUTTER - 12 || px > GUTTER + track + 12) return null
+            return <g className="focus-marker">
+              <line x1={px} x2={px} y1={18} y2={view.height} />
+              <circle cx={px} cy={13} r={3.5} />
+              <title>{`${focus.label} · ${focus.at}`}</title>
+            </g>
+          })()}
           <defs>
             <marker id="activation-arrow" viewBox="0 0 8 8" refX={7} refY={4} markerWidth={6} markerHeight={6} orient="auto">
               <path d="M0,0 L8,4 L0,8 z" fill="#bb9af7" />
@@ -448,7 +486,7 @@ export default function ExperienceTimeline() {
         <p className="experience-hint">scroll — zoom · drag — pan · row click — details · bars are lifespans, points are events, ✕ marks death</p>
       </section>
       <aside className="obs-panel experience-detail">
-        {!selectedRow ? <p className="obs-empty">Выберите опыт на таймлайне — здесь появятся его жизненный цикл, эпизоды, происхождение и связи.</p> : <RowDetails row={selectedRow} lineage={model.lineage} forensic={forensicOf(selectedRow, model)} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} />}
+        {!selectedRow ? <p className="obs-empty">Выберите опыт на таймлайне — здесь появятся его жизненный цикл, эпизоды, происхождение и связи.</p> : <RowDetails row={selectedRow} lineage={model.lineage} forensic={forensicOf(selectedRow, model)} onFocus={focusOn} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} />}
       </aside>
     </main>
   </div>
@@ -480,7 +518,7 @@ function Header({ project, setProject, load, loading }: { project: string; setPr
   </header>
 }
 
-function RowDetails({ row, lineage, forensic, related }: { row: KnowledgeRow; lineage: KnowledgeLineage[]; forensic: ForensicRecord; related: KnowledgeRow[] }) {
+function RowDetails({ row, lineage, forensic, onFocus, related }: { row: KnowledgeRow; lineage: KnowledgeLineage[]; forensic: ForensicRecord; onFocus: (at: string, eventId: string, label: string) => void; related: KnowledgeRow[] }) {
   const counts = LIFECYCLE_KINDS.map((kind) => {
     const count = row.points.filter((point) => point.kind === kind).length
     return count ? `${kind} ×${count}` : ''
@@ -510,7 +548,7 @@ function RowDetails({ row, lineage, forensic, related }: { row: KnowledgeRow; li
     <section>
       <h4>Forensics</h4>
       {forensic.formed && <div className="forensic-block">
-        <p className="forensic-head">formed <time>{clock(forensic.formed.at)}</time>{forensic.formed.run ? ` · ${shortRun(forensic.formed.run)}` : ''}{forensic.formed.role ? ` · ${forensic.formed.role}` : ''}{forensic.formed.actor ? ` · by ${forensic.formed.actor}` : ''}</p>
+        <p className="forensic-head clickable" title="locate on timeline" onClick={() => onFocus(forensic.formed!.at, row.points.find((point) => point.kind === 'appeared')?.eventId ?? '', `formed · ${shortKnowledge(row.knowledgeId)}`)}>formed <time>{clock(forensic.formed.at)}</time>{forensic.formed.run ? ` · ${shortRun(forensic.formed.run)}` : ''}{forensic.formed.role ? ` · ${forensic.formed.role}` : ''}{forensic.formed.actor ? ` · by ${forensic.formed.actor}` : ''}</p>
         {forensic.formed.evidence.length > 0 && <ul className="forensic-evidence">
           {forensic.formed.evidence.map((item, index) => <li key={index} title={item.ref}>{item.ref}</li>)}
         </ul>}
@@ -522,7 +560,7 @@ function RowDetails({ row, lineage, forensic, related }: { row: KnowledgeRow; li
       {forensic.activations.length > 0 && <div className="forensic-block">
         <p className="forensic-head">activations · {forensic.activations.length}</p>
         <ul className="forensic-activations">
-          {forensic.activations.map((activation) => <li key={`${activation.offeredAt}-${activation.usedRun ?? 'unused'}`} data-status={activation.usedRunStatus}>
+          {forensic.activations.map((activation) => <li key={`${activation.offeredAt}-${activation.usedRun ?? 'unused'}`} data-status={activation.usedRunStatus} title="locate on timeline" onClick={() => onFocus(activation.usedAt ?? activation.offeredAt, '', `activation → ${activation.usedRun ?? 'not used'}`)}>
             <span>{activation.usedRun ? shortRun(activation.usedRun) : 'not used'}</span>
             <small>{activation.usedAt ? clock(activation.usedAt) : clock(activation.offeredAt)}{activation.usedRunStatus ? ` · run ${activation.usedRunStatus}` : ''}</small>
             {activation.commands.length > 0 && <details>
@@ -533,7 +571,7 @@ function RowDetails({ row, lineage, forensic, related }: { row: KnowledgeRow; li
         </ul>
       </div>}
       {forensic.deaths.map((death) => <div className="forensic-block forensic-death" key={death.eventId}>
-        <p className="forensic-head">{death.kind} <time>{clock(death.at)}</time>{death.actor ? ` · by ${death.actor}` : ''}{death.run ? ` · ${shortRun(death.run)}` : ' · manual'}</p>
+        <p className="forensic-head clickable" title="locate on timeline" onClick={() => onFocus(death.at, death.eventId, `${death.kind} · ${shortKnowledge(row.knowledgeId)}`)}>{death.kind} <time>{clock(death.at)}</time>{death.actor ? ` · by ${death.actor}` : ''}{death.run ? ` · ${shortRun(death.run)}` : ' · manual'}</p>
         {death.reason && <p className="forensic-reason" title={death.reason}>{death.reason}</p>}
         {death.supersededBy.length > 0 && <p className="forensic-successor">superseded by → {death.supersededBy.map(shortKnowledge).join(', ')}</p>}
       </div>)}
@@ -543,7 +581,7 @@ function RowDetails({ row, lineage, forensic, related }: { row: KnowledgeRow; li
       <h4>Lifecycle</h4>
       <p className="member-counts">{counts}</p>
       <ol className="cluster-points">
-        {row.points.map((point) => <li key={point.eventId} data-kind={point.kind}>
+        {row.points.map((point) => <li key={point.eventId} data-kind={point.kind} title="locate on timeline" onClick={() => onFocus(point.at, point.eventId, `${point.kind} · ${shortKnowledge(row.knowledgeId)}`)}>
           <span className="point-dot" style={{ background: LIFECYCLE_COLORS[point.kind] }} />
           <time>{point.at}</time>
           <strong>{point.kind}</strong>

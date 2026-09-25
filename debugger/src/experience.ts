@@ -755,6 +755,20 @@ export function forensicOf(row: KnowledgeRow, model: ExperienceModel): ForensicR
   return { formed, activations, deaths }
 }
 
+/** Time window centered on a lifecycle moment, clamped to the project bounds:
+ * what the forensic navigation uses to bring an event into view. */
+export function windowAround(at: string, bounds: { from: string; to: string }, minSpan = 30_000): { t0: number; t1: number } {
+  const target = new Date(at).getTime()
+  const from = new Date(bounds.from).getTime()
+  const to = new Date(bounds.to).getTime()
+  const span = Math.max(minSpan, (to - from) * 0.04)
+  let t0 = target - span / 2
+  let t1 = target + span / 2
+  if (t0 < from) { t1 += from - t0; t0 = from }
+  if (t1 > to) { t0 -= t1 - to; t1 = to }
+  return { t0: Math.max(from, t0), t1: Math.min(to, t1) }
+}
+
 function execClusterKeyOf(member: MemberFold): { id: string; title: string; scope: string; kind: 'execution'; command: string } {
   const canonical = canonicalCommand(member.command!)
   // Scope comes from the command itself (test/vet/build/fmt): the kernel's

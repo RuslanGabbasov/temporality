@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ObservationEvent } from './observationApi'
-import { aliveRowAt, commandSegments, contentTokens, foldExperience, lifecycleKindOf, propositionMechanisms, roleOfKnowledgeId, roleOfRun, runOfEvidenceRef, scopeOfCommand, segmentSubcommand, shortKnowledge, stateBucket } from './experience'
+import { aliveRowAt, commandSegments, contentTokens, foldExperience, lifecycleKindOf, propositionMechanisms, roleOfKnowledgeId, roleOfRun, runOfEvidenceRef, scopeOfCommand, segmentSubcommand, shortKnowledge, stateBucket, windowAround } from './experience'
 
 let counter = 0
 
@@ -265,5 +265,30 @@ describe('foldExperience', () => {
     expect(vet?.state).toBe('invalidated')
     // UI scope follows the command, not the kernel's coarse command_class.
     expect(vet?.scope).toBe('vet')
+  })
+})
+
+describe('windowAround (forensic navigation)', () => {
+  const bounds = { from: '2026-09-25T04:00:00Z', to: '2026-09-25T06:00:00Z' }
+
+  it('centers the window on the target moment', () => {
+    const { t0, t1 } = windowAround('2026-09-25T05:00:00Z', bounds)
+    const target = new Date('2026-09-25T05:00:00Z').getTime()
+    expect(t0).toBeLessThanOrEqual(target)
+    expect(t1).toBeGreaterThanOrEqual(target)
+    expect((t0 + t1) / 2).toBe(target)
+  })
+
+  it('clamps to the project bounds near the edges', () => {
+    const early = windowAround('2026-09-25T04:00:10Z', bounds)
+    expect(early.t0).toBe(new Date(bounds.from).getTime())
+    expect(early.t1).toBeGreaterThan(early.t0)
+    const late = windowAround('2026-09-25T05:59:50Z', bounds)
+    expect(late.t1).toBe(new Date(bounds.to).getTime())
+  })
+
+  it('never shrinks below the minimum span', () => {
+    const tight = windowAround('2026-09-25T05:00:00Z', { from: '2026-09-25T04:59:40Z', to: '2026-09-25T05:00:20Z' })
+    expect(tight.t1 - tight.t0).toBeGreaterThanOrEqual(30_000)
   })
 })
