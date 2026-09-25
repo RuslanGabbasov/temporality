@@ -4,10 +4,12 @@ import { aliveRowAt, foldExperience, forensicOf, stateBucket } from './experienc
 import exp4 from './fixtures/experiment4-gatekeeper.json'
 import exp5 from './fixtures/experiment5-nightlybox.json'
 import exp6 from './fixtures/experiment6-relay.json'
+import exp7 from './fixtures/experiment7-forge.json'
 
 const GATEKEEPER = exp4 as unknown as ObservationEvent[]
 const NIGHTLYBOX = exp5 as unknown as ObservationEvent[]
 const RELAY = exp6 as unknown as ObservationEvent[]
+const FORGE = exp7 as unknown as ObservationEvent[]
 
 const K = (run: string, id: string) => `${run}/knowledge/${id}`
 
@@ -204,6 +206,103 @@ describe('Experiment 6 fixture — competing experiences across two flips', () =
     for (const id of [A3, B1, C1, C2]) expect(run09).toContain(id)
     expect(run09).not.toContain(A1)
     expect(run09).not.toContain(A2)
+  })
+})
+
+// Experiment 7 (§ examples/experiment7/README.md): the scale corpus. Five
+// forge mechanisms, two of which flip in v2; 16 runs; reinforcement loops
+// (stable experiences recalled in EVERY later run); a competing build pair
+// (b1 challenged, b2 appears while b1 is still alive, b1 dies only after the
+// operator resolves the competition); and the budget-displacement finding —
+// the kernel's fixed hint budget let stable auto observations crowd the
+// corrected v2 claims out of recall entirely, so run 13 re-derived pack
+// semantics and recorded a duplicate. The displacement assertions pin the
+// OBSERVED behaviour (used=0), not the desired one.
+describe('Experiment 7 fixture — reinforcement, competing pair, scale', () => {
+  const model = foldExperience(FORGE)
+
+  const A1 = K('forge-20260925-01', '99') // login via FORGE_TOKEN
+  const P1 = K('forge-20260925-02', '90') // publish requires CHANNEL
+  const B1 = K('forge-20260925-03', '89') // build v1: no cache layer
+  const K1 = K('forge-20260925-04', '69') // pack v1: dist.tar.gz
+  const S1 = K('forge-20260925-05', '104') // sign v1: SIGN_KEY
+  const E1 = K('forge-20260925-06', '102') // end-to-end v1
+  const B2 = K('forge-20260925-08b', '118') // build v2: cache layer
+  const K2 = K('forge-20260925-09', '99') // pack v2: dist.zip
+  const S2 = K('forge-20260925-10b', '88') // sign v2: SIGNING_KEY
+  const E2 = K('forge-20260925-11', '105') // end-to-end v2
+  const E3 = K('forge-20260925-12', '112') // end-to-end v3
+  const DUP = K('forge-20260925-13', '99') // duplicate pack v2 rediscovery
+  const GO_TEST = 'auto/36ddc4e27eb32101c7b39641'
+
+  const row = (id: string) => model.rows.find((item) => item.knowledgeId === id)
+  const usedIn = (id: string) => model.links.filter((link) => link.knowledgeId === id).map((link) => link.usedRun)
+
+  it('folds the recorded corpus shape', () => {
+    expect(model.totals.events).toBe(1884)
+    expect(model.rows).toHaveLength(20)
+    expect(model.runs).toHaveLength(16)
+    expect(model.links).toHaveLength(110)
+  })
+
+  it('reinforcement: stable experiences are recalled in every later run', () => {
+    expect(usedIn(A1)).toHaveLength(15)
+    expect(usedIn(P1)).toHaveLength(14)
+    expect(usedIn(GO_TEST)).toHaveLength(15)
+  })
+
+  it('the build pair competes: b2 appears while b1 is alive, b1 dies later', () => {
+    const b1 = row(B1)!
+    const b2 = row(B2)!
+    expect(b1.scopes.primary).toBe('build')
+    expect(b2.scopes.primary).toBe('build')
+    expect(b2.terminal).toBeUndefined()
+    // b2 appeared in 08b; b1's invalidation only came after run 12
+    expect(b1.terminal).toBeDefined()
+    expect(b2.firstAt < b1.terminal!.at).toBe(true)
+    // the operator challenge of run 07 is visible in b1's lifecycle points
+    expect(b1.points.map((point) => point.kind)).toContain('contradicted')
+  })
+
+  it('derives the full supersession set from operator invalidations', () => {
+    expect(model.lineage.map((edge) => `${edge.fromId}->${edge.toId}`).sort()).toEqual(
+      [`${B1}->${B2}`, `${E1}->${E2}`, `${K1}->${K2}`, `${S1}->${S2}`].sort(),
+    )
+    expect(model.lineage.every((edge) => edge.inferred)).toBe(true)
+  })
+
+  it('selective death: v1 mechanisms die, login and publish survive', () => {
+    for (const id of [B1, K1, S1, E1]) expect(row(id)?.state).toBe('invalidated')
+    for (const id of [A1, P1, B2, K2, S2, E2, E3]) expect(row(id)?.terminal).toBeUndefined()
+  })
+
+  it('runs 13/14 recall only living experiences', () => {
+    for (const runId of ['forge-20260925-13', 'forge-20260925-14']) {
+      const got = model.links.filter((link) => link.usedRun === runId).map((link) => link.knowledgeId)
+      for (const dead of [B1, K1, S1, E1]) expect(got).not.toContain(dead)
+      for (const alive of [A1, P1, B2]) expect(got).toContain(alive)
+    }
+  })
+
+  it('hint budget displacement: corrected v2 claims never recalled, run 13 duplicates pack', () => {
+    for (const id of [K2, S2, E2, E3]) expect(usedIn(id)).toHaveLength(0)
+    expect(row(DUP)?.proposition).toMatch(/pack/)
+    expect(row(DUP)?.scopes.primary).toBe('end-to-end')
+  })
+
+  it('derives per-mechanism lanes for the forge corpus', () => {
+    expect(model.scopes.map((scope) => scope.id).sort()).toEqual(['build', 'end-to-end', 'login', 'pack', 'publish', 'sign', 'test'])
+    expect(row(A1)?.scopes.primary).toBe('login')
+    expect(row(P1)?.scopes.primary).toBe('publish')
+    expect(row(K1)?.scopes.primary).toBe('pack')
+    expect(row(K2)?.scopes.primary).toBe('pack')
+    expect(row(S1)?.scopes.primary).toBe('sign')
+    expect(row(S2)?.scopes.primary).toBe('sign')
+    expect(row(B1)?.scopes.primary).toBe('build')
+    expect(row(B2)?.scopes.primary).toBe('build')
+    expect(row(E1)?.scopes.primary).toBe('end-to-end')
+    expect(row(E2)?.scopes.primary).toBe('end-to-end')
+    expect(row(E3)?.scopes.primary).toBe('end-to-end')
   })
 })
 

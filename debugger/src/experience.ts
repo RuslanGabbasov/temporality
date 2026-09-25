@@ -258,18 +258,22 @@ export function scopeOfCommand(command: string): string {
 // this project — the mechanism vocabulary is built from subcommand-position
 // tokens of executed commands, never from proposition overlap.
 
-const SHELL_BINARIES = new Set(['mkdir', 'rm', 'cp', 'mv', 'cat', 'ls', 'echo', 'cd', 'touch', 'chmod', 'chown', 'curl', 'wget', 'grep', 'sed', 'awk', 'head', 'tail', 'sort', 'uniq', 'find', 'xargs', 'tee', 'env', 'export', 'sudo', 'pwd', 'which', 'whoami', 'date', 'sleep', 'true', 'false', 'printf', 'less', 'more', 'vim', 'nano', 'git', 'docker', 'python', 'python3', 'pip', 'pip3', 'node', 'npm', 'npx', 'yarn', 'pnpm', 'cargo', 'rustc', 'make', 'cmake', 'java', 'gradle', 'mvn', 'dotnet', 'sh', 'bash', 'zsh'])
-const COMMAND_WRAPPERS = new Set(['env', 'sudo', 'nohup', 'time', 'timeout', 'command', 'exec'])
-const SHELL_OPERATORS = new Set(['&&', '||', ';', '|', '&', '>'])
+const SHELL_BINARIES = new Set(['mkdir', 'rm', 'cp', 'mv', 'cat', 'ls', 'echo', 'cd', 'touch', 'chmod', 'chown', 'curl', 'wget', 'grep', 'sed', 'awk', 'head', 'tail', 'sort', 'uniq', 'find', 'xargs', 'tee', 'env', 'export', 'sudo', 'pwd', 'which', 'whoami', 'date', 'sleep', 'true', 'false', 'printf', 'less', 'more', 'vim', 'nano', 'git', 'docker', 'python', 'python3', 'pip', 'pip3', 'node', 'npm', 'npx', 'yarn', 'pnpm', 'cargo', 'rustc', 'make', 'cmake', 'java', 'gradle', 'mvn', 'dotnet', 'sh', 'bash', 'zsh', 'set', 'command', 'type', 'source', 'alias', 'trap', 'wait', 'read', 'test', 'exit', 'unset', 'return', 'shift', 'break', 'continue'])
+const COMMAND_WRAPPERS = new Set(['env', 'sudo', 'nohup', 'time', 'timeout', 'exec'])
+const SHELL_OPERATORS = /^[;&|>]+$/ // any run of operator chars: &&, ||, ;, |, &, >, >&
 const WORD_TOKEN = /^[a-zA-Z][a-zA-Z0-9_-]{1,}$/
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
+// `env -u SIGN_KEY SIGNING_KEY …` leaves bare variable names in argv; they
+// are environment names, never mechanisms, and would otherwise leak into the
+// vocabulary (and from there into every claim quoting them).
+const ENV_NAME = /^[A-Z][A-Z0-9_]{1,}$/
 
 /** Split a tokenized command on shell operators into simple segments. */
 export function commandSegments(tokens: string[]): string[][] {
   const segments: string[][] = []
   let current: string[] = []
   for (const token of tokens) {
-    if (SHELL_OPERATORS.has(token)) {
+    if (SHELL_OPERATORS.test(token)) {
       if (current.length) segments.push(current)
       current = []
     } else current.push(token)
@@ -282,12 +286,15 @@ export function commandSegments(tokens: string[]): string[][] {
  * an interpreter/project binary (`go run . auth` → auth, `nb report` →
  * report, `go test` → test). Plain shell utilities own no mechanism. */
 export function segmentSubcommand(tokens: string[]): string | undefined {
-  const meaningful = tokens.filter((token) => !ENV_ASSIGNMENT.test(token) && !COMMAND_WRAPPERS.has(token) && !/^\d+$/.test(token))
+  const meaningful = tokens.filter((token) => !ENV_ASSIGNMENT.test(token) && !ENV_NAME.test(token) && !COMMAND_WRAPPERS.has(token) && !/^\d+$/.test(token) && !/^-\D/.test(token))
   if (!meaningful.length) return undefined
   const head = meaningful[0]
-  const wordTail = () => meaningful.slice(1).find((token) => WORD_TOKEN.test(token))?.toLowerCase()
+  // `go` is a toolchain head, not a mechanism: it only carries meaning in
+  // head position (`go build`, `go run . auth`) and is noise in the tail of
+  // broken argv like ["head;", "go", "build"] where the head failed to parse.
+  const wordTail = () => meaningful.slice(1).find((token) => WORD_TOKEN.test(token) && token !== 'go' && !SHELL_BINARIES.has(token) && !COMMAND_WRAPPERS.has(token))?.toLowerCase()
   if (head === 'go') {
-    if (meaningful[1] === 'run') return meaningful.slice(2).find((token) => WORD_TOKEN.test(token))?.toLowerCase()
+    if (meaningful[1] === 'run') return meaningful.slice(2).find((token) => WORD_TOKEN.test(token) && !SHELL_BINARIES.has(token))?.toLowerCase()
     return WORD_TOKEN.test(meaningful[1] ?? '') ? meaningful[1].toLowerCase() : undefined
   }
   if (head.startsWith('./') || head.startsWith('.') || head.startsWith('/') || !WORD_TOKEN.test(head)) return wordTail()
@@ -312,6 +319,46 @@ export function propositionMechanisms(proposition: string, vocabulary: Set<strin
     if (quoted.length) return quoted
   }
   return hit(proposition)
+}
+
+/** True when argv invokes a shell with `-c` and a single script argument. */
+function shellScriptArgv(tokens: string[]): string | undefined {
+  if (tokens.length < 3) return undefined
+  if (!['sh', 'bash', 'zsh', 'dash', 'ash'].includes(tokens[0])) return undefined
+  return tokens.slice(1, -1).includes('-c') ? tokens[tokens.length - 1] : undefined
+}
+
+/** Primary/secondary scope of a claim. Beyond the mechanism set, this uses
+ * two signals the flat list cannot express: PIPELINE INTENT (an explicit step
+ * enumeration or the words “end to end” mark a claim that genuinely spans
+ * mechanisms, however many it happens to quote) and SUBJECT FREQUENCY — a
+ * thorough claim enumerates related behaviours (“related v1 behaviors: sign
+ * requires…, publish requires…”), so the subject is the mechanism the claim
+ * talks about MOST, not the first one it happens to quote (`go build`
+ * verification prose routinely precedes the `forge pack` finding). */
+export function propositionScope(proposition: string, vocabulary: Set<string>): { primary: string; secondary: string[] } {
+  if (!vocabulary.size || !proposition) return { primary: '', secondary: [] }
+  // Mechanisms the claim mentions, in first-appearance order — code spans
+  // first (a claim's subject is usually among its quoted commands), whole
+  // text second (nightly K82 mentions `nb auth` only in prose).
+  const seen: string[] = []
+  const push = (text: string) => {
+    for (const token of text.toLowerCase().split(/[^a-z0-9_-]+/i).filter(Boolean)) {
+      if (vocabulary.has(token) && !seen.includes(token)) seen.push(token)
+    }
+  }
+  for (const match of proposition.matchAll(/`([^`]*)`/g)) push(match[1])
+  push(proposition)
+  if (!seen.length) return { primary: '', secondary: [] }
+  if (seen.length >= 2 && (/\(\d+\)/.test(proposition) || /end.?to.?end/i.test(proposition))) {
+    return { primary: 'end-to-end', secondary: seen }
+  }
+  const counts = new Map<string, number>()
+  for (const token of proposition.toLowerCase().split(/[^a-z0-9_-]+/i).filter(Boolean)) {
+    if (vocabulary.has(token)) counts.set(token, (counts.get(token) ?? 0) + 1)
+  }
+  const subject = [...seen].sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0) || seen.indexOf(a) - seen.indexOf(b))[0]
+  return { primary: subject, secondary: seen.filter((mechanism) => mechanism !== subject) }
 }
 
 /** Memory population: how many experiences are alive at a moment. */
@@ -608,7 +655,14 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
 
   // ——— Experience scopes ———
   const vocabulary = new Set<string>()
-  const feed = (tokens: string[]) => {
+  const feed = (tokens: string[], depth = 0) => {
+    // Shell-wrapped commands (`sh -c "cd /work && forge login"`) are the norm
+    // once models learn argv has no shell; the script body carries the real
+    // mechanisms. Script text is tokenized so shell operators become standalone
+    // tokens (commandSegments then splits on them) — glued forms like `true;
+    // test` or newlines would otherwise smuggle noise into the vocabulary.
+    const script = depth === 0 ? shellScriptArgv(tokens) : undefined
+    if (script) feed(script.replace(/&&|\|\||[;|>&]+/g, (operator) => ` ${operator} `).split(/\s+/).filter(Boolean), 1)
     for (const segment of commandSegments(tokens)) {
       const sub = segmentSubcommand(segment)
       if (sub) vocabulary.add(sub)
@@ -644,10 +698,10 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
     } else {
       const predecessor = predecessorOf.get(id)
       if (predecessor && members.has(predecessor.fromId)) primary = assignScope(predecessor.fromId, seen)
-      const mechanisms = propositionMechanisms(member.proposition, vocabulary)
-      if (!primary) primary = mechanisms.length === 1 ? mechanisms[0] : mechanisms.length >= 2 ? 'end-to-end' : ''
+      const scope = propositionScope(member.proposition, vocabulary)
+      if (!primary) primary = scope.primary
       if (!primary) primary = clusters.get(clusterOfKnowledge.get(id) ?? '')?.scope ?? 'misc'
-      secondary = mechanisms.filter((mechanism) => mechanism !== primary)
+      secondary = scope.secondary
     }
     primaryOf.set(id, primary)
     secondaryOf.set(id, secondary)

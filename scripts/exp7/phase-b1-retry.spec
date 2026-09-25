@@ -1,0 +1,5 @@
+# Experiment 7 retries — runs 08/10 established their conclusions in the final
+# answer but hit the turn budget before calling remember; retries make the
+# durable record explicit (the exp5/6 retry convention).
+forge-20260925-08b|The forge CLI in this Go repository was upgraded to a new version and rebuilt; the README was not touched. Verify whether `forge build` behavior changed in the upgrade, especially what CACHE_DIR does now (a prior note says v1 had no cache layer; it has been challenged and needs re-verification). Verify empirically. Important: finish by recording your final conclusion with the remember tool — later runs will rely on it. Keep the investigation tight. Definition of done: `go test ./...` must pass.|14
+forge-20260925-10b|The forge CLI in this Go repository was upgraded to a new version and rebuilt; the README was not touched. Check whether the signing mechanism (`forge sign`) changed from what was previously established. Verify empirically. Important: finish by recording your final conclusion with the remember tool — later runs will rely on it. Keep the investigation tight. Definition of done: `go test ./...` must pass.|14
