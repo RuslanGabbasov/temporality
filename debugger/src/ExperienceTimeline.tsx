@@ -299,19 +299,27 @@ export default function ExperienceTimeline() {
         <svg ref={svgRef} width={width} height={view.height} className="experience-svg"
           onPointerDown={(down) => {
             if (down.button !== 0) return
-            const rect = svgRef.current!.getBoundingClientRect()
-            dragRef.current = { x: down.clientX - rect.left, t0: view.active.t0, t1: view.active.t1 }
-            svgRef.current!.setPointerCapture(down.pointerId)
+            const svg = svgRef.current!
+            const rect = svg.getBoundingClientRect()
+            const drag = { x: down.clientX - rect.left, t0: view.active.t0, t1: view.active.t1 }
+            dragRef.current = drag
+            // Pan via window listeners instead of setPointerCapture: capture
+            // retargets pointerup to the <svg> and the browser then synthesizes
+            // the click on the svg, swallowing row selection.
+            const onMove = (move: PointerEvent) => {
+              const bounds = svg.getBoundingClientRect()
+              const span = drag.t1 - drag.t0
+              const dt = ((move.clientX - bounds.left - drag.x) / track) * span
+              setWindow({ t0: drag.t0 - dt, t1: drag.t1 - dt })
+            }
+            const onUp = () => {
+              dragRef.current = null
+              window.removeEventListener('pointermove', onMove)
+              window.removeEventListener('pointerup', onUp)
+            }
+            window.addEventListener('pointermove', onMove)
+            window.addEventListener('pointerup', onUp)
           }}
-          onPointerMove={(move) => {
-            const drag = dragRef.current
-            if (!drag) return
-            const rect = svgRef.current!.getBoundingClientRect()
-            const span = drag.t1 - drag.t0
-            const dt = ((move.clientX - rect.left - drag.x) / track) * span
-            setWindow({ t0: drag.t0 - dt, t1: drag.t1 - dt })
-          }}
-          onPointerUp={() => { dragRef.current = null }}
         >
           <g>
             {ticks.map((tick) => <g key={tick}>
