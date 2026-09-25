@@ -333,20 +333,40 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
     if (!run.endedAt) run.endedAt = last
   }
 
-  // Group members into clusters.
+  // Group members into clusters. Execution observations cluster by canonical
+  // command; free-form claims cluster by shared content tokens so that one
+  // semantic experience (one problem, one mechanism) spans runs and roles as
+  // a single visual object.
   const clusters = new Map<string, ExperienceCluster>()
-  for (const member of members.values()) {
-    const key = clusterKeyOf(member)
-    let cluster = clusters.get(key.id)
-    if (!cluster) {
-      cluster = { id: key.id, title: key.title, scope: key.scope, kind: key.kind, command: key.command, commands: [], members: [], points: [], episodes: [], runs: [], roles: [], firstAt: member.firstAt, lastAt: member.firstAt, state: 'proposed', strength: 0.5 }
-      clusters.set(key.id, cluster)
-    }
+  const attach = (cluster: ExperienceCluster, member: MemberFold) => {
     cluster.members.push({ knowledgeId: member.knowledgeId, proposition: member.proposition, state: member.state, firstAt: member.firstAt })
     cluster.points.push(...member.points)
     cluster.episodes.push(...member.episodes)
     if (member.command && !cluster.commands.includes(member.command)) cluster.commands.push(member.command)
     clusterOfKnowledge.set(member.knowledgeId, cluster.id)
+  }
+  const claimMembers: MemberFold[] = []
+  for (const member of members.values()) {
+    if (member.policy && member.command) {
+      const key = execClusterKeyOf(member)
+      let cluster = clusters.get(key.id)
+      if (!cluster) {
+        cluster = { id: key.id, title: key.title, scope: key.scope, kind: key.kind, command: key.command, commands: [], members: [], points: [], episodes: [], runs: [], roles: [], firstAt: member.firstAt, lastAt: member.firstAt, state: 'proposed', strength: 0.5 }
+        clusters.set(key.id, cluster)
+      }
+      attach(cluster, member)
+    } else {
+      claimMembers.push(member)
+    }
+  }
+  for (const group of groupClaims(claimMembers)) {
+    const key = claimClusterKeyOf(group)
+    let cluster = clusters.get(key.id)
+    if (!cluster) {
+      cluster = { id: key.id, title: key.title, scope: key.scope, kind: 'claim', commands: [], members: [], points: [], episodes: [], runs: [], roles: [], firstAt: group[0].firstAt, lastAt: group[0].firstAt, state: 'proposed', strength: 0.5 }
+      clusters.set(key.id, cluster)
+    }
+    for (const member of group) attach(cluster, member)
   }
   for (const link of links) link.clusterId = clusterOfKnowledge.get(link.knowledgeId) ?? ''
 
@@ -376,16 +396,85 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
   }
 }
 
-function clusterKeyOf(member: MemberFold): { id: string; title: string; scope: string; kind: 'execution' | 'claim'; command?: string } {
-  if (member.policy && member.command) {
-    const canonical = canonicalCommand(member.command)
-    // Scope comes from the command itself (test/vet/build/fmt): the kernel's
-    // command_class is a coarse verification/build split that would fold `go
-    // vet` into `test` and hide real scope boundaries in the UI.
-    return { id: `exec:${canonical}`, title: canonical, scope: scopeOfCommand(canonical), kind: 'execution', command: canonical }
+function execClusterKeyOf(member: MemberFold): { id: string; title: string; scope: string; kind: 'execution'; command: string } {
+  const canonical = canonicalCommand(member.command!)
+  // Scope comes from the command itself (test/vet/build/fmt): the kernel's
+  // command_class is a coarse verification/build split that would fold `go
+  // vet` into `test` and hide real scope boundaries in the UI.
+  return { id: `exec:${canonical}`, title: canonical, scope: scopeOfCommand(canonical), kind: 'execution', command: canonical }
+}
+
+/** Content tokens used for claim clustering: lowercase alphanumeric runs,
+ * mirroring the runtime matcher's tokenization (AUTH_TOKEN → auth, token). */
+export function contentTokens(text: string): string[] {
+  const raw = text.toLowerCase().match(/[a-z0-9]+/g) ?? []
+  return raw.filter((token) => token.length >= 2 && !CLAIM_STOPWORDS.has(token))
+}
+
+const CLAIM_STOPWORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'it', 'its', 'this', 'that', 'these', 'those', 'with', 'without', 'for', 'from', 'as', 'not', 'no', 'nor', 'but',
+  'does', 'do', 'did', 'done', 'so', 'if', 'then', 'than', 'when', 'which', 'who', 'whom', 'whose', 'into', 'via',
+  'only', 'after', 'before', 'must', 'should', 'will', 'would', 'can', 'could', 'may', 'might', 'shall', 'has',
+  'have', 'had', 'am', 'we', 'you', 'they', 'he', 'she', 'our', 'their', 'your', 'my', 'me', 'us', 'them',
+])
+
+/** Merges claim members whose propositions share at least two content
+ * tokens — the same overlap threshold the runtime hint matcher uses, so
+ * what clusters together in the view is what can recall together. */
+function groupClaims(claimMembers: MemberFold[]): MemberFold[][] {
+  const tokens = new Map(claimMembers.map((member) => [member.knowledgeId, new Set(contentTokens(member.proposition))]))
+  const parent = new Map(claimMembers.map((member) => [member.knowledgeId, member.knowledgeId]))
+  const find = (id: string): string => {
+    let root = id
+    while (parent.get(root) !== root) root = parent.get(root)!
+    while (parent.get(id) !== root) {
+      const next = parent.get(id)!
+      parent.set(id, root)
+      id = next
+    }
+    return root
   }
-  const role = roleOfKnowledgeId(member.knowledgeId) ?? 'agent'
-  return { id: `claim:${role}`, title: `${role} claims`, scope: role, kind: 'claim' }
+  for (let i = 0; i < claimMembers.length; i++) {
+    for (let j = i + 1; j < claimMembers.length; j++) {
+      const left = tokens.get(claimMembers[i].knowledgeId)!
+      const right = tokens.get(claimMembers[j].knowledgeId)!
+      let shared = 0
+      for (const token of left) if (right.has(token)) shared++
+      if (shared >= 2) parent.set(find(claimMembers[i].knowledgeId), find(claimMembers[j].knowledgeId))
+    }
+  }
+  const groups = new Map<string, MemberFold[]>()
+  for (const member of claimMembers) {
+    const root = find(member.knowledgeId)
+    const group = groups.get(root) ?? []
+    group.push(member)
+    groups.set(root, group)
+  }
+  return [...groups.values()]
+}
+
+/** Claim cluster identity comes from the group's most frequent content
+ * tokens (frequency, then first appearance in the stream). */
+function claimClusterKeyOf(group: MemberFold[]): { id: string; title: string; scope: string } {
+  const freq = new Map<string, number>()
+  const order = new Map<string, number>()
+  let seen = 0
+  for (const member of group) {
+    for (const token of new Set(contentTokens(member.proposition))) {
+      freq.set(token, (freq.get(token) ?? 0) + 1)
+      if (!order.has(token)) order.set(token, seen++)
+    }
+  }
+  const top = [...freq.entries()]
+    .sort((left, right) => right[1] - left[1] || (order.get(left[0]) ?? 0) - (order.get(right[0]) ?? 0))
+    .slice(0, 2)
+    .map(([token]) => token)
+  if (top.length === 0) {
+    const role = roleOfKnowledgeId(group[0].knowledgeId) ?? 'agent'
+    return { id: `claim:${role}`, title: `${role} claims`, scope: role }
+  }
+  return { id: `claim:${top.join(' ')}`, title: top.join(' '), scope: top[0] }
 }
 
 /** Knowledge ids from agent runs embed the originating role:

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ObservationEvent } from './observationApi'
-import { canonicalCommand, foldExperience, lifecycleKindOf, roleOfKnowledgeId, roleOfRun, runOfEvidenceRef, scopeOfCommand } from './experience'
+import { canonicalCommand, contentTokens, foldExperience, lifecycleKindOf, roleOfKnowledgeId, roleOfRun, runOfEvidenceRef, scopeOfCommand } from './experience'
 
 let counter = 0
 
@@ -114,10 +114,31 @@ describe('foldExperience', () => {
     expect(build?.points.map((point) => point.kind)).toEqual(['appeared'])
   })
 
-  it('groups agent claims by originating role', () => {
-    const claims = model.clusters.find((cluster) => cluster.id === 'claim:reviewer')
-    expect(claims?.kind).toBe('claim')
-    expect(claims?.members[0].proposition).toContain('APPROVED')
+  it('keeps single unrelated claims in their own cluster', () => {
+    const claims = model.clusters.filter((cluster) => cluster.kind === 'claim')
+    expect(claims).toHaveLength(1)
+    expect(claims[0].members[0].proposition).toContain('APPROVED')
+    expect(claims[0].roles).toContain('reviewer')
+  })
+
+  it('clusters semantically overlapping claims across runs into one experience', () => {
+    const gatekeeper = foldExperience([
+      event('knowledge.proposed', T0, { knowledge_id: 'gk-01/knowledge/1', proposition: 'gatekeeper v2 authenticates via token file; env var rejected', kind: 'claim' }, { run: 'gk-01' }),
+      event('knowledge.proposed', T1, { knowledge_id: 'gk-02/knowledge/2', proposition: 'gatekeeper token file setup verified access granted', kind: 'claim' }, { run: 'gk-02' }),
+      event('knowledge.proposed', T2, { knowledge_id: 'other/knowledge/3', proposition: 'Reviewer verdict APPROVED unrelated topic', kind: 'claim' }, { run: 'other' }),
+    ])
+    const claims = gatekeeper.clusters.filter((cluster) => cluster.kind === 'claim')
+    expect(claims).toHaveLength(2)
+    const auth = claims.find((cluster) => cluster.scope === 'gatekeeper')
+    expect(auth?.title).toBe('gatekeeper token')
+    expect(auth?.members).toHaveLength(2)
+    expect(auth?.runs).toEqual(['gk-01', 'gk-02'])
+    expect(claims.find((cluster) => cluster.scope !== 'gatekeeper')?.members).toHaveLength(1)
+  })
+
+  it('tokenizes propositions into content tokens like the runtime matcher', () => {
+    expect(contentTokens('The AUTH_TOKEN env var is unsupported')).toEqual(['auth', 'token', 'env', 'var', 'unsupported'])
+    expect(contentTokens('')).toEqual([])
   })
 
   it('records episodes from execution evidence refs', () => {
