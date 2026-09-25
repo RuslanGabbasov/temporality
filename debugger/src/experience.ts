@@ -53,6 +53,40 @@ export interface ClusterMember {
   firstAt: string
 }
 
+/** Primary visual object after Experiment 5: one knowledge item as a lane row
+ * with its lifespan (appeared → terminal), lifecycle points and scopes. */
+export interface KnowledgeRow {
+  knowledgeId: string
+  proposition: string
+  state: string
+  firstAt: string
+  lastAt: string
+  /** First archived point — the death of the experience, if it died. */
+  terminal?: { kind: LifecycleKind; at: string }
+  scopes: { primary: string; secondary: string[] }
+  command?: string
+  commandClass?: string
+  policy?: string
+  points: ExperiencePoint[]
+  episodes: EpisodeRef[]
+  relatedIds: string[]
+  runs: string[]
+  roles: string[]
+  strength: number
+}
+
+/** Semantic top-level grouping: Scope → Knowledge, orthogonal to time. */
+export interface ScopeLane {
+  id: string
+  title: string
+  kind: 'execution' | 'claim'
+  rows: KnowledgeRow[]
+  runs: string[]
+  roles: string[]
+  firstAt: string
+  lastAt: string
+}
+
 /** A semantic group of related knowledge items (one verification command
  * family, one recurring claim type). The primary visual object. */
 export interface ExperienceCluster {
@@ -115,6 +149,8 @@ export interface KnowledgeLineage {
 export interface ExperienceModel {
   runs: RunInfo[]
   clusters: ExperienceCluster[]
+  rows: KnowledgeRow[]
+  scopes: ScopeLane[]
   links: ActivationLink[]
   lineage: KnowledgeLineage[]
   bounds: { from: string; to: string }
@@ -164,6 +200,79 @@ export function scopeOfCommand(command: string): string {
   }
   if (head === 'gofmt') return 'fmt'
   return head || 'exec'
+}
+
+// ——— Experience scope derivation ———
+// Visual grouping is deliberately NOT the retrieval matcher (lexical claim
+// clustering over-merges: see docs/experiment5-long-horizon.md). A claim
+// lands in `auth` because the agent actually operated `go run . auth` in
+// this project — the mechanism vocabulary is built from subcommand-position
+// tokens of executed commands, never from proposition overlap.
+
+const SHELL_BINARIES = new Set(['mkdir', 'rm', 'cp', 'mv', 'cat', 'ls', 'echo', 'cd', 'touch', 'chmod', 'chown', 'curl', 'wget', 'grep', 'sed', 'awk', 'head', 'tail', 'sort', 'uniq', 'find', 'xargs', 'tee', 'env', 'export', 'sudo', 'pwd', 'which', 'whoami', 'date', 'sleep', 'true', 'false', 'printf', 'less', 'more', 'vim', 'nano', 'git', 'docker', 'python', 'python3', 'pip', 'pip3', 'node', 'npm', 'npx', 'yarn', 'pnpm', 'cargo', 'rustc', 'make', 'cmake', 'java', 'gradle', 'mvn', 'dotnet', 'sh', 'bash', 'zsh'])
+const COMMAND_WRAPPERS = new Set(['env', 'sudo', 'nohup', 'time', 'timeout', 'command', 'exec'])
+const SHELL_OPERATORS = new Set(['&&', '||', ';', '|', '&', '>'])
+const WORD_TOKEN = /^[a-zA-Z][a-zA-Z0-9_-]{1,}$/
+const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
+
+/** Split a tokenized command on shell operators into simple segments. */
+export function commandSegments(tokens: string[]): string[][] {
+  const segments: string[][] = []
+  let current: string[] = []
+  for (const token of tokens) {
+    if (SHELL_OPERATORS.has(token)) {
+      if (current.length) segments.push(current)
+      current = []
+    } else current.push(token)
+  }
+  if (current.length) segments.push(current)
+  return segments
+}
+
+/** The project mechanism a command segment operates on: the subcommand of
+ * an interpreter/project binary (`go run . auth` → auth, `nb report` →
+ * report, `go test` → test). Plain shell utilities own no mechanism. */
+export function segmentSubcommand(tokens: string[]): string | undefined {
+  const meaningful = tokens.filter((token) => !ENV_ASSIGNMENT.test(token) && !COMMAND_WRAPPERS.has(token) && !/^\d+$/.test(token))
+  if (!meaningful.length) return undefined
+  const head = meaningful[0]
+  const wordTail = () => meaningful.slice(1).find((token) => WORD_TOKEN.test(token))?.toLowerCase()
+  if (head === 'go') {
+    if (meaningful[1] === 'run') return meaningful.slice(2).find((token) => WORD_TOKEN.test(token))?.toLowerCase()
+    return WORD_TOKEN.test(meaningful[1] ?? '') ? meaningful[1].toLowerCase() : undefined
+  }
+  if (head.startsWith('./') || head.startsWith('.') || head.startsWith('/') || !WORD_TOKEN.test(head)) return wordTail()
+  if (SHELL_BINARIES.has(head)) return undefined
+  return wordTail()
+}
+
+/** Mechanisms a proposition talks about, matched against the project's
+ * executed-command vocabulary (exact word match, case-insensitive). */
+export function propositionMechanisms(proposition: string, vocabulary: Set<string>): string[] {
+  if (!vocabulary.size || !proposition) return []
+  const tokens = new Set(proposition.toLowerCase().split(/[^a-z0-9_-]+/i).filter(Boolean))
+  return [...vocabulary].filter((mechanism) => tokens.has(mechanism)).sort()
+}
+
+/** Memory population: how many experiences are alive at a moment. */
+export function aliveRowAt(rows: KnowledgeRow[], at: string): number {
+  return rows.filter((row) => row.firstAt <= at && (!row.terminal || row.terminal.at > at)).length
+}
+
+export type MemoryBucket = 'active' | 'stale' | 'invalidated' | 'archived'
+
+export function stateBucket(state: string): MemoryBucket {
+  if (state === 'invalidated') return 'invalidated'
+  if (state === 'superseded') return 'archived'
+  if (state === 'challenged' || state === 'corrected') return 'stale'
+  return 'active'
+}
+
+/** Compact row label: `…/knowledge/82` → K82, auto hashes → head…tail. */
+export function shortKnowledge(id: string): string {
+  const tail = id.split('/knowledge/')[1] ?? id
+  if (/^\d+$/.test(tail)) return `K${tail}`
+  return tail.length > 12 ? `${tail.slice(0, 5)}…${tail.slice(-4)}` : tail
 }
 
 /** Child run ids look like `<root>/<role>`; root team runs have no slash. */
@@ -236,6 +345,8 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
   // Invalidations whose reason may reference the replacing knowledge; resolved
   // after the pass because the referenced item can appear later in the stream.
   const pendingInferences: { fromId: string; refs: string[]; reason?: string; eventId: string; at: string }[] = []
+  // Executed commands (approval payloads) feed the mechanism vocabulary.
+  const executedCommands: string[][] = []
   let first = ''
   let last = ''
 
@@ -264,6 +375,12 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
         runInfo.endedAt = event.occurred_at
         runInfo.status = stringOf(event.data?.status) || event.type.slice('run.'.length)
       }
+    }
+
+    if (event.type.startsWith('approval.')) {
+      const operation = event.data?.operation as { arguments?: { command?: unknown } } | undefined
+      const command = operation?.arguments?.command
+      if (Array.isArray(command)) executedCommands.push(command.map((token) => String(token)))
     }
 
     const kind = lifecycleKindOf(event)
@@ -417,6 +534,100 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
     if (link.usedRun) link.usedRunStatus = runs.get(link.usedRun)?.status
   }
 
+  // ——— Experience scopes ———
+  const vocabulary = new Set<string>()
+  const feed = (tokens: string[]) => {
+    for (const segment of commandSegments(tokens)) {
+      const sub = segmentSubcommand(segment)
+      if (sub) vocabulary.add(sub)
+    }
+  }
+  for (const tokens of executedCommands) feed(tokens)
+  for (const member of members.values()) if (member.command) feed(member.command.split(/\s+/))
+
+  // Lineage reversed: for replacing knowledge, its predecessor is the
+  // earliest invalidated item pointing at it (K82→K73 means K73 supersedes K82).
+  const predecessorOf = new Map<string, { fromId: string; at: string }>()
+  for (const edge of lineage) {
+    const current = predecessorOf.get(edge.toId)
+    if (!current || edge.at < current.at) predecessorOf.set(edge.toId, { fromId: edge.fromId, at: edge.at })
+  }
+
+  const primaryOf = new Map<string, string>()
+  const secondaryOf = new Map<string, string[]>()
+  // Priority: execution command scope > lineage inheritance (a corrected
+  // experience stays in its predecessor's scope) > single mechanism >
+  // multi-mechanism “end-to-end” > lexical claim-cluster fallback.
+  const assignScope = (id: string, seen: Set<string>): string => {
+    const known = primaryOf.get(id)
+    if (known) return known
+    if (seen.has(id)) return ''
+    seen.add(id)
+    const member = members.get(id)
+    if (!member) return ''
+    let primary = ''
+    let secondary: string[] = []
+    if (member.policy && member.command) {
+      primary = scopeOfCommand(member.command)
+    } else {
+      const predecessor = predecessorOf.get(id)
+      if (predecessor && members.has(predecessor.fromId)) primary = assignScope(predecessor.fromId, seen)
+      const mechanisms = propositionMechanisms(member.proposition, vocabulary)
+      if (!primary) primary = mechanisms.length === 1 ? mechanisms[0] : mechanisms.length >= 2 ? 'end-to-end' : ''
+      if (!primary) primary = clusters.get(clusterOfKnowledge.get(id) ?? '')?.scope ?? 'misc'
+      secondary = mechanisms.filter((mechanism) => mechanism !== primary)
+    }
+    primaryOf.set(id, primary)
+    secondaryOf.set(id, secondary)
+    return primary
+  }
+  for (const id of members.keys()) assignScope(id, new Set())
+
+  const relatedOf = new Map<string, string[]>()
+  for (const cluster of clusters.values()) {
+    const ids = cluster.members.map((member) => member.knowledgeId)
+    for (const id of ids) relatedOf.set(id, ids.filter((other) => other !== id))
+  }
+
+  const rows: KnowledgeRow[] = [...members.values()].map((member) => {
+    const points = [...member.points].sort((left, right) => left.at.localeCompare(right.at))
+    const terminal = points.find((point) => point.kind === 'archived')
+    const useCount = points.filter((point) => point.kind === 'injected' || point.kind === 'reused').length
+    return {
+      knowledgeId: member.knowledgeId,
+      proposition: member.proposition,
+      state: member.state,
+      firstAt: member.firstAt,
+      lastAt: points[points.length - 1]?.at ?? member.firstAt,
+      terminal: terminal ? { kind: terminal.kind, at: terminal.at } : undefined,
+      scopes: { primary: primaryOf.get(member.knowledgeId) ?? 'misc', secondary: secondaryOf.get(member.knowledgeId) ?? [] },
+      command: member.command,
+      commandClass: member.commandClass,
+      policy: member.policy,
+      points,
+      episodes: member.episodes,
+      relatedIds: relatedOf.get(member.knowledgeId) ?? [],
+      runs: distinct(points.map((point) => point.run)),
+      roles: distinct(points.map((point) => point.role)),
+      strength: derivedStrength(member.state, useCount),
+    }
+  })
+  rows.sort((left, right) => left.firstAt.localeCompare(right.firstAt) || left.knowledgeId.localeCompare(right.knowledgeId))
+
+  const scopeMap = new Map<string, ScopeLane>()
+  for (const row of rows) {
+    let lane = scopeMap.get(row.scopes.primary)
+    if (!lane) {
+      lane = { id: row.scopes.primary, title: row.scopes.primary.charAt(0).toUpperCase() + row.scopes.primary.slice(1), kind: row.policy ? 'execution' : 'claim', rows: [], runs: [], roles: [], firstAt: row.firstAt, lastAt: row.lastAt }
+      scopeMap.set(row.scopes.primary, lane)
+    }
+    lane.rows.push(row)
+    lane.runs = distinct([...lane.runs, ...row.runs])
+    lane.roles = distinct([...lane.roles, ...row.roles])
+    if (row.lastAt > lane.lastAt) lane.lastAt = row.lastAt
+  }
+  const scopeList = [...scopeMap.values()].sort((left, right) => left.firstAt.localeCompare(right.firstAt) || left.id.localeCompare(right.id))
+
   const clusterList = [...clusters.values()].map((cluster) => {
     // Stable sort by time only: ties keep stream order (received_at), which
     // already places a hint offer before the injection that consumed it.
@@ -437,6 +648,8 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
   return {
     runs: runList,
     clusters: clusterList,
+    rows,
+    scopes: scopeList,
     links: links.filter((link) => link.clusterId),
     lineage,
     bounds: { from: first, to: last },

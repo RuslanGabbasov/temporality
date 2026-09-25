@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_BASE } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
-import { foldExperience, LIFECYCLE_KINDS, type ExperienceCluster, type KnowledgeLineage, type LifecycleKind, type RunInfo } from './experience'
+import { aliveRowAt, foldExperience, LIFECYCLE_KINDS, shortKnowledge, stateBucket, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type RunInfo } from './experience'
 
 const GUTTER = 210
 const AXIS_HEIGHT = 34
 const RUN_LANE = 24
-const CLUSTER_LANE = 30
+const SCOPE_HEADER = 26
+const ROW_LANE = 22
+const POPULATION_LANE = 64
+
+const MEMORY_BUCKETS: MemoryBucket[] = ['active', 'stale', 'invalidated', 'archived']
 
 const LIFECYCLE_COLORS: Record<LifecycleKind, string> = {
   appeared: '#7aa2f7',
@@ -76,6 +80,7 @@ export default function ExperienceTimeline() {
   const [kinds, setKinds] = useState<Set<LifecycleKind>>(new Set(LIFECYCLE_KINDS))
   const [roleFilter, setRoleFilter] = useState('all')
   const [scopeFilter, setScopeFilter] = useState('all')
+  const [bucketFilter, setBucketFilter] = useState<'all' | MemoryBucket>('all')
   const [hiddenRoots, setHiddenRoots] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState('')
   const [window_, setWindow] = useState<{ t0: number; t1: number } | null>(null)
@@ -130,24 +135,38 @@ export default function ExperienceTimeline() {
     const roots = model.runs.filter((run) => !run.parentRun)
     const roleRuns = model.runs.filter((run) => run.role)
     const roles = [...new Set(roleRuns.map((run) => run.role))].sort()
-    const scopes = [...new Set(model.clusters.map((cluster) => cluster.scope))].sort()
+    const scopes = model.scopes.map((scope) => scope.id).sort()
     const visibleRun = (run: RunInfo) => !hiddenRoots.has(run.parentRun ?? '') && !hiddenRoots.has(run.id.split('/')[0]) && (roleFilter === 'all' || run.role === roleFilter || !run.role)
     const visibleRuns = model.runs.filter(visibleRun)
-    const visibleClusters = model.clusters.filter((cluster) =>
-      (scopeFilter === 'all' || cluster.scope === scopeFilter) &&
-      (roleFilter === 'all' || cluster.roles.includes(roleFilter)) &&
-      cluster.points.some((point) => kinds.has(point.kind)) &&
-      cluster.runs.some((run) => !hiddenRoots.has(run.split('/')[0])))
-    const conflictsPresent = model.clusters.some((cluster) => cluster.points.some((point) => point.kind === 'contradicted' || point.kind === 'weakened' || point.kind === 'archived'))
+    const visibleRow = (row: KnowledgeRow) =>
+      (bucketFilter === 'all' || stateBucket(row.state) === bucketFilter) &&
+      (scopeFilter === 'all' || row.scopes.primary === scopeFilter) &&
+      (roleFilter === 'all' || row.roles.includes(roleFilter)) &&
+      row.points.some((point) => kinds.has(point.kind)) &&
+      row.runs.some((run) => !hiddenRoots.has(run.split('/')[0]))
+    const visibleRows = model.rows.filter(visibleRow)
+    const visibleRowIds = new Set(visibleRows.map((row) => row.knowledgeId))
+    const visibleScopes = model.scopes
+      .map((scope) => ({ scope, rows: scope.rows.filter((row) => visibleRowIds.has(row.knowledgeId)) }))
+      .filter((entry) => entry.rows.length > 0)
+    const conflictsPresent = model.lineage.length > 0 || model.rows.some((row) => row.points.some((point) => point.kind === 'contradicted' || point.kind === 'weakened' || point.kind === 'archived'))
     const runLaneY = new Map<string, number>()
     let y = AXIS_HEIGHT
     for (const run of visibleRuns) { runLaneY.set(run.id, y + RUN_LANE / 2); y += RUN_LANE }
-    const clusterLaneY = new Map<string, number>()
-    const clusterStart = y + 6
-    y = clusterStart
-    for (const cluster of visibleClusters) { clusterLaneY.set(cluster.id, y + CLUSTER_LANE / 2); y += CLUSTER_LANE }
-    return { full, active, roots, roles, scopes, visibleRuns, visibleClusters, conflictsPresent, runLaneY, clusterLaneY, height: y + 8 }
-  }, [model, window_, hiddenRoots, roleFilter, scopeFilter, kinds])
+    const rowY = new Map<string, number>()
+    const scopeHeaderY = new Map<string, number>()
+    const populationY = y + 10
+    if (lens.experience) {
+      y = populationY + POPULATION_LANE
+      for (const { scope, rows } of visibleScopes) {
+        scopeHeaderY.set(scope.id, y + SCOPE_HEADER / 2)
+        y += SCOPE_HEADER
+        for (const row of rows) { rowY.set(row.knowledgeId, y + ROW_LANE / 2); y += ROW_LANE }
+        y += 4
+      }
+    }
+    return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleScopes, conflictsPresent, runLaneY, rowY, scopeHeaderY, populationY, height: y + 8 }
+  }, [model, window_, hiddenRoots, roleFilter, scopeFilter, bucketFilter, kinds, lens.experience])
 
   const activity = useMemo(() => {
     const map = new Map<string, { tools: number[]; models: number[] }>()
@@ -206,19 +225,8 @@ export default function ExperienceTimeline() {
     const span = view.active.t1 - view.active.t0
     return GUTTER + ((value - view.active.t0) / span) * track
   }
-  const selectedCluster = model.clusters.find((cluster) => cluster.id === selected)
-
-  // knowledge id → owning cluster / lifecycle points, for lineage edges.
-  // Built from all clusters (ids) but only visible clusters (points) so that
-  // filtering never leaves an edge pointing into a hidden lane.
-  const knowledgeClusterOf = new Map<string, string>()
-  for (const cluster of model.clusters) for (const member of cluster.members) knowledgeClusterOf.set(member.knowledgeId, cluster.id)
-  const knowledgePoints = new Map<string, { at: string; kind: LifecycleKind }[]>()
-  for (const cluster of view.visibleClusters) for (const point of cluster.points) {
-    const list = knowledgePoints.get(point.knowledgeId)
-    if (list) list.push(point)
-    else knowledgePoints.set(point.knowledgeId, [point])
-  }
+  const selectedRow = model.rows.find((row) => row.knowledgeId === selected)
+  const rowOf = new Map(model.rows.map((row) => [row.knowledgeId, row]))
 
   const toggleKind = (kind: LifecycleKind) => setKinds((current) => {
     const next = new Set(current)
@@ -241,7 +249,10 @@ export default function ExperienceTimeline() {
     <Header project={project} setProject={setProject} load={load} loading={loading} />
     {error && <div className="obs-error" role="alert">{error}</div>}
     <div className="experience-meta">
-      <span>{model.runs.filter((run) => !run.parentRun).length} team runs · {model.runs.length} lanes · {model.clusters.length} experience clusters · {model.totals.knowledge} knowledge items · {model.totals.events} events</span>
+      <span>{model.runs.filter((run) => !run.parentRun).length} team runs · {model.rows.length} experiences · {model.scopes.length} scopes · {model.totals.events} events</span>
+      <span className="experience-note">
+        active {model.rows.filter((row) => stateBucket(row.state) === 'active').length} · stale {model.rows.filter((row) => stateBucket(row.state) === 'stale').length} · invalidated {model.rows.filter((row) => stateBucket(row.state) === 'invalidated').length} · archived {model.rows.filter((row) => stateBucket(row.state) === 'archived').length} · activations {model.links.length}
+      </span>
       {lens.conflicts && !view.conflictsPresent && <span className="experience-note">No contradicted / weakened / archived points in this project yet</span>}
     </div>
     <div className="experience-lens">
@@ -271,6 +282,12 @@ export default function ExperienceTimeline() {
         <select value={scopeFilter} onChange={(change) => setScopeFilter(change.target.value)}>
           <option value="all">all</option>
           {view.scopes.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
+        </select>
+      </label>
+      <label>memory
+        <select value={bucketFilter} onChange={(change) => setBucketFilter(change.target.value as 'all' | MemoryBucket)}>
+          <option value="all">all</option>
+          {MEMORY_BUCKETS.map((bucket) => <option key={bucket} value={bucket}>{bucket}</option>)}
         </select>
       </label>
       <div className="run-chips">{view.roots.map((root) => (
@@ -315,39 +332,77 @@ export default function ExperienceTimeline() {
               {acts?.models.map((at, index) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <circle key={`m${index}`} cx={px} cy={yLane} r={1.8} fill="#e8e8e8" opacity={0.7} /> : null })}
             </g>
           })}
-          {lens.experience && view.visibleClusters.map((cluster) => {
-            const yLane = view.clusterLaneY.get(cluster.id)!
-            const x0 = x(cluster.firstAt)
-            const x1 = x(cluster.lastAt)
-            const stateColor = STATE_COLORS[cluster.state] ?? '#7aa2f7'
-            const points = lens.lifecycle ? cluster.points.filter((point) => kinds.has(point.kind)) : []
-            return <g key={cluster.id} className={`cluster-lane ${selected === cluster.id ? 'selected' : ''}`} onClick={() => setSelected(cluster.id)}>
-              <rect x={0} y={yLane - CLUSTER_LANE / 2} width={width} height={CLUSTER_LANE} fill="transparent" />
-              <text x={8} y={yLane - 2} className="lane-label cluster-label">{cluster.title}</text>
-              <text x={8} y={yLane + 9} className="lane-sublabel">{cluster.members.length} items · {cluster.runs.length} runs · {model.links.filter((link) => link.clusterId === cluster.id).length} activations · {cluster.members.filter((member) => member.state === 'invalidated' || member.state === 'superseded' || member.state === 'corrected').length} retired · {cluster.state}</text>
-              <rect x={Math.max(GUTTER, x0)} width={Math.max(3, Math.min(x1, GUTTER + track) - Math.max(GUTTER, x0))} y={yLane - 2.5} height={5} rx={2.5} fill={stateColor} opacity={0.25 + cluster.strength * 0.6}>
-                <title>{`${cluster.title} · ${cluster.state} · strength ${cluster.strength.toFixed(2)} (derived)`}</title>
-              </rect>
-              {points.map((point) => {
-                const px = x(point.at)
-                if (px < GUTTER || px > GUTTER + track) return null
-                return <circle key={point.eventId} cx={px} cy={yLane} r={point.kind === 'appeared' ? 5 : 3.6} fill={LIFECYCLE_COLORS[point.kind]} fillOpacity={point.kind === 'appeared' ? 0.25 : 0.95} stroke={LIFECYCLE_COLORS[point.kind]} strokeWidth={1.4}>
-                  <title>{`${point.kind} · ${point.at} · ${point.run ?? ''}${point.role ? ` (${point.role})` : ''}${point.rule ? ` · ${point.rule}` : ''}`}</title>
-                </circle>
+          {lens.experience && <g className="population-lane">
+            <text x={8} y={view.populationY + 12} className="lane-label population-label">memory population</text>
+            <text x={8} y={view.populationY + 24} className="lane-sublabel">alive experiences at each run start</text>
+            {view.roots.filter((run) => !hiddenRoots.has(run.id)).map((run) => {
+              const alive = aliveRowAt(model.rows, run.startedAt)
+              const px = x(run.startedAt)
+              if (px < GUTTER || px > GUTTER + track || alive === 0) return null
+              const base = view.populationY + POPULATION_LANE - 8
+              return <g key={run.id}>
+                <rect x={px - 4} y={base - alive * 5} width={8} height={alive * 5} fill="#4fd6be" opacity={0.65} rx={1.5}>
+                  <title>{`${shortRun(run.id)} · ${alive} experiences alive at run start`}</title>
+                </rect>
+                <text x={px} y={base - alive * 5 - 3} textAnchor="middle" className="population-count">{alive}</text>
+              </g>
+            })}
+          </g>}
+          {lens.experience && view.visibleScopes.map(({ scope, rows }) => {
+            const headerY = view.scopeHeaderY.get(scope.id)!
+            const activations = model.links.filter((link) => scope.rows.some((row) => row.knowledgeId === link.knowledgeId)).length
+            const retired = scope.rows.filter((row) => row.terminal).length
+            return <g key={scope.id} className="scope-section">
+              <text x={8} y={headerY + 4} className="lane-label scope-label">{scope.title.toUpperCase()}</text>
+              <text x={GUTTER - 8} y={headerY + 4} textAnchor="end" className="lane-sublabel">{rows.length} experiences · {scope.runs.length} runs · {activations} activations{retired ? ` · ${retired} retired` : ''}</text>
+              <line x1={GUTTER - 6} x2={width} y1={headerY + SCOPE_HEADER / 2 - 2} y2={headerY + SCOPE_HEADER / 2 - 2} stroke="#1c2530" strokeWidth={1} />
+              {rows.map((row) => {
+                const yLane = view.rowY.get(row.knowledgeId)!
+                const x0 = x(row.firstAt)
+                const x1 = x(row.terminal?.at ?? row.lastAt)
+                const stateColor = STATE_COLORS[row.state] ?? '#7aa2f7'
+                const points = lens.lifecycle ? row.points.filter((point) => kinds.has(point.kind)) : []
+                return <g key={row.knowledgeId} className={`row-lane ${selected === row.knowledgeId ? 'selected' : ''}`} onClick={() => setSelected(row.knowledgeId)}>
+                  <rect x={0} y={yLane - ROW_LANE / 2} width={width} height={ROW_LANE} fill="transparent" />
+                  <text x={16} y={yLane + 3} className="row-label">{shortKnowledge(row.knowledgeId)}</text>
+                  <text x={58} y={yLane + 3} className="row-state" style={{ fill: stateColor }}>{row.state}{row.scopes.secondary.length ? ` ·+${row.scopes.secondary.join(',')}` : ''}</text>
+                  <rect x={Math.max(GUTTER, x0)} width={Math.max(3, Math.min(x1, GUTTER + track) - Math.max(GUTTER, x0))} y={yLane - 2} height={4} rx={2} fill={stateColor} opacity={0.25 + row.strength * 0.55}>
+                    <title>{`${row.knowledgeId} · ${row.state} · strength ${row.strength.toFixed(2)} (derived)${row.terminal ? ` · died ${row.terminal.at}` : ' · alive'}`}</title>
+                  </rect>
+                  {points.map((point) => {
+                    const px = x(point.at)
+                    if (px < GUTTER || px > GUTTER + track) return null
+                    const hollow = point.kind === 'contradicted' || point.kind === 'weakened'
+                    return <circle key={point.eventId} cx={px} cy={yLane} r={point.kind === 'appeared' ? 4.5 : 3.4} fill={hollow ? '#0b1016' : LIFECYCLE_COLORS[point.kind]} fillOpacity={point.kind === 'appeared' ? 0.25 : 0.95} stroke={LIFECYCLE_COLORS[point.kind]} strokeWidth={1.4}>
+                      <title>{`${point.kind} · ${point.at} · ${point.run ?? ''}${point.role ? ` (${point.role})` : ''}${point.rule ? ` · ${point.rule}` : ''}`}</title>
+                    </circle>
+                  })}
+                  {row.terminal && (() => {
+                    const px = x(row.terminal.at)
+                    if (px < GUTTER - 4 || px > GUTTER + track + 4) return null
+                    const dead = row.state === 'invalidated'
+                    const stroke = dead ? '#f7768e' : '#565f89'
+                    return <g className="death-marker" stroke={stroke} strokeWidth={1.6}>
+                      <line x1={px - 3.5} y1={yLane - 3.5} x2={px + 3.5} y2={yLane + 3.5} />
+                      <line x1={px - 3.5} y1={yLane + 3.5} x2={px + 3.5} y2={yLane - 3.5} />
+                      <title>{`${row.terminal.kind} · ${row.terminal.at}`}</title>
+                    </g>
+                  })()}
+                </g>
               })}
             </g>
           })}
           {lens.conflicts && model.lineage.map((edge) => {
-            const y1 = view.clusterLaneY.get(knowledgeClusterOf.get(edge.fromId) ?? '')
-            const y2 = view.clusterLaneY.get(knowledgeClusterOf.get(edge.toId) ?? '')
+            const y1 = view.rowY.get(edge.fromId)
+            const y2 = view.rowY.get(edge.toId)
             if (y1 === undefined || y2 === undefined) return null
-            const fromPoints = knowledgePoints.get(edge.fromId) ?? []
-            const toPoints = knowledgePoints.get(edge.toId) ?? []
-            const fromPoint = [...fromPoints].reverse().find((point) => point.kind === 'archived' || point.kind === 'contradicted' || point.kind === 'weakened') ?? fromPoints[fromPoints.length - 1]
-            const toPoint = toPoints.find((point) => point.kind === 'appeared') ?? toPoints[0]
-            if (!fromPoint || !toPoint) return null
-            const x1 = x(fromPoint.at)
-            const x2 = x(toPoint.at)
+            const fromRow = rowOf.get(edge.fromId)
+            const toRow = rowOf.get(edge.toId)
+            const fromAt = fromRow?.terminal?.at ?? fromRow?.points[fromRow.points.length - 1]?.at
+            const toAt = toRow?.points.find((point) => point.kind === 'appeared')?.at ?? toRow?.firstAt
+            if (!fromAt || !toAt) return null
+            const x1 = x(fromAt)
+            const x2 = x(toAt)
             if (Math.max(x1, x2) < GUTTER || Math.min(x1, x2) > GUTTER + track) return null
             const bend = Math.max(20, Math.abs(x2 - x1) * 0.35)
             return <g key={`${edge.eventId}-${edge.fromId}`} className="lineage-link">
@@ -357,15 +412,15 @@ export default function ExperienceTimeline() {
           })}
           {lens.activation && model.links.map((link) => {
             if (hiddenRoots.has(link.offeredRun?.split('/')[0] ?? '')) return null
-            const clusterY = view.clusterLaneY.get(link.clusterId)
+            const rowLaneY = view.rowY.get(link.knowledgeId)
             const runY = view.runLaneY.get(link.usedRun ?? '')
-            if (clusterY === undefined || runY === undefined) return null
+            if (rowLaneY === undefined || runY === undefined) return null
             const x1 = x(link.offeredAt)
             const x2 = x(link.usedAt ?? link.offeredAt)
             if (x1 < GUTTER || x1 > GUTTER + track) return null
             const failed = link.usedRunStatus === 'failed'
             return <g key={link.hintId} className={`activation-link ${failed ? 'failed' : ''}`}>
-              <line x1={x1} y1={clusterY} x2={x2} y2={runY} stroke={failed ? '#f7768e' : '#bb9af7'} strokeWidth={1} strokeDasharray={failed ? '2 4' : '3 3'} opacity={0.8} markerEnd="url(#activation-arrow)" />
+              <line x1={x1} y1={rowLaneY} x2={x2} y2={runY} stroke={failed ? '#f7768e' : '#bb9af7'} strokeWidth={1} strokeDasharray={failed ? '2 4' : '3 3'} opacity={0.8} markerEnd="url(#activation-arrow)" />
               {failed && <g stroke="#f7768e" strokeWidth={1.4}>
                 <line x1={x2 - 3} y1={runY - 3} x2={x2 + 3} y2={runY + 3} />
                 <line x1={x2 - 3} y1={runY + 3} x2={x2 + 3} y2={runY - 3} />
@@ -382,10 +437,10 @@ export default function ExperienceTimeline() {
             </marker>
           </defs>
         </svg>
-        <p className="experience-hint">scroll — zoom · drag — pan · cluster click — details · bars are derived state, points are recorded events</p>
+        <p className="experience-hint">scroll — zoom · drag — pan · row click — details · bars are lifespans, points are events, ✕ marks death</p>
       </section>
       <aside className="obs-panel experience-detail">
-        {!selectedCluster ? <p className="obs-empty">Выберите кластер опыта на таймлайне — здесь появятся его жизненный цикл, эпизоды и цепочки активации.</p> : <ClusterDetails cluster={selectedCluster} lineage={model.lineage} />}
+        {!selectedRow ? <p className="obs-empty">Выберите опыт на таймлайне — здесь появятся его жизненный цикл, эпизоды, происхождение и связи.</p> : <RowDetails row={selectedRow} lineage={model.lineage} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} />}
       </aside>
     </main>
   </div>
@@ -417,34 +472,38 @@ function Header({ project, setProject, load, loading }: { project: string; setPr
   </header>
 }
 
-function ClusterDetails({ cluster, lineage }: { cluster: ExperienceCluster; lineage: KnowledgeLineage[] }) {
-  const [openMember, setOpenMember] = useState<string | null>(null)
-  const countsOf = (knowledgeId: string) => {
-    const parts = LIFECYCLE_KINDS.map((kind) => {
-      const count = cluster.points.filter((point) => point.knowledgeId === knowledgeId && point.kind === kind).length
-      return count ? `${kind} ×${count}` : ''
-    }).filter(Boolean)
-    return parts.join(' · ') || 'no lifecycle points'
-  }
-  return <div className="cluster-details">
-    <header><span className="eyebrow">{cluster.kind === 'execution' ? `EXECUTION · ${cluster.scope}` : `CLAIM · ${cluster.scope}`}</span><strong>{cluster.title}</strong></header>
+function RowDetails({ row, lineage, related }: { row: KnowledgeRow; lineage: KnowledgeLineage[]; related: KnowledgeRow[] }) {
+  const counts = LIFECYCLE_KINDS.map((kind) => {
+    const count = row.points.filter((point) => point.kind === kind).length
+    return count ? `${kind} ×${count}` : ''
+  }).filter(Boolean).join(' · ') || 'no lifecycle points'
+  const supersedes = lineage.filter((edge) => edge.fromId === row.knowledgeId)
+  const supersededBy = lineage.filter((edge) => edge.toId === row.knowledgeId)
+  const stateColor = STATE_COLORS[row.state] ?? '#7aa2f7'
+  return <div className="cluster-details row-details">
+    <header>
+      <span className="eyebrow">{row.policy ? `EXECUTION · ${row.scopes.primary}` : `CLAIM · ${row.scopes.primary}${row.scopes.secondary.length ? ` +${row.scopes.secondary.join(', ')}` : ''}`}</span>
+      <strong>{shortKnowledge(row.knowledgeId)}</strong>
+    </header>
     <div className="cluster-stats">
-      <span>state <strong style={{ color: STATE_COLORS[cluster.state] }}>{cluster.state}</strong></span>
-      <span>items {cluster.members.length}</span>
-      <span>runs {cluster.runs.length}</span>
-      <span>episodes {cluster.episodes.length}</span>
-      <span>roles {cluster.roles.join(', ') || '—'}</span>
+      <span>state <strong style={{ color: stateColor }}>{row.state}</strong></span>
+      <span>runs {row.runs.length}</span>
+      <span>roles {row.roles.join(', ') || '—'}</span>
+      <span>episodes {row.episodes.length}</span>
+      <span>{row.terminal ? `died ${row.terminal.at}` : 'alive'}</span>
     </div>
     <div className="strength-meter" title="derived from lifecycle state + reuse telemetry, not a model output">
       <span>strength</span>
-      <div className="strength-track"><div style={{ width: `${Math.round(cluster.strength * 100)}%`, background: STATE_COLORS[cluster.state] }} /></div>
-      <data>{cluster.strength.toFixed(2)}</data>
+      <div className="strength-track"><div style={{ width: `${Math.round(row.strength * 100)}%`, background: stateColor }} /></div>
+      <data>{row.strength.toFixed(2)}</data>
     </div>
-    {cluster.commands.length > 1 && <p className="cluster-variants">command variants: {cluster.commands.join(' · ')}</p>}
+    <p className="row-proposition">{row.proposition}</p>
+    {row.command && <p className="cluster-variants">command: {row.command}</p>}
     <section>
       <h4>Lifecycle</h4>
+      <p className="member-counts">{counts}</p>
       <ol className="cluster-points">
-        {cluster.points.map((point) => <li key={point.eventId} data-kind={point.kind}>
+        {row.points.map((point) => <li key={point.eventId} data-kind={point.kind}>
           <span className="point-dot" style={{ background: LIFECYCLE_COLORS[point.kind] }} />
           <time>{point.at}</time>
           <strong>{point.kind}</strong>
@@ -452,36 +511,24 @@ function ClusterDetails({ cluster, lineage }: { cluster: ExperienceCluster; line
         </li>)}
       </ol>
     </section>
-    {cluster.episodes.length > 0 && <section>
+    {row.episodes.length > 0 && <section>
       <h4>Episodes</h4>
       <ul className="cluster-episodes">
-        {cluster.episodes.map((episode, index) => <li key={`${episode.ref}-${index}`}><span className={`episode-kind ${episode.kind}`} />{episode.ref}<small>{episode.at}</small></li>)}
+        {row.episodes.map((episode, index) => <li key={`${episode.ref}-${index}`}><span className={`episode-kind ${episode.kind}`} />{episode.ref}<small>{episode.at}</small></li>)}
       </ul>
     </section>}
-    <section>
-      <h4>Knowledge items</h4>
-      <ul className="cluster-members">
-        {cluster.members.map((member) => {
-          const open = member.knowledgeId === openMember
-          const supersedes = lineage.filter((edge) => edge.fromId === member.knowledgeId)
-          const supersededBy = lineage.filter((edge) => edge.toId === member.knowledgeId)
-          const episodes = cluster.episodes.filter((episode) => episode.knowledgeId === member.knowledgeId)
-          return <li key={member.knowledgeId} className={open ? 'open' : ''} onClick={() => setOpenMember(open ? null : member.knowledgeId)}>
-            <code>{member.knowledgeId}</code><span className={`member-state ${member.state}`}>{member.state}</span>
-            <p>{member.proposition}</p>
-            {open && <div className="member-detail">
-              <p className="member-counts">{countsOf(member.knowledgeId)}</p>
-              {episodes.length > 0 && <ul className="cluster-episodes member-episodes">
-                {episodes.map((episode, index) => <li key={`${episode.ref}-${index}`}><span className={`episode-kind ${episode.kind}`} />{episode.ref}<small>{episode.at}</small></li>)}
-              </ul>}
-              {(supersedes.length > 0 || supersededBy.length > 0) && <ul className="lineage-list">
-                {supersedes.map((edge) => <li key={`out-${edge.eventId}`}>supersedes <code>{edge.toId}</code>{edge.inferred ? ' · inferred' : ''}{edge.reason ? <small>{edge.reason}</small> : null}</li>)}
-                {supersededBy.map((edge) => <li key={`in-${edge.eventId}`}>superseded by <code>{edge.fromId}</code>{edge.inferred ? ' · inferred' : ''}{edge.reason ? <small>{edge.reason}</small> : null}</li>)}
-              </ul>}
-            </div>}
-          </li>
-        })}
+    {(supersedes.length > 0 || supersededBy.length > 0) && <section>
+      <h4>Lineage</h4>
+      <ul className="lineage-list">
+        {supersedes.map((edge) => <li key={`out-${edge.eventId}`}>supersedes <code>{edge.toId}</code>{edge.inferred ? ' · inferred' : ''}{edge.reason ? <small>{edge.reason}</small> : null}</li>)}
+        {supersededBy.map((edge) => <li key={`in-${edge.eventId}`}>superseded by <code>{edge.fromId}</code>{edge.inferred ? ' · inferred' : ''}{edge.reason ? <small>{edge.reason}</small> : null}</li>)}
       </ul>
-    </section>
+    </section>}
+    {related.length > 0 && <section>
+      <h4>Related experiences</h4>
+      <ul className="related-list">
+        {related.map((item) => <li key={item.knowledgeId}><code>{shortKnowledge(item.knowledgeId)}</code><span className={`member-state ${item.state}`}>{item.state}</span><small>{item.scopes.primary}</small></li>)}
+      </ul>
+    </section>}
   </div>
 }

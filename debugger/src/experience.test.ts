@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ObservationEvent } from './observationApi'
-import { canonicalCommand, contentTokens, foldExperience, lifecycleKindOf, roleOfKnowledgeId, roleOfRun, runOfEvidenceRef, scopeOfCommand } from './experience'
+import { aliveRowAt, commandSegments, contentTokens, foldExperience, lifecycleKindOf, propositionMechanisms, roleOfKnowledgeId, roleOfRun, runOfEvidenceRef, scopeOfCommand, segmentSubcommand, shortKnowledge, stateBucket } from './experience'
 
 let counter = 0
 
@@ -63,12 +63,61 @@ describe('lifecycleKindOf', () => {
 
 describe('canonicalCommand / scopeOfCommand', () => {
   it('merges flag variations of one verification into a canonical command', () => {
-    expect(canonicalCommand('go test -count=1 -v ./...')).toBe('go test ./...')
-    expect(canonicalCommand('go test ./...')).toBe('go test ./...')
     expect(scopeOfCommand('go test ./...')).toBe('test')
     expect(scopeOfCommand('go vet ./...')).toBe('vet')
     expect(scopeOfCommand('go build ./...')).toBe('build')
     expect(scopeOfCommand('gofmt -l .')).toBe('fmt')
+  })
+})
+
+describe('scope derivation helpers', () => {
+  it('splits compound commands into simple segments', () => {
+    expect(commandSegments(['mkdir', '-p', 'out', '&&', 'go', 'run', '.', 'report'])).toEqual([['mkdir', '-p', 'out'], ['go', 'run', '.', 'report']])
+  })
+
+  it('extracts the mechanism from interpreter, wrapper and project binaries', () => {
+    expect(segmentSubcommand(['go', 'run', '.', 'auth'])).toBe('auth')
+    expect(segmentSubcommand(['env', 'AUTH_TOKEN=x', 'go', 'run', '.', 'auth'])).toBe('auth')
+    expect(segmentSubcommand(['go', 'test', './...'])).toBe('test')
+    expect(segmentSubcommand(['nb', 'report'])).toBe('report')
+    expect(segmentSubcommand(['./bin/tool', 'serve'])).toBe('serve')
+    expect(segmentSubcommand(['go', 'run', '.'])).toBeUndefined()
+    expect(segmentSubcommand(['mkdir', '-p', 'out'])).toBeUndefined()
+    expect(segmentSubcommand(['echo', 'hi'])).toBeUndefined()
+  })
+
+  it('matches proposition words against the executed-command vocabulary', () => {
+    const vocab = new Set(['auth', 'report', 'fetch'])
+    expect(propositionMechanisms('nb auth authenticates via .token-file', vocab)).toEqual(['auth'])
+    expect(propositionMechanisms('AUTH_TOKEN env var rejected; auth ok', vocab)).toEqual(['auth'])
+    expect(propositionMechanisms('setup verified end to end: auth and report', vocab)).toEqual(['auth', 'report'])
+    expect(propositionMechanisms('Reviewer verdict APPROVED', vocab)).toEqual([])
+  })
+
+  it('buckets memory states for the live/dead filter', () => {
+    expect(stateBucket('confirmed')).toBe('active')
+    expect(stateBucket('proposed')).toBe('active')
+    expect(stateBucket('challenged')).toBe('stale')
+    expect(stateBucket('corrected')).toBe('stale')
+    expect(stateBucket('invalidated')).toBe('invalidated')
+    expect(stateBucket('superseded')).toBe('archived')
+  })
+
+  it('shortens knowledge ids into row labels', () => {
+    expect(shortKnowledge('run/knowledge/82')).toBe('K82')
+    expect(shortKnowledge('auto/80447996488d1cde9bbc0b8f')).toBe('auto/…0b8f')
+    expect(shortKnowledge('plain')).toBe('plain')
+  })
+
+  it('counts the living population at a moment', () => {
+    const rows = [
+      { firstAt: '1', lastAt: '9', terminal: { kind: 'archived' as const, at: '5' } },
+      { firstAt: '2', lastAt: '9' },
+      { firstAt: '6', lastAt: '9' },
+    ] as never[]
+    expect(aliveRowAt(rows, '3')).toBe(2)
+    expect(aliveRowAt(rows, '5')).toBe(1)
+    expect(aliveRowAt(rows, '7')).toBe(2)
   })
 })
 
