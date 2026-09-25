@@ -50,25 +50,47 @@ func TestStdioMCPServerDiscoveryAndCalls(t *testing.T) {
 	if len(c.ToolDefs()) != 3 || !c.RequiresApproval("mcp__create_issue") {
 		t.Fatalf("unexpected discovered tools/policy: %#v", c.ToolDefs())
 	}
-	got, err := c.Call(ctx, "mcp__read_file", map[string]any{"path": "calculator.go"})
+	got, err := c.Call(ctx, "mcp__read_file", map[string]any{"path": "calculator.go"}, "")
 	if err != nil || !strings.Contains(got, "a+b") {
 		t.Fatalf("read_file = %q, %v", got, err)
 	}
-	got, err = c.Call(ctx, "mcp__search", map[string]any{"query": "func Add"})
+	got, err = c.Call(ctx, "mcp__search", map[string]any{"query": "func Add"}, "")
 	if err != nil || got != "calculator.go" {
 		t.Fatalf("search = %q, %v", got, err)
 	}
-	if _, err := c.Call(ctx, "mcp__read_file", map[string]any{"path": "../outside"}); err == nil {
+	if _, err := c.Call(ctx, "mcp__read_file", map[string]any{"path": "../outside"}, ""); err == nil {
 		t.Fatal("workspace escape was accepted")
 	}
-	if _, err := c.Call(ctx, "mcp__not_allowlisted", nil); err == nil {
+	if _, err := c.Call(ctx, "mcp__not_allowlisted", nil, ""); err == nil {
 		t.Fatal("non-allowlisted tool was callable")
 	}
-	if _, err := c.Call(ctx, "mcp__create_issue", map[string]any{"title": "bug", "body": "repro"}); err != nil {
+	first, err := c.Call(ctx, "mcp__create_issue", map[string]any{"title": "bug", "body": "repro"}, "run-1/turn/01/call-1")
+	if err != nil {
 		t.Fatalf("create_issue call: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".test-issues.log")); err != nil {
+	// Same idempotency key: the server returns the same issue number instead of
+	// creating a duplicate — this is the contract retries rely on.
+	retried, err := c.Call(ctx, "mcp__create_issue", map[string]any{"title": "bug", "body": "repro"}, "run-1/turn/01/call-1")
+	if err != nil {
+		t.Fatalf("create_issue retry: %v", err)
+	}
+	if !strings.Contains(first, "#1") || !strings.Contains(retried, "#1") || strings.Contains(retried, "#2") {
+		t.Fatalf("idempotent retry diverged: first=%q retried=%q", first, retried)
+	}
+	// Different key: a distinct operation creates a distinct issue.
+	second, err := c.Call(ctx, "mcp__create_issue", map[string]any{"title": "bug", "body": "repro"}, "run-1/turn/02/call-2")
+	if err != nil {
+		t.Fatalf("create_issue second call: %v", err)
+	}
+	if !strings.Contains(second, "#2") {
+		t.Fatalf("distinct operations must not collapse: second=%q", second)
+	}
+	issues, err := os.ReadFile(filepath.Join(root, ".test-issues.log"))
+	if err != nil {
 		t.Fatalf("create_issue side effect missing: %v", err)
+	}
+	if got := strings.Count(string(issues), "---"); got != 2 {
+		t.Fatalf("expected exactly two persisted issues, got %d", got)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/observation"
+	enums "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
@@ -538,6 +539,21 @@ func TestModelFailureRecordsBoundedErrorDetail(t *testing.T) {
 	runFailure := events[indexEvent(events, "run.failed")]
 	require.Contains(t, runFailure.Data["error"], "provider status 403")
 	require.Less(t, indexEvent(events, "model.failed"), indexEvent(events, "run.failed"))
+}
+
+func TestToolFailureDataEffectSemantics(t *testing.T) {
+	rejected := temporal.NewNonRetryableApplicationError("command must be an array of strings", "InvalidToolArguments", nil)
+	data := toolFailureData("op-1", "sha256:x", "run_command", rejected)
+	require.Equal(t, "none", data["effect"], "argument rejection happens before execution")
+
+	crashed := errors.New("docker daemon gone")
+	data = toolFailureData("op-2", "sha256:y", "run_command", crashed)
+	require.Equal(t, "uncertain", data["effect"], "execution-boundary failures leave the effect unknown")
+	require.Equal(t, "activity_failed", data["error_type"])
+
+	timeout := temporal.NewTimeoutError(enums.TIMEOUT_TYPE_START_TO_CLOSE, nil)
+	data = toolFailureData("op-3", "sha256:z", "mcp__github__create_issue", timeout)
+	require.Equal(t, "uncertain", data["effect"], "timeouts after dispatch leave the effect unknown")
 }
 
 func TestMCPServerNameEnvResolution(t *testing.T) {

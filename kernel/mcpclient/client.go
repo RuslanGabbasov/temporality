@@ -118,7 +118,12 @@ func (c *Client) HasTool(name string) bool {
 	return ok
 }
 
-func (c *Client) Call(ctx context.Context, name string, args map[string]any) (string, error) {
+// Call executes one MCP tool. idempotencyKey is propagated via the
+// protocol's _meta field: servers that support idempotent execution can
+// deduplicate retries of the same operation (the kernel always retries a
+// consequential call as a NEW operation, so keys are never reused across
+// distinct intents). Servers without support simply ignore it.
+func (c *Client) Call(ctx context.Context, name string, args map[string]any, idempotencyKey string) (string, error) {
 	if c == nil {
 		return "", errors.New("MCP is not configured")
 	}
@@ -131,7 +136,11 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any) (st
 		return "", err
 	}
 	defer session.Close()
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: actual, Arguments: args})
+	params := &mcp.CallToolParams{Name: actual, Arguments: args}
+	if idempotencyKey != "" {
+		params.Meta = mcp.Meta{"idempotency_key": idempotencyKey}
+	}
+	result, err := session.CallTool(ctx, params)
 	if err != nil {
 		return "", err
 	}

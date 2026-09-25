@@ -5,9 +5,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -72,20 +75,71 @@ func main() {
 		}
 		return mcpText(strings.Join(matches, "\n")), nil, nil
 	})
-	mcp.AddTool(s, &mcp.Tool{Name: "create_issue", Description: "Create a test issue", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"title": map[string]any{"type": "string"}, "body": map[string]any{"type": "string"}}, "required": []string{"title", "body"}}}, func(_ context.Context, _ *mcp.CallToolRequest, a issueArgs) (*mcp.CallToolResult, any, error) {
+	// The server persists issues and idempotency keys under the test root, so
+	// the contract survives process restarts — the kernel spawns a fresh stdio
+	// server per call, which is exactly the retry window this simulates.
+	issueLog := filepath.Join(root, ".test-issues.log")
+	keyLog := filepath.Join(root, ".test-idempotency.log")
+	var issueMu sync.Mutex
+	loadKeys := func() (map[string]int, int) {
+		keys := map[string]int{}
+		highest := 0
+		data, err := os.ReadFile(keyLog)
+		if err != nil {
+			return keys, highest
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			key, number, ok := strings.Cut(line, " ")
+			if !ok || key == "" {
+				continue
+			}
+			n, err := strconv.Atoi(number)
+			if err != nil {
+				continue
+			}
+			keys[key] = n
+			if n > highest {
+				highest = n
+			}
+		}
+		return keys, highest
+	}
+	mcp.AddTool(s, &mcp.Tool{Name: "create_issue", Description: "Create a test issue", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"title": map[string]any{"type": "string"}, "body": map[string]any{"type": "string"}}, "required": []string{"title", "body"}}}, func(_ context.Context, req *mcp.CallToolRequest, a issueArgs) (*mcp.CallToolResult, any, error) {
 		if strings.TrimSpace(a.Title) == "" {
 			return nil, nil, errors.New("title is required")
 		}
-		f, err := os.OpenFile(filepath.Join(root, ".test-issues.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+		// The server honors the client's idempotency key: a retry of the same
+		// operation returns the same issue instead of creating a duplicate.
+		key, _ := req.Params.Meta["idempotency_key"].(string)
+		issueMu.Lock()
+		defer issueMu.Unlock()
+		keys, seq := loadKeys()
+		if number, ok := keys[key]; key != "" && ok {
+			return mcpText(fmt.Sprintf("issue #%d already created (idempotent retry)", number)), nil, nil
+		}
+		seq++
+		number := seq
+		f, err := os.OpenFile(issueLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 		if err != nil {
 			return nil, nil, err
 		}
-		defer f.Close()
-		_, err = f.WriteString(a.Title + "\n" + a.Body + "\n---\n")
-		if err != nil {
+		if _, err := f.WriteString(fmt.Sprintf("#%d %s\n%s\n---\n", number, a.Title, a.Body)); err != nil {
+			f.Close()
 			return nil, nil, err
 		}
-		return mcpText("issue created"), nil, nil
+		f.Close()
+		if key != "" {
+			kf, err := os.OpenFile(keyLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, err := kf.WriteString(key + " " + strconv.Itoa(number) + "\n"); err != nil {
+				kf.Close()
+				return nil, nil, err
+			}
+			kf.Close()
+		}
+		return mcpText(fmt.Sprintf("issue #%d created", number)), nil, nil
 	})
 	if err := s.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		panic(err)

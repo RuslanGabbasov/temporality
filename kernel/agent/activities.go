@@ -150,6 +150,15 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		if value, ok := request.Arguments["timeout_sec"].(float64); ok {
 			timeout = int(value)
 		}
+		if fault := strings.TrimSpace(os.Getenv("KERNEL_FAULT_AFTER_EFFECT")); fault != "" && request.OperationID == fault {
+			// Fault injection for live reconciliation drills: run the command for
+			// real (the effect lands), then report a worker-style crash so the
+			// workflow records tool.failed with effect=uncertain.
+			if _, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.Role == "reviewer" || request.Role == "qa"}); err != nil {
+				return ToolResult{}, err
+			}
+			return ToolResult{}, fmt.Errorf("injected worker crash after effect (operation %s)", request.OperationID)
+		}
 		result, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.Role == "reviewer" || request.Role == "qa"})
 		if err != nil {
 			return ToolResult{}, err
@@ -158,7 +167,13 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return ToolResult{Content: fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, result.Output), ExitCode: &exitCode}, nil
 	default:
 		if a.MCP != nil && a.MCP.HasTool(request.Name) {
-			content, err := a.MCP.Call(ctx, request.Name, request.Arguments)
+			if fault := strings.TrimSpace(os.Getenv("KERNEL_FAULT_AFTER_EFFECT")); fault != "" && request.OperationID == fault {
+				// Fault injection for live reconciliation drills: the effect has
+				// committed, but the worker "dies" before reporting the result.
+				// Downstream, this is indistinguishable from a real crash window.
+				return ToolResult{}, fmt.Errorf("injected worker crash after effect (operation %s)", request.OperationID)
+			}
+			content, err := a.MCP.Call(ctx, request.Name, request.Arguments, request.OperationID)
 			return ToolResult{Content: content}, err
 		}
 		return ToolResult{}, fmt.Errorf("tool %q is not registered", request.Name)

@@ -292,7 +292,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					} else if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Arguments: call.Args}).Get(ctx, &toolResult); err != nil {
 						toolFailed = true
-						if eventErr := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "activity_failed"}); eventErr != nil {
+						if eventErr := emit(activityCtx, state, "tool.failed", toolFailureData(operationID, argumentsHash, call.Name, err)); eventErr != nil {
 							return result, eventErr
 						}
 						toolResult.Content = toolFailureMessage(call.Name, err)
@@ -360,7 +360,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Arguments: call.Args}).Get(ctx, &toolResult); err != nil {
 					toolFailed = true
-					if eventErr := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "activity_failed"}); eventErr != nil {
+					if eventErr := emit(activityCtx, state, "tool.failed", toolFailureData(operationID, argumentsHash, call.Name, err)); eventErr != nil {
 						return result, eventErr
 					}
 					toolResult.Content = toolFailureMessage(call.Name, err)
@@ -553,6 +553,22 @@ func modelObservability(completion llm.Completion) map[string]any {
 func resultContentRef(content string) string {
 	digest := sha256.Sum256([]byte(content))
 	return "sha256:" + hex.EncodeToString(digest[:])
+}
+
+// toolFailureData builds the tool.failed payload. The effect field is the
+// reconciliation contract: "none" means the call was rejected before any
+// execution (fixable, safe to re-issue), "uncertain" means the failure
+// happened at or after the execution boundary, where the operator — not the
+// model — must decide whether the side effect landed.
+func toolFailureData(operationID, argumentsHash, tool string, err error) map[string]any {
+	data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": tool, "error_type": "activity_failed"}
+	var application *temporal.ApplicationError
+	if errors.As(err, &application) && application.NonRetryable() {
+		data["effect"] = "none"
+	} else {
+		data["effect"] = "uncertain"
+	}
+	return data
 }
 
 // emitAgentSummary records the agent-authored final answer as derived data:
