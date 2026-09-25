@@ -146,47 +146,42 @@ Timeline.** Universal observation API (migration 000018), Agent Kernel,
 6. **Пустой tracked-файл `docs-placeholder`** и корневой каталог из 9
    документов четырёх эпох вперемешку с кодом.
 
-## 5. Предлагаемая расчистка
+## 5. Расчистка — выполнено (2026-09-25)
 
-Рекомендация — три стадии, каждая обратима и не трогает продуктовый контур.
+Стадии A–C выполнены одной операцией (см. git log от `dc01ff2`):
 
-### Стадия A — разделение эпох (сейчас, ~полдня)
+- **Извлечён journal**: `observation/httpapi` + `observation/postgres`
+  (embedded-миграция) + `observation/memory` (тесты) +
+  `cmd/temporality-journal`; compose-сервис `runtime`/`executor` заменён на
+  `journal`; debugger nginx проксирует `/api/` на journal.
+- **Kernel отвязан от эпохи 2**: `aml/llm` → `kernel/llm`.
+- **Удалено** (~40k LOC): `frp/`, `aml/`, `cmd/temporality-runtime`,
+  `cmd/temporality-executor`, `cmd/aml-*`, `benchmarks/`, legacy-скрипты
+  (их эндпоинты жили на FRP-сервере), FRP-страница debugger и её модули,
+  `docs-placeholder`. Makefile собирает journal + agent-kernel.
+- **Доки**: история эпох 1–2 в `docs/history/` (ТЗ, отчёты, pivot-серии,
+  aml/frp-бенчмарки); продуктовые доки остаются в `docs/`.
+- Продуктовый контур больше не компилирует ни одного legacy-пакета.
 
-1. `docs/history/`: перенести все корневые ТЗ/отчёты/планы эпох 1–2 и
-   `docs/pivot/`, `docs/benchmarks/aml-*`; `docs-placeholder` удалить.
-2. Переписать `README.md` под продукт (контур из §1, схемы, эксперименты,
-   указатель на `docs/history/` для FRP/AML). `ROADMAP.md` → `docs/history/`.
-3. `frp/README.md`: «FROZEN. FRP v0.3 runtime, эпоха 1, не на продуктовом
-   пути; живые части — substrate и observation endpoints, см.
-   docs/product-architecture.md». Аналогично `aml/README.md`.
-4. Makefile: сгруппировать цели: `kernel-*`, `stack-*`, `test*` — продукт;
-   `legacy-frp-*`, `legacy-aml-*` — остальное.
-5. Debugger: сделать `/experience` дефолтным роутом; FRP-страницу оставить
-   по прямому адресу с бейджем «архив».
-6. `cmd/temporality-executor` и сервис `executor` в compose: kernel не
-   использует; убрать из compose (код оставить до стадии C).
+## 5a. Соответствие целевой корпоративной архитектуре
 
-Результат стадии A: репозиторий читается как один продукт с историей, а
-не как три продукта вперемешку.
+Целевая нарезка (см. §6) и текущий код:
 
-### Стадия B — извлечение journal-сервиса (следующий milestone, ~неделя)
+| Слой (цель) | Сегодня в коде | Заметки |
+|---|---|---|
+| Temporal — durable execution | `temporal` в compose; kernel workflow | уже так |
+| Agent Harness — Agent Model | `kernel/agent` (generic + Lead/Coder/Reviewer/QA под build-тегом) | roles/skills — гипотезы эпох 2, оставить только доказанное |
+| Agent Harness — Execution | `kernel/mcpclient`, sandbox (`run_command`), `kernel/llm` gateway | model gateway = `kernel/llm` |
+| Agent Harness — Orchestration | Temporal workflow, delegation в `kernel/agent/workflow.go` | parallelism/policies — по мере надобности |
+| Agent Harness — Control | approval (requested/granted, redacted preview), budgets (turns) | behavioral SLO/policy enforcement — будущие стадии |
+| Agent Harness — Evidence & Observability | observation events, kernel event outbox (миграция 000019) | evidence package / replay — частично (Experience Timeline) |
+| Temporality — опыт и память | `observation/` (journal, knowledge, hints) + Experience Timeline | ядро продукта |
+| Enterprise Control Plane | — | отсутствует: auth, tenants/projects, RBAC на invalidation, secrets, quotas |
+| Infrastructure | docker compose | при развёртывании заменить на целевые среды |
 
-1. Новый бинарник `cmd/temporality-journal`: только `/v1/observations/*`
-   (+ healthz), на пакетах `observation/` + `frp/substrate/postgres`
-   (перенести в `internal/substrate`). Миграции: вынести 000018 в
-   независимую цепочку.
-2. `aml/llm` → `kernel/llm`; удалить зависимость kernel от `aml/`.
-3. Compose: journal вместо runtime; FRP-runtime (и temporal при
-   необходимости) остаются для истории, не поднимаются по умолчанию.
-4. Debugger: `VITE_FRP_API_URL` → `VITE_API_URL`.
-5. Продуктовый контур больше не компилирует ни одного legacy-пакета.
-
-### Стадия C — удаление (после стабилизации B, одна PR)
-
-- `frp/*` кроме перенесённого субстрата (~23k LOC), `cmd/temporality-runtime`
-  (в старом виде), `cmd/temporality-executor`, `aml/*`, `cmd/aml-*`,
-  `benchmarks/aml-*`, legacy-скрипты, FRP-страница debugger.
-- История остаётся в git и `docs/history/`. Это ~33k LOC минус продукт.
+Scheduling не выделяется в отдельный блок harness: cron/schedules/events
+естественно живут на стороне Temporal; harness определяет только что
+запускать и с какими параметрами.
 
 ## 6. Что развивать как продукт (и что нет)
 
@@ -215,9 +210,16 @@ Timeline.** Universal observation API (migration 000018), Agent Kernel,
 
 ## 7. Открытые решения за пользователем
 
-1. **Executor**: убрать из compose на стадии A? FRP-страница debugger
-   может показывать affordances — проверить при удалении.
-2. **FRP-страница `/`**: оставить как историческое демо или удалить на
-   стадии C?
-3. **`aml/` после переноса `llm`**: удалить на C или заморозить навсегда?
-4. **Время стадии B**: сразу после exp9 или до него?
+Открытые вопросы стадии A–C сняты решениями от 2026-09-25: executor и
+FRP-страница удалены, `aml/` удалён, расчистка сделана до exp9.
+
+Следующий открытый фронт — «используемый продукт»:
+
+1. **Развёртывание для команды** вместо новых экспериментов: env-конфиг,
+   .env.example, документация запуска, реальные проекты вместо
+   gatekeeper/lighthouse фикстур.
+2. **Enterprise Control Plane** как следующий крупный слой: auth на
+   journal/kernel API, мультипроектность, RBAC на invalidation (сейчас
+   единственный write-эндпоинт без авторизации), secrets вне .env.
+3. **Kernel P0/P1** только там, где мешает наблюдаемости (model-call
+   observability, MCP provenance, failure/reconciliation).

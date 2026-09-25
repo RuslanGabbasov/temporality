@@ -57,7 +57,7 @@ First vertical: start run -> model call -> tool/sandbox -> approval -> event out
 
 ## Relationship to the universal adapter
 
-`docs/pivot/09-universal-observability-plan.md` remains valid as the cross-harness ingestion/activation contract. Its statement that the agent loop stays outside Temporality is unchanged. This document adds one first-party Kernel producer; it does not make FRP Frames, Temporal IDs or this Kernel mandatory for third-party producers.
+`docs/history/pivot/09-universal-observability-plan.md` remains valid as the cross-harness ingestion/activation contract. Its statement that the agent loop stays outside Temporality is unchanged. This document adds one first-party Kernel producer; it does not make FRP Frames, Temporal IDs or this Kernel mandatory for third-party producers.
 
 ## Open implementation questions
 
