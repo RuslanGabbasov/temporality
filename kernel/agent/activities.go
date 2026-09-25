@@ -16,6 +16,7 @@ import (
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/sandbox"
 	"github.com/temporality-project/temporality/observation"
+	"go.temporal.io/sdk/temporal"
 )
 
 type EventOutbox interface {
@@ -119,7 +120,10 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		}
 		command, err := stringArgs(request.Arguments["command"])
 		if err != nil {
-			return ToolResult{}, err
+			// Argument validation happens before anything executes: the failure is
+			// deterministic, has no side effect, and is fixable by the caller, so it
+			// must be neither retried nor reported as an uncertain effect.
+			return ToolResult{}, temporal.NewNonRetryableApplicationError(err.Error(), "InvalidToolArguments", nil)
 		}
 		timeout := 0
 		if value, ok := request.Arguments["timeout_sec"].(float64); ok {

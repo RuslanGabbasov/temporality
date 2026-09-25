@@ -476,6 +476,13 @@ func eventScope(sourceID, project, runID string) string {
 func EventScope(sourceID, project, runID string) string { return eventScope(sourceID, project, runID) }
 
 func toolFailureMessage(name string, err error) string {
+	// Argument-validation failures are rejected before execution: no effect,
+	// deterministic, and fixable — tell the model exactly what to correct so a
+	// schema slip does not burn the run budget as repeated "uncertain" failures.
+	var application *temporal.ApplicationError
+	if errors.As(err, &application) && application.Type() == "InvalidToolArguments" {
+		return "Tool call rejected before execution, no effect: " + application.Message() + ". Re-issue the call with corrected arguments: run_command expects command as an array of strings, e.g. [\"go\",\"run\",\".\",\"check\"]."
+	}
 	if strings.HasPrefix(name, "mcp__") || name == "run_command" {
 		return "Tool call failed; its effect may be uncertain. Do not repeat a consequential action without checking its status."
 	}

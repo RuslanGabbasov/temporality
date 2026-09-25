@@ -13,6 +13,7 @@ import (
 	"github.com/temporality-project/temporality/aml/llm"
 	"github.com/temporality-project/temporality/observation"
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
 )
@@ -21,6 +22,18 @@ func TestMCPToolFailureDoesNotExposeRemoteError(t *testing.T) {
 	message := toolFailureMessage("mcp__write_file", errors.New("response lost; token=secret"))
 	if strings.Contains(message, "secret") || !strings.Contains(message, "uncertain") {
 		t.Fatalf("unexpected MCP failure message: %q", message)
+	}
+}
+
+func TestRejectedToolArgumentsAreReportedAsFixable(t *testing.T) {
+	rejected := temporal.NewNonRetryableApplicationError("command must be an array of strings", "InvalidToolArguments", nil)
+	message := toolFailureMessage("run_command", rejected)
+	if !strings.Contains(message, "no effect") || !strings.Contains(message, "array of strings") {
+		t.Fatalf("argument rejection must explain the fix: %q", message)
+	}
+	uncertain := toolFailureMessage("run_command", errors.New("docker daemon gone"))
+	if !strings.Contains(uncertain, "uncertain") {
+		t.Fatalf("execution failures keep the uncertain-effect caution: %q", uncertain)
 	}
 }
 
