@@ -20,8 +20,12 @@ type KnowledgeTransition struct {
 }
 
 type Knowledge struct {
-	ID              string                `json:"id"`
-	Proposition     string                `json:"proposition"`
+	ID          string `json:"id"`
+	Proposition string `json:"proposition"`
+	// Kind distinguishes model-authored claims from kernel heuristic
+	// observations ("claim" vs "observation"). Events recorded before kinds
+	// existed project as claims, which is the original authorship model.
+	Kind            string                `json:"kind,omitempty"`
 	Topics          []string              `json:"topics,omitempty"`
 	Entities        []string              `json:"entities,omitempty"`
 	State           string                `json:"state"`
@@ -129,7 +133,7 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			if proposition == "" {
 				return nil, fmt.Errorf("knowledge %q has an empty proposition", id)
 			}
-			item = &Knowledge{ID: id, Proposition: proposition, Topics: stringList(event.Data["topics"]), Entities: stringList(event.Data["entities"]), State: "proposed", Project: event.Context.Project, CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt, CreatedBy: event.Context.Actor, Evidence: append([]Evidence(nil), event.Evidence...)}
+			item = &Knowledge{ID: id, Proposition: proposition, Kind: knowledgeKind(event.Data), Topics: stringList(event.Data["topics"]), Entities: stringList(event.Data["entities"]), State: "proposed", Project: event.Context.Project, CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt, CreatedBy: event.Context.Actor, Evidence: append([]Evidence(nil), event.Evidence...)}
 			byID[id] = item
 			appendKnowledgeTransition(item, event)
 			continue
@@ -262,6 +266,13 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func knowledgeKind(data map[string]any) string {
+	if kind := stringValue(data, "kind"); kind != "" {
+		return kind
+	}
+	return "claim"
 }
 
 func stringList(value any) []string {

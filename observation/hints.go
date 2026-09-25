@@ -28,6 +28,7 @@ type Hint struct {
 type hintCandidate struct {
 	hint      Hint
 	matchTier int
+	kindTier  int
 	stateTier int
 }
 
@@ -95,6 +96,12 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 		if candidates[i].matchTier != candidates[j].matchTier {
 			return candidates[i].matchTier < candidates[j].matchTier
 		}
+		// Kind ranks below match strength: an entity/topic-matched observation
+		// still outranks a term-matched claim, but observations must not crowd
+		// claims out of the budget at equal match strength.
+		if candidates[i].kindTier != candidates[j].kindTier {
+			return candidates[i].kindTier < candidates[j].kindTier
+		}
 		if candidates[i].stateTier != candidates[j].stateTier {
 			return candidates[i].stateTier < candidates[j].stateTier
 		}
@@ -133,11 +140,19 @@ func makeHintCandidate(item Knowledge, matched []string, matchTier int) (hintCan
 		}
 		caution += "depends on retired knowledge: " + strings.Join(item.RiskSources, ", ")
 	}
+	kindTier := 0
+	if item.Kind == "observation" {
+		// Observations are cheap kernel side-products: every successful
+		// verification command records one. Claims are the model's authored
+		// conclusions, so at equal match strength a claim outranks an
+		// observation and observations fill the remaining budget.
+		kindTier = 1
+	}
 	return hintCandidate{hint: Hint{
 		KnowledgeID: item.ID, Proposition: item.Proposition, State: item.State,
 		MatchedBy: boundedStrings(matched, 8), Caution: caution,
 		Evidence: boundedEvidence(item.Evidence, 8), History: boundedHistory(item.History, 5),
-	}, matchTier: matchTier, stateTier: stateTier}, true
+	}, matchTier: matchTier, kindTier: kindTier, stateTier: stateTier}, true
 }
 
 func matchKnowledge(item Knowledge, entities, topics, queryTokens map[string]bool, phrase string) ([]string, int) {

@@ -43,6 +43,7 @@ Fixture: `debugger/src/fixtures/experiment7-forge.json` (1884 events,
 | 12 | v2 full pipeline (conflicts → execution decides) | 8 | `/112` e3: v2 semantics consolidated | turn_limit† |
 | 13 | post-invalidation pipeline | 8 (no dead, no k2!) | `/99` dup: pack re-derived — the displacement symptom | completed |
 | 14 | final audit | 8 | `/91` c91: sign/pack supersede map; `/94` c94: /scratch ephemerality | completed |
+| 15 | post-fix validation (same task as 13) | 8 = all living claims incl. k2/s2/e2/e3 | `/47` e2e verification record (no pack re-derivation) | completed |
 
 † turn budget reached after `remember` had fired.
 
@@ -84,6 +85,9 @@ Operator steps (recorded as `human-operator` events):
    knowledge is operationally dead: the memory is written but never read.
    Kernel follow-up (P0 candidate): cap auto/observation nodes per budget
    and/or rank `kind=claim` above `kind=observation` in KnowledgeHints.
+   **Implemented** (ranking, post-corpus): `observation.FindHints` now
+   ranks `kind=claim` above `kind=observation` at equal match strength —
+   see "Hint-budget fix validation (run 15)" below.
 
 5. **Challenged knowledge was also displaced.** b1 stayed challengable in
    theory but never made the 8-slot budget after 08b — unlike Experiment 6's
@@ -94,6 +98,32 @@ Operator steps (recorded as `human-operator` events):
    their conclusions in the final answer but hit the turn budget before
    `remember`; the 08b/10b retries (per the exp5/6 convention) made the
    durable record explicit.
+
+## Hint-budget fix validation (run 15)
+
+After the corpus froze, the ranking fix landed: the knowledge projection
+records the `kind` discriminator (`claim` vs `observation`; pre-kind events
+project as claims), and `FindHints` orders candidates
+`matchTier → kindTier → stateTier → id`, so at equal match strength a claim —
+even a proposed one — outranks a confirmed auto observation. An entity/topic-
+matched observation still beats a term-matched claim: match strength dominates.
+
+Run 15 (`forge-20260925-15`, same task and fixture as run 13, spec
+`phase-b4-validation.spec`) confirms the fix end to end:
+
+- the budget of 8 went to all seven living claims (a1, p1, b2, k2, s2, e2,
+  e3 — the first k2/s2/e2/e3 recall in the project's history) plus run 13's
+  duplicate claim; the five stable auto observations received zero slots;
+- all eight hints were used in turn 1, the pipeline ran on v2 semantics from
+  knowledge (`FORGE_TOKEN`, `CACHE_DIR=.cache`, `dist.zip`, `SIGNING_KEY`),
+  and the run completed in 6 turns (run 13 needed 8);
+- no pack re-derivation: the single new claim (`…-15/knowledge/47`) is an
+  end-to-end verification record; a repeated successful command deduplicated
+  into `knowledge.used` of the existing auto node instead of a new proposal.
+
+The fixture and its acceptance assertions stay frozen on purpose: they pin
+the corpus as observed (used=0 for k2/s2/e2/e3 through run 14). Run 15 lives
+only in the live project stream.
 
 ## Fold refinements recorded by this corpus
 
