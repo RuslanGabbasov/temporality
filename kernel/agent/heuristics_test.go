@@ -117,4 +117,33 @@ func TestExecutionObservationProposal(t *testing.T) {
 	if proposal := executionObservationProposal(run, llm.ToolCall{Name: "run_command", Args: masked}, ToolResult{ExitCode: exitCode(0)}); proposal != nil {
 		t.Fatal("exit-code masking wrapper must not produce a proposal")
 	}
+	// Output-path variants of one build command share a knowledge node: where
+	// the binary is written is incidental to the observed fact.
+	scratch := executionObservationProposal(run, llm.ToolCall{Name: "run_command", Args: map[string]any{"command": []any{"go", "build", "-o", "/scratch/forge", "."}}}, ToolResult{ExitCode: exitCode(0)})
+	if scratch == nil || scratch.Command != "go build -o OUT ." {
+		t.Fatalf("canonical build command = %v", scratch)
+	}
+	for _, variant := range []map[string]any{
+		{"command": []any{"go", "build", "-o", "./forge", "."}},
+		{"command": []any{"go", "build", "-o", "/tmp/forge", "."}},
+		{"command": []any{"go", "build", "-o=/tmp/forge", "."}},
+		{"command": []any{"sh", "-c", "cd repo && go build -o /workspace/forge ."}},
+	} {
+		if proposal := executionObservationProposal(run, llm.ToolCall{Name: "run_command", Args: variant}, ToolResult{ExitCode: exitCode(0)}); proposal == nil || proposal.KnowledgeID != scratch.KnowledgeID {
+			t.Fatalf("output-path variant %v must share one knowledge id (got %v)", variant, proposal)
+		}
+	}
+	// A different output flag spelling stays a distinct observation: only the
+	// flag VALUE is canonicalized, not the flag name.
+	if longFlag := executionObservationProposal(run, llm.ToolCall{Name: "run_command", Args: map[string]any{"command": []any{"go", "build", "--output", "/workspace/forge", "."}}}, ToolResult{ExitCode: exitCode(0)}); longFlag == nil || longFlag.Command != "go build --output OUT ." || longFlag.KnowledgeID == scratch.KnowledgeID {
+		t.Fatalf("flag spellings must stay distinct: %v", longFlag)
+	}
+	// Arguments other than the output path still distinguish observations.
+	if tagged := executionObservationProposal(run, llm.ToolCall{Name: "run_command", Args: map[string]any{"command": []any{"go", "build", "-o", "/tmp/forge", "-tags", "integration", "."}}}, ToolResult{ExitCode: exitCode(0)}); tagged.KnowledgeID == scratch.KnowledgeID {
+		t.Fatal("non-output arguments must still distinguish knowledge ids")
+	}
+	// Commands without an explicit output flag are canonicalized untouched.
+	if plain := executionObservationProposal(run, llm.ToolCall{Name: "run_command", Args: map[string]any{"command": []any{"go", "build", "./..."}}}, ToolResult{ExitCode: exitCode(0)}); plain == nil || plain.Command != "go build ./..." {
+		t.Fatalf("plain build command = %v", plain)
+	}
 }

@@ -44,7 +44,7 @@ func verificationClass(command []string) string {
 // instead of flooding the projection with near-duplicates.
 func verificationTarget(command []string) (string, string) {
 	if class := argvVerificationClass(command); class != "" {
-		return class, strings.Join(command, " ")
+		return class, strings.Join(canonicalizeOutputPath(command), " ")
 	}
 	script, ok := shellScript(command)
 	if !ok {
@@ -58,7 +58,7 @@ func verificationTarget(command []string) (string, string) {
 	if class == "" {
 		return "", ""
 	}
-	return class, strings.Join(tokens, " ")
+	return class, strings.Join(canonicalizeOutputPath(tokens), " ")
 }
 
 // argvVerificationClass is the bare-token classifier.
@@ -187,6 +187,58 @@ func isRedirection(token string) bool {
 	}
 	digits := token[:i]
 	return strings.Trim(digits, "0123456789") == ""
+}
+
+// outputPathPlaceholder replaces output-path values in canonical build
+// commands. It is ALL-CAPS on purpose: the debugger's vocabulary fold already
+// classifies ALL_CAPS argv tokens as environment names, so the placeholder can
+// never leak into mechanism vocabulary.
+const outputPathPlaceholder = "OUT"
+
+// canonicalizeOutputPath rewrites explicit output-path argument values to a
+// placeholder. Where the binary is written is incidental to the observation:
+// `go build -o /scratch/forge .`, `go build -o ./forge .` and
+// `go build -o /tmp/forge .` are the same verified fact and must share one
+// knowledge node instead of flooding the projection with near-duplicates.
+// Only the value of an explicit output flag is rewritten; package paths and
+// other arguments are preserved.
+func canonicalizeOutputPath(tokens []string) []string {
+	normalized := make([]string, 0, len(tokens))
+	skipValue := false
+	for _, token := range tokens {
+		if skipValue {
+			normalized = append(normalized, outputPathPlaceholder)
+			skipValue = false
+			continue
+		}
+		name, _, inline := outputFlag(token)
+		switch {
+		case name == "":
+			normalized = append(normalized, token)
+		case inline:
+			// `-o=path` and `-o path` are the same invocation; both canonicalize
+			// to the two-token form so they share one knowledge node.
+			normalized = append(normalized, name, outputPathPlaceholder)
+		default:
+			normalized = append(normalized, name)
+			skipValue = true
+		}
+	}
+	return normalized
+}
+
+// outputFlag reports whether a token introduces an explicit output path, its
+// flag name, and whether the value is attached with "=".
+func outputFlag(token string) (name, value string, inline bool) {
+	for _, name := range []string{"-o", "--output"} {
+		if strings.HasPrefix(token, name+"=") {
+			return name, token[len(name)+1:], true
+		}
+		if token == name {
+			return name, "", false
+		}
+	}
+	return "", "", false
 }
 
 // executionKnowledgeID returns a project-scoped stable identity for a
