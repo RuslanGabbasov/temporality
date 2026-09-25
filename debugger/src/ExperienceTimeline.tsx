@@ -123,14 +123,6 @@ export default function ExperienceTimeline() {
   const svgRef = useRef<SVGSVGElement>(null)
   const dragRef = useRef<{ x: number; t0: number; t1: number } | null>(null)
 
-  useEffect(() => {
-    const element = canvasRef.current
-    if (!element) return
-    const observer = new ResizeObserver((entries) => setWidth(Math.max(640, entries[0].contentRect.width)))
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [model])
-
   const load = useCallback(async (projectID: string) => {
     if (!projectID.trim()) return
     setLoading(true); setError(''); setEvents([]); setWindow(null); setSelected('')
@@ -157,6 +149,16 @@ export default function ExperienceTimeline() {
   useEffect(() => { if (!initialised) { setInitialised(true); void load(initialProject) } }, [initialised, initialProject, load])
 
   const model = useMemo(() => (events.length ? foldExperience(events) : null), [events])
+
+  // Canvas width, not shell width: the svg must fit the column it renders in
+  // (and re-measure when the detail panel is hidden).
+  useEffect(() => {
+    const element = canvasRef.current
+    if (!element) return
+    const observer = new ResizeObserver((entries) => setWidth(Math.max(640, entries[0].contentRect.width)))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [model])
 
   const view = useMemo(() => {
     if (!model) return null
