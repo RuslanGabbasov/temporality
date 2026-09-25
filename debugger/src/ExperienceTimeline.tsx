@@ -63,8 +63,11 @@ type PresetName = keyof typeof PRESETS
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 function shortRun(id: string) {
+  // ids look like `forge-20260925-13` (optionally `/role/agent`): the project
+  // prefix and the date are constant within a corpus, so `forge 13` scans
+  // better than the date tail.
   const parts = id.split('/')
-  const root = parts[0].replace(/^calculator-e2e-\d+-/, '').slice(-8)
+  const root = parts[0].replace(/^([a-z][a-z0-9]*)-\d{8}-/i, '$1 ')
   return parts.length > 1 ? `${root}/${parts[parts.length - 1]}` : root
 }
 function clock(iso: string) {
@@ -111,8 +114,10 @@ export default function ExperienceTimeline() {
   // noise lanes (one per command); their merged lane starts aggregated.
   const [laneOverrides, setLaneOverrides] = useState<Record<string, boolean>>({ execution: true })
   const [query, setQuery] = useState('')
-  const [detailsOpen, setDetailsOpen] = useState(true)
+  // The detail panel is selection-driven: it exists only while a knowledge
+  // row is selected (opened by clicking a row, closed by its × button).
   const [selected, setSelected] = useState('')
+  const [runsOpen, setRunsOpen] = useState(false)
   const [focus, setFocus] = useState<{ at: string; eventId: string; label: string } | null>(null)
   const [window_, setWindow] = useState<{ t0: number; t1: number } | null>(null)
   const [width, setWidth] = useState(1100)
@@ -366,7 +371,6 @@ export default function ExperienceTimeline() {
       <button onClick={() => { setWindow(null); setFocus(null); setLaneOverrides({ execution: true }) }}>fit</button>
       <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 0.6))}>zoom +</button>
       <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 1.6))}>zoom −</button>
-      <button className={`detail-toggle ${detailsOpen ? 'on' : ''}`} title="hide the detail panel to give the timeline full width" onClick={() => setDetailsOpen((open) => !open)}>{detailsOpen ? 'details ✓' : 'details ✕'}</button>
       <span className="lens-sep" />
       {LIFECYCLE_KINDS.map((kind) => (
         <button key={kind} className={`kind-chip ${kinds.has(kind) ? 'on' : ''}`} style={{ ['--chip' as string]: LIFECYCLE_COLORS[kind] }} onClick={() => toggleKind(kind)}>{kind}</button>
@@ -394,11 +398,31 @@ export default function ExperienceTimeline() {
       <label>search
         <input type="search" value={query} onChange={(change) => setQuery(change.target.value)} placeholder="claim text / id" title="filter experiences by proposition or id" />
       </label>
-      <div className="run-chips">{view.roots.map((root) => (
-        <button key={root.id} className={`run-chip ${hiddenRoots.has(root.id) ? '' : 'on'}`} onClick={() => toggleRoot(root.id)}>{shortRun(root.id)} · {clock(root.startedAt)}</button>
-      ))}</div>
+      <div className="run-picker">
+        {runsOpen && <div className="run-picker-backdrop" onClick={() => setRunsOpen(false)} />}
+        <button className={`run-picker-toggle ${hiddenRoots.size ? 'filtered' : ''}`} onClick={() => setRunsOpen((open) => !open)}>
+          runs {view.roots.filter((root) => !hiddenRoots.has(root.id)).length}/{view.roots.length} {runsOpen ? '▴' : '▾'}
+        </button>
+        {runsOpen && <div className="run-picker-panel">
+          <div className="run-picker-actions">
+            <button onClick={() => setHiddenRoots(new Set())}>all</button>
+            <button onClick={() => setHiddenRoots(new Set(view.roots.map((root) => root.id)))}>none</button>
+          </div>
+          <ul>
+            {view.roots.map((root) => (
+              <li key={root.id}>
+                <label>
+                  <input type="checkbox" checked={!hiddenRoots.has(root.id)} onChange={() => toggleRoot(root.id)} />
+                  <span>{shortRun(root.id)}</span>
+                  <small>{clock(root.startedAt)}{root.status ? ` · ${root.status}` : ''}</small>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>}
+      </div>
     </div>
-    <main className={`experience-grid ${detailsOpen ? '' : 'no-details'}`}>
+    <main className={`experience-grid ${selected ? '' : 'no-details'}`}>
       <section className="obs-panel experience-canvas" ref={canvasRef}>
         <svg ref={svgRef} width={width} height={view.height} className="experience-svg"
           onPointerDown={(down) => {
@@ -598,10 +622,11 @@ export default function ExperienceTimeline() {
             </marker>
           </defs>
         </svg>
-        <p className="experience-hint">scroll — zoom · drag — pan · row click — details · bars are lifespans, points are events, ✕ marks death</p>
+        <p className="experience-hint">pinch / wheel — zoom · drag or two-finger swipe — pan · row click — details · bars are lifespans, points are events, ✕ marks death</p>
       </section>
-      {detailsOpen && <aside className="obs-panel experience-detail">
-        {!selectedRow ? <p className="obs-empty">Выберите опыт на таймлайне — здесь появятся его жизненный цикл, эпизоды, происхождение и связи.</p> : <RowDetails row={selectedRow} lineage={model.lineage} forensic={forensicOf(selectedRow, model)} onFocus={focusOn} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} />}
+      {selectedRow && <aside className="obs-panel experience-detail">
+        <button className="detail-close" title="close the detail panel" onClick={() => setSelected('')} aria-label="Close details">×</button>
+        <RowDetails row={selectedRow} lineage={model.lineage} forensic={forensicOf(selectedRow, model)} onFocus={focusOn} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} />
       </aside>}
     </main>
   </div>
