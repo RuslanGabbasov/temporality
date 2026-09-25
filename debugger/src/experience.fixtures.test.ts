@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ObservationEvent } from './observationApi'
-import { aliveRowAt, foldExperience } from './experience'
+import { aliveRowAt, foldExperience, forensicOf } from './experience'
 import exp4 from './fixtures/experiment4-gatekeeper.json'
 import exp5 from './fixtures/experiment5-nightlybox.json'
 
@@ -129,5 +129,61 @@ describe('Experiment 5 fixture — accumulation, selective death, recall hygiene
     const run06 = model.runs.find((run) => run.id === 'nightly-20260925-06')
     expect(run06).toBeDefined()
     expect(aliveRowAt(model.rows, run06!.startedAt)).toBe(3)
+  })
+})
+
+// §20 of the phase plan: the forensic view reconstructs, for one knowledge
+// item, why it appeared (evidence + prior commands), how it was activated
+// (recall → injection → run outcome) and who/what killed it.
+describe('Forensic view — formation, activation, death', () => {
+  const nightly = foldExperience(NIGHTLYBOX)
+  const gate = foldExperience(GATEKEEPER)
+
+  const nightlyRow = (run: string, id: string) => nightly.rows.find((item) => item.knowledgeId === K(run, id))!
+
+  it('K82 formation exposes run, rejected-path evidence and prior commands', () => {
+    const { formed } = forensicOf(nightlyRow('nightly-20260925-01b', '82'), nightly)
+    expect(formed?.run).toBe('nightly-20260925-01b')
+    expect(formed?.evidence.length).toBeGreaterThanOrEqual(2)
+    expect(formed?.evidence.some((item) => item.ref.includes('AUTH_TOKEN'))).toBe(true)
+    expect(formed?.evidence.some((item) => item.ref.includes('.token-file'))).toBe(true)
+    // the failed hypothesis and the verified mechanism are both visible as commands
+    expect(formed?.commands.some((command) => command.command.includes('AUTH_TOKEN'))).toBe(true)
+    expect(formed?.commands.some((command) => command.command.includes('.token-file'))).toBe(true)
+  })
+
+  it('K82 activations carry the consuming run, its outcome and the commands that followed injection', () => {
+    const { activations } = forensicOf(nightlyRow('nightly-20260925-01b', '82'), nightly)
+    expect(activations.length).toBeGreaterThanOrEqual(3)
+    const failed = activations.find((activation) => activation.usedRun === 'nightly-20260925-02')
+    expect(failed?.usedRunStatus).toBe('failed')
+    const run03 = activations.find((activation) => activation.usedRun === 'nightly-20260925-03')
+    expect(run03?.commands.some((command) => command.command.includes('.token-file'))).toBe(true)
+  })
+
+  it('K82 death names the human operator, the reason and the successor', () => {
+    const { deaths } = forensicOf(nightlyRow('nightly-20260925-01b', '82'), nightly)
+    expect(deaths).toHaveLength(1)
+    const death = deaths[0]
+    expect(death.kind).toBe('archived')
+    expect(death.actor).toBe('human-operator')
+    expect(death.reason).toMatch(/v3/)
+    expect(death.supersededBy).toEqual([K('nightly-20260925-05', '73')])
+  })
+
+  it('K77 death in the gatekeeper corpus points at K86', () => {
+    const k77 = gate.rows.find((item) => item.knowledgeId === K('gatekeeper-20260925-01', '77'))!
+    const { deaths } = forensicOf(k77, gate)
+    expect(deaths).toHaveLength(1)
+    expect(deaths[0].actor).toBe('human-operator')
+    expect(deaths[0].reason).toMatch(/v3/)
+    expect(deaths[0].supersededBy).toEqual([K('gatekeeper-20260925-03', '86')])
+  })
+
+  it('leaves experiences without recorded evidence lean but intact', () => {
+    const k73 = nightly.rows.find((item) => item.knowledgeId === K('nightly-20260925-05', '73'))!
+    const record = forensicOf(k73, nightly)
+    expect(record.deaths).toHaveLength(0)
+    expect(record.formed?.run).toBe('nightly-20260925-05')
   })
 })

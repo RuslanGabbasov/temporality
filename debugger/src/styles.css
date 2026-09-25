@@ -359,4 +359,19 @@ dialog::backdrop { background: #020408cc; backdrop-filter: blur(3px); }
 .lineage-list li { color: #ff9e64; font: .64rem "SFMono-Regular", monospace; padding: .2rem 0; border-bottom: 1px dashed var(--line); }
 .lineage-list code { color: #b4d9ff; font: .62rem "SFMono-Regular", monospace; word-break: break-all; }
 .lineage-list small { display: block; color: var(--muted); font-size: .6rem; margin-top: .15rem; }
+.forensic-block { margin-bottom: .6rem; padding: .45rem .55rem; border-left: 2px solid #4fd6be; background: rgba(79, 214, 190, .04); }
+.forensic-death { border-left-color: #f7768e; background: rgba(247, 118, 142, .05); }
+.forensic-head { margin: 0 0 .3rem; color: #c0caf5; font: .64rem "SFMono-Regular", monospace; }
+.forensic-head time { color: var(--muted); }
+.forensic-evidence { list-style: none; margin: 0; padding: 0; }
+.forensic-evidence li { color: #aebdcc; font-size: .64rem; line-height: 1.45; padding: .18rem 0; border-bottom: 1px dashed var(--line); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.forensic-commands summary, .forensic-activations summary { cursor: pointer; color: #7dcfff; font: .62rem "SFMono-Regular", monospace; padding: .15rem 0; }
+.forensic-commands ol, .forensic-activations ol { margin: .2rem 0 0; padding-left: 1.1rem; }
+.forensic-commands li, .forensic-activations li { color: var(--muted); font: .6rem "SFMono-Regular", monospace; padding: .12rem 0; word-break: break-all; }
+.forensic-activations { list-style: none; margin: 0; padding: 0; }
+.forensic-activations li { padding: .22rem 0; border-bottom: 1px solid var(--line); font: .64rem "SFMono-Regular", monospace; }
+.forensic-activations li[data-status='failed'] span { color: #f7768e; }
+.forensic-activations small { display: block; color: var(--muted); font-size: .6rem; }
+.forensic-reason { margin: .25rem 0 0; color: #aebdcc; font-size: .64rem; line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.forensic-successor { margin: .3rem 0 0; color: #ff9e64; font: .64rem "SFMono-Regular", monospace; }
 @media (max-width: 1080px) { .experience-grid { grid-template-columns: 1fr; }.experience-detail { border-left: 0; border-top: 1px solid var(--line); max-height: 50vh; } }

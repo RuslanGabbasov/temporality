@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_BASE } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
-import { aliveRowAt, foldExperience, LIFECYCLE_KINDS, shortKnowledge, stateBucket, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type RunInfo } from './experience'
+import { aliveRowAt, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type RunInfo } from './experience'
 
 const GUTTER = 210
 const AXIS_HEIGHT = 34
@@ -448,7 +448,7 @@ export default function ExperienceTimeline() {
         <p className="experience-hint">scroll — zoom · drag — pan · row click — details · bars are lifespans, points are events, ✕ marks death</p>
       </section>
       <aside className="obs-panel experience-detail">
-        {!selectedRow ? <p className="obs-empty">Выберите опыт на таймлайне — здесь появятся его жизненный цикл, эпизоды, происхождение и связи.</p> : <RowDetails row={selectedRow} lineage={model.lineage} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} />}
+        {!selectedRow ? <p className="obs-empty">Выберите опыт на таймлайне — здесь появятся его жизненный цикл, эпизоды, происхождение и связи.</p> : <RowDetails row={selectedRow} lineage={model.lineage} forensic={forensicOf(selectedRow, model)} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} />}
       </aside>
     </main>
   </div>
@@ -480,7 +480,7 @@ function Header({ project, setProject, load, loading }: { project: string; setPr
   </header>
 }
 
-function RowDetails({ row, lineage, related }: { row: KnowledgeRow; lineage: KnowledgeLineage[]; related: KnowledgeRow[] }) {
+function RowDetails({ row, lineage, forensic, related }: { row: KnowledgeRow; lineage: KnowledgeLineage[]; forensic: ForensicRecord; related: KnowledgeRow[] }) {
   const counts = LIFECYCLE_KINDS.map((kind) => {
     const count = row.points.filter((point) => point.kind === kind).length
     return count ? `${kind} ×${count}` : ''
@@ -507,6 +507,38 @@ function RowDetails({ row, lineage, related }: { row: KnowledgeRow; lineage: Kno
     </div>
     <p className="row-proposition">{row.proposition}</p>
     {row.command && <p className="cluster-variants">command: {row.command}</p>}
+    <section>
+      <h4>Forensics</h4>
+      {forensic.formed && <div className="forensic-block">
+        <p className="forensic-head">formed <time>{clock(forensic.formed.at)}</time>{forensic.formed.run ? ` · ${shortRun(forensic.formed.run)}` : ''}{forensic.formed.role ? ` · ${forensic.formed.role}` : ''}{forensic.formed.actor ? ` · by ${forensic.formed.actor}` : ''}</p>
+        {forensic.formed.evidence.length > 0 && <ul className="forensic-evidence">
+          {forensic.formed.evidence.map((item, index) => <li key={index} title={item.ref}>{item.ref}</li>)}
+        </ul>}
+        {forensic.formed.commands.length > 0 && <details className="forensic-commands">
+          <summary>prior commands · {forensic.formed.commands.length}</summary>
+          <ol>{forensic.formed.commands.map((command) => <li key={command.eventId}><code>{command.command}</code></li>)}</ol>
+        </details>}
+      </div>}
+      {forensic.activations.length > 0 && <div className="forensic-block">
+        <p className="forensic-head">activations · {forensic.activations.length}</p>
+        <ul className="forensic-activations">
+          {forensic.activations.map((activation) => <li key={`${activation.offeredAt}-${activation.usedRun ?? 'unused'}`} data-status={activation.usedRunStatus}>
+            <span>{activation.usedRun ? shortRun(activation.usedRun) : 'not used'}</span>
+            <small>{activation.usedAt ? clock(activation.usedAt) : clock(activation.offeredAt)}{activation.usedRunStatus ? ` · run ${activation.usedRunStatus}` : ''}</small>
+            {activation.commands.length > 0 && <details>
+              <summary>+{activation.commands.length} commands</summary>
+              <ol>{activation.commands.map((command) => <li key={command.eventId}><code>{command.command}</code></li>)}</ol>
+            </details>}
+          </li>)}
+        </ul>
+      </div>}
+      {forensic.deaths.map((death) => <div className="forensic-block forensic-death" key={death.eventId}>
+        <p className="forensic-head">{death.kind} <time>{clock(death.at)}</time>{death.actor ? ` · by ${death.actor}` : ''}{death.run ? ` · ${shortRun(death.run)}` : ' · manual'}</p>
+        {death.reason && <p className="forensic-reason" title={death.reason}>{death.reason}</p>}
+        {death.supersededBy.length > 0 && <p className="forensic-successor">superseded by → {death.supersededBy.map(shortKnowledge).join(', ')}</p>}
+      </div>)}
+      {!forensic.formed && forensic.activations.length === 0 && forensic.deaths.length === 0 && <p className="obs-empty">Недостаточно событий для реконструкции цепочки.</p>}
+    </section>
     <section>
       <h4>Lifecycle</h4>
       <p className="member-counts">{counts}</p>

@@ -31,6 +31,7 @@ export interface ExperiencePoint {
   knowledgeId: string
   run?: string
   role?: string
+  actor?: string
   eventId: string
   hintId?: string
   rule?: string
@@ -44,6 +45,25 @@ export interface EpisodeRef {
   ref: string
   kind: string
   at: string
+}
+
+/** One approved operation executed inside a run (approval.* payload). */
+export interface RunCommand {
+  command: string
+  policy?: string
+  at: string
+  eventId: string
+}
+
+/** A weakening or terminal transition with its cause: who/what/why. */
+export interface DeathRecord {
+  kind: LifecycleKind
+  at: string
+  run?: string
+  role?: string
+  actor?: string
+  reason?: string
+  eventId: string
 }
 
 export interface ClusterMember {
@@ -69,6 +89,7 @@ export interface KnowledgeRow {
   policy?: string
   points: ExperiencePoint[]
   episodes: EpisodeRef[]
+  deaths: DeathRecord[]
   relatedIds: string[]
   runs: string[]
   roles: string[]
@@ -118,6 +139,7 @@ export interface RunInfo {
   toolCalls: number
   modelCalls: number
   knowledgeEvents: number
+  commands: RunCommand[]
 }
 
 /** recall → injection pairing: which run pulled which memory item when. */
@@ -144,6 +166,33 @@ export interface KnowledgeLineage {
   eventId: string
   at: string
   inferred: boolean
+}
+
+/** Forensic reconstruction (phase plan §20): one knowledge item's causal
+ * chain built from the same folded stream — formation evidence, activations
+ * and death. Pure derived data, no extra state. */
+export interface ForensicCommand { command: string; policy?: string; at: string; eventId: string }
+export interface ForensicFormed {
+  at: string
+  run?: string
+  role?: string
+  actor?: string
+  evidence: { ref: string; type: string }[]
+  commands: ForensicCommand[]
+}
+export interface ForensicActivation {
+  offeredAt: string
+  offeredRun?: string
+  usedAt?: string
+  usedRun?: string
+  usedRunStatus?: string
+  commands: ForensicCommand[]
+}
+export interface ForensicDeath extends DeathRecord { supersededBy: string[] }
+export interface ForensicRecord {
+  formed?: ForensicFormed
+  activations: ForensicActivation[]
+  deaths: ForensicDeath[]
 }
 
 export interface ExperienceModel {
@@ -331,6 +380,7 @@ interface MemberFold {
   policy?: string
   points: ExperiencePoint[]
   episodes: EpisodeRef[]
+  deaths: DeathRecord[]
 }
 
 /** Fold the raw event stream into the Experience Timeline model. */
@@ -363,7 +413,7 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
     if (event.type === 'run.started') {
       const id = run ?? event.event_id
       if (!runs.has(id)) {
-        runs.set(id, { id, role, parentRun: stringOf(event.data?.parent_run_id) || undefined, startedAt: event.occurred_at, toolCalls: 0, modelCalls: 0, knowledgeEvents: 0 })
+        runs.set(id, { id, role, parentRun: stringOf(event.data?.parent_run_id) || undefined, startedAt: event.occurred_at, toolCalls: 0, modelCalls: 0, knowledgeEvents: 0, commands: [] })
       }
       continue
     }
@@ -380,7 +430,11 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
     if (event.type.startsWith('approval.')) {
       const operation = event.data?.operation as { arguments?: { command?: unknown } } | undefined
       const command = operation?.arguments?.command
-      if (Array.isArray(command)) executedCommands.push(command.map((token) => String(token)))
+      if (Array.isArray(command)) {
+        const tokens = command.map((token) => String(token))
+        executedCommands.push(tokens)
+        if (runInfo) runInfo.commands.push({ command: tokens.join(' '), policy: stringOf(event.data?.policy_id) || undefined, at: event.occurred_at, eventId: event.event_id })
+      }
     }
 
     const kind = lifecycleKindOf(event)
@@ -427,6 +481,7 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
           policy: stringOf(event.data?.policy_id) || undefined,
           points: [],
           episodes: [],
+          deaths: [],
         })
       }
     }
@@ -434,7 +489,11 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
     const member = members.get(knowledgeId)
     if (!member) continue
 
-    member.points.push({ at: event.occurred_at, kind, origin: event.type, knowledgeId, run, role, eventId: event.event_id, hintId: stringOf(event.data?.hint_id) || undefined, rule: stringOf(event.data?.rule) || undefined })
+    member.points.push({ at: event.occurred_at, kind, origin: event.type, knowledgeId, run, role, eventId: event.event_id, hintId: stringOf(event.data?.hint_id) || undefined, rule: stringOf(event.data?.rule) || undefined, actor: stringOf(event.context?.actor?.id) || undefined })
+
+    if (kind === 'contradicted' || kind === 'weakened' || kind === 'archived') {
+      member.deaths.push({ kind, at: event.occurred_at, run, role, actor: stringOf(event.context?.actor?.id) || undefined, reason: stringOf(event.data?.reason) || undefined, eventId: event.event_id })
+    }
 
     if (kind === 'injected') {
       const hintId = stringOf(event.data?.hint_id)
@@ -606,6 +665,7 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
       policy: member.policy,
       points,
       episodes: member.episodes,
+      deaths: member.deaths,
       relatedIds: relatedOf.get(member.knowledgeId) ?? [],
       runs: distinct(points.map((point) => point.run)),
       roles: distinct(points.map((point) => point.role)),
@@ -655,6 +715,44 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
     bounds: { from: first, to: last },
     totals: { events: events.length, knowledge: members.size },
   }
+}
+
+/** Reconstruct the §20 forensic chain for one knowledge item: formation
+ * (run + evidence + prior executed commands), activations (recall →
+ * injection → outcome of the consuming run) and death (who/what/why plus
+ * the successor via lineage). Derived from the fold, no extra state. */
+export function forensicOf(row: KnowledgeRow, model: ExperienceModel): ForensicRecord {
+  const commandsOf = (runId: string | undefined, after?: string, before?: string): ForensicCommand[] => {
+    const run = model.runs.find((item) => item.id === runId)
+    if (!run) return []
+    return run.commands
+      .filter((item) => (!after || item.at >= after) && (!before || item.at <= before))
+      .map(({ command, policy, at, eventId }) => ({ command, policy, at, eventId }))
+  }
+  const appeared = row.points.find((point) => point.kind === 'appeared')
+  const formed: ForensicFormed | undefined = appeared ? {
+    at: appeared.at,
+    run: appeared.run,
+    role: appeared.role,
+    actor: appeared.actor,
+    evidence: row.episodes.filter((episode) => episode.at === appeared.at).map((episode) => ({ ref: episode.ref, type: episode.kind })),
+    commands: commandsOf(appeared.run, undefined, appeared.at),
+  } : undefined
+  const activations: ForensicActivation[] = model.links
+    .filter((link) => link.knowledgeId === row.knowledgeId)
+    .map((link) => ({
+      offeredAt: link.offeredAt,
+      offeredRun: link.offeredRun,
+      usedAt: link.usedAt,
+      usedRun: link.usedRun,
+      usedRunStatus: link.usedRunStatus,
+      commands: commandsOf(link.usedRun, link.usedAt),
+    }))
+  const deaths: ForensicDeath[] = row.deaths.map((death) => ({
+    ...death,
+    supersededBy: model.lineage.filter((edge) => edge.fromId === row.knowledgeId && edge.at === death.at).map((edge) => edge.toId),
+  }))
+  return { formed, activations, deaths }
 }
 
 function execClusterKeyOf(member: MemberFold): { id: string; title: string; scope: string; kind: 'execution'; command: string } {
