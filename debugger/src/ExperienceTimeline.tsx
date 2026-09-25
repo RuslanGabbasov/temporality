@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_BASE } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
+import Token from './Token'
 import { aliveRowAt, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type RunInfo } from './experience'
 
 const GUTTER = 210
@@ -651,6 +652,7 @@ function Header({ project, setProject, load, loading }: { project: string; setPr
       <span className="connection">Events <code>{API_BASE}</code></span>
       <a className="obs-link" href="/agents">Agent runs</a>
       <a className="obs-link" href="/observability">Knowledge</a>
+      <Token />
     </div>
     <form className="experience-project" onSubmit={(event) => { event.preventDefault(); void load(project) }}>
       <input value={project} onChange={(change) => setProject(change.target.value)} placeholder="calculator-e2e" />

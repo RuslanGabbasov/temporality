@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { API_BASE } from './api'
+import { API_BASE, authHeaders } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
 import Markdown from './Markdown'
+import Token from './Token'
 
 const KERNEL_API = '/kernel-api'
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -36,9 +37,9 @@ export default function AgentRuns() {
           const id = runID(event)
           if (!id) continue
           const query = new URLSearchParams({ project: project.trim(), source_id: event.source.id })
-          let response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(id)}?${query}`)
+          let response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(id)}?${query}`, { headers: authHeaders() })
           if (!response.ok && event.data?.workflow === 'LeadCoderReviewerQA') {
-            response = await fetch(`${KERNEL_API}/v1/agent/examples/lead-coder-reviewer-qa/runs/${encodeURIComponent(id)}?${query}`)
+            response = await fetch(`${KERNEL_API}/v1/agent/examples/lead-coder-reviewer-qa/runs/${encodeURIComponent(id)}?${query}`, { headers: authHeaders() })
           }
           if (response.ok) { setSelected(id); break }
         }
@@ -65,8 +66,8 @@ export default function AgentRuns() {
       setTimeline(allEvents)
       const resultPath = teamRun ? `/v1/agent/examples/lead-coder-reviewer-qa/runs/${encodeURIComponent(run)}` : `/v1/agent/runs/${encodeURIComponent(run)}`
       const sourceQuery = new URLSearchParams({ project: project.trim(), source_id: root?.source.id ?? '' })
-      let response = await fetch(`${KERNEL_API}${resultPath}?${sourceQuery}`)
-      if (!response.ok && teamRun) response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(run)}?${sourceQuery}`)
+      let response = await fetch(`${KERNEL_API}${resultPath}?${sourceQuery}`, { headers: authHeaders() })
+      if (!response.ok && teamRun) response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(run)}?${sourceQuery}`, { headers: authHeaders() })
       if (!response.ok) { const detail = await response.text(); throw new Error(`${response.status} ${detail}`) }
       setResult(await response.json() as Record<string, unknown>)
       const query = new URLSearchParams({ project: project.trim(), run })
@@ -91,7 +92,7 @@ export default function AgentRuns() {
       const operation = event.data?.operation as Record<string, unknown> | undefined
       const approvalQuery = new URLSearchParams({ project: project.trim(), source_id: root?.source.id ?? '' })
       const response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(selected)}/approval?${approvalQuery}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ operation_id: operationID, arguments_hash: operation?.arguments_hash ?? '', approved, actor_id: 'human-ui', reason: reason.trim() }),
       })
       if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
@@ -103,7 +104,7 @@ export default function AgentRuns() {
   const answer = (result?.result as Record<string, unknown> | undefined)?.answer
   const stages = (result?.result as Record<string, unknown> | undefined)?.stages
   return <div className="observability-shell agent-runs-shell">
-    <header className="topbar obs-topbar"><div><span className="eyebrow">TEMPORALITY / AGENT KERNEL</span><h1>Agent runs</h1></div><div className="header-actions"><span className="connection">Kernel <code>:8090</code> · Events <code>{API_BASE}</code></span><a className="obs-link" href="/experience">Experience</a><a className="obs-link" href="/observability">Knowledge</a></div></header>
+    <header className="topbar obs-topbar"><div><span className="eyebrow">TEMPORALITY / AGENT KERNEL</span><h1>Agent runs</h1></div><div className="header-actions"><span className="connection">Kernel <code>:8090</code> · Events <code>{API_BASE}</code></span><a className="obs-link" href="/experience">Experience</a><a className="obs-link" href="/observability">Knowledge</a><Token /></div></header>
     <form className="obs-controls agent-controls" onSubmit={(event) => { event.preventDefault(); setSelected(''); setTimeline([]); void loadRuns() }}><label>Project ID<input value={project} onChange={(event) => setProject(event.target.value)} placeholder="temporality-live-verification" required /></label><button className="primary" disabled={busy}>{busy ? 'Loading…' : 'Load runs'}</button></form>
     {error && <div className="obs-error" role="alert">{error}<small>Проверьте, что Agent Kernel доступен на localhost:8090, а Runtime — на localhost:8080.</small></div>}
     <main className="agent-grid">

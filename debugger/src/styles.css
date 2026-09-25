@@ -186,6 +186,10 @@ dialog::backdrop { background: #020408cc; backdrop-filter: blur(3px); }
 
 .obs-link { color: var(--cyan); border: 1px solid var(--line-bright); border-radius: 6px; padding: .45rem .7rem; text-decoration: none; font-size: .72rem; white-space: nowrap; }
 .obs-link:hover { background: #1a2938; border-color: var(--cyan); }
+.token-form { display: flex; align-items: center; gap: .35rem; }
+.token-form input { width: 130px; padding: .35rem .5rem; font-size: .72rem; background: #0c1420; border: 1px solid var(--line-bright); border-radius: 6px; color: var(--text); }
+.token-form button { font-size: .68rem; padding: .4rem .6rem; cursor: pointer; background: #12202c; color: var(--cyan); border: 1px solid var(--line-bright); border-radius: 6px; }
+.token-form button:hover { border-color: var(--cyan); }
 .observability-shell { min-height: 100vh; }
 .obs-topbar { z-index: 10; }
 .obs-controls { display: grid; grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(145px, 1fr)) auto; gap: .75rem; padding: 1rem 1.25rem; border-bottom: 1px solid var(--line); background: #0c1118; align-items: end; }

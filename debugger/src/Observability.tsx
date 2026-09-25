@@ -1,6 +1,7 @@
 import { type FormEvent, useMemo, useState } from 'react'
 import { API_BASE } from './api'
 import { observationApi, type KnowledgeItem, type ObservationEvent, type ObservationHint } from './observationApi'
+import Token from './Token'
 
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 function json(value: unknown) { return JSON.stringify(value, null, 2) }
@@ -119,7 +120,7 @@ export default function Observability() {
   }
 
   return <div className="observability-shell">
-    <header className="topbar obs-topbar"><div><span className="eyebrow">TEMPORALITY / OBSERVATIONS</span><h1>Knowledge observability</h1></div><div className="header-actions"><span className="connection">API <code>{API_BASE}</code></span><a className="obs-link" href="/experience">Experience</a><a className="obs-link" href="/agents">Agent runs</a></div></header>
+    <header className="topbar obs-topbar"><div><span className="eyebrow">TEMPORALITY / OBSERVATIONS</span><h1>Knowledge observability</h1></div><div className="header-actions"><span className="connection">API <code>{API_BASE}</code></span><a className="obs-link" href="/experience">Experience</a><a className="obs-link" href="/agents">Agent runs</a><Token /></div></header>
     <form className="obs-controls" onSubmit={load}>
       <label>Project ID<input value={project} onChange={(event) => setProject(event.target.value)} placeholder="repo-a" required /></label>
       <label>Observed as of<input type="datetime-local" value={asOf} onChange={(event) => setAsOf(event.target.value)} /></label>

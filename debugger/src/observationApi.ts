@@ -1,4 +1,4 @@
-import { apiUrl } from './api'
+import { apiUrl, authHeaders } from './api'
 
 export interface ObservationActor { id: string; type?: string }
 export interface ObservationEvidence { ref: string; type?: string }
@@ -64,7 +64,7 @@ export interface ObservationHint {
 async function request<T>(path: string, init?: RequestInit, query?: Record<string, string | number | undefined>): Promise<T> {
   const response = await fetch(apiUrl(path, query), {
     ...init,
-    headers: { Accept: 'application/json', ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
+    headers: { Accept: 'application/json', ...authHeaders(), ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
   })
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
