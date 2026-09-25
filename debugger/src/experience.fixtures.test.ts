@@ -5,11 +5,13 @@ import exp4 from './fixtures/experiment4-gatekeeper.json'
 import exp5 from './fixtures/experiment5-nightlybox.json'
 import exp6 from './fixtures/experiment6-relay.json'
 import exp7 from './fixtures/experiment7-forge.json'
+import exp8 from './fixtures/experiment8-lighthouse.json'
 
 const GATEKEEPER = exp4 as unknown as ObservationEvent[]
 const NIGHTLYBOX = exp5 as unknown as ObservationEvent[]
 const RELAY = exp6 as unknown as ObservationEvent[]
 const FORGE = exp7 as unknown as ObservationEvent[]
+const LIGHTHOUSE = exp8 as unknown as ObservationEvent[]
 
 const K = (run: string, id: string) => `${run}/knowledge/${id}`
 
@@ -303,6 +305,153 @@ describe('Experiment 7 fixture — reinforcement, competing pair, scale', () => 
     expect(row(E1)?.scopes.primary).toBe('end-to-end')
     expect(row(E2)?.scopes.primary).toBe('end-to-end')
     expect(row(E3)?.scopes.primary).toBe('end-to-end')
+  })
+})
+
+// Experiment 8 (§ examples/experiment8/README.md): the fourth acceptance
+// corpus targets LONG-HORIZON evolution across three versions of one CLI —
+// a resurrection chain (login flips LH_TOKEN → .lh-token → LH_TOKEN back),
+// a composite note whose deploy half died while its report half was re-derived
+// as new knowledge, competing corrections that coexist for several runs, and
+// kernel-side dedup of canonicalized build commands into a single auto node.
+describe('Experiment 8 fixture — long-horizon evolution, resurrection, composite death', () => {
+  const model = foldExperience(LIGHTHOUSE)
+
+  const A1 = K('lighthouse-20260925-01', '101') // v1 login: LH_TOKEN env
+  const D1 = K('lighthouse-20260925-02', '83') // v1 composite: deploy --env + report.txt
+  const E1 = K('lighthouse-20260925-03', '43') // v1 pipeline
+  const A2 = K('lighthouse-20260925-04', '55') // v2 login: .lh-token file
+  const D2 = K('lighthouse-20260925-05', '56') // v2 deploy: LH_STAGE
+  const E2 = K('lighthouse-20260925-06', '48') // v2 pipeline
+  const H1 = K('lighthouse-20260925-07', '92') // harness quirks (stable anchor)
+  const A3 = K('lighthouse-20260925-08', '41') // v3 login: LH_TOKEN again (resurrection)
+  const R2 = K('lighthouse-20260925-09', '37') // v3 report: --format json
+  const E3 = K('lighthouse-20260925-10', '49') // v3 pipeline
+  const C1 = K('lighthouse-20260925-11', '43') // final supersession summary
+  const BUILD = 'auto/eb2d265c3abc778ffbd624ee'
+
+  const row = (id: string) => model.rows.find((item) => item.knowledgeId === id)
+  const usedIn = (id: string) => model.links.filter((link) => link.knowledgeId === id).map((link) => link.usedRun)
+  const edges = () => model.lineage.map((edge) => `${edge.fromId}->${edge.toId}`)
+
+  it('folds the recorded corpus shape', () => {
+    expect(model.totals.events).toBe(834)
+    expect(model.rows).toHaveLength(13)
+    expect(model.runs).toHaveLength(11)
+    expect(model.links).toHaveLength(52)
+  })
+
+  it('resurrection: login flips LH_TOKEN → token-file → LH_TOKEN, only the last note lives', () => {
+    expect(row(A1)?.proposition).toMatch(/LH_TOKEN/)
+    expect(row(A1)?.state).toBe('invalidated')
+    expect(row(A2)?.state).toBe('invalidated')
+    expect(row(A3)?.terminal).toBeUndefined()
+    // the resurrected claim restores the v1 mechanism in a new living node
+    expect(row(A3)?.proposition).toMatch(/LH_TOKEN/)
+    expect(row(A3)?.proposition).toMatch(/\.lh-token/)
+    expect(edges()).toContain(`${A1}->${A2}`)
+    expect(edges()).toContain(`${A2}->${A3}`)
+  })
+
+  it('composite death: the v1 deploy+report note dies in two steps with two successors', () => {
+    expect(row(D1)?.state).toBe('invalidated')
+    const { deaths } = forensicOf(row(D1)!, model)
+    expect(deaths).toHaveLength(2)
+    // first the operator challenges the stale deploy half without replacing it
+    expect(deaths[0].kind).toBe('contradicted')
+    expect(deaths[0].supersededBy).toEqual([])
+    // then the invalidation names two refs: the v2 deploy fix and the v2 pipeline
+    expect(deaths[1].kind).toBe('archived')
+    expect(deaths[1].supersededBy).toEqual([D2, E2])
+    expect(edges()).toContain(`${D1}->${D2}`)
+    expect(edges()).toContain(`${D1}->${E2}`)
+  })
+
+  it('pipeline notes supersede per flip; only the v3 pipeline survives', () => {
+    expect(row(E1)?.state).toBe('invalidated')
+    expect(row(E2)?.state).toBe('invalidated')
+    expect(row(E3)?.terminal).toBeUndefined()
+    expect(edges()).toContain(`${E1}->${E2}`)
+    expect(edges()).toContain(`${E2}->${E3}`)
+  })
+
+  it('derives the full supersession set from operator invalidations', () => {
+    expect(edges().sort()).toEqual(
+      [`${A1}->${A2}`, `${A2}->${A3}`, `${D1}->${D2}`, `${D1}->${E2}`, `${E1}->${E2}`, `${E2}->${E3}`].sort(),
+    )
+    expect(model.lineage.every((edge) => edge.inferred)).toBe(true)
+  })
+
+  it('competing deploy notes coexist until the operator retires the v1 one after run 07', () => {
+    expect(usedIn(D1)).toEqual([
+      'lighthouse-20260925-03',
+      'lighthouse-20260925-04',
+      'lighthouse-20260925-05',
+      'lighthouse-20260925-06',
+      'lighthouse-20260925-07',
+    ])
+    expect(usedIn(D2)).toEqual([
+      'lighthouse-20260925-06',
+      'lighthouse-20260925-07',
+      'lighthouse-20260925-08',
+      'lighthouse-20260925-09',
+      'lighthouse-20260925-10',
+      'lighthouse-20260925-11',
+    ])
+  })
+
+  it('the harness note is a stable anchor for the late corpus', () => {
+    expect(usedIn(H1)).toEqual([
+      'lighthouse-20260925-08',
+      'lighthouse-20260925-09',
+      'lighthouse-20260925-10',
+      'lighthouse-20260925-11',
+    ])
+  })
+
+  it('kernel dedup: every build invocation folds into one canonical auto node', () => {
+    expect(model.rows.filter((item) => item.scopes.primary === 'build')).toHaveLength(1)
+    expect(row(BUILD)?.command).toBe('go build -o OUT .')
+    expect(usedIn(BUILD)).toHaveLength(7)
+    // the stable verification command stays confirmed across the whole corpus
+    expect(model.rows.filter((item) => item.scopes.primary === 'test')).toHaveLength(1)
+  })
+
+  it('run 11 recalls exactly the living claims and none of the dead experiences', () => {
+    const got = model.links
+      .filter((link) => link.usedRun === 'lighthouse-20260925-11')
+      .map((link) => link.knowledgeId)
+    for (const dead of [A1, D1, E1, A2, E2]) expect(got).not.toContain(dead)
+    for (const alive of [D2, H1, A3, R2, E3]) expect(got).toContain(alive)
+    // the audit summary itself is formed here and never recalled
+    expect(usedIn(C1)).toHaveLength(0)
+  })
+
+  it('memory population after selective death: 7 alive rows at run 11', () => {
+    const run11 = model.runs.find((run) => run.id === 'lighthouse-20260925-11')
+    expect(aliveRowAt(model.rows, run11!.startedAt)).toBe(7)
+  })
+
+  it('derives mechanism lanes for the lighthouse corpus', () => {
+    expect(model.scopes.map((scope) => scope.id).sort()).toEqual(['build', 'end-to-end', 'report', 'test'])
+    const report = model.scopes.find((scope) => scope.id === 'report')!
+    expect(report.rows.map((item) => item.knowledgeId).sort()).toEqual([E1, E2, R2, E3].sort())
+  })
+
+  it('forensic: the resurrected note forms in run 08 and activates cleanly', () => {
+    const record = forensicOf(row(A3)!, model)
+    expect(record.formed?.run).toBe('lighthouse-20260925-08')
+    expect(record.activations).toHaveLength(3)
+    expect(record.activations.every((activation) => activation.usedRunStatus === 'completed')).toBe(true)
+    expect(record.deaths).toHaveLength(0)
+  })
+
+  it('the v2 login death records the revert and names the resurrecting successor', () => {
+    const { deaths } = forensicOf(row(A2)!, model)
+    expect(deaths).toHaveLength(1)
+    expect(deaths[0].actor).toBe('human-operator')
+    expect(deaths[0].reason).toMatch(/revert/i)
+    expect(deaths[0].supersededBy).toEqual([A3])
   })
 })
 

@@ -1,0 +1,1 @@
+lighthouse-20260925-07|Run the full pipeline once more on the upgraded CLI: login, build, deploy, report — every step must actually succeed. Where you hold conflicting notes, test and let execution decide. Record only genuinely new durable conclusions with the remember tool. Definition of done: `go test ./...` must pass — run it before you finish.

@@ -1,0 +1,1 @@
+lighthouse-20260925-11|Final audit: run the complete pipeline once more and report which of your remembered conclusions held and which needed correction since you first started working in this repo. Record a short supersession summary with the remember tool: which note replaced which, and why. Definition of done: `go test ./...` must pass — run it before you finish.
