@@ -6,7 +6,7 @@ import { aliveRowAt, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge
 const GUTTER = 210
 const AXIS_HEIGHT = 34
 const RUN_LANE = 24
-const SCOPE_HEADER = 26
+const SCOPE_HEADER = 34
 const ROW_LANE = 22
 const POPULATION_LANE = 64
 
@@ -389,8 +389,8 @@ export default function ExperienceTimeline() {
             const activations = model.links.filter((link) => scope.rows.some((row) => row.knowledgeId === link.knowledgeId)).length
             const retired = scope.rows.filter((row) => row.terminal).length
             return <g key={scope.id} className="scope-section">
-              <text x={8} y={headerY + 4} className="lane-label scope-label">{scope.title.toUpperCase()}</text>
-              <text x={GUTTER - 8} y={headerY + 4} textAnchor="end" className="lane-sublabel">{rows.length} experiences · {scope.runs.length} runs · {activations} activations{retired ? ` · ${retired} retired` : ''}</text>
+              <text x={8} y={headerY - 2} className="lane-label scope-label">{scope.title.toUpperCase()}</text>
+              <text x={8} y={headerY + 10} className="lane-sublabel">{rows.length} exp · {scope.runs.length} runs · {activations} act{retired ? ` · ${retired} retired` : ''}</text>
               <line x1={GUTTER - 6} x2={width} y1={headerY + SCOPE_HEADER / 2 - 2} y2={headerY + SCOPE_HEADER / 2 - 2} stroke="#1c2530" strokeWidth={1} />
               {rows.map((row) => {
                 const yLane = view.rowY.get(row.knowledgeId)!
