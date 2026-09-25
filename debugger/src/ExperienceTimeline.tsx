@@ -455,7 +455,9 @@ export default function ExperienceTimeline() {
               <text x={x(tick)} y={14} textAnchor="middle" className="tick-label">{clock(new Date(tick).toISOString())}</text>
             </g>)}
           </g>
-          {lens.trajectory && view.visibleRuns.map((run, index) => {
+          {/* Activation links target run lanes: keep the lanes rendered
+             (labels + bars) whenever the arrows need somewhere to land. */}
+          {(lens.trajectory || lens.activation) && view.visibleRuns.map((run, index) => {
             const yLane = view.runLaneY.get(run.id)!
             const x0 = x(run.startedAt)
             const x1 = x(run.endedAt ?? run.startedAt)
