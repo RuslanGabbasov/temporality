@@ -291,7 +291,7 @@ dialog::backdrop { background: #020408cc; backdrop-filter: blur(3px); }
 .preset-chip.on { color: #e0af68 !important; border-color: #e0af68 !important; background: rgba(224, 175, 104, .08) !important; }
 .experience-filters { display: flex; align-items: center; gap: 1rem; padding: .55rem 1.25rem; border-bottom: 1px solid var(--line); }
 .experience-filters label { display: grid; gap: .3rem; color: var(--muted); font-size: .66rem; }
-.experience-filters select { padding: .3rem .4rem; border: 1px solid var(--line-bright); border-radius: 5px; background: #0b1016; color: var(--fg); font-size: .72rem; }
+.experience-filters select, .experience-filters input { padding: .3rem .4rem; border: 1px solid var(--line-bright); border-radius: 5px; background: #0b1016; color: var(--fg); font-size: .72rem; }
 .run-chips { display: flex; flex-wrap: wrap; gap: .35rem; }
 .run-chip { padding: .25rem .6rem; border: 1px solid var(--line-bright); border-radius: 999px; background: transparent; color: var(--muted); font: .68rem "SFMono-Regular", monospace; cursor: pointer; }
 .run-chip.on { color: var(--cyan); border-color: var(--cyan); }

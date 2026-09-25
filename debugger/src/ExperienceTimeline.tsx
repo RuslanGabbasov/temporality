@@ -8,7 +8,13 @@ const AXIS_HEIGHT = 34
 const RUN_LANE = 24
 const SCOPE_HEADER = 34
 const ROW_LANE = 22
+const AGGREGATE_LANE = 26
 const POPULATION_LANE = 64
+// Semantic zoom: zoomed out beyond this share of the full span, and only once
+// the corpus is big enough to need it, multi-row lanes collapse into summary
+// bands (manual click always overrides; `fit` returns to the automatic mode).
+const AGGREGATE_RATIO = 0.45
+const AUTO_AGGREGATE_ROWS = 12
 
 const MEMORY_BUCKETS: MemoryBucket[] = ['active', 'stale', 'invalidated', 'archived']
 
@@ -74,14 +80,6 @@ function claimLabel(proposition: string): string {
   return flat.length > 30 ? `${flat.slice(0, 29)}…` : flat
 }
 
-function toggleSetItem(id: string) {
-  return (current: Set<string>) => {
-    const next = new Set(current)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    return next
-  }
-}
 
 function roleColor(role: string | undefined, index: number) {
   if (!role) return '#565f89'
@@ -109,9 +107,10 @@ export default function ExperienceTimeline() {
   const [scopeFilter, setScopeFilter] = useState('all')
   const [bucketFilter, setBucketFilter] = useState<'all' | MemoryBucket>('all')
   const [hiddenRoots, setHiddenRoots] = useState<Set<string>>(new Set())
-  // Auto execution observations are noise lanes (one per command); they fold
-  // into a single collapsed lane until the user opens them.
-  const [collapsedScopes, setCollapsedScopes] = useState<Set<string>>(new Set(['execution']))
+  // Lane aggregation state: id → aggregated?. Auto execution observations are
+  // noise lanes (one per command); their merged lane starts aggregated.
+  const [laneOverrides, setLaneOverrides] = useState<Record<string, boolean>>({ execution: true })
+  const [query, setQuery] = useState('')
   const [detailsOpen, setDetailsOpen] = useState(true)
   const [selected, setSelected] = useState('')
   const [focus, setFocus] = useState<{ at: string; eventId: string; label: string } | null>(null)
@@ -173,10 +172,12 @@ export default function ExperienceTimeline() {
     const scopes = model.scopes.map((scope) => scope.id).sort()
     const visibleRun = (run: RunInfo) => !hiddenRoots.has(run.parentRun ?? '') && !hiddenRoots.has(run.id.split('/')[0]) && (roleFilter === 'all' || run.role === roleFilter || !run.role)
     const visibleRuns = model.runs.filter(visibleRun)
+    const needle = query.trim().toLowerCase()
     const visibleRow = (row: KnowledgeRow) =>
       (bucketFilter === 'all' || stateBucket(row.state) === bucketFilter) &&
       (scopeFilter === 'all' || row.scopes.primary === scopeFilter) &&
       (roleFilter === 'all' || row.roles.includes(roleFilter)) &&
+      (!needle || row.proposition.toLowerCase().includes(needle) || row.knowledgeId.toLowerCase().includes(needle)) &&
       row.points.some((point) => kinds.has(point.kind)) &&
       row.runs.some((run) => !hiddenRoots.has(run.split('/')[0]))
     const visibleRows = model.rows.filter(visibleRow)
@@ -198,25 +199,36 @@ export default function ExperienceTimeline() {
       rows: executionRows,
     }] : []
     const visibleScopes = [...claimLanes, ...executionLane]
+    // Semantic zoom: at wide spans and scale, multi-row lanes collapse into
+    // one summary band each; explicit clicks override, `fit` resets.
+    const autoAggregate = (active.t1 - active.t0) / Math.max(1, full.t1 - full.t0) > AGGREGATE_RATIO && visibleRows.length > AUTO_AGGREGATE_ROWS
+    const aggregatedIds = new Set<string>()
+    for (const { scope, rows } of visibleScopes) {
+      if (rows.length < 2 && scope.id !== 'execution') continue
+      const override = laneOverrides[scope.id]
+      const aggregated = override !== undefined ? override : (scope.id === 'execution' ? true : autoAggregate)
+      if (aggregated) aggregatedIds.add(scope.id)
+    }
     const conflictsPresent = model.lineage.length > 0 || model.rows.some((row) => row.points.some((point) => point.kind === 'contradicted' || point.kind === 'weakened' || point.kind === 'archived'))
     const runLaneY = new Map<string, number>()
     let y = AXIS_HEIGHT
     for (const run of visibleRuns) { runLaneY.set(run.id, y + RUN_LANE / 2); y += RUN_LANE }
     const rowY = new Map<string, number>()
     const scopeHeaderY = new Map<string, number>()
+    const bandY = new Map<string, number>()
     const populationY = y + 10
     if (lens.experience) {
       y = populationY + POPULATION_LANE
       for (const { scope, rows } of visibleScopes) {
         scopeHeaderY.set(scope.id, y + SCOPE_HEADER / 2)
         y += SCOPE_HEADER
-        if (collapsedScopes.has(scope.id)) continue
+        if (aggregatedIds.has(scope.id)) { bandY.set(scope.id, y + AGGREGATE_LANE / 2); y += AGGREGATE_LANE; continue }
         for (const row of rows) { rowY.set(row.knowledgeId, y + ROW_LANE / 2); y += ROW_LANE }
         y += 4
       }
     }
-    return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleScopes, conflictsPresent, runLaneY, rowY, scopeHeaderY, populationY, height: y + 8 }
-  }, [model, window_, hiddenRoots, roleFilter, scopeFilter, bucketFilter, kinds, lens.experience, collapsedScopes])
+    return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleScopes, aggregatedIds, conflictsPresent, runLaneY, rowY, scopeHeaderY, bandY, populationY, height: y + 8 }
+  }, [model, window_, hiddenRoots, roleFilter, scopeFilter, bucketFilter, kinds, lens.experience, laneOverrides, query])
 
   const activity = useMemo(() => {
     const map = new Map<string, { tools: number[]; models: number[] }>()
@@ -329,7 +341,7 @@ export default function ExperienceTimeline() {
         <button key={name} className={`preset-chip ${activePreset === name ? 'on' : ''}`} onClick={() => { setLens(PRESETS[name].lens); setKinds(new Set(PRESETS[name].kinds)) }}>{name === 'all' ? 'all' : `${name} only`}</button>
       ))}
       <span className="lens-sep" />
-      <button onClick={() => { setWindow(null); setFocus(null) }}>fit</button>
+      <button onClick={() => { setWindow(null); setFocus(null); setLaneOverrides({ execution: true }) }}>fit</button>
       <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 0.6))}>zoom +</button>
       <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 1.6))}>zoom −</button>
       <button className={`detail-toggle ${detailsOpen ? 'on' : ''}`} title="hide the detail panel to give the timeline full width" onClick={() => setDetailsOpen((open) => !open)}>{detailsOpen ? 'details ✓' : 'details ✕'}</button>
@@ -356,6 +368,9 @@ export default function ExperienceTimeline() {
           <option value="all">all</option>
           {MEMORY_BUCKETS.map((bucket) => <option key={bucket} value={bucket}>{bucket}</option>)}
         </select>
+      </label>
+      <label>search
+        <input type="search" value={query} onChange={(change) => setQuery(change.target.value)} placeholder="claim text / id" title="filter experiences by proposition or id" />
       </label>
       <div className="run-chips">{view.roots.map((root) => (
         <button key={root.id} className={`run-chip ${hiddenRoots.has(root.id) ? '' : 'on'}`} onClick={() => toggleRoot(root.id)}>{shortRun(root.id)} · {clock(root.startedAt)}</button>
@@ -425,17 +440,47 @@ export default function ExperienceTimeline() {
           </g>}
           {lens.experience && view.visibleScopes.map(({ scope, rows }) => {
             const headerY = view.scopeHeaderY.get(scope.id)!
-            const collapsed = collapsedScopes.has(scope.id)
+            const aggregated = view.aggregatedIds.has(scope.id)
+            const toggleLane = () => setLaneOverrides((current) => ({ ...current, [scope.id]: !aggregated }))
             const activations = model.links.filter((link) => scope.rows.some((row) => row.knowledgeId === link.knowledgeId)).length
             const retired = scope.rows.filter((row) => row.terminal).length
+            const alive = rows.length - retired
             return <g key={scope.id} className="scope-section">
-              <text x={8} y={headerY - 2} className="lane-label scope-label" onClick={() => setCollapsedScopes(toggleSetItem(scope.id))} style={{ cursor: 'pointer' }}>
-                <title>{collapsed ? 'expand lane' : 'collapse lane'}</title>
-                {collapsed ? '▸' : '▾'} {scope.title.toUpperCase()}
+              <text x={8} y={headerY - 2} className="lane-label scope-label" onClick={toggleLane} style={{ cursor: 'pointer' }}>
+                <title>{aggregated ? 'expand into individual experiences' : 'collapse into a summary band'}</title>
+                {aggregated ? '▸' : '▾'} {scope.title.toUpperCase()}
               </text>
               <text x={8} y={headerY + 10} className="lane-sublabel">{rows.length} exp · {scope.runs.length} runs · {activations} act{retired ? ` · ${retired} retired` : ''}</text>
               <line x1={GUTTER - 6} x2={width} y1={headerY + SCOPE_HEADER / 2 - 2} y2={headerY + SCOPE_HEADER / 2 - 2} stroke="#1c2530" strokeWidth={1} />
-              {(collapsed ? [] : rows).map((row) => {
+              {aggregated ? (() => {
+                const bandCenter = view.bandY.get(scope.id)!
+                const bx0 = Math.max(GUTTER, x(scope.firstAt))
+                const bx1 = Math.min(GUTTER + track, x(scope.lastAt))
+                const expand = () => setLaneOverrides((current) => ({ ...current, [scope.id]: false }))
+                return <g className="scope-band" onClick={expand} style={{ cursor: 'pointer' }}>
+                  <rect x={0} y={bandCenter - AGGREGATE_LANE / 2} width={width} height={AGGREGATE_LANE} fill="transparent" onClick={expand} />
+                  <rect x={bx0} y={bandCenter - 4} width={Math.max(3, bx1 - bx0)} height={8} rx={4} fill="#7aa2f7" opacity={0.16}>
+                    <title>{`${scope.title}: ${rows.length} experiences · ${alive} alive · ${retired} retired · ${clock(scope.firstAt)} → ${clock(scope.lastAt)}`}</title>
+                  </rect>
+                  {rows.map((row) => {
+                    const px = x(row.firstAt)
+                    if (px < GUTTER || px > GUTTER + track) return null
+                    return <line key={`born-${row.knowledgeId}`} x1={px} x2={px} y1={bandCenter - 9} y2={bandCenter - 4} stroke={STATE_COLORS[row.state] ?? '#7aa2f7'} strokeWidth={1.8} >
+                      <title>{`${row.knowledgeId} appeared · ${clock(row.firstAt)}`}</title>
+                    </line>
+                  })}
+                  {rows.map((row) => row.terminal && (() => {
+                    const px = x(row.terminal.at)
+                    if (px < GUTTER || px > GUTTER + track) return null
+                    return <g key={`died-${row.knowledgeId}`} stroke={row.state === 'invalidated' ? '#f7768e' : '#565f89'} strokeWidth={1.4}>
+                      <line x1={px - 3} y1={bandCenter + 4} x2={px + 3} y2={bandCenter + 9} />
+                      <line x1={px - 3} y1={bandCenter + 9} x2={px + 3} y2={bandCenter + 4} />
+                      <title>{`${row.knowledgeId} ${row.terminal.kind} · ${clock(row.terminal.at)}`}</title>
+                    </g>
+                  })())}
+                  <text x={Math.min(bx1 + 8, width - 78)} y={bandCenter + 3} className="lane-sublabel">{rows.length} exp · {alive} alive</text>
+                </g>
+              })() : rows.map((row) => {
                 const yLane = view.rowY.get(row.knowledgeId)!
                 const x0 = x(row.firstAt)
                 const x1 = x(row.terminal?.at ?? row.lastAt)
