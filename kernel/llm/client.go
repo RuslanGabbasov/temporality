@@ -8,12 +8,15 @@ package llm
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -51,7 +54,20 @@ type Completion struct {
 	ToolCalls []ToolCall
 	Usage     Usage
 	Finish    string
+	// Observability fields (pivot §13): provider identity, wall-clock
+	// latency and content-addressed references for the exact request and
+	// response payloads. Hashes only — payload contents never enter events.
+	Provider    string `json:"provider,omitempty"`
+	LatencyMs   int64  `json:"latency_ms,omitempty"`
+	RequestRef  string `json:"request_ref,omitempty"`
+	ResponseRef string `json:"response_ref,omitempty"`
+	Attempts    int    `json:"attempts,omitempty"`
 }
+
+// Truncated reports whether the provider cut the completion off at the token
+// limit (finish_reason=length). Callers must surface this: a truncated answer
+// is not a normal completion.
+func (c Completion) Truncated() bool { return c.Finish == "length" }
 
 // Usage carries provider token accounting.
 type Usage struct {
@@ -111,18 +127,26 @@ func ConfigFromEnv() (Config, error) {
 
 // Client talks to one OpenAI-compatible endpoint.
 type Client struct {
-	cfg    Config
-	http   *http.Client
-	jitter *rand.Rand
+	cfg          Config
+	http         *http.Client
+	jitter       *rand.Rand
+	providerHost string
 }
 
 // New builds a client.
 func New(cfg Config) *Client {
-	return &Client{cfg: cfg, http: &http.Client{Timeout: cfg.Timeout}, jitter: rand.New(rand.NewSource(1))}
+	host := ""
+	if parsed, err := url.Parse(cfg.BaseURL); err == nil && parsed.Host != "" {
+		host = parsed.Host
+	}
+	return &Client{cfg: cfg, http: &http.Client{Timeout: cfg.Timeout}, jitter: rand.New(rand.NewSource(time.Now().UnixNano())), providerHost: host}
 }
 
 // Model identifies the configured model in reports.
 func (c *Client) Model() string { return c.cfg.Model }
+
+// Provider identifies the configured endpoint host in reports.
+func (c *Client) Provider() string { return c.providerHost }
 
 type chatTool struct {
 	Type     string  `json:"type"`
@@ -207,7 +231,9 @@ func toRequestMessages(messages []Message) []requestMessage {
 }
 
 // Complete performs one chat completion. It retries transient provider
-// failures (429/5xx/network) with bounded backoff.
+// failures (429/5xx/network) with bounded backoff; the returned completion
+// carries observability fields (provider, latency, payload references,
+// attempt count).
 func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolDef) (Completion, error) {
 	req := chatRequest{
 		Model:       c.cfg.Model,
@@ -215,7 +241,11 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 		Temperature: c.cfg.Temperature,
 		MaxTokens:   c.cfg.MaxOutputTokens,
 		Reasoning:   reasoningRequest(c.cfg.Reasoning),
-		ToolChoice:  "auto",
+	}
+	if len(tools) > 0 {
+		// tool_choice is only meaningful when tools exist; sending it on a
+		// tools-less forced finale is contradictory wire traffic.
+		req.ToolChoice = "auto"
 	}
 	for _, tool := range tools {
 		req.Tools = append(req.Tools, chatTool{Type: "function", Function: tool})
@@ -225,9 +255,10 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 		return Completion{}, err
 	}
 
+	started := time.Now()
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
+	for attempt := 1; attempt <= 3; attempt++ {
+		if attempt > 1 {
 			delay := time.Duration(1<<uint(attempt))*time.Second + time.Duration(c.jitter.Int63n(1500))*time.Millisecond
 			select {
 			case <-ctx.Done():
@@ -237,10 +268,12 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 		}
 		completion, err := c.once(ctx, payload)
 		if err == nil {
+			completion.LatencyMs = time.Since(started).Milliseconds()
+			completion.Attempts = attempt
 			return completion, nil
 		}
 		lastErr = err
-		if !transient(err) {
+		if ctx.Err() != nil || !transient(err) {
 			return Completion{}, err
 		}
 	}
@@ -252,8 +285,18 @@ func transient(err error) bool {
 	if errors.As(err, &statusErr) {
 		return statusErr.code == http.StatusTooManyRequests || statusErr.code >= 500
 	}
-	return false
+	// Transport failures (connection refused, EOF mid-body, DNS) are transient
+	// provider-side conditions; only request-context cancellation is final.
+	var transportErr *transportError
+	return errors.As(err, &transportErr)
 }
+
+type transportError struct {
+	err error
+}
+
+func (e *transportError) Error() string { return "provider transport: " + e.err.Error() }
+func (e *transportError) Unwrap() error { return e.err }
 
 type statusError struct {
 	code int
@@ -275,7 +318,7 @@ func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return Completion{}, err
+		return Completion{}, &transportError{err: err}
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
@@ -318,7 +361,17 @@ func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {
 			TotalTokens:      decoded.Usage.TotalTokens,
 		}
 	}
+	completion.Provider = c.providerHost
+	completion.RequestRef = contentRef(payload)
+	completion.ResponseRef = contentRef(body)
 	return completion, nil
+}
+
+// contentRef derives the sha256 content reference operators can use to
+// correlate the exact payload behind an event without storing the payload.
+func contentRef(payload []byte) string {
+	digest := sha256.Sum256(payload)
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 func truncate(text string, limit int) string {

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -162,10 +163,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			return result, err
 		}
 		var completion llm.Completion
-		// Model endpoints fail transiently (hangs, EOFs, empty bodies); retries
-		// with backoff absorb that without losing the run. Non-retryable model
-		// errors (bad request, auth) still fail fast on the same attempt budget.
-		modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 4 * time.Minute, ScheduleToCloseTimeout: 12 * time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: 15 * time.Second, MaximumInterval: 60 * time.Second, MaximumAttempts: 3}})
+		// Model endpoints fail transiently (hangs, EOFs, empty bodies). Retries
+		// with backoff live inside the llm client; the activity therefore runs
+		// exactly once and its timeout must cover the client's worst case
+		// (3 attempts × request timeout + backoff ≈ 9m15s). Non-retryable model
+		// errors (bad request, auth) fail fast on the first client attempt.
+		modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Minute, ScheduleToCloseTimeout: 11 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 		if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, modelReq).Get(ctx, &completion); err != nil {
 			failureDetail := boundedFailureDetail(err)
 			if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": turn, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
@@ -177,7 +180,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			result.Status = "failed"
 			return result, err
 		}
-		if err := emit(activityCtx, state, "model.completed", map[string]any{"turn": turn, "tool_call_count": len(completion.ToolCalls), "finish_reason": completion.Finish, "total_tokens": completion.Usage.TotalTokens}); err != nil {
+		completedData := map[string]any{"turn": turn, "tool_call_count": len(completion.ToolCalls), "finish_reason": completion.Finish, "total_tokens": completion.Usage.TotalTokens}
+		maps.Copy(completedData, modelObservability(completion))
+		if err := emit(activityCtx, state, "model.completed", completedData); err != nil {
 			return result, err
 		}
 		if len(completion.ToolCalls) == 0 {
@@ -421,7 +426,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		return result, err
 	}
 	var finale llm.Completion
-	modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 4 * time.Minute, ScheduleToCloseTimeout: 12 * time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: 15 * time.Second, MaximumInterval: 60 * time.Second, MaximumAttempts: 3}})
+	modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Minute, ScheduleToCloseTimeout: 11 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 	if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, ModelRequest{Model: input.Model, Messages: finaleMessages}).Get(ctx, &finale); err != nil {
 		failureDetail := boundedFailureDetail(err)
 		if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "forced_finale": true, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
@@ -433,7 +438,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		result.Status = "failed"
 		return result, err
 	}
-	if err := emit(activityCtx, state, "model.completed", map[string]any{"turn": finaleTurn, "forced_finale": true, "tool_call_count": len(finale.ToolCalls), "finish_reason": finale.Finish, "total_tokens": finale.Usage.TotalTokens}); err != nil {
+	finaleData := map[string]any{"turn": finaleTurn, "forced_finale": true, "tool_call_count": len(finale.ToolCalls), "finish_reason": finale.Finish, "total_tokens": finale.Usage.TotalTokens}
+	maps.Copy(finaleData, modelObservability(finale))
+	if err := emit(activityCtx, state, "model.completed", finaleData); err != nil {
 		return result, err
 	}
 	if finale.Content != "" {
@@ -514,6 +521,24 @@ func boundedFailureDetail(err error) string {
 		return detail[:failureDetailBytes] + "…"
 	}
 	return detail
+}
+
+// modelObservability projects client-side model-call observability onto the
+// model.completed event: provider identity, wall-clock latency, token usage
+// split, truncation flag, attempt count and content-addressed references for
+// the exact request/response payloads. References are hashes only — payload
+// contents never enter the event stream.
+func modelObservability(completion llm.Completion) map[string]any {
+	return map[string]any{
+		"provider":          completion.Provider,
+		"latency_ms":        completion.LatencyMs,
+		"prompt_tokens":     completion.Usage.PromptTokens,
+		"completion_tokens": completion.Usage.CompletionTokens,
+		"input_ref":         completion.RequestRef,
+		"output_ref":        completion.ResponseRef,
+		"truncated":         completion.Truncated(),
+		"attempts":          completion.Attempts,
+	}
 }
 
 // emitAgentSummary records the agent-authored final answer as derived data:
