@@ -174,7 +174,7 @@ Timeline.** Universal observation API (migration 000018), Agent Kernel,
 | Agent Harness — Execution | `kernel/mcpclient`, sandbox (`run_command`), `kernel/llm` gateway | model gateway = `kernel/llm` |
 | Agent Harness — Orchestration | Temporal workflow, delegation в `kernel/agent/workflow.go` | parallelism/policies — по мере надобности |
 | Agent Harness — Control | approval (requested/granted, redacted preview), budgets (turns) | behavioral SLO/policy enforcement — будущие стадии |
-| Agent Harness — Evidence & Observability | observation events, kernel event outbox (миграция 000019) | evidence package / replay — частично (Experience Timeline) |
+| Agent Harness — Evidence & Observability | observation events, kernel event outbox (миграция 000019), effect semantics + operation reconciler | evidence package / replay — частично (Experience Timeline); failure/reconciliation сделана (2026-09-25) |
 | Temporality — опыт и память | `observation/` (journal, knowledge, hints) + Experience Timeline | ядро продукта |
 | Enterprise Control Plane | `controlplane/`: bearer-токены, роли reader/writer/operator/admin, project-scoping на journal и kernel API | минимум 2026-09-25: auth + RBAC готовы (JOURNAL_AUTH_TOKENS / KERNEL_AUTH_TOKENS / TEMPORALITY_API_TOKEN); остались tenants, secrets вне .env, quotas |
 | Infrastructure | docker compose | при развёртывании заменить на целевые среды |
@@ -223,7 +223,11 @@ FRP-страница удалены, `aml/` удалён, расчистка с�
    journal/kernel готовы (`controlplane/`, 2026-09-25); остаются tenants
    как отдельная сущность, secrets вне .env, quotas.
 3. **Kernel P0/P1** только там, где мешает наблюдаемости: model-call
-   observability и MCP provenance сделаны (2026-09-25: model.completed
-   несёт provider/latency/token split/content refs/attempts/truncated;
-   mcp.call.* — server + result_ref + result_bytes); осталась
-   failure/reconciliation семантика.
+   observability, MCP provenance и failure/reconciliation сделаны
+   (2026-09-25: model.completed несёт provider/latency/token split/content
+   refs/attempts/truncated; mcp.call.* — server + result_ref + result_bytes;
+   tool.failed несёт effect=none/uncertain, `GET /v1/agent/operations`
+   проецирует неурегулированные операции, `POST .../reconcile` пишет
+   производный operation.reconciled, KERNEL_FAULT_AFTER_EFFECT вооружает
+   live-drill). Остались: surfacing в debugger UI и автоматические
+   read-after-write пробы.

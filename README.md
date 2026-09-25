@@ -218,6 +218,28 @@ resource limits, bounded output). Approval waits — 1 час по умолча�
 Lead → Coder → Reviewer → QA пример — [`examples/lead_coder_reviewer_qa`](examples/lead_coder_reviewer_qa),
 в compose включён build-тегом `agent_examples`.
 
+### Failure reconciliation
+
+`tool.failed` несёт семантику эффекта: `effect=none` (отказ до исполнения —
+безопасно повторять) vs `effect=uncertain` (сбой на/после границы
+исполнения). Неурегулированные операции проецируются из event stream
+по запросу:
+
+```sh
+curl 'http://localhost:8090/v1/agent/operations?project=repo-a' \
+  -H "Authorization: Bearer $READER_TOKEN"
+curl -X POST http://localhost:8090/v1/agent/operations/reconcile \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" -H 'content-type: application/json' \
+  -d '{"project":"repo-a","run_id":"demo-1","operation_id":"...","effect":"occurred","note":"verified downstream","actor_id":"ops","started_event_id":"..."}'
+```
+
+`effect` — закрытый словарь `none|occurred|unknown`; записанный вердикт
+сеттлит операцию (производный `operation.reconciled` с `parent_event_id`
+на `tool.started`). Live-drill: `KERNEL_FAULT_AFTER_EFFECT=<operation-id
+или tool-name>` — эффект реально выполняется, после чего воркер
+«падает», и операция честно попадает в listing как uncertain
+(см. [`docs/failure-reconciliation.md`](docs/failure-reconciliation.md)).
+
 ## Experience Timeline
 
 Главный экран — `/experience`: runs по горизонтали, knowledge-полосы по
