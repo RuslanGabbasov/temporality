@@ -175,6 +175,35 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]any{"pending": stats.Pending, "oldest_pending_age_seconds": int64(stats.OldestPendingAge.Seconds()), "delivered": stats.Delivered, "last_error": stats.FailedAttemptsLast})
 	})
+	liveness := &temporalLiveness{client: temporalClient}
+	mux.HandleFunc("GET /v1/agent/operations", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if !gate.Allow(w, r, controlplane.RoleReader, project) {
+			return
+		}
+		operations, err := activities.UncertainOperations(r.Context(), project, liveness)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"operations": operations, "count": len(operations)})
+	})
+	mux.HandleFunc("POST /v1/agent/operations/reconcile", func(w http.ResponseWriter, r *http.Request) {
+		var request agent.ReconcileRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleOperator, request.Project) {
+			return
+		}
+		event, err := activities.RecordReconciliation(r.Context(), request)
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		writeJSON(w, 201, map[string]any{"event_id": event.EventID, "operation_id": request.OperationID, "effect": request.Effect, "recorded": true})
+	})
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
 	address := env("KERNEL_HTTP_ADDR", ":8090")
 	server := &http.Server{Addr: address, Handler: gate.Authenticate(mux), ReadHeaderTimeout: 5 * time.Second}
@@ -220,6 +249,24 @@ func querySourceID(r *http.Request, fallback string) string {
 func workflowIDFor(sourceID, project, runID string) string {
 	digest := sha256.Sum256([]byte(sourceID + "\x00" + project + "\x00" + runID))
 	return fmt.Sprintf("agent-run/%x", digest[:16])
+}
+
+// temporalLiveness reports whether the run's workflow is still executing.
+// A missing workflow counts as not running: its events can never complete.
+type temporalLiveness struct {
+	client client.Client
+}
+
+func (t *temporalLiveness) IsWorkflowRunning(ctx context.Context, sourceID, project, runID string) (bool, error) {
+	description, err := t.client.DescribeWorkflowExecution(ctx, workflowIDFor(sourceID, project, runID), "")
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return false, nil
+		}
+		return false, err
+	}
+	status := description.GetWorkflowExecutionInfo().GetStatus()
+	return status == enums.WORKFLOW_EXECUTION_STATUS_RUNNING, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
