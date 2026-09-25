@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -68,6 +69,7 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 	input.Tools = a.ToolDefs()
 	input.ApprovalTools = a.ApprovalTools()
 	input.AutoApproveTools = nil
+	input.MCPServer = MCPServerName()
 	if a.Sandbox != nil {
 		input.AutoApproveTools = []string{"run_command"}
 		workspace, err := a.Sandbox.ResolveWorkspace(input.WorkspacePath)
@@ -77,6 +79,21 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 		input.WorkspacePath = workspace
 	}
 	return nil
+}
+
+// MCPServerName identifies the MCP server behind mcp__* tools in the event
+// stream. An explicit KERNEL_MCP_SERVER_NAME wins; otherwise the basename of
+// KERNEL_MCP_COMMAND serves as a stable default. Empty when no MCP server is
+// configured.
+func MCPServerName() string {
+	if name := strings.TrimSpace(os.Getenv("KERNEL_MCP_SERVER_NAME")); name != "" {
+		return name
+	}
+	command := strings.TrimSpace(os.Getenv("KERNEL_MCP_COMMAND"))
+	if command == "" {
+		return ""
+	}
+	return filepath.Base(command)
 }
 
 func (a *Activities) RecordEvent(ctx context.Context, event observation.Event) error {

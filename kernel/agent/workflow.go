@@ -44,6 +44,7 @@ type RunInput struct {
 	SourceID               string        `json:"source_id,omitempty"`
 	ApprovalTimeoutSeconds int           `json:"approval_timeout_seconds,omitempty"`
 	WorkspacePath          string        `json:"workspace_path,omitempty"`
+	MCPServer              string        `json:"mcp_server,omitempty"`
 }
 
 type RunResult struct {
@@ -240,7 +241,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if !isMCP {
 					return nil
 				}
-				return emit(activityCtx, state, "mcp.call.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "approval_required": approvalRequired})
+				return emit(activityCtx, state, "mcp.call.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": input.MCPServer, "approval_required": approvalRequired})
 			}
 			var toolResult ToolResult
 			toolFailed := false
@@ -272,7 +273,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					}
 					if isMCP {
-						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "reason": "approval_timeout"}); err != nil {
+						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": input.MCPServer, "reason": "approval_timeout"}); err != nil {
 							return result, err
 						}
 					}
@@ -316,7 +317,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					}
 					if isMCP {
-						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "reason": "approval_rejected"}); err != nil {
+						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": input.MCPServer, "reason": "approval_rejected"}); err != nil {
 							return result, err
 						}
 					}
@@ -383,11 +384,17 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			if isMCP && !toolBlocked {
 				eventType := "mcp.call.completed"
-				data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}
+				data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": input.MCPServer}
 				if toolFailed {
 					eventType = "mcp.call.failed"
 					data["error_type"] = "activity_failed"
 					data["outcome"] = "uncertain"
+				} else {
+					// Result is content-addressed, never stored raw: the ref plus byte
+					// count let operators correlate the exact MCP payload without
+					// copying tool output into the event stream.
+					data["result_ref"] = resultContentRef(toolResult.Content)
+					data["result_bytes"] = len(toolResult.Content)
 				}
 				if err := emit(activityCtx, state, eventType, data); err != nil {
 					return result, err
@@ -539,6 +546,13 @@ func modelObservability(completion llm.Completion) map[string]any {
 		"truncated":         completion.Truncated(),
 		"attempts":          completion.Attempts,
 	}
+}
+
+// resultContentRef derives the sha256 content reference for an MCP tool
+// result so events stay correlatable without embedding tool output.
+func resultContentRef(content string) string {
+	digest := sha256.Sum256([]byte(content))
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 // emitAgentSummary records the agent-authored final answer as derived data:

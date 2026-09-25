@@ -539,3 +539,68 @@ func TestModelFailureRecordsBoundedErrorDetail(t *testing.T) {
 	require.Contains(t, runFailure.Data["error"], "provider status 403")
 	require.Less(t, indexEvent(events, "model.failed"), indexEvent(events, "run.failed"))
 }
+
+func TestMCPServerNameEnvResolution(t *testing.T) {
+	t.Setenv("KERNEL_MCP_SERVER_NAME", "")
+	t.Setenv("KERNEL_MCP_COMMAND", "")
+	require.Empty(t, MCPServerName())
+
+	t.Setenv("KERNEL_MCP_COMMAND", "/usr/local/bin/github-mcp-server")
+	require.Equal(t, "github-mcp-server", MCPServerName())
+
+	t.Setenv("KERNEL_MCP_COMMAND", "go")
+	require.Equal(t, "go", MCPServerName())
+
+	t.Setenv("KERNEL_MCP_SERVER_NAME", "github-prod")
+	require.Equal(t, "github-prod", MCPServerName())
+}
+
+func TestMCPCallEventsCarryServerAndResultRef(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var events []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		events = append(events, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	modelCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, _ ModelRequest) (llm.Completion, error) {
+		modelCalls++
+		if modelCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "mcp-1", Name: "mcp__github__create_issue", Args: map[string]any{"title": "flaky test"}}}}, nil
+		}
+		return llm.Completion{Content: "issue filed"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ToolRequest) (ToolResult, error) {
+		require.Equal(t, "mcp__github__create_issue", request.Name)
+		return ToolResult{Content: "issue created: #42"}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-mcp", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "file the issue", MaxTurns: 3, MCPServer: "github-mcp"})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	started, completed := 0, 0
+	for _, event := range events {
+		switch event.Type {
+		case "mcp.call.started":
+			started++
+			require.Equal(t, "github-mcp", event.Data["server"])
+			require.Equal(t, "mcp__github__create_issue", event.Data["tool"])
+			require.Equal(t, "run-mcp/turn/01/mcp-1", event.Data["operation_id"])
+		case "mcp.call.completed":
+			completed++
+			require.Equal(t, "github-mcp", event.Data["server"])
+			ref, ok := event.Data["result_ref"].(string)
+			require.True(t, ok, "result_ref must be a string")
+			require.Len(t, ref, len("sha256:")+64)
+			require.True(t, strings.HasPrefix(ref, "sha256:"))
+			require.EqualValues(t, len("issue created: #42"), event.Data["result_bytes"])
+			require.Equal(t, resultContentRef("issue created: #42"), ref)
+		}
+	}
+	require.Equal(t, 1, started)
+	require.Equal(t, 1, completed)
+}
