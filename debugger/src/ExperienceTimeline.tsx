@@ -200,8 +200,11 @@ export default function ExperienceTimeline() {
     const element = svgRef.current
     if (!element || !view) return
     const onWheel = (wheel: WheelEvent) => {
-      wheel.preventDefault()
+      // The left label column is a panel, not timeline canvas: wheel there must
+      // keep native page scrolling instead of zooming.
       const rect = element.getBoundingClientRect()
+      if (wheel.clientX - rect.left < GUTTER) return
+      wheel.preventDefault()
       const x = wheel.clientX - rect.left - GUTTER
       setWindow((current) => {
         const state = current ?? view.full
