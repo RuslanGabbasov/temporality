@@ -259,12 +259,12 @@ export default function ExperienceTimeline() {
       // keep native page scrolling instead of zooming.
       const rect = element.getBoundingClientRect()
       if (wheel.clientX - rect.left < GUTTER) return
-      // Input intent: a trackpad PINCH arrives as ctrl+wheel; a real mouse
-      // wheel reports discrete deltas (line mode, or large integer pixel
-      // steps). Only those zoom. A trackpad two-finger swipe (fractional
-      // pixel deltas, no ctrl) pans the timeline horizontally and leaves
-      // vertical swipes to the native page scroll.
-      const mouseWheel = wheel.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || (Number.isInteger(wheel.deltaY) && Math.abs(wheel.deltaY) >= 10)
+      // Input intent: a trackpad PINCH arrives as ctrl+wheel; Firefox-class
+      // mice report line-mode deltas; pixel-mode mouse notches are large
+      // integers (Chrome ±100/±120). Trackpad two-finger swipes are small —
+      // Safari rounds them to integers too, so the notch threshold must sit
+      // well above real swipe values, or one swipe splits into scroll + zoom.
+      const mouseWheel = wheel.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || (Number.isInteger(wheel.deltaY) && Math.abs(wheel.deltaY) >= 40)
       if (!wheel.ctrlKey && !mouseWheel) {
         if (Math.abs(wheel.deltaX) <= Math.abs(wheel.deltaY)) return
         wheel.preventDefault()
