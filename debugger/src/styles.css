@@ -296,6 +296,8 @@ dialog::backdrop { background: #020408cc; backdrop-filter: blur(3px); }
 .run-chip { padding: .25rem .6rem; border: 1px solid var(--line-bright); border-radius: 999px; background: transparent; color: var(--muted); font: .68rem "SFMono-Regular", monospace; cursor: pointer; }
 .run-chip.on { color: var(--cyan); border-color: var(--cyan); }
 .experience-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 0; border-bottom: 1px solid var(--line); }
+.experience-grid.no-details { grid-template-columns: minmax(0, 1fr); }
+.detail-toggle.on { color: var(--cyan); border-color: var(--cyan); }
 .experience-canvas { overflow-x: auto; }
 .experience-svg { display: block; cursor: grab; user-select: none; }
 .experience-svg:active { cursor: grabbing; }

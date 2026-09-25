@@ -67,6 +67,22 @@ function clock(iso: string) {
 }
 function ms(iso: string) { return new Date(iso).getTime() }
 
+/** Gutter label budget is ~180px of .66rem mono ≈ 30 chars: propositions,
+ * not opaque ids, are what the reader scans lanes by. */
+function claimLabel(proposition: string): string {
+  const flat = proposition.replace(/\s+/g, ' ').trim()
+  return flat.length > 30 ? `${flat.slice(0, 29)}…` : flat
+}
+
+function toggleSetItem(id: string) {
+  return (current: Set<string>) => {
+    const next = new Set(current)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  }
+}
+
 function roleColor(role: string | undefined, index: number) {
   if (!role) return '#565f89'
   const palette: Record<string, string> = { lead: '#7aa2f7', coder: '#73daca', reviewer: '#e0af68', qa: '#bb9af7' }
@@ -93,22 +109,27 @@ export default function ExperienceTimeline() {
   const [scopeFilter, setScopeFilter] = useState('all')
   const [bucketFilter, setBucketFilter] = useState<'all' | MemoryBucket>('all')
   const [hiddenRoots, setHiddenRoots] = useState<Set<string>>(new Set())
+  // Auto execution observations are noise lanes (one per command); they fold
+  // into a single collapsed lane until the user opens them.
+  const [collapsedScopes, setCollapsedScopes] = useState<Set<string>>(new Set(['execution']))
+  const [detailsOpen, setDetailsOpen] = useState(true)
   const [selected, setSelected] = useState('')
   const [focus, setFocus] = useState<{ at: string; eventId: string; label: string } | null>(null)
   const [window_, setWindow] = useState<{ t0: number; t1: number } | null>(null)
   const [width, setWidth] = useState(1100)
 
   const shellRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const dragRef = useRef<{ x: number; t0: number; t1: number } | null>(null)
 
   useEffect(() => {
-    const element = shellRef.current
+    const element = canvasRef.current
     if (!element) return
     const observer = new ResizeObserver((entries) => setWidth(Math.max(640, entries[0].contentRect.width)))
     observer.observe(element)
     return () => observer.disconnect()
-  }, [])
+  }, [model])
 
   const load = useCallback(async (projectID: string) => {
     if (!projectID.trim()) return
@@ -158,9 +179,23 @@ export default function ExperienceTimeline() {
       row.runs.some((run) => !hiddenRoots.has(run.split('/')[0]))
     const visibleRows = model.rows.filter(visibleRow)
     const visibleRowIds = new Set(visibleRows.map((row) => row.knowledgeId))
-    const visibleScopes = model.scopes
+    // Claim lanes render as before; every execution lane merges into one
+    // collapsed-by-default lane so per-command auto rows stop flooding lanes.
+    const claimLanes = model.scopes
+      .filter((scope) => scope.kind !== 'execution')
       .map((scope) => ({ scope, rows: scope.rows.filter((row) => visibleRowIds.has(row.knowledgeId)) }))
       .filter((entry) => entry.rows.length > 0)
+    const executionRows = model.scopes.filter((scope) => scope.kind === 'execution').flatMap((scope) => scope.rows.filter((row) => visibleRowIds.has(row.knowledgeId)))
+    const executionLane = executionRows.length ? [{
+      scope: {
+        id: 'execution', title: 'execution observations', kind: 'execution' as const, rows: executionRows,
+        runs: [...new Set(executionRows.flatMap((row) => row.runs))], roles: [...new Set(executionRows.flatMap((row) => row.roles))],
+        firstAt: executionRows.reduce((min, row) => row.firstAt < min ? row.firstAt : min, executionRows[0].firstAt),
+        lastAt: executionRows.reduce((max, row) => row.lastAt > max ? row.lastAt : max, executionRows[0].lastAt),
+      },
+      rows: executionRows,
+    }] : []
+    const visibleScopes = [...claimLanes, ...executionLane]
     const conflictsPresent = model.lineage.length > 0 || model.rows.some((row) => row.points.some((point) => point.kind === 'contradicted' || point.kind === 'weakened' || point.kind === 'archived'))
     const runLaneY = new Map<string, number>()
     let y = AXIS_HEIGHT
@@ -173,12 +208,13 @@ export default function ExperienceTimeline() {
       for (const { scope, rows } of visibleScopes) {
         scopeHeaderY.set(scope.id, y + SCOPE_HEADER / 2)
         y += SCOPE_HEADER
+        if (collapsedScopes.has(scope.id)) continue
         for (const row of rows) { rowY.set(row.knowledgeId, y + ROW_LANE / 2); y += ROW_LANE }
         y += 4
       }
     }
     return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleScopes, conflictsPresent, runLaneY, rowY, scopeHeaderY, populationY, height: y + 8 }
-  }, [model, window_, hiddenRoots, roleFilter, scopeFilter, bucketFilter, kinds, lens.experience])
+  }, [model, window_, hiddenRoots, roleFilter, scopeFilter, bucketFilter, kinds, lens.experience, collapsedScopes])
 
   const activity = useMemo(() => {
     const map = new Map<string, { tools: number[]; models: number[] }>()
@@ -294,6 +330,7 @@ export default function ExperienceTimeline() {
       <button onClick={() => { setWindow(null); setFocus(null) }}>fit</button>
       <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 0.6))}>zoom +</button>
       <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 1.6))}>zoom −</button>
+      <button className={`detail-toggle ${detailsOpen ? 'on' : ''}`} title="hide the detail panel to give the timeline full width" onClick={() => setDetailsOpen((open) => !open)}>{detailsOpen ? 'details ✓' : 'details ✕'}</button>
       <span className="lens-sep" />
       {LIFECYCLE_KINDS.map((kind) => (
         <button key={kind} className={`kind-chip ${kinds.has(kind) ? 'on' : ''}`} style={{ ['--chip' as string]: LIFECYCLE_COLORS[kind] }} onClick={() => toggleKind(kind)}>{kind}</button>
@@ -322,8 +359,8 @@ export default function ExperienceTimeline() {
         <button key={root.id} className={`run-chip ${hiddenRoots.has(root.id) ? '' : 'on'}`} onClick={() => toggleRoot(root.id)}>{shortRun(root.id)} · {clock(root.startedAt)}</button>
       ))}</div>
     </div>
-    <main className="experience-grid">
-      <section className="obs-panel experience-canvas">
+    <main className={`experience-grid ${detailsOpen ? '' : 'no-details'}`}>
+      <section className="obs-panel experience-canvas" ref={canvasRef}>
         <svg ref={svgRef} width={width} height={view.height} className="experience-svg"
           onPointerDown={(down) => {
             if (down.button !== 0) return
@@ -386,13 +423,17 @@ export default function ExperienceTimeline() {
           </g>}
           {lens.experience && view.visibleScopes.map(({ scope, rows }) => {
             const headerY = view.scopeHeaderY.get(scope.id)!
+            const collapsed = collapsedScopes.has(scope.id)
             const activations = model.links.filter((link) => scope.rows.some((row) => row.knowledgeId === link.knowledgeId)).length
             const retired = scope.rows.filter((row) => row.terminal).length
             return <g key={scope.id} className="scope-section">
-              <text x={8} y={headerY - 2} className="lane-label scope-label">{scope.title.toUpperCase()}</text>
+              <text x={8} y={headerY - 2} className="lane-label scope-label" onClick={() => setCollapsedScopes(toggleSetItem(scope.id))} style={{ cursor: 'pointer' }}>
+                <title>{collapsed ? 'expand lane' : 'collapse lane'}</title>
+                {collapsed ? '▸' : '▾'} {scope.title.toUpperCase()}
+              </text>
               <text x={8} y={headerY + 10} className="lane-sublabel">{rows.length} exp · {scope.runs.length} runs · {activations} act{retired ? ` · ${retired} retired` : ''}</text>
               <line x1={GUTTER - 6} x2={width} y1={headerY + SCOPE_HEADER / 2 - 2} y2={headerY + SCOPE_HEADER / 2 - 2} stroke="#1c2530" strokeWidth={1} />
-              {rows.map((row) => {
+              {(collapsed ? [] : rows).map((row) => {
                 const yLane = view.rowY.get(row.knowledgeId)!
                 const x0 = x(row.firstAt)
                 const x1 = x(row.terminal?.at ?? row.lastAt)
@@ -400,8 +441,10 @@ export default function ExperienceTimeline() {
                 const points = lens.lifecycle ? row.points.filter((point) => kinds.has(point.kind)) : []
                 return <g key={row.knowledgeId} className={`row-lane ${selected === row.knowledgeId ? 'selected' : ''}`} onClick={() => setSelected(row.knowledgeId)}>
                   <rect x={0} y={yLane - ROW_LANE / 2} width={width} height={ROW_LANE} fill="transparent" />
-                  <text x={16} y={yLane + 3} className="row-label">{shortKnowledge(row.knowledgeId)}</text>
-                  <text x={58} y={yLane + 3} className="row-state" style={{ fill: stateColor }}>{row.state}{row.scopes.secondary.length ? ` ·+${row.scopes.secondary.join(',')}` : ''}</text>
+                  <circle cx={12} cy={yLane} r={3.4} fill={stateColor}>
+                    <title>{`${row.state}${row.scopes.secondary.length ? ` · +${row.scopes.secondary.join(', ')}` : ''}`}</title>
+                  </circle>
+                  <text x={20} y={yLane + 3} className="row-label"><title>{`${row.knowledgeId} · ${row.state}`}</title>{claimLabel(row.proposition)}</text>
                   <rect x={Math.max(GUTTER, x0)} width={Math.max(3, Math.min(x1, GUTTER + track) - Math.max(GUTTER, x0))} y={yLane - 2} height={4} rx={2} fill={stateColor} opacity={0.25 + row.strength * 0.55}>
                     <title>{`${row.knowledgeId} · ${row.state} · strength ${row.strength.toFixed(2)} (derived)${row.terminal ? ` · died ${row.terminal.at}` : ' · alive'}`}</title>
                   </rect>
@@ -488,9 +531,9 @@ export default function ExperienceTimeline() {
         </svg>
         <p className="experience-hint">scroll — zoom · drag — pan · row click — details · bars are lifespans, points are events, ✕ marks death</p>
       </section>
-      <aside className="obs-panel experience-detail">
+      {detailsOpen && <aside className="obs-panel experience-detail">
         {!selectedRow ? <p className="obs-empty">Выберите опыт на таймлайне — здесь появятся его жизненный цикл, эпизоды, происхождение и связи.</p> : <RowDetails row={selectedRow} lineage={model.lineage} forensic={forensicOf(selectedRow, model)} onFocus={focusOn} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} />}
-      </aside>
+      </aside>}
     </main>
   </div>
 }
