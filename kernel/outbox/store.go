@@ -152,7 +152,7 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 		count(*) FILTER (WHERE delivered_at IS NULL),
 		min(created_at) FILTER (WHERE delivered_at IS NULL),
 		count(*) FILTER (WHERE delivered_at IS NOT NULL),
-		(SELECT last_error FROM kernel_event_outbox WHERE last_error <> '' ORDER BY attempts DESC, created_at DESC LIMIT 1)
+		COALESCE((SELECT last_error FROM kernel_event_outbox WHERE last_error <> '' ORDER BY attempts DESC, created_at DESC LIMIT 1), '')
 		FROM kernel_event_outbox`).Scan(&stats.Pending, &oldest, &stats.Delivered, &stats.FailedAttemptsLast)
 	if err != nil {
 		return stats, err
