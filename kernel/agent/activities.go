@@ -29,9 +29,13 @@ type Activities struct {
 	Model          *llm.Client
 	HTTP           *http.Client
 	TemporalityURL string
-	MCP            *mcpclient.Client
-	SourceID       string
-	Sandbox        *sandbox.Docker
+	// APIToken authenticates direct journal calls (hints, knowledge lookup)
+	// when the journal requires bearer auth; it mirrors TEMPORALITY_API_TOKEN
+	// used by the event outbox publisher.
+	APIToken string
+	MCP      *mcpclient.Client
+	SourceID string
+	Sandbox  *sandbox.Docker
 }
 
 func NewActivities(events EventOutbox) (*Activities, error) {
@@ -49,7 +53,7 @@ func NewActivities(events EventOutbox) (*Activities, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), MCP: mcpTools, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandboxRunner}, nil
+	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), APIToken: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), MCP: mcpTools, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandboxRunner}, nil
 }
 
 func (a *Activities) ToolDefs() []llm.ToolDef {
@@ -190,6 +194,9 @@ func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([
 		return nil, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
+	if a.APIToken != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+a.APIToken)
+	}
 	response, err := a.HTTP.Do(httpRequest)
 	if err != nil {
 		return nil, err
@@ -237,6 +244,9 @@ func (a *Activities) KnowledgeLookup(ctx context.Context, request KnowledgeLooku
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return KnowledgeLookupResult{}, err
+	}
+	if a.APIToken != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+a.APIToken)
 	}
 	response, err := a.HTTP.Do(httpRequest)
 	if err != nil {
