@@ -4,28 +4,27 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
-COPY frp ./frp
 COPY aml ./aml
 COPY observation ./observation
 COPY kernel ./kernel
 COPY examples ./examples
-RUN CGO_ENABLED=0 go build -o /out/temporality-runtime ./cmd/temporality-runtime \
- && CGO_ENABLED=0 go build -o /out/temporality-executor ./cmd/temporality-executor \
+RUN CGO_ENABLED=0 go build -o /out/temporality-journal ./cmd/temporality-journal \
  && CGO_ENABLED=0 go build -tags "$KERNEL_BUILD_TAGS" -o /out/temporality-agent-kernel ./cmd/agent-kernel
 
-FROM alpine:3.22 AS runtime
+FROM alpine:3.22 AS journal
 RUN adduser -D -u 10001 temporality
 WORKDIR /app
-COPY --from=build /out/temporality-runtime /usr/local/bin/temporality-runtime
-COPY migrations ./migrations
+COPY --from=build /out/temporality-journal /usr/local/bin/temporality-journal
 USER temporality
 EXPOSE 8080
-ENTRYPOINT ["temporality-runtime"]
+ENTRYPOINT ["temporality-journal"]
 
 FROM alpine:3.22 AS agent-kernel
 RUN adduser -D -u 10001 temporality
 WORKDIR /app
 COPY --from=build /out/temporality-agent-kernel /usr/local/bin/temporality-agent-kernel
+# The kernel applies the kernel event outbox migration (000019) from the
+# filesystem before serving traffic.
 COPY migrations ./migrations
 # The optional run_command sandbox shells out to the Docker CLI against the
 # host daemon socket, so the CLI must exist inside the image.
@@ -33,10 +32,3 @@ COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
 USER temporality
 EXPOSE 8090
 ENTRYPOINT ["temporality-agent-kernel"]
-
-FROM alpine:3.22 AS executor
-RUN adduser -D -u 10001 temporality
-WORKDIR /app
-COPY --from=build /out/temporality-executor /usr/local/bin/temporality-executor
-USER temporality
-ENTRYPOINT ["temporality-executor"]

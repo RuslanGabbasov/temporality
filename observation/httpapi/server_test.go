@@ -1,0 +1,263 @@
+package httpapi
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/temporality-project/temporality/observation"
+	"github.com/temporality-project/temporality/observation/memory"
+)
+
+func newTestServer(t *testing.T) http.Handler {
+	t.Helper()
+	return New(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func doJSON(t *testing.T, handler http.Handler, method, path string, body any) (*http.Response, map[string]any) {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal request: %v", err)
+		}
+		reader = bytes.NewReader(raw)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	res := rec.Result()
+	defer res.Body.Close()
+	payload := map[string]any{}
+	if res.ContentLength != 0 {
+		raw, _ := io.ReadAll(res.Body)
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatalf("decode response %s: %v", path, err)
+			}
+		}
+	}
+	return res, payload
+}
+
+func proposedEvent(project, eventID, knowledgeID, proposition string) observation.Event {
+	return observation.Event{
+		Schema: observation.Schema, EventID: eventID, OccurredAt: time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "kernel-test", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: project, Run: "run-1", Actor: observation.Actor{ID: "coder", Type: "agent"}},
+		Type:    "knowledge.proposed",
+		Data:    map[string]any{"knowledge_id": knowledgeID, "proposition": proposition},
+	}
+}
+
+func TestJournalFlowIngestListHintsInvalidate(t *testing.T) {
+	handler := newTestServer(t)
+
+	res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{
+		"events": []observation.Event{proposedEvent("lighthouse", "evt-1", "K1", "gatekeeper v2 authenticates via .token-file")},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+	if body["accepted"].(float64) != 1 {
+		t.Fatalf("accepted = %v", body["accepted"])
+	}
+
+	res, body = doJSON(t, handler, "GET", "/v1/observations/events?project=lighthouse", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d", res.StatusCode)
+	}
+	events := body["events"].([]any)
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	first := events[0].(map[string]any)
+	if first["event_id"] != "evt-1" {
+		t.Fatalf("event_id = %v", first["event_id"])
+	}
+	if _, ok := first["received_at"]; !ok {
+		t.Fatal("server must stamp received_at on ingest")
+	}
+
+	res, body = doJSON(t, handler, "POST", "/v1/observations/hints", map[string]any{
+		"project": "lighthouse", "query": "how do I authenticate to gatekeeper v2", "actor": map[string]any{"id": "coder", "type": "agent"},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("hints status = %d, body = %v", res.StatusCode, body)
+	}
+	activationID, _ := body["activation_id"].(string)
+	if !isDashedUUID(activationID) {
+		t.Fatalf("activation_id = %q, want dashed UUID", activationID)
+	}
+	hints := body["hints"].([]any)
+	if len(hints) != 1 {
+		t.Fatalf("hints = %d, want 1", len(hints))
+	}
+	hint := hints[0].(map[string]any)
+	if hint["knowledge_id"] != "K1" {
+		t.Fatalf("hint knowledge_id = %v", hint["knowledge_id"])
+	}
+
+	res, body = doJSON(t, handler, "GET", "/v1/observations/events?project=lighthouse&type=hint.query", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("hint events list status = %d", res.StatusCode)
+	}
+	events = body["events"].([]any)
+	if len(events) != 1 {
+		t.Fatalf("hint.query events = %d, want 1", len(events))
+	}
+	if source := events[0].(map[string]any)["source"].(map[string]any); source["id"] != "temporality-activation" {
+		t.Fatalf("hint.query source.id = %v", source["id"])
+	}
+	res, body = doJSON(t, handler, "GET", "/v1/observations/events?project=lighthouse&type=hint.offered", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("hint.offered list status = %d", res.StatusCode)
+	}
+	if count := body["count"].(float64); count != 1 {
+		t.Fatalf("hint.offered count = %v, want 1", count)
+	}
+
+	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("knowledge status = %d", res.StatusCode)
+	}
+	knowledge := body["knowledge"].([]any)
+	if len(knowledge) != 1 || knowledge[0].(map[string]any)["id"] != "K1" {
+		t.Fatalf("knowledge = %v", body["knowledge"])
+	}
+
+	res, body = doJSON(t, handler, "POST", "/v1/observations/knowledge/invalidate", map[string]any{
+		"knowledge_id": "K1", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"}, "reason": "environment switched to v3",
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("invalidate status = %d, body = %v", res.StatusCode, body)
+	}
+
+	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("knowledge after invalidate status = %d", res.StatusCode)
+	}
+	knowledge = body["knowledge"].([]any)
+	if state := knowledge[0].(map[string]any)["state"]; state != "invalidated" {
+		t.Fatalf("state after invalidate = %v, want invalidated", state)
+	}
+
+	res, body = doJSON(t, handler, "POST", "/v1/observations/knowledge/invalidate", map[string]any{
+		"knowledge_id": "K1", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"}, "reason": "again",
+	})
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("second invalidate status = %d, want 409", res.StatusCode)
+	}
+}
+
+func TestIngestBatchLimits(t *testing.T) {
+	handler := newTestServer(t)
+
+	res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": []observation.Event{}})
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("empty batch status = %d, body = %v", res.StatusCode, body)
+	}
+
+	var batch []observation.Event
+	for i := 0; i < 101; i++ {
+		batch = append(batch, proposedEvent("lighthouse", fmt.Sprintf("evt-%d", i), fmt.Sprintf("K%d", i), "proposition"))
+	}
+	res, body = doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": batch})
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("101 batch status = %d, body = %v", res.StatusCode, body)
+	}
+}
+
+func TestIngestConflictReturnsMultiStatus(t *testing.T) {
+	handler := newTestServer(t)
+
+	_, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{
+		"events": []observation.Event{proposedEvent("lighthouse", "evt-1", "K1", "first proposition")},
+	})
+	if body["accepted"].(float64) != 1 {
+		t.Fatalf("accepted = %v", body["accepted"])
+	}
+
+	res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{
+		"events": []observation.Event{
+			proposedEvent("lighthouse", "evt-2", "K2", "fresh event"),
+			proposedEvent("lighthouse", "evt-1", "K1", "different content same id"),
+		},
+	})
+	if res.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("partial failure status = %d, body = %v", res.StatusCode, body)
+	}
+	results := body["results"].([]any)
+	second := results[1].(map[string]any)
+	if second["status"] != "rejected" || second["error"] != observation.ErrConflict.Error() {
+		t.Fatalf("conflict result = %v", second)
+	}
+	if body["accepted"].(float64) != 1 {
+		t.Fatalf("accepted = %v", body["accepted"])
+	}
+}
+
+func TestIngestRepeatedIsIdempotent(t *testing.T) {
+	handler := newTestServer(t)
+
+	event := proposedEvent("lighthouse", "evt-1", "K1", "same content")
+	_, _ = doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": []observation.Event{event}})
+	res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": []observation.Event{event}})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("repeated status = %d", res.StatusCode)
+	}
+	if body["repeated"].(float64) != 1 || body["accepted"].(float64) != 0 {
+		t.Fatalf("repeated = %v accepted = %v", body["repeated"], body["accepted"])
+	}
+}
+
+func TestIngestRejectsUnknownFields(t *testing.T) {
+	handler := newTestServer(t)
+
+	res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{
+		"events": []observation.Event{proposedEvent("lighthouse", "evt-1", "K1", "p")}, "unexpected": true,
+	})
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unknown field status = %d, body = %v", res.StatusCode, body)
+	}
+}
+
+func TestListLimitValidation(t *testing.T) {
+	handler := newTestServer(t)
+
+	res, _ := doJSON(t, handler, "GET", "/v1/observations/events?limit=501", nil)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("limit=501 status = %d", res.StatusCode)
+	}
+	res, _ = doJSON(t, handler, "GET", "/v1/observations/events?limit=0", nil)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("limit=0 status = %d", res.StatusCode)
+	}
+}
+
+func isDashedUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for i, char := range value {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if char != '-' {
+				return false
+			}
+			continue
+		}
+		if !strings.ContainsRune("0123456789abcdef", char) {
+			return false
+		}
+	}
+	return true
+}
