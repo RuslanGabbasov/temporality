@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -18,6 +19,7 @@ import (
 type Store struct {
 	pool   *pgxpool.Pool
 	url    string
+	token  string
 	client *http.Client
 }
 
@@ -30,7 +32,9 @@ func Open(ctx context.Context, databaseURL, temporalityURL string) (*Store, erro
 		pool.Close()
 		return nil, err
 	}
-	return &Store{pool: pool, url: temporalityURL, client: &http.Client{Timeout: 5 * time.Second}}, nil
+	// The journal may require bearer auth (JOURNAL_AUTH_TOKENS); the kernel
+	// publisher authenticates with TEMPORALITY_API_TOKEN.
+	return &Store{pool: pool, url: temporalityURL, token: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), client: &http.Client{Timeout: 5 * time.Second}}, nil
 }
 
 func (s *Store) Close() { s.pool.Close() }
@@ -87,6 +91,9 @@ func (s *Store) PublishOne(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if s.token != "" {
+		request.Header.Set("Authorization", "Bearer "+s.token)
+	}
 	response, err := s.client.Do(request)
 	if err != nil {
 		s.noteFailure(ctx, sourceID, eventID, err.Error())
@@ -127,6 +134,32 @@ func (s *Store) noteFailure(ctx context.Context, sourceID, eventID, message stri
 func (s *Store) markDelivered(ctx context.Context, sourceID, eventID string) error {
 	_, err := s.pool.Exec(ctx, `UPDATE kernel_event_outbox SET delivered_at=clock_timestamp(),attempts=attempts+1,last_error='',claimed_until=NULL WHERE source_id=$1 AND event_id=$2`, sourceID, eventID)
 	return err
+}
+
+// Stats reports delivery reconciliation state for operators: how many events
+// are pending and how long the oldest has been waiting.
+type Stats struct {
+	Pending            int64
+	OldestPendingAge   time.Duration // zero when nothing is pending
+	Delivered          int64
+	FailedAttemptsLast string // last_error of the most recently failed attempt, if any
+}
+
+func (s *Store) Stats(ctx context.Context) (Stats, error) {
+	var stats Stats
+	var oldest *time.Time
+	err := s.pool.QueryRow(ctx, `SELECT
+		count(*) FILTER (WHERE delivered_at IS NULL),
+		min(created_at) FILTER (WHERE delivered_at IS NULL),
+		count(*) FILTER (WHERE delivered_at IS NOT NULL),
+		(SELECT last_error FROM kernel_event_outbox WHERE last_error <> '' ORDER BY attempts DESC, created_at DESC LIMIT 1)`).Scan(&stats.Pending, &oldest, &stats.Delivered, &stats.FailedAttemptsLast)
+	if err != nil {
+		return stats, err
+	}
+	if oldest != nil {
+		stats.OldestPendingAge = time.Since(*oldest).Round(time.Second)
+	}
+	return stats, nil
 }
 
 func (s *Store) RunPublisher(ctx context.Context) {

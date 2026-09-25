@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/outbox"
 	"go.temporal.io/api/enums/v1"
@@ -62,6 +63,16 @@ func main() {
 	registerExampleWorkflow(temporalWorker)
 	workerDone := make(chan error, 1)
 	go func() { workerDone <- temporalWorker.Run(worker.InterruptCh()) }()
+	gate, err := controlplane.NewGate(os.Getenv("KERNEL_AUTH_TOKENS"))
+	if err != nil {
+		log.Error("parse KERNEL_AUTH_TOKENS", "error", err)
+		os.Exit(1)
+	}
+	if !gate.Enabled() {
+		log.Warn("KERNEL_AUTH_TOKENS is empty: authentication disabled; configure tokens before sharing this instance")
+	} else {
+		log.Info("kernel authentication enabled", "tokens", gate.TokenCount())
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]bool{"ok": true}) })
 	mux.HandleFunc("POST /v1/agent/runs", func(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +83,9 @@ func main() {
 		}
 		if strings.TrimSpace(input.RunID) == "" || strings.TrimSpace(input.Project) == "" || strings.TrimSpace(input.Prompt) == "" {
 			writeError(w, 422, errors.New("run_id, project and prompt are required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleWriter, input.Project) {
 			return
 		}
 		if input.ActorID == "" {
@@ -94,6 +108,9 @@ func main() {
 		project := r.URL.Query().Get("project")
 		if project == "" {
 			writeError(w, 400, errors.New("project query parameter is required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleReader, project) {
 			return
 		}
 		sourceID := querySourceID(r, activities.SourceID)
@@ -132,6 +149,9 @@ func main() {
 			writeError(w, 400, errors.New("project query parameter is required"))
 			return
 		}
+		if !gate.Allow(w, r, controlplane.RoleOperator, project) {
+			return
+		}
 		sourceID := querySourceID(r, activities.SourceID)
 		childRunID, _, _ := strings.Cut(approval.OperationID, "/turn/")
 		workflowID := workflowIDFor(sourceID, project, r.PathValue("runID"))
@@ -144,9 +164,20 @@ func main() {
 		}
 		writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
 	})
-	registerExampleRoutes(mux, temporalClient, taskQueue, activities)
+	mux.HandleFunc("GET /v1/agent/outbox", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		stats, err := events.Stats(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"pending": stats.Pending, "oldest_pending_age_seconds": int64(stats.OldestPendingAge.Seconds()), "delivered": stats.Delivered, "last_error": stats.FailedAttemptsLast})
+	})
+	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
 	address := env("KERNEL_HTTP_ADDR", ":8090")
-	server := &http.Server{Addr: address, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Addr: address, Handler: gate.Authenticate(mux), ReadHeaderTimeout: 5 * time.Second}
 	go func() { <-ctx.Done(); _ = server.Shutdown(context.Background()) }()
 	log.Info("agent kernel started", "address", address, "task_queue", taskQueue)
 	serveErr := server.ListenAndServe()

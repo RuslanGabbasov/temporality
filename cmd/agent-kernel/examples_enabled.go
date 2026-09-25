@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/temporality-project/temporality/controlplane"
 	team "github.com/temporality-project/temporality/examples/lead_coder_reviewer_qa"
 	"github.com/temporality-project/temporality/kernel/agent"
 	"go.temporal.io/api/enums/v1"
@@ -20,7 +21,7 @@ func registerExampleWorkflow(w worker.Worker) {
 	w.RegisterWorkflowWithOptions(team.Workflow, workflow.RegisterOptions{Name: team.WorkflowName})
 }
 
-func registerExampleRoutes(mux *http.ServeMux, temporalClient client.Client, taskQueue string, activities *agent.Activities) {
+func registerExampleRoutes(mux *http.ServeMux, temporalClient client.Client, taskQueue string, activities *agent.Activities, gate *controlplane.Gate) {
 	const prefix = "/v1/agent/examples/lead-coder-reviewer-qa"
 	mux.HandleFunc("POST "+prefix, func(w http.ResponseWriter, r *http.Request) {
 		var input agent.RunInput
@@ -30,6 +31,9 @@ func registerExampleRoutes(mux *http.ServeMux, temporalClient client.Client, tas
 		}
 		if strings.TrimSpace(input.RunID) == "" || strings.TrimSpace(input.Project) == "" || strings.TrimSpace(input.Prompt) == "" {
 			writeError(w, 422, errors.New("run_id, project and prompt are required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleWriter, input.Project) {
 			return
 		}
 		if err := activities.PrepareRun(&input); err != nil {
@@ -47,6 +51,9 @@ func registerExampleRoutes(mux *http.ServeMux, temporalClient client.Client, tas
 		project := r.URL.Query().Get("project")
 		if project == "" {
 			writeError(w, 400, errors.New("project query parameter is required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleReader, project) {
 			return
 		}
 		id := workflowIDFor(activities.SourceID, project, r.PathValue("runID"))
@@ -83,6 +90,9 @@ func registerExampleRoutes(mux *http.ServeMux, temporalClient client.Client, tas
 		project := r.URL.Query().Get("project")
 		if project == "" {
 			writeError(w, 400, errors.New("project query parameter is required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleOperator, project) {
 			return
 		}
 		childRunID, _, ok := strings.Cut(approval.OperationID, "/turn/")
