@@ -105,7 +105,7 @@ describe('scope derivation helpers', () => {
 
   it('shortens knowledge ids into row labels', () => {
     expect(shortKnowledge('run/knowledge/82')).toBe('K82')
-    expect(shortKnowledge('auto/80447996488d1cde9bbc0b8f')).toBe('auto/…0b8f')
+    expect(shortKnowledge('auto/80447996488d1cde9bbc0b8f')).toBe('…c0b8f')
     expect(shortKnowledge('plain')).toBe('plain')
   })
 

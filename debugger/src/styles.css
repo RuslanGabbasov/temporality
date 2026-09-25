@@ -306,7 +306,7 @@ dialog::backdrop { background: #020408cc; backdrop-filter: blur(3px); }
 .cluster-lane:hover .lane-label, .cluster-lane.selected .lane-label { fill: var(--cyan); }
 .cluster-lane.selected rect { stroke: var(--cyan); stroke-width: 1; }
 .experience-hint { padding: .5rem .75rem; color: var(--muted); font: .62rem "SFMono-Regular", monospace; border-top: 1px solid var(--line); }
-.experience-detail { border-left: 1px solid var(--line); max-height: calc(100vh - 220px); overflow-y: auto; }
+.experience-detail { position: sticky; top: 0; align-self: start; border-left: 1px solid var(--line); max-height: calc(100vh - 220px); overflow-y: auto; }
 .cluster-details > header { margin-bottom: .7rem; }
 .cluster-details > header strong { display: block; color: var(--fg); font-size: .95rem; margin-top: .2rem; }
 .cluster-stats { display: flex; flex-wrap: wrap; gap: .4rem .9rem; color: var(--muted); font: .68rem "SFMono-Regular", monospace; margin-bottom: .6rem; }

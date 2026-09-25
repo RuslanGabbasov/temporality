@@ -532,7 +532,7 @@ function RowDetails({ row, lineage, forensic, onFocus, related }: { row: Knowled
   return <div className="cluster-details row-details">
     <header>
       <span className="eyebrow">{row.policy ? `EXECUTION · ${row.scopes.primary}` : `CLAIM · ${row.scopes.primary}${row.scopes.secondary.length ? ` +${row.scopes.secondary.join(', ')}` : ''}`}</span>
-      <strong>{shortKnowledge(row.knowledgeId)}</strong>
+      <strong title={row.knowledgeId}>{shortKnowledge(row.knowledgeId)}</strong>
     </header>
     <div className="cluster-stats">
       <span>state <strong style={{ color: stateColor }}>{row.state}</strong></span>

@@ -332,7 +332,9 @@ export function stateBucket(state: string): MemoryBucket {
 export function shortKnowledge(id: string): string {
   const tail = id.split('/knowledge/')[1] ?? id
   if (/^\d+$/.test(tail)) return `K${tail}`
-  return tail.length > 12 ? `${tail.slice(0, 5)}…${tail.slice(-4)}` : tail
+  // Lane-label budget before row-state (x=58) is ~6 mono chars; longer
+  // auto tails keep only their recognizable ending.
+  return tail.length > 6 ? `…${tail.slice(-5)}` : tail
 }
 
 /** Child run ids look like `<root>/<role>`; root team runs have no slash. */
