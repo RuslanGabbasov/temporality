@@ -356,7 +356,14 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					}
 					toolResult.Content = toolFailureMessage(call.Name, err)
 				} else {
-					if eventErr := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); eventErr != nil {
+					completed := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}
+					// Exit code makes tool completion a first-class trajectory fact:
+					// a command exiting non-zero is a failed attempt even though the
+					// tool activity itself succeeded.
+					if toolResult.ExitCode != nil {
+						completed["exit_code"] = *toolResult.ExitCode
+					}
+					if eventErr := emit(activityCtx, state, "tool.completed", completed); eventErr != nil {
 						return result, eventErr
 					}
 					if proposal := executionObservationProposal(input, call, toolResult); proposal != nil {
