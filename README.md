@@ -92,6 +92,38 @@ TEMPORALITY_MODEL_API_KEY=
 
 После изменения `.env` пересоздайте стек: `docker compose up --build -d`.
 
+## Auth (bearer-токены)
+
+Journal и Agent Kernel поддерживают bearer-токены с RBAC и project-scoping
+(минимум enterprise control plane). Пустые переменные = auth выключен
+(только для локальной разработки; при старте печатается предупреждение).
+
+Формат записи: `token:subject:role:projects`, записи разделяются `;` или
+переносами строк. Роли: `reader < writer < operator < admin`. Projects —
+`*` или список через запятую. Токены: `openssl rand -hex 24`.
+
+```sh
+# .env
+JOURNAL_AUTH_TOKENS=reader-token:alice:reader:*;writer-token:bob:writer:lighthouse;operator-token:carol:operator:*
+KERNEL_AUTH_TOKENS=reader-token:alice:reader:*;writer-token:bob:writer:lighthouse;operator-token:carol:operator:*
+TEMPORALITY_API_TOKEN=writer-token   # ядро → journal (ingest + hints)
+```
+
+Права:
+
+| Слой | reader | writer | operator | admin |
+|---|---|---|---|---|
+| journal | чтение, hints | ingest событий | + invalidation | всё |
+| kernel | GET runs | POST runs | + approvals, outbox | всё |
+
+Листинг без фильтра проекта требует `*`-scope. `/healthz` открыт.
+В UI debugger токен вводится в поле в хедере любой страницы (хранится в
+localStorage, отправляется на journal и kernel).
+
+```sh
+curl -H 'Authorization: Bearer reader-token' 'http://localhost:8080/v1/observations/knowledge?project=repo-a'
+```
+
 ## Journal API
 
 Приём событий (1–100 на batch; повторная доставка того же

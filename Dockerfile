@@ -4,6 +4,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
+COPY controlplane ./controlplane
 COPY observation ./observation
 COPY kernel ./kernel
 COPY examples ./examples

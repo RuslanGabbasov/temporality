@@ -22,6 +22,10 @@ services:
     environment:
       DATABASE_URL: postgres://temporality:temporality@postgres:5432/temporality?sslmode=disable
       HTTP_ADDR: :8080
+      # Bearer auth for the journal API. Empty disables auth (local dev only).
+      # Format: "token:subject:role:projects" entries separated by ';' or
+      # newlines; projects is '*' or a comma list. Generate: openssl rand -hex 24
+      JOURNAL_AUTH_TOKENS: ${JOURNAL_AUTH_TOKENS:-}
     ports:
       - "8080:8080"
     depends_on:
@@ -85,6 +89,13 @@ services:
       KERNEL_MCP_ARGS: ${KERNEL_MCP_ARGS:-}
       KERNEL_MCP_ALLOW: ${KERNEL_MCP_ALLOW:-}
       KERNEL_MCP_APPROVAL: ${KERNEL_MCP_APPROVAL:-}
+      # Bearer auth for the kernel API (same format as JOURNAL_AUTH_TOKENS).
+      KERNEL_AUTH_TOKENS: ${KERNEL_AUTH_TOKENS:-}
+      # Token the kernel uses to ingest events into the journal and read hints;
+      # needs at least writer role on the projects your runs target.
+      TEMPORALITY_API_TOKEN: ${TEMPORALITY_API_TOKEN:-}
+      # Optional MCP server identity recorded on mcp.call.* events.
+      KERNEL_MCP_SERVER_NAME: ${KERNEL_MCP_SERVER_NAME:-}
       KERNEL_SANDBOX_ROOT: ${TEMPORALITY_SANDBOX_ROOT:-}
       KERNEL_SANDBOX_IMAGE: ${KERNEL_SANDBOX_IMAGE:-}
     ports:

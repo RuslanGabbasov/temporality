@@ -176,7 +176,7 @@ Timeline.** Universal observation API (migration 000018), Agent Kernel,
 | Agent Harness — Control | approval (requested/granted, redacted preview), budgets (turns) | behavioral SLO/policy enforcement — будущие стадии |
 | Agent Harness — Evidence & Observability | observation events, kernel event outbox (миграция 000019) | evidence package / replay — частично (Experience Timeline) |
 | Temporality — опыт и память | `observation/` (journal, knowledge, hints) + Experience Timeline | ядро продукта |
-| Enterprise Control Plane | — | отсутствует: auth, tenants/projects, RBAC на invalidation, secrets, quotas |
+| Enterprise Control Plane | `controlplane/`: bearer-токены, роли reader/writer/operator/admin, project-scoping на journal и kernel API | минимум 2026-09-25: auth + RBAC готовы (JOURNAL_AUTH_TOKENS / KERNEL_AUTH_TOKENS / TEMPORALITY_API_TOKEN); остались tenants, secrets вне .env, quotas |
 | Infrastructure | docker compose | при развёртывании заменить на целевые среды |
 
 Scheduling не выделяется в отдельный блок harness: cron/schedules/events
@@ -217,9 +217,13 @@ FRP-страница удалены, `aml/` удалён, расчистка с�
 
 1. **Развёртывание для команды** вместо новых экспериментов: env-конфиг,
    .env.example, документация запуска, реальные проекты вместо
-   gatekeeper/lighthouse фикстур.
-2. **Enterprise Control Plane** как следующий крупный слой: auth на
-   journal/kernel API, мультипроектность, RBAC на invalidation (сейчас
-   единственный write-эндпоинт без авторизации), secrets вне .env.
-3. **Kernel P0/P1** только там, где мешает наблюдаемости (model-call
-   observability, MCP provenance, failure/reconciliation).
+   gatekeeper/lighthouse фикстур. Auth/RBAC включены переменными из
+   .env.example (см. README → Auth).
+2. **Enterprise Control Plane**: bearer auth + роли + project-scoping на
+   journal/kernel готовы (`controlplane/`, 2026-09-25); остаются tenants
+   как отдельная сущность, secrets вне .env, quotas.
+3. **Kernel P0/P1** только там, где мешает наблюдаемости: model-call
+   observability и MCP provenance сделаны (2026-09-25: model.completed
+   несёт provider/latency/token split/content refs/attempts/truncated;
+   mcp.call.* — server + result_ref + result_bytes); осталась
+   failure/reconciliation семантика.
