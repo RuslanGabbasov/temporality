@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/temporality-project/temporality/aml/llm"
+	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/observation"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"

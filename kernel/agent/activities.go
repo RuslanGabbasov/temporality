@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/temporality-project/temporality/aml/llm"
+	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/sandbox"
 	"github.com/temporality-project/temporality/observation"

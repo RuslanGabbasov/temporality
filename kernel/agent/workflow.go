@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/temporality-project/temporality/aml/llm"
+	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/observation"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"

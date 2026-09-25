@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/temporality-project/temporality/aml/llm"
+	"github.com/temporality-project/temporality/kernel/llm"
 )
 
 // ExecutionObservationPolicy identifies the deterministic kernel heuristic that

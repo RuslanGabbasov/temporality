@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/temporality-project/temporality/aml/llm"
+	"github.com/temporality-project/temporality/kernel/llm"
 )
 
 func TestVerificationClass(t *testing.T) {
