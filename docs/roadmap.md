@@ -49,10 +49,17 @@
 - после успешного реконсайла запись исчезает из списка (сеттлится).
 
 Acceptance:
-- [ ] seeded uncertain-операция видна в UI без curl;
-- [ ] реконсайл из UI пишет `operation.reconciled` с `parent_event_id`;
-- [ ] reader-токен не видит кнопку реконсайла, operator — видит;
-- [ ] список обновляется после реконсайла.
+- [x] seeded uncertain-операция видна в UI без curl (через тот же эндпоинт,
+      что дергает UI; рендер — vitest);
+- [x] реконсайл из UI пишет `operation.reconciled` с `parent_event_id`
+      (live-smoke через прокси :3000, 201 + receipt);
+- [x] reader-токен не видит кнопку реконсайла (`GET /v1/agent/whoami`
+      → role reader → форма скрыта), operator — видит;
+- [x] список обновляется после реконсайла (listing → count 0).
+
+Реализовано 2026-09-26: экран `/operations` в debugger
+(`kernelApi.ts`, `Operations.tsx`), `GET /v1/agent/whoami` в kernel для
+роли в UI.
 
 ### 2.2. Duplicate-call mitigation (остатки из phase2)
 

@@ -651,6 +651,7 @@ function Header({ project, setProject, load, loading }: { project: string; setPr
     <div className="header-actions">
       <span className="connection">Events <code>{API_BASE}</code></span>
       <a className="obs-link" href="/agents">Agent runs</a>
+      <a className="obs-link" href="/operations">Operations</a>
       <a className="obs-link" href="/observability">Knowledge</a>
       <Token />
     </div>

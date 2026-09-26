@@ -104,7 +104,7 @@ export default function AgentRuns() {
   const answer = (result?.result as Record<string, unknown> | undefined)?.answer
   const stages = (result?.result as Record<string, unknown> | undefined)?.stages
   return <div className="observability-shell agent-runs-shell">
-    <header className="topbar obs-topbar"><div><span className="eyebrow">TEMPORALITY / AGENT KERNEL</span><h1>Agent runs</h1></div><div className="header-actions"><span className="connection">Kernel <code>:8090</code> · Events <code>{API_BASE}</code></span><a className="obs-link" href="/experience">Experience</a><a className="obs-link" href="/observability">Knowledge</a><Token /></div></header>
+    <header className="topbar obs-topbar"><div><span className="eyebrow">TEMPORALITY / AGENT KERNEL</span><h1>Agent runs</h1></div><div className="header-actions"><span className="connection">Kernel <code>:8090</code> · Events <code>{API_BASE}</code></span><a className="obs-link" href="/experience">Experience</a><a className="obs-link" href="/operations">Operations</a><a className="obs-link" href="/observability">Knowledge</a><Token /></div></header>
     <form className="obs-controls agent-controls" onSubmit={(event) => { event.preventDefault(); setSelected(''); setTimeline([]); void loadRuns() }}><label>Project ID<input value={project} onChange={(event) => setProject(event.target.value)} placeholder="temporality-live-verification" required /></label><button className="primary" disabled={busy}>{busy ? 'Loading…' : 'Load runs'}</button></form>
     {error && <div className="obs-error" role="alert">{error}<small>Проверьте, что Agent Kernel доступен на localhost:8090, а Runtime — на localhost:8080.</small></div>}
     <main className="agent-grid">

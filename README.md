@@ -235,7 +235,10 @@ curl -X POST http://localhost:8090/v1/agent/operations/reconcile \
 
 `effect` — закрытый словарь `none|occurred|unknown`; записанный вердикт
 сеттлит операцию (производный `operation.reconciled` с `parent_event_id`
-на `tool.started`). Live-drill: `KERNEL_FAULT_AFTER_EFFECT=<operation-id
+на `tool.started`). Операции с неурегулированным эффектом видны и
+реконсайлятся из UI: экран **Operations** (`/operations`) в debugger,
+форма записи вердикта доступна токенам с ролью operator. Live-drill:
+`KERNEL_FAULT_AFTER_EFFECT=<operation-id
 или tool-name>` — эффект реально выполняется, после чего воркер
 «падает», и операция честно попадает в listing как uncertain
 (см. [`docs/failure-reconciliation.md`](docs/failure-reconciliation.md)).

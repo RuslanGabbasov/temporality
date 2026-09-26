@@ -1,18 +1,21 @@
 import { useEffect, useState } from 'react'
 import Observability from './Observability'
 import AgentRuns from './AgentRuns'
+import Operations from './Operations'
 import ExperienceTimeline from './ExperienceTimeline'
 
 const Routes = {
   experience: /^\/experience(\/|$)/,
   agents: /^\/agents(\/|$)/,
+  operations: /^\/operations(\/|$)/,
   observability: /^\/observability(\/|$)/,
 } as const
 
-type Page = 'experience' | 'agents' | 'observability'
+type Page = 'experience' | 'agents' | 'operations' | 'observability'
 
 function pageFor(pathname: string): Page {
   if (Routes.agents.test(pathname)) return 'agents'
+  if (Routes.operations.test(pathname)) return 'operations'
   if (Routes.observability.test(pathname)) return 'observability'
   return 'experience'
 }
@@ -38,6 +41,8 @@ export default function App() {
   switch (page) {
     case 'agents':
       return <AgentRuns />
+    case 'operations':
+      return <Operations />
     case 'observability':
       return <Observability />
     default:
