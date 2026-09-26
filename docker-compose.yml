@@ -48,6 +48,8 @@ services:
     depends_on:
       journal:
         condition: service_healthy
+      agent-kernel:
+        condition: service_healthy
     restart: unless-stopped
 
   temporal:

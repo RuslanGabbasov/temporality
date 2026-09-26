@@ -3,20 +3,23 @@ import Observability from './Observability'
 import AgentRuns from './AgentRuns'
 import Operations from './Operations'
 import ExperienceTimeline from './ExperienceTimeline'
+import Workspace from './Workspace'
 
 const Routes = {
   experience: /^\/experience(\/|$)/,
   agents: /^\/agents(\/|$)/,
   operations: /^\/operations(\/|$)/,
   observability: /^\/observability(\/|$)/,
+  workspace: /^\/workspace(\/|$)/,
 } as const
 
-type Page = 'experience' | 'agents' | 'operations' | 'observability'
+type Page = 'experience' | 'agents' | 'operations' | 'observability' | 'workspace'
 
 function pageFor(pathname: string): Page {
   if (Routes.agents.test(pathname)) return 'agents'
   if (Routes.operations.test(pathname)) return 'operations'
   if (Routes.observability.test(pathname)) return 'observability'
+  if (Routes.workspace.test(pathname)) return 'workspace'
   return 'experience'
 }
 
@@ -45,6 +48,8 @@ export default function App() {
       return <Operations />
     case 'observability':
       return <Observability />
+    case 'workspace':
+      return <Workspace />
     default:
       return <ExperienceTimeline />
   }

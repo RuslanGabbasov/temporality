@@ -40,12 +40,15 @@ type Message struct {
 }
 
 // ToolCall is a model-requested tool invocation. Args are already decoded
-// from the provider's JSON string.
+// from the provider's JSON string. ArgsError marks calls whose arguments
+// never parsed: the call is preserved as conversation record but must not
+// execute.
 type ToolCall struct {
-	ID      string         `json:"id"`
-	Name    string         `json:"name"`
-	Args    map[string]any `json:"args"`
-	ArgsRaw string         `json:"args_raw"`
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Args      map[string]any `json:"args"`
+	ArgsRaw   string         `json:"args_raw"`
+	ArgsError string         `json:"-"`
 }
 
 // Completion is one assistant turn.
@@ -170,13 +173,17 @@ type requestMessage struct {
 }
 
 type chatRequest struct {
-	Model       string           `json:"model"`
-	Messages    []requestMessage `json:"messages"`
-	Tools       []chatTool       `json:"tools,omitempty"`
-	ToolChoice  string           `json:"tool_choice,omitempty"`
-	Temperature float64          `json:"temperature"`
-	MaxTokens   int              `json:"max_tokens"`
-	Reasoning   map[string]any   `json:"reasoning,omitempty"`
+	Model    string           `json:"model"`
+	Messages []requestMessage `json:"messages"`
+	Tools    []chatTool       `json:"tools,omitempty"`
+	// tool_choice is only meaningful when tools exist.
+	ToolChoice string `json:"tool_choice,omitempty"`
+	// ParallelToolCalls=false asks the provider for at most one tool call per
+	// response: batches of near-identical calls were the main waste source.
+	ParallelToolCalls *bool          `json:"parallel_tool_calls,omitempty"`
+	Temperature       float64        `json:"temperature"`
+	MaxTokens         int            `json:"max_tokens"`
+	Reasoning         map[string]any `json:"reasoning,omitempty"`
 }
 
 type chatResponse struct {
@@ -246,6 +253,8 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 		// tool_choice is only meaningful when tools exist; sending it on a
 		// tools-less forced finale is contradictory wire traffic.
 		req.ToolChoice = "auto"
+		parallel := false
+		req.ParallelToolCalls = &parallel
 	}
 	for _, tool := range tools {
 		req.Tools = append(req.Tools, chatTool{Type: "function", Function: tool})
@@ -342,16 +351,22 @@ func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {
 	completion := Completion{Content: choice.Message.Content, Finish: choice.FinishReason}
 	for _, call := range choice.Message.ToolCalls {
 		args := map[string]any{}
+		argsError := ""
 		if strings.TrimSpace(call.Function.Arguments) != "" {
 			if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
-				return Completion{}, fmt.Errorf("decode tool arguments for %s: %w", call.Function.Name, err)
+				// Salvage the call instead of failing the whole completion: one
+				// malformed arguments string must not lose the neighboring
+				// well-formed calls of the same response.
+				args = nil
+				argsError = err.Error()
 			}
 		}
 		completion.ToolCalls = append(completion.ToolCalls, ToolCall{
-			ID:      call.ID,
-			Name:    call.Function.Name,
-			Args:    args,
-			ArgsRaw: call.Function.Arguments,
+			ID:        call.ID,
+			Name:      call.Function.Name,
+			Args:      args,
+			ArgsRaw:   call.Function.Arguments,
+			ArgsError: argsError,
 		})
 	}
 	if decoded.Usage != nil {

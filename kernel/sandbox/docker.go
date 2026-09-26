@@ -114,6 +114,14 @@ func validateByteSize(value string) error {
 	return nil
 }
 
+// SandboxRoot returns the configured sandbox root directory.
+func (d *Docker) SandboxRoot() string {
+	if d == nil {
+		return ""
+	}
+	return d.Root
+}
+
 func (d *Docker) ResolveWorkspace(path string) (string, error) {
 	if d == nil {
 		return "", errors.New("sandbox is not configured")

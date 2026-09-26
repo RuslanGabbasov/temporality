@@ -38,6 +38,7 @@ type RunInput struct {
 	ApprovalTools          []string      `json:"approval_tools,omitempty"`
 	AutoApproveTools       []string      `json:"auto_approve_tools,omitempty"`
 	Role                   string        `json:"role,omitempty"`
+	SystemPrompt           string        `json:"system_prompt,omitempty"`
 	ParentRunID            string        `json:"parent_run_id,omitempty"`
 	ParentFrameID          string        `json:"parent_frame_id,omitempty"`
 	ParentEventID          string        `json:"parent_event_id,omitempty"`
@@ -133,7 +134,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			return result, err
 		}
 	}
-	messages := []llm.Message{{Role: "system", Content: systemPromptForRole(input.Role)}, {Role: "user", Content: input.Prompt}}
+	systemPrompt := systemPromptForRole(input.Role)
+	if input.SystemPrompt != "" {
+		systemPrompt = input.SystemPrompt
+	}
+	messages := []llm.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: input.Prompt}}
 	for _, hint := range priorHints {
 		messages = append(messages, llm.Message{Role: "system", Content: "Temporality context (prior knowledge, inspect provenance): " + hint.Proposition + " [" + hint.State + "] " + hint.Caution})
 		if hint.HintID != "" {
@@ -214,7 +219,21 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		for _, call := range completion.ToolCalls {
 			operationID := fmt.Sprintf("%s/%s", frame, call.ID)
 			argumentsHash := operationArgumentsHash(call.Args)
-			callKey := call.Name + "\x00" + argumentsHash
+			if call.ArgsError != "" {
+				// The arguments never parsed, so the call is rejected before any
+				// effect could land (effect=none); neighboring calls of this
+				// response survive instead of failing the whole completion.
+				argumentsHash = rawArgumentsHash(call.ArgsRaw)
+				if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID}); err != nil {
+					return result, err
+				}
+				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "malformed_arguments", "effect": "none", "detail": call.ArgsError}); err != nil {
+					return result, err
+				}
+				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: "Tool call arguments were malformed JSON; the call was not executed. Re-issue it with valid JSON arguments."})
+				continue
+			}
+			callKey := dedupSignature(call.Name, call.Args) // legacy key format: call.Name + "\x00" + argumentsHash
 			if original, duplicate := executed[callKey]; duplicate {
 				if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "duplicate_of": original.operationID}); err != nil {
 					return result, err

@@ -7,6 +7,7 @@ COPY cmd ./cmd
 COPY controlplane ./controlplane
 COPY observation ./observation
 COPY kernel ./kernel
+COPY workspace ./workspace
 COPY examples ./examples
 RUN CGO_ENABLED=0 go build -o /out/temporality-journal ./cmd/temporality-journal \
  && CGO_ENABLED=0 go build -tags "$KERNEL_BUILD_TAGS" -o /out/temporality-agent-kernel ./cmd/agent-kernel

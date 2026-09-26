@@ -29,6 +29,7 @@ type EventOutbox interface {
 // workspace against the configured root and executing commands inside it.
 // It exists so failure-injection drills can fake the runner in tests.
 type SandboxRunner interface {
+	SandboxRoot() string
 	ResolveWorkspace(path string) (string, error)
 	Execute(context.Context, sandbox.Request) (sandbox.Result, error)
 }
@@ -85,6 +86,15 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 	input.MCPServer = MCPServerName()
 	if a.Sandbox != nil {
 		input.AutoApproveTools = []string{"run_command"}
+		if input.WorkspacePath == "" {
+			// Workspace runs and API calls that don't specify a workspace
+			// get an isolated temporary directory inside the sandbox root.
+			dir, err := os.MkdirTemp(a.Sandbox.SandboxRoot(), "ws-"+input.RunID+"-*")
+			if err != nil {
+				return fmt.Errorf("create workspace: %w", err)
+			}
+			input.WorkspacePath = dir
+		}
 		workspace, err := a.Sandbox.ResolveWorkspace(input.WorkspacePath)
 		if err != nil {
 			return err

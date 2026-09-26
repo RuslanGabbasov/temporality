@@ -19,6 +19,7 @@ import (
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/outbox"
 	"github.com/temporality-project/temporality/kernel/quota"
+	"github.com/temporality-project/temporality/workspace"
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
@@ -58,6 +59,16 @@ func main() {
 	}
 	if quotas.Enabled() {
 		log.Info("run quotas enabled", "default_per_day", quotas.Default())
+	}
+	ws, err := workspace.Open(ctx, databaseURL)
+	if err != nil {
+		log.Error("open workspace store", "error", err)
+		os.Exit(1)
+	}
+	defer ws.Close()
+	if err = ws.Migrate(ctx, "migrations/000021_workspace.up.sql"); err != nil {
+		log.Error("migrate workspace", "error", err)
+		os.Exit(1)
 	}
 	activities, err := agent.NewActivities(events)
 	if err != nil {
@@ -267,6 +278,371 @@ func main() {
 		}
 		writeJSON(w, 201, map[string]any{"event_id": event.EventID, "operation_id": request.OperationID, "effect": request.Effect, "recorded": true})
 	})
+	// Workspace CRUD endpoints
+	mux.HandleFunc("GET /v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		projects, err := ws.ListProjects(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"projects": projects})
+	})
+	mux.HandleFunc("POST /v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req workspace.CreateProjectRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Name) == "" {
+			writeError(w, 422, errors.New("name is required"))
+			return
+		}
+		if req.ID == "" {
+			req.ID = slugify(req.Name)
+		}
+		project := &workspace.Project{ID: req.ID, Name: req.Name, Description: req.Description}
+		if err := ws.CreateProject(r.Context(), project); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		writeJSON(w, 201, project)
+	})
+	mux.HandleFunc("GET /v1/workspace/projects/{projectID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		project, err := ws.GetProject(r.Context(), r.PathValue("projectID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, project)
+	})
+	mux.HandleFunc("PUT /v1/workspace/projects/{projectID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req workspace.CreateProjectRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		project := workspace.Project{ID: r.PathValue("projectID"), Name: req.Name, Description: req.Description}
+		if err := ws.UpdateProject(r.Context(), project); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, project)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/projects/{projectID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		if err := ws.DeleteProject(r.Context(), r.PathValue("projectID")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/agents", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		agents, err := ws.ListAgents(r.Context(), r.PathValue("projectID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"agents": agents})
+	})
+	mux.HandleFunc("POST /v1/workspace/agents", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req workspace.CreateAgentRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.ProjectID) == "" {
+			writeError(w, 422, errors.New("name and project_id are required"))
+			return
+		}
+		if req.ID == "" {
+			req.ID = slugify(req.Name)
+		}
+		a := &workspace.Agent{
+			ID: req.ID, ProjectID: req.ProjectID, Name: req.Name,
+			Model: req.Model, SystemPrompt: req.SystemPrompt,
+			Skills: req.Skills, MCPServers: req.MCPServers,
+			SandboxProfile: req.SandboxProfile,
+		}
+		if err := ws.CreateAgent(r.Context(), a); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		writeJSON(w, 201, a)
+	})
+	mux.HandleFunc("GET /v1/workspace/agents/{agentID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		a, err := ws.GetAgent(r.Context(), r.PathValue("agentID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, a)
+	})
+	mux.HandleFunc("PUT /v1/workspace/agents/{agentID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req workspace.CreateAgentRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		a := workspace.Agent{
+			ID: r.PathValue("agentID"), ProjectID: req.ProjectID, Name: req.Name,
+			Model: req.Model, SystemPrompt: req.SystemPrompt,
+			Skills: req.Skills, MCPServers: req.MCPServers,
+			SandboxProfile: req.SandboxProfile,
+		}
+		if err := ws.UpdateAgent(r.Context(), a); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, a)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/agents/{agentID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		if err := ws.DeleteAgent(r.Context(), r.PathValue("agentID")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/tasks", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		tasks, err := ws.ListTasks(r.Context(), r.PathValue("projectID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"tasks": tasks})
+	})
+	mux.HandleFunc("POST /v1/workspace/tasks", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req workspace.CreateTaskRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" || strings.TrimSpace(req.ProjectID) == "" {
+			writeError(w, 422, errors.New("title, prompt and project_id are required"))
+			return
+		}
+		if req.ID == "" {
+			req.ID = slugify(req.Title)
+		}
+		task := &workspace.Task{ID: req.ID, ProjectID: req.ProjectID, AgentID: req.AgentID, Title: req.Title, Prompt: req.Prompt}
+		if err := ws.CreateTask(r.Context(), task); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		writeJSON(w, 201, task)
+	})
+	mux.HandleFunc("GET /v1/workspace/tasks/{taskID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		task, err := ws.GetTask(r.Context(), r.PathValue("taskID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, task)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/tasks/{taskID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		if err := ws.DeleteTask(r.Context(), r.PathValue("taskID")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+	mux.HandleFunc("POST /v1/workspace/tasks/{taskID}/runs", func(w http.ResponseWriter, r *http.Request) {
+		// Start a run for a workspace task, using the assigned agent's config.
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		task, err := ws.GetTask(r.Context(), r.PathValue("taskID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		var req workspace.StartRunRequest
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req)
+		// Resolve agent: explicit override > task default > none
+		agentID := req.AgentID
+		if agentID == "" {
+			agentID = task.AgentID
+		}
+		var agentCfg *workspace.Agent
+		if agentID != "" {
+			a, aErr := ws.GetAgent(r.Context(), agentID)
+			if aErr != nil {
+				if errors.Is(aErr, workspace.ErrNotFound) {
+					writeError(w, 404, errors.New("agent not found"))
+					return
+				}
+				writeError(w, 500, aErr)
+				return
+			}
+			agentCfg = &a
+		}
+		runID := task.ID + "-" + time.Now().UTC().Format("20060102-150405")
+		input := agent.RunInput{
+			RunID:   runID,
+			Project: task.ProjectID,
+			TaskID:  task.ID,
+			Prompt:  task.Prompt,
+		}
+		if agentCfg != nil {
+			if agentCfg.Model != "" {
+				input.Model = agentCfg.Model
+			}
+			if agentCfg.SystemPrompt != "" {
+				input.SystemPrompt = agentCfg.SystemPrompt
+			}
+		}
+		if req.Model != "" {
+			input.Model = req.Model
+		}
+		if err := activities.PrepareRun(&input); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		if quotas.Enabled() {
+			verdict, qErr := quotas.Allow(r.Context(), task.ProjectID)
+			if qErr != nil {
+				writeError(w, 500, qErr)
+				return
+			}
+			if !verdict.Allowed {
+				writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "daily quota exceeded"})
+				return
+			}
+		}
+		input.ActorID = "human-requester"
+		workflowID := workflowIDFor(activities.SourceID, task.ProjectID, runID)
+		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
+		run, wfErr := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
+		if wfErr != nil {
+			writeError(w, 409, wfErr)
+			return
+		}
+		wsRun := &workspace.Run{
+			ID: runID, TaskID: task.ID, ProjectID: task.ProjectID,
+			AgentID: agentID, RunID: runID, Status: "started", Model: input.Model,
+		}
+		_ = ws.CreateRun(r.Context(), wsRun)
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"run_id": runID, "task_id": task.ID, "project": task.ProjectID,
+			"workflow_id": run.GetID(), "temporal_run_id": run.GetRunID(), "status": "started",
+		})
+	})
+	mux.HandleFunc("GET /v1/workspace/runs/{runID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		run, err := ws.GetRun(r.Context(), r.PathValue("runID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		// Enrich with live Temporal status
+		response, tErr := temporalClient.DescribeWorkflowExecution(r.Context(), workflowIDFor(activities.SourceID, run.ProjectID, run.RunID), "")
+		if tErr == nil && response.WorkflowExecutionInfo != nil {
+			run.Status = strings.ToLower(response.WorkflowExecutionInfo.Status.String())
+			if response.WorkflowExecutionInfo.Status == enums.WORKFLOW_EXECUTION_STATUS_COMPLETED {
+				var result agent.RunResult
+				if gErr := temporalClient.GetWorkflow(r.Context(), workflowIDFor(activities.SourceID, run.ProjectID, run.RunID), "").Get(r.Context(), &result); gErr == nil {
+					run.Answer = result.Answer
+					run.Turns = result.Turns
+					run.Status = result.Status
+					_ = ws.UpdateRunStatus(r.Context(), run.ID, run.Status, run.Answer, run.Turns, "")
+				}
+			}
+		}
+		writeJSON(w, 200, run)
+	})
+	mux.HandleFunc("GET /v1/workspace/tasks/{taskID}/runs", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		runs, err := ws.ListRuns(r.Context(), r.PathValue("taskID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"runs": runs})
+	})
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
 	address := env("KERNEL_HTTP_ADDR", ":8090")
 	server := &http.Server{Addr: address, Handler: gate.Authenticate(mux), ReadHeaderTimeout: 5 * time.Second}
@@ -355,4 +731,23 @@ func requiredEnv(name string) string {
 		panic(name + " is required")
 	}
 	return value
+}
+
+func slugify(name string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash && (r == ' ' || r == '-' || r == '_') {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	result := strings.TrimRight(b.String(), "-")
+	if result == "" {
+		return "untitled"
+	}
+	return result
 }
