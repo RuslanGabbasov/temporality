@@ -65,6 +65,11 @@ func toolEvent(project, run, operationID, eventType string, occurredAt time.Time
 		data["error_type"] = "activity_failed"
 		data["effect"] = "uncertain"
 	}
+	if eventType == "operation.reconciled" {
+		data["effect"] = "unknown"
+		data["reconciled_by"] = "operator-1"
+		data["derived"] = true
+	}
 	return observation.Event{
 		Schema: "temporality.event/1", EventID: eventType + "/" + operationID, OccurredAt: occurredAt,
 		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel"},
@@ -89,6 +94,11 @@ func TestUncertainOperationsCrashWindow(t *testing.T) {
 		toolEvent("repo", "run-5", "op-failed", "tool.failed", old),
 		toolEvent("repo", "run-6", "op-rejected", "tool.started", old),
 		rejected,
+		toolEvent("repo", "run-7", "op-reconciled", "tool.started", old),
+		toolEvent("repo", "run-7", "op-reconciled", "operation.reconciled", old),
+		toolEvent("repo", "run-8", "op-failed-recon", "tool.started", old),
+		toolEvent("repo", "run-8", "op-failed-recon", "tool.failed", old),
+		toolEvent("repo", "run-8", "op-failed-recon", "operation.reconciled", old),
 	)
 	// op-rejected was refused before execution (effect=none) — settled.
 	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "writer"}
@@ -108,6 +118,8 @@ func TestUncertainOperationsCrashWindow(t *testing.T) {
 	require.Contains(t, ids, "op-failed", "an activity failure at the execution boundary leaves the effect uncertain")
 	require.Equal(t, "failed_uncertain", ids["op-failed"].Reason)
 	require.NotContains(t, ids, "op-rejected", "pre-execution rejection (effect=none) is settled")
+	require.NotContains(t, ids, "op-reconciled", "a recorded reconciliation verdict settles the operation")
+	require.NotContains(t, ids, "op-failed-recon", "an operator verdict settles even an uncertain failure")
 	require.NotContains(t, ids, "op-live", "fresh tool.started inside a running workflow is still in flight")
 	require.Contains(t, ids, "op-stale", "a tool.started older than the activity budget inside a running workflow went uncertain")
 	require.Equal(t, "stale_in_flight", ids["op-stale"].Reason)

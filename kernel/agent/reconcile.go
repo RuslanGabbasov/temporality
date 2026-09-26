@@ -84,7 +84,10 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 		return nil, err
 	}
 	terminals := map[string]observation.Event{}
-	for _, terminalType := range []string{"tool.completed", "tool.failed", "tool.blocked"} {
+	// operation.reconciled is terminal too: once an operator recorded a
+	// verdict (including effect=unknown), the operation is settled and must
+	// not resurface in the uncertain listing on every scan.
+	for _, terminalType := range []string{"tool.completed", "tool.failed", "tool.blocked", "operation.reconciled"} {
 		events, err := a.toolEvents(ctx, project, terminalType)
 		if err != nil {
 			return nil, err
