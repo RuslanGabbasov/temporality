@@ -25,7 +25,7 @@ function knowledgeID(event: ObservationEvent) {
 }
 function utcValue(local: string) { return local ? new Date(local).toISOString() : undefined }
 
-const STATE_COLORS: Record<string, string> = {
+const STATE_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'red'> = {
   proposed: 'blue',
   confirmed: 'green',
   challenged: 'warm-gray',
