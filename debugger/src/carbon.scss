@@ -1,10 +1,11 @@
 // Carbon Design System styles
-// Uses Dart Sass to compile @carbon/react SCSS
+// Disable Carbon's built-in font loading (we use Google Fonts CDN)
+$css--font-face: false;
+
 @use '@carbon/react';
 
 // Temporality custom overrides
 :root {
-  // Brand accent colors
   --cds-interactive-01: #57d7e8;
   --cds-interactive-02: #9e8cff;
   --cds-interactive-03: #93e8c0;
