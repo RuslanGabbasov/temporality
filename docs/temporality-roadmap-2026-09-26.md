@@ -653,7 +653,7 @@ P1 — Make experience understandable
 ├── state-at-T  [x] done
 ├── semantic replay
 ├── diff  [x] done
-├── activation chain
+├── activation chain  [x] done
 ├── semantic zoom
 ├── URL/shareable investigations
 └── investigation flows

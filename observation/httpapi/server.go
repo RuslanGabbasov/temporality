@@ -38,6 +38,7 @@ func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate) htt
 	mux.HandleFunc("GET /v1/observations/events", s.listObservations)
 	mux.HandleFunc("GET /v1/observations/knowledge", s.listObservationKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/diff", s.diffKnowledge)
+	mux.HandleFunc("GET /v1/observations/knowledge/chain", s.knowledgeChain)
 	mux.HandleFunc("POST /v1/observations/knowledge/invalidate", s.invalidateObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/hints", s.activateObservationHints)
 	return logRequests(log, s.gate.Authenticate(mux))
@@ -316,6 +317,76 @@ func (s *Server) diffKnowledge(w http.ResponseWriter, r *http.Request) {
 		"added": added, "removed": removed, "changed": changed,
 		"count": map[string]int{"added": len(added), "removed": len(removed), "changed": len(changed)},
 	})
+}
+
+type ChainEntry struct {
+	Type    string         `json:"type"` // appeared, recalled, injected, decided, acted, outcome
+	EventID string         `json:"event_id"`
+	At      time.Time      `json:"at"`
+	Details map[string]any `json:"details,omitempty"`
+}
+
+func (s *Server) knowledgeChain(w http.ResponseWriter, r *http.Request) {
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	knowledgeID := strings.TrimSpace(r.URL.Query().Get("knowledge_id"))
+	if project == "" || knowledgeID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("project and knowledge_id are required"))
+		return
+	}
+	if !s.gate.Allow(w, r, controlplane.RoleReader, project) {
+		return
+	}
+	filter := observation.Filter{Project: project, Limit: 500}
+	var allEvents []observation.Event
+	cursor := ""
+	for {
+		page, err := s.store.ListObservationPage(r.Context(), filter, cursor)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, errors.New("could not load events"))
+			return
+		}
+		allEvents = append(allEvents, page.Events...)
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	var chain []ChainEntry
+	// Index hint_offered events by hint_id for linking.
+	hintByID := map[string]observation.Event{}
+	for _, ev := range allEvents {
+		if ev.Type == "hint.offered" {
+			hintID, _ := ev.Data["hint_id"].(string)
+			if hintID != "" {
+				hintByID[hintID] = ev
+			}
+		}
+	}
+	for _, ev := range allEvents {
+		switch ev.Type {
+		case "knowledge.proposed":
+			if kid, _ := ev.Data["knowledge_id"].(string); kid == knowledgeID {
+				chain = append(chain, ChainEntry{Type: "appeared", EventID: ev.EventID, At: ev.OccurredAt, Details: map[string]any{"proposition": ev.Data["proposition"]}})
+			}
+		case "hint.offered":
+			if kid, _ := ev.Data["knowledge_id"].(string); kid == knowledgeID {
+				chain = append(chain, ChainEntry{Type: "recalled", EventID: ev.EventID, At: ev.OccurredAt, Details: map[string]any{"hint_id": ev.Data["hint_id"], "matched_by": ev.Data["matched_by"]}})
+			}
+		case "hint.used":
+			if kid, _ := ev.Data["knowledge_id"].(string); kid == knowledgeID {
+				chain = append(chain, ChainEntry{Type: "injected", EventID: ev.EventID, At: ev.OccurredAt, Details: map[string]any{"hint_id": ev.Data["hint_id"]}})
+			}
+		case "hint.outcome":
+			if kid, _ := ev.Data["knowledge_id"].(string); kid == knowledgeID {
+				chain = append(chain, ChainEntry{Type: "outcome", EventID: ev.EventID, At: ev.OccurredAt, Details: map[string]any{"outcome": ev.Data["outcome"], "hint_id": ev.Data["hint_id"]}})
+			}
+		case "knowledge.confirmed", "knowledge.invalidated", "knowledge.superseded", "knowledge.corrected":
+			if kid, _ := ev.Data["knowledge_id"].(string); kid == knowledgeID {
+				chain = append(chain, ChainEntry{Type: "lifecycle", EventID: ev.EventID, At: ev.OccurredAt, Details: map[string]any{"event_type": ev.Type, "reason": ev.Data["reason"]}})
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"knowledge_id": knowledgeID, "project": project, "chain": chain, "count": len(chain)})
 }
 
 func (s *Server) invalidateObservationKnowledge(w http.ResponseWriter, r *http.Request) {

@@ -432,3 +432,75 @@ func TestKnowledgeDiff(t *testing.T) {
 		t.Fatalf("diff t2..t3 counts = %v", counts)
 	}
 }
+
+func TestKnowledgeChain(t *testing.T) {
+	handler := newTestServer(t)
+
+	// Ingest: K1 proposed, then recalled (hint.offered), then used (hint.used), then outcome.
+	ingest := func(events ...observation.Event) {
+		t.Helper()
+		res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": events})
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("ingest failed: %d %v", res.StatusCode, body)
+		}
+	}
+
+	k1 := proposedEvent("lighthouse", "evt-k1", "K1", "gatekeeper v2 authenticates via .token-file")
+	ingest(k1)
+
+	// hint.offered
+	offered := observation.Event{
+		Schema: observation.Schema, EventID: "evt-offer-1", OccurredAt: time.Date(2026, 9, 25, 12, 5, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "temporality-activation", Integration: "temporality", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-1", Actor: observation.Actor{ID: "coder", Type: "agent"}},
+		Type:    "hint.offered",
+		Data:    map[string]any{"hint_id": "hint-1", "activation_id": "act-1", "knowledge_id": "K1", "state": "confirmed", "matched_by": "lexical"},
+	}
+	ingest(offered)
+
+	// hint.used
+	used := observation.Event{
+		Schema: observation.Schema, EventID: "evt-used-1", OccurredAt: time.Date(2026, 9, 25, 12, 6, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "temporality-activation", Integration: "temporality", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-1", Actor: observation.Actor{ID: "coder", Type: "agent"}},
+		Type:    "hint.used",
+		Data:    map[string]any{"hint_id": "hint-1", "knowledge_id": "K1"},
+	}
+	ingest(used)
+
+	// hint.outcome (helpful)
+	outcome := observation.Event{
+		Schema: observation.Schema, EventID: "evt-outcome-1", OccurredAt: time.Date(2026, 9, 25, 12, 7, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "temporality-activation", Integration: "temporality", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-1", Actor: observation.Actor{ID: "coder", Type: "agent"}},
+		Type:    "hint.outcome",
+		Data:    map[string]any{"hint_id": "hint-1", "knowledge_id": "K1", "outcome": "helpful"},
+	}
+	ingest(outcome)
+
+	// Query chain
+	res, body := doJSON(t, handler, "GET", "/v1/observations/knowledge/chain?project=lighthouse&knowledge_id=K1", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("chain status = %d", res.StatusCode)
+	}
+	chain, ok := body["chain"].([]any)
+	if !ok || len(chain) != 4 {
+		t.Fatalf("chain length = %v, want 4", body["chain"])
+	}
+	// Verify sequence: appeared, recalled, injected, outcome
+	types := make([]string, len(chain))
+	for i, entry := range chain {
+		types[i] = entry.(map[string]any)["type"].(string)
+	}
+	expected := []string{"appeared", "recalled", "injected", "outcome"}
+	for i, want := range expected {
+		if types[i] != want {
+			t.Fatalf("chain[%d] = %q, want %q (full: %v)", i, types[i], want, types)
+		}
+	}
+	// Verify outcome details
+	outcomeEntry := chain[3].(map[string]any)
+	if outcomeEntry["details"].(map[string]any)["outcome"] != "helpful" {
+		t.Fatalf("outcome details = %v", outcomeEntry["details"])
+	}
+}
