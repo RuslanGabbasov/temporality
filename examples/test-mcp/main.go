@@ -142,7 +142,9 @@ func main() {
 		return mcpText(fmt.Sprintf("issue #%d created", number)), nil, nil
 	})
 	if err := s.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-		panic(err)
+		// The transport closes on stdin EOF; exit cleanly so the MCP client
+		// can observe the process exit without a crash trace.
+		os.Exit(0)
 	}
 }
 

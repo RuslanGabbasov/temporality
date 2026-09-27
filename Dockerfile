@@ -10,7 +10,8 @@ COPY kernel ./kernel
 COPY workspace ./workspace
 COPY examples ./examples
 RUN CGO_ENABLED=0 go build -o /out/temporality-journal ./cmd/temporality-journal \
- && CGO_ENABLED=0 go build -tags "$KERNEL_BUILD_TAGS" -o /out/temporality-agent-kernel ./cmd/agent-kernel
+ && CGO_ENABLED=0 go build -tags "$KERNEL_BUILD_TAGS" -o /out/temporality-agent-kernel ./cmd/agent-kernel \
+ && CGO_ENABLED=0 go build -o /out/test-mcp ./examples/test-mcp
 
 FROM alpine:3.22 AS journal
 RUN adduser -D -u 10001 temporality
@@ -24,6 +25,7 @@ FROM alpine:3.22 AS agent-kernel
 RUN adduser -D -u 10001 temporality
 WORKDIR /app
 COPY --from=build /out/temporality-agent-kernel /usr/local/bin/temporality-agent-kernel
+COPY --from=build /out/test-mcp /usr/local/bin/test-mcp
 # The kernel applies the kernel event outbox migration (000019) from the
 # filesystem before serving traffic.
 COPY migrations ./migrations

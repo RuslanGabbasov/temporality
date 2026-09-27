@@ -114,6 +114,9 @@ services:
       # the sandbox root must exist at the same absolute path inside this
       # container and on the host (set TEMPORALITY_SANDBOX_ROOT in .env).
       - /var/run/docker.sock:/var/run/docker.sock
+      # Sandbox workspace must be accessible to MCP servers running as
+      # child processes of the kernel.
+      - ${TEMPORALITY_SANDBOX_ROOT:-./.sandbox}:${TEMPORALITY_SANDBOX_ROOT:-./.sandbox}
       - type: bind
         source: ${TEMPORALITY_SANDBOX_ROOT:-/tmp}
         target: ${TEMPORALITY_SANDBOX_ROOT:-/tmp}
