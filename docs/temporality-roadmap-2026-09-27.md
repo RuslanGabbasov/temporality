@@ -300,14 +300,20 @@ authoritative verdict.
 
 ## P2 — Economics / scale
 
-### 3.12. Cost accounting
+### 3.12. Cost accounting [x] done
 
--   model price table;
--   cost per model call;
--   cost per run;
--   cost per project;
--   aggregation;
+-   model price table (`KERNEL_MODEL_PRICES` env: `model:prompt_per_1k:completion_per_1k`);
+-   cost per model call (derived from token counts in `model.completed`);
+-   cost per run (`GET /v1/agent/cost/run?project=&run=`);
+-   cost per project (`GET /v1/agent/cost/project?project=`);
+-   prices endpoint (`GET /v1/agent/cost/prices`);
 -   потенциально token quotas.
+
+Реализовано (2026-09-27):
+- `kernel/cost` package с `ParsePrices`, `ModelCost`, `CostAPI`;
+- token counts берутся из `model.completed` events (prompt_tokens + completion_tokens);
+- prices endpoint без auth, run/project endpoints с reader RBAC;
+- no new persistent storage — projection over event stream.
 
 ---
 
@@ -445,7 +451,7 @@ P1/P2 — Prove product value
 │
 P2 — Economics / scale
 │
-└── Cost accounting
+└── Cost accounting  [x] done
 
 Research — Experience Priming
 │

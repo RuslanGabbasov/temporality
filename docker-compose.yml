@@ -96,6 +96,9 @@ services:
       # Daily run quotas per project: "project:limit" comma list, "*" sets
       # the default. Empty disables quotas.
       KERNEL_RUN_QUOTAS: ${KERNEL_RUN_QUOTAS:-}
+      # Model cost prices: "model:prompt_per_1k:completion_per_1k" comma list.
+      # Example: KERNEL_MODEL_PRICES="gpt-4o:2.50:10.00,claude-3-sonnet:3.00:15.00"
+      KERNEL_MODEL_PRICES: ${KERNEL_MODEL_PRICES:-}
       # Token the kernel uses to ingest events into the journal and read hints;
       # needs at least writer role on the projects your runs target.
       TEMPORALITY_API_TOKEN: ${TEMPORALITY_API_TOKEN:-}

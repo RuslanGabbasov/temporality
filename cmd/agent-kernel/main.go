@@ -17,6 +17,7 @@ import (
 
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
+	"github.com/temporality-project/temporality/kernel/cost"
 	"github.com/temporality-project/temporality/kernel/outbox"
 	"github.com/temporality-project/temporality/kernel/quota"
 	"github.com/temporality-project/temporality/workspace"
@@ -59,6 +60,15 @@ func main() {
 	}
 	if quotas.Enabled() {
 		log.Info("run quotas enabled", "default_per_day", quotas.Default())
+	}
+	costPrices, err := cost.ParsePrices(os.Getenv("KERNEL_MODEL_PRICES"))
+	if err != nil {
+		log.Error("parse model prices", "error", err)
+		os.Exit(1)
+	}
+	costAPI := cost.NewCostAPI(costPrices, observationURL, os.Getenv("TEMPORALITY_API_TOKEN"))
+	if len(costPrices.Prices()) > 0 {
+		log.Info("model cost accounting enabled", "models", len(costPrices.Prices()))
 	}
 	ws, err := workspace.Open(ctx, databaseURL)
 	if err != nil {
@@ -248,6 +258,23 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"project": project, "used": verdict.Used, "limit": verdict.Limit, "reset_at": verdict.ResetAt})
+	})
+	mux.HandleFunc("GET /v1/agent/cost/prices", func(w http.ResponseWriter, r *http.Request) {
+		costAPI.PricesHandler(w, r)
+	})
+	mux.HandleFunc("GET /v1/agent/cost/run", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if !gate.Allow(w, r, controlplane.RoleReader, project) {
+			return
+		}
+		costAPI.RunCostHandler(w, r)
+	})
+	mux.HandleFunc("GET /v1/agent/cost/project", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if !gate.Allow(w, r, controlplane.RoleReader, project) {
+			return
+		}
+		costAPI.ProjectCostHandler(w, r)
 	})
 	liveness := &temporalLiveness{client: temporalClient}
 	mux.HandleFunc("GET /v1/agent/operations", func(w http.ResponseWriter, r *http.Request) {
