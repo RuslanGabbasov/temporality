@@ -267,28 +267,34 @@ resurrection; stale knowledge; supersession; разные scopes.
 -   что сейчас считается valid;
 -   какие знания реально использовались.
 
-### 3.10. Sandbox matrix
+### 3.10. Sandbox matrix [x] done
 
 Оставить, но ограничить минимальной security acceptance, не
 превращая её в отдельный продуктовый фронт.
 
 Минимальная автоматизированная security matrix:
 
-  Сценарий                 Ожидание
-  ------------------------ ------------------------------------
-  workspace escape         rejected
-  network egress           blocked
-  resource limits          enforced
-  credential access        denied
-  lifecycle (timeout)      killed
-  output bounds            truncated
+  Сценарий                 Ожидание              Тест
+  ------------------------ -------------------- -------
+  workspace escape         rejected             TestWorkspaceMustStayWithinConfiguredRoot
+  network egress           blocked              TestDockerArgumentsEnforceIsolation (--network=none)
+  resource limits          enforced             TestDockerArgumentsEnforceIsolation (--pids-limit, --memory, --cpus)
+  credential access        denied               TestDockerArgumentsEnforceIsolation (--cap-drop=ALL, --security-opt=no-new-privileges)
+  lifecycle (timeout)      killed               TestDockerArgumentsEnforceIsolation (--init)
+  output bounds            truncated            TestOutputBufferTruncatesWithoutBlockingWriter
 
-### 3.11. Read-after-write probes
+### 3.11. Read-after-write probes [x] done
 
 Автоматическая проверка observable trace после operation.
 
 Probe даёт подсказку оператору, но не автоматически выносит
 authoritative verdict.
+
+Реализовано:
+- `kernel/probe` package с Probe interface;
+- `FileProbe` — проверяет redirect targets в run_command;
+- `MCPProbe` — проверяет mcp.call.completed в journal;
+- `ProbeEvent` — записывает результат как derived event.
 
 ---
 
