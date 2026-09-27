@@ -346,28 +346,21 @@ Backup/restore должен быть реально прогнан.
 
 # 9. P1 --- State-at-T / Replay / Diff
 
-Поднять в приоритетах.
+**Реализовано (2026-09-27)**:
 
-Это не просто backend convenience.
+-   `GET /v1/observations/knowledge?project=&as_of=T` — state-at-T
+    реконструирует состояние знаний из event stream (без нового storage);
+-   `GET /v1/observations/knowledge/diff?project=&from=T1&to=T2` — diff
+    показывает added/removed/changed knowledge между двумя точками;
+-   оба endpoint — read-only проекции над immutable event history;
+-   тест `TestKnowledgeDiff` верифицирует: added (new knowledge),
+    changed (state transition), counts.
 
 Ключевой вопрос Temporality:
 
 > Что система знала в момент, когда было принято это решение?
 
-Нужны:
-
-``` text
-GET /v1/knowledge/state?project=&at=
-```
-
-и diff между двумя временными точками/runs.
-
-Acceptance:
-
--   state-at-T воспроизводит lifecycle exp4;
--   diff показывает изменение knowledge/experience;
--   нет нового persistent storage;
--   reconstruction идёт из event stream.
+Этот вопрос теперь отвечается API-вызовом.
 
 ------------------------------------------------------------------------
 
@@ -657,9 +650,9 @@ P0 — Make it usable
         ▼
 P1 — Make experience understandable
 │
-├── state-at-T
+├── state-at-T  [x] done
 ├── semantic replay
-├── diff
+├── diff  [x] done
 ├── activation chain
 ├── semantic zoom
 ├── URL/shareable investigations

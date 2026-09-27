@@ -370,3 +370,65 @@ func TestAuthEnforcedOnJournal(t *testing.T) {
 		t.Fatalf("operator invalidate = %d, body = %v", res.StatusCode, body)
 	}
 }
+
+func TestKnowledgeDiff(t *testing.T) {
+	handler := newTestServer(t)
+	t1 := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	t3 := time.Date(2026, 9, 25, 14, 0, 0, 0, time.UTC)
+
+	// Ingest: K1 proposed at t1, K2 proposed at t2, K1 invalidated at t3.
+	ingest := func(events ...observation.Event) {
+		t.Helper()
+		res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": events})
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("ingest failed: %d %v", res.StatusCode, body)
+		}
+	}
+	k1 := proposedEvent("lighthouse", "evt-1", "K1", "gatekeeper v2 authenticates via .token-file")
+	k1.OccurredAt = t1
+	ingest(k1)
+	k2 := proposedEvent("lighthouse", "evt-2", "K2", "pagination uses cursor-based offset")
+	k2.OccurredAt = t2
+	ingest(k2)
+	invalidated := observation.Event{
+		Schema: observation.Schema, EventID: "evt-3", OccurredAt: t3,
+		Source:  observation.Source{ID: "kernel-test", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-2", Actor: observation.Actor{ID: "operator", Type: "human"}},
+		Type:    "knowledge.invalidated",
+		Data:    map[string]any{"knowledge_id": "K1", "reason": "environment changed", "method": "manual"},
+	}
+	ingest(invalidated)
+
+	// Diff t1..t2: K2 added.
+	res, body := doJSON(t, handler, "GET", "/v1/observations/knowledge/diff?project=lighthouse&from="+t1.Format(time.RFC3339Nano)+"&to="+t2.Format(time.RFC3339Nano), nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("diff t1..t2 status = %d", res.StatusCode)
+	}
+	added, _ := body["added"].([]any)
+	if len(added) != 1 || added[0].(map[string]any)["id"] != "K2" {
+		t.Fatalf("diff t1..t2 added = %v", added)
+	}
+	removed, _ := body["removed"].([]any)
+	changed, _ := body["changed"].([]any)
+	if len(removed) != 0 || len(changed) != 0 {
+		t.Fatalf("diff t1..t2 removed=%d changed=%d", len(removed), len(changed))
+	}
+
+	// Diff t2..t3: K1 changed (proposed -> invalidated).
+	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge/diff?project=lighthouse&from="+t2.Format(time.RFC3339Nano)+"&to="+t3.Format(time.RFC3339Nano), nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("diff t2..t3 status = %d", res.StatusCode)
+	}
+	changed, _ = body["changed"].([]any)
+	if len(changed) != 1 || changed[0].(map[string]any)["id"] != "K1" {
+		t.Fatalf("diff t2..t3 changed = %v", changed)
+	}
+	if state := changed[0].(map[string]any)["state"]; state != "invalidated" {
+		t.Fatalf("diff t2..t3 K1 state = %v, want invalidated", state)
+	}
+	counts := body["count"].(map[string]any)
+	if counts["added"].(float64) != 0 || counts["removed"].(float64) != 0 || counts["changed"].(float64) != 1 {
+		t.Fatalf("diff t2..t3 counts = %v", counts)
+	}
+}

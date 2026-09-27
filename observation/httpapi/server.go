@@ -37,6 +37,7 @@ func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate) htt
 	mux.HandleFunc("POST /v1/observations/events", s.appendObservations)
 	mux.HandleFunc("GET /v1/observations/events", s.listObservations)
 	mux.HandleFunc("GET /v1/observations/knowledge", s.listObservationKnowledge)
+	mux.HandleFunc("GET /v1/observations/knowledge/diff", s.diffKnowledge)
 	mux.HandleFunc("POST /v1/observations/knowledge/invalidate", s.invalidateObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/hints", s.activateObservationHints)
 	return logRequests(log, s.gate.Authenticate(mux))
@@ -240,6 +241,81 @@ func (s *Server) listObservationKnowledge(w http.ResponseWriter, r *http.Request
 		knowledge = filtered
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"knowledge": knowledge, "count": len(knowledge)})
+}
+
+func (s *Server) diffKnowledge(w http.ResponseWriter, r *http.Request) {
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	if project == "" {
+		writeError(w, http.StatusBadRequest, errors.New("project is required"))
+		return
+	}
+	if !s.gate.Allow(w, r, controlplane.RoleReader, project) {
+		return
+	}
+	var from, to *time.Time
+	for name, target := range map[string]**time.Time{"from": &from, "to": &to} {
+		value := r.URL.Query().Get(name)
+		if value == "" {
+			writeError(w, http.StatusBadRequest, errors.New(name+" is required"))
+			return
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, errors.New(name+" must be RFC3339"))
+			return
+		}
+		*target = &parsed
+	}
+	if !from.Before(*to) {
+		writeError(w, http.StatusBadRequest, errors.New("from must be before to"))
+		return
+	}
+	eventsFrom, err := s.projectKnowledge(r, project, from, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not load knowledge at from"))
+		return
+	}
+	eventsTo, err := s.projectKnowledge(r, project, to, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not load knowledge at to"))
+		return
+	}
+	knowledgeFrom, err := observation.ProjectKnowledge(eventsFrom)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	knowledgeTo, err := observation.ProjectKnowledge(eventsTo)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	fromByID := make(map[string]*observation.Knowledge, len(knowledgeFrom))
+	for i := range knowledgeFrom {
+		fromByID[knowledgeFrom[i].ID] = &knowledgeFrom[i]
+	}
+	toByID := make(map[string]*observation.Knowledge, len(knowledgeTo))
+	for i := range knowledgeTo {
+		toByID[knowledgeTo[i].ID] = &knowledgeTo[i]
+	}
+	var added, removed, changed []observation.Knowledge
+	for id, toItem := range toByID {
+		if fromItem, existed := fromByID[id]; !existed {
+			added = append(added, *toItem)
+		} else if fromItem.State != toItem.State || fromItem.Proposition != toItem.Proposition {
+			changed = append(changed, *toItem)
+		}
+	}
+	for id, fromItem := range fromByID {
+		if _, exists := toByID[id]; !exists {
+			removed = append(removed, *fromItem)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project": project, "from": from, "to": to,
+		"added": added, "removed": removed, "changed": changed,
+		"count": map[string]int{"added": len(added), "removed": len(removed), "changed": len(changed)},
+	})
 }
 
 func (s *Server) invalidateObservationKnowledge(w http.ResponseWriter, r *http.Request) {
