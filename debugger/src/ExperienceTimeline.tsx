@@ -152,7 +152,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   }, [])
 
   const [initialised, setInitialised] = useState(false)
-  useEffect(() => { if (!initialised) { setInitialised(true); void load(project) } }, [initialised, project, load])
+  useEffect(() => { setInitialised(true); void load(project) }, [project, load])
 
   // Sync investigation state to URL for shareable links.
   useEffect(() => {
@@ -666,11 +666,7 @@ function zoom(current: { t0: number; t1: number }, full: { t0: number; t1: numbe
 }
 
 function Header({ project, load, loading }: { project: string; load: (project: string) => Promise<void> | void; loading: boolean }) {
-  return <div className="experience-controls">
-    <button className="primary" disabled={loading} onClick={() => void load(project)}>
-      {loading ? 'Loading…' : 'Open timeline'}
-    </button>
-  </div>
+  return null
 }
 
 function RowDetails({ row, lineage, forensic, onFocus, related }: { row: KnowledgeRow; lineage: KnowledgeLineage[]; forensic: ForensicRecord; onFocus: (at: string, eventId: string, label: string) => void; related: KnowledgeRow[] }) {
