@@ -115,7 +115,12 @@ $css--font-face: false;
 .run-picker-panel label span { color: #e5e9f0; font: .7rem "SFMono-Regular", monospace; }
 .scope-band { cursor: pointer; }
 .scope-section { margin-bottom: .5rem; }
-.row-label { cursor: pointer; }
+.row-label { cursor: pointer; fill: #a9b1d6; font: .66rem "SFMono-Regular", monospace; }
+.row-state { font: .58rem "SFMono-Regular", monospace; opacity: .85; }
+.row-lane:hover .row-label { fill: #e8e8e8; }
+.row-lane.selected .row-label { fill: #fff; }
+.population-label { fill: #4fd6be; font: .62rem "SFMono-Regular", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.population-count { fill: #4fd6be; font: .58rem "SFMono-Regular", monospace; }
 .row-proposition { font-size: .75rem; }
 .point-dot { cursor: pointer; }
 .point-focus-ring { fill: none; stroke-width: 2; }
@@ -261,4 +266,26 @@ $css--font-face: false;
 /* Experience note */
 .experience-note {
   color: #e0af68;
+}
+
+/* === Carbon Content override === */
+.cds--content {
+  background: #080b10;
+  margin: 0;
+  padding: 1rem;
+}
+
+/* Override Carbon's default white backgrounds */
+.cds--css-grid {
+  background: transparent;
+}
+
+.cds--css-grid-column {
+  background: transparent;
+}
+
+/* Ensure consistent dark background */
+body, #root, #main-content {
+  background: #080b10;
+  color: #e5e9f0;
 }
