@@ -651,7 +651,7 @@ P0 — Make it usable
 P1 — Make experience understandable
 │
 ├── state-at-T  [x] done
-├── semantic replay
+├── semantic replay  [x] done
 ├── diff  [x] done
 ├── activation chain  [x] done
 ├── semantic zoom

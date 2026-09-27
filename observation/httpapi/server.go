@@ -39,6 +39,7 @@ func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate) htt
 	mux.HandleFunc("GET /v1/observations/knowledge", s.listObservationKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/diff", s.diffKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/chain", s.knowledgeChain)
+	mux.HandleFunc("GET /v1/observations/runs/state", s.runState)
 	mux.HandleFunc("POST /v1/observations/knowledge/invalidate", s.invalidateObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/hints", s.activateObservationHints)
 	return logRequests(log, s.gate.Authenticate(mux))
@@ -387,6 +388,66 @@ func (s *Server) knowledgeChain(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"knowledge_id": knowledgeID, "project": project, "chain": chain, "count": len(chain)})
+}
+
+type RunStateEntry struct {
+	Type    string         `json:"type"` // run.started, turn.started, model.completed, tool.started, tool.completed, tool.failed, turn.completed, run.completed
+	EventID string         `json:"event_id"`
+	At      time.Time      `json:"at"`
+	Details map[string]any `json:"details,omitempty"`
+}
+
+func (s *Server) runState(w http.ResponseWriter, r *http.Request) {
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	runID := strings.TrimSpace(r.URL.Query().Get("run"))
+	if project == "" || runID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("project and run are required"))
+		return
+	}
+	if !s.gate.Allow(w, r, controlplane.RoleReader, project) {
+		return
+	}
+	var at *time.Time
+	if value := r.URL.Query().Get("at"); value != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, errors.New("at must be RFC3339"))
+			return
+		}
+		at = &parsed
+	}
+	filter := observation.Filter{Project: project, Run: runID, Until: at, Limit: 500}
+	var allEvents []observation.Event
+	cursor := ""
+	for {
+		page, err := s.store.ListObservationPage(r.Context(), filter, cursor)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, errors.New("could not load events"))
+			return
+		}
+		allEvents = append(allEvents, page.Events...)
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	var entries []RunStateEntry
+	for _, ev := range allEvents {
+		switch ev.Type {
+		case "run.started", "turn.started", "model.completed", "tool.started", "tool.completed", "tool.failed", "turn.completed", "run.completed":
+			entries = append(entries, RunStateEntry{Type: ev.Type, EventID: ev.EventID, At: ev.OccurredAt, Details: ev.Data})
+		}
+	}
+	status := "unknown"
+	if len(entries) > 0 {
+		last := entries[len(entries)-1]
+		if last.Type == "run.completed" {
+			status = "completed"
+		} else if last.Type == "run.started" || last.Type == "turn.started" || last.Type == "model.completed" || last.Type == "tool.started" || last.Type == "tool.completed" || last.Type == "turn.completed" {
+			status = "in_progress"
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"project": project, "run": runID, "at": at, "status": status, "events": entries, "count": len(entries)})
 }
 
 func (s *Server) invalidateObservationKnowledge(w http.ResponseWriter, r *http.Request) {

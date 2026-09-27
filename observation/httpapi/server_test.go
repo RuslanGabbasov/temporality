@@ -504,3 +504,65 @@ func TestKnowledgeChain(t *testing.T) {
 		t.Fatalf("outcome details = %v", outcomeEntry["details"])
 	}
 }
+
+func TestRunState(t *testing.T) {
+	handler := newTestServer(t)
+
+	ingest := func(events ...observation.Event) {
+		t.Helper()
+		res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": events})
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("ingest failed: %d %v", res.StatusCode, body)
+		}
+	}
+
+	t1 := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 9, 25, 10, 1, 0, 0, time.UTC)
+	t3 := time.Date(2026, 9, 25, 10, 2, 0, 0, time.UTC)
+
+	runStarted := observation.Event{
+		Schema: observation.Schema, EventID: "evt-run-1", OccurredAt: t1,
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-1"},
+		Type:    "run.started", Data: map[string]any{"turns": 5},
+	}
+	toolStarted := observation.Event{
+		Schema: observation.Schema, EventID: "evt-tool-1", OccurredAt: t2,
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-1"},
+		Type:    "tool.started", Data: map[string]any{"tool": "run_command", "operation_id": "op-1"},
+	}
+	toolCompleted := observation.Event{
+		Schema: observation.Schema, EventID: "evt-tool-2", OccurredAt: t3,
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-1"},
+		Type:    "tool.completed", Data: map[string]any{"tool": "run_command", "operation_id": "op-1", "exit_code": 0},
+	}
+	ingest(runStarted, toolStarted, toolCompleted)
+
+	// Full state (no at parameter)
+	res, body := doJSON(t, handler, "GET", "/v1/observations/runs/state?project=lighthouse&run=run-1", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("run state status = %d", res.StatusCode)
+	}
+	entries, ok := body["events"].([]any)
+	if !ok || len(entries) != 3 {
+		t.Fatalf("entries count = %v, want 3", body["count"])
+	}
+	if body["status"] != "in_progress" {
+		t.Fatalf("status = %v, want in_progress (no run.completed event)", body["status"])
+	}
+
+	// State at t2 (only run.started + tool.started)
+	res, body = doJSON(t, handler, "GET", "/v1/observations/runs/state?project=lighthouse&run=run-1&at="+t2.Format(time.RFC3339Nano), nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("run state at t2 status = %d", res.StatusCode)
+	}
+	entries, ok = body["events"].([]any)
+	if !ok || len(entries) != 2 {
+		t.Fatalf("entries at t2 = %v, want 2", body["count"])
+	}
+	if body["status"] != "in_progress" {
+		t.Fatalf("status at t2 = %v, want in_progress", body["status"])
+	}
+}
