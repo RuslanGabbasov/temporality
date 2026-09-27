@@ -1,10 +1,48 @@
 import { useCallback, useEffect, useState } from 'react'
+import {
+  Button,
+  TextInput,
+  TextArea,
+  Select,
+  SelectItem,
+  StructuredListWrapper,
+  StructuredListHead,
+  StructuredListBody,
+  StructuredListRow,
+  StructuredListCell,
+  InlineNotification,
+  Loading,
+  Tag,
+  Tile,
+  Grid,
+  Column,
+  Stack,
+  Section,
+  Heading,
+  Layer,
+} from '@carbon/react'
+import {
+  Add,
+  Play,
+  ArrowRight,
+  Warning,
+  CheckmarkFilled,
+  Time,
+} from '@carbon/icons-react'
 import { workspaceApi, type Project, type Agent, type Task, type Run } from './workspaceApi'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 function shortTime(iso: string) {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString()
+}
+
+const STATUS_TAGS: Record<string, { type: string; label: string }> = {
+  completed: { type: 'green', label: 'Completed' },
+  failed: { type: 'red', label: 'Failed' },
+  running: { type: 'blue', label: 'Running' },
+  turn_limit: { type: 'warm-gray', label: 'Turn Limit' },
+  pending: { type: 'gray', label: 'Pending' },
 }
 
 export default function Workspace() {
@@ -75,7 +113,6 @@ export default function Workspace() {
 
   useEffect(() => { void loadProjects() }, [loadProjects])
 
-  // Poll selected run while in-flight
   useEffect(() => {
     if (!selectedRun || selectedRun.status === 'completed' || selectedRun.status === 'failed' || selectedRun.status === 'turn_limit') return
     const timer = setInterval(() => { void loadRun(selectedRun.id) }, 3000)
@@ -130,135 +167,320 @@ export default function Workspace() {
     try {
       const result = await workspaceApi.startRun(task.id, { agent_id: task.agent_id || undefined })
       await loadTaskRuns(task)
-      // Poll for the run
       void loadRun(result.run_id)
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }
 
-  return <div className="workspace-shell">
-    <header className="topbar obs-topbar">
-      <div><span className="eyebrow">TEMPORALITY</span><h1>Workspace</h1></div>
-      <div className="header-actions">
-        <span className="connection">Kernel API</span>
-        <a className="obs-link" href="/experience">Experience</a>
-        <a className="obs-link" href="/agents">Agent runs</a>
-        <a className="obs-link" href="/operations">Operations</a>
-      </div>
-    </header>
-    {error && <div className="obs-error" role="alert">{error}<button onClick={() => setError('')}>dismiss</button></div>}
-    <main className="workspace-grid">
+  return (
+    <Grid fullWidth className="workspace-container">
+      {/* Error notification */}
+      {error && (
+        <Column span={16}>
+          <InlineNotification
+            kind="error"
+            title="Error"
+            subtitle={error}
+            onClose={() => setError('')}
+            lowContrast
+          />
+        </Column>
+      )}
+
       {/* Projects panel */}
-      <section className="ws-panel ws-projects">
-        <h2>Projects</h2>
-        <ul className="ws-list">
-          {projects.map((p) => (
-            <li key={p.id} className={selectedProject?.id === p.id ? 'selected' : ''} onClick={() => void loadProjectData(p)}>
-              <strong>{p.name}</strong>
-              <small>{p.id}</small>
-            </li>
-          ))}
-        </ul>
-        {showProjectForm ? <div className="ws-form">
-          <input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Project name" autoFocus />
-          <input value={projectDesc} onChange={(e) => setProjectDesc(e.target.value)} placeholder="Description (optional)" />
-          <div className="ws-form-actions">
-            <button className="primary" onClick={() => void createProject()} disabled={loading}>Create</button>
-            <button onClick={() => setShowProjectForm(false)}>Cancel</button>
-          </div>
-        </div> : <button onClick={() => setShowProjectForm(true)}>+ New project</button>}
-      </section>
+      <Column sm={4} md={4} lg={4}>
+        <Section level={2}>
+          <Heading>Projects</Heading>
+          <Stack gap={3}>
+            {projects.map((p) => (
+              <Tile
+                key={p.id}
+                onClick={() => void loadProjectData(p)}
+                className={`workspace-tile ${selectedProject?.id === p.id ? 'selected' : ''}`}
+              >
+                <strong>{p.name}</strong>
+                <br />
+                <small>{p.id}</small>
+              </Tile>
+            ))}
+            
+            {showProjectForm ? (
+              <Layer>
+                <Stack gap={3}>
+                  <TextInput
+                    id="project-name"
+                    labelText="Project name"
+                    value={projectName}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProjectName(e.target.value)}
+                    placeholder="my-project"
+                    autoFocus
+                  />
+                  <TextInput
+                    id="project-desc"
+                    labelText="Description (optional)"
+                    value={projectDesc}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProjectDesc(e.target.value)}
+                    placeholder="What this project is about"
+                  />
+                  <Stack orientation="horizontal" gap={2}>
+                    <Button onClick={() => void createProject()} disabled={loading}>
+                      Create project
+                    </Button>
+                    <Button kind="secondary" onClick={() => setShowProjectForm(false)}>
+                      Cancel
+                    </Button>
+                  </Stack>
+                </Stack>
+              </Layer>
+            ) : (
+              <Button renderIcon={Add} onClick={() => setShowProjectForm(true)}>
+                New project
+              </Button>
+            )}
+          </Stack>
+        </Section>
+      </Column>
 
       {/* Agents + Tasks panel */}
-      {selectedProject && <section className="ws-panel ws-agents-tasks">
-        <h2>{selectedProject.name}</h2>
-        <div className="ws-subsection">
-          <h3>Agents</h3>
-          <ul className="ws-list">
-            {agents.map((a) => (
-              <li key={a.id}>
-                <strong>{a.name}</strong>
-                {a.model && <small>{a.model}</small>}
-                {a.system_prompt && <small className="ws-preview">{a.system_prompt.slice(0, 60)}…</small>}
-              </li>
-            ))}
-          </ul>
-          {showAgentForm ? <div className="ws-form">
-            <input value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder="Agent name" autoFocus />
-            <input value={agentModel} onChange={(e) => setAgentModel(e.target.value)} placeholder="Model (optional, e.g. gpt-4o)" />
-            <textarea value={agentPrompt} onChange={(e) => setAgentPrompt(e.target.value)} placeholder="System prompt (optional)" rows={4} />
-            <div className="ws-form-actions">
-              <button className="primary" onClick={() => void createAgent()} disabled={loading}>Create</button>
-              <button onClick={() => setShowAgentForm(false)}>Cancel</button>
-            </div>
-          </div> : <button onClick={() => setShowAgentForm(true)}>+ New agent</button>}
-        </div>
-        <div className="ws-subsection">
-          <h3>Tasks</h3>
-          <ul className="ws-list">
-            {tasks.map((t) => (
-              <li key={t.id} className={selectedTask?.id === t.id ? 'selected' : ''}>
-                <div onClick={() => void loadTaskRuns(t)}>
-                  <strong>{t.title}</strong>
-                  <small>{t.agent_id || 'no agent'}</small>
-                </div>
-                <button className="ws-run-btn" onClick={() => void startRun(t)} disabled={loading}>Run</button>
-              </li>
-            ))}
-          </ul>
-          {showTaskForm ? <div className="ws-form">
-            <input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="Task title" autoFocus />
-            <textarea value={taskPrompt} onChange={(e) => setTaskPrompt(e.target.value)} placeholder="Prompt" rows={4} />
-            <select value={taskAgentId} onChange={(e) => setTaskAgentId(e.target.value)}>
-              <option value="">No agent (use defaults)</option>
-              {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-            <div className="ws-form-actions">
-              <button className="primary" onClick={() => void createTask()} disabled={loading}>Create</button>
-              <button onClick={() => setShowTaskForm(false)}>Cancel</button>
-            </div>
-          </div> : <button onClick={() => setShowTaskForm(true)}>+ New task</button>}
-        </div>
-      </section>}
+      {selectedProject && (
+        <Column sm={4} md={4} lg={4}>
+          <Section level={2}>
+            <Heading>{selectedProject.name}</Heading>
+            
+            {/* Agents */}
+            <Section level={3}>
+              <Heading>Agents</Heading>
+              <Stack gap={2}>
+                {agents.map((a) => (
+                  <Tile key={a.id}>
+                    <strong>{a.name}</strong>
+                    {a.model && <><br /><Tag type="blue">{a.model}</Tag></>}
+                    {a.system_prompt && (
+                      <>
+                        <br />
+                        <small className="ws-preview">
+                          {a.system_prompt.length > 80 
+                            ? a.system_prompt.slice(0, 80) + '…' 
+                            : a.system_prompt}
+                        </small>
+                      </>
+                    )}
+                  </Tile>
+                ))}
+                
+                {showAgentForm ? (
+                  <Layer>
+                    <Stack gap={3}>
+                      <TextInput
+                        id="agent-name"
+                        labelText="Agent name"
+                        value={agentName}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAgentName(e.target.value)}
+                        placeholder="coder"
+                        autoFocus
+                      />
+                      <TextInput
+                        id="agent-model"
+                        labelText="Model (optional)"
+                        value={agentModel}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAgentModel(e.target.value)}
+                        placeholder="gpt-4o, claude-3-sonnet, etc."
+                      />
+                      <TextArea
+                        id="agent-prompt"
+                        labelText="System prompt"
+                        value={agentPrompt}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAgentPrompt(e.target.value)}
+                        placeholder="You are a careful developer..."
+                        rows={6}
+                      />
+                      <Stack orientation="horizontal" gap={2}>
+                        <Button onClick={() => void createAgent()} disabled={loading}>
+                          Create agent
+                        </Button>
+                        <Button kind="secondary" onClick={() => setShowAgentForm(false)}>
+                          Cancel
+                        </Button>
+                      </Stack>
+                    </Stack>
+                  </Layer>
+                ) : (
+                  <Button renderIcon={Add} size="sm" onClick={() => setShowAgentForm(true)}>
+                    New agent
+                  </Button>
+                )}
+              </Stack>
+            </Section>
+
+            {/* Tasks */}
+            <Section level={3}>
+              <Heading>Tasks</Heading>
+              <Stack gap={2}>
+                {tasks.map((t) => (
+                  <Tile
+                    key={t.id}
+                    onClick={() => void loadTaskRuns(t)}
+                    className={`workspace-tile ${selectedTask?.id === t.id ? 'selected' : ''}`}
+                  >
+                    <Grid>
+                      <Column sm={3} md={6} lg={10}>
+                        <strong>{t.title}</strong>
+                        <br />
+                        <Tag type="gray" size="sm">{t.agent_id || 'no agent'}</Tag>
+                      </Column>
+                      <Column sm={1} md={2} lg={6} className="ws-task-action">
+                        <Button
+                          renderIcon={Play}
+                          size="sm"
+                          onClick={(e: React.MouseEvent) => { e.stopPropagation(); void startRun(t) }}
+                          disabled={loading}
+                        >
+                          Run
+                        </Button>
+                      </Column>
+                    </Grid>
+                  </Tile>
+                ))}
+
+                {showTaskForm ? (
+                  <Layer>
+                    <Stack gap={3}>
+                      <TextInput
+                        id="task-title"
+                        labelText="Task title"
+                        value={taskTitle}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTaskTitle(e.target.value)}
+                        placeholder="Fix the bug in calculator"
+                        autoFocus
+                      />
+                      <TextArea
+                        id="task-prompt"
+                        labelText="Prompt"
+                        value={taskPrompt}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTaskPrompt(e.target.value)}
+                        placeholder="Find and fix the bug in calculator.go. Verify with tests."
+                        rows={8}
+                        helperText="Describe what the agent should do. Be specific."
+                      />
+                      <Select
+                        id="task-agent"
+                        labelText="Agent (optional)"
+                        value={taskAgentId}
+                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTaskAgentId(e.target.value)}
+                      >
+                        <SelectItem value="" text="Use defaults" />
+                        {agents.map((a) => (
+                          <SelectItem key={a.id} value={a.id} text={a.name} />
+                        ))}
+                      </Select>
+                      <Stack orientation="horizontal" gap={2}>
+                        <Button onClick={() => void createTask()} disabled={loading}>
+                          Create task
+                        </Button>
+                        <Button kind="secondary" onClick={() => setShowTaskForm(false)}>
+                          Cancel
+                        </Button>
+                      </Stack>
+                    </Stack>
+                  </Layer>
+                ) : (
+                  <Button renderIcon={Add} size="sm" onClick={() => setShowTaskForm(true)}>
+                    New task
+                  </Button>
+                )}
+              </Stack>
+            </Section>
+          </Section>
+        </Column>
+      )}
 
       {/* Runs panel */}
-      {selectedTask && <section className="ws-panel ws-runs">
-        <h3>Runs for: {selectedTask.title}</h3>
-        <ul className="ws-list">
-          {runs.map((r) => (
-            <li key={r.id} className={selectedRun?.id === r.id ? 'selected' : ''} onClick={() => void loadRun(r.id)}>
-              <strong>{r.run_id}</strong>
-              <span className={`ws-status ws-status-${r.status}`}>{r.status}</span>
-              <small>{shortTime(r.created_at)}</small>
-            </li>
-          ))}
-          {runs.length === 0 && <li className="ws-empty">No runs yet</li>}
-        </ul>
-      </section>}
+      {selectedTask && (
+        <Column sm={4} md={4} lg={4}>
+          <Section level={2}>
+            <Heading>Runs: {selectedTask.title}</Heading>
+            <Stack gap={2}>
+              {runs.length === 0 && (
+                <Tile><p>No runs yet</p></Tile>
+              )}
+              {runs.map((r) => (
+                <Tile
+                  key={r.id}
+                  onClick={() => void loadRun(r.id)}
+                  className={`workspace-tile ${selectedRun?.id === r.id ? 'selected' : ''}`}
+                >
+                  <Grid>
+                    <Column sm={3} md={5} lg={10}>
+                      <strong>{r.run_id}</strong>
+                      <br />
+                      <Tag type={STATUS_TAGS[r.status]?.type as any || 'gray'} size="sm">
+                        {STATUS_TAGS[r.status]?.label || r.status}
+                      </Tag>
+                    </Column>
+                    <Column sm={1} md={3} lg={6}>
+                      <Time size={16} /> {shortTime(r.created_at)}
+                    </Column>
+                  </Grid>
+                </Tile>
+              ))}
+            </Stack>
+          </Section>
+        </Column>
+      )}
 
       {/* Run detail panel */}
-      {selectedRun && <section className="ws-panel ws-run-detail">
-        <h3>Run: {selectedRun.run_id}</h3>
-        <div className="ws-run-meta">
-          <span>status: <strong className={`ws-status ws-status-${selectedRun.status}`}>{selectedRun.status}</strong></span>
-          <span>turns: {selectedRun.turns}</span>
-          <span>model: {selectedRun.model || 'default'}</span>
-          <span>started: {shortTime(selectedRun.created_at)}</span>
-        </div>
-        {selectedRun.answer && <div className="ws-run-answer">
-          <h4>Answer</h4>
-          <pre>{selectedRun.answer}</pre>
-        </div>}
-        {selectedRun.error && <div className="ws-run-error">
-          <h4>Error</h4>
-          <pre>{selectedRun.error}</pre>
-        </div>}
-        <div className="ws-run-actions">
-          <a className="obs-link" href={`/experience?project=${selectedRun.project_id}`} target="_blank" rel="noopener noreferrer">
-            Open in Experience Timeline →
-          </a>
-        </div>
-      </section>}
-    </main>
-  </div>
+      {selectedRun && (
+        <Column sm={4} md={4} lg={4}>
+          <Section level={2}>
+            <Heading>Run: {selectedRun.run_id}</Heading>
+            <Stack gap={3}>
+              <Tile>
+                <Grid>
+                  <Column>
+                    <Tag type={STATUS_TAGS[selectedRun.status]?.type as any || 'gray'}>
+                      {STATUS_TAGS[selectedRun.status]?.label || selectedRun.status}
+                    </Tag>
+                  </Column>
+                  <Column>Turns: {selectedRun.turns}</Column>
+                  <Column>Model: {selectedRun.model || 'default'}</Column>
+                  <Column>Started: {shortTime(selectedRun.created_at)}</Column>
+                </Grid>
+              </Tile>
+
+              {selectedRun.answer && (
+                <Tile>
+                  <Heading>Answer</Heading>
+                  <pre className="ws-answer">{selectedRun.answer}</pre>
+                </Tile>
+              )}
+
+              {selectedRun.error && (
+                <InlineNotification
+                  kind="error"
+                  title="Error"
+                  subtitle={selectedRun.error}
+                  lowContrast
+                />
+              )}
+
+              <Button
+                renderIcon={ArrowRight}
+                kind="ghost"
+                href={`/experience?project=${selectedRun.project_id}`}
+                target="_blank"
+              >
+                Open in Experience Timeline
+              </Button>
+            </Stack>
+          </Section>
+        </Column>
+      )}
+
+      {loading && (
+        <Column span={16}>
+          <Loading withOverlay={false} />
+        </Column>
+      )}
+    </Grid>
+  )
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Layout from './Layout'
 import Observability from './Observability'
 import AgentRuns from './AgentRuns'
 import Operations from './Operations'
@@ -29,11 +30,6 @@ export default function App() {
   useEffect(() => {
     const navigate = () => {
       const next = pageFor(window.location.pathname)
-      if (!Routes[next].test(window.location.pathname)) {
-        // The product home is the Experience Timeline; legacy deep links to
-        // legacy root paths land there too.
-        window.history.replaceState(null, '', `/experience${window.location.search}`)
-      }
       setPage(next)
     }
     navigate()
@@ -41,16 +37,24 @@ export default function App() {
     return () => window.removeEventListener('popstate', navigate)
   }, [])
 
-  switch (page) {
-    case 'agents':
-      return <AgentRuns />
-    case 'operations':
-      return <Operations />
-    case 'observability':
-      return <Observability />
-    case 'workspace':
-      return <Workspace />
-    default:
-      return <ExperienceTimeline />
+  const renderPage = () => {
+    switch (page) {
+      case 'agents':
+        return <AgentRuns />
+      case 'operations':
+        return <Operations />
+      case 'observability':
+        return <Observability />
+      case 'workspace':
+        return <Workspace />
+      default:
+        return <ExperienceTimeline />
+    }
   }
+
+  return (
+    <Layout activePage={page}>
+      {renderPage()}
+    </Layout>
+  )
 }
