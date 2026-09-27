@@ -423,8 +423,8 @@ P1 — Make experience understandable
 ├── State-at-T / Replay / Diff  [x] done
 ├── Experience Timeline
 │   ├── activation chain  [x] done
-│   ├── semantic zoom  [ ] UI
-│   └── shareable investigation URL  [ ] UI
+│   ├── semantic zoom  [x] done
+│   └── shareable investigation URL  [x] done
 ├── Experience Investigation  [x] done
 │   ├── why this decision?
 │   ├── why knowledge disappeared?
