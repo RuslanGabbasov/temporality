@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { API_BASE, authHeaders } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
 import Markdown from './Markdown'
-import Token from './Token'
 import {
   Button,
   TextInput,
@@ -134,7 +133,6 @@ export default function AgentRuns({ project }: { project: string }) {
             <Button onClick={() => { setSelected(''); setTimeline([]); void loadRuns() }} disabled={busy}>
               Load runs
             </Button>
-            <Token />
           </div>
         </Column>
       </Grid>

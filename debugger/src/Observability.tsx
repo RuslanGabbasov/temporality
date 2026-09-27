@@ -1,7 +1,6 @@
 import { type FormEvent, useMemo, useState } from 'react'
 import { API_BASE } from './api'
 import { observationApi, type KnowledgeItem, type ObservationEvent, type ObservationHint } from './observationApi'
-import Token from './Token'
 import {
   Button,
   TextInput,
@@ -159,7 +158,6 @@ export default function Observability({ project }: { project: string }) {
               <TextInput id="known-at" labelText="Known by" type="datetime-local" value={knownAt} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKnownAt(e.target.value)} />
             </div>
             <Button onClick={load} disabled={loading}>Open project</Button>
-            <Token />
           </div>
         </Column>
       </Grid>

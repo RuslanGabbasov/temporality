@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import { API_BASE, authHeaders } from './api'
-import Token from './Token'
 import {
   Button,
   TextInput,
@@ -120,7 +119,6 @@ export default function Operations({ project }: { project: string }) {
         <Column sm={4} md={8} lg={16}>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
             <Button onClick={() => void load()} disabled={busy}>Load operations</Button>
-            <Token />
             {identity && <Tag type="gray">{identity.subject} ({identity.role})</Tag>}
           </div>
         </Column>
