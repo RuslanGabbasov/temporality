@@ -99,28 +99,32 @@ function tickStep(span: number, width: number): number {
 }
 
 export default function ExperienceTimeline() {
-  const [initialProject] = useState(() => new URLSearchParams(window.location.search).get('project') ?? 'calculator-e2e')
+  const params = new URLSearchParams(window.location.search)
+  const [initialProject] = useState(() => params.get('project') ?? 'calculator-e2e')
   const [project, setProject] = useState(initialProject)
   const [events, setEvents] = useState<ObservationEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
-  const [lens, setLens] = useState<Lens>(DEFAULT_LENS)
-  const [kinds, setKinds] = useState<Set<LifecycleKind>>(new Set(LIFECYCLE_KINDS))
-  const [roleFilter, setRoleFilter] = useState('all')
-  const [scopeFilter, setScopeFilter] = useState('all')
-  const [bucketFilter, setBucketFilter] = useState<'all' | MemoryBucket>('all')
-  const [hiddenRoots, setHiddenRoots] = useState<Set<string>>(new Set())
+  const parseLens = (s: string | null): Lens => { if (!s) return DEFAULT_LENS; try { return { ...DEFAULT_LENS, ...JSON.parse(s) } } catch { return DEFAULT_LENS } }
+  const [lens, setLens] = useState<Lens>(() => parseLens(params.get('lens')))
+  const parseKinds = (s: string | null): Set<LifecycleKind> => { if (!s) return new Set(LIFECYCLE_KINDS); const arr = s.split(',').filter((k): k is LifecycleKind => LIFECYCLE_KINDS.includes(k as LifecycleKind)); return arr.length ? new Set(arr) : new Set(LIFECYCLE_KINDS) }
+  const [kinds, setKinds] = useState<Set<LifecycleKind>>(() => parseKinds(params.get('kinds')))
+  const [roleFilter, setRoleFilter] = useState(params.get('role') ?? 'all')
+  const [scopeFilter, setScopeFilter] = useState(params.get('scope') ?? 'all')
+  const [bucketFilter, setBucketFilter] = useState<'all' | MemoryBucket>(() => { const v = params.get('bucket'); return (['active','stale','invalidated','archived'] as const).includes(v as MemoryBucket) ? v as MemoryBucket : 'all' })
+  const [hiddenRoots, setHiddenRoots] = useState<Set<string>>(() => { const v = params.get('hidden'); return v ? new Set(v.split(',')) : new Set() })
   // Lane aggregation state: id → aggregated?. Auto execution observations are
   // noise lanes (one per command); their merged lane starts aggregated.
   const [laneOverrides, setLaneOverrides] = useState<Record<string, boolean>>({ execution: true })
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(params.get('q') ?? '')
   // The detail panel is selection-driven: it exists only while a knowledge
   // row is selected (opened by clicking a row, closed by its × button).
-  const [selected, setSelected] = useState('')
+  const [selected, setSelected] = useState(params.get('selected') ?? '')
   const [runsOpen, setRunsOpen] = useState(false)
   const [focus, setFocus] = useState<{ at: string; eventId: string; label: string } | null>(null)
-  const [window_, setWindow] = useState<{ t0: number; t1: number } | null>(null)
+  const parseWindow = (s: string | null): { t0: number; t1: number } | null => { if (!s) return null; const [a, b] = s.split(',').map(Number); return a && b ? { t0: a, t1: b } : null }
+  const [window_, setWindow] = useState<{ t0: number; t1: number } | null>(() => parseWindow(params.get('w')))
   const [width, setWidth] = useState(1100)
 
   const shellRef = useRef<HTMLDivElement>(null)
@@ -152,6 +156,25 @@ export default function ExperienceTimeline() {
 
   const [initialised, setInitialised] = useState(false)
   useEffect(() => { if (!initialised) { setInitialised(true); void load(initialProject) } }, [initialised, initialProject, load])
+
+  // Sync investigation state to URL for shareable links.
+  useEffect(() => {
+    const p = new URLSearchParams()
+    p.set('project', project)
+    const lensObj: Record<string, boolean> = {}
+    for (const [k, v] of Object.entries(lens)) { if (v !== DEFAULT_LENS[k as keyof Lens]) lensObj[k] = v }
+    if (Object.keys(lensObj).length) p.set('lens', JSON.stringify(lensObj))
+    const kindArr = [...kinds]
+    if (kindArr.length !== LIFECYCLE_KINDS.length || !LIFECYCLE_KINDS.every((k) => kinds.has(k))) p.set('kinds', kindArr.join(','))
+    if (roleFilter !== 'all') p.set('role', roleFilter)
+    if (scopeFilter !== 'all') p.set('scope', scopeFilter)
+    if (bucketFilter !== 'all') p.set('bucket', bucketFilter)
+    if (hiddenRoots.size) p.set('hidden', [...hiddenRoots].join(','))
+    if (query) p.set('q', query)
+    if (selected) p.set('selected', selected)
+    if (window_) p.set('w', `${window_.t0},${window_.t1}`)
+    window.history.replaceState(null, '', `/experience?${p}`)
+  }, [project, lens, kinds, roleFilter, scopeFilter, bucketFilter, hiddenRoots, query, selected, window_])
 
   const model = useMemo(() => (events.length ? foldExperience(events) : null), [events])
 
