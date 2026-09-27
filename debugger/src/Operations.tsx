@@ -47,8 +47,7 @@ const EFFECT_HELP: Record<ReconcileEffect, string> = {
   unknown: 'the outcome could not be established — documented as unresolved',
 }
 
-export default function Operations() {
-  const [project, setProject] = useState(initialProject())
+export default function Operations({ project }: { project: string }) {
   const [ops, setOps] = useState<UncertainOperation[]>([])
   const [selected, setSelected] = useState<UncertainOperation | null>(null)
   const [identity, setIdentity] = useState<Whoami | null>(null)
@@ -120,9 +119,6 @@ export default function Operations() {
       <Grid>
         <Column sm={4} md={8} lg={16}>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
-            <div style={{ flex: 1 }}>
-              <TextInput id="project" labelText="Project ID" value={project} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProject(e.target.value)} placeholder="repo-a" />
-            </div>
             <Button onClick={() => void load()} disabled={busy}>Load operations</Button>
             <Token />
             {identity && <Tag type="gray">{identity.subject} ({identity.role})</Tag>}

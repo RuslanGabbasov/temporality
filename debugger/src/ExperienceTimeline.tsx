@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_BASE } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
-import Token from './Token'
 import { aliveRowAt, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type RunInfo } from './experience'
 
 const GUTTER = 210
@@ -98,10 +97,8 @@ function tickStep(span: number, width: number): number {
   return 86400e3
 }
 
-export default function ExperienceTimeline() {
+export default function ExperienceTimeline({ project }: { project: string }) {
   const params = new URLSearchParams(window.location.search)
-  const [initialProject] = useState(() => params.get('project') ?? 'calculator-e2e')
-  const [project, setProject] = useState(initialProject)
   const [events, setEvents] = useState<ObservationEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState('')
@@ -155,7 +152,7 @@ export default function ExperienceTimeline() {
   }, [])
 
   const [initialised, setInitialised] = useState(false)
-  useEffect(() => { if (!initialised) { setInitialised(true); void load(initialProject) } }, [initialised, initialProject, load])
+  useEffect(() => { if (!initialised) { setInitialised(true); void load(project) } }, [initialised, project, load])
 
   // Sync investigation state to URL for shareable links.
   useEffect(() => {
@@ -328,7 +325,7 @@ export default function ExperienceTimeline() {
 
   if (!model || !view) {
     return <div className="observability-shell" ref={shellRef}>
-      <Header project={project} setProject={setProject} load={load} loading={loading} />
+      <Header project={project} load={load} loading={loading} />
       {error && <div className="obs-error" role="alert">{error}<small>Проверьте, что журнал доступен на {API_BASE}.</small></div>}
       {loading && <div className="status" role="status"><span className="spinner" /> Loading experience… {progress}</div>}
       {!loading && !error && <div className="obs-controls"><p className="obs-empty">Введите project ID и нажмите Open timeline.</p></div>}
@@ -371,7 +368,7 @@ export default function ExperienceTimeline() {
   for (let t = Math.ceil(view.active.t0 / step) * step; t <= view.active.t1; t += step) ticks.push(t)
 
   return <div className="observability-shell" ref={shellRef}>
-    <Header project={project} setProject={setProject} load={load} loading={loading} />
+    <Header project={project} load={load} loading={loading} />
     {error && <div className="obs-error" role="alert">{error}</div>}
     <div className="experience-meta">
       <span>{model.runs.filter((run) => !run.parentRun).length} team runs · {model.rows.length} experiences · {model.scopes.length} scopes · {model.totals.events} events</span>
@@ -668,22 +665,12 @@ function zoom(current: { t0: number; t1: number }, full: { t0: number; t1: numbe
   return { t0: Math.max(full.t0, t0), t1: Math.min(full.t1, t1) }
 }
 
-function Header({ project, setProject, load, loading }: { project: string; setProject: (value: string) => void; load: (project: string) => Promise<void> | void; loading: boolean }) {
-  return <header className="topbar obs-topbar">
-    <div><span className="eyebrow">TEMPORALITY / EXPERIENCE</span><h1>Experience timeline</h1></div>
-    <div className="header-actions">
-      <span className="connection">Events <code>{API_BASE}</code></span>
-      <a className="obs-link" href="/workspace">Workspace</a>
-      <a className="obs-link" href="/agents">Agent runs</a>
-      <a className="obs-link" href="/operations">Operations</a>
-      <a className="obs-link" href="/observability">Knowledge</a>
-      <Token />
-    </div>
-    <form className="experience-project" onSubmit={(event) => { event.preventDefault(); void load(project) }}>
-      <input value={project} onChange={(change) => setProject(change.target.value)} placeholder="calculator-e2e" />
-      <button className="primary" disabled={loading}>{loading ? 'Loading…' : 'Open timeline'}</button>
-    </form>
-  </header>
+function Header({ project, load, loading }: { project: string; load: (project: string) => Promise<void> | void; loading: boolean }) {
+  return <div className="experience-controls">
+    <button className="primary" disabled={loading} onClick={() => void load(project)}>
+      {loading ? 'Loading…' : 'Open timeline'}
+    </button>
+  </div>
 }
 
 function RowDetails({ row, lineage, forensic, onFocus, related }: { row: KnowledgeRow; lineage: KnowledgeLineage[]; forensic: ForensicRecord; onFocus: (at: string, eventId: string, label: string) => void; related: KnowledgeRow[] }) {

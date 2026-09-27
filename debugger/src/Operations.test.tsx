@@ -17,7 +17,7 @@ afterEach(() => {
 describe('Operations', () => {
   it('renders the reconciliation console shell and empty state', () => {
     stubLocalStorage()
-    const html = renderToStaticMarkup(<Operations />)
+    const html = renderToStaticMarkup(<Operations project="test-project" />)
     expect(html).toContain('UNRESOLVED OPERATIONS')
     expect(html).toContain('nothing to reconcile')
     expect(html).toContain('/agents')

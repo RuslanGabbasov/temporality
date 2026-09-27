@@ -27,11 +27,9 @@ function pendingApprovals(events: ObservationEvent[]) {
   return events.filter((event) => event.type === 'approval.requested' && !ended.has(event.data?.operation_id))
 }
 
-export default function AgentRuns() {
-  const params = new URLSearchParams(window.location.search)
-  const [project, setProject] = useState(params.get('project') ?? 'temporality-live-verification')
+export default function AgentRuns({ project }: { project: string }) {
   const [runs, setRuns] = useState<ObservationEvent[]>([])
-  const [selected, setSelected] = useState(params.get('run') ?? '')
+  const [selected, setSelected] = useState('')
   const [timeline, setTimeline] = useState<ObservationEvent[]>([])
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
   const [reason, setReason] = useState('Reviewed in Agent Runs UI')
@@ -133,15 +131,6 @@ export default function AgentRuns() {
       <Grid>
         <Column sm={4} md={8} lg={16}>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
-            <div style={{ flex: 1 }}>
-              <TextInput
-                id="project-id"
-                labelText="Project ID"
-                value={project}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProject(e.target.value)}
-                placeholder="temporality-live-verification"
-              />
-            </div>
             <Button onClick={() => { setSelected(''); setTimeline([]); void loadRuns() }} disabled={busy}>
               Load runs
             </Button>

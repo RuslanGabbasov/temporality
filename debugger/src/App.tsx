@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import Layout from './Layout'
+import Layout, { type AppState } from './Layout'
 import Observability from './Observability'
 import AgentRuns from './AgentRuns'
 import Operations from './Operations'
@@ -28,33 +28,28 @@ export default function App() {
   const [page, setPage] = useState<Page>(() => pageFor(window.location.pathname))
 
   useEffect(() => {
-    const navigate = () => {
-      const next = pageFor(window.location.pathname)
-      setPage(next)
-    }
+    const navigate = () => setPage(pageFor(window.location.pathname))
     navigate()
     window.addEventListener('popstate', navigate)
     return () => window.removeEventListener('popstate', navigate)
   }, [])
 
-  const renderPage = () => {
-    switch (page) {
-      case 'agents':
-        return <AgentRuns />
-      case 'operations':
-        return <Operations />
-      case 'observability':
-        return <Observability />
-      case 'workspace':
-        return <Workspace />
-      default:
-        return <ExperienceTimeline />
-    }
-  }
-
   return (
     <Layout activePage={page}>
-      {renderPage()}
+      {({ project, setProject }: AppState) => {
+        switch (page) {
+          case 'agents':
+            return <AgentRuns project={project} />
+          case 'operations':
+            return <Operations project={project} />
+          case 'observability':
+            return <Observability project={project} />
+          case 'workspace':
+            return <Workspace project={project} setProject={setProject} />
+          default:
+            return <ExperienceTimeline project={project} />
+        }
+      }}
     </Layout>
   )
 }

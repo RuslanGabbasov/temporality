@@ -34,8 +34,7 @@ const STATE_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 're
   invalidated: 'red',
 }
 
-export default function Observability() {
-  const [project, setProject] = useState(new URLSearchParams(window.location.search).get('project') ?? '')
+export default function Observability({ project }: { project: string }) {
   const [asOf, setAsOf] = useState('')
   const [compareAsOf, setCompareAsOf] = useState('')
   const [knownAt, setKnownAt] = useState('')
@@ -150,9 +149,6 @@ export default function Observability() {
       <Grid>
         <Column sm={4} md={8} lg={16}>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '1rem', flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: '200px' }}>
-              <TextInput id="project" labelText="Project ID" value={project} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProject(e.target.value)} placeholder="repo-a" />
-            </div>
             <div style={{ minWidth: '150px' }}>
               <TextInput id="as-of" labelText="As of" type="datetime-local" value={asOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAsOf(e.target.value)} />
             </div>
