@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/mcpclient"
@@ -53,9 +52,7 @@ func NewActivities(events EventOutbox) (*Activities, error) {
 	if err != nil {
 		return nil, err
 	}
-	mcpCtx, cancelMCP := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancelMCP()
-	mcpTools, err := mcpclient.FromEnv(mcpCtx)
+	mcpTools, err := mcpclient.FromEnv(context.Background())
 	if err != nil {
 		return nil, err
 	}
