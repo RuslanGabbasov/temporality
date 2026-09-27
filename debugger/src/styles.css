@@ -1,24 +1,15 @@
 /* Temporality — Carbon-based design system */
+/* Import Carbon styles */
+@import '@carbon/styles/css/styles.css';
 
 /* Carbon theme overrides for Temporality brand */
 :root {
+  /* These will be overridden by Carbon's Theme component */
   --cds-interactive-01: #57d7e8;  /* Cyan accent */
   --cds-interactive-02: #9e8cff;  /* Violet accent */
   --cds-interactive-03: #93e8c0;  /* Success */
   --cds-interactive-04: #e6b85c;  /* Warning */
   --cds-interactive-05: #ff7285;  /* Error */
-  
-  --cds-ui-background: #080b10;
-  --cds-ui-01: #0d1118;
-  --cds-ui-02: #121823;
-  --cds-ui-03: #172130;
-  
-  --cds-text-01: #e5e9f0;
-  --cds-text-02: #7e8a9c;
-  --cds-text-03: #565f89;
-  
-  --cds-ui-04: #202a38;
-  --cds-ui-05: #344258;
 }
 
 /* Base styles */
@@ -30,50 +21,6 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: var(--cds-ui-background);
-  color: var(--cds-text-01);
-  font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-
-/* Carbon component overrides */
-.cds--header {
-  background: var(--cds-ui-01);
-  border-bottom: 1px solid var(--cds-ui-04);
-}
-
-.cds--header__name {
-  color: var(--cds-text-01);
-  font-weight: 600;
-}
-
-.cds--header__menu-item {
-  color: var(--cds-text-02);
-}
-
-.cds--header__menu-item--current,
-.cds--header__menu-item:hover {
-  color: var(--cds-text-01);
-  border-bottom-color: var(--cds-interactive-01);
-}
-
-.cds--side-nav {
-  background: var(--cds-ui-01);
-  border-right: 1px solid var(--cds-ui-04);
-}
-
-.cds--side-nav__link {
-  color: var(--cds-text-02);
-}
-
-.cds--side-nav__link:hover,
-.cds--side-nav__link--current {
-  color: var(--cds-text-01);
-  background: var(--cds-ui-02);
-}
-
-.cds--content {
-  background: var(--cds-ui-background);
-  padding: 1.5rem;
 }
 
 /* Workspace styles */
@@ -109,7 +56,6 @@ body {
 }
 
 .ws-answer {
-  color: var(--cds-text-01);
   background: var(--cds-ui-02);
   padding: 1rem;
   border-radius: 4px;
@@ -122,35 +68,10 @@ body {
   overflow-y: auto;
 }
 
-/* Carbon form overrides */
-.cds--text-input,
-.cds--text-area,
-.cds--select-input {
-  background: var(--cds-ui-02);
-  border-color: var(--cds-ui-04);
-  color: var(--cds-text-01);
-}
-
-.cds--text-input:focus,
-.cds--text-area:focus,
-.cds--select-input:focus {
-  border-color: var(--cds-interactive-01);
-  box-shadow: 0 0 0 1px var(--cds-interactive-01);
-}
-
-.cds--label {
-  color: var(--cds-text-02);
-}
-
-.cds--form-requirement {
-  color: var(--cds-interactive-05);
-}
-
-/* Carbon button overrides */
+/* Carbon component customizations */
 .cds--btn--primary {
   background: var(--cds-interactive-01);
   border-color: var(--cds-interactive-01);
-  color: var(--cds-ui-background);
 }
 
 .cds--btn--primary:hover {
@@ -166,96 +87,6 @@ body {
 
 .cds--btn--ghost {
   color: var(--cds-interactive-01);
-}
-
-/* Carbon notification overrides */
-.cds--inline-notification {
-  background: var(--cds-ui-02);
-  border: 1px solid var(--cds-ui-04);
-}
-
-.cds--inline-notification__title {
-  color: var(--cds-text-01);
-}
-
-.cds--inline-notification__subtitle {
-  color: var(--cds-text-02);
-}
-
-/* Carbon tile overrides */
-.cds--tile {
-  background: var(--cds-ui-02);
-  border: 1px solid var(--cds-ui-04);
-}
-
-.cds--tile:hover {
-  border-color: var(--cds-ui-05);
-}
-
-/* Carbon tag overrides */
-.cds--tag--red {
-  background: #3d1a22;
-  color: #ff7285;
-}
-
-.cds--tag--green {
-  background: #1a3d2a;
-  color: #93e8c0;
-}
-
-.cds--tag--blue {
-  background: #1a2a3d;
-  color: #57d7e8;
-}
-
-.cds--tag--warm-gray {
-  background: #3d3a1a;
-  color: #e6b85c;
-}
-
-.cds--tag--gray {
-  background: #2a2a2a;
-  color: #7e8a9c;
-}
-
-/* Carbon section headings */
-.cds--section {
-  margin-bottom: 1.5rem;
-}
-
-.cds--heading {
-  color: var(--cds-text-01);
-  margin-bottom: 1rem;
-}
-
-/* Carbon stack spacing */
-.cds--stack {
-  gap: 0.75rem;
-}
-
-/* Carbon grid */
-.cds--grid {
-  padding: 0;
-}
-
-.cds--col {
-  padding: 0.5rem;
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-  .cds--content {
-    padding: 1rem;
-  }
-  
-  .workspace-container {
-    padding: 0.5rem;
-  }
-}
-
-/* Loading overlay */
-.cds--loading-overlay {
-  background: rgba(8, 11, 16, 0.8);
 }
 
 /* Scrollbar styling */
