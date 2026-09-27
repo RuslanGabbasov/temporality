@@ -281,14 +281,16 @@ unknown
 
 ## 7.1. Duplicate mitigation
 
-Сделать только необходимый минимум:
+**Реализовано (2026-09-27)**:
 
--   `parallel_tool_calls: false`;
--   exact duplicate suppression;
--   near-duplicate mitigation настолько, насколько требуется для
-    стабильного запуска acceptance-сценариев;
--   malformed-argv salvage, если корректные соседние tool calls можно
-    сохранить.
+-   `parallel_tool_calls: false` в каждом запросе с tools (kernel/llm);
+-   `dedupSignature` в kernel/agent: для `run_command` shell-обёртки
+    (`sh -c`, `echo ...; go test`) нормализуются до effective command,
+    остальные инструменты — exact args hash;
+-   `malformed-argv salvage`: `ToolCall.ArgsError` флагирует невалидный
+    JSON аргументов, workflow пишет `tool.started` + `tool.failed(effect=none, error_type=malformed_arguments)`
+    и пропускает вызов вместо провала всего completion;
+-   exact duplicate suppression — существовал (bf92a98).
 
 Не превращать Temporality в универсальный policy engine против
 патологического поведения агентов.
@@ -647,8 +649,8 @@ P0 — Make it usable
 │   ├── sandbox profile
 │   └── task/run
 │
-├── Operations UI
-├── minimal duplicate mitigation
+├── Operations UI  [x] done
+├── minimal duplicate mitigation  [x] done
 ├── Live MCP E2E
 └── runbook
         │
