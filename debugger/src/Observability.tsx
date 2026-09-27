@@ -2,6 +2,20 @@ import { type FormEvent, useMemo, useState } from 'react'
 import { API_BASE } from './api'
 import { observationApi, type KnowledgeItem, type ObservationEvent, type ObservationHint } from './observationApi'
 import Token from './Token'
+import {
+  Button,
+  TextInput,
+  TextArea,
+  InlineNotification,
+  Loading,
+  Tag,
+  Tile,
+  Grid,
+  Column,
+  Stack,
+  Section,
+  Heading,
+} from '@carbon/react'
 
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 function json(value: unknown) { return JSON.stringify(value, null, 2) }
@@ -10,6 +24,15 @@ function knowledgeID(event: ObservationEvent) {
   return typeof value === 'string' ? value : ''
 }
 function utcValue(local: string) { return local ? new Date(local).toISOString() : undefined }
+
+const STATE_COLORS: Record<string, string> = {
+  proposed: 'blue',
+  confirmed: 'green',
+  challenged: 'warm-gray',
+  corrected: 'warm-gray',
+  superseded: 'gray',
+  invalidated: 'red',
+}
 
 export default function Observability() {
   const [project, setProject] = useState(new URLSearchParams(window.location.search).get('project') ?? '')
@@ -119,56 +142,201 @@ export default function Observability() {
     catch (failure) { setOperationError(errorMessage(failure)) }
   }
 
-  return <div className="observability-shell">
-    <header className="topbar obs-topbar"><div><span className="eyebrow">TEMPORALITY / OBSERVATIONS</span><h1>Knowledge observability</h1></div><div className="header-actions"><span className="connection">API <code>{API_BASE}</code></span><a className="obs-link" href="/workspace">Workspace</a><a className="obs-link" href="/experience">Experience</a><a className="obs-link" href="/agents">Agent runs</a><a className="obs-link" href="/operations">Operations</a><Token /></div></header>
-    <form className="obs-controls" onSubmit={load}>
-      <label>Project ID<input value={project} onChange={(event) => setProject(event.target.value)} placeholder="repo-a" required /></label>
-      <label>Observed as of<input type="datetime-local" value={asOf} onChange={(event) => setAsOf(event.target.value)} /></label>
-      <label>Compare from<input type="datetime-local" value={compareAsOf} onChange={(event) => setCompareAsOf(event.target.value)} /></label>
-      <label>Known by<input type="datetime-local" value={knownAt} onChange={(event) => setKnownAt(event.target.value)} /></label>
-      <button className="primary" disabled={loading}>{loading ? 'Loading…' : 'Open project'}</button>
-    </form>
-    {error && <div className="obs-error" role="alert">{error}</div>}
-    <main className="obs-grid">
-      <aside className="obs-panel obs-timeline">
-        <header><span className="eyebrow">EVENT STREAM</span><strong>{events.length} loaded</strong></header>
-        {!events.length ? <p className="obs-empty">Open a project to inspect its observation history.</p> : <ol>{events.map((event) => <li key={`${event.source.id}:${event.event_id}`}>
-          <time>{new Date(event.occurred_at).toLocaleString()}</time>
-          <button className="obs-event" onClick={() => { const id = knowledgeID(event); if (id) setSelectedID(id) }}>
-            <strong>{event.type}</strong><span>{knowledgeID(event) || event.context?.task || event.context?.run || event.source.integration}</span>
-          </button>
-          <details><summary>event payload</summary><pre>{json(event)}</pre></details>
-        </li>)}</ol>}
-        {nextCursor && <button className="obs-more" onClick={() => void loadMore()} disabled={loading}>{loading ? 'Loading…' : 'Load next events'}</button>}
-      </aside>
+  return (
+    <div style={{ padding: '1rem' }}>
+      {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
+      {operationError && <InlineNotification kind="error" title="Operation error" subtitle={operationError} onClose={() => setOperationError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
-      <section className="obs-panel obs-knowledge">
-        <header><span className="eyebrow">COLLECTIVE KNOWLEDGE</span><strong>{knowledge.length} items</strong></header>
-        {knowledgeChanges && <section className="obs-diff"><strong>Change since {new Date(utcValue(compareAsOf)!).toLocaleString()}</strong><span>+{knowledgeChanges.added.length} knowledge items · {knowledgeChanges.changed.length} changed · {knowledgeChanges.previousCount} at comparison point</span>{knowledgeChanges.changed.slice(0, 6).map(({ item, previous }) => <small key={item.id}>{item.proposition}: {previous.state} → {item.state} · reuse {previous.reuse_count} → {item.reuse_count}{item.at_risk && ' · at risk'}</small>)}</section>}
-        {clusters.length > 0 && <nav className="obs-cloud" aria-label="Knowledge clusters"><button className={clusterFilter === 'all' ? 'active' : ''} onClick={() => setClusterFilter('all')}>All · {knowledge.length}</button>{clusters.map(([name, items]) => <button key={name} className={clusterFilter === name ? 'active' : ''} onClick={() => { setClusterFilter(name); setSelectedID(items[0]?.id ?? '') }}><strong>{name}</strong><span>{items.length} items · {items.filter((item) => item.state === 'confirmed').length} confirmed</span></button>)}</nav>}
-        {!visibleKnowledge.length ? <p className="obs-empty">No knowledge in this cluster.</p> : <div className="obs-knowledge-list">{visibleKnowledge.map((item) => <button key={item.id} className={`obs-knowledge-item ${selectedID === item.id ? 'selected' : ''}`} onClick={() => setSelectedID(item.id)}>
-          <span className={`obs-state ${item.state}`}>{item.at_risk ? 'at risk' : item.state}</span><strong>{item.proposition}</strong><small>{item.history.length} events · reused {item.reuse_count} · hints used {item.hint_uses}/{item.hint_offers}</small>
-        </button>)}</div>}
-      </section>
+      <Grid>
+        <Column sm={4} md={8} lg={16}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '1rem', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: '200px' }}>
+              <TextInput id="project" labelText="Project ID" value={project} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProject(e.target.value)} placeholder="repo-a" />
+            </div>
+            <div style={{ minWidth: '150px' }}>
+              <TextInput id="as-of" labelText="As of" type="datetime-local" value={asOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAsOf(e.target.value)} />
+            </div>
+            <div style={{ minWidth: '150px' }}>
+              <TextInput id="compare" labelText="Compare from" type="datetime-local" value={compareAsOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompareAsOf(e.target.value)} />
+            </div>
+            <div style={{ minWidth: '150px' }}>
+              <TextInput id="known-at" labelText="Known by" type="datetime-local" value={knownAt} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKnownAt(e.target.value)} />
+            </div>
+            <Button onClick={load} disabled={loading}>Open project</Button>
+            <Token />
+          </div>
+        </Column>
+      </Grid>
 
-      <aside className="obs-panel obs-detail">
-        <header><span className="eyebrow">PROVENANCE / ACTIVATION</span></header>
-        {selected ? <>
-          <article className="obs-selected"><span className={`obs-state ${selected.state}`}>{selected.state}</span><h2>{selected.proposition}</h2><small>Knowledge ID <code>{selected.id}</code></small>
-            <p>Created {new Date(selected.created_at).toLocaleString()} · Updated {new Date(selected.updated_at).toLocaleString()}</p>
-            <p>Reuse {selected.reuse_count} · hints offered {selected.hint_offers} · used {selected.hint_uses} · ignored {selected.hint_ignores} · helpful {selected.helpful_outcomes} · harmful {selected.harmful_outcomes}</p>
-            {selected.at_risk && <p className="obs-risk">Depends on retired knowledge: {selected.risk_sources?.join(', ')}</p>}
-            {selected.relationships?.length ? <><h3>Knowledge relations</h3><ul>{selected.relationships.map((relation) => <li key={relation.event_id}>{relation.type} → <code>{relation.target_id}</code></li>)}</ul></> : null}
-            {selected.evidence?.length ? <><h3>Evidence</h3><ul>{selected.evidence.map((item) => <li key={item.ref}><code>{item.ref}</code> {item.type}</li>)}</ul></> : <p className="obs-muted">No evidence attached</p>}
-            <h3>Lifecycle</h3><ol className="obs-history">{selected.history.map((entry) => <li key={entry.event_id}><time>{new Date(entry.at).toLocaleString()}</time><strong>{entry.type}</strong><span>{entry.state}{entry.rule ? ` · ${entry.rule}` : ''}</span>{entry.reason && <p>{entry.reason}</p>}{entry.evidence?.map((item) => <code key={item.ref}>{item.ref}</code>)}<button onClick={() => void openSourceEvent(entry.source_id, entry.event_id)}>Open source event</button></li>)}</ol>
-            {sourceEvent && <details className="obs-source-event" open><summary>Source event {sourceEvent.source.id}:{sourceEvent.event_id}</summary><pre>{json(sourceEvent)}</pre></details>}
-          </article>
-          {selected.state !== 'invalidated' && selected.state !== 'corrected' && selected.state !== 'superseded' && <form className="obs-form" onSubmit={invalidate}><h3>Manual invalidation</h3><label>Actor<input value={actor} onChange={(event) => setActor(event.target.value)} required /></label><label>Reason<textarea value={reason} onChange={(event) => setReason(event.target.value)} required rows={3} /></label><button disabled={!reason.trim()}>Invalidate knowledge</button>{operationError && <p className="obs-error" role="alert">{operationError}</p>}</form>}
-        </> : <p className="obs-empty">Select a knowledge item to inspect its origin and lifecycle.</p>}
-        <form className="obs-form obs-hint-form" onSubmit={retrieveHints}><h3>Try memory activation</h3><label>Current task / query<textarea value={query} onChange={(event) => setQuery(event.target.value)} rows={2} placeholder="What is the agent trying to do?" /></label><label>Tool name<input value={tool} onChange={(event) => setTool(event.target.value)} placeholder="test-runner" /></label><label>Tool result<textarea value={toolResult} onChange={(event) => setToolResult(event.target.value)} rows={3} placeholder="Relevant excerpt from the latest tool result" /></label><button disabled={hintBusy || (!query.trim() && !toolResult.trim())}>{hintBusy ? 'Searching…' : 'Retrieve hints'}</button>{hintError && <p className="obs-error" role="alert">{hintError}</p>}
-          {hints.length > 0 && <ul className="obs-hints">{hints.map((hint) => <li key={hint.hint_id}><span className={`obs-state ${hint.state}`}>{hint.state}</span><strong>{hint.proposition}</strong>{hint.caution && <small>{hint.caution}</small>}<small>Matched by {hint.matched_by.join(', ')}</small><small>Hint ID <code>{hint.hint_id}</code></small></li>)}</ul>}
-        </form>
-      </aside>
-    </main>
-  </div>
+      {knowledgeChanges && (
+        <InlineNotification
+          kind="info"
+          title={`Change since ${new Date(utcValue(compareAsOf)!).toLocaleString()}`}
+          subtitle={`+${knowledgeChanges.added.length} knowledge items · ${knowledgeChanges.changed.length} changed · ${knowledgeChanges.previousCount} at comparison point`}
+          lowContrast
+          style={{ marginBottom: '1rem' }}
+        />
+      )}
+
+      <Grid>
+        {/* Event stream */}
+        <Column sm={4} md={3} lg={4}>
+          <Section level={3}>
+            <Heading>Event Stream ({events.length})</Heading>
+            <Stack gap={1}>
+              {events.length === 0 && <Tile><p>Open a project to inspect events</p></Tile>}
+              {events.map((event) => (
+                <div key={`${event.source.id}:${event.event_id}`} style={{ fontSize: '0.75rem', padding: '0.25rem 0' }}>
+                  <time style={{ color: '#7e8a9c' }}>{new Date(event.occurred_at).toLocaleString()}</time>
+                  <br />
+                  <span
+                    style={{ cursor: 'pointer', color: '#57d7e8' }}
+                    onClick={() => { const id = knowledgeID(event); if (id) setSelectedID(id) }}
+                  >
+                    {event.type}
+                  </span>
+                  <span style={{ color: '#7e8a9c', marginLeft: '0.5rem' }}>
+                    {knowledgeID(event) || event.context?.task || event.context?.run || ''}
+                  </span>
+                </div>
+              ))}
+              {nextCursor && (
+                <Button size="sm" kind="ghost" onClick={() => void loadMore()} disabled={loading}>
+                  Load more
+                </Button>
+              )}
+            </Stack>
+          </Section>
+        </Column>
+
+        {/* Knowledge list */}
+        <Column sm={4} md={5} lg={5}>
+          <Section level={3}>
+            <Heading>Knowledge ({knowledge.length})</Heading>
+            {clusters.length > 0 && (
+              <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                <Tag
+                  type={clusterFilter === 'all' ? 'blue' : 'gray'}
+                  size="sm"
+                  onClick={() => setClusterFilter('all')}
+                  style={{ cursor: 'pointer' }}
+                >
+                  All ({knowledge.length})
+                </Tag>
+                {clusters.map(([name, items]) => (
+                  <Tag
+                    key={name}
+                    type={clusterFilter === name ? 'blue' : 'gray'}
+                    size="sm"
+                    onClick={() => { setClusterFilter(name); setSelectedID(items[0]?.id ?? '') }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {name} ({items.length})
+                  </Tag>
+                ))}
+              </div>
+            )}
+            <Stack gap={1}>
+              {visibleKnowledge.map((item) => (
+                <Tile
+                  key={item.id}
+                  onClick={() => setSelectedID(item.id)}
+                  className={`workspace-tile ${selectedID === item.id ? 'selected' : ''}`}
+                  style={{ padding: '0.5rem' }}
+                >
+                  <Tag type={STATE_COLORS[item.state] || 'gray'} size="sm">{item.at_risk ? 'at risk' : item.state}</Tag>
+                  <strong style={{ fontSize: '0.875rem' }}>{item.proposition}</strong>
+                  <br />
+                  <small style={{ color: '#7e8a9c' }}>
+                    {item.history.length} events · reused {item.reuse_count} · hints {item.hint_uses}/{item.hint_offers}
+                  </small>
+                </Tile>
+              ))}
+            </Stack>
+          </Section>
+        </Column>
+
+        {/* Detail */}
+        <Column sm={4} md={8} lg={7}>
+          <Section level={3}>
+            <Heading>Provenance / Activation</Heading>
+            {!selected ? (
+              <Tile><p>Select a knowledge item to inspect</p></Tile>
+            ) : (
+              <Stack gap={3}>
+                <Tile>
+                  <Tag type={STATE_COLORS[selected.state] || 'gray'}>{selected.state}</Tag>
+                  <h3>{selected.proposition}</h3>
+                  <small style={{ color: '#7e8a9c' }}>ID: {selected.id}</small>
+                  <p>Created: {new Date(selected.created_at).toLocaleString()} · Updated: {new Date(selected.updated_at).toLocaleString()}</p>
+                  <p>Reuse: {selected.reuse_count} · Hints: {selected.hint_uses}/{selected.hint_offers} · Helpful: {selected.helpful_outcomes} · Harmful: {selected.harmful_outcomes}</p>
+                  {selected.at_risk && <InlineNotification kind="warning" title="At risk" subtitle={`Depends on: ${selected.risk_sources?.join(', ')}`} lowContrast />}
+                  {selected.relationships?.length ? (
+                    <>
+                      <h4>Relations</h4>
+                      {selected.relationships.map((r) => <div key={r.event_id}>{r.type} → <code>{r.target_id}</code></div>)}
+                    </>
+                  ) : null}
+                  {selected.evidence?.length ? (
+                    <>
+                      <h4>Evidence</h4>
+                      {selected.evidence.map((e) => <div key={e.ref}><code>{e.ref}</code> ({e.type})</div>)}
+                    </>
+                  ) : <p style={{ color: '#7e8a9c' }}>No evidence attached</p>}
+                </Tile>
+
+                <Tile>
+                  <h4>Lifecycle</h4>
+                  <Stack gap={1}>
+                    {selected.history.map((entry) => (
+                      <div key={entry.event_id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.75rem' }}>
+                        <small style={{ color: '#7e8a9c', minWidth: '8rem' }}>{new Date(entry.at).toLocaleString()}</small>
+                        <Tag type="gray" size="sm">{entry.type}</Tag>
+                        <span>{entry.state}{entry.rule ? ` · ${entry.rule}` : ''}</span>
+                        {entry.reason && <small style={{ color: '#7e8a9c' }}>{entry.reason}</small>}
+                      </div>
+                    ))}
+                  </Stack>
+                </Tile>
+
+                {selected.state !== 'invalidated' && selected.state !== 'corrected' && selected.state !== 'superseded' && (
+                  <Tile>
+                    <h4>Manual Invalidation</h4>
+                    <Stack gap={2}>
+                      <TextInput id="actor" labelText="Actor" value={actor} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setActor(e.target.value)} />
+                      <TextArea id="reason" labelText="Reason" value={reason} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setReason(e.target.value)} rows={3} />
+                      <Button kind="danger" onClick={invalidate} disabled={!reason.trim()}>Invalidate</Button>
+                    </Stack>
+                  </Tile>
+                )}
+
+                <Tile>
+                  <h4>Memory Activation</h4>
+                  <Stack gap={2}>
+                    <TextArea id="query" labelText="Query" value={query} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setQuery(e.target.value)} rows={2} placeholder="What is the agent trying to do?" />
+                    <TextInput id="tool" labelText="Tool" value={tool} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTool(e.target.value)} placeholder="test-runner" />
+                    <TextArea id="tool-result" labelText="Tool result" value={toolResult} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setToolResult(e.target.value)} rows={3} placeholder="Relevant excerpt" />
+                    <Button onClick={retrieveHints} disabled={hintBusy || (!query.trim() && !toolResult.trim())}>
+                      {hintBusy ? 'Searching…' : 'Retrieve hints'}
+                    </Button>
+                    {hintError && <InlineNotification kind="error" title="Error" subtitle={hintError} lowContrast />}
+                    {hints.map((hint) => (
+                      <Tile key={hint.hint_id} style={{ padding: '0.5rem' }}>
+                        <Tag type="gray" size="sm">{hint.state}</Tag>
+                        <strong>{hint.proposition}</strong>
+                        {hint.caution && <small style={{ color: '#e6b85c', display: 'block' }}>{hint.caution}</small>}
+                        <small style={{ color: '#7e8a9c', display: 'block' }}>Matched by: {hint.matched_by.join(', ')}</small>
+                      </Tile>
+                    ))}
+                  </Stack>
+                </Tile>
+              </Stack>
+            )}
+          </Section>
+        </Column>
+      </Grid>
+
+      {loading && <Loading withOverlay={false} />}
+    </div>
+  )
 }

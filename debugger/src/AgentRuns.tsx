@@ -3,6 +3,20 @@ import { API_BASE, authHeaders } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
 import Markdown from './Markdown'
 import Token from './Token'
+import {
+  Button,
+  TextInput,
+  InlineNotification,
+  Loading,
+  Tag,
+  Tile,
+  Grid,
+  Column,
+  Stack,
+  Section,
+  Heading,
+} from '@carbon/react'
+import { Time, Play } from '@carbon/icons-react'
 
 const KERNEL_API = '/kernel-api'
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -103,26 +117,164 @@ export default function AgentRuns() {
 
   const answer = (result?.result as Record<string, unknown> | undefined)?.answer
   const stages = (result?.result as Record<string, unknown> | undefined)?.stages
-  return <div className="observability-shell agent-runs-shell">
-    <header className="topbar obs-topbar"><div><span className="eyebrow">TEMPORALITY / AGENT KERNEL</span><h1>Agent runs</h1></div><div className="header-actions"><span className="connection">Kernel <code>:8090</code> · Events <code>{API_BASE}</code></span><a className="obs-link" href="/workspace">Workspace</a><a className="obs-link" href="/experience">Experience</a><a className="obs-link" href="/operations">Operations</a><a className="obs-link" href="/observability">Knowledge</a><Token /></div></header>
-    <form className="obs-controls agent-controls" onSubmit={(event) => { event.preventDefault(); setSelected(''); setTimeline([]); void loadRuns() }}><label>Project ID<input value={project} onChange={(event) => setProject(event.target.value)} placeholder="temporality-live-verification" required /></label><button className="primary" disabled={busy}>{busy ? 'Loading…' : 'Load runs'}</button></form>
-    {error && <div className="obs-error" role="alert">{error}<small>Проверьте, что Agent Kernel доступен на localhost:8090, а Runtime — на localhost:8080.</small></div>}
-    <main className="agent-grid">
-      <aside className="obs-panel agent-list"><header><span className="eyebrow">RUN HISTORY</span><strong>{runs.length} runs</strong></header>
-        {!runs.length ? <p className="obs-empty">Нет запусков для этого проекта. Сначала отправьте run через ваш harness/Agent Kernel, затем нажмите Load runs.</p> : runs.map((event) => { const id = runID(event); return <button key={event.event_id} className={`agent-run ${selected === id ? 'selected' : ''}`} onClick={() => setSelected(id)}><time>{new Date(event.occurred_at).toLocaleString()}</time><strong>{id}</strong><span>{String(event.data?.role ?? 'agent')} · {String(event.data?.task_id ?? '')}</span></button> })}
-      </aside>
-      <section className="obs-panel agent-detail"><header><span className="eyebrow">RESULT & TRACE</span><strong>{String(result?.status ?? (selected ? 'loading' : 'select a run'))}</strong></header>
-        {!selected ? <p className="obs-empty">Выберите запуск слева. Здесь появятся ответ агента, события и запросы на подтверждение.</p> : <>
-          {typeof answer === 'string' && <article className="agent-answer"><h2>Agent answer</h2><Markdown content={answer} /></article>}
-          {Array.isArray(stages) && stages.map((stage, index) => {
-            const item = stage as Record<string, unknown>
-            return <article className="agent-stage" key={`${String(item.run_id ?? item.role ?? index)}`}><h3>{String(item.role ?? `Stage ${index + 1}`)} <span>{String(item.status ?? '')}</span></h3>{typeof item.answer === 'string' && <Markdown content={item.answer} />}</article>
-          })}
-          {result?.result !== undefined && !answer && <details open><summary>Run result</summary><pre>{json(result.result)}</pre></details>}
-          {pending.map((event) => { const details = event.data?.details as Record<string, unknown> | undefined; const operation = event.data?.operation as Record<string, unknown> | undefined; const operationArgs = operation?.arguments as Record<string, unknown> | undefined; const command = operationArgs?.command; const risk = event.data?.risk as Record<string, unknown> | undefined; const redaction = event.data?.redaction as Record<string, unknown> | undefined; return <article className="agent-approval" key={event.event_id}><h2>Approval required</h2><p>{String(operation?.summary ?? event.data?.reason ?? event.data?.action ?? 'Agent requested approval')}</p>{details && <><strong>{String(details.tool)}{details.workspace_read_only ? ' · read only' : ''} · risk {String(risk?.level ?? 'unknown')}</strong><pre>{Array.isArray(command) ? command.join(' ') : json(operation?.arguments ?? details)}</pre><small>Workspace: {String(details.workspace ?? 'not specified')} · arguments {String(operation?.arguments_hash ?? 'hash unavailable')} · redacted {String(redaction?.applied ?? false)}{redaction?.truncated ? ' · preview truncated' : ''}</small></>}<label>Decision note<input value={reason} onChange={(change) => setReason(change.target.value)} /></label><div className="agent-actions"><button className="primary" disabled={busy} onClick={() => void decide(event, true)}>Approve and run</button><button disabled={busy} onClick={() => void decide(event, false)}>Reject</button></div></article> })}
-          <ol className="agent-timeline">{[...timeline].reverse().map((event) => <li key={`${event.source.id}:${event.event_id}`}><time>{new Date(event.occurred_at).toLocaleString()}</time><strong>{event.type}</strong><details><summary>event data</summary><pre>{json(event)}</pre></details></li>)}</ol>
-        </>}
-      </section>
-    </main>
-  </div>
+  return (
+    <div style={{ padding: '1rem' }}>
+      {error && (
+        <InlineNotification
+          kind="error"
+          title="Error"
+          subtitle={error}
+          onClose={() => setError('')}
+          lowContrast
+          style={{ marginBottom: '1rem' }}
+        />
+      )}
+
+      <Grid>
+        <Column sm={4} md={8} lg={16}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
+            <div style={{ flex: 1 }}>
+              <TextInput
+                id="project-id"
+                labelText="Project ID"
+                value={project}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProject(e.target.value)}
+                placeholder="temporality-live-verification"
+              />
+            </div>
+            <Button onClick={() => { setSelected(''); setTimeline([]); void loadRuns() }} disabled={busy}>
+              Load runs
+            </Button>
+            <Token />
+          </div>
+        </Column>
+      </Grid>
+
+      <Grid>
+        {/* Run list */}
+        <Column sm={4} md={3} lg={4}>
+          <Section level={3}>
+            <Heading>Run History ({runs.length})</Heading>
+            <Stack gap={2}>
+              {runs.length === 0 && <Tile><p>No runs for this project</p></Tile>}
+              {runs.map((event) => {
+                const id = runID(event)
+                return (
+                  <Tile
+                    key={event.event_id}
+                    onClick={() => setSelected(id)}
+                    className={`workspace-tile ${selected === id ? 'selected' : ''}`}
+                  >
+                    <strong>{id}</strong>
+                    <br />
+                    <Tag type="gray" size="sm">{String(event.data?.role ?? 'agent')}</Tag>
+                    <small style={{ marginLeft: '0.5rem', color: '#7e8a9c' }}>
+                      {new Date(event.occurred_at).toLocaleString()}
+                    </small>
+                  </Tile>
+                )
+              })}
+            </Stack>
+          </Section>
+        </Column>
+
+        {/* Run detail */}
+        <Column sm={4} md={5} lg={12}>
+          <Section level={3}>
+            <Heading>
+              {String(result?.status ?? (selected ? 'Loading…' : 'Select a run'))}
+            </Heading>
+
+            {!selected ? (
+              <Tile><p>Select a run from the list</p></Tile>
+            ) : (
+              <Stack gap={3}>
+                {typeof answer === 'string' && (
+                  <Tile>
+                    <Heading>Agent Answer</Heading>
+                    <Markdown content={answer} />
+                  </Tile>
+                )}
+
+                {Array.isArray(stages) && stages.map((stage, index) => {
+                  const item = stage as Record<string, unknown>
+                  return (
+                    <Tile key={`${String(item.run_id ?? item.role ?? index)}`}>
+                      <Heading>{String(item.role ?? `Stage ${index + 1}`)}</Heading>
+                      <Tag type="gray" size="sm">{String(item.status ?? '')}</Tag>
+                      {typeof item.answer === 'string' && <Markdown content={item.answer} />}
+                    </Tile>
+                  )
+                })}
+
+                {result?.result !== undefined && !answer && (
+                  <Tile>
+                    <Heading>Run Result</Heading>
+                    <pre style={{ background: '#121823', padding: '1rem', fontSize: '0.75rem', overflow: 'auto' }}>
+                      {json(result.result)}
+                    </pre>
+                  </Tile>
+                )}
+
+                {pending.map((event) => {
+                  const details = event.data?.details as Record<string, unknown> | undefined
+                  const operation = event.data?.operation as Record<string, unknown> | undefined
+                  const operationArgs = operation?.arguments as Record<string, unknown> | undefined
+                  const command = operationArgs?.command
+                  const risk = event.data?.risk as Record<string, unknown> | undefined
+                  const redaction = event.data?.redaction as Record<string, unknown> | undefined
+                  return (
+                    <Tile key={event.event_id} style={{ borderLeft: '3px solid #e6b85c' }}>
+                      <Heading>Approval Required</Heading>
+                      <p>{String(operation?.summary ?? event.data?.reason ?? event.data?.action ?? 'Agent requested approval')}</p>
+                      {details && (
+                        <>
+                          <Tag type="warm-gray" size="sm">{String(details.tool)}</Tag>
+                          {details.workspace_read_only && <Tag type="gray" size="sm">read only</Tag>}
+                          <Tag type="gray" size="sm">risk {String(risk?.level ?? 'unknown')}</Tag>
+                          <pre style={{ background: '#121823', padding: '0.5rem', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                            {Array.isArray(command) ? command.join(' ') : json(operation?.arguments ?? details)}
+                          </pre>
+                          <small style={{ color: '#7e8a9c' }}>
+                            Workspace: {String(details.workspace ?? 'not specified')} · arguments {String(operation?.arguments_hash ?? 'hash unavailable')} · redacted {String(redaction?.applied ?? false)}
+                          </small>
+                        </>
+                      )}
+                      <div style={{ marginTop: '1rem' }}>
+                        <TextInput
+                          id="decision-note"
+                          labelText="Decision note"
+                          value={reason}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)}
+                        />
+                      </div>
+                      <Stack orientation="horizontal" gap={2} style={{ marginTop: '0.75rem' }}>
+                        <Button onClick={() => void decide(event, true)} disabled={busy}>Approve</Button>
+                        <Button kind="secondary" onClick={() => void decide(event, false)} disabled={busy}>Reject</Button>
+                      </Stack>
+                    </Tile>
+                  )
+                })}
+
+                <Tile>
+                  <Heading>Timeline</Heading>
+                  <Stack gap={1}>
+                    {[...timeline].reverse().map((event) => (
+                      <div key={`${event.source.id}:${event.event_id}`} style={{ display: 'flex', gap: '0.5rem', fontSize: '0.75rem' }}>
+                        <Time size={16} style={{ flexShrink: 0 }} />
+                        <small style={{ color: '#7e8a9c', minWidth: '8rem' }}>{new Date(event.occurred_at).toLocaleString()}</small>
+                        <strong>{event.type}</strong>
+                      </div>
+                    ))}
+                  </Stack>
+                </Tile>
+              </Stack>
+            )}
+          </Section>
+        </Column>
+      </Grid>
+
+      {busy && <Loading withOverlay={false} />}
+    </div>
+  )
 }
