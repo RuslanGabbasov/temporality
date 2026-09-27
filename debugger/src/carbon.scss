@@ -1,0 +1,75 @@
+// Carbon Design System styles
+// Uses Dart Sass to compile @carbon/react SCSS
+@use '@carbon/react';
+
+// Temporality custom overrides
+:root {
+  // Brand accent colors
+  --cds-interactive-01: #57d7e8;
+  --cds-interactive-02: #9e8cff;
+  --cds-interactive-03: #93e8c0;
+  --cds-interactive-04: #e6b85c;
+  --cds-interactive-05: #ff7285;
+}
+
+// Workspace styles
+.workspace-container {
+  padding: 1rem;
+}
+
+.workspace-tile {
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.workspace-tile:hover {
+  border-color: var(--cds-interactive-01);
+}
+
+.workspace-tile.selected {
+  border-color: var(--cds-interactive-01);
+  box-shadow: 0 0 0 1px var(--cds-interactive-01);
+}
+
+.ws-preview {
+  color: var(--cds-text-02, #7e8a9c);
+  font-size: 0.75rem;
+  display: block;
+  margin-top: 0.25rem;
+}
+
+.ws-task-action {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.ws-answer {
+  background: var(--cds-ui-02, #121823);
+  padding: 1rem;
+  font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+// Scrollbar styling
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--cds-ui-01, #0d1118);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--cds-ui-05, #344258);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cds-text-02, #7e8a9c);
+}
