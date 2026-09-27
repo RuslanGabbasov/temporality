@@ -1,6 +1,4 @@
 /* Temporality — Carbon-based design system */
-/* Import Carbon styles */
-@import '@carbon/styles/css/styles.css';
 
 /* Carbon theme overrides for Temporality brand */
 :root {
