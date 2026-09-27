@@ -19,7 +19,7 @@ type recordingSandbox struct {
 	commands [][]string
 }
 
-func (r *recordingSandbox) SandboxRoot() string                       { return os.TempDir() }
+func (r *recordingSandbox) SandboxRoot() string                          { return os.TempDir() }
 func (r *recordingSandbox) ResolveWorkspace(path string) (string, error) { return path, nil }
 
 func (r *recordingSandbox) Execute(_ context.Context, request sandbox.Request) (sandbox.Result, error) {

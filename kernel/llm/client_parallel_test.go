@@ -1,10 +1,12 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestParallelToolCallsDisabledWhenToolsPresent(t *testing.T) {
@@ -21,8 +23,10 @@ func TestParallelToolCallsDisabledWhenToolsPresent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(Config{BaseURL: server.URL, Model: "m", MaxOutputTokens: 64})
-	_, err := client.Complete(nil, []Message{{Role: "user", Content: "hi"}}, []ToolDef{{Name: "t"}})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := New(Config{BaseURL: server.URL, Model: "m", MaxOutputTokens: 64, Timeout: 5 * time.Second})
+	_, err := client.Complete(ctx, []Message{{Role: "user", Content: "hi"}}, []ToolDef{{Name: "t"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,8 +51,10 @@ func TestParallelToolCallsOmittedWhenNoTools(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(Config{BaseURL: server.URL, Model: "m", MaxOutputTokens: 64})
-	_, err := client.Complete(nil, []Message{{Role: "user", Content: "hi"}}, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := New(Config{BaseURL: server.URL, Model: "m", MaxOutputTokens: 64, Timeout: 5 * time.Second})
+	_, err := client.Complete(ctx, []Message{{Role: "user", Content: "hi"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,8 +87,10 @@ func TestMalformedArgumentsSalvage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(Config{BaseURL: server.URL, Model: "m", MaxOutputTokens: 64})
-	result, err := client.Complete(nil, []Message{{Role: "user", Content: "go"}}, []ToolDef{{Name: "t"}})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := New(Config{BaseURL: server.URL, Model: "m", MaxOutputTokens: 64, Timeout: 5 * time.Second})
+	result, err := client.Complete(ctx, []Message{{Role: "user", Content: "go"}}, []ToolDef{{Name: "t"}})
 	if err != nil {
 		t.Fatalf("malformed call must not fail the completion: %v", err)
 	}
