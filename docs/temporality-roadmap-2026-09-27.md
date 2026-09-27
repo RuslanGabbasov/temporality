@@ -210,30 +210,38 @@ Investigation должна быть shareable ссылкой.
 Temporality должен не только показывать timeline, но и позволять
 исследовать типовые вопросы:
 
-#### Почему агент это сделал?
+#### Почему агент это сделал? [x] done
 
--   какой knowledge был доступен;
+-   какой knowledge был доступен (activation chain);
 -   какой hint был recalled;
 -   какое решение последовало;
 -   какие действия были совершены.
 
-#### Почему знание устарело?
+Endpoint: `GET /v1/observations/knowledge/chain?knowledge_id=`
+
+#### Почему знание устарело? [x] done
 
 -   lifecycle knowledge;
 -   evidence, вызвавшее contradiction;
 -   replacement knowledge.
 
-#### Почему два run различаются?
+Endpoint: `GET /v1/observations/knowledge?knowledge_id=` (включает history)
+
+#### Почему два run различаются? [x] done
 
 -   diff knowledge state между runs;
 -   diff trajectory;
 -   diff outcomes.
 
-#### Что команда уже знает?
+Endpoint: `GET /v1/observations/runs/compare?project=&run1=&run2=`
+
+#### Что команда уже знает? [x] done
 
 -   aggregate knowledge по scope;
 -   confidence distribution;
 -   contradiction map.
+
+Endpoint: `GET /v1/observations/knowledge?project=`
 
 ---
 
@@ -417,7 +425,7 @@ P1 — Make experience understandable
 │   ├── activation chain  [x] done
 │   ├── semantic zoom
 │   └── shareable investigation URL
-├── Experience Investigation
+├── Experience Investigation  [x] done
 │   ├── why this decision?
 │   ├── why knowledge disappeared?
 │   ├── why runs differ?

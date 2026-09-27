@@ -40,6 +40,7 @@ func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate) htt
 	mux.HandleFunc("GET /v1/observations/knowledge/diff", s.diffKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/chain", s.knowledgeChain)
 	mux.HandleFunc("GET /v1/observations/runs/state", s.runState)
+	mux.HandleFunc("GET /v1/observations/runs/compare", s.compareRuns)
 	mux.HandleFunc("POST /v1/observations/knowledge/invalidate", s.invalidateObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/hints", s.activateObservationHints)
 	return logRequests(log, s.gate.Authenticate(mux))
@@ -448,6 +449,75 @@ func (s *Server) runState(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"project": project, "run": runID, "at": at, "status": status, "events": entries, "count": len(entries)})
+}
+
+type RunSummary struct {
+	RunID         string `json:"run_id"`
+	Status        string `json:"status"`
+	Turns         int    `json:"turns"`
+	ToolCalls     int    `json:"tool_calls"`
+	MCPRequests   int    `json:"mcp_requests"`
+	KnowledgeUsed int    `json:"knowledge_used"`
+}
+
+func (s *Server) compareRuns(w http.ResponseWriter, r *http.Request) {
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	run1 := strings.TrimSpace(r.URL.Query().Get("run1"))
+	run2 := strings.TrimSpace(r.URL.Query().Get("run2"))
+	if project == "" || run1 == "" || run2 == "" {
+		writeError(w, http.StatusBadRequest, errors.New("project, run1, and run2 are required"))
+		return
+	}
+	if !s.gate.Allow(w, r, controlplane.RoleReader, project) {
+		return
+	}
+	summarize := func(runID string) (RunSummary, error) {
+		filter := observation.Filter{Project: project, Run: runID, Limit: 500}
+		var allEvents []observation.Event
+		cursor := ""
+		for {
+			page, err := s.store.ListObservationPage(r.Context(), filter, cursor)
+			if err != nil {
+				return RunSummary{}, err
+			}
+			allEvents = append(allEvents, page.Events...)
+			if page.NextCursor == "" {
+				break
+			}
+			cursor = page.NextCursor
+		}
+		var summary RunSummary
+		summary.RunID = runID
+		for _, ev := range allEvents {
+			switch ev.Type {
+			case "run.started":
+				summary.Status = "started"
+			case "run.completed":
+				summary.Status = "completed"
+			case "turn.completed":
+				summary.Turns++
+			case "tool.started":
+				summary.ToolCalls++
+				if strings.HasPrefix(ev.Data["tool"].(string), "mcp__") {
+					summary.MCPRequests++
+				}
+			case "hint.used":
+				summary.KnowledgeUsed++
+			}
+		}
+		return summary, nil
+	}
+	s1, err := summarize(run1)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not load run1 events"))
+		return
+	}
+	s2, err := summarize(run2)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not load run2 events"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"project": project, "run1": s1, "run2": s2})
 }
 
 func (s *Server) invalidateObservationKnowledge(w http.ResponseWriter, r *http.Request) {

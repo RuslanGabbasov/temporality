@@ -566,3 +566,123 @@ func TestRunState(t *testing.T) {
 		t.Fatalf("status at t2 = %v, want in_progress", body["status"])
 	}
 }
+
+func TestCompareRuns(t *testing.T) {
+	handler := newTestServer(t)
+
+	ingest := func(events ...observation.Event) {
+		t.Helper()
+		res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": events})
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("ingest failed: %d %v", res.StatusCode, body)
+		}
+	}
+
+	// Run 1: 2 turns, 1 tool call, 1 knowledge used
+	run1Started := observation.Event{
+		Schema: observation.Schema, EventID: "r1-start", OccurredAt: time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-1"},
+		Type:    "run.started", Data: map[string]any{},
+	}
+	run1Tool := observation.Event{
+		Schema: observation.Schema, EventID: "r1-tool", OccurredAt: time.Date(2026, 9, 25, 10, 1, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-1"},
+		Type:    "tool.started", Data: map[string]any{"tool": "run_command", "operation_id": "op-1"},
+	}
+	run1Hint := observation.Event{
+		Schema: observation.Schema, EventID: "r1-hint", OccurredAt: time.Date(2026, 9, 25, 10, 2, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-1"},
+		Type:    "hint.used", Data: map[string]any{"hint_id": "h1", "knowledge_id": "K1"},
+	}
+	run1Turn1 := observation.Event{
+		Schema: observation.Schema, EventID: "r1-turn1", OccurredAt: time.Date(2026, 9, 25, 10, 3, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-1"},
+		Type:    "turn.completed", Data: map[string]any{"turn": 1},
+	}
+	run1Turn2 := observation.Event{
+		Schema: observation.Schema, EventID: "r1-turn2", OccurredAt: time.Date(2026, 9, 25, 10, 4, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-1"},
+		Type:    "turn.completed", Data: map[string]any{"turn": 2},
+	}
+	run1Completed := observation.Event{
+		Schema: observation.Schema, EventID: "r1-done", OccurredAt: time.Date(2026, 9, 25, 10, 5, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-1"},
+		Type:    "run.completed", Data: map[string]any{},
+	}
+	ingest(run1Started, run1Tool, run1Hint, run1Turn1, run1Turn2, run1Completed)
+
+	// Run 2: 1 turn, 2 tool calls (1 MCP), 0 knowledge used
+	run2Started := observation.Event{
+		Schema: observation.Schema, EventID: "r2-start", OccurredAt: time.Date(2026, 9, 25, 11, 0, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-2"},
+		Type:    "run.started", Data: map[string]any{},
+	}
+	run2Tool1 := observation.Event{
+		Schema: observation.Schema, EventID: "r2-tool1", OccurredAt: time.Date(2026, 9, 25, 11, 1, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-2"},
+		Type:    "tool.started", Data: map[string]any{"tool": "run_command", "operation_id": "op-2"},
+	}
+	run2Tool2 := observation.Event{
+		Schema: observation.Schema, EventID: "r2-tool2", OccurredAt: time.Date(2026, 9, 25, 11, 2, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-2"},
+		Type:    "tool.started", Data: map[string]any{"tool": "mcp__read_file", "operation_id": "op-3"},
+	}
+	run2Turn := observation.Event{
+		Schema: observation.Schema, EventID: "r2-turn", OccurredAt: time.Date(2026, 9, 25, 11, 3, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-2"},
+		Type:    "turn.completed", Data: map[string]any{"turn": 1},
+	}
+	run2Completed := observation.Event{
+		Schema: observation.Schema, EventID: "r2-done", OccurredAt: time.Date(2026, 9, 25, 11, 4, 0, 0, time.UTC),
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: "lighthouse", Run: "run-2"},
+		Type:    "run.completed", Data: map[string]any{},
+	}
+	ingest(run2Started, run2Tool1, run2Tool2, run2Turn, run2Completed)
+
+	// Compare
+	res, body := doJSON(t, handler, "GET", "/v1/observations/runs/compare?project=lighthouse&run1=run-1&run2=run-2", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("compare status = %d", res.StatusCode)
+	}
+	r1 := body["run1"].(map[string]any)
+	r2 := body["run2"].(map[string]any)
+
+	// Run 1: 2 turns, 1 tool, 0 MCP, 1 knowledge
+	if r1["turns"].(float64) != 2 {
+		t.Fatalf("run1 turns = %v, want 2", r1["turns"])
+	}
+	if r1["tool_calls"].(float64) != 1 {
+		t.Fatalf("run1 tool_calls = %v, want 1", r1["tool_calls"])
+	}
+	if r1["mcp_requests"].(float64) != 0 {
+		t.Fatalf("run1 mcp_requests = %v, want 0", r1["mcp_requests"])
+	}
+	if r1["knowledge_used"].(float64) != 1 {
+		t.Fatalf("run1 knowledge_used = %v, want 1", r1["knowledge_used"])
+	}
+
+	// Run 2: 1 turn, 2 tools, 1 MCP, 0 knowledge
+	if r2["turns"].(float64) != 1 {
+		t.Fatalf("run2 turns = %v, want 1", r2["turns"])
+	}
+	if r2["tool_calls"].(float64) != 2 {
+		t.Fatalf("run2 tool_calls = %v, want 2", r2["tool_calls"])
+	}
+	if r2["mcp_requests"].(float64) != 1 {
+		t.Fatalf("run2 mcp_requests = %v, want 1", r2["mcp_requests"])
+	}
+	if r2["knowledge_used"].(float64) != 0 {
+		t.Fatalf("run2 knowledge_used = %v, want 0", r2["knowledge_used"])
+	}
+}
