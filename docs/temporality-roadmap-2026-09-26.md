@@ -651,8 +651,8 @@ P0 — Make it usable
 │
 ├── Operations UI  [x] done
 ├── minimal duplicate mitigation  [x] done
-├── Live MCP E2E
-└── runbook
+├── Live MCP E2E  [~] infra ready, live test pending
+└── runbook  [x] done
         │
         ▼
 P1 — Make experience understandable
