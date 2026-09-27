@@ -1,30 +1,7 @@
-// Carbon-based layout shell for Temporality
+// Custom layout shell for Temporality
 // Provides consistent navigation, header, and content area
 
-import { useState, useEffect, type ReactNode } from 'react'
-import {
-  Header,
-  HeaderName,
-  HeaderNavigation,
-  HeaderMenuItem,
-  HeaderGlobalBar,
-  HeaderGlobalAction,
-  SideNav,
-  SideNavItems,
-  SideNavMenuItem,
-  SideNavMenu,
-  Content,
-  Theme,
-} from '@carbon/react'
-import {
-  Dashboard,
-  Activity,
-  Settings,
-  Document,
-  Time,
-  User,
-} from '@carbon/icons-react'
-import Token from './Token'
+import { useState, type ReactNode } from 'react'
 
 interface LayoutProps {
   children: ReactNode
@@ -32,92 +9,67 @@ interface LayoutProps {
 }
 
 const NAV_ITEMS = [
-  { path: '/experience', label: 'Experience Timeline', icon: Time },
-  { path: '/agents', label: 'Agent Runs', icon: Activity },
-  { path: '/operations', label: 'Operations', icon: Settings },
-  { path: '/observability', label: 'Knowledge', icon: Document },
-  { path: '/workspace', label: 'Workspace', icon: Dashboard },
+  { path: '/experience', label: 'Experience Timeline' },
+  { path: '/agents', label: 'Agent Runs' },
+  { path: '/operations', label: 'Operations' },
+  { path: '/observability', label: 'Knowledge' },
+  { path: '/workspace', label: 'Workspace' },
 ]
 
 export default function Layout({ children, activePage }: LayoutProps) {
-  const [isSideNavExpanded, setIsSideNavExpanded] = useState(true)
-
   const navigate = (path: string) => {
     window.history.pushState(null, '', path)
     window.dispatchEvent(new PopStateEvent('popstate'))
   }
 
   return (
-    <Theme theme="g100">
-      <Header aria-label="Temporality">
-        <HeaderName href="/experience" prefix="">
+    <div>
+      <header className="header">
+        <a href="/experience" className="header__name" onClick={(e) => { e.preventDefault(); navigate('/experience') }}>
           Temporality
-        </HeaderName>
+        </a>
         
-        <HeaderNavigation aria-label="Main navigation">
+        <nav className="header__nav">
           {NAV_ITEMS.map(({ path, label }) => (
-            <HeaderMenuItem
+            <a
               key={path}
               href={path}
-              isActive={activePage === path.slice(1)}
-              onClick={(e: React.MouseEvent) => {
+              className={`header__link ${activePage === path.slice(1) ? 'header__link--active' : ''}`}
+              onClick={(e) => {
                 e.preventDefault()
                 navigate(path)
               }}
             >
               {label}
-            </HeaderMenuItem>
+            </a>
           ))}
-        </HeaderNavigation>
+        </nav>
+      </header>
 
-        <HeaderGlobalBar>
-          <HeaderGlobalAction
-            aria-label="Toggle side navigation"
-            onClick={() => setIsSideNavExpanded(!isSideNavExpanded)}
-            isActive={isSideNavExpanded}
-            tooltipAlignment="end"
-          >
-            <Settings size={20} />
-          </HeaderGlobalAction>
-        </HeaderGlobalBar>
-      </Header>
-
-      <SideNav
-        aria-label="Side navigation"
-        expanded={isSideNavExpanded}
-        onOverlayClick={() => setIsSideNavExpanded(false)}
-        href="#main-content"
-      >
-        <SideNavItems>
-          <SideNavMenu title="Navigation" defaultExpanded>
-            {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
-              <SideNavMenuItem
+      <div className="layout">
+        <nav className="sidenav">
+          <div className="sidenav__section">
+            <div className="sidenav__title">Navigation</div>
+            {NAV_ITEMS.map(({ path, label }) => (
+              <a
                 key={path}
                 href={path}
-                isActive={activePage === path.slice(1)}
-                onClick={(e: React.MouseEvent) => {
+                className={`sidenav__link ${activePage === path.slice(1) ? 'sidenav__link--active' : ''}`}
+                onClick={(e) => {
                   e.preventDefault()
                   navigate(path)
                 }}
               >
-                <Icon size={16} style={{ marginRight: '0.5rem' }} />
                 {label}
-              </SideNavMenuItem>
+              </a>
             ))}
-          </SideNavMenu>
-          
-          <SideNavMenu title="Settings">
-            <SideNavMenuItem href="#token">
-              <User size={16} style={{ marginRight: '0.5rem' }} />
-              Authentication
-            </SideNavMenuItem>
-          </SideNavMenu>
-        </SideNavItems>
-      </SideNav>
+          </div>
+        </nav>
 
-      <Content id="main-content">
-        {children}
-      </Content>
-    </Theme>
+        <main className="layout__content">
+          {children}
+        </main>
+      </div>
+    </div>
   )
 }
