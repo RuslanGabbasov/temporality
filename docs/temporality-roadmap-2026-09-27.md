@@ -408,7 +408,7 @@ P0 — Make it usable
 │
 P0/P1 — Execution provenance
 │
-├── Live MCP E2E  [~] infra ready, live test pending
+├── Live MCP E2E  [x] done
 │
 P1 — Make experience understandable
 │
