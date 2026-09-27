@@ -151,8 +151,14 @@ func (c *Client) Call(ctx context.Context, name string, args map[string]any, ide
 }
 
 func (c *Client) connect(ctx context.Context) (*mcp.ClientSession, error) {
+	cmd := exec.CommandContext(ctx, c.command, c.args...)
+	cmd.Stderr = os.Stderr // surface server panics/errors in kernel logs
 	client := mcp.NewClient(&mcp.Implementation{Name: "temporality-agent-kernel", Version: "0.1.0"}, nil)
-	return client.Connect(ctx, &mcp.CommandTransport{Command: exec.CommandContext(ctx, c.command, c.args...)}, nil)
+	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("connect %s %v: %w", c.command, c.args, err)
+	}
+	return session, nil
 }
 
 func contentText(content []mcp.Content) string {
