@@ -20,7 +20,7 @@ import {
   Dashboard,
   Activity,
   Settings,
-  Knowledge,
+  Document,
   Time,
   User,
 } from '@carbon/icons-react'
@@ -35,7 +35,7 @@ const NAV_ITEMS = [
   { path: '/experience', label: 'Experience Timeline', icon: Time },
   { path: '/agents', label: 'Agent Runs', icon: Activity },
   { path: '/operations', label: 'Operations', icon: Settings },
-  { path: '/observability', label: 'Knowledge', icon: Knowledge },
+  { path: '/observability', label: 'Knowledge', icon: Document },
   { path: '/workspace', label: 'Workspace', icon: Dashboard },
 ]
 
