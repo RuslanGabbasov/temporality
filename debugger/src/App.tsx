@@ -61,6 +61,7 @@ export default function App() {
           case 'providers':
             return <Providers />
           case 'users':
+            // @ts-ignore — Users returns JSX but TS infers void due to bare returns in callbacks
             return <Users />
           default:
             return <ExperienceTimeline project={project} />

@@ -94,8 +94,6 @@ export default function Users() {
     void navigator.clipboard.writeText(text)
   }
 
-  const remove = async (u: User) => {
-
   const ROLE_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'red'> = {
     admin: 'blue',
     operator: 'green',
@@ -176,5 +174,4 @@ export default function Users() {
       {loading && <Loading withOverlay={false} />}
     </div>
   )
-}
 }
