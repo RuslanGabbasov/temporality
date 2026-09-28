@@ -172,6 +172,23 @@ export default function Workspace({ project }: { project: string }) {
     if (activeConvId === id) setActiveConvId(null)
   }
 
+  const branchConversation = (convId: string, messageIndex: number) => {
+    const conv = conversations.find((c) => c.id === convId)
+    if (!conv) return
+    // Create a new conversation with messages up to (and including) the clicked message
+    const branchMessages = conv.messages.slice(0, messageIndex + 1)
+    const branch: Conversation = {
+      id: crypto.randomUUID(),
+      title: conv.title + ' (branch)',
+      messages: branchMessages,
+      agentId: conv.agentId,
+      taskId: '',
+      createdAt: new Date(),
+    }
+    setConversations((prev) => [branch, ...prev])
+    setActiveConvId(branch.id)
+  }
+
   const updateMsg = (convId: string, runId: string, patch: Partial<ChatMessage>) => {
     setConversations((prev) => prev.map((c) => {
       if (c.id !== convId) return c
@@ -405,8 +422,15 @@ export default function Workspace({ project }: { project: string }) {
                     )}
 
                     {msg.runId && msg.status && msg.status !== 'running' && (
-                      <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: msg.role === 'user' ? '#080b10' : '#7e8a9c' }}>
+                      <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: msg.role === 'user' ? '#080b10' : '#7e8a9c', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Tag type={STATUS_COLORS[msg.status] || 'gray'} size="sm">{msg.status}</Tag>
+                        {activeConv && (
+                          <button
+                            onClick={() => branchConversation(activeConv.id, i)}
+                            style={{ background: 'none', border: '1px solid #344258', borderRadius: '4px', color: '#57d7e8', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
+                            title="Branch conversation from this point"
+                          >Branch</button>
+                        )}
                       </div>
                     )}
                   </div>
