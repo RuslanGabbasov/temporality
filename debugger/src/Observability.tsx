@@ -1,5 +1,5 @@
 import { type FormEvent, useMemo, useState } from 'react'
-import { API_BASE } from './api'
+import { API_BASE, authHeaders } from './api'
 import { observationApi, type KnowledgeItem, type ObservationEvent, type ObservationHint } from './observationApi'
 import {
   Button,
@@ -160,6 +160,15 @@ export default function Observability({ project }: { project: string }) {
               <TextInput id="known-at" labelText="Known by" type="datetime-local" value={knownAt} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKnownAt(e.target.value)} />
             </div>
             <Button onClick={load} disabled={loading}>Open project</Button>
+            <Button kind="secondary" onClick={async () => {
+              if (!project.trim()) return
+              setLoading(true)
+              try {
+                const resp = await fetch(`/kernel-api/v1/workspace/projects/${encodeURIComponent(project.trim())}/projection`, { headers: { ...authHeaders() } })
+                if (resp.ok) { setProjection(await resp.json()); setShowProjection(true) }
+              } catch { /* ignore */ }
+              finally { setLoading(false) }
+            }} disabled={loading}>Experience projection</Button>
           </div>
         </Column>
       </Grid>
@@ -172,6 +181,53 @@ export default function Observability({ project }: { project: string }) {
           lowContrast
           style={{ marginBottom: '1rem' }}
         />
+      )}
+
+      {/* Experience Projection */}
+      {showProjection && projection && (
+        <Tile style={{ marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <Heading style={{ fontSize: '0.875rem' }}>Experience Projection — {projection.run_count} runs</Heading>
+            <button onClick={() => setShowProjection(false)} style={{ background: 'none', border: 'none', color: '#7e8a9c', cursor: 'pointer', fontSize: '0.875rem' }}>✕</button>
+          </div>
+          {/* Summary */}
+          <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginBottom: '0.75rem', fontSize: '0.8rem' }}>
+            <span><strong>{projection.summary?.total_tool_patterns ?? 0}</strong> tool patterns</span>
+            <span><strong>{projection.summary?.total_knowledge ?? 0}</strong> knowledge items</span>
+            <span style={{ color: '#9ece6a' }}><strong>{projection.summary?.alive_knowledge ?? 0}</strong> alive</span>
+            <span style={{ color: '#565f89' }}><strong>{projection.summary?.dead_knowledge ?? 0}</strong> dead</span>
+            <span>Avg success: <strong>{((projection.summary?.avg_success_rate ?? 0) * 100).toFixed(0)}%</strong></span>
+            {projection.summary?.most_used_tools?.length > 0 && (
+              <span>Top tools: {projection.summary.most_used_tools.map((t: string) => <Tag key={t} type="blue" size="sm" style={{ marginLeft: '0.25rem' }}>{t}</Tag>)}</span>
+            )}
+          </div>
+          {/* Tool patterns */}
+          {projection.tool_patterns?.length > 0 && (
+            <div style={{ marginBottom: '0.75rem' }}>
+              <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Tool Patterns</h5>
+              {projection.tool_patterns.map((p: any, i: number) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', fontSize: '0.8rem' }}>
+                  <Tag type="cyan" size="sm">{p.count}x</Tag>
+                  <code style={{ color: '#9e8cff' }}>{p.signature}</code>
+                  <span style={{ color: '#7e8a9c' }}>{p.run_count} runs · {(p.success_rate * 100).toFixed(0)}% success</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Knowledge lifecycle */}
+          {projection.knowledge_lifecycle?.length > 0 && (
+            <div>
+              <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Knowledge Lifecycle</h5>
+              {projection.knowledge_lifecycle.map((k: any, i: number) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', fontSize: '0.8rem' }}>
+                  <Tag type={k.is_alive ? 'green' : 'red'} size="sm">{k.current_state}</Tag>
+                  <span>{k.proposition || k.knowledge_id}</span>
+                  <span style={{ color: '#7e8a9c' }}>{k.run_count} runs</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Tile>
       )}
 
       <Grid>
