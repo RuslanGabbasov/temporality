@@ -267,20 +267,20 @@ export default function Observability({ project }: { project: string }) {
                   {selected.at_risk && <InlineNotification kind="warning" title="At risk" subtitle={`Depends on: ${selected.risk_sources?.join(', ')}`} lowContrast />}
                   {selected.relationships?.length ? (
                     <>
-                      <h5 style="fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem"">Relations</h5>
+                      <h5 style={{ fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Relations</h5>
                       {selected.relationships.map((r) => <div key={r.event_id}>{r.type} → <code>{r.target_id}</code></div>)}
                     </>
                   ) : null}
                   {selected.evidence?.length ? (
                     <>
-                      <h5 style="fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem"">Evidence</h5>
+                      <h5 style={{ fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Evidence</h5>
                       {selected.evidence.map((e) => <div key={e.ref}><code>{e.ref}</code> ({e.type})</div>)}
                     </>
                   ) : <p style={{ color: '#7e8a9c' }}>No evidence attached</p>}
                 </Tile>
 
                 <Tile>
-                  <h5 style="fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem"">Lifecycle</h5>
+                  <h5 style={{ fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Lifecycle</h5>
                   <Stack gap={1}>
                     {selected.history.map((entry) => (
                       <div key={entry.event_id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.75rem' }}>
@@ -295,7 +295,7 @@ export default function Observability({ project }: { project: string }) {
 
                 {selected.state !== 'invalidated' && selected.state !== 'corrected' && selected.state !== 'superseded' && (
                   <Tile>
-                    <h5 style="fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem"">Manual Invalidation</h5>
+                    <h5 style={{ fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Manual Invalidation</h5>
                     <Stack gap={2}>
                       <TextInput id="actor" labelText="Actor" value={actor} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setActor(e.target.value)} />
                       <TextArea id="reason" labelText="Reason" value={reason} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setReason(e.target.value)} rows={3} />
@@ -305,7 +305,7 @@ export default function Observability({ project }: { project: string }) {
                 )}
 
                 <Tile>
-                  <h5 style="fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem"">Memory Activation</h5>
+                  <h5 style={{ fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Memory Activation</h5>
                   <Stack gap={2}>
                     <TextArea id="query" labelText="Query" value={query} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setQuery(e.target.value)} rows={2} placeholder="What is the agent trying to do?" />
                     <TextInput id="tool" labelText="Tool" value={tool} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTool(e.target.value)} placeholder="test-runner" />
