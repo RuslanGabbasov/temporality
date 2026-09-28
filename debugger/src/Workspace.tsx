@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import {
   Button,
   TextInput,
@@ -14,14 +14,8 @@ import {
   Stack,
   Section,
   Heading,
-  Layer,
 } from '@carbon/react'
-import {
-  Add,
-  Play,
-  ArrowRight,
-  Time,
-} from '@carbon/icons-react'
+import { Add, Play, ArrowRight, Send, Time, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Project, type Agent, type Task, type Run } from './workspaceApi'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -30,29 +24,38 @@ function shortTime(iso: string) {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString()
 }
 
-const STATUS_TAGS: Record<string, { type: string; label: string }> = {
-  completed: { type: 'green', label: 'Completed' },
-  failed: { type: 'red', label: 'Failed' },
-  running: { type: 'blue', label: 'Running' },
-  turn_limit: { type: 'warm-gray', label: 'Turn Limit' },
-  pending: { type: 'gray', label: 'Pending' },
+const STATUS_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'red'> = {
+  completed: 'green', failed: 'red', running: 'blue', turn_limit: 'warm-gray', pending: 'gray',
 }
 
-export default function Workspace({ project }: { project: string; setProject: (p: string) => void }) {
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: Date
+  runId?: string
+  status?: string
+}
+
+export default function Workspace({ project }: { project: string }) {
   const [agents, setAgents] = useState<Agent[]>([])
+  const [allAgents, setAllAgents] = useState<Agent[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [runs, setRuns] = useState<Run[]>([])
   const [selectedRun, setSelectedRun] = useState<Run | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  // Chat state
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [inputValue, setInputValue] = useState('')
+  const [selectedAgentId, setSelectedAgentId] = useState('')
+  const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Agent form
   const [showAgentForm, setShowAgentForm] = useState(false)
   const [agentName, setAgentName] = useState('')
   const [agentModel, setAgentModel] = useState('')
   const [agentPrompt, setAgentPrompt] = useState('')
-  const [allAgents, setAllAgents] = useState<Agent[]>([])
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null)
 
   // Task form
@@ -61,33 +64,6 @@ export default function Workspace({ project }: { project: string; setProject: (p
   const [taskPrompt, setTaskPrompt] = useState('')
   const [taskAgentId, setTaskAgentId] = useState('')
 
-  const loadProjects = useCallback(async () => {
-    try {
-      const agentsData = await workspaceApi.listAllAgents()
-      setAllAgents(agentsData.agents ?? [])
-    } catch (f) { setError(message(f)) }
-  }, [])
-
-  const loadTaskRuns = useCallback(async (task: Task) => {
-    setSelectedTask(task)
-    setSelectedRun(null)
-    try {
-      const data = await workspaceApi.listRuns(task.id)
-      setRuns(data.runs ?? [])
-    } catch (f) { setError(message(f)) }
-  }, [])
-
-  const loadRun = useCallback(async (runId: string) => {
-    try {
-      const run = await workspaceApi.getRun(runId)
-      setSelectedRun(run)
-      setRuns((prev) => prev.map((r) => r.id === run.id ? run : r))
-    } catch (f) { setError(message(f)) }
-  }, [])
-
-  useEffect(() => { void loadProjects() }, [loadProjects])
-
-  // Load project data when global project changes
   const loadProjectInfo = useCallback(async () => {
     if (!project) return
     try {
@@ -103,36 +79,79 @@ export default function Workspace({ project }: { project: string; setProject: (p
     }
   }, [project])
 
-  useEffect(() => { void loadProjectInfo() }, [loadProjectInfo])
+  const loadAllAgents = useCallback(async () => {
+    try {
+      const data = await workspaceApi.listAllAgents()
+      setAllAgents(data.agents ?? [])
+    } catch { /* ignore */ }
+  }, [])
 
-  useEffect(() => {
-    if (!selectedRun || selectedRun.status === 'completed' || selectedRun.status === 'failed' || selectedRun.status === 'turn_limit') return
-    const timer = setInterval(() => { void loadRun(selectedRun.id) }, 3000)
-    return () => clearInterval(timer)
-  }, [selectedRun, loadRun])
+  useEffect(() => { void loadProjectInfo(); void loadAllAgents() }, [loadProjectInfo, loadAllAgents])
 
-  const startEditAgent = (agent: Agent) => {
+  // Chat functions
+  const scrollToBottom = () => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }
+  useEffect(scrollToBottom, [messages])
+
+  const sendMessage = async () => {
+    if (!inputValue.trim() || loading) return
+    const userMsg: ChatMessage = { role: 'user', content: inputValue.trim(), timestamp: new Date() }
+    setMessages((prev) => [...prev, userMsg])
+    setInputValue('')
+    setLoading(true)
+    setError('')
+    try {
+      // Auto-create task from chat message
+      const task = await workspaceApi.createTask({
+        project_id: project,
+        agent_id: selectedAgentId || undefined,
+        title: userMsg.content.slice(0, 80),
+        prompt: userMsg.content,
+      })
+      const result = await workspaceApi.startRun(task.id, { agent_id: selectedAgentId || undefined })
+      const assistantMsg: ChatMessage = {
+        role: 'assistant',
+        content: `Run started: ${result.run_id}`,
+        timestamp: new Date(),
+        runId: result.run_id,
+        status: 'running',
+      }
+      setMessages((prev) => [...prev, assistantMsg])
+      // Start polling for the run
+      pollRun(result.run_id, assistantMsg)
+    } catch (f) {
+      setError(message(f))
+      setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${message(f)}`, timestamp: new Date(), status: 'failed' }])
+    } finally { setLoading(false) }
+  }
+
+  const pollRun = (runId: string, msg: ChatMessage) => {
+    const poll = async () => {
+      try {
+        const run = await workspaceApi.getRun(runId)
+        if (run.status === 'completed' || run.status === 'failed' || run.status === 'turn_limit') {
+          setMessages((prev) => prev.map((m) =>
+            m.runId === runId ? { ...m, content: run.answer || run.error || 'No answer', status: run.status } : m
+          ))
+          return
+        }
+        setTimeout(poll, 3000)
+      } catch { setTimeout(poll, 5000) }
+    }
+    setTimeout(poll, 2000)
+  }
+
+  // Agent CRUD
   const createOrUpdateAgent = async () => {
     if (!agentName.trim()) return
     setLoading(true); setError('')
     try {
       if (editingAgent) {
-        await workspaceApi.updateAgent(editingAgent.id, {
-          name: agentName.trim(),
-          model: agentModel.trim(),
-          system_prompt: agentPrompt,
-        })
+        await workspaceApi.updateAgent(editingAgent.id, { name: agentName.trim(), model: agentModel.trim(), system_prompt: agentPrompt })
       } else {
-        await workspaceApi.createAgent({
-          project_id: project,
-          name: agentName.trim(),
-          model: agentModel.trim(),
-          system_prompt: agentPrompt,
-        })
+        await workspaceApi.createAgent({ project_id: project, name: agentName.trim(), model: agentModel.trim(), system_prompt: agentPrompt })
       }
       setAgentName(''); setAgentModel(''); setAgentPrompt(''); setShowAgentForm(false); setEditingAgent(null)
-      await loadProjects()
-      await loadProjectInfo()
+      void loadProjectInfo()
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }
@@ -142,8 +161,7 @@ export default function Workspace({ project }: { project: string; setProject: (p
     setLoading(true); setError('')
     try {
       await workspaceApi.deleteAgent(agent.id)
-      await loadProjects()
-      await loadProjectInfo()
+      void loadProjectInfo()
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }
@@ -156,42 +174,13 @@ export default function Workspace({ project }: { project: string; setProject: (p
     setShowAgentForm(true)
   }
 
-  const [quickPrompt, setQuickPrompt] = useState('')
-  const [quickAgentId, setQuickAgentId] = useState('')
-  const quickRun = async () => {
-    if (!quickPrompt.trim() || !project) return
-    setLoading(true); setError('')
-    try {
-      // Auto-create task with prompt
-      const task = await workspaceApi.createTask({
-        project_id: project,
-        agent_id: quickAgentId || undefined,
-        title: `Quick: ${quickPrompt.slice(0, 50)}`,
-        prompt: quickPrompt,
-      })
-      const result = await workspaceApi.startRun(task.id, { agent_id: quickAgentId || undefined })
-      setQuickPrompt('')
-      // Switch to the task/run view
-      const createdTask: Task = task as unknown as Task
-      setSelectedTask(createdTask)
-      void loadTaskRuns(createdTask)
-      void loadRun(result.run_id)
-    } catch (f) { setError(message(f)) }
-    finally { setLoading(false) }
-  }
-
   const createTask = async () => {
     if (!taskTitle.trim() || !taskPrompt.trim()) return
     setLoading(true); setError('')
     try {
-      await workspaceApi.createTask({
-        project_id: project,
-        agent_id: taskAgentId || undefined,
-        title: taskTitle.trim(),
-        prompt: taskPrompt.trim(),
-      })
+      await workspaceApi.createTask({ project_id: project, agent_id: taskAgentId || undefined, title: taskTitle.trim(), prompt: taskPrompt.trim() })
       setTaskTitle(''); setTaskPrompt(''); setTaskAgentId(''); setShowTaskForm(false)
-      await loadProjectInfo()
+      void loadProjectInfo()
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }
@@ -200,311 +189,175 @@ export default function Workspace({ project }: { project: string; setProject: (p
     setLoading(true); setError('')
     try {
       const result = await workspaceApi.startRun(task.id, { agent_id: task.agent_id || undefined })
-      await loadTaskRuns(task)
-      void loadRun(result.run_id)
+      // Add to chat
+      setMessages((prev) => [...prev, { role: 'user', content: `[Task] ${task.title}`, timestamp: new Date() }])
+      const assistantMsg: ChatMessage = { role: 'assistant', content: `Run started: ${result.run_id}`, timestamp: new Date(), runId: result.run_id, status: 'running' }
+      setMessages((prev) => [...prev, assistantMsg])
+      pollRun(result.run_id, assistantMsg)
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }
 
+  const loadRun = useCallback(async (runId: string) => {
+    try {
+      const run = await workspaceApi.getRun(runId)
+      setSelectedRun(run)
+      setRuns((prev) => prev.map((r) => r.id === run.id ? run : r))
+    } catch { /* ignore */ }
+  }, [])
+
   return (
-    <Grid fullWidth className="workspace-container">
-      {/* Error notification */}
-      {error && (
-        <Column span={16}>
-          <InlineNotification
-            kind="error"
-            title="Error"
-            subtitle={error}
-            onClose={() => setError('')}
-            lowContrast
-          />
+    <div style={{ padding: '1rem' }}>
+      {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
+
+      <Grid>
+        {/* Chat panel */}
+        <Column sm={4} md={5} lg={7}>
+          <Tile style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem 0' }}>
+              {messages.length === 0 && (
+                <div style={{ textAlign: 'center', color: '#7e8a9c', padding: '3rem 1rem' }}>
+                  <Heading>Temporality Agent</Heading>
+                  <p>Send a message to start a conversation with the agent.</p>
+                </div>
+              )}
+              {messages.map((msg, i) => (
+                <div key={i} style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                  <div style={{
+                    maxWidth: '80%', padding: '0.75rem', borderRadius: '8px',
+                    background: msg.role === 'user' ? '#57d7e8' : '#121823',
+                    color: msg.role === 'user' ? '#080b10' : '#e5e9f0',
+                    border: msg.role === 'user' ? 'none' : '1px solid #344258',
+                  }}>
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                    {msg.runId && (
+                      <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: msg.role === 'user' ? '#080b10' : '#7e8a9c' }}>
+                        <Tag type={STATUS_COLORS[msg.status || 'pending'] || 'gray'} size="sm">{msg.status || 'pending'}</Tag>
+                        <Button size="sm" kind="ghost" onClick={() => { if (msg.runId) void loadRun(msg.runId) }} style={{ marginLeft: '0.5rem' }}>View details</Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Agent selector */}
+            <div style={{ marginBottom: '0.5rem' }}>
+              <Select id="chat-agent" labelText="" hideLabel value={selectedAgentId} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelectedAgentId(e.target.value)} size="sm">
+                <SelectItem value="" text="Default agent" />
+                {allAgents.map((a) => <SelectItem key={a.id} value={a.id} text={`${a.name} (${a.project_id})`} />)}
+              </Select>
+            </div>
+
+            {/* Input */}
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <TextInput id="chat-input" labelText="" hideLabel value={inputValue} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
+                placeholder="Type a message..." onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage() } }} />
+              <Button renderIcon={Send} onClick={() => void sendMessage()} disabled={loading || !inputValue.trim()}>Send</Button>
+            </div>
+          </Tile>
         </Column>
-      )}
 
-      {/* Quick Run */}
-      <Column sm={4} md={8} lg={16}>
-        <Tile style={{ marginBottom: '1rem' }}>
-          <Heading>Quick Run</Heading>
-          <Stack gap={2}>
-            <TextArea
-              id="quick-prompt"
-              labelText="Prompt"
-              value={quickPrompt}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setQuickPrompt(e.target.value)}
-              placeholder="Describe what the agent should do..."
-              rows={3}
-            />
-            <Stack orientation="horizontal" gap={2}>
-              <div style={{ flex: 1 }}>
-                <Select
-                  id="quick-agent"
-                  labelText="Agent (optional)"
-                  hideLabel
-                  value={quickAgentId}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setQuickAgentId(e.target.value)}
-                >
-                  <SelectItem value="" text="Default" />
-                  {allAgents.map((a) => (
-                    <SelectItem key={a.id} value={a.id} text={`${a.name} (${a.project_id})`} />
-                  ))}
-                </Select>
+        {/* Sidebar: Agents + Tasks + Runs */}
+        <Column sm={4} md={3} lg={5}>
+          <Stack gap={3}>
+            {/* Agents */}
+            <Section level={3}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <Heading>Agents</Heading>
+                <Button size="sm" kind="ghost" renderIcon={Add} onClick={() => setShowAgentForm(true)}>New</Button>
               </div>
-              <Button onClick={() => void quickRun()} disabled={loading || !quickPrompt.trim()}>
-                Run
-              </Button>
-            </Stack>
-          </Stack>
-        </Tile>
-      </Column>
-
-      {/* Agents + Tasks panel */}
-      <Column sm={4} md={4} lg={4}>
-        <Section level={2}>
-          <Heading>{project}</Heading>
-
-          {/* Agents */}
-          <Section level={3}>
-              <Heading>Agents</Heading>
-              <Stack gap={2}>
+              <Stack gap={1}>
                 {agents.map((a) => (
-                  <Tile key={a.id}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <Tile key={a.id} style={{ padding: '0.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <strong>{a.name}</strong>
-                        {a.model && <><br /><Tag type="blue">{a.model}</Tag></>}
-                        {a.system_prompt && (
-                          <>
-                            <br />
-                            <small className="ws-preview">
-                              {a.system_prompt.length > 80
-                                ? a.system_prompt.slice(0, 80) + '…'
-                                : a.system_prompt}
-                            </small>
-                          </>
-                        )}
+                        {a.model && <Tag type="blue" size="sm" style={{ marginLeft: '0.25rem' }}>{a.model}</Tag>}
                       </div>
                       <Stack orientation="horizontal" gap={1}>
-                        <Button size="sm" kind="ghost" onClick={() => startEditAgent(a)}>Edit</Button>
-                        <Button size="sm" kind="danger--ghost" onClick={() => void deleteAgent(a)}>Delete</Button>
+                        <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription="Edit" onClick={() => startEditAgent(a)} />
+                        <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} iconDescription="Delete" onClick={() => void deleteAgent(a)} />
                       </Stack>
                     </div>
+                    {a.system_prompt && <small style={{ color: '#7e8a9c', display: 'block', marginTop: '0.25rem' }}>{a.system_prompt.length > 60 ? a.system_prompt.slice(0, 60) + '…' : a.system_prompt}</small>}
                   </Tile>
                 ))}
-
-                {showAgentForm ? (
-                  <Layer>
-                    <Stack gap={3}>
-                      <Heading>{editingAgent ? 'Edit Agent' : 'New Agent'}</Heading>
-                      <TextInput
-                        id="agent-name"
-                        labelText="Agent name"
-                        value={agentName}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAgentName(e.target.value)}
-                        placeholder="coder"
-                        autoFocus
-                      />
-                      <TextInput
-                        id="agent-model"
-                        labelText="Model (optional)"
-                        value={agentModel}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAgentModel(e.target.value)}
-                        placeholder="gpt-4o, claude-3-sonnet, etc."
-                      />
-                      <TextArea
-                        id="agent-prompt"
-                        labelText="System prompt"
-                        value={agentPrompt}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAgentPrompt(e.target.value)}
-                        placeholder="You are a careful developer..."
-                        rows={6}
-                      />
-                      <Stack orientation="horizontal" gap={2}>
-                        <Button onClick={() => void createOrUpdateAgent()} disabled={loading}>
-                          {editingAgent ? 'Save changes' : 'Create agent'}
-                        </Button>
-                        <Button kind="secondary" onClick={() => { setShowAgentForm(false); setEditingAgent(null) }}>
-                          Cancel
-                        </Button>
-                      </Stack>
-                    </Stack>
-                  </Layer>
-                ) : (
-                  <Button renderIcon={Add} size="sm" onClick={() => setShowAgentForm(true)}>
-                    New agent
-                  </Button>
-                )}
               </Stack>
+              {showAgentForm && (
+                <Tile style={{ marginTop: '0.5rem' }}>
+                  <Stack gap={2}>
+                    <Heading>{editingAgent ? 'Edit Agent' : 'New Agent'}</Heading>
+                    <TextInput id="agent-name" labelText="Name" value={agentName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAgentName(e.target.value)} placeholder="coder" autoFocus />
+                    <TextInput id="agent-model" labelText="Model" value={agentModel} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAgentModel(e.target.value)} placeholder="gpt-4o" />
+                    <TextArea id="agent-prompt" labelText="System prompt" value={agentPrompt} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAgentPrompt(e.target.value)} rows={4} placeholder="You are a careful developer..." />
+                    <Stack orientation="horizontal" gap={2}>
+                      <Button size="sm" onClick={() => void createOrUpdateAgent()}>{editingAgent ? 'Save' : 'Create'}</Button>
+                      <Button size="sm" kind="secondary" onClick={() => { setShowAgentForm(false); setEditingAgent(null) }}>Cancel</Button>
+                    </Stack>
+                  </Stack>
+                </Tile>
+              )}
             </Section>
 
             {/* Tasks */}
             <Section level={3}>
-              <Heading>Tasks</Heading>
-              <Stack gap={2}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <Heading>Tasks</Heading>
+                <Button size="sm" kind="ghost" renderIcon={Add} onClick={() => setShowTaskForm(true)}>New</Button>
+              </div>
+              <Stack gap={1}>
                 {tasks.map((t) => (
-                  <Tile
-                    key={t.id}
-                    onClick={() => void loadTaskRuns(t)}
-                    className={`workspace-tile ${selectedTask?.id === t.id ? 'selected' : ''}`}
-                  >
-                    <Grid>
-                      <Column sm={3} md={6} lg={10}>
-                        <strong>{t.title}</strong>
-                        <br />
-                        <Tag type="gray" size="sm">{t.agent_id || 'no agent'}</Tag>
-                      </Column>
-                      <Column sm={1} md={2} lg={6} className="ws-task-action">
-                        <Button
-                          renderIcon={Play}
-                          size="sm"
-                          onClick={(e: React.MouseEvent) => { e.stopPropagation(); void startRun(t) }}
-                          disabled={loading}
-                        >
-                          Run
-                        </Button>
-                      </Column>
-                    </Grid>
+                  <Tile key={t.id} style={{ padding: '0.5rem', cursor: 'pointer' }} onClick={() => void startRun(t)}>
+                    <strong>{t.title}</strong>
+                    <br />
+                    <Tag type="gray" size="sm">{t.agent_id || 'default'}</Tag>
                   </Tile>
                 ))}
-
-                {showTaskForm ? (
-                  <Layer>
-                    <Stack gap={3}>
-                      <TextInput
-                        id="task-title"
-                        labelText="Task title"
-                        value={taskTitle}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTaskTitle(e.target.value)}
-                        placeholder="Fix the bug in calculator"
-                        autoFocus
-                      />
-                      <TextArea
-                        id="task-prompt"
-                        labelText="Prompt"
-                        value={taskPrompt}
-                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTaskPrompt(e.target.value)}
-                        placeholder="Find and fix the bug in calculator.go. Verify with tests."
-                        rows={8}
-                        helperText="Describe what the agent should do. Be specific."
-                      />
-                      <Select
-                        id="task-agent"
-                        labelText="Agent (optional, cross-project)"
-                        value={taskAgentId}
-                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTaskAgentId(e.target.value)}
-                      >
-                        <SelectItem value="" text="Use defaults" />
-                        {allAgents.map((a) => (
-                          <SelectItem key={a.id} value={a.id} text={`${a.name} (${a.project_id})`} />
-                        ))}
-                      </Select>
-                      <Stack orientation="horizontal" gap={2}>
-                        <Button onClick={() => void createTask()} disabled={loading}>
-                          Create task
-                        </Button>
-                        <Button kind="secondary" onClick={() => setShowTaskForm(false)}>
-                          Cancel
-                        </Button>
-                      </Stack>
-                    </Stack>
-                  </Layer>
-                ) : (
-                  <Button renderIcon={Add} size="sm" onClick={() => setShowTaskForm(true)}>
-                    New task
-                  </Button>
-                )}
               </Stack>
+              {showTaskForm && (
+                <Tile style={{ marginTop: '0.5rem' }}>
+                  <Stack gap={2}>
+                    <Heading>New Task</Heading>
+                    <TextInput id="task-title" labelText="Title" value={taskTitle} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTaskTitle(e.target.value)} placeholder="Fix the bug" autoFocus />
+                    <TextArea id="task-prompt" labelText="Prompt" value={taskPrompt} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTaskPrompt(e.target.value)} rows={5} placeholder="Describe what the agent should do..." />
+                    <Select id="task-agent" labelText="Agent" value={taskAgentId} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTaskAgentId(e.target.value)}>
+                      <SelectItem value="" text="Default" />
+                      {allAgents.map((a) => <SelectItem key={a.id} value={a.id} text={`${a.name} (${a.project_id})`} />)}
+                    </Select>
+                    <Stack orientation="horizontal" gap={2}>
+                      <Button size="sm" onClick={() => void createTask()}>Create</Button>
+                      <Button size="sm" kind="secondary" onClick={() => setShowTaskForm(false)}>Cancel</Button>
+                    </Stack>
+                  </Stack>
+                </Tile>
+              )}
             </Section>
-          </Section>
-        </Column>
 
-      {/* Runs panel */}
-      {selectedTask && (
-        <Column sm={4} md={4} lg={4}>
-          <Section level={2}>
-            <Heading>Runs: {selectedTask.title}</Heading>
-            <Stack gap={2}>
-              {runs.length === 0 && (
-                <Tile><p>No runs yet</p></Tile>
-              )}
-              {runs.map((r) => (
-                <Tile
-                  key={r.id}
-                  onClick={() => void loadRun(r.id)}
-                  className={`workspace-tile ${selectedRun?.id === r.id ? 'selected' : ''}`}
-                >
-                  <Grid>
-                    <Column sm={3} md={5} lg={10}>
-                      <strong>{r.run_id}</strong>
-                      <br />
-                      <Tag type={STATUS_TAGS[r.status]?.type as any || 'gray'} size="sm">
-                        {STATUS_TAGS[r.status]?.label || r.status}
-                      </Tag>
-                    </Column>
-                    <Column sm={1} md={3} lg={6}>
-                      <Time size={16} /> {shortTime(r.created_at)}
-                    </Column>
-                  </Grid>
-                </Tile>
-              ))}
-            </Stack>
-          </Section>
-        </Column>
-      )}
-
-      {/* Run detail panel */}
-      {selectedRun && (
-        <Column sm={4} md={4} lg={4}>
-          <Section level={2}>
-            <Heading>Run: {selectedRun.run_id}</Heading>
-            <Stack gap={3}>
-              <Tile>
-                <Grid>
-                  <Column>
-                    <Tag type={STATUS_TAGS[selectedRun.status]?.type as any || 'gray'}>
-                      {STATUS_TAGS[selectedRun.status]?.label || selectedRun.status}
-                    </Tag>
-                  </Column>
-                  <Column>Turns: {selectedRun.turns}</Column>
-                  <Column>Model: {selectedRun.model || 'default'}</Column>
-                  <Column>Started: {shortTime(selectedRun.created_at)}</Column>
-                </Grid>
-              </Tile>
-
-              {selectedRun.answer && (
+            {/* Recent Runs */}
+            {selectedRun && (
+              <Section level={3}>
+                <Heading>Run: {selectedRun.run_id}</Heading>
                 <Tile>
-                  <Heading>Answer</Heading>
-                  <pre className="ws-answer">{selectedRun.answer}</pre>
+                  <Tag type={STATUS_COLORS[selectedRun.status] || 'gray'}>{selectedRun.status}</Tag>
+                  <span style={{ marginLeft: '0.5rem' }}>Turns: {selectedRun.turns}</span>
+                  {selectedRun.answer && (
+                    <pre style={{ background: '#121823', padding: '0.75rem', marginTop: '0.5rem', fontSize: '0.75rem', overflow: 'auto', maxHeight: '300px', border: '1px solid #344258' }}>
+                      {selectedRun.answer}
+                    </pre>
+                  )}
+                  <Button kind="ghost" size="sm" renderIcon={ArrowRight} href={`/experience?project=${selectedRun.project_id}`} target="_blank" style={{ marginTop: '0.5rem' }}>
+                    Timeline
+                  </Button>
                 </Tile>
-              )}
-
-              {selectedRun.error && (
-                <InlineNotification
-                  kind="error"
-                  title="Error"
-                  subtitle={selectedRun.error}
-                  lowContrast
-                />
-              )}
-
-              <Button
-                renderIcon={ArrowRight}
-                kind="ghost"
-                href={`/experience?project=${selectedRun.project_id}`}
-                target="_blank"
-              >
-                Open in Experience Timeline
-              </Button>
-            </Stack>
-          </Section>
+              </Section>
+            )}
+          </Stack>
         </Column>
-      )}
+      </Grid>
 
-      {loading && (
-        <Column span={16}>
-          <Loading withOverlay={false} />
-        </Column>
-      )}
-    </Grid>
+      {loading && <Loading withOverlay={false} />}
+    </div>
   )
-}
 }
