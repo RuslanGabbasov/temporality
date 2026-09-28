@@ -61,25 +61,26 @@ function saveConversations(convs: Conversation[]) {
 }
 
 /** Format a stream event into a human-readable status line. */
-function formatStreamEvent(type: string, data: any): string | null {
+function formatStreamEvent(type: string, outer: any): string | null {
+  const d = outer.data ?? outer
   switch (type) {
     case 'run.started':
-      return `Run started${data.model ? ` · model ${data.model}` : ''}`
+      return `Run started${d.model ? ` · model ${d.model}` : ''}`
     case 'model.completed': {
-      const tokens = data.usage ? ` · ${data.usage.total_tokens ?? '?'} tokens` : ''
-      const latency = data.latency_ms ? ` · ${(data.latency_ms / 1000).toFixed(1)}s` : ''
-      return `Model turn ${data.turn ?? ''}${tokens}${latency}`
+      const tokens = d.usage ? ` · ${d.usage.total_tokens ?? '?'} tokens` : d.total_tokens ? ` · ${d.total_tokens} tokens` : ''
+      const latency = d.latency_ms ? ` · ${(d.latency_ms / 1000).toFixed(1)}s` : ''
+      return `Model turn ${d.turn ?? ''}${tokens}${latency}`
     }
     case 'turn.completed':
-      return `Turn ${data.turn ?? ''} done${data.tool_calls ? ` · ${data.tool_calls} tool calls` : ''}`
+      return `Turn ${d.turn ?? ''} done${d.tool_calls ? ` · ${d.tool_calls} tool calls` : ''}`
     case 'tool.completed':
-      return `Tool: ${data.name ?? data.tool ?? '?'}`
+      return `Tool: ${d.name ?? d.tool ?? '?'} `
     case 'knowledge.proposed':
-      return `Learned: ${(data.proposition ?? '').slice(0, 60)}`
+      return `Learned: ${(d.proposition ?? '').slice(0, 60)}`
     case 'run.completed':
-      return `Completed · ${data.turns ?? '?'} turns`
+      return `Completed · ${d.turns ?? '?'} turns`
     case 'run.failed':
-      return `Failed: ${data.error ?? 'unknown'}`
+      return `Failed: ${d.error ?? 'unknown'} `
     default:
       return null
   }
@@ -194,8 +195,9 @@ export default function Workspace({ project }: { project: string }) {
     // agent.summary carries the final answer text.
     es.addEventListener('agent.summary', (e) => {
       try {
-        const data = JSON.parse(e.data)
-        const answer = data.answer ?? ''
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const answer = d.answer ?? ''
         if (answer) {
           lines.push('Answer received')
           updateMsg(convId, runId, { content: answer, status: 'completed', streamLines: [...lines] })
@@ -215,10 +217,11 @@ export default function Workspace({ project }: { project: string }) {
 
     es.addEventListener('run.failed', (e) => {
       try {
-        const data = JSON.parse(e.data)
-        const line = formatStreamEvent('run.failed', data)
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const line = formatStreamEvent('run.failed', outer)
         if (line) lines.push(line)
-        updateMsg(convId, runId, { content: `Failed: ${data.error ?? 'unknown'}`, status: 'failed', streamLines: [...lines] })
+        updateMsg(convId, runId, { content: `Failed: ${d.error ?? 'unknown'}`, status: 'failed', streamLines: [...lines] })
       } catch {
         updateMsg(convId, runId, { content: 'Run failed', status: 'failed', streamLines: [...lines] })
       }
