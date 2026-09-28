@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"crypto/rand"
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/cost"
@@ -80,6 +81,10 @@ func main() {
 	defer ws.Close()
 	if err = ws.Migrate(ctx, "migrations/000021_workspace.up.sql"); err != nil {
 		log.Error("migrate workspace", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000022_workspace_agents_top_level.up.sql"); err != nil {
+		log.Error("migrate workspace v22", "error", err)
 		os.Exit(1)
 	}
 	activities, err := agent.NewActivities(events)
@@ -402,7 +407,7 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		agents, err := ws.ListAgents(r.Context(), r.PathValue("projectID"))
+		agents, err := ws.ListAgentsByProject(r.Context(), r.PathValue("projectID"))
 		if err != nil {
 			writeError(w, 500, err)
 			return
@@ -429,8 +434,8 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
-		if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.ProjectID) == "" {
-			writeError(w, 422, errors.New("name and project_id are required"))
+		if strings.TrimSpace(req.Name) == "" {
+			writeError(w, 422, errors.New("name is required"))
 			return
 		}
 		if req.ID == "" {
@@ -690,6 +695,149 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]any{"runs": runs})
 	})
+
+	// Providers
+	mux.HandleFunc("GET /v1/workspace/providers", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		providers, err := ws.ListProviders(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"providers": providers})
+	})
+	mux.HandleFunc("POST /v1/workspace/providers", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		var req workspace.CreateProviderRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.BaseURL) == "" {
+			writeError(w, 422, errors.New("name and base_url are required"))
+			return
+		}
+		if req.ID == "" {
+			req.ID = "prov-" + shortID()
+		}
+		provider := &workspace.Provider{ID: req.ID, Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels}
+		if err := ws.CreateProvider(r.Context(), provider); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 201, provider)
+	})
+	mux.HandleFunc("GET /v1/workspace/providers/{providerID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		provider, err := ws.GetProvider(r.Context(), r.PathValue("providerID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) { writeError(w, 404, err); return }
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, provider)
+	})
+	mux.HandleFunc("PUT /v1/workspace/providers/{providerID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		var req workspace.CreateProviderRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		provider := workspace.Provider{ID: r.PathValue("providerID"), Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels}
+		if err := ws.UpdateProvider(r.Context(), provider); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) { writeError(w, 404, err); return }
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, provider)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/providers/{providerID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		if err := ws.DeleteProvider(r.Context(), r.PathValue("providerID")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) { writeError(w, 404, err); return }
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"deleted": true})
+	})
+
+	// Users
+	mux.HandleFunc("GET /v1/workspace/users", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		users, err := ws.ListUsers(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"users": users})
+	})
+	mux.HandleFunc("POST /v1/workspace/users", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		var req workspace.CreateUserRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Role) == "" {
+			writeError(w, 422, errors.New("name and role are required"))
+			return
+		}
+		if req.ID == "" {
+			req.ID = "user-" + shortID()
+		}
+		active := req.Active != nil && *req.Active
+		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Projects: req.Projects, Active: active}
+		if err := ws.CreateUser(r.Context(), user); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 201, user)
+	})
+	mux.HandleFunc("PUT /v1/workspace/users/{userID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		var req workspace.CreateUserRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		active := req.Active != nil && *req.Active
+		user := workspace.User{ID: r.PathValue("userID"), Name: req.Name, Email: req.Email, Role: req.Role, Projects: req.Projects, Active: active}
+		if err := ws.UpdateUser(r.Context(), user); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) { writeError(w, 404, err); return }
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, user)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/users/{userID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		if err := ws.DeleteUser(r.Context(), r.PathValue("userID")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) { writeError(w, 404, err); return }
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"deleted": true})
+	})
+
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
 	address := env("KERNEL_HTTP_ADDR", ":8090")
 	server := &http.Server{Addr: address, Handler: gate.Authenticate(mux), ReadHeaderTimeout: 5 * time.Second}
@@ -797,4 +945,10 @@ func slugify(name string) string {
 		return "untitled"
 	}
 	return result
+}
+
+func shortID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
 }

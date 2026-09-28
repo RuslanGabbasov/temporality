@@ -12,8 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func readFile(path string) ([]byte, error) { return os.ReadFile(path) }
-
 var ErrNotFound = errors.New("not found")
 
 type Store struct {
@@ -25,7 +23,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := pool.Ping(ctx); err != nil {
+	if err = pool.Ping(ctx); err != nil {
 		pool.Close()
 		return nil, err
 	}
@@ -50,8 +48,7 @@ func (s *Store) CreateProject(ctx context.Context, p *Project) error {
 	p.CreatedAt = now
 	p.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_project (id, name, description, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5)`,
+		`INSERT INTO workspace_project (id, name, description, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)`,
 		p.ID, p.Name, p.Description, p.CreatedAt, p.UpdatedAt)
 	return err
 }
@@ -59,8 +56,7 @@ func (s *Store) CreateProject(ctx context.Context, p *Project) error {
 func (s *Store) GetProject(ctx context.Context, id string) (Project, error) {
 	var p Project
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, description, created_at, updated_at
-		 FROM workspace_project WHERE id = $1`, id).
+		`SELECT id, name, description, created_at, updated_at FROM workspace_project WHERE id = $1`, id).
 		Scan(&p.ID, &p.Name, &p.Description, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ErrNotFound
@@ -69,9 +65,7 @@ func (s *Store) GetProject(ctx context.Context, id string) (Project, error) {
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, description, created_at, updated_at
-		 FROM workspace_project ORDER BY created_at DESC`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, description, created_at, updated_at FROM workspace_project ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -87,34 +81,10 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 	return result, rows.Err()
 }
 
-// ListAllAgents returns all agents across all projects.
-func (s *Store) ListAllAgents(ctx context.Context) ([]Agent, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, name, model, system_prompt, skills, mcp_servers, sandbox_profile, created_at, updated_at
-		 FROM workspace_agent ORDER BY created_at`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var result []Agent
-	for rows.Next() {
-		var a Agent
-		var skills, mcp []byte
-		if err := rows.Scan(&a.ID, &a.ProjectID, &a.Name, &a.Model, &a.SystemPrompt, &skills, &mcp, &a.SandboxProfile, &a.CreatedAt, &a.UpdatedAt); err != nil {
-			return nil, err
-		}
-		_ = json.Unmarshal(skills, &a.Skills)
-		_ = json.Unmarshal(mcp, &a.MCPServers)
-		result = append(result, a)
-	}
-	return result, rows.Err()
-}
-
 func (s *Store) UpdateProject(ctx context.Context, p Project) error {
 	p.UpdatedAt = time.Now().UTC()
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_project SET name = $2, description = $3, updated_at = $4
-		 WHERE id = $1`,
+		`UPDATE workspace_project SET name = $2, description = $3, updated_at = $4 WHERE id = $1`,
 		p.ID, p.Name, p.Description, p.UpdatedAt)
 	if err != nil {
 		return err
@@ -136,7 +106,7 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 	return nil
 }
 
-// Agents
+// Agents — top-level entities, project_id is optional.
 
 func (s *Store) CreateAgent(ctx context.Context, a *Agent) error {
 	now := time.Now().UTC()
@@ -144,48 +114,88 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent) error {
 	a.UpdatedAt = now
 	skills, _ := json.Marshal(a.Skills)
 	mcp, _ := json.Marshal(a.MCPServers)
+	labels, _ := json.Marshal(a.Labels)
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_agent (id, project_id, name, model, system_prompt, skills, mcp_servers, sandbox_profile, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		a.ID, a.ProjectID, a.Name, a.Model, a.SystemPrompt, skills, mcp, a.SandboxProfile, a.CreatedAt, a.UpdatedAt)
+		`INSERT INTO workspace_agent
+		 (id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers,
+		  sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+		a.ID, nullString(a.ProjectID), a.Name, a.Description, a.Model, a.Provider,
+		a.SystemPrompt, skills, mcp, a.SandboxProfile,
+		a.Temperature, a.MaxTokens, a.NetworkAccess, a.ReadOnly,
+		a.MaxTurns, a.ApprovalMode, labels, a.CreatedAt, a.UpdatedAt)
 	return err
 }
 
 func (s *Store) GetAgent(ctx context.Context, id string) (Agent, error) {
 	var a Agent
-	var skills, mcp []byte
+	var skills, mcp, labels []byte
+	var projectID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, project_id, name, model, system_prompt, skills, mcp_servers, sandbox_profile, created_at, updated_at
+		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers,
+		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels, created_at, updated_at
 		 FROM workspace_agent WHERE id = $1`, id).
-		Scan(&a.ID, &a.ProjectID, &a.Name, &a.Model, &a.SystemPrompt, &skills, &mcp, &a.SandboxProfile, &a.CreatedAt, &a.UpdatedAt)
+		Scan(&a.ID, &projectID, &a.Name, &a.Description, &a.Model, &a.Provider,
+			&a.SystemPrompt, &skills, &mcp, &a.SandboxProfile,
+			&a.Temperature, &a.MaxTokens, &a.NetworkAccess, &a.ReadOnly,
+			&a.MaxTurns, &a.ApprovalMode, &labels, &a.CreatedAt, &a.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, ErrNotFound
 	}
 	if err != nil {
 		return a, err
 	}
+	a.ProjectID = derefPtr(projectID)
 	_ = json.Unmarshal(skills, &a.Skills)
 	_ = json.Unmarshal(mcp, &a.MCPServers)
+	_ = json.Unmarshal(labels, &a.Labels)
 	return a, nil
 }
 
-func (s *Store) ListAgents(ctx context.Context, projectID string) ([]Agent, error) {
+func (s *Store) ListAllAgents(ctx context.Context) ([]Agent, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, name, model, system_prompt, skills, mcp_servers, sandbox_profile, created_at, updated_at
+		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers,
+		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels, created_at, updated_at
+		 FROM workspace_agent ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAgents(rows)
+}
+
+func (s *Store) ListAgentsByProject(ctx context.Context, projectID string) ([]Agent, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers,
+		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels, created_at, updated_at
 		 FROM workspace_agent WHERE project_id = $1 ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanAgents(rows)
+}
+
+func scanAgents(rows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}) ([]Agent, error) {
 	var result []Agent
 	for rows.Next() {
 		var a Agent
-		var skills, mcp []byte
-		if err := rows.Scan(&a.ID, &a.ProjectID, &a.Name, &a.Model, &a.SystemPrompt, &skills, &mcp, &a.SandboxProfile, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		var skills, mcp, labels []byte
+		var projectID *string
+		if err := rows.Scan(&a.ID, &projectID, &a.Name, &a.Description, &a.Model, &a.Provider,
+			&a.SystemPrompt, &skills, &mcp, &a.SandboxProfile,
+			&a.Temperature, &a.MaxTokens, &a.NetworkAccess, &a.ReadOnly,
+			&a.MaxTurns, &a.ApprovalMode, &labels, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
+		a.ProjectID = derefPtr(projectID)
 		_ = json.Unmarshal(skills, &a.Skills)
 		_ = json.Unmarshal(mcp, &a.MCPServers)
+		_ = json.Unmarshal(labels, &a.Labels)
 		result = append(result, a)
 	}
 	return result, rows.Err()
@@ -195,11 +205,17 @@ func (s *Store) UpdateAgent(ctx context.Context, a Agent) error {
 	a.UpdatedAt = time.Now().UTC()
 	skills, _ := json.Marshal(a.Skills)
 	mcp, _ := json.Marshal(a.MCPServers)
+	labels, _ := json.Marshal(a.Labels)
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_agent
-		 SET name = $2, model = $3, system_prompt = $4, skills = $5, mcp_servers = $6, sandbox_profile = $7, updated_at = $8
-		 WHERE id = $1`,
-		a.ID, a.Name, a.Model, a.SystemPrompt, skills, mcp, a.SandboxProfile, a.UpdatedAt)
+		 SET project_id=$2, name=$3, description=$4, model=$5, provider=$6, system_prompt=$7,
+		     skills=$8, mcp_servers=$9, sandbox_profile=$10, temperature=$11, max_tokens=$12,
+		     network_access=$13, read_only=$14, max_turns=$15, approval_mode=$16, labels=$17, updated_at=$18
+		 WHERE id=$1`,
+		a.ID, nullString(a.ProjectID), a.Name, a.Description, a.Model, a.Provider,
+		a.SystemPrompt, skills, mcp, a.SandboxProfile,
+		a.Temperature, a.MaxTokens, a.NetworkAccess, a.ReadOnly,
+		a.MaxTurns, a.ApprovalMode, labels, a.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -237,22 +253,21 @@ func (s *Store) GetTask(ctx context.Context, id string) (Task, error) {
 	var t Task
 	var agentID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, project_id, agent_id, title, prompt, created_at, updated_at
-		 FROM workspace_task WHERE id = $1`, id).
+		`SELECT id, project_id, agent_id, title, prompt, created_at, updated_at FROM workspace_task WHERE id = $1`, id).
 		Scan(&t.ID, &t.ProjectID, &agentID, &t.Title, &t.Prompt, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return t, ErrNotFound
 	}
-	if agentID != nil {
-		t.AgentID = *agentID
+	if err != nil {
+		return t, err
 	}
-	return t, err
+	t.AgentID = derefPtr(agentID)
+	return t, nil
 }
 
 func (s *Store) ListTasks(ctx context.Context, projectID string) ([]Task, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, agent_id, title, prompt, created_at, updated_at
-		 FROM workspace_task WHERE project_id = $1 ORDER BY created_at DESC`, projectID)
+		`SELECT id, project_id, agent_id, title, prompt, created_at, updated_at FROM workspace_task WHERE project_id = $1 ORDER BY created_at DESC`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -264,9 +279,7 @@ func (s *Store) ListTasks(ctx context.Context, projectID string) ([]Task, error)
 		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Title, &t.Prompt, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
-		if agentID != nil {
-			t.AgentID = *agentID
-		}
+		t.AgentID = derefPtr(agentID)
 		result = append(result, t)
 	}
 	return result, rows.Err()
@@ -290,24 +303,10 @@ func (s *Store) CreateRun(ctx context.Context, r *Run) error {
 	r.CreatedAt = now
 	r.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_run (id, task_id, project_id, agent_id, run_id, status, model, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		r.ID, r.TaskID, r.ProjectID, nullString(r.AgentID), r.RunID, r.Status, r.Model, r.CreatedAt, r.UpdatedAt)
+		`INSERT INTO workspace_run (id, task_id, project_id, agent_id, run_id, status, model, answer, turns, error, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		r.ID, r.TaskID, r.ProjectID, nullString(r.AgentID), r.RunID, r.Status, r.Model, r.Answer, r.Turns, r.Error, r.CreatedAt, r.UpdatedAt)
 	return err
-}
-
-func (s *Store) UpdateRunStatus(ctx context.Context, id, status, answer string, turns int, runErr string) error {
-	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_run SET status = $2, answer = $3, turns = $4, error = $5, updated_at = $6
-		 WHERE id = $1`,
-		id, status, answer, turns, runErr, time.Now().UTC())
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 func (s *Store) GetRun(ctx context.Context, id string) (Run, error) {
@@ -320,10 +319,24 @@ func (s *Store) GetRun(ctx context.Context, id string) (Run, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, ErrNotFound
 	}
-	if agentID != nil {
-		r.AgentID = *agentID
+	if err != nil {
+		return r, err
 	}
-	return r, err
+	r.AgentID = derefPtr(agentID)
+	return r, nil
+}
+
+func (s *Store) UpdateRunStatus(ctx context.Context, id, status, answer string, turns int, runErr string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_run SET status = $2, answer = $3, turns = $4, error = $5, updated_at = $6 WHERE id = $1`,
+		id, status, answer, turns, runErr, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
@@ -341,48 +354,14 @@ func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
 		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
-		if agentID != nil {
-			r.AgentID = *agentID
-		}
+		r.AgentID = derefPtr(agentID)
 		result = append(result, r)
 	}
 	return result, rows.Err()
 }
 
-func (s *Store) ListRunsByProject(ctx context.Context, projectID string) ([]Run, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, task_id, project_id, agent_id, run_id, status, model, answer, turns, error, created_at, updated_at
-		 FROM workspace_run WHERE project_id = $1 ORDER BY created_at DESC`, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var result []Run
-	for rows.Next() {
-		var r Run
-		var agentID *string
-		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
-			return nil, err
-		}
-		if agentID != nil {
-			r.AgentID = *agentID
-		}
-		result = append(result, r)
-	}
-	return result, rows.Err()
-}
-
-func nullString(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-// ListAllProjects returns workspace projects merged with journal projects
-// (distinct project_id from observation_events).
+// ListAllProjects returns workspace projects merged with journal projects.
 func (s *Store) ListAllProjects(ctx context.Context) ([]Project, error) {
-	// Workspace projects
 	wp, err := s.ListProjects(ctx)
 	if err != nil {
 		return nil, err
@@ -391,10 +370,9 @@ func (s *Store) ListAllProjects(ctx context.Context) ([]Project, error) {
 	for _, p := range wp {
 		byID[p.ID] = p
 	}
-	// Journal projects (observation_events)
 	rows, err := s.pool.Query(ctx, `SELECT DISTINCT project_id FROM observation_events WHERE project_id != '' ORDER BY project_id`)
 	if err != nil {
-		return wp, nil // fallback to workspace-only
+		return wp, nil
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -412,4 +390,180 @@ func (s *Store) ListAllProjects(ctx context.Context) ([]Project, error) {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil
+}
+
+// Providers
+
+func (s *Store) CreateProvider(ctx context.Context, p *Provider) error {
+	now := time.Now().UTC()
+	p.CreatedAt = now
+	p.UpdatedAt = now
+	labels, _ := json.Marshal(p.Labels)
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO workspace_provider (id, name, base_url, api_key_ref, models, labels, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		p.ID, p.Name, p.BaseURL, p.APIKeyRef, p.Models, labels, p.CreatedAt, p.UpdatedAt)
+	return err
+}
+
+func (s *Store) GetProvider(ctx context.Context, id string) (Provider, error) {
+	var p Provider
+	var labels []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, name, base_url, api_key_ref, models, labels, created_at, updated_at
+		 FROM workspace_provider WHERE id = $1`, id).
+		Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &p.CreatedAt, &p.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return p, ErrNotFound
+	}
+	if err != nil {
+		return p, err
+	}
+	_ = json.Unmarshal(labels, &p.Labels)
+	return p, nil
+}
+
+func (s *Store) ListProviders(ctx context.Context) ([]Provider, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, name, base_url, api_key_ref, models, labels, created_at, updated_at FROM workspace_provider ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Provider
+	for rows.Next() {
+		var p Provider
+		var labels []byte
+		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.APIKeyRef, &p.Models, &labels, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(labels, &p.Labels)
+		result = append(result, p)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) UpdateProvider(ctx context.Context, p Provider) error {
+	p.UpdatedAt = time.Now().UTC()
+	labels, _ := json.Marshal(p.Labels)
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_provider SET name=$2, base_url=$3, api_key_ref=$4, models=$5, labels=$6, updated_at=$7 WHERE id=$1`,
+		p.ID, p.Name, p.BaseURL, p.APIKeyRef, p.Models, labels, p.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteProvider(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM workspace_provider WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Users
+
+func (s *Store) CreateUser(ctx context.Context, u *User) error {
+	now := time.Now().UTC()
+	u.CreatedAt = now
+	u.UpdatedAt = now
+	if !u.Active {
+		u.Active = true
+	}
+	projects, _ := json.Marshal(u.Projects)
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO workspace_user (id, name, email, role, projects, active, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		u.ID, u.Name, u.Email, u.Role, projects, u.Active, u.CreatedAt, u.UpdatedAt)
+	return err
+}
+
+func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
+	var u User
+	var projects []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, name, email, role, projects, active, created_at, updated_at
+		 FROM workspace_user WHERE id = $1`, id).
+		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &projects, &u.Active, &u.CreatedAt, &u.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return u, ErrNotFound
+	}
+	if err != nil {
+		return u, err
+	}
+	_ = json.Unmarshal(projects, &u.Projects)
+	return u, nil
+}
+
+func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, projects, active, created_at, updated_at FROM workspace_user ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []User
+	for rows.Next() {
+		var u User
+		var projects []byte
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &projects, &u.Active, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(projects, &u.Projects)
+		result = append(result, u)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) UpdateUser(ctx context.Context, u User) error {
+	u.UpdatedAt = time.Now().UTC()
+	projects, _ := json.Marshal(u.Projects)
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_user SET name=$2, email=$3, role=$4, projects=$5, active=$6, updated_at=$7 WHERE id=$1`,
+		u.ID, u.Name, u.Email, u.Role, projects, u.Active, u.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM workspace_user WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Helpers
+
+func readFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	return data, err
+}
+
+func nullString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func derefPtr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
