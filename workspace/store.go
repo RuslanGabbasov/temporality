@@ -479,9 +479,9 @@ func (s *Store) CreateUser(ctx context.Context, u *User) error {
 	}
 	projects, _ := json.Marshal(u.Projects)
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_user (id, name, email, role, projects, active, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		u.ID, u.Name, u.Email, u.Role, projects, u.Active, u.CreatedAt, u.UpdatedAt)
+		`INSERT INTO workspace_user (id, name, email, role, token, projects, active, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		u.ID, u.Name, u.Email, u.Role, u.Token, projects, u.Active, u.CreatedAt, u.UpdatedAt)
 	return err
 }
 
@@ -489,9 +489,9 @@ func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
 	var u User
 	var projects []byte
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, email, role, projects, active, created_at, updated_at
+		`SELECT id, name, email, role, COALESCE(token, ''), projects, active, created_at, updated_at
 		 FROM workspace_user WHERE id = $1`, id).
-		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &projects, &u.Active, &u.CreatedAt, &u.UpdatedAt)
+		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &projects, &u.Active, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return u, ErrNotFound
 	}
@@ -503,7 +503,7 @@ func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, projects, active, created_at, updated_at FROM workspace_user ORDER BY created_at`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, '', projects, active, created_at, updated_at FROM workspace_user ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -512,7 +512,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	for rows.Next() {
 		var u User
 		var projects []byte
-		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &projects, &u.Active, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &projects, &u.Active, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(projects, &u.Projects)
@@ -566,4 +566,23 @@ func derefPtr(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// GetUserByToken looks up a user by their bearer token.
+// Returns ErrNotFound if no active user has that token.
+func (s *Store) GetUserByToken(ctx context.Context, token string) (User, error) {
+	var u User
+	var projects []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, name, email, role, '', projects, active, created_at, updated_at
+		 FROM workspace_user WHERE token = $1 AND active = true`, token).
+		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &projects, &u.Active, &u.CreatedAt, &u.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return u, ErrNotFound
+	}
+	if err != nil {
+		return u, err
+	}
+	_ = json.Unmarshal(projects, &u.Projects)
+	return u, nil
 }

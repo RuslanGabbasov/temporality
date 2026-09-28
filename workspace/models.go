@@ -87,6 +87,7 @@ type User struct {
 	Name      string    `json:"name"`
 	Email     string    `json:"email,omitempty"`
 	Role      string    `json:"role"`               // viewer, operator, admin
+	Token     string    `json:"token,omitempty"`    // bearer token (write-only, never returned in list)
 	Projects  []string  `json:"projects,omitempty"` // empty = all
 	Active    bool      `json:"active"`
 	CreatedAt time.Time `json:"created_at"`
@@ -152,6 +153,7 @@ type CreateUserRequest struct {
 	Name     string   `json:"name"`
 	Email    string   `json:"email,omitempty"`
 	Role     string   `json:"role"`
+	Token    string   `json:"token,omitempty"` // auto-generated if empty
 	Projects []string `json:"projects,omitempty"`
 	Active   *bool    `json:"active,omitempty"`
 }

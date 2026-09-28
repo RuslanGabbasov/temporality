@@ -55,12 +55,18 @@ export default function Users() {
     if (!form.name?.trim() || !form.role?.trim()) return
     setLoading(true); setError('')
     try {
+      let result: User
       if (editing) {
-        await workspaceApi.updateUser(editing.id, form)
+        result = await workspaceApi.updateUser(editing.id, form)
       } else {
-        await workspaceApi.createUser(form as User & { name: string; role: string })
+        result = await workspaceApi.createUser(form as User & { name: string; role: string })
       }
       setShowForm(false); setEditing(null)
+      // Show token if created
+      if (result.token) {
+        setGeneratedToken(result.token)
+        setTokenUser(result)
+      }
       void load()
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
@@ -87,6 +93,8 @@ export default function Users() {
   const copyToClipboard = (text: string) => {
     void navigator.clipboard.writeText(text)
   }
+
+  const remove = async (u: User) => {
 
   const ROLE_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'red'> = {
     admin: 'blue',
@@ -153,16 +161,12 @@ export default function Users() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#0d1118', border: '1px solid #344258', borderRadius: '8px', padding: '1.5rem', width: '600px' }}>
             <Heading>Token for {tokenUser.name}</Heading>
-            <p style={{ color: '#7e8a9c', marginBottom: '1rem' }}>Copy this token now — it will not be shown again.</p>
+            <p style={{ color: '#7e8a9c', marginBottom: '1rem' }}>Token stored in database. User can log in immediately after kernel restart.</p>
             <div style={{ background: '#121823', border: '1px solid #344258', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all', marginBottom: '1rem' }}>
               {generatedToken}
             </div>
-            <p style={{ color: '#7e8a9c', marginBottom: '0.5rem' }}>Add this line to <code>.env</code> (append to KERNEL_AUTH_TOKENS):</p>
-            <div style={{ background: '#121823', border: '1px solid #344258', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.75rem', wordBreak: 'break-all', marginBottom: '1rem' }}>
-              {generatedToken}:{tokenUser.name}:{tokenUser.role}:{tokenUser.projects?.length ? tokenUser.projects.join(',') : '*'}
-            </div>
             <Stack orientation="horizontal" gap={2}>
-              <Button onClick={() => { copyToClipboard(generatedToken + ':' + tokenUser.name + ':' + tokenUser.role + ':' + (tokenUser.projects?.length ? tokenUser.projects.join(',') : '*')); setGeneratedToken(null); setTokenUser(null) }}>Copy & Close</Button>
+              <Button onClick={() => { copyToClipboard(generatedToken); setGeneratedToken(null); setTokenUser(null) }}>Copy & Close</Button>
               <Button kind="secondary" onClick={() => { setGeneratedToken(null); setTokenUser(null) }}>Close</Button>
             </Stack>
           </div>

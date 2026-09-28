@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"crypto/rand"
+	"encoding/hex"
+
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/cost"
@@ -114,6 +116,27 @@ func main() {
 	if err != nil {
 		log.Error("parse KERNEL_AUTH_TOKENS", "error", err)
 		os.Exit(1)
+	}
+	// Merge database-stored user tokens with .env tokens. DB tokens added
+	// via the UI take effect after kernel restart.
+	if dbUsers, err := ws.ListUsers(ctx); err == nil {
+		var extra []string
+		for _, u := range dbUsers {
+			if u.Token != "" && u.Active {
+				projects := "*"
+				if len(u.Projects) > 0 {
+					projects = strings.Join(u.Projects, ",")
+				}
+				extra = append(extra, u.Token+":"+u.Name+":"+u.Role+":"+projects)
+			}
+		}
+		if len(extra) > 0 {
+			dbGate, err := controlplane.NewGate(strings.Join(extra, ";"))
+			if err == nil && dbGate != nil && dbGate.Enabled() {
+				gate = gate.Merge(dbGate)
+				log.Info("merged database user tokens", "count", len(extra))
+			}
+		}
 	}
 	if !gate.Enabled() {
 		log.Warn("KERNEL_AUTH_TOKENS is empty: authentication disabled; configure tokens before sharing this instance")
@@ -737,7 +760,10 @@ func main() {
 		}
 		provider, err := ws.GetProvider(r.Context(), r.PathValue("providerID"))
 		if err != nil {
-			if errors.Is(err, workspace.ErrNotFound) { writeError(w, 404, err); return }
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
 			writeError(w, 500, err)
 			return
 		}
@@ -754,7 +780,10 @@ func main() {
 		}
 		provider := workspace.Provider{ID: r.PathValue("providerID"), Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels}
 		if err := ws.UpdateProvider(r.Context(), provider); err != nil {
-			if errors.Is(err, workspace.ErrNotFound) { writeError(w, 404, err); return }
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
 			writeError(w, 500, err)
 			return
 		}
@@ -765,7 +794,10 @@ func main() {
 			return
 		}
 		if err := ws.DeleteProvider(r.Context(), r.PathValue("providerID")); err != nil {
-			if errors.Is(err, workspace.ErrNotFound) { writeError(w, 404, err); return }
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
 			writeError(w, 500, err)
 			return
 		}
@@ -800,8 +832,12 @@ func main() {
 		if req.ID == "" {
 			req.ID = "user-" + shortID()
 		}
+		token := strings.TrimSpace(req.Token)
+		if token == "" {
+			token = generateToken()
+		}
 		active := req.Active != nil && *req.Active
-		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Projects: req.Projects, Active: active}
+		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Token: token, Projects: req.Projects, Active: active}
 		if err := ws.CreateUser(r.Context(), user); err != nil {
 			writeError(w, 500, err)
 			return
@@ -820,7 +856,10 @@ func main() {
 		active := req.Active != nil && *req.Active
 		user := workspace.User{ID: r.PathValue("userID"), Name: req.Name, Email: req.Email, Role: req.Role, Projects: req.Projects, Active: active}
 		if err := ws.UpdateUser(r.Context(), user); err != nil {
-			if errors.Is(err, workspace.ErrNotFound) { writeError(w, 404, err); return }
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
 			writeError(w, 500, err)
 			return
 		}
@@ -831,7 +870,10 @@ func main() {
 			return
 		}
 		if err := ws.DeleteUser(r.Context(), r.PathValue("userID")); err != nil {
-			if errors.Is(err, workspace.ErrNotFound) { writeError(w, 404, err); return }
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
 			writeError(w, 500, err)
 			return
 		}
@@ -951,4 +993,10 @@ func shortID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return fmt.Sprintf("%x", b)
+}
+
+func generateToken() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }

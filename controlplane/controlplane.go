@@ -275,3 +275,25 @@ func LoadFileSecrets(names ...string) error {
 	}
 	return nil
 }
+
+// Merge returns a new Gate that accepts tokens from both g and other.
+// If either gate is nil or disabled, the other is returned as-is.
+func (g *Gate) Merge(other *Gate) *Gate {
+	if !g.Enabled() && !other.Enabled() {
+		return nil
+	}
+	if !g.Enabled() {
+		return other
+	}
+	if !other.Enabled() {
+		return g
+	}
+	merged := &Gate{byToken: make(map[string]Principal)}
+	for token, p := range g.byToken {
+		merged.byToken[token] = p
+	}
+	for token, p := range other.byToken {
+		merged.byToken[token] = p
+	}
+	return merged
+}
