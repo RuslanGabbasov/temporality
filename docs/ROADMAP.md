@@ -1,0 +1,123 @@
+# Temporality Roadmap
+
+## Status: September 2026
+
+### Done (P0)
+
+- [x] **Kernel P0** — failure/reconciliation, duplicate mitigation, cost accounting, quotas, secrets, runbook
+- [x] **Live MCP E2E** — test-mcp in image, sandbox volume, KERNEL_MCP_TEST_ROOT, approval flow
+- [x] **Journal endpoints** — state-at-T, diff, activation chain, run state-at-T, compare runs
+- [x] **Workspace refactor** — agents top-level, providers CRUD, users CRUD with DB tokens
+- [x] **Experience Priming v1** — deterministic pipeline (group by scope → score → top 7)
+- [x] **Carbon Design System** — full integration, dark theme, proper input styles
+- [x] **Workspace chat** — SSE streaming, conversation history, Markdown rendering, agent selector on new chat
+- [x] **Operations page** — human-readable tool display, verdict buttons, pending badge
+- [x] **Runs trace** — rich event timeline with arguments/output, color-coded icons
+- [x] **Memory Lens filters** — strength, recency, activated, cross-scope, terminal state, presets
+- [x] **Experience Timeline** — SVG, scopes, lifecycle, zoom, semantic zoom, detail panel
+- [x] **Pending badges** — Operations (uncertain ops) and Runs (approval requests) on nav bar
+- [x] **Sandbox network** — agent network_access wired to Docker --network=bridge
+- [x] **Read-only tools** — read_file/search/grep no longer flagged as uncertain operations
+- [x] **Task reuse** — follow-up chat messages reuse same task, not creating new ones
+- [x] **Tool arguments in traces** — tool.started has arguments, tool.completed has output
+
+---
+
+## P0/P1 — Trajectory-derived experience
+
+- [ ] **Trajectory extraction primitive**
+  - Extract repeating steps, tool-call sequences, decisions and outcomes from completed runs.
+  - No separate storage: result is built from event stream.
+  - Separate deterministic features from LLM-derived conclusions.
+  - Acceptance: for a selected run, get a set of repeating structures with provenance to original events.
+
+- [ ] **Experience pattern projection**
+  - Aggregate similar memories/events into experience patterns.
+  - Account for relevance, recency, validation, outcome, recurrence, contradiction, supersession.
+  - Store provenance and links to original events.
+  - Acceptance: hundreds of candidates collapse into a compact set of patterns without losing ability to expand to original evidence.
+
+- [ ] **Experience Priming experiment**
+  - Add optional pre-run stage: candidates → patterns → ranking → 3–7 cues.
+  - Limit priming with strict token budget.
+  - Don't put raw hundreds of memories in prompt.
+  - Allow agent to JIT-retrieve details through existing tools/memory.
+  - Acceptance: compare baseline / conventional RAG / priming / priming+JIT by task success, trajectory length, token usage, unnecessary retrieval/tool calls, wrong-memory activation, contradiction rate and latency.
+  - Fix regressions: priming is not mandatory until value is confirmed.
+
+- [ ] **Trajectory comparison / fork**
+  - Allow running controlled variants from one source task/configuration.
+  - Compare trajectories and derived experience between variants.
+  - Minimum set: no priming vs priming.
+  - Acceptance: differences visible at step level, tool calls, cost and outcome, not just final answer.
+
+- [ ] **Trajectory-to-artifact extraction**
+  - Build general interface for extracting reusable artifacts from trajectory.
+  - Minimum two types: experience pattern and repeatable workflow fragment.
+  - Each artifact must have provenance to source trajectory/events.
+  - Don't implement automatic agent-loop-to-workflow replacement yet.
+
+---
+
+## P1 — Make experience understandable
+
+- [ ] **Forensic View** — why did this experience appear? which evidence? which run/action/outcome?
+- [ ] **Experience lineage** — K82 → K73 supersession chain visible on timeline
+- [ ] **Shareable investigation URL** — backend done, frontend polish needed
+- [ ] **Investigation flows** — "why did agent do this?", "why did knowledge disappear?", "why do two runs differ?"
+- [ ] **Experiment 9 corpus** — validate human understanding of experience evolution through UI
+
+---
+
+## P1 — Platform usability
+
+- [ ] **Streaming improvements** — show model tokens as they arrive (not just turn-level)
+- [ ] **Conversation branching** — fork a conversation from a specific point
+- [ ] **Agent templates** — pre-configured agents for common tasks (coder, reviewer, researcher)
+- [ ] **Project settings** — per-project defaults for agent, model, sandbox
+- [ ] **Bulk operations** — select multiple runs/operations for batch actions
+
+---
+
+## P2 — Advanced
+
+- [ ] **Memory population overview** — active/stale/invalidated counts over time
+- [ ] **Semantic zoom improvements** — knowledge → episode → event navigation
+- [ ] **Cross-project knowledge** — knowledge that spans multiple projects
+- [ ] **Embeddings infrastructure** — if lexical clustering proves insufficient
+- [ ] **Graph-based experience relations** — when timeline is not enough
+
+---
+
+## NOT doing (until proven necessary)
+
+- Universal graph clustering
+- Topic modeling
+- Graph database
+- Complex automatic clustering
+- New runtime
+- Complex visual editor
+- Automatic agent-loop-to-workflow replacement
+
+---
+
+## Architecture
+
+```
+Temporal          — durable execution and orchestration
+Agent Harness     — agent execution semantics
+Temporality       — experience and memory
+Enterprise CP     — identity, tenants, RBAC, secrets, quotas, policies
+Infrastructure    — compute, containers, DB, network
+```
+
+Temporality visualizes the evolution of agent experience in a semantic-temporal space.
+
+Three fundamental dimensions:
+- TIME
+- EXPERIENCE LIFECYCLE
+- SEMANTIC SCOPE
+
+Two connections:
+- Experience → Experience (contradiction / supersession)
+- Experience → Trajectory (activation)
