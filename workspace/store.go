@@ -406,6 +406,7 @@ func (s *Store) StreamRunEvents(ctx context.Context, projectID, runID, afterCurs
 		_ = at
 		// Use event_id as cursor instead of timestamp to avoid precision issues.
 		lastID = ev.EventID
+		ev.OccurredAt = at.UTC().Format(time.RFC3339Nano)
 		events = append(events, ev)
 	}
 	return events, lastID, rows.Err()

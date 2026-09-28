@@ -191,17 +191,26 @@ export default function Workspace({ project }: { project: string }) {
       } catch { /* ignore */ }
     })
 
+    // agent.summary carries the final answer text.
+    es.addEventListener('agent.summary', (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        const answer = data.answer ?? ''
+        if (answer) {
+          lines.push('Answer received')
+          updateMsg(convId, msg, { content: answer, status: 'completed', streamLines: [...lines] })
+        }
+      } catch { /* ignore */ }
+    })
+
     es.addEventListener('run.completed', (e) => {
       try {
         const data = JSON.parse(e.data)
         const line = formatStreamEvent('run.completed', data)
         if (line) lines.push(line)
-        // Fetch the final answer.
-        void fetchFinalAnswer(runId, convId, msg)
-      } catch {
-        void fetchFinalAnswer(runId, convId, msg)
-      }
-      es.close(); streamRef.current.delete(convId)
+      } catch { /* ignore */ }
+      // Don't close yet — agent.summary with the answer comes after.
+      // The 'done' event will trigger final cleanup.
     })
 
     es.addEventListener('run.failed', (e) => {
@@ -218,8 +227,15 @@ export default function Workspace({ project }: { project: string }) {
 
     es.addEventListener('done', () => {
       es.close(); streamRef.current.delete(convId)
-      // If we haven't fetched an answer yet, try now.
-      void fetchFinalAnswer(runId, convId, msg)
+      // If agent.summary already set the answer, we're done.
+      // Otherwise fetch from REST API.
+      setConversations((prev) => {
+        const conv = prev.find((c) => c.id === convId)
+        const m = conv?.messages.find((x) => x === msg)
+        if (m?.content) return prev
+        void fetchFinalAnswer(runId, convId, msg)
+        return prev
+      })
     })
 
     es.onerror = () => {
