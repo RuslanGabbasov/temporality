@@ -34,9 +34,10 @@ const STATE_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 're
 }
 
 export default function Observability({ project }: { project: string }) {
-  const [asOf, setAsOf] = useState('')
-  const [compareAsOf, setCompareAsOf] = useState('')
-  const [knownAt, setKnownAt] = useState('')
+  const initParams = new URLSearchParams(window.location.search)
+  const [asOf, setAsOf] = useState(initParams.get('as_of') ?? '')
+  const [compareAsOf, setCompareAsOf] = useState(initParams.get('compare') ?? '')
+  const [knownAt, setKnownAt] = useState(initParams.get('known_at') ?? '')
   const [events, setEvents] = useState<ObservationEvent[]>([])
   const [nextCursor, setNextCursor] = useState('')
   const [knowledge, setKnowledge] = useState<KnowledgeItem[]>([])
@@ -68,6 +69,16 @@ export default function Observability({ project }: { project: string }) {
     return [...groups.entries()].sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]))
   }, [knowledge])
   const visibleKnowledge = clusterFilter === 'all' ? knowledge : knowledge.filter((item) => (item.topics?.[0] || item.entities?.[0] || 'Unscoped knowledge') === clusterFilter)
+
+  // Sync selected knowledge and cluster filter to URL for shareable links
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (selectedID) params.set('selected', selectedID)
+    else params.delete('selected')
+    if (clusterFilter !== 'all') params.set('cluster', clusterFilter)
+    else params.delete('cluster')
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
+  }, [selectedID, clusterFilter])
 
   // Fetch activation chain when a knowledge item is selected
   useEffect(() => {
@@ -112,6 +123,11 @@ export default function Observability({ project }: { project: string }) {
       setSelectedID((current) => history.knowledge.some((item) => item.id === current) ? current : history.knowledge[0]?.id ?? '')
       const params = new URLSearchParams(window.location.search)
       params.set('project', project.trim())
+      if (asOf) params.set('as_of', asOf)
+      if (compareAsOf) params.set('compare', compareAsOf)
+      if (knownAt) params.set('known_at', knownAt)
+      if (selectedID) params.set('selected', selectedID)
+      if (clusterFilter !== 'all') params.set('cluster', clusterFilter)
       window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
     } catch (reason) { setError(errorMessage(reason)) }
     finally { setLoading(false) }
@@ -371,6 +387,17 @@ export default function Observability({ project }: { project: string }) {
                       <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
                         Activation Chain — {chain.total_runs} runs · {chain.activations.length} activations · {chain.is_alive ? 'alive' : 'dead'}
                       </h5>
+                      {/* Formation evidence */}
+                      {chain.formation_evidence?.length > 0 && (
+                        <div style={{ marginBottom: '0.5rem', padding: '0.4rem 0.5rem', borderLeft: '3px solid #57d7e8', background: 'rgba(87,215,232,0.05)', borderRadius: '0 4px 4px 0' }}>
+                          <div style={{ fontSize: '0.75rem', color: '#57d7e8', fontWeight: 600, marginBottom: '0.25rem' }}>Formed in {chain.formed_in} turn {chain.formed_turn}</div>
+                          <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                            {chain.formation_evidence.map((t: any, i: number) => (
+                              <Tag key={i} type={t.success ? 'green' : 'red'} size="sm">{t.tool}{t.exit_code !== undefined && t.exit_code !== 0 ? ` (${t.exit_code})` : ''}</Tag>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {chain.activations.map((a: any, i: number) => (
                         <div key={i} style={{ padding: '0.4rem 0.5rem', borderLeft: `3px solid ${a.outcome === 'success' ? '#9ece6a' : a.outcome === 'failure' ? '#f7768e' : '#7e8a9c'}`, marginBottom: '0.25rem', background: 'rgba(255,255,255,0.02)', borderRadius: '0 4px 4px 0', fontSize: '0.8rem' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

@@ -12,16 +12,18 @@ import (
 
 // ActivationChain is the full lifecycle of a knowledge item across runs.
 type ActivationChain struct {
-	KnowledgeID  string            `json:"knowledge_id"`
-	Proposition  string            `json:"proposition"`
-	CurrentState string            `json:"current_state"`
-	FormedAt     time.Time         `json:"formed_at"`
-	FormedIn     string            `json:"formed_in"` // run ID
-	Activations  []Activation      `json:"activations"`
-	Invalidation *InvalidationInfo `json:"invalidation,omitempty"`
-	SupersededBy string            `json:"superseded_by,omitempty"`
-	TotalRuns    int               `json:"total_runs"`
-	IsAlive      bool              `json:"is_alive"`
+	KnowledgeID       string            `json:"knowledge_id"`
+	Proposition       string            `json:"proposition"`
+	CurrentState      string            `json:"current_state"`
+	FormedAt          time.Time         `json:"formed_at"`
+	FormedIn          string            `json:"formed_in"` // run ID
+	FormedTurn        int               `json:"formed_turn"`
+	FormationEvidence []ToolStep        `json:"formation_evidence"` // tool calls in the formation turn
+	Activations       []Activation      `json:"activations"`
+	Invalidation      *InvalidationInfo `json:"invalidation,omitempty"`
+	SupersededBy      string            `json:"superseded_by,omitempty"`
+	TotalRuns         int               `json:"total_runs"`
+	IsAlive           bool              `json:"is_alive"`
 }
 
 // Activation is one recall/injection/use of knowledge in a run.
@@ -67,7 +69,15 @@ func ExtractActivationChain(knowledgeID string, trajectories []Trajectory) Activ
 				if chain.FormedAt.IsZero() || k.At.Before(chain.FormedAt) {
 					chain.FormedAt = k.At
 					chain.FormedIn = traj.RunID
+					chain.FormedTurn = k.TurnNumber
 					chain.Proposition = k.Proposition
+					// Capture tool calls from the formation turn as evidence
+					for _, turn := range traj.Turns {
+						if turn.Number == k.TurnNumber {
+							chain.FormationEvidence = turn.Tools
+							break
+						}
+					}
 				}
 				chain.CurrentState = "proposed"
 				runSet[traj.RunID] = true
