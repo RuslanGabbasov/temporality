@@ -176,7 +176,7 @@ export default function Observability({ project }: { project: string }) {
         {/* Event stream */}
         <Column sm={4} md={3} lg={4}>
           <Section level={3}>
-            <Heading>Event Stream ({events.length})</Heading>
+            <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>Event Stream ({events.length})</Heading>
             <Stack gap={1}>
               {events.length === 0 && <Tile><p>Open a project to inspect events</p></Tile>}
               {events.map((event) => (
@@ -206,7 +206,7 @@ export default function Observability({ project }: { project: string }) {
         {/* Knowledge list */}
         <Column sm={4} md={5} lg={5}>
           <Section level={3}>
-            <Heading>Knowledge ({knowledge.length})</Heading>
+            <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>Knowledge ({knowledge.length})</Heading>
             {clusters.length > 0 && (
               <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
                 <Tag
@@ -253,34 +253,34 @@ export default function Observability({ project }: { project: string }) {
         {/* Detail */}
         <Column sm={4} md={8} lg={7}>
           <Section level={3}>
-            <Heading>Provenance / Activation</Heading>
+            <Heading style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>Provenance / Activation</Heading>
             {!selected ? (
               <Tile><p>Select a knowledge item to inspect</p></Tile>
             ) : (
               <Stack gap={3}>
                 <Tile>
                   <Tag type={STATE_COLORS[selected.state] || 'gray'}>{selected.state}</Tag>
-                  <h3>{selected.proposition}</h3>
+                  <p style={{ fontSize: '0.875rem', fontWeight: 600, marginTop: '0.5rem', lineHeight: 1.4 }}>{selected.proposition}</p>
                   <small style={{ color: '#7e8a9c' }}>ID: {selected.id}</small>
-                  <p>Created: {new Date(selected.created_at).toLocaleString()} · Updated: {new Date(selected.updated_at).toLocaleString()}</p>
-                  <p>Reuse: {selected.reuse_count} · Hints: {selected.hint_uses}/{selected.hint_offers} · Helpful: {selected.helpful_outcomes} · Harmful: {selected.harmful_outcomes}</p>
+                  <p style={{ fontSize: '0.75rem', color: '#7e8a9c', marginTop: '0.25rem' }}>Created: {new Date(selected.created_at).toLocaleString()} · Updated: {new Date(selected.updated_at).toLocaleString()}</p>
+                  <p style={{ fontSize: '0.75rem', color: '#7e8a9c' }}>Reuse: {selected.reuse_count} · Hints: {selected.hint_uses}/{selected.hint_offers} · Helpful: {selected.helpful_outcomes} · Harmful: {selected.harmful_outcomes}</p>
                   {selected.at_risk && <InlineNotification kind="warning" title="At risk" subtitle={`Depends on: ${selected.risk_sources?.join(', ')}`} lowContrast />}
                   {selected.relationships?.length ? (
                     <>
-                      <h4>Relations</h4>
+                      <h5 style="fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem"">Relations</h5>
                       {selected.relationships.map((r) => <div key={r.event_id}>{r.type} → <code>{r.target_id}</code></div>)}
                     </>
                   ) : null}
                   {selected.evidence?.length ? (
                     <>
-                      <h4>Evidence</h4>
+                      <h5 style="fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem"">Evidence</h5>
                       {selected.evidence.map((e) => <div key={e.ref}><code>{e.ref}</code> ({e.type})</div>)}
                     </>
                   ) : <p style={{ color: '#7e8a9c' }}>No evidence attached</p>}
                 </Tile>
 
                 <Tile>
-                  <h4>Lifecycle</h4>
+                  <h5 style="fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem"">Lifecycle</h5>
                   <Stack gap={1}>
                     {selected.history.map((entry) => (
                       <div key={entry.event_id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.75rem' }}>
@@ -295,7 +295,7 @@ export default function Observability({ project }: { project: string }) {
 
                 {selected.state !== 'invalidated' && selected.state !== 'corrected' && selected.state !== 'superseded' && (
                   <Tile>
-                    <h4>Manual Invalidation</h4>
+                    <h5 style="fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem"">Manual Invalidation</h5>
                     <Stack gap={2}>
                       <TextInput id="actor" labelText="Actor" value={actor} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setActor(e.target.value)} />
                       <TextArea id="reason" labelText="Reason" value={reason} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setReason(e.target.value)} rows={3} />
@@ -305,7 +305,7 @@ export default function Observability({ project }: { project: string }) {
                 )}
 
                 <Tile>
-                  <h4>Memory Activation</h4>
+                  <h5 style="fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem"">Memory Activation</h5>
                   <Stack gap={2}>
                     <TextArea id="query" labelText="Query" value={query} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setQuery(e.target.value)} rows={2} placeholder="What is the agent trying to do?" />
                     <TextInput id="tool" labelText="Tool" value={tool} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTool(e.target.value)} placeholder="test-runner" />
