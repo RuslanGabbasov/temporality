@@ -274,13 +274,8 @@ export default function Workspace({ project }: { project: string }) {
     }
     setConversations((prev) => prev.map((c) => c.id === updatedConv.id ? updatedConv : c))
 
-    // Add placeholder assistant message
-    const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', streamLines: ['Starting run…'] }
-    const withAssistant = { ...updatedConv, messages: [...updatedConv.messages, assistantMsg] }
-    setConversations((prev) => prev.map((c) => c.id === withAssistant.id ? withAssistant : c))
-
     try {
-      // Create task and start run
+      // Create task and start run first to get the runId
       const task = await workspaceApi.createTask({
         project_id: project,
         agent_id: selectedAgentId || undefined,
@@ -289,19 +284,19 @@ export default function Workspace({ project }: { project: string }) {
       })
       const result = await workspaceApi.startRun(task.id, { agent_id: selectedAgentId || undefined })
       const runId = result.run_id
-      // Update assistant message with runId
-      setConversations((prev) => prev.map((c) => {
-        if (c.id !== activeConv.id) return c
-        return { ...c, messages: c.messages.map((m) => m === assistantMsg ? { ...m, runId, streamLines: ['Run started · streaming…'] } : m) }
-      }))
+
+      // Now create the assistant message WITH runId already set
+      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: ['Run started · streaming…'] }
+      const withAssistant = { ...updatedConv, messages: [...updatedConv.messages, assistantMsg] }
+      setConversations((prev) => prev.map((c) => c.id === withAssistant.id ? withAssistant : c))
+
       // Start SSE streaming
       streamRun(runId, activeConv.id)
     } catch (f) {
       setError(message(f))
-      setConversations((prev) => prev.map((c) => {
-        if (c.id !== activeConv.id) return c
-        return { ...c, messages: c.messages.map((m) => m === assistantMsg ? { ...m, content: `Error: ${message(f)}`, status: 'failed', streamLines: undefined } : m) }
-      }))
+      const errMsg: ChatMessage = { role: 'assistant', content: `Error: ${message(f)}`, timestamp: new Date(), status: 'failed' }
+      const withErr = { ...updatedConv, messages: [...updatedConv.messages, errMsg] }
+      setConversations((prev) => prev.map((c) => c.id === withErr.id ? withErr : c))
     } finally { setLoading(false) }
   }
 
