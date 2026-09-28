@@ -70,6 +70,7 @@ function turnOf(opId: string): string | null {
 export default function Operations({ project }: { project: string }) {
   const [ops, setOps] = useState<UncertainOperation[]>([])
   const [selected, setSelected] = useState<UncertainOperation | null>(null)
+  const [selectedSet, setSelectedSet] = useState<Set<string>>(new Set())
   const [identity, setIdentity] = useState<Whoami | null>(null)
   const [effect, setEffect] = useState<ReconcileEffect>('occurred')
   const [note, setNote] = useState('')
@@ -120,6 +121,36 @@ export default function Operations({ project }: { project: string }) {
     finally { setBusy(false) }
   }
 
+  async function batchReconcile(batchEffect: ReconcileEffect) {
+    const selected = ops.filter((op) => selectedSet.has(op.operation_id))
+    if (selected.length === 0) return
+    setBusy(true); setError(''); setReceipt(null)
+    let count = 0
+    for (const op of selected) {
+      try {
+        await reconcile({
+          project: op.project, run_id: op.run_id, operation_id: op.operation_id,
+          effect: batchEffect, note: note.trim() || undefined,
+          actor_id: actor.trim() || 'human-ui', started_event_id: op.started_event_id,
+        })
+        count++
+      } catch { /* continue */ }
+    }
+    setReceipt({ event_id: `batch-${count}`, operation_id: `${count} operations`, effect: batchEffect } as any)
+    setSelectedSet(new Set()); setNote('')
+    await load(project, true)
+    setBusy(false)
+  }
+
+  const toggleSelect = (opId: string) => {
+    setSelectedSet((prev) => {
+      const next = new Set(prev)
+      if (next.has(opId)) next.delete(opId)
+      else next.add(opId)
+      return next
+    })
+  }
+
   const operator = canReconcile(identity?.role ?? '')
 
   return (
@@ -159,9 +190,19 @@ export default function Operations({ project }: { project: string }) {
                   <p style={{ fontSize: '0.75rem', marginTop: '0.5rem' }}>All tool executions have been confirmed.</p>
                 </Tile>
               )}
+              {selectedSet.size > 0 && operator && (
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', padding: '0.5rem', marginBottom: '0.5rem', background: '#121823', borderRadius: '6px', border: '1px solid #344258' }}>
+                  <span style={{ fontSize: '0.8rem', color: '#7e8a9c' }}>{selectedSet.size} selected</span>
+                  <Button size="sm" kind="ghost" onClick={() => void batchReconcile('occurred')} disabled={busy}>All occurred</Button>
+                  <Button size="sm" kind="ghost" onClick={() => void batchReconcile('none')} disabled={busy}>All none</Button>
+                  <Button size="sm" kind="ghost" onClick={() => void batchReconcile('unknown')} disabled={busy}>All unknown</Button>
+                  <Button size="sm" kind="ghost" onClick={() => setSelectedSet(new Set())}>Clear</Button>
+                </div>
+              )}
               {ops.map((op) => {
                 const info = toolInfo(op.tool, op.server)
                 const turn = turnOf(op.operation_id)
+                const isChecked = selectedSet.has(op.operation_id)
                 return (
                   <Tile
                     key={`${op.run_id}:${op.operation_id}`}
@@ -170,6 +211,13 @@ export default function Operations({ project }: { project: string }) {
                     style={{ cursor: 'pointer', padding: '0.75rem' }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onClick={(e) => { e.stopPropagation(); toggleSelect(op.operation_id) }}
+                        onChange={() => {}}
+                        style={{ accentColor: '#57d7e8', flexShrink: 0 }}
+                      />
                       <span style={{ fontSize: '1.1rem' }}>{info.icon}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{info.label}</div>
