@@ -719,7 +719,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       </section>
       {selectedRow && <aside className="obs-panel experience-detail">
         <button className="detail-close" title="close the detail panel" onClick={() => setSelected('')} aria-label="Close details">×</button>
-        <RowDetails row={selectedRow} lineage={model.lineage} forensic={forensicOf(selectedRow, model)} onFocus={focusOn} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} />
+        <RowDetails row={selectedRow} lineage={model.lineage} forensic={forensicOf(selectedRow, model)} onFocus={focusOn} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} project={project} />
       </aside>}
     </main>
   </div>
@@ -739,7 +739,7 @@ function Header({ project, load, loading }: { project: string; load: (project: s
   return null
 }
 
-function RowDetails({ row, lineage, forensic, onFocus, related }: { row: KnowledgeRow; lineage: KnowledgeLineage[]; forensic: ForensicRecord; onFocus: (at: string, eventId: string, label: string) => void; related: KnowledgeRow[] }) {
+function RowDetails({ row, lineage, forensic, onFocus, related, project }: { row: KnowledgeRow; lineage: KnowledgeLineage[]; forensic: ForensicRecord; onFocus: (at: string, eventId: string, label: string) => void; related: KnowledgeRow[]; project: string }) {
   const counts = LIFECYCLE_KINDS.map((kind) => {
     const count = row.points.filter((point) => point.kind === kind).length
     return count ? `${kind} ×${count}` : ''
@@ -829,5 +829,13 @@ function RowDetails({ row, lineage, forensic, onFocus, related }: { row: Knowled
         {related.map((item) => <li key={item.knowledgeId}><code>{shortKnowledge(item.knowledgeId)}</code><span className={`member-state ${item.state}`}>{item.state}</span><small>{item.scopes.primary}</small></li>)}
       </ul>
     </section>}
+    <section style={{ marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid #202a38' }}>
+      <h4>Investigate</h4>
+      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.35rem' }}>
+        <a href={`/observability?project=${encodeURIComponent(project)}&selected=${encodeURIComponent(row.knowledgeId)}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>Knowledge page</a>
+        {row.runs[0] && <a href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(row.runs[0])}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>First run trace</a>}
+        {row.runs.length > 1 && <a href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(row.runs[row.runs.length - 1])}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>Last run trace</a>}
+      </div>
+    </section>
   </div>
 }
