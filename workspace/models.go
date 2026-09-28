@@ -4,11 +4,13 @@ import "time"
 
 // Project groups tasks and runs. Agents are top-level and reusable across projects.
 type Project struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description"`
+	DefaultAgentID string    `json:"default_agent_id,omitempty"`
+	DefaultModel   string    `json:"default_model,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // Agent is a top-level entity with full configuration. Agents are reusable
@@ -96,9 +98,11 @@ type User struct {
 
 // CreateProjectRequest is the payload for creating a project.
 type CreateProjectRequest struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	DefaultAgentID string `json:"default_agent_id"`
+	DefaultModel   string `json:"default_model"`
 }
 
 // CreateAgentRequest is the payload for creating an agent.

@@ -10,6 +10,8 @@ import {
   Theme,
   Button,
   TextInput,
+  Select,
+  SelectItem,
   Modal,
 } from '@carbon/react'
 import { User, Settings, Add, Edit, TrashCan } from '@carbon/icons-react'
@@ -42,12 +44,15 @@ interface Project {
   id: string
   name: string
   description: string
+  default_agent_id?: string
+  default_model?: string
 }
 
 export default function Layout({ children, activePage }: LayoutProps) {
   const params = new URLSearchParams(window.location.search)
   const [project, setProject] = useState(params.get('project') ?? 'lighthouse')
   const [projects, setProjects] = useState<Project[]>([])
+  const [allAgents, setAllAgents] = useState<{ id: string; name: string }[]>([])
   const [showProjectPanel, setShowProjectPanel] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
   const [token, setToken] = useState(authToken() ?? '')
@@ -119,6 +124,16 @@ export default function Layout({ children, activePage }: LayoutProps) {
 
   useEffect(() => { void loadProjects() }, [loadProjects])
 
+  useEffect(() => {
+    const loadAgents = async () => {
+      try {
+        const resp = await fetch('/kernel-api/v1/workspace/agents', { headers: { ...authHeaders() } })
+        if (resp.ok) { const data = await resp.json(); setAllAgents(data.agents ?? []) }
+      } catch { /* ignore */ }
+    }
+    void loadAgents()
+  }, [])
+
   const navigate = (path: string) => {
     window.history.pushState(null, '', path)
     window.dispatchEvent(new PopStateEvent('popstate'))
@@ -150,7 +165,13 @@ export default function Layout({ children, activePage }: LayoutProps) {
   // Project CRUD
   const saveProject = async () => {
     const id = editProject?.id ?? newProjectName.trim().toLowerCase().replace(/\s+/g, '-')
-    const body = { id, name: editProject ? editProject.name : newProjectName.trim(), description: editProject ? editProject.description : newProjectDesc.trim() }
+    const body = {
+      id,
+      name: editProject ? editProject.name : newProjectName.trim(),
+      description: editProject ? editProject.description : newProjectDesc.trim(),
+      default_agent_id: editProject?.default_agent_id ?? '',
+      default_model: editProject?.default_model ?? '',
+    }
     const url = editProject ? `/kernel-api/v1/workspace/projects/${id}` : '/kernel-api/v1/workspace/projects'
     const method = editProject ? 'PUT' : 'POST'
     await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(body) })
@@ -325,6 +346,26 @@ export default function Layout({ children, activePage }: LayoutProps) {
           }}
           placeholder="What this project is about"
         />
+        {editProject && (
+          <>
+            <Select
+              id="project-agent"
+              labelText="Default agent"
+              value={editProject.default_agent_id ?? ''}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEditProject({ ...editProject, default_agent_id: e.target.value })}
+            >
+              <SelectItem value="" text="None (user chooses)" />
+              {allAgents.map((a) => <SelectItem key={a.id} value={a.id} text={a.name} />)}
+            </Select>
+            <TextInput
+              id="project-model"
+              labelText="Default model (override)"
+              value={editProject.default_model ?? ''}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditProject({ ...editProject, default_model: e.target.value })}
+              placeholder="Leave empty to use agent's model"
+            />
+          </>
+        )}
       </Modal>
 
       <Content id="main-content">

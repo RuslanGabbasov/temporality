@@ -370,7 +370,7 @@ func main() {
 		if req.ID == "" {
 			req.ID = slugify(req.Name)
 		}
-		project := &workspace.Project{ID: req.ID, Name: req.Name, Description: req.Description}
+		project := &workspace.Project{ID: req.ID, Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel}
 		if err := ws.CreateProject(r.Context(), project); err != nil {
 			writeError(w, 409, err)
 			return
@@ -401,7 +401,7 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
-		project := workspace.Project{ID: r.PathValue("projectID"), Name: req.Name, Description: req.Description}
+		project := workspace.Project{ID: r.PathValue("projectID"), Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel}
 		if err := ws.UpdateProject(r.Context(), project); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)

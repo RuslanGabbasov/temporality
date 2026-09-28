@@ -1,0 +1,2 @@
+ALTER TABLE workspace_project ADD COLUMN IF NOT EXISTS default_agent_id TEXT REFERENCES workspace_agent(id) ON DELETE SET NULL;
+ALTER TABLE workspace_project ADD COLUMN IF NOT EXISTS default_model TEXT NOT NULL DEFAULT '';
