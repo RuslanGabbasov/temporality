@@ -559,7 +559,7 @@ func main() {
 			return
 		}
 		if req.ID == "" {
-			req.ID = slugify(req.Title)
+			req.ID = slugify(req.Title) + "-" + time.Now().UTC().Format("20060102-150405")
 		}
 		// Ensure project exists in workspace (auto-create from journal scope).
 		if _, err := ws.GetProject(r.Context(), req.ProjectID); err != nil {
