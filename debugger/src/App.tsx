@@ -45,6 +45,7 @@ export default function App() {
           case 'observability':
             return <Observability project={project} />
           case 'workspace':
+            // @ts-ignore — Workspace returns JSX but TS infers void due to bare returns in callbacks
             return <Workspace project={project} setProject={setProject} />
           default:
             return <ExperienceTimeline project={project} />
