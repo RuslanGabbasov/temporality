@@ -13,7 +13,7 @@ import {
   Stack,
   Heading,
 } from '@carbon/react'
-import { Add, Edit, TrashCan } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, Key } from '@carbon/icons-react'
 import { workspaceApi, type User } from './workspaceApi'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -25,6 +25,8 @@ export default function Users() {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<User | null>(null)
   const [form, setForm] = useState<Partial<User>>({})
+  const [generatedToken, setGeneratedToken] = useState<string | null>(null)
+  const [tokenUser, setTokenUser] = useState<User | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -74,6 +76,18 @@ export default function Users() {
     finally { setLoading(false) }
   }
 
+  const generateToken = (u: User) => {
+    const bytes = new Uint8Array(32)
+    crypto.getRandomValues(bytes)
+    const token = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+    setGeneratedToken(token)
+    setTokenUser(u)
+  }
+
+  const copyToClipboard = (text: string) => {
+    void navigator.clipboard.writeText(text)
+  }
+
   const ROLE_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'red'> = {
     admin: 'blue',
     operator: 'green',
@@ -104,6 +118,7 @@ export default function Users() {
                   </div>
                 </div>
                 <Stack orientation="horizontal" gap={1}>
+                  <Button size="sm" kind="ghost" renderIcon={Key} iconDescription="Generate Token" onClick={() => generateToken(u)} />
                   <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(u)} />
                   <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(u)} />
                 </Stack>
@@ -129,6 +144,26 @@ export default function Users() {
                 <Button onClick={() => void save()}>{editing ? 'Save' : 'Create'}</Button>
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>Cancel</Button>
               </Stack>
+            </Stack>
+          </div>
+        </div>
+      )}
+
+      {generatedToken && tokenUser && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#0d1118', border: '1px solid #344258', borderRadius: '8px', padding: '1.5rem', width: '600px' }}>
+            <Heading>Token for {tokenUser.name}</Heading>
+            <p style={{ color: '#7e8a9c', marginBottom: '1rem' }}>Copy this token now — it will not be shown again.</p>
+            <div style={{ background: '#121823', border: '1px solid #344258', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all', marginBottom: '1rem' }}>
+              {generatedToken}
+            </div>
+            <p style={{ color: '#7e8a9c', marginBottom: '0.5rem' }}>Add this line to <code>.env</code> (append to KERNEL_AUTH_TOKENS):</p>
+            <div style={{ background: '#121823', border: '1px solid #344258', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.75rem', wordBreak: 'break-all', marginBottom: '1rem' }}>
+              {generatedToken}:{tokenUser.name}:{tokenUser.role}:{tokenUser.projects?.length ? tokenUser.projects.join(',') : '*'}
+            </div>
+            <Stack orientation="horizontal" gap={2}>
+              <Button onClick={() => { copyToClipboard(generatedToken + ':' + tokenUser.name + ':' + tokenUser.role + ':' + (tokenUser.projects?.length ? tokenUser.projects.join(',') : '*')); setGeneratedToken(null); setTokenUser(null) }}>Copy & Close</Button>
+              <Button kind="secondary" onClick={() => { setGeneratedToken(null); setTokenUser(null) }}>Close</Button>
             </Stack>
           </div>
         </div>
