@@ -38,9 +38,7 @@ const STATUS_TAGS: Record<string, { type: string; label: string }> = {
   pending: { type: 'gray', label: 'Pending' },
 }
 
-export default function Workspace({ project, setProject }: { project: string; setProject: (p: string) => void }) {
-  const [projects, setProjects] = useState<Project[]>([])
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+export default function Workspace({ project }: { project: string; setProject: (p: string) => void }) {
   const [agents, setAgents] = useState<Agent[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
@@ -48,11 +46,6 @@ export default function Workspace({ project, setProject }: { project: string; se
   const [selectedRun, setSelectedRun] = useState<Run | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-
-  // Project form
-  const [showProjectForm, setShowProjectForm] = useState(false)
-  const [projectName, setProjectName] = useState('')
-  const [projectDesc, setProjectDesc] = useState('')
 
   // Agent form
   const [showAgentForm, setShowAgentForm] = useState(false)
@@ -70,26 +63,8 @@ export default function Workspace({ project, setProject }: { project: string; se
 
   const loadProjects = useCallback(async () => {
     try {
-      const [projectsData, agentsData] = await Promise.all([
-        workspaceApi.listProjects(),
-        workspaceApi.listAllAgents(),
-      ])
-      setProjects(projectsData.projects ?? [])
+      const agentsData = await workspaceApi.listAllAgents()
       setAllAgents(agentsData.agents ?? [])
-    } catch (f) { setError(message(f)) }
-  }, [])
-
-  const loadProjectData = useCallback(async (project: Project) => {
-    setSelectedProject(project)
-    setSelectedTask(null)
-    setSelectedRun(null)
-    try {
-      const [a, t] = await Promise.all([
-        workspaceApi.listAgents(project.id),
-        workspaceApi.listTasks(project.id),
-      ])
-      setAgents(a.agents ?? [])
-      setTasks(t.tasks ?? [])
     } catch (f) { setError(message(f)) }
   }, [])
 
@@ -112,23 +87,31 @@ export default function Workspace({ project, setProject }: { project: string; se
 
   useEffect(() => { void loadProjects() }, [loadProjects])
 
+  // Load project data when global project changes
+  const loadProjectInfo = useCallback(async () => {
+    if (!project) return
+    try {
+      const [a, t] = await Promise.all([
+        workspaceApi.listAgents(project),
+        workspaceApi.listTasks(project),
+      ])
+      setAgents(a.agents ?? [])
+      setTasks(t.tasks ?? [])
+    } catch {
+      setAgents([])
+      setTasks([])
+    }
+  }, [project])
+
+  useEffect(() => { void loadProjectInfo() }, [loadProjectInfo])
+
   useEffect(() => {
     if (!selectedRun || selectedRun.status === 'completed' || selectedRun.status === 'failed' || selectedRun.status === 'turn_limit') return
     const timer = setInterval(() => { void loadRun(selectedRun.id) }, 3000)
     return () => clearInterval(timer)
   }, [selectedRun, loadRun])
 
-  const createProject = async () => {
-    if (!projectName.trim()) return
-    setLoading(true); setError('')
-    try {
-      await workspaceApi.createProject({ name: projectName.trim(), description: projectDesc.trim() })
-      setProjectName(''); setProjectDesc(''); setShowProjectForm(false)
-      await loadProjects()
-    } catch (f) { setError(message(f)) }
-    finally { setLoading(false) }
-  }
-
+  const startEditAgent = (agent: Agent) => {
   const createOrUpdateAgent = async () => {
     if (!agentName.trim()) return
     setLoading(true); setError('')
@@ -139,9 +122,9 @@ export default function Workspace({ project, setProject }: { project: string; se
           model: agentModel.trim(),
           system_prompt: agentPrompt,
         })
-      } else if (selectedProject) {
+      } else {
         await workspaceApi.createAgent({
-          project_id: selectedProject.id,
+          project_id: project,
           name: agentName.trim(),
           model: agentModel.trim(),
           system_prompt: agentPrompt,
@@ -149,7 +132,7 @@ export default function Workspace({ project, setProject }: { project: string; se
       }
       setAgentName(''); setAgentModel(''); setAgentPrompt(''); setShowAgentForm(false); setEditingAgent(null)
       await loadProjects()
-      if (selectedProject) await loadProjectData(selectedProject)
+      await loadProjectInfo()
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }
@@ -160,7 +143,7 @@ export default function Workspace({ project, setProject }: { project: string; se
     try {
       await workspaceApi.deleteAgent(agent.id)
       await loadProjects()
-      if (selectedProject) await loadProjectData(selectedProject)
+      await loadProjectInfo()
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }
@@ -198,17 +181,17 @@ export default function Workspace({ project, setProject }: { project: string; se
   }
 
   const createTask = async () => {
-    if (!taskTitle.trim() || !taskPrompt.trim() || !selectedProject) return
+    if (!taskTitle.trim() || !taskPrompt.trim()) return
     setLoading(true); setError('')
     try {
       await workspaceApi.createTask({
-        project_id: selectedProject.id,
+        project_id: project,
         agent_id: taskAgentId || undefined,
         title: taskTitle.trim(),
         prompt: taskPrompt.trim(),
       })
       setTaskTitle(''); setTaskPrompt(''); setTaskAgentId(''); setShowTaskForm(false)
-      await loadProjectData(selectedProject)
+      await loadProjectInfo()
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }
@@ -274,68 +257,13 @@ export default function Workspace({ project, setProject }: { project: string; se
         </Tile>
       </Column>
 
-      {/* Projects panel */}
+      {/* Agents + Tasks panel */}
       <Column sm={4} md={4} lg={4}>
         <Section level={2}>
-          <Heading>Projects</Heading>
-          <Stack gap={3}>
-            {projects.map((p) => (
-              <Tile
-                key={p.id}
-                onClick={() => void loadProjectData(p)}
-                className={`workspace-tile ${selectedProject?.id === p.id ? 'selected' : ''}`}
-              >
-                <strong>{p.name}</strong>
-                <br />
-                <small>{p.id}</small>
-              </Tile>
-            ))}
-            
-            {showProjectForm ? (
-              <Layer>
-                <Stack gap={3}>
-                  <TextInput
-                    id="project-name"
-                    labelText="Project name"
-                    value={projectName}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProjectName(e.target.value)}
-                    placeholder="my-project"
-                    autoFocus
-                  />
-                  <TextInput
-                    id="project-desc"
-                    labelText="Description (optional)"
-                    value={projectDesc}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProjectDesc(e.target.value)}
-                    placeholder="What this project is about"
-                  />
-                  <Stack orientation="horizontal" gap={2}>
-                    <Button onClick={() => void createProject()} disabled={loading}>
-                      Create project
-                    </Button>
-                    <Button kind="secondary" onClick={() => setShowProjectForm(false)}>
-                      Cancel
-                    </Button>
-                  </Stack>
-                </Stack>
-              </Layer>
-            ) : (
-              <Button renderIcon={Add} onClick={() => setShowProjectForm(true)}>
-                New project
-              </Button>
-            )}
-          </Stack>
-        </Section>
-      </Column>
+          <Heading>{project}</Heading>
 
-      {/* Agents + Tasks panel */}
-      {selectedProject && (
-        <Column sm={4} md={4} lg={4}>
-          <Section level={2}>
-            <Heading>{selectedProject.name}</Heading>
-            
-            {/* Agents */}
-            <Section level={3}>
+          {/* Agents */}
+          <Section level={3}>
               <Heading>Agents</Heading>
               <Stack gap={2}>
                 {agents.map((a) => (
@@ -488,7 +416,6 @@ export default function Workspace({ project, setProject }: { project: string; se
             </Section>
           </Section>
         </Column>
-      )}
 
       {/* Runs panel */}
       {selectedTask && (
@@ -579,4 +506,4 @@ export default function Workspace({ project, setProject }: { project: string; se
       )}
     </Grid>
   )
-}
+}}
