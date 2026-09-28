@@ -94,7 +94,7 @@ export default function Workspace({ project }: { project: string }) {
       const result = await workspaceApi.startRun(task.id, { agent_id: selectedAgentId || undefined })
       const assistantMsg: ChatMessage = {
         role: 'assistant',
-        content: `Run started: ${result.run_id}`,
+        content: 'Running...',
         timestamp: new Date(),
         runId: result.run_id,
         status: 'running',
@@ -112,8 +112,9 @@ export default function Workspace({ project }: { project: string }) {
       try {
         const run = await workspaceApi.getRun(runId)
         if (run.status === 'completed' || run.status === 'failed' || run.status === 'turn_limit') {
+          const answer = run.answer || run.error || 'No answer received'
           setMessages((prev) => prev.map((m) =>
-            m.runId === runId ? { ...m, content: run.answer || run.error || 'No answer', status: run.status } : m
+            m.runId === runId ? { ...m, content: answer, status: run.status } : m
           ))
           return
         }
@@ -180,7 +181,17 @@ export default function Workspace({ project }: { project: string }) {
                     {msg.runId && (
                       <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: msg.role === 'user' ? '#080b10' : '#7e8a9c' }}>
                         <Tag type={STATUS_COLORS[msg.status || 'pending'] || 'gray'} size="sm">{msg.status || 'pending'}</Tag>
-                        <Button size="sm" kind="ghost" onClick={() => { if (msg.runId) void loadRun(msg.runId) }} style={{ marginLeft: '0.5rem' }}>Details</Button>
+                        {msg.status === 'completed' && (
+                          <Button size="sm" kind="ghost" onClick={() => { if (msg.runId) void loadRun(msg.runId) }} style={{ marginLeft: '0.5rem' }}>View details</Button>
+                        )}
+                        {msg.status === 'completed' && (
+                          <Button size="sm" kind="ghost" href={`/experience?project=${project}`} target="_blank" style={{ marginLeft: '0.5rem' }}>Timeline</Button>
+                        )}
+                      </div>
+                    )}
+                    {msg.status === 'completed' && msg.role === 'assistant' && (
+                      <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: 'rgba(87,215,232,0.08)', borderRadius: '4px', fontSize: '0.75rem', color: '#7e8a9c' }}>
+                        Type a follow-up message to continue the conversation.
                       </div>
                     )}
                   </div>
