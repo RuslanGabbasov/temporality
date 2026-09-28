@@ -31,6 +31,7 @@ type Request struct {
 	Command        []string
 	TimeoutSeconds int
 	ReadOnly       bool
+	Network        string // "" (use Docker default), "none", "bridge"
 }
 
 type Result struct {
@@ -53,6 +54,7 @@ type Docker struct {
 	UID         int
 	GID         int
 	ScratchSize string
+	Network     string // "none" (default) or "bridge" for network access
 }
 
 func NewFromEnv() (*Docker, error) {
@@ -228,7 +230,14 @@ func (d *Docker) arguments(workspace string, request Request, name string) []str
 	if scratchSize == "" {
 		scratchSize = "512m"
 	}
-	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(d.PIDs), "--memory", d.Memory, "--memory-swap", d.Memory, "--cpus", d.CPUs, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "--tmpfs", "/scratch:rw,exec,nosuid,size=" + scratchSize, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode, d.Image}
+	network := request.Network
+	if network == "" {
+		network = d.Network
+	}
+	if network == "" {
+		network = "none"
+	}
+	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=" + network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(d.PIDs), "--memory", d.Memory, "--memory-swap", d.Memory, "--cpus", d.CPUs, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "--tmpfs", "/scratch:rw,exec,nosuid,size=" + scratchSize, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode, d.Image}
 	return append(args, request.Command...)
 }
 

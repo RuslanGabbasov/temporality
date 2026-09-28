@@ -46,6 +46,7 @@ type RunInput struct {
 	ApprovalTimeoutSeconds int           `json:"approval_timeout_seconds,omitempty"`
 	WorkspacePath          string        `json:"workspace_path,omitempty"`
 	MCPServer              string        `json:"mcp_server,omitempty"`
+	NetworkAccess          bool          `json:"network_access,omitempty"`
 }
 
 type RunResult struct {

@@ -41,10 +41,11 @@ type Activities struct {
 	// APIToken authenticates direct journal calls (hints, knowledge lookup)
 	// when the journal requires bearer auth; it mirrors TEMPORALITY_API_TOKEN
 	// used by the event outbox publisher.
-	APIToken string
-	MCP      *mcpclient.Client
-	SourceID string
-	Sandbox  SandboxRunner
+	APIToken      string
+	MCP           *mcpclient.Client
+	SourceID      string
+	Sandbox       SandboxRunner
+	NetworkAccess bool
 }
 
 func NewActivities(events EventOutbox) (*Activities, error) {
@@ -66,7 +67,7 @@ func NewActivities(events EventOutbox) (*Activities, error) {
 func (a *Activities) ToolDefs() []llm.ToolDef {
 	defs := a.MCP.ToolDefs()
 	if a.Sandbox != nil {
-		defs = append(defs, llm.ToolDef{Name: "run_command", Description: "Run a command in the isolated workspace container. It is automatically authorized by the sandbox.workspace.v1 policy; it has no network and can write only to this run's workspace. Provide argv as an array.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}}})
+		defs = append(defs, llm.ToolDef{Name: "run_command", Description: "Run a command in the isolated workspace container. Network access depends on agent configuration. Write access depends on the agent's read_only setting. Provide argv as an array.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}}})
 	}
 	return defs
 }
@@ -81,6 +82,7 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 	input.ApprovalTools = a.ApprovalTools()
 	input.AutoApproveTools = nil
 	input.MCPServer = MCPServerName()
+	a.NetworkAccess = input.NetworkAccess
 	if a.Sandbox != nil {
 		input.AutoApproveTools = []string{"run_command"}
 		if input.WorkspacePath == "" {
@@ -170,12 +172,20 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 			// Fault injection for live reconciliation drills: run the command for
 			// real (the effect lands), then report a worker-style crash so the
 			// workflow records tool.failed with effect=uncertain.
-			if _, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.Role == "reviewer" || request.Role == "qa"}); err != nil {
+			net := ""
+			if a.NetworkAccess {
+				net = "bridge"
+			}
+			if _, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.Role == "reviewer" || request.Role == "qa", Network: net}); err != nil {
 				return ToolResult{}, err
 			}
 			return ToolResult{}, fmt.Errorf("injected worker crash after effect (operation %s)", request.OperationID)
 		}
-		result, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.Role == "reviewer" || request.Role == "qa"})
+		net := ""
+		if a.NetworkAccess {
+			net = "bridge"
+		}
+		result, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.Role == "reviewer" || request.Role == "qa", Network: net})
 		if err != nil {
 			return ToolResult{}, err
 		}

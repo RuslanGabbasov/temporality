@@ -679,6 +679,9 @@ func main() {
 			if agentCfg.SystemPrompt != "" {
 				input.SystemPrompt = agentCfg.SystemPrompt
 			}
+			if agentCfg.NetworkAccess != nil && *agentCfg.NetworkAccess {
+				input.NetworkAccess = true
+			}
 		}
 		if req.Model != "" {
 			input.Model = req.Model
