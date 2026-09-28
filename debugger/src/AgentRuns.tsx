@@ -171,6 +171,7 @@ export default function AgentRuns({ project }: { project: string }) {
   const [runs, setRuns] = useState<ObservationEvent[]>([])
   const [selected, setSelected] = useState('')
   const [timeline, setTimeline] = useState<ObservationEvent[]>([])
+  const [trajectory, setTrajectory] = useState<any>(null)
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
   const [reason, setReason] = useState('Reviewed in Agent Runs UI')
   const [busy, setBusy] = useState(false)
@@ -232,6 +233,11 @@ export default function AgentRuns({ project }: { project: string }) {
       }
       const query = new URLSearchParams({ project: project.trim(), run })
       window.history.replaceState(null, '', `/agents?${query}`)
+      // Fetch trajectory extraction (deterministic patterns from event stream)
+      try {
+        const tResp = await fetch(`${KERNEL_API}/v1/workspace/runs/${encodeURIComponent(run)}/trajectory`, { headers: authHeaders() })
+        if (tResp.ok) setTrajectory(await tResp.json())
+      } catch { /* ignore */ }
     } catch (failure) { setError(message(failure)) }
     finally { if (!silent) setBusy(false) }
   }, [project])
@@ -413,6 +419,72 @@ export default function AgentRuns({ project }: { project: string }) {
                     })}
                   </Stack>
                 </Tile>
+
+                {/* Trajectory extraction */}
+                {trajectory && (
+                  <Tile>
+                    <Heading style={{ fontSize: '0.875rem', marginBottom: '0.75rem' }}>Trajectory</Heading>
+                    {/* Summary */}
+                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.75rem', fontSize: '0.8rem' }}>
+                      <span><strong>{trajectory.summary?.total_turns ?? 0}</strong> turns</span>
+                      <span><strong>{trajectory.summary?.total_tools ?? 0}</strong> tool calls</span>
+                      <span><strong>{trajectory.summary?.total_tokens ?? 0}</strong> tokens</span>
+                      <span><strong>{trajectory.summary?.knowledge_formed ?? 0}</strong> learned</span>
+                      <span><strong>{trajectory.summary?.knowledge_recalled ?? 0}</strong> recalled</span>
+                      {trajectory.summary?.failed_tools > 0 && <span style={{ color: '#f7768e' }}><strong>{trajectory.summary.failed_tools}</strong> failed</span>}
+                    </div>
+                    {trajectory.summary?.tools_used?.length > 0 && (
+                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                        {trajectory.summary.tools_used.map((t: string) => <Tag key={t} type="blue" size="sm">{t}</Tag>)}
+                      </div>
+                    )}
+                    {/* Turns */}
+                    {trajectory.turns?.length > 0 && (
+                      <div style={{ marginBottom: '0.75rem' }}>
+                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Turns</h5>
+                        {trajectory.turns.map((turn: any) => (
+                          <div key={turn.number} style={{ padding: '0.4rem 0.5rem', borderLeft: '3px solid #bb9af7', marginBottom: '0.25rem', background: 'rgba(255,255,255,0.02)', borderRadius: '0 4px 4px 0', fontSize: '0.8rem' }}>
+                            <strong>Turn {turn.number}</strong>
+                            {turn.tokens > 0 && <span style={{ color: '#7e8a9c', marginLeft: '0.5rem' }}>{turn.tokens} tok</span>}
+                            {turn.latency_ms > 0 && <span style={{ color: '#7e8a9c', marginLeft: '0.5rem' }}>{(turn.latency_ms / 1000).toFixed(1)}s</span>}
+                            {turn.tools?.length > 0 && (
+                              <div style={{ marginTop: '0.25rem', display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                                {turn.tools.map((tool: any, ti: number) => (
+                                  <Tag key={ti} type={tool.success ? 'green' : 'red'} size="sm">{tool.tool}{tool.exit_code !== undefined && tool.exit_code !== 0 ? ` (${tool.exit_code})` : ''}</Tag>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Patterns */}
+                    {trajectory.patterns?.length > 0 && (
+                      <div style={{ marginBottom: '0.75rem' }}>
+                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Repeating patterns</h5>
+                        {trajectory.patterns.map((p: any, i: number) => (
+                          <div key={i} style={{ fontSize: '0.8rem', marginBottom: '0.25rem', color: '#e5e9f0' }}>
+                            <Tag type="cyan" size="sm">×{p.count}</Tag>
+                            <code style={{ marginLeft: '0.5rem', color: '#9e8cff' }}>{p.signature}</code>
+                            <span style={{ color: '#7e8a9c', marginLeft: '0.5rem' }}>turns {p.turns.join(', ')}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Knowledge events */}
+                    {trajectory.knowledge?.length > 0 && (
+                      <div>
+                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Knowledge</h5>
+                        {trajectory.knowledge.map((k: any, i: number) => (
+                          <div key={i} style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>
+                            <Tag type={k.kind === 'proposed' ? 'blue' : k.kind === 'recalled' ? 'purple' : 'red'} size="sm">{k.kind}</Tag>
+                            <span style={{ marginLeft: '0.5rem' }}>{k.proposition || k.knowledge_id}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Tile>
+                )}
               </Stack>
             )}
           </Section>

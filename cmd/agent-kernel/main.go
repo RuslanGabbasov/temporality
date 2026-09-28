@@ -803,6 +803,59 @@ func main() {
 		flusher.Flush()
 	})
 
+	// Trajectory extraction: deterministic structures from a run's event stream.
+	mux.HandleFunc("GET /v1/workspace/runs/{runID}/trajectory", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		run, err := ws.GetRun(r.Context(), r.PathValue("runID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		// Fetch all events for this run from the journal.
+		events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, "", 500)
+		if eErr != nil {
+			writeError(w, 500, eErr)
+			return
+		}
+		// Convert to EventLike for the extraction module.
+		var evLikes []agent.EventLike
+		for _, ev := range events {
+			var occurredAt time.Time
+			if ev.OccurredAt != "" {
+				occurredAt, _ = time.Parse(time.RFC3339Nano, ev.OccurredAt)
+			}
+			el := agent.EventLike{
+				EventID:    ev.EventID,
+				OccurredAt: occurredAt,
+				Type:       ev.Type,
+				Context:    struct{ Run, Project string }{Run: run.RunID, Project: run.ProjectID},
+			}
+			// Parse the data JSON.
+			if ev.Data != nil {
+				_ = json.Unmarshal(ev.Data, &el.Data)
+			}
+			if el.Data == nil {
+				el.Data = make(map[string]any)
+			}
+			evLikes = append(evLikes, el)
+		}
+		trajectory := agent.ExtractTrajectory(evLikes)
+		// Debug: log event types and turn count
+		slog.Info("trajectory extraction", "events", len(evLikes), "turns", len(trajectory.Turns), "tools", len(trajectory.Tools), "tokens", trajectory.Summary.TotalTokens)
+		for i, ev := range evLikes {
+			if i < 5 || ev.Type == "model.completed" || ev.Type == "turn.started" {
+				slog.Info("  event", "type", ev.Type, "id", ev.EventID[len(ev.EventID)-10:], "data_keys", len(ev.Data))
+			}
+		}
+		writeJSON(w, 200, trajectory)
+	})
+
 	mux.HandleFunc("GET /v1/workspace/tasks/{taskID}/runs", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return

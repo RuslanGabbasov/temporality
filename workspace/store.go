@@ -393,7 +393,7 @@ func (s *Store) StreamRunEvents(ctx context.Context, projectID, runID, afterCurs
 		rows, err = s.pool.Query(ctx,
 			`SELECT event_id, type, occurred_at, data FROM observation_events
 			 WHERE project_id = $1 AND run_id = $2
-			 ORDER BY occurred_at LIMIT $3`, projectID, runID, limit)
+			 ORDER BY occurred_at, event_id LIMIT $3`, projectID, runID, limit)
 	} else {
 		rows, err = s.pool.Query(ctx,
 			`SELECT event_id, type, occurred_at, data FROM observation_events
