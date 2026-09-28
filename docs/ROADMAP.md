@@ -26,19 +26,19 @@
 
 ## P0/P1 — Trajectory-derived experience
 
-- [ ] **Trajectory extraction primitive**
+- [x] **Trajectory extraction primitive**
   - Extract repeating steps, tool-call sequences, decisions and outcomes from completed runs.
   - No separate storage: result is built from event stream.
   - Separate deterministic features from LLM-derived conclusions.
   - Acceptance: for a selected run, get a set of repeating structures with provenance to original events.
 
-- [ ] **Experience pattern projection**
+- [x] **Experience pattern projection**
   - Aggregate similar memories/events into experience patterns.
   - Account for relevance, recency, validation, outcome, recurrence, contradiction, supersession.
   - Store provenance and links to original events.
   - Acceptance: hundreds of candidates collapse into a compact set of patterns without losing ability to expand to original evidence.
 
-- [ ] **Experience Priming experiment**
+- [x] **Experience Priming experiment**
   - Add optional pre-run stage: candidates → patterns → ranking → 3–7 cues.
   - Limit priming with strict token budget.
   - Don't put raw hundreds of memories in prompt.
@@ -46,13 +46,13 @@
   - Acceptance: compare baseline / conventional RAG / priming / priming+JIT by task success, trajectory length, token usage, unnecessary retrieval/tool calls, wrong-memory activation, contradiction rate and latency.
   - Fix regressions: priming is not mandatory until value is confirmed.
 
-- [ ] **Trajectory comparison / fork**
+- [x] **Trajectory comparison / fork**
   - Allow running controlled variants from one source task/configuration.
   - Compare trajectories and derived experience between variants.
   - Minimum set: no priming vs priming.
   - Acceptance: differences visible at step level, tool calls, cost and outcome, not just final answer.
 
-- [ ] **Trajectory-to-artifact extraction**
+- [x] **Trajectory-to-artifact extraction**
   - Build general interface for extracting reusable artifacts from trajectory.
   - Minimum two types: experience pattern and repeatable workflow fragment.
   - Each artifact must have provenance to source trajectory/events.
@@ -62,19 +62,19 @@
 
 ## P1 — Make experience understandable
 
-- [ ] **Activation chain UI** — click knowledge → see where it arose, where recalled, where injected, what decision followed, what actions, what outcome, where validated/invalidated/superseded. Distinguish: reused/validated, failed, invalidated, superseded, resurrected.
-- [ ] **Semantic zoom** — Knowledge → Episode → Event. Episode = turn / tool call / observation / formation / validation / invalidation / reuse. Transition from "event log" to "experience episodes".
-- [ ] **Forensic View** — why did this experience appear? which evidence? which run/action/outcome?
-- [ ] **Experience lineage** — K82 → K73 supersession chain visible on timeline
-- [ ] **Shareable investigation URL** — backend done, frontend polish needed. Lens, filters, zoom, selected entity all in URL.
-- [ ] **Investigation flows** — "why did agent do this?", "why did knowledge disappear?", "why do two runs differ?", "what does the team know?"
+- [x] **Activation chain UI** — click knowledge → see where it arose, where recalled, where injected, what decision followed, what actions, what outcome, where validated/invalidated/superseded. Distinguish: reused/validated, failed, invalidated, superseded, resurrected.
+- [x] **Semantic zoom** — Knowledge → Episode → Event. Episode = turn / tool call / observation / formation / validation / invalidation / reuse. Transition from "event log" to "experience episodes".
+- [x] **Forensic View** — why did this experience appear? which evidence? which run/action/outcome?
+- [x] **Experience lineage** — K82 → K73 supersession chain visible on timeline
+- [x] **Shareable investigation URL** — backend done, frontend polish needed. Lens, filters, zoom, selected entity all in URL.
+- [x] **Investigation flows** — "why did agent do this?", "why did knowledge disappear?", "why do two runs differ?", "what does the team know?"
 - [ ] **Experiment 9 corpus** — validate human understanding of experience evolution through UI. Scenarios: competing hypotheses, repeated confirmation, contradiction, resurrection, stale knowledge, supersession, different scopes. Acceptance: which hypothesis appeared first? which confirmed? which died? which resurrected? why stale knowledge used? what evidence caused contradiction? what's valid now? what was actually used?
 
 ---
 
 ## P1 — Platform usability
 
-- [ ] **State-at-T as product feature** — not just an API endpoint. "What did the system know when this decision was made?" needs a proper UI accessible from timeline/trace.
+- [x] **State-at-T as product feature** — not just an API endpoint. "What did the system know when this decision was made?" needs a proper UI accessible from timeline/trace.
 - [ ] **Streaming improvements** — show model tokens as they arrive (not just turn-level)
 - [ ] **Conversation branching** — fork a conversation from a specific point
 - [ ] **Agent templates** — pre-configured agents for common tasks (coder, reviewer, researcher)
