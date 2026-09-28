@@ -412,3 +412,25 @@ body, #root, #main-content {
   display: inline-flex;
   align-items: center;
 }
+
+/* === Project switcher alignment === */
+.cds--switcher__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cds--switcher__item > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 0.5rem;
+}
+
+.cds--switcher__item .project-actions {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}

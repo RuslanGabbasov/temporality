@@ -156,12 +156,10 @@ export default function Layout({ children, activePage }: LayoutProps) {
                       aria-labelledby={p.id}
                       onClick={() => { setProject(p.id); setShowProjectPanel(false) }}
                     >
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', width: '100%' }}>
-                        <span>{p.name}</span>
-                        <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end' }}>
-                          <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription="Edit" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setEditProject(p); setShowProjectPanel(false) }} />
-                          <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} iconDescription="Delete" onClick={(e: React.MouseEvent) => { e.stopPropagation(); void deleteProject(p.id) }} />
-                        </div>
+                      <span>{p.name}</span>
+                      <div className="project-actions">
+                        <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription="Edit" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setEditProject(p); setShowProjectPanel(false) }} />
+                        <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} iconDescription="Delete" onClick={(e: React.MouseEvent) => { e.stopPropagation(); void deleteProject(p.id) }} />
                       </div>
                     </SwitcherItem>
                   ))}
