@@ -60,6 +60,8 @@ export default function Layout({ children, activePage }: LayoutProps) {
 
   // Pending operations badge
   const [pendingOps, setPendingOps] = useState(0)
+  // Pending approvals badge (for Runs tab)
+  const [pendingApprovals, setPendingApprovals] = useState(0)
 
   useEffect(() => {
     if (!authToken()) return
@@ -69,6 +71,34 @@ export default function Layout({ children, activePage }: LayoutProps) {
         if (resp.ok) {
           const data = await resp.json()
           setPendingOps(data.count ?? (data.operations ?? []).length)
+        }
+      } catch { /* ignore */ }
+      try {
+        // Count unresolved approval requests in this project
+        const resp = await fetch(`/api/v1/observations/events?project=${encodeURIComponent(project)}&type=approval.requested&limit=50`, { headers: { ...authHeaders() } })
+        if (resp.ok) {
+          const data = await resp.json()
+          const requested: string[] = []
+          for (const ev of (data.events ?? []) as { data?: { operation_id?: string } }[]) {
+            if (ev.data?.operation_id) requested.push(ev.data.operation_id)
+          }
+          if (requested.length > 0) {
+            // Check which ones have been resolved
+            const resp2 = await fetch(`/api/v1/observations/events?project=${encodeURIComponent(project)}&type=approval.granted&limit=50`, { headers: { ...authHeaders() } })
+            const resp3 = await fetch(`/api/v1/observations/events?project=${encodeURIComponent(project)}&type=approval.rejected&limit=50`, { headers: { ...authHeaders() } })
+            const resolved = new Set<string>()
+            for (const r of [resp2, resp3]) {
+              if (r.ok) {
+                const d = await r.json()
+                for (const ev of (d.events ?? []) as { data?: { operation_id?: string } }[]) {
+                  if (ev.data?.operation_id) resolved.add(ev.data.operation_id)
+                }
+              }
+            }
+            setPendingApprovals(requested.filter((id) => !resolved.has(id)).length)
+          } else {
+            setPendingApprovals(0)
+          }
         }
       } catch { /* ignore */ }
     }
@@ -163,6 +193,19 @@ export default function Layout({ children, activePage }: LayoutProps) {
                   lineHeight: 1,
                   verticalAlign: 'middle',
                 }}>{pendingOps}</span>
+              )}
+              {path === '/agents' && pendingApprovals > 0 && (
+                <span style={{
+                  marginLeft: '0.35rem',
+                  background: '#e6b85c',
+                  color: '#080b10',
+                  fontSize: '0.6rem',
+                  fontWeight: 700,
+                  padding: '0.1rem 0.4rem',
+                  borderRadius: '999px',
+                  lineHeight: 1,
+                  verticalAlign: 'middle',
+                }}>{pendingApprovals}</span>
               )}
             </HeaderMenuItem>
           ))}
