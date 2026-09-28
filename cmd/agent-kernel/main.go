@@ -561,6 +561,18 @@ func main() {
 		if req.ID == "" {
 			req.ID = slugify(req.Title)
 		}
+		// Ensure project exists in workspace (auto-create from journal scope).
+		if _, err := ws.GetProject(r.Context(), req.ProjectID); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				if err := ws.CreateProject(r.Context(), &workspace.Project{ID: req.ProjectID, Name: req.ProjectID}); err != nil {
+					writeError(w, 500, err)
+					return
+				}
+			} else {
+				writeError(w, 500, err)
+				return
+			}
+		}
 		task := &workspace.Task{ID: req.ID, ProjectID: req.ProjectID, AgentID: req.AgentID, Title: req.Title, Prompt: req.Prompt}
 		if err := ws.CreateTask(r.Context(), task); err != nil {
 			writeError(w, 409, err)
