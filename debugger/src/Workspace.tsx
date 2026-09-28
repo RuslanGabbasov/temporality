@@ -173,6 +173,30 @@ export default function Workspace({ project, setProject }: { project: string; se
     setShowAgentForm(true)
   }
 
+  const [quickPrompt, setQuickPrompt] = useState('')
+  const [quickAgentId, setQuickAgentId] = useState('')
+  const quickRun = async () => {
+    if (!quickPrompt.trim() || !project) return
+    setLoading(true); setError('')
+    try {
+      // Auto-create task with prompt
+      const task = await workspaceApi.createTask({
+        project_id: project,
+        agent_id: quickAgentId || undefined,
+        title: `Quick: ${quickPrompt.slice(0, 50)}`,
+        prompt: quickPrompt,
+      })
+      const result = await workspaceApi.startRun(task.id, { agent_id: quickAgentId || undefined })
+      setQuickPrompt('')
+      // Switch to the task/run view
+      const createdTask: Task = task as unknown as Task
+      setSelectedTask(createdTask)
+      void loadTaskRuns(createdTask)
+      void loadRun(result.run_id)
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }
+
   const createTask = async () => {
     if (!taskTitle.trim() || !taskPrompt.trim() || !selectedProject) return
     setLoading(true); setError('')
@@ -213,6 +237,42 @@ export default function Workspace({ project, setProject }: { project: string; se
           />
         </Column>
       )}
+
+      {/* Quick Run */}
+      <Column sm={4} md={8} lg={16}>
+        <Tile style={{ marginBottom: '1rem' }}>
+          <Heading>Quick Run</Heading>
+          <Stack gap={2}>
+            <TextArea
+              id="quick-prompt"
+              labelText="Prompt"
+              value={quickPrompt}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setQuickPrompt(e.target.value)}
+              placeholder="Describe what the agent should do..."
+              rows={3}
+            />
+            <Stack orientation="horizontal" gap={2}>
+              <div style={{ flex: 1 }}>
+                <Select
+                  id="quick-agent"
+                  labelText="Agent (optional)"
+                  hideLabel
+                  value={quickAgentId}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setQuickAgentId(e.target.value)}
+                >
+                  <SelectItem value="" text="Default" />
+                  {allAgents.map((a) => (
+                    <SelectItem key={a.id} value={a.id} text={`${a.name} (${a.project_id})`} />
+                  ))}
+                </Select>
+              </div>
+              <Button onClick={() => void quickRun()} disabled={loading || !quickPrompt.trim()}>
+                Run
+              </Button>
+            </Stack>
+          </Stack>
+        </Tile>
+      </Column>
 
       {/* Projects panel */}
       <Column sm={4} md={4} lg={4}>
