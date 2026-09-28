@@ -152,14 +152,16 @@ export default function AgentRuns({ project }: { project: string }) {
   const [error, setError] = useState('')
   const pending = useMemo(() => pendingApprovals(timeline), [timeline])
 
-  const loadRuns = useCallback(async () => {
+  const loadRuns = useCallback(async (autoSelect = false) => {
     if (!project.trim()) return
-    setBusy(true); setError('')
+    if (!autoSelect) setBusy(true)
+    setError('')
     try {
       const page = await observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.started', limit: 500 })
       const rootRuns = page.events.filter((event) => !event.data?.parent_run_id)
       setRuns(rootRuns.reverse())
-      if (!selected && rootRuns.length) {
+      // Only auto-select on initial load when nothing is selected
+      if (autoSelect && !selected && rootRuns.length) {
         for (const event of rootRuns) {
           const id = runID(event)
           if (!id) continue
@@ -173,7 +175,7 @@ export default function AgentRuns({ project }: { project: string }) {
         if (!selected) setSelected(runID(rootRuns[0]) || '')
       }
     } catch (failure) { setError(message(failure)) }
-    finally { setBusy(false) }
+    finally { if (!autoSelect) setBusy(false) }
   }, [project])
 
   const loadRun = useCallback(async (run: string, silent = false) => {
@@ -209,13 +211,14 @@ export default function AgentRuns({ project }: { project: string }) {
     finally { if (!silent) setBusy(false) }
   }, [project])
 
-  useEffect(() => { void loadRuns() }, [loadRuns])
+  useEffect(() => { void loadRuns(true) }, [loadRuns])
   useEffect(() => { if (selected) void loadRun(selected) }, [selected, loadRun])
   useEffect(() => {
     if (!selected) return
-    const timer = window.setInterval(() => { void loadRuns(); void loadRun(selected, true) }, 4000)
+    // Poll only the selected run's events, don't re-fetch the full run list
+    const timer = window.setInterval(() => { void loadRun(selected, true) }, 10000)
     return () => window.clearInterval(timer)
-  }, [selected, loadRuns, loadRun])
+  }, [selected, loadRun])
 
   async function decide(event: ObservationEvent, approved: boolean) {
     const operationID = String(event.data?.operation_id ?? '')
@@ -245,7 +248,7 @@ export default function AgentRuns({ project }: { project: string }) {
       <Grid>
         <Column sm={4} md={8} lg={16}>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
-            <Button onClick={() => { setSelected(''); setTimeline([]); void loadRuns() }} disabled={busy}>
+            <Button onClick={() => { setSelected(''); setTimeline([]); void loadRuns(true) }} disabled={busy}>
               Refresh
             </Button>
             {selected && <Tag type="gray" size="sm">{selected}</Tag>}
