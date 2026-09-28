@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -108,7 +109,6 @@ func (s *Store) ListAllAgents(ctx context.Context) ([]Agent, error) {
 	}
 	return result, rows.Err()
 }
-
 
 func (s *Store) UpdateProject(ctx context.Context, p Project) error {
 	p.UpdatedAt = time.Now().UTC()
@@ -377,4 +377,39 @@ func nullString(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// ListAllProjects returns workspace projects merged with journal projects
+// (distinct project_id from observation_events).
+func (s *Store) ListAllProjects(ctx context.Context) ([]Project, error) {
+	// Workspace projects
+	wp, err := s.ListProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byID := map[string]Project{}
+	for _, p := range wp {
+		byID[p.ID] = p
+	}
+	// Journal projects (observation_events)
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT project_id FROM observation_events WHERE project_id != '' ORDER BY project_id`)
+	if err != nil {
+		return wp, nil // fallback to workspace-only
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pid string
+		if err := rows.Scan(&pid); err != nil {
+			continue
+		}
+		if _, exists := byID[pid]; !exists {
+			byID[pid] = Project{ID: pid, Name: pid}
+		}
+	}
+	result := make([]Project, 0, len(byID))
+	for _, p := range byID {
+		result = append(result, p)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result, nil
 }

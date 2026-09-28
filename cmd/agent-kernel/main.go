@@ -319,7 +319,7 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		projects, err := ws.ListProjects(r.Context())
+		projects, err := ws.ListAllProjects(r.Context())
 		if err != nil {
 			writeError(w, 500, err)
 			return

@@ -289,3 +289,126 @@ body, #root, #main-content {
   background: #080b10;
   color: #e5e9f0;
 }
+
+/* === Timeline grid layout === */
+.experience-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 0;
+  border-bottom: 1px solid #202a38;
+}
+
+.experience-grid.no-details {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.experience-canvas {
+  overflow-x: auto;
+}
+
+.experience-svg {
+  display: block;
+  cursor: grab;
+  user-select: none;
+}
+
+.experience-svg:active {
+  cursor: grabbing;
+}
+
+/* Detail panel */
+.experience-detail {
+  position: sticky;
+  top: 48px;
+  align-self: start;
+  border-left: 1px solid #202a38;
+  max-height: calc(100vh - 68px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: #0d1118;
+}
+
+.detail-close {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  align-self: flex-end;
+  display: flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #344258;
+  border-radius: 5px;
+  background: #0c1118;
+  color: #7e8a9c;
+  font-size: .9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.detail-close:hover {
+  color: #e5e9f0;
+  border-color: #57d7e8;
+}
+
+.cluster-details > header {
+  margin-bottom: .7rem;
+}
+
+.cluster-details > header strong {
+  display: block;
+  color: #e5e9f0;
+  font-size: .95rem;
+  margin-top: .2rem;
+}
+
+.cluster-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem .9rem;
+  color: #7e8a9c;
+  font: .68rem "SFMono-Regular", monospace;
+  margin-bottom: .6rem;
+}
+
+@media (max-width: 1080px) {
+  .experience-grid {
+    grid-template-columns: 1fr;
+  }
+  .experience-detail {
+    border-left: 0;
+    border-top: 1px solid #202a38;
+    max-height: 50vh;
+  }
+}
+
+/* === Header button alignment === */
+.cds--header__global {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cds--header__global .cds--btn {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+}
+
+.cds--header__global select,
+.cds--header__global input {
+  margin: 0;
+}
+
+/* Fix project switcher button alignment */
+.cds--header__global button {
+  vertical-align: middle;
+}
+
+/* Fix logout button alignment */
+.cds--header__global a,
+.cds--header__global button {
+  display: inline-flex;
+  align-items: center;
+}
