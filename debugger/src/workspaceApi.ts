@@ -1,6 +1,5 @@
 import { authHeaders } from './api'
 
-// Workspace endpoints live on the kernel API, not the journal.
 const KERNEL_API = '/kernel-api'
 
 export interface Project {
@@ -13,13 +12,22 @@ export interface Project {
 
 export interface Agent {
   id: string
-  project_id: string
+  project_id?: string
   name: string
+  description: string
   model: string
+  provider: string
   system_prompt: string
+  temperature?: number
+  max_tokens?: number
   skills: string[]
   mcp_servers: string[]
   sandbox_profile: string
+  network_access?: boolean
+  read_only?: boolean
+  max_turns?: number
+  approval_mode: string
+  labels: Record<string, string>
   created_at: string
   updated_at: string
 }
@@ -49,6 +57,28 @@ export interface Run {
   updated_at: string
 }
 
+export interface Provider {
+  id: string
+  name: string
+  base_url: string
+  api_key_ref: string
+  models: string[]
+  labels: Record<string, string>
+  created_at: string
+  updated_at: string
+}
+
+export interface User {
+  id: string
+  name: string
+  email: string
+  role: string
+  projects: string[]
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+
 const headers = () => ({ 'Content-Type': 'application/json', ...authHeaders() })
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -72,14 +102,13 @@ export const workspaceApi = {
     request<{ deleted: boolean }>(`/v1/workspace/projects/${id}`, { method: 'DELETE' }),
 
   // Agents
-  listAllAgents: () =>
-    request<{ agents: Agent[] }>('/v1/workspace/agents'),
-  listAgents: (projectId: string) =>
+  listAllAgents: () => request<{ agents: Agent[] }>('/v1/workspace/agents'),
+  listAgentsByProject: (projectId: string) =>
     request<{ agents: Agent[] }>(`/v1/workspace/projects/${projectId}/agents`),
   getAgent: (id: string) => request<Agent>(`/v1/workspace/agents/${id}`),
-  createAgent: (data: { id?: string; project_id: string; name: string; model?: string; system_prompt?: string; skills?: string[]; mcp_servers?: string[]; sandbox_profile?: string }) =>
+  createAgent: (data: Partial<Agent> & { name: string }) =>
     request<Agent>('/v1/workspace/agents', { method: 'POST', body: JSON.stringify(data) }),
-  updateAgent: (id: string, data: { project_id?: string; name: string; model?: string; system_prompt?: string; skills?: string[]; mcp_servers?: string[]; sandbox_profile?: string }) =>
+  updateAgent: (id: string, data: Partial<Agent>) =>
     request<Agent>(`/v1/workspace/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAgent: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/agents/${id}`, { method: 'DELETE' }),
@@ -100,4 +129,24 @@ export const workspaceApi = {
   getRun: (runId: string) => request<Run>(`/v1/workspace/runs/${runId}`),
   listRuns: (taskId: string) =>
     request<{ runs: Run[] }>(`/v1/workspace/tasks/${taskId}/runs`),
+
+  // Providers
+  listProviders: () => request<{ providers: Provider[] }>('/v1/workspace/providers'),
+  getProvider: (id: string) => request<Provider>(`/v1/workspace/providers/${id}`),
+  createProvider: (data: { id?: string; name: string; base_url: string; api_key_ref?: string; models?: string[] }) =>
+    request<Provider>('/v1/workspace/providers', { method: 'POST', body: JSON.stringify(data) }),
+  updateProvider: (id: string, data: Partial<Provider>) =>
+    request<Provider>(`/v1/workspace/providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteProvider: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/workspace/providers/${id}`, { method: 'DELETE' }),
+
+  // Users
+  listUsers: () => request<{ users: User[] }>('/v1/workspace/users'),
+  getUser: (id: string) => request<User>(`/v1/workspace/users/${id}`),
+  createUser: (data: { id?: string; name: string; email?: string; role: string; projects?: string[] }) =>
+    request<User>('/v1/workspace/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUser: (id: string, data: Partial<User>) =>
+    request<User>(`/v1/workspace/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteUser: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/workspace/users/${id}`, { method: 'DELETE' }),
 }

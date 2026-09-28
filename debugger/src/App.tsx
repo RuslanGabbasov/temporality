@@ -5,6 +5,9 @@ import AgentRuns from './AgentRuns'
 import Operations from './Operations'
 import ExperienceTimeline from './ExperienceTimeline'
 import Workspace from './Workspace'
+import Agents from './Agents'
+import Providers from './Providers'
+import Users from './Users'
 
 const Routes = {
   experience: /^\/experience(\/|$)/,
@@ -12,15 +15,21 @@ const Routes = {
   operations: /^\/operations(\/|$)/,
   observability: /^\/observability(\/|$)/,
   workspace: /^\/workspace(\/|$)/,
+  'agent-config': /^\/agent-config(\/|$)/,
+  providers: /^\/providers(\/|$)/,
+  users: /^\/users(\/|$)/,
 } as const
 
-type Page = 'experience' | 'agents' | 'operations' | 'observability' | 'workspace'
+type Page = 'experience' | 'agents' | 'operations' | 'observability' | 'workspace' | 'agent-config' | 'providers' | 'users'
 
 function pageFor(pathname: string): Page {
   if (Routes.agents.test(pathname)) return 'agents'
   if (Routes.operations.test(pathname)) return 'operations'
   if (Routes.observability.test(pathname)) return 'observability'
   if (Routes.workspace.test(pathname)) return 'workspace'
+  if (Routes['agent-config'].test(pathname)) return 'agent-config'
+  if (Routes.providers.test(pathname)) return 'providers'
+  if (Routes.users.test(pathname)) return 'users'
   return 'experience'
 }
 
@@ -45,8 +54,14 @@ export default function App() {
           case 'observability':
             return <Observability project={project} />
           case 'workspace':
-            // @ts-ignore — Workspace returns JSX but TS infers void due to bare returns in callbacks
+            // @ts-ignore
             return <Workspace project={project} setProject={setProject} />
+          case 'agent-config':
+            return <Agents />
+          case 'providers':
+            return <Providers />
+          case 'users':
+            return <Users />
           default:
             return <ExperienceTimeline project={project} />
         }
