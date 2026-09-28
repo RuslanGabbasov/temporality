@@ -30,6 +30,7 @@ export default function Agents() {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Agent | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [showTemplates, setShowTemplates] = useState(false)
 
   // Form state
   const [form, setForm] = useState<Partial<Agent>>({})
@@ -49,7 +50,47 @@ export default function Agents() {
 
   useEffect(() => { void load() }, [load])
 
-  const startCreate = () => {
+  const TEMPLATES = [
+  {
+    name: 'Coder',
+    description: 'General-purpose coding agent',
+    model: '',
+    system_prompt: 'You are a careful developer. Read code before modifying it. Run tests after changes. Write clean, minimal code.',
+    sandbox_profile: 'standard',
+    network_access: true,
+    max_turns: 30,
+  },
+  {
+    name: 'Reviewer',
+    description: 'Code review and analysis (read-only)',
+    model: '',
+    system_prompt: 'You are a code reviewer. Read the codebase, identify issues, and report findings. Do not modify files.',
+    sandbox_profile: 'restricted',
+    network_access: false,
+    read_only: true,
+    max_turns: 15,
+  },
+  {
+    name: 'Researcher',
+    description: 'Web research and documentation',
+    model: '',
+    system_prompt: 'You are a researcher. Search the web, read documentation, and compile findings into a clear report.',
+    sandbox_profile: 'standard',
+    network_access: true,
+    max_turns: 20,
+  },
+  {
+    name: 'DevOps',
+    description: 'Infrastructure and deployment tasks',
+    model: '',
+    system_prompt: 'You are a DevOps engineer. Work with Docker, CI/CD, infrastructure config. Always verify changes before applying.',
+    sandbox_profile: 'standard',
+    network_access: true,
+    max_turns: 25,
+  },
+]
+
+const startCreate = () => {
     setEditing(null)
     setForm({ name: '', model: '', system_prompt: '', skills: [], mcp_servers: [] })
     setShowForm(true)
@@ -98,7 +139,10 @@ export default function Agents() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <Heading>Agents</Heading>
-        <Button renderIcon={Add} onClick={startCreate}>New Agent</Button>
+        <Stack orientation="horizontal" gap={2}>
+          <Button kind="secondary" onClick={() => setShowTemplates(true)}>From template</Button>
+          <Button renderIcon={Add} onClick={startCreate}>New Agent</Button>
+        </Stack>
       </div>
 
       <Grid>
@@ -193,6 +237,36 @@ export default function Agents() {
       )}
 
       {loading && <Loading withOverlay={false} />}
+
+      {/* Template selection modal */}
+      {showTemplates && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#0d1118', border: '1px solid #344258', borderRadius: '8px', padding: '1.5rem', width: '500px', maxHeight: '80vh', overflow: 'auto' }}>
+            <Heading>Choose a template</Heading>
+            <p style={{ color: '#7e8a9c', fontSize: '0.8rem', marginBottom: '1rem' }}>Start with a pre-configured agent and customize as needed.</p>
+            <Stack gap={2}>
+              {TEMPLATES.map((t) => (
+                <Tile key={t.name} style={{ cursor: 'pointer' }} onClick={() => {
+                  setEditing(null)
+                  setForm({ name: t.name, model: t.model, system_prompt: t.system_prompt, skills: [], mcp_servers: [], sandbox_profile: t.sandbox_profile, network_access: t.network_access, read_only: t.read_only, max_turns: t.max_turns })
+                  setShowForm(true)
+                  setShowTemplates(false)
+                }}>
+                  <strong>{t.name}</strong>
+                  <p style={{ color: '#7e8a9c', fontSize: '0.75rem', marginTop: '0.25rem' }}>{t.description}</p>
+                  <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.25rem' }}>
+                    <Tag type="gray" size="sm">{t.sandbox_profile}</Tag>
+                    {t.network_access ? <Tag type="green" size="sm">network</Tag> : <Tag type="red" size="sm">no network</Tag>}
+                    {t.read_only && <Tag type="warm-gray" size="sm">read-only</Tag>}
+                    <Tag type="blue" size="sm">{t.max_turns} turns</Tag>
+                  </div>
+                </Tile>
+              ))}
+            </Stack>
+            <Button kind="secondary" onClick={() => setShowTemplates(false)} style={{ marginTop: '1rem' }}>Cancel</Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
