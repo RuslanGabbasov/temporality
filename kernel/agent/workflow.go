@@ -599,13 +599,28 @@ func compactJSON(v any, maxLen int) string {
 	return string(b)
 }
 
+// readOnlyTools are tools that never produce side effects — they only
+// observe state. If they fail, there's nothing to reconcile.
+var readOnlyTools = map[string]bool{
+	"read_file": true, "mcp__read_file": true,
+	"list_directory": true, "mcp__list_directory": true,
+	"search": true, "mcp__search": true,
+	"glob": true, "mcp__glob": true,
+	"grep": true, "mcp__grep": true,
+}
+
 func toolFailureData(operationID, argumentsHash, tool string, err error) map[string]any {
 	data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": tool, "error_type": "activity_failed"}
-	var application *temporal.ApplicationError
-	if errors.As(err, &application) && application.NonRetryable() {
+	if readOnlyTools[tool] {
+		// Read-only tools have no side effect regardless of where they fail.
 		data["effect"] = "none"
 	} else {
-		data["effect"] = "uncertain"
+		var application *temporal.ApplicationError
+		if errors.As(err, &application) && application.NonRetryable() {
+			data["effect"] = "none"
+		} else {
+			data["effect"] = "uncertain"
+		}
 	}
 	return data
 }
