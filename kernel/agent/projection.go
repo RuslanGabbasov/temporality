@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -339,7 +340,78 @@ func ProjectExperience(trajectories []Trajectory) ExperienceProjection {
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-// toolScope extracts a semantic scope hint from a tool name.
+// TrajectoryArtifact is a reusable structure extracted from a trajectory.
+type TrajectoryArtifact struct {
+	ID          string       `json:"id"`
+	Kind        string       `json:"kind"`      // "tool_sequence" or "workflow_fragment"
+	Signature   string       `json:"signature"` // human-readable
+	Tools       []string     `json:"tools"`
+	SuccessRate float64      `json:"success_rate"`
+	Count       int          `json:"count"`
+	Runs        []string     `json:"runs"`
+	Provenance  []Provenance `json:"provenance"`
+}
+
+// ExtractArtifacts extracts reusable artifacts from a trajectory.
+// Artifacts are successful tool sequences that could be replayed.
+func ExtractArtifacts(traj Trajectory) []TrajectoryArtifact {
+	var artifacts []TrajectoryArtifact
+	seen := make(map[string]*TrajectoryArtifact)
+
+	for _, turn := range traj.Turns {
+		if len(turn.Tools) < 2 {
+			continue
+		}
+		var names []string
+		allSuccess := true
+		for _, t := range turn.Tools {
+			names = append(names, t.Tool)
+			if !t.Success {
+				allSuccess = false
+			}
+		}
+		if !allSuccess {
+			continue
+		}
+		sig := strings.Join(names, " → ")
+		art, ok := seen[sig]
+		if !ok {
+			art = &TrajectoryArtifact{
+				ID:        fmt.Sprintf("artifact/%s/%d", traj.RunID, len(artifacts)+1),
+				Kind:      "tool_sequence",
+				Signature: sig,
+				Tools:     names,
+			}
+			seen[sig] = art
+			artifacts = append(artifacts, *art)
+		}
+		// Update the artifact in the slice
+		for i := range artifacts {
+			if artifacts[i].Signature == sig {
+				artifacts[i].Count++
+				if !containsStr(artifacts[i].Runs, traj.RunID) {
+					artifacts[i].Runs = append(artifacts[i].Runs, traj.RunID)
+				}
+				for _, t := range turn.Tools {
+					artifacts[i].Provenance = append(artifacts[i].Provenance, Provenance{
+						RunID:   traj.RunID,
+						EventID: t.EventID,
+						Turn:    turn.Number,
+					})
+				}
+				break
+			}
+		}
+	}
+
+	// Calculate success rates
+	for i := range artifacts {
+		// For single-run artifacts, success rate is1.0 (we only extracted successful sequences)
+		artifacts[i].SuccessRate = 1.0
+	}
+
+	return artifacts
+}
 func toolScope(tool string) string {
 	if strings.HasPrefix(tool, "mcp__") {
 		return "mcp"

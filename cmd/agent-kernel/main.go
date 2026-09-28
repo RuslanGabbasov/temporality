@@ -898,6 +898,116 @@ func main() {
 		writeJSON(w, 200, projection)
 	})
 
+	// Trajectory comparison: extract and diff two runs side-by-side.
+	mux.HandleFunc("GET /v1/workspace/runs/compare", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		runA := r.URL.Query().Get("a")
+		runB := r.URL.Query().Get("b")
+		if runA == "" || runB == "" {
+			writeError(w, 422, errors.New("query params a and b (run IDs) are required"))
+			return
+		}
+		extractRun := func(runID string) (*agent.Trajectory, error) {
+			run, err := ws.GetRun(r.Context(), runID)
+			if err != nil {
+				return nil, err
+			}
+			events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, "", 500)
+			if eErr != nil {
+				return nil, eErr
+			}
+			var evLikes []agent.EventLike
+			for _, ev := range events {
+				var occurredAt time.Time
+				if ev.OccurredAt != "" {
+					occurredAt, _ = time.Parse(time.RFC3339Nano, ev.OccurredAt)
+				}
+				el := agent.EventLike{
+					EventID: ev.EventID, OccurredAt: occurredAt, Type: ev.Type,
+					Context: struct{ Run, Project string }{Run: run.RunID, Project: run.ProjectID},
+				}
+				if ev.Data != nil {
+					_ = json.Unmarshal(ev.Data, &el.Data)
+				}
+				if el.Data == nil {
+					el.Data = make(map[string]any)
+				}
+				evLikes = append(evLikes, el)
+			}
+			t := agent.ExtractTrajectory(evLikes)
+			return &t, nil
+		}
+		trajA, errA := extractRun(runA)
+		trajB, errB := extractRun(runB)
+		if errA != nil {
+			writeError(w, 404, fmt.Errorf("run A: %w", errA))
+			return
+		}
+		if errB != nil {
+			writeError(w, 404, fmt.Errorf("run B: %w", errB))
+			return
+		}
+		// Build comparison
+		comparison := map[string]any{
+			"run_a": trajA,
+			"run_b": trajB,
+			"diff": map[string]any{
+				"turns":     trajA.Summary.TotalTurns - trajB.Summary.TotalTurns,
+				"tools":     trajA.Summary.TotalTools - trajB.Summary.TotalTools,
+				"tokens":    trajA.Summary.TotalTokens - trajB.Summary.TotalTokens,
+				"knowledge": trajA.Summary.KnowledgeFormed - trajB.Summary.KnowledgeFormed,
+				"failed":    trajA.Summary.FailedTools - trajB.Summary.FailedTools,
+				"tools_a":   trajA.Summary.ToolsUsed,
+				"tools_b":   trajB.Summary.ToolsUsed,
+			},
+		}
+		writeJSON(w, 200, comparison)
+	})
+
+	// Artifact extraction: extract reusable structures from a trajectory.
+	mux.HandleFunc("GET /v1/workspace/runs/{runID}/artifacts", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		run, err := ws.GetRun(r.Context(), r.PathValue("runID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, "", 500)
+		if eErr != nil {
+			writeError(w, 500, eErr)
+			return
+		}
+		var evLikes []agent.EventLike
+		for _, ev := range events {
+			var occurredAt time.Time
+			if ev.OccurredAt != "" {
+				occurredAt, _ = time.Parse(time.RFC3339Nano, ev.OccurredAt)
+			}
+			el := agent.EventLike{
+				EventID: ev.EventID, OccurredAt: occurredAt, Type: ev.Type,
+				Context: struct{ Run, Project string }{Run: run.RunID, Project: run.ProjectID},
+			}
+			if ev.Data != nil {
+				_ = json.Unmarshal(ev.Data, &el.Data)
+			}
+			if el.Data == nil {
+				el.Data = make(map[string]any)
+			}
+			evLikes = append(evLikes, el)
+		}
+		traj := agent.ExtractTrajectory(evLikes)
+		artifacts := agent.ExtractArtifacts(traj)
+		writeJSON(w, 200, map[string]any{"artifacts": artifacts, "count": len(artifacts)})
+	})
+
 	mux.HandleFunc("GET /v1/workspace/tasks/{taskID}/runs", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
