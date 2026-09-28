@@ -465,10 +465,12 @@ func main() {
 			req.ID = slugify(req.Name)
 		}
 		a := &workspace.Agent{
-			ID: req.ID, ProjectID: req.ProjectID, Name: req.Name,
-			Model: req.Model, SystemPrompt: req.SystemPrompt,
+			ID: req.ID, ProjectID: req.ProjectID, Name: req.Name, Description: req.Description,
+			Model: req.Model, Provider: req.Provider, SystemPrompt: req.SystemPrompt,
+			Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 			Skills: req.Skills, MCPServers: req.MCPServers,
-			SandboxProfile: req.SandboxProfile,
+			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
+			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels,
 		}
 		if err := ws.CreateAgent(r.Context(), a); err != nil {
 			writeError(w, 409, err)
@@ -501,10 +503,12 @@ func main() {
 			return
 		}
 		a := workspace.Agent{
-			ID: r.PathValue("agentID"), ProjectID: req.ProjectID, Name: req.Name,
-			Model: req.Model, SystemPrompt: req.SystemPrompt,
+			ID: r.PathValue("agentID"), ProjectID: req.ProjectID, Name: req.Name, Description: req.Description,
+			Model: req.Model, Provider: req.Provider, SystemPrompt: req.SystemPrompt,
+			Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 			Skills: req.Skills, MCPServers: req.MCPServers,
-			SandboxProfile: req.SandboxProfile,
+			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
+			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels,
 		}
 		if err := ws.UpdateAgent(r.Context(), a); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
