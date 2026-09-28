@@ -109,6 +109,33 @@ export default function Workspace({ project }: { project: string }) {
   useEffect(() => { saveConversations(conversations) }, [conversations])
   useEffect(() => () => { streamRef.current.forEach((es) => es.close()); streamRef.current.clear() }, [])
 
+  // Reconnect SSE streams for in-progress messages on mount (e.g. after
+  // navigating away and back to the Workspace tab). Also poll for stale
+  // running messages as a safety net.
+  useEffect(() => {
+    for (const conv of conversations) {
+      for (const msg of conv.messages) {
+        if (msg.status === 'running' && msg.runId && !streamRef.current.has(conv.id)) {
+          streamRun(msg.runId, conv.id)
+        }
+      }
+    }
+    // Poll for stale running messages every 30s
+    const timer = window.setInterval(() => {
+      setConversations((prev) => {
+        for (const conv of prev) {
+          for (const msg of conv.messages) {
+            if (msg.status === 'running' && msg.runId && !streamRef.current.has(conv.id)) {
+              void fetchFinalAnswer(msg.runId, conv.id)
+            }
+          }
+        }
+        return prev
+      })
+    }, 30000)
+    return () => window.clearInterval(timer)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const loadAllAgents = useCallback(async () => {
     try {
       const data = await workspaceApi.listAllAgents()
