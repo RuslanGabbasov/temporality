@@ -15,6 +15,9 @@ const POPULATION_LANE = 64
 // bands (manual click always overrides; `fit` returns to the automatic mode).
 const AGGREGATE_RATIO = 0.45
 const AUTO_AGGREGATE_ROWS = 12
+// Episode zoom: when the visible span is below this share of the full span,
+// individual tool-call episodes become visible within each knowledge row.
+const EPISODE_RATIO = 0.15
 
 const MEMORY_BUCKETS: MemoryBucket[] = ['active', 'stale', 'invalidated', 'archived']
 
@@ -274,6 +277,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       if (aggregated) aggregatedIds.add(scope.id)
     }
     const conflictsPresent = model.lineage.length > 0 || model.rows.some((row) => row.points.some((point) => point.kind === 'contradicted' || point.kind === 'weakened' || point.kind === 'archived'))
+    const showEpisodes = (active.t1 - active.t0) / Math.max(1, full.t1 - full.t0) < EPISODE_RATIO
     const runLaneY = new Map<string, number>()
     let y = AXIS_HEIGHT
     for (const run of visibleRuns) { runLaneY.set(run.id, y + RUN_LANE / 2); y += RUN_LANE }
@@ -291,7 +295,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
         y += 4
       }
     }
-    return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleScopes, aggregatedIds, conflictsPresent, runLaneY, rowY, scopeHeaderY, bandY, populationY, height: y + 8 }
+    return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleScopes, aggregatedIds, conflictsPresent, showEpisodes, runLaneY, rowY, scopeHeaderY, bandY, populationY, height: y + 8 }
   }, [model, window_, hiddenRoots, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, kinds, lens.experience, laneOverrides, query])
 
   const activity = useMemo(() => {
@@ -644,6 +648,17 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                       <circle cx={px} cy={yLane} r={point.kind === 'appeared' ? 4.5 : 3.4} fill={hollow ? '#0b1016' : LIFECYCLE_COLORS[point.kind]} fillOpacity={point.kind === 'appeared' ? 0.25 : 0.95} stroke={LIFECYCLE_COLORS[point.kind]} strokeWidth={isFocus ? 2.4 : 1.4}>
                         <title>{`${point.kind} · ${point.at} · ${point.run ?? ''}${point.role ? ` (${point.role})` : ''}${point.rule ? ` · ${point.rule}` : ''}`}</title>
                       </circle>
+                    </g>
+                  })}
+                  {/* Episode bars: visible when zoomed in past EPISODE_RATIO */}
+                  {view.showEpisodes && row.episodes.map((ep, ei) => {
+                    const px = x(ep.at)
+                    if (px < GUTTER || px > GUTTER + track) return null
+                    const epColor = ep.kind === 'artifact' ? '#9ece6a' : ep.kind === 'validation' ? '#73daca' : ep.kind === 'invalidation' ? '#f7768e' : '#7e8a9c'
+                    return <g key={`ep-${ei}`}>
+                      <rect x={px - 1.5} y={yLane - ROW_LANE / 2 + 2} width={3} height={ROW_LANE - 4} rx={1} fill={epColor} opacity={0.6}>
+                        <title>{`${ep.kind} · ${ep.at} · ${ep.run}${ep.role ? ` (${ep.role})` : ''}`}</title>
+                      </rect>
                     </g>
                   })}
                   {row.terminal && (() => {
