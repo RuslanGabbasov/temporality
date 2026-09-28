@@ -86,6 +86,30 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 	return result, rows.Err()
 }
 
+// ListAllAgents returns all agents across all projects.
+func (s *Store) ListAllAgents(ctx context.Context) ([]Agent, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, project_id, name, model, system_prompt, skills, mcp_servers, sandbox_profile, created_at, updated_at
+		 FROM workspace_agent ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Agent
+	for rows.Next() {
+		var a Agent
+		var skills, mcp []byte
+		if err := rows.Scan(&a.ID, &a.ProjectID, &a.Name, &a.Model, &a.SystemPrompt, &skills, &mcp, &a.SandboxProfile, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(skills, &a.Skills)
+		_ = json.Unmarshal(mcp, &a.MCPServers)
+		result = append(result, a)
+	}
+	return result, rows.Err()
+}
+
+
 func (s *Store) UpdateProject(ctx context.Context, p Project) error {
 	p.UpdatedAt = time.Now().UTC()
 	tag, err := s.pool.Exec(ctx,

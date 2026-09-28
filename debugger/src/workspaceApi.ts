@@ -72,6 +72,8 @@ export const workspaceApi = {
     request<{ deleted: boolean }>(`/v1/workspace/projects/${id}`, { method: 'DELETE' }),
 
   // Agents
+  listAllAgents: () =>
+    request<{ agents: Agent[] }>('/v1/workspace/agents'),
   listAgents: (projectId: string) =>
     request<{ agents: Agent[] }>(`/v1/workspace/projects/${projectId}/agents`),
   getAgent: (id: string) => request<Agent>(`/v1/workspace/agents/${id}`),

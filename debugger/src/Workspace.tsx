@@ -38,7 +38,7 @@ const STATUS_TAGS: Record<string, { type: string; label: string }> = {
   pending: { type: 'gray', label: 'Pending' },
 }
 
-export default function Workspace() {
+export default function Workspace({ project, setProject }: { project: string; setProject: (p: string) => void }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [agents, setAgents] = useState<Agent[]>([])
@@ -59,6 +59,8 @@ export default function Workspace() {
   const [agentName, setAgentName] = useState('')
   const [agentModel, setAgentModel] = useState('')
   const [agentPrompt, setAgentPrompt] = useState('')
+  const [allAgents, setAllAgents] = useState<Agent[]>([])
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(null)
 
   // Task form
   const [showTaskForm, setShowTaskForm] = useState(false)
@@ -68,8 +70,12 @@ export default function Workspace() {
 
   const loadProjects = useCallback(async () => {
     try {
-      const data = await workspaceApi.listProjects()
-      setProjects(data.projects ?? [])
+      const [projectsData, agentsData] = await Promise.all([
+        workspaceApi.listProjects(),
+        workspaceApi.listAllAgents(),
+      ])
+      setProjects(projectsData.projects ?? [])
+      setAllAgents(agentsData.agents ?? [])
     } catch (f) { setError(message(f)) }
   }, [])
 
@@ -123,20 +129,48 @@ export default function Workspace() {
     finally { setLoading(false) }
   }
 
-  const createAgent = async () => {
-    if (!agentName.trim() || !selectedProject) return
+  const createOrUpdateAgent = async () => {
+    if (!agentName.trim()) return
     setLoading(true); setError('')
     try {
-      await workspaceApi.createAgent({
-        project_id: selectedProject.id,
-        name: agentName.trim(),
-        model: agentModel.trim(),
-        system_prompt: agentPrompt,
-      })
-      setAgentName(''); setAgentModel(''); setAgentPrompt(''); setShowAgentForm(false)
-      await loadProjectData(selectedProject)
+      if (editingAgent) {
+        await workspaceApi.updateAgent(editingAgent.id, {
+          name: agentName.trim(),
+          model: agentModel.trim(),
+          system_prompt: agentPrompt,
+        })
+      } else if (selectedProject) {
+        await workspaceApi.createAgent({
+          project_id: selectedProject.id,
+          name: agentName.trim(),
+          model: agentModel.trim(),
+          system_prompt: agentPrompt,
+        })
+      }
+      setAgentName(''); setAgentModel(''); setAgentPrompt(''); setShowAgentForm(false); setEditingAgent(null)
+      await loadProjects()
+      if (selectedProject) await loadProjectData(selectedProject)
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
+  }
+
+  const deleteAgent = async (agent: Agent) => {
+    if (!confirm(`Delete agent ${agent.name}?`)) return
+    setLoading(true); setError('')
+    try {
+      await workspaceApi.deleteAgent(agent.id)
+      await loadProjects()
+      if (selectedProject) await loadProjectData(selectedProject)
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }
+
+  const startEditAgent = (agent: Agent) => {
+    setEditingAgent(agent)
+    setAgentName(agent.name)
+    setAgentModel(agent.model)
+    setAgentPrompt(agent.system_prompt)
+    setShowAgentForm(true)
   }
 
   const createTask = async () => {
@@ -246,24 +280,33 @@ export default function Workspace() {
               <Stack gap={2}>
                 {agents.map((a) => (
                   <Tile key={a.id}>
-                    <strong>{a.name}</strong>
-                    {a.model && <><br /><Tag type="blue">{a.model}</Tag></>}
-                    {a.system_prompt && (
-                      <>
-                        <br />
-                        <small className="ws-preview">
-                          {a.system_prompt.length > 80 
-                            ? a.system_prompt.slice(0, 80) + '…' 
-                            : a.system_prompt}
-                        </small>
-                      </>
-                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <strong>{a.name}</strong>
+                        {a.model && <><br /><Tag type="blue">{a.model}</Tag></>}
+                        {a.system_prompt && (
+                          <>
+                            <br />
+                            <small className="ws-preview">
+                              {a.system_prompt.length > 80
+                                ? a.system_prompt.slice(0, 80) + '…'
+                                : a.system_prompt}
+                            </small>
+                          </>
+                        )}
+                      </div>
+                      <Stack orientation="horizontal" gap={1}>
+                        <Button size="sm" kind="ghost" onClick={() => startEditAgent(a)}>Edit</Button>
+                        <Button size="sm" kind="danger--ghost" onClick={() => void deleteAgent(a)}>Delete</Button>
+                      </Stack>
+                    </div>
                   </Tile>
                 ))}
-                
+
                 {showAgentForm ? (
                   <Layer>
                     <Stack gap={3}>
+                      <Heading>{editingAgent ? 'Edit Agent' : 'New Agent'}</Heading>
                       <TextInput
                         id="agent-name"
                         labelText="Agent name"
@@ -288,10 +331,10 @@ export default function Workspace() {
                         rows={6}
                       />
                       <Stack orientation="horizontal" gap={2}>
-                        <Button onClick={() => void createAgent()} disabled={loading}>
-                          Create agent
+                        <Button onClick={() => void createOrUpdateAgent()} disabled={loading}>
+                          {editingAgent ? 'Save changes' : 'Create agent'}
                         </Button>
-                        <Button kind="secondary" onClick={() => setShowAgentForm(false)}>
+                        <Button kind="secondary" onClick={() => { setShowAgentForm(false); setEditingAgent(null) }}>
                           Cancel
                         </Button>
                       </Stack>
@@ -357,13 +400,13 @@ export default function Workspace() {
                       />
                       <Select
                         id="task-agent"
-                        labelText="Agent (optional)"
+                        labelText="Agent (optional, cross-project)"
                         value={taskAgentId}
                         onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTaskAgentId(e.target.value)}
                       >
                         <SelectItem value="" text="Use defaults" />
-                        {agents.map((a) => (
-                          <SelectItem key={a.id} value={a.id} text={a.name} />
+                        {allAgents.map((a) => (
+                          <SelectItem key={a.id} value={a.id} text={`${a.name} (${a.project_id})`} />
                         ))}
                       </Select>
                       <Stack orientation="horizontal" gap={2}>
