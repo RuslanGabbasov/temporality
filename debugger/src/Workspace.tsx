@@ -170,14 +170,16 @@ export default function Workspace({ project }: { project: string }) {
     es.addEventListener('tool.completed', handleEvent('tool.completed'))
     es.addEventListener('knowledge.proposed', handleEvent('knowledge.proposed'))
 
+    // agent.summary arrives via SSE but the answer in observation_events
+    // loses newlines (JSONB storage). Always fetch the real answer from REST.
     es.addEventListener('agent.summary', (e) => {
       try {
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
-        const answer = d.answer ?? ''
-        if (answer) {
+        if (d.answer) {
           lines.push('Answer received')
-          updateMsg(convId, runId, { content: answer, status: 'completed', streamLines: [...lines] })
+          updateMsg(convId, runId, { streamLines: [...lines] })
+          void fetchFinalAnswer(runId, convId)
         }
       } catch { /* ignore */ }
     })
