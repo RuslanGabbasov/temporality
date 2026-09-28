@@ -77,9 +77,9 @@
 - [x] **State-at-T as product feature** — not just an API endpoint. "What did the system know when this decision was made?" needs a proper UI accessible from timeline/trace.
 - [ ] **Streaming improvements** — show model tokens as they arrive (not just turn-level)
 - [ ] **Conversation branching** — fork a conversation from a specific point
-- [ ] **Agent templates** — pre-configured agents for common tasks (coder, reviewer, researcher)
-- [ ] **Project settings** — per-project defaults for agent, model, sandbox
-- [ ] **Bulk operations** — select multiple runs/operations for batch actions
+- [x] **Agent templates** — pre-configured agents for common tasks (coder, reviewer, researcher)
+- [x] **Project settings** — per-project defaults for agent, model, sandbox
+- [x] **Bulk operations** — select multiple runs/operations for batch actions
 
 ---
 
