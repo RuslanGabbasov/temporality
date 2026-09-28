@@ -15,6 +15,8 @@ import {
 import { User, Settings, Add, Edit, TrashCan } from '@carbon/icons-react'
 import { TOKEN_STORAGE_KEY, authToken, authHeaders } from './api'
 
+const KERNEL_API = '/kernel-api'
+
 export interface AppState {
   project: string
   setProject: (project: string) => void
@@ -55,6 +57,25 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [editProject, setEditProject] = useState<Project | null>(null)
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectDesc, setNewProjectDesc] = useState('')
+
+  // Pending operations badge
+  const [pendingOps, setPendingOps] = useState(0)
+
+  useEffect(() => {
+    if (!authToken()) return
+    const poll = async () => {
+      try {
+        const resp = await fetch(`${KERNEL_API}/v1/agent/operations?project=${encodeURIComponent(project)}`, { headers: { ...authHeaders() } })
+        if (resp.ok) {
+          const data = await resp.json()
+          setPendingOps(data.count ?? (data.operations ?? []).length)
+        }
+      } catch { /* ignore */ }
+    }
+    void poll()
+    const timer = window.setInterval(poll, 15000)
+    return () => window.clearInterval(timer)
+  }, [project])
 
   const loadProjects = useCallback(async () => {
     try {
@@ -130,6 +151,19 @@ export default function Layout({ children, activePage }: LayoutProps) {
               onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path) }}
             >
               {label}
+              {path === '/operations' && pendingOps > 0 && (
+                <span style={{
+                  marginLeft: '0.35rem',
+                  background: '#f7768e',
+                  color: '#080b10',
+                  fontSize: '0.6rem',
+                  fontWeight: 700,
+                  padding: '0.1rem 0.4rem',
+                  borderRadius: '999px',
+                  lineHeight: 1,
+                  verticalAlign: 'middle',
+                }}>{pendingOps}</span>
+              )}
             </HeaderMenuItem>
           ))}
         </HeaderNavigation>
