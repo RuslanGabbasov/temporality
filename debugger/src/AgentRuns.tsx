@@ -79,8 +79,14 @@ export default function AgentRuns({ project }: { project: string }) {
       const sourceQuery = new URLSearchParams({ project: project.trim(), source_id: root?.source.id ?? '' })
       let response = await fetch(`${KERNEL_API}${resultPath}?${sourceQuery}`, { headers: authHeaders() })
       if (!response.ok && teamRun) response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(run)}?${sourceQuery}`, { headers: authHeaders() })
-      if (!response.ok) { const detail = await response.text(); throw new Error(`${response.status} ${detail}`) }
-      setResult(await response.json() as Record<string, unknown>)
+      if (response.ok) {
+        setResult(await response.json() as Record<string, unknown>)
+      } else if (response.status === 404) {
+        setResult({ status: 'workflow_expired', error: 'Workflow no longer available in Temporal (events preserved in journal)' })
+      } else {
+        const detail = await response.text()
+        throw new Error(`${response.status} ${detail}`)
+      }
       const query = new URLSearchParams({ project: project.trim(), run })
       window.history.replaceState(null, '', `/agents?${query}`)
     } catch (failure) { setError(message(failure)) }
