@@ -723,6 +723,61 @@ func main() {
 		}
 		writeJSON(w, 200, run)
 	})
+	// SSE stream for a workspace run — pushes model.completed, turn.completed,
+	// tool.* and run.completed events as they land in the journal.
+	mux.HandleFunc("GET /v1/workspace/runs/{runID}/stream", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		runID := r.PathValue("runID")
+		run, err := ws.GetRun(r.Context(), runID)
+		if err != nil {
+			writeError(w, 404, err)
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			writeError(w, 500, errors.New("streaming not supported"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		ctx := r.Context()
+		var cursor string
+		done := false
+		for !done {
+			select {
+			case <-ctx.Done():
+				done = true
+			default:
+			}
+			if done {
+				break
+			}
+			events, nextCursor, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, runID, cursor, 50)
+			if eErr == nil {
+				for _, ev := range events {
+					data, _ := json.Marshal(ev)
+					fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, data)
+					flusher.Flush()
+					if ev.Type == "run.completed" || ev.Type == "run.failed" {
+						done = true
+					}
+				}
+				if nextCursor != "" {
+					cursor = nextCursor
+				}
+			}
+			if !done {
+				time.Sleep(1500 * time.Millisecond)
+			}
+		}
+		fmt.Fprintf(w, "event: done\ndata: {}\n\n")
+		flusher.Flush()
+	})
+
 	mux.HandleFunc("GET /v1/workspace/tasks/{taskID}/runs", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return

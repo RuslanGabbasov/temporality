@@ -360,6 +360,57 @@ func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
 	return result, rows.Err()
 }
 
+// StreamEvent is a lightweight event representation for SSE streaming.
+type StreamEvent struct {
+	Type       string          `json:"type"`
+	OccurredAt string          `json:"occurred_at"`
+	EventID    string          `json:"event_id"`
+	Data       json.RawMessage `json:"data"`
+}
+
+// StreamRunEvents fetches observation events for a run, optionally starting
+// after a cursor (event_id). Returns events ordered by occurred_at.
+func (s *Store) StreamRunEvents(ctx context.Context, projectID, runID, afterCursor string, limit int) ([]StreamEvent, string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var rows pgx.Rows
+	var err error
+	if afterCursor == "" {
+		rows, err = s.pool.Query(ctx,
+			`SELECT event_id, type, occurred_at, data FROM observation_events
+			 WHERE project_id = $1 AND run_id = $2
+			 ORDER BY occurred_at LIMIT $3`, projectID, runID, limit)
+	} else {
+		rows, err = s.pool.Query(ctx,
+			`SELECT event_id, type, occurred_at, data FROM observation_events
+			 WHERE project_id = $1 AND run_id = $2
+			 AND occurred_at > (SELECT occurred_at FROM observation_events WHERE event_id = $3 LIMIT 1)
+			 ORDER BY occurred_at LIMIT $4`, projectID, runID, afterCursor, limit)
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	var events []StreamEvent
+	var lastID string
+	for rows.Next() {
+		var ev StreamEvent
+		var at time.Time
+		if err := rows.Scan(&ev.EventID, &ev.Type, &at, &ev.Data); err != nil {
+			return nil, "", err
+		}
+		if ev.Data == nil {
+			ev.Data = json.RawMessage("{}")
+		}
+		_ = at
+		// Use event_id as cursor instead of timestamp to avoid precision issues.
+		lastID = ev.EventID
+		events = append(events, ev)
+	}
+	return events, lastID, rows.Err()
+}
+
 // ListAllProjects returns workspace projects merged with journal projects.
 func (s *Store) ListAllProjects(ctx context.Context) ([]Project, error) {
 	wp, err := s.ListProjects(ctx)

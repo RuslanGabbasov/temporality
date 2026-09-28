@@ -182,14 +182,17 @@ func (g *Gate) Authenticate(next http.Handler) http.Handler {
 
 func bearerToken(r *http.Request) (string, bool) {
 	header := strings.TrimSpace(r.Header.Get("Authorization"))
-	if header == "" {
-		return "", false
+	if header != "" {
+		if token, ok := strings.CutPrefix(header, "Bearer "); ok {
+			return strings.TrimSpace(token), true
+		}
 	}
-	token, ok := strings.CutPrefix(header, "Bearer ")
-	if !ok {
-		return "", false
+	// Also accept ?token= query parameter for SSE / EventSource connections
+	// which cannot set custom headers.
+	if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" {
+		return token, true
 	}
-	return strings.TrimSpace(token), true
+	return "", false
 }
 
 // Allow authorizes the request for at least min role over every listed
