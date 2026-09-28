@@ -1,4 +1,4 @@
-import { type FormEvent, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { API_BASE, authHeaders } from './api'
 import { observationApi, type KnowledgeItem, type ObservationEvent, type ObservationHint } from './observationApi'
 import {
@@ -47,6 +47,7 @@ export default function Observability({ project }: { project: string }) {
   const [error, setError] = useState('')
   const [projection, setProjection] = useState<any>(null)
   const [showProjection, setShowProjection] = useState(false)
+  const [chain, setChain] = useState<any>(null)
   const [actor, setActor] = useState('human')
   const [reason, setReason] = useState('')
   const [operationError, setOperationError] = useState('')
@@ -67,6 +68,19 @@ export default function Observability({ project }: { project: string }) {
     return [...groups.entries()].sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]))
   }, [knowledge])
   const visibleKnowledge = clusterFilter === 'all' ? knowledge : knowledge.filter((item) => (item.topics?.[0] || item.entities?.[0] || 'Unscoped knowledge') === clusterFilter)
+
+  // Fetch activation chain when a knowledge item is selected
+  useEffect(() => {
+    if (!selectedID || !project.trim()) { setChain(null); return }
+    const fetchChain = async () => {
+      try {
+        const resp = await fetch(`/kernel-api/v1/workspace/knowledge/${encodeURIComponent(selectedID)}/chain?project=${encodeURIComponent(project.trim())}`, { headers: { ...authHeaders() } })
+        if (resp.ok) setChain(await resp.json())
+        else setChain(null)
+      } catch { setChain(null) }
+    }
+    void fetchChain()
+  }, [selectedID, project])
   const knowledgeChanges = useMemo(() => {
     if (!comparisonKnowledge) return null
     const oldByID = new Map(comparisonKnowledge.map((item) => [item.id, item]))
@@ -351,7 +365,37 @@ export default function Observability({ project }: { project: string }) {
                   </Stack>
                 </Tile>
 
-                {selected.state !== 'invalidated' && selected.state !== 'corrected' && selected.state !== 'superseded' && (
+              {/* Activation chain */}
+                  {chain && chain.activations?.length > 0 && (
+                    <Tile>
+                      <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
+                        Activation Chain — {chain.total_runs} runs · {chain.activations.length} activations · {chain.is_alive ? 'alive' : 'dead'}
+                      </h5>
+                      {chain.activations.map((a: any, i: number) => (
+                        <div key={i} style={{ padding: '0.4rem 0.5rem', borderLeft: `3px solid ${a.outcome === 'success' ? '#9ece6a' : a.outcome === 'failure' ? '#f7768e' : '#7e8a9c'}`, marginBottom: '0.25rem', background: 'rgba(255,255,255,0.02)', borderRadius: '0 4px 4px 0', fontSize: '0.8rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <strong>Turn {a.turn}</strong>
+                            <span style={{ color: '#7e8a9c' }}>{a.run_id}</span>
+                            {a.tool_name && <Tag type={a.tool_success ? 'green' : 'red'} size="sm">{a.tool_name}</Tag>}
+                            {a.outcome && <Tag type={a.outcome === 'success' ? 'green' : 'red'} size="sm">{a.outcome}</Tag>}
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: '#7e8a9c', marginTop: '0.15rem' }}>
+                            recalled {new Date(a.recalled_at).toLocaleString()}
+                            {a.injected_at && ` → injected ${new Date(a.injected_at).toLocaleString()}`}
+                          </div>
+                        </div>
+                      ))}
+                      {chain.invalidation && (
+                        <div style={{ padding: '0.4rem 0.5rem', borderLeft: '3px solid #f7768e', marginTop: '0.25rem', background: 'rgba(247,118,142,0.05)', borderRadius: '0 4px 4px 0', fontSize: '0.8rem' }}>
+                          <strong style={{ color: '#f7768e' }}>{chain.invalidation.kind}</strong>
+                          <span style={{ color: '#7e8a9c', marginLeft: '0.5rem' }}>{chain.invalidation.run_id} · {new Date(chain.invalidation.at).toLocaleString()}</span>
+                          {chain.invalidation.reason && <span style={{ color: '#7e8a9c', marginLeft: '0.5rem' }}>· {chain.invalidation.reason}</span>}
+                        </div>
+                      )}
+                    </Tile>
+                  )}
+
+                  {selected.state !== 'invalidated' && selected.state !== 'corrected' && selected.state !== 'superseded' && (
                   <Tile>
                     <h5 style={{ fontSize: "0.75rem", fontWeight: 600, color: "#7e8a9c", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.5rem" }}>Manual Invalidation</h5>
                     <Stack gap={2}>

@@ -1008,6 +1008,96 @@ func main() {
 		writeJSON(w, 200, map[string]any{"artifacts": artifacts, "count": len(artifacts)})
 	})
 
+	// Activation chain: trace how a specific knowledge item influenced agent decisions.
+	mux.HandleFunc("GET /v1/workspace/knowledge/{knowledgeID}/chain", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		knowledgeID := r.PathValue("knowledgeID")
+		project := r.URL.Query().Get("project")
+		if project == "" {
+			writeError(w, 422, errors.New("project query param is required"))
+			return
+		}
+		// Get all completed runs for this project
+		runs, err := ws.ListRunsByProject(r.Context(), project)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		// Extract trajectories
+		var trajectories []agent.Trajectory
+		for _, run := range runs {
+			events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, "", 500)
+			if eErr != nil {
+				continue
+			}
+			var evLikes []agent.EventLike
+			for _, ev := range events {
+				var occurredAt time.Time
+				if ev.OccurredAt != "" {
+					occurredAt, _ = time.Parse(time.RFC3339Nano, ev.OccurredAt)
+				}
+				el := agent.EventLike{
+					EventID: ev.EventID, OccurredAt: occurredAt, Type: ev.Type,
+					Context: struct{ Run, Project string }{Run: run.RunID, Project: run.ProjectID},
+				}
+				if ev.Data != nil {
+					_ = json.Unmarshal(ev.Data, &el.Data)
+				}
+				if el.Data == nil {
+					el.Data = make(map[string]any)
+				}
+				evLikes = append(evLikes, el)
+			}
+			trajectories = append(trajectories, agent.ExtractTrajectory(evLikes))
+		}
+		chain := agent.ExtractActivationChain(knowledgeID, trajectories)
+		writeJSON(w, 200, chain)
+	})
+
+	// All activation chains for a project.
+	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/chains", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		projectID := r.PathValue("projectID")
+		runs, err := ws.ListRunsByProject(r.Context(), projectID)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		var trajectories []agent.Trajectory
+		for _, run := range runs {
+			events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, "", 500)
+			if eErr != nil {
+				continue
+			}
+			var evLikes []agent.EventLike
+			for _, ev := range events {
+				var occurredAt time.Time
+				if ev.OccurredAt != "" {
+					occurredAt, _ = time.Parse(time.RFC3339Nano, ev.OccurredAt)
+				}
+				el := agent.EventLike{
+					EventID: ev.EventID, OccurredAt: occurredAt, Type: ev.Type,
+					Context: struct{ Run, Project string }{Run: run.RunID, Project: run.ProjectID},
+				}
+				if ev.Data != nil {
+					_ = json.Unmarshal(ev.Data, &el.Data)
+				}
+				if el.Data == nil {
+					el.Data = make(map[string]any)
+				}
+				evLikes = append(evLikes, el)
+			}
+			trajectories = append(trajectories, agent.ExtractTrajectory(evLikes))
+		}
+		chains := agent.ExtractAllActivationChains(trajectories)
+		slog.Info("activation chains", "project", projectID, "runs", len(trajectories), "chains", len(chains))
+		writeJSON(w, 200, map[string]any{"chains": chains, "count": len(chains)})
+	})
+
 	mux.HandleFunc("GET /v1/workspace/tasks/{taskID}/runs", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
