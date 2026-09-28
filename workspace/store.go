@@ -285,6 +285,19 @@ func (s *Store) ListTasks(ctx context.Context, projectID string) ([]Task, error)
 	return result, rows.Err()
 }
 
+func (s *Store) UpdateTaskPrompt(ctx context.Context, id, prompt, title string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_task SET prompt = $2, title = COALESCE(NULLIF($3, ''), title), updated_at = $4 WHERE id = $1`,
+		id, prompt, title, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) DeleteTask(ctx context.Context, id string) error {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM workspace_task WHERE id = $1`, id)
 	if err != nil {

@@ -595,6 +595,28 @@ func main() {
 		}
 		writeJSON(w, 200, task)
 	})
+	mux.HandleFunc("PATCH /v1/workspace/tasks/{taskID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req struct {
+			Prompt string `json:"prompt"`
+			Title  string `json:"title"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if err := ws.UpdateTaskPrompt(r.Context(), r.PathValue("taskID"), req.Prompt, req.Title); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"updated": true})
+	})
 	mux.HandleFunc("DELETE /v1/workspace/tasks/{taskID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleOperator) {
 			return

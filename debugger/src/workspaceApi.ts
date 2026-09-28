@@ -120,6 +120,8 @@ export const workspaceApi = {
   getTask: (id: string) => request<Task>(`/v1/workspace/tasks/${id}`),
   createTask: (data: { id?: string; project_id: string; agent_id?: string; title: string; prompt: string }) =>
     request<Task>('/v1/workspace/tasks', { method: 'POST', body: JSON.stringify(data) }),
+  updateTask: (id: string, data: { prompt?: string; title?: string }) =>
+    request<{ updated: boolean }>(`/v1/workspace/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteTask: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/tasks/${id}`, { method: 'DELETE' }),
 

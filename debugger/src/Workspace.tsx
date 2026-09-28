@@ -40,6 +40,7 @@ interface Conversation {
   title: string
   messages: ChatMessage[]
   agentId: string
+  taskId: string
   createdAt: Date
 }
 
@@ -51,6 +52,7 @@ function loadConversations(): Conversation[] {
     if (!raw) return []
     return JSON.parse(raw).map((c: any) => ({
       ...c,
+      taskId: c.taskId ?? '',
       agentId: c.agentId ?? '',
       createdAt: new Date(c.createdAt),
       messages: c.messages.map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) })),
@@ -127,6 +129,7 @@ export default function Workspace({ project }: { project: string }) {
       title: 'New conversation',
       messages: [],
       agentId: newChatAgentId,
+      taskId: '',
       createdAt: new Date(),
     }
     setConversations((prev) => [conv, ...prev])
@@ -252,13 +255,24 @@ export default function Workspace({ project }: { project: string }) {
       }
       const fullPrompt = historyLines.join('\n\n')
 
-      const task = await workspaceApi.createTask({
-        project_id: project,
-        agent_id: activeConv.agentId || undefined,
-        title: content.slice(0, 80),
-        prompt: fullPrompt,
-      })
-      const result = await workspaceApi.startRun(task.id, { agent_id: activeConv.agentId || undefined })
+      // Reuse existing task for follow-up messages, create new one for first message
+      let taskId = activeConv.taskId
+      if (!taskId) {
+        const task = await workspaceApi.createTask({
+          project_id: project,
+          agent_id: activeConv.agentId || undefined,
+          title: content.slice(0, 80),
+          prompt: fullPrompt,
+        })
+        taskId = task.id
+        // Store taskId on the conversation
+        setConversations((prev) => prev.map((c) => c.id === activeConv.id ? { ...c, taskId } : c))
+      } else {
+        // Update the existing task's prompt with the full conversation
+        await workspaceApi.updateTask(taskId, { prompt: fullPrompt, title: content.slice(0, 80) })
+      }
+
+      const result = await workspaceApi.startRun(taskId, { agent_id: activeConv.agentId || undefined })
       const runId = result.run_id
 
       const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: ['Run started · streaming…'] }
