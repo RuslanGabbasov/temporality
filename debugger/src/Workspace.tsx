@@ -241,11 +241,22 @@ export default function Workspace({ project }: { project: string }) {
     setConversations((prev) => prev.map((c) => c.id === updatedConv.id ? updatedConv : c))
 
     try {
+      // Build full conversation history as the prompt
+      const historyLines: string[] = []
+      for (const msg of updatedConv.messages) {
+        if (msg.role === 'user') {
+          historyLines.push(`User: ${msg.content}`)
+        } else if (msg.role === 'assistant' && msg.content) {
+          historyLines.push(`Assistant: ${msg.content}`)
+        }
+      }
+      const fullPrompt = historyLines.join('\n\n')
+
       const task = await workspaceApi.createTask({
         project_id: project,
         agent_id: activeConv.agentId || undefined,
         title: content.slice(0, 80),
-        prompt: content,
+        prompt: fullPrompt,
       })
       const result = await workspaceApi.startRun(task.id, { agent_id: activeConv.agentId || undefined })
       const runId = result.run_id
