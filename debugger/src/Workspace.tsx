@@ -2,16 +2,17 @@ import { useCallback, useEffect, useState, useRef } from 'react'
 import {
   Button,
   TextInput,
+  TextArea,
   Select,
   SelectItem,
   InlineNotification,
   Loading,
   Tag,
   Heading,
+  Modal,
 } from '@carbon/react'
 import { Add, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent } from './workspaceApi'
-import { authHeaders } from './api'
 import Markdown from './Markdown'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -31,7 +32,6 @@ interface ChatMessage {
   timestamp: Date
   runId?: string
   status?: string
-  /** Live streaming lines shown while the run is in progress. */
   streamLines?: string[]
 }
 
@@ -39,6 +39,7 @@ interface Conversation {
   id: string
   title: string
   messages: ChatMessage[]
+  agentId: string
   createdAt: Date
 }
 
@@ -50,6 +51,7 @@ function loadConversations(): Conversation[] {
     if (!raw) return []
     return JSON.parse(raw).map((c: any) => ({
       ...c,
+      agentId: c.agentId ?? '',
       createdAt: new Date(c.createdAt),
       messages: c.messages.map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) })),
     }))
@@ -67,20 +69,20 @@ function formatStreamEvent(type: string, outer: any): string | null {
     case 'run.started':
       return `Run started${d.model ? ` · model ${d.model}` : ''}`
     case 'model.completed': {
-      const tokens = d.usage ? ` · ${d.usage.total_tokens ?? '?'} tokens` : d.total_tokens ? ` · ${d.total_tokens} tokens` : ''
+      const tokens = d.total_tokens ? ` · ${d.total_tokens} tokens` : ''
       const latency = d.latency_ms ? ` · ${(d.latency_ms / 1000).toFixed(1)}s` : ''
       return `Model turn ${d.turn ?? ''}${tokens}${latency}`
     }
     case 'turn.completed':
       return `Turn ${d.turn ?? ''} done${d.tool_calls ? ` · ${d.tool_calls} tool calls` : ''}`
     case 'tool.completed':
-      return `Tool: ${d.name ?? d.tool ?? '?'} `
+      return `Tool: ${d.name ?? d.tool ?? '?'}`
     case 'knowledge.proposed':
       return `Learned: ${(d.proposition ?? '').slice(0, 60)}`
     case 'run.completed':
       return `Completed · ${d.turns ?? '?'} turns`
     case 'run.failed':
-      return `Failed: ${d.error ?? 'unknown'} `
+      return `Failed: ${d.error ?? 'unknown'}`
     default:
       return null
   }
@@ -95,17 +97,14 @@ export default function Workspace({ project }: { project: string }) {
   const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
   const [activeConvId, setActiveConvId] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
-  const [selectedAgentId, setSelectedAgentId] = useState('')
+  const [showNewChat, setShowNewChat] = useState(false)
+  const [newChatAgentId, setNewChatAgentId] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
-  // Track active EventSource connections so we can clean up.
   const streamRef = useRef<Map<string, EventSource>>(new Map())
 
   const activeConv = conversations.find((c) => c.id === activeConvId) ?? null
 
-  // Persist conversations to localStorage
   useEffect(() => { saveConversations(conversations) }, [conversations])
-
-  // Cleanup all streams on unmount.
   useEffect(() => () => { streamRef.current.forEach((es) => es.close()); streamRef.current.clear() }, [])
 
   const loadAllAgents = useCallback(async () => {
@@ -117,30 +116,32 @@ export default function Workspace({ project }: { project: string }) {
 
   useEffect(() => { void loadAllAgents() }, [loadAllAgents])
 
-  // Auto-scroll
   const scrollToBottom = () => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }
   useEffect(scrollToBottom, [activeConv?.messages])
 
-  const newConversation = () => {
+  const agentName = (id: string) => allAgents.find((a) => a.id === id)?.name ?? 'Default'
+
+  const createConversation = () => {
     const conv: Conversation = {
       id: crypto.randomUUID(),
       title: 'New conversation',
       messages: [],
+      agentId: newChatAgentId,
       createdAt: new Date(),
     }
     setConversations((prev) => [conv, ...prev])
     setActiveConvId(conv.id)
+    setShowNewChat(false)
+    setNewChatAgentId('')
   }
 
   const deleteConversation = (id: string) => {
-    // Close any active stream for this conversation.
     const es = streamRef.current.get(id)
     if (es) { es.close(); streamRef.current.delete(id) }
     setConversations((prev) => prev.filter((c) => c.id !== id))
     if (activeConvId === id) setActiveConvId(null)
   }
 
-  /** Update a specific assistant message in a conversation by runId. */
   const updateMsg = (convId: string, runId: string, patch: Partial<ChatMessage>) => {
     setConversations((prev) => prev.map((c) => {
       if (c.id !== convId) return c
@@ -148,51 +149,27 @@ export default function Workspace({ project }: { project: string }) {
     }))
   }
 
-  /** Start SSE streaming for a run. Shows live progress lines in the message. */
   const streamRun = (runId: string, convId: string) => {
     const token = localStorage.getItem('temporality_token') ?? ''
     const es = new EventSource(`/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/stream${token ? `?token=${token}` : ''}`)
-
-    // Store the EventSource so we can close it later.
     streamRef.current.set(convId, es)
-
     const lines: string[] = []
 
-    es.onmessage = () => { /* default handler, not used — we listen to named events */ }
+    es.onmessage = () => {}
 
-    es.addEventListener('model.completed', (e) => {
+    const handleEvent = (type: string) => (e: MessageEvent) => {
       try {
-        const data = JSON.parse(e.data)
-        const line = formatStreamEvent('model.completed', data)
-        if (line) { lines.push(line); updateMsg(convId, runId, { streamLines: [...lines] }) }
-      } catch { /* ignore parse errors */ }
-    })
-
-    es.addEventListener('turn.completed', (e) => {
-      try {
-        const data = JSON.parse(e.data)
-        const line = formatStreamEvent('turn.completed', data)
+        const outer = JSON.parse(e.data)
+        const line = formatStreamEvent(type, outer)
         if (line) { lines.push(line); updateMsg(convId, runId, { streamLines: [...lines] }) }
       } catch { /* ignore */ }
-    })
+    }
 
-    es.addEventListener('tool.completed', (e) => {
-      try {
-        const data = JSON.parse(e.data)
-        const line = formatStreamEvent('tool.completed', data)
-        if (line) { lines.push(line); updateMsg(convId, runId, { streamLines: [...lines] }) }
-      } catch { /* ignore */ }
-    })
+    es.addEventListener('model.completed', handleEvent('model.completed'))
+    es.addEventListener('turn.completed', handleEvent('turn.completed'))
+    es.addEventListener('tool.completed', handleEvent('tool.completed'))
+    es.addEventListener('knowledge.proposed', handleEvent('knowledge.proposed'))
 
-    es.addEventListener('knowledge.proposed', (e) => {
-      try {
-        const data = JSON.parse(e.data)
-        const line = formatStreamEvent('knowledge.proposed', data)
-        if (line) { lines.push(line); updateMsg(convId, runId, { streamLines: [...lines] }) }
-      } catch { /* ignore */ }
-    })
-
-    // agent.summary carries the final answer text.
     es.addEventListener('agent.summary', (e) => {
       try {
         const outer = JSON.parse(e.data)
@@ -205,15 +182,7 @@ export default function Workspace({ project }: { project: string }) {
       } catch { /* ignore */ }
     })
 
-    es.addEventListener('run.completed', (e) => {
-      try {
-        const data = JSON.parse(e.data)
-        const line = formatStreamEvent('run.completed', data)
-        if (line) lines.push(line)
-      } catch { /* ignore */ }
-      // Don't close yet — agent.summary with the answer comes after.
-      // The 'done' event will trigger final cleanup.
-    })
+    es.addEventListener('run.completed', handleEvent('run.completed'))
 
     es.addEventListener('run.failed', (e) => {
       try {
@@ -230,8 +199,6 @@ export default function Workspace({ project }: { project: string }) {
 
     es.addEventListener('done', () => {
       es.close(); streamRef.current.delete(convId)
-      // If agent.summary already set the answer, we're done.
-      // Otherwise fetch from REST API.
       setConversations((prev) => {
         const conv = prev.find((c) => c.id === convId)
         const m = conv?.messages.find((x) => x.runId === runId)
@@ -247,7 +214,6 @@ export default function Workspace({ project }: { project: string }) {
     }
   }
 
-  /** Fetch the final run result after streaming ends. */
   const fetchFinalAnswer = async (runId: string, convId: string) => {
     try {
       const run = await workspaceApi.getRun(runId)
@@ -255,7 +221,7 @@ export default function Workspace({ project }: { project: string }) {
         const answer = run.answer || run.error || 'No answer received'
         updateMsg(convId, runId, { content: answer, status: run.status })
       }
-    } catch { /* ignore — will be retried by polling fallback */ }
+    } catch { /* ignore */ }
   }
 
   const sendMessage = async () => {
@@ -265,32 +231,27 @@ export default function Workspace({ project }: { project: string }) {
     setLoading(true)
     setError('')
 
-    // Add user message
     const userMsg: ChatMessage = { role: 'user', content, timestamp: new Date() }
     const updatedConv = { ...activeConv, messages: [...activeConv.messages, userMsg] }
-    // Update title from first message
     if (updatedConv.messages.length === 1) {
       updatedConv.title = content.slice(0, 60) + (content.length > 60 ? '…' : '')
     }
     setConversations((prev) => prev.map((c) => c.id === updatedConv.id ? updatedConv : c))
 
     try {
-      // Create task and start run first to get the runId
       const task = await workspaceApi.createTask({
         project_id: project,
-        agent_id: selectedAgentId || undefined,
+        agent_id: activeConv.agentId || undefined,
         title: content.slice(0, 80),
         prompt: content,
       })
-      const result = await workspaceApi.startRun(task.id, { agent_id: selectedAgentId || undefined })
+      const result = await workspaceApi.startRun(task.id, { agent_id: activeConv.agentId || undefined })
       const runId = result.run_id
 
-      // Now create the assistant message WITH runId already set
       const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: ['Run started · streaming…'] }
       const withAssistant = { ...updatedConv, messages: [...updatedConv.messages, assistantMsg] }
       setConversations((prev) => prev.map((c) => c.id === withAssistant.id ? withAssistant : c))
 
-      // Start SSE streaming
       streamRun(runId, activeConv.id)
     } catch (f) {
       setError(message(f))
@@ -301,11 +262,11 @@ export default function Workspace({ project }: { project: string }) {
   }
 
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 48px)', background: '#080b10' }}>
+    <div style={{ display: 'flex', height: 'calc(100vh - 3rem)', background: '#080b10' }}>
       {/* Left panel: conversations */}
-      <div style={{ width: '280px', borderRight: '1px solid #202a38', display: 'flex', flexDirection: 'column', background: '#0d1118' }}>
+      <div style={{ width: '280px', borderRight: '1px solid #202a38', display: 'flex', flexDirection: 'column', background: '#0d1118', flexShrink: 0 }}>
         <div style={{ padding: '0.75rem', borderBottom: '1px solid #202a38' }}>
-          <Button renderIcon={Add} size="sm" onClick={newConversation} style={{ width: '100%' }}>New chat</Button>
+          <Button renderIcon={Add} size="sm" onClick={() => setShowNewChat(true)} style={{ width: '100%' }}>New chat</Button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
           {conversations.length === 0 && (
@@ -328,7 +289,7 @@ export default function Workspace({ project }: { project: string }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.title}</div>
                   <div style={{ fontSize: '0.75rem', color: '#7e8a9c', marginTop: '0.25rem' }}>
-                    {conv.messages.length} messages · {shortTime(conv.createdAt.toISOString())}
+                    {conv.agentId ? agentName(conv.agentId) : 'Default'} · {conv.messages.length} msgs
                   </div>
                 </div>
                 <button
@@ -344,11 +305,17 @@ export default function Workspace({ project }: { project: string }) {
       </div>
 
       {/* Right panel: active chat */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         {activeConv ? (
           <>
+            {/* Chat header */}
+            <div style={{ padding: '0.5rem 1rem', borderBottom: '1px solid #202a38', background: '#0d1118', display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
+              <strong style={{ fontSize: '0.875rem' }}>{activeConv.title}</strong>
+              {activeConv.agentId && <Tag type="blue" size="sm">{agentName(activeConv.agentId)}</Tag>}
+            </div>
+
             {/* Chat messages */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', minHeight: 0 }}>
               {activeConv.messages.length === 0 && (
                 <div style={{ textAlign: 'center', color: '#7e8a9c', padding: '3rem 1rem' }}>
                   <Heading>Temporality Agent</Heading>
@@ -358,19 +325,17 @@ export default function Workspace({ project }: { project: string }) {
               {activeConv.messages.map((msg, i) => (
                 <div key={i} style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div style={{
-                    maxWidth: '80%', padding: '0.75rem', borderRadius: '8px',
+                    maxWidth: '80%', padding: '0.75rem 1rem', borderRadius: '8px',
                     background: msg.role === 'user' ? '#57d7e8' : '#121823',
                     color: msg.role === 'user' ? '#080b10' : '#e5e9f0',
                     border: msg.role === 'user' ? 'none' : '1px solid #344258',
                   }}>
-                    {/* Show Markdown answer if present */}
                     {msg.content && msg.role === 'assistant' && msg.status && msg.status !== 'running' ? (
                       <Markdown content={msg.content} />
                     ) : msg.content ? (
                       <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                     ) : null}
 
-                    {/* Show live streaming progress lines */}
                     {msg.status === 'running' && msg.streamLines && msg.streamLines.length > 0 && (
                       <div style={{ marginTop: msg.content ? '0.5rem' : 0 }}>
                         {msg.streamLines.map((line, li) => (
@@ -385,7 +350,6 @@ export default function Workspace({ project }: { project: string }) {
                       </div>
                     )}
 
-                    {/* Status tag */}
                     {msg.runId && msg.status && msg.status !== 'running' && (
                       <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: msg.role === 'user' ? '#080b10' : '#7e8a9c' }}>
                         <Tag type={STATUS_COLORS[msg.status] || 'gray'} size="sm">{msg.status}</Tag>
@@ -397,19 +361,26 @@ export default function Workspace({ project }: { project: string }) {
               <div ref={chatEndRef} />
             </div>
 
-            {/* Agent selector + Input */}
-            <div style={{ padding: '0.75rem', borderTop: '1px solid #202a38', background: '#0d1118' }}>
+            {/* Input area */}
+            <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid #202a38', background: '#0d1118', flexShrink: 0 }}>
               {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '0.5rem' }} />}
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
-                <Select id="chat-agent" labelText="" hideLabel value={selectedAgentId} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelectedAgentId(e.target.value)} size="sm">
-                  <SelectItem value="" text="Default agent" />
-                  {allAgents.map((a) => <SelectItem key={a.id} value={a.id} text={a.name} />)}
-                </Select>
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end' }}>
                 <div style={{ flex: 1 }}>
-                  <TextInput id="chat-input" labelText="" hideLabel value={inputValue} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
-                    placeholder="Type a message..." onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage() } }} />
+                  <TextArea
+                    id="chat-input"
+                    labelText=""
+                    hideLabel
+                    value={inputValue}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInputValue(e.target.value)}
+                    placeholder="Type a message… (Shift+Enter for newline)"
+                    rows={3}
+                    onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage() }
+                    }}
+                    style={{ resize: 'vertical', minHeight: '72px' }}
+                  />
                 </div>
-                <Button renderIcon={Send} onClick={() => void sendMessage()} disabled={loading || !inputValue.trim()}>Send</Button>
+                <Button renderIcon={Send} onClick={() => void sendMessage()} disabled={loading || !inputValue.trim()} style={{ marginBottom: '2px' }}>Send</Button>
               </div>
             </div>
           </>
@@ -418,11 +389,31 @@ export default function Workspace({ project }: { project: string }) {
             <div style={{ textAlign: 'center' }}>
               <Heading>Temporality Agent</Heading>
               <p style={{ marginTop: '0.5rem' }}>Select a conversation or start a new one.</p>
-              <Button renderIcon={Add} onClick={newConversation} style={{ marginTop: '1rem' }}>New chat</Button>
+              <Button renderIcon={Add} onClick={() => setShowNewChat(true)} style={{ marginTop: '1rem' }}>New chat</Button>
             </div>
           </div>
         )}
       </div>
+
+      {/* New chat modal — agent selector lives here, not in the input bar */}
+      <Modal
+        open={showNewChat}
+        onRequestClose={() => setShowNewChat(false)}
+        modalHeading="New conversation"
+        primaryButtonText="Create"
+        secondaryButtonText="Cancel"
+        onRequestSubmit={createConversation}
+      >
+        <Select
+          id="new-chat-agent"
+          labelText="Agent"
+          value={newChatAgentId}
+          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewChatAgentId(e.target.value)}
+        >
+          <SelectItem value="" text="Default agent" />
+          {allAgents.map((a) => <SelectItem key={a.id} value={a.id} text={`${a.name}${a.model ? ` (${a.model})` : ''}`} />)}
+        </Select>
+      </Modal>
 
       {loading && <Loading withOverlay={false} />}
     </div>
