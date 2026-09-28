@@ -118,9 +118,9 @@ export default function Users() {
                   </div>
                 </div>
                 <Stack orientation="horizontal" gap={1}>
-                  <Button size="sm" kind="ghost" renderIcon={Key} iconDescription="Generate Token" onClick={() => generateToken(u)} />
-                  <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(u)} />
-                  <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(u)} />
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Key} iconDescription="Generate Token" onClick={() => generateToken(u)} />
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(u)} />
+                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(u)} />
                 </Stack>
               </div>
             </Tile>

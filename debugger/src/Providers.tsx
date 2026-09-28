@@ -97,8 +97,8 @@ export default function Providers() {
                   ) : <p style={{ color: '#7e8a9c', fontSize: '0.75rem', marginTop: '0.5rem' }}>No models listed</p>}
                 </div>
                 <Stack orientation="horizontal" gap={1}>
-                  <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(p)} />
-                  <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(p)} />
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(p)} />
+                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(p)} />
                 </Stack>
               </div>
             </Tile>

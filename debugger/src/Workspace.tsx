@@ -277,8 +277,8 @@ export default function Workspace({ project }: { project: string }) {
                         {a.model && <Tag type="blue" size="sm" style={{ marginLeft: '0.25rem' }}>{a.model}</Tag>}
                       </div>
                       <Stack orientation="horizontal" gap={1}>
-                        <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription="Edit" onClick={() => startEditAgent(a)} />
-                        <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} iconDescription="Delete" onClick={() => void deleteAgent(a)} />
+                        <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEditAgent(a)} />
+                        <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void deleteAgent(a)} />
                       </Stack>
                     </div>
                     {a.system_prompt && <small style={{ color: '#7e8a9c', display: 'block', marginTop: '0.25rem' }}>{a.system_prompt.length > 60 ? a.system_prompt.slice(0, 60) + '…' : a.system_prompt}</small>}

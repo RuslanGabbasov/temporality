@@ -117,9 +117,9 @@ export default function Agents() {
                   </div>
                 </div>
                 <Stack orientation="horizontal" gap={1}>
-                  <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(a)} />
-                  <Button size="sm" kind="ghost" renderIcon={Copy} iconDescription="Duplicate" onClick={() => duplicateAgent(a)} />
-                  <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} iconDescription="Delete" onClick={() => void deleteAgent(a)} />
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(a)} />
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription="Duplicate" onClick={() => duplicateAgent(a)} />
+                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void deleteAgent(a)} />
                 </Stack>
               </div>
 
