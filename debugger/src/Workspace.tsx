@@ -139,16 +139,16 @@ export default function Workspace({ project }: { project: string }) {
     if (activeConvId === id) setActiveConvId(null)
   }
 
-  /** Update a specific assistant message in a conversation. */
-  const updateMsg = (convId: string, msg: ChatMessage, patch: Partial<ChatMessage>) => {
+  /** Update a specific assistant message in a conversation by runId. */
+  const updateMsg = (convId: string, runId: string, patch: Partial<ChatMessage>) => {
     setConversations((prev) => prev.map((c) => {
       if (c.id !== convId) return c
-      return { ...c, messages: c.messages.map((m) => m === msg ? { ...m, ...patch } : m) }
+      return { ...c, messages: c.messages.map((m) => m.runId === runId ? { ...m, ...patch } : m) }
     }))
   }
 
   /** Start SSE streaming for a run. Shows live progress lines in the message. */
-  const streamRun = (runId: string, convId: string, msg: ChatMessage) => {
+  const streamRun = (runId: string, convId: string) => {
     const token = localStorage.getItem('temporality_token') ?? ''
     const es = new EventSource(`/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/stream${token ? `?token=${token}` : ''}`)
 
@@ -163,7 +163,7 @@ export default function Workspace({ project }: { project: string }) {
       try {
         const data = JSON.parse(e.data)
         const line = formatStreamEvent('model.completed', data)
-        if (line) { lines.push(line); updateMsg(convId, msg, { streamLines: [...lines] }) }
+        if (line) { lines.push(line); updateMsg(convId, runId, { streamLines: [...lines] }) }
       } catch { /* ignore parse errors */ }
     })
 
@@ -171,7 +171,7 @@ export default function Workspace({ project }: { project: string }) {
       try {
         const data = JSON.parse(e.data)
         const line = formatStreamEvent('turn.completed', data)
-        if (line) { lines.push(line); updateMsg(convId, msg, { streamLines: [...lines] }) }
+        if (line) { lines.push(line); updateMsg(convId, runId, { streamLines: [...lines] }) }
       } catch { /* ignore */ }
     })
 
@@ -179,7 +179,7 @@ export default function Workspace({ project }: { project: string }) {
       try {
         const data = JSON.parse(e.data)
         const line = formatStreamEvent('tool.completed', data)
-        if (line) { lines.push(line); updateMsg(convId, msg, { streamLines: [...lines] }) }
+        if (line) { lines.push(line); updateMsg(convId, runId, { streamLines: [...lines] }) }
       } catch { /* ignore */ }
     })
 
@@ -187,7 +187,7 @@ export default function Workspace({ project }: { project: string }) {
       try {
         const data = JSON.parse(e.data)
         const line = formatStreamEvent('knowledge.proposed', data)
-        if (line) { lines.push(line); updateMsg(convId, msg, { streamLines: [...lines] }) }
+        if (line) { lines.push(line); updateMsg(convId, runId, { streamLines: [...lines] }) }
       } catch { /* ignore */ }
     })
 
@@ -198,7 +198,7 @@ export default function Workspace({ project }: { project: string }) {
         const answer = data.answer ?? ''
         if (answer) {
           lines.push('Answer received')
-          updateMsg(convId, msg, { content: answer, status: 'completed', streamLines: [...lines] })
+          updateMsg(convId, runId, { content: answer, status: 'completed', streamLines: [...lines] })
         }
       } catch { /* ignore */ }
     })
@@ -218,9 +218,9 @@ export default function Workspace({ project }: { project: string }) {
         const data = JSON.parse(e.data)
         const line = formatStreamEvent('run.failed', data)
         if (line) lines.push(line)
-        updateMsg(convId, msg, { content: `Failed: ${data.error ?? 'unknown'}`, status: 'failed', streamLines: [...lines] })
+        updateMsg(convId, runId, { content: `Failed: ${data.error ?? 'unknown'}`, status: 'failed', streamLines: [...lines] })
       } catch {
-        updateMsg(convId, msg, { content: 'Run failed', status: 'failed', streamLines: [...lines] })
+        updateMsg(convId, runId, { content: 'Run failed', status: 'failed', streamLines: [...lines] })
       }
       es.close(); streamRef.current.delete(convId)
     })
@@ -231,28 +231,26 @@ export default function Workspace({ project }: { project: string }) {
       // Otherwise fetch from REST API.
       setConversations((prev) => {
         const conv = prev.find((c) => c.id === convId)
-        const m = conv?.messages.find((x) => x === msg)
+        const m = conv?.messages.find((x) => x.runId === runId)
         if (m?.content) return prev
-        void fetchFinalAnswer(runId, convId, msg)
+        void fetchFinalAnswer(runId, convId)
         return prev
       })
     })
 
     es.onerror = () => {
-      // SSE reconnect is automatic, but if the server closes the connection
-      // we fall back to polling once.
       es.close(); streamRef.current.delete(convId)
-      void fetchFinalAnswer(runId, convId, msg)
+      void fetchFinalAnswer(runId, convId)
     }
   }
 
   /** Fetch the final run result after streaming ends. */
-  const fetchFinalAnswer = async (runId: string, convId: string, msg: ChatMessage) => {
+  const fetchFinalAnswer = async (runId: string, convId: string) => {
     try {
       const run = await workspaceApi.getRun(runId)
       if (run.status === 'completed' || run.status === 'failed' || run.status === 'turn_limit') {
         const answer = run.answer || run.error || 'No answer received'
-        updateMsg(convId, msg, { content: answer, status: run.status })
+        updateMsg(convId, runId, { content: answer, status: run.status })
       }
     } catch { /* ignore — will be retried by polling fallback */ }
   }
@@ -294,7 +292,7 @@ export default function Workspace({ project }: { project: string }) {
         return { ...c, messages: c.messages.map((m) => m === assistantMsg ? { ...m, runId, streamLines: ['Run started · streaming…'] } : m) }
       }))
       // Start SSE streaming
-      streamRun(runId, activeConv.id, assistantMsg)
+      streamRun(runId, activeConv.id)
     } catch (f) {
       setError(message(f))
       setConversations((prev) => prev.map((c) => {
