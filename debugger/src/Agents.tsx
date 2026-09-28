@@ -170,7 +170,7 @@ export default function Agents() {
               <TextArea id="agent-prompt" labelText="System prompt" value={form.system_prompt ?? ''} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, system_prompt: e.target.value })} rows={6} placeholder="You are a careful developer..." />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
                 <NumberInput id="agent-temp" label="Temperature" value={form.temperature ?? 0} onChange={(_, { value }) => setForm({ ...form, temperature: typeof value === 'number' ? value : 0 })} min={0} max={2} step={0.1} />
-                <NumberInput id="agent-tokens" label="Max tokens" value={form.max_tokens ?? 1024} onChange={(_, { value }) => setForm({ ...form, max_tokens: typeof value === 'number' ? value : 1024 })} min={64} max={65536} />
+                <NumberInput id="agent-tokens" label="Max tokens" value={form.max_tokens ?? 1024} onChange={(_, { value }) => setForm({ ...form, max_tokens: typeof value === 'number' ? value : 1024 })} min={64} max={1000000} />
                 <NumberInput id="agent-turns" label="Max turns" value={form.max_turns ?? 20} onChange={(_, { value }) => setForm({ ...form, max_turns: typeof value === 'number' ? value : 20 })} min={1} max={100} />
               </div>
               <Select id="agent-sandbox" labelText="Sandbox profile" value={form.sandbox_profile ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, sandbox_profile: e.target.value })}>
