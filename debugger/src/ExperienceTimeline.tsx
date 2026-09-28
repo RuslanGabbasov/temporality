@@ -18,6 +18,16 @@ const AUTO_AGGREGATE_ROWS = 12
 
 const MEMORY_BUCKETS: MemoryBucket[] = ['active', 'stale', 'invalidated', 'archived']
 
+type RecencyFilter = 'all' | 'last-run' | '24h' | '7d' | '30d'
+type TerminalFilter = 'all' | 'alive' | 'dead'
+const RECENCY_OPTIONS: { value: RecencyFilter; label: string }[] = [
+  { value: 'all', label: 'All time' },
+  { value: 'last-run', label: 'Last run' },
+  { value: '24h', label: 'Last 24 hours' },
+  { value: '7d', label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+]
+
 const LIFECYCLE_COLORS: Record<LifecycleKind, string> = {
   appeared: '#7aa2f7',
   recalled: '#9d7cd8',
@@ -60,6 +70,16 @@ const PRESETS = {
   conflicts: { lens: { trajectory: false, experience: true, lifecycle: true, conflicts: true, activation: false }, kinds: CONFLICT_KINDS },
 } as const
 type PresetName = keyof typeof PRESETS
+
+type MemoryLensPreset = { label: string; bucket: 'all' | MemoryBucket; terminal: TerminalFilter; recency: RecencyFilter; activated: boolean; xscope: boolean; strength: number }
+const MEMORY_LENS_PRESETS: MemoryLensPreset[] = [
+  { label: 'All', bucket: 'all', terminal: 'all', recency: 'all', activated: false, xscope: false, strength: 0 },
+  { label: 'Active only', bucket: 'active', terminal: 'alive', recency: 'all', activated: false, xscope: false, strength: 0 },
+  { label: 'Activated', bucket: 'all', terminal: 'all', recency: 'all', activated: true, xscope: false, strength: 0 },
+  { label: 'Cross-scope', bucket: 'all', terminal: 'all', recency: 'all', activated: false, xscope: true, strength: 0 },
+  { label: 'Strong & recent', bucket: 'active', terminal: 'alive', recency: '7d', activated: false, xscope: false, strength: 0.5 },
+  { label: 'Dead', bucket: 'all', terminal: 'dead', recency: 'all', activated: false, xscope: false, strength: 0 },
+]
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 function shortRun(id: string) {
@@ -110,6 +130,11 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const [roleFilter, setRoleFilter] = useState(params.get('role') ?? 'all')
   const [scopeFilter, setScopeFilter] = useState(params.get('scope') ?? 'all')
   const [bucketFilter, setBucketFilter] = useState<'all' | MemoryBucket>(() => { const v = params.get('bucket'); return (['active','stale','invalidated','archived'] as const).includes(v as MemoryBucket) ? v as MemoryBucket : 'all' })
+  const [strengthMin, setStrengthMin] = useState(() => { const v = parseFloat(params.get('str') ?? ''); return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0 })
+  const [recencyFilter, setRecencyFilter] = useState<RecencyFilter>(() => { const v = params.get('recency'); return (['all','last-run','24h','7d','30d'] as const).includes(v as RecencyFilter) ? v as RecencyFilter : 'all' })
+  const [hasActivations, setHasActivations] = useState(params.get('activated') === '1')
+  const [crossScopeOnly, setCrossScopeOnly] = useState(params.get('xscope') === '1')
+  const [terminalFilter, setTerminalFilter] = useState<TerminalFilter>(() => { const v = params.get('life'); return (['all','alive','dead'] as const).includes(v as TerminalFilter) ? v as TerminalFilter : 'all' })
   const [hiddenRoots, setHiddenRoots] = useState<Set<string>>(() => { const v = params.get('hidden'); return v ? new Set(v.split(',')) : new Set() })
   // Lane aggregation state: id → aggregated?. Auto execution observations are
   // noise lanes (one per command); their merged lane starts aggregated.
@@ -166,12 +191,17 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     if (roleFilter !== 'all') p.set('role', roleFilter)
     if (scopeFilter !== 'all') p.set('scope', scopeFilter)
     if (bucketFilter !== 'all') p.set('bucket', bucketFilter)
+    if (strengthMin > 0) p.set('str', strengthMin.toFixed(2))
+    if (recencyFilter !== 'all') p.set('recency', recencyFilter)
+    if (hasActivations) p.set('activated', '1')
+    if (crossScopeOnly) p.set('xscope', '1')
+    if (terminalFilter !== 'all') p.set('life', terminalFilter)
     if (hiddenRoots.size) p.set('hidden', [...hiddenRoots].join(','))
     if (query) p.set('q', query)
     if (selected) p.set('selected', selected)
     if (window_) p.set('w', `${window_.t0},${window_.t1}`)
     window.history.replaceState(null, '', `/experience?${p}`)
-  }, [project, lens, kinds, roleFilter, scopeFilter, bucketFilter, hiddenRoots, query, selected, window_])
+  }, [project, lens, kinds, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, hiddenRoots, query, selected, window_])
 
   const model = useMemo(() => (events.length ? foldExperience(events) : null), [events])
 
@@ -199,13 +229,21 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     const visibleRun = (run: RunInfo) => !hiddenRoots.has(run.parentRun ?? '') && !hiddenRoots.has(run.id.split('/')[0]) && (roleFilter === 'all' || run.role === roleFilter || !run.role)
     const visibleRuns = model.runs.filter(visibleRun)
     const needle = query.trim().toLowerCase()
+    const lastRunId = model.runs.length ? model.runs[model.runs.length - 1].id : ''
+    const now = Date.now()
+    const recencyCutoff = recencyFilter === 'all' ? 0 : recencyFilter === 'last-run' ? (model.runs.length ? ms(model.runs[model.runs.length - 1].startedAt) : 0) : recencyFilter === '24h' ? now - 86400e3 : recencyFilter === '7d' ? now - 7 * 86400e3 : now - 30 * 86400e3
     const visibleRow = (row: KnowledgeRow) =>
       (bucketFilter === 'all' || stateBucket(row.state) === bucketFilter) &&
       (scopeFilter === 'all' || row.scopes.primary === scopeFilter) &&
       (roleFilter === 'all' || row.roles.includes(roleFilter)) &&
       (!needle || row.proposition.toLowerCase().includes(needle) || row.knowledgeId.toLowerCase().includes(needle)) &&
       row.points.some((point) => kinds.has(point.kind)) &&
-      row.runs.some((run) => !hiddenRoots.has(run.split('/')[0]))
+      row.runs.some((run) => !hiddenRoots.has(run.split('/')[0])) &&
+      row.strength >= strengthMin &&
+      (recencyFilter === 'all' || ms(row.lastAt) >= recencyCutoff) &&
+      (!hasActivations || row.points.some((p) => ['recalled', 'injected', 'reused'].includes(p.kind))) &&
+      (!crossScopeOnly || row.scopes.secondary.length > 0) &&
+      (terminalFilter === 'all' || (terminalFilter === 'alive' ? !row.terminal : !!row.terminal))
     const visibleRows = model.rows.filter(visibleRow)
     const visibleRowIds = new Set(visibleRows.map((row) => row.knowledgeId))
     // Claim lanes render as before; every execution lane merges into one
@@ -254,7 +292,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       }
     }
     return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleScopes, aggregatedIds, conflictsPresent, runLaneY, rowY, scopeHeaderY, bandY, populationY, height: y + 8 }
-  }, [model, window_, hiddenRoots, roleFilter, scopeFilter, bucketFilter, kinds, lens.experience, laneOverrides, query])
+  }, [model, window_, hiddenRoots, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, kinds, lens.experience, laneOverrides, query])
 
   const activity = useMemo(() => {
     const map = new Map<string, { tools: number[]; models: number[] }>()
@@ -357,6 +395,10 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     setFocus({ at, eventId, label })
     setWindow(windowAround(at, model.bounds))
   }
+  const resetMemoryLens = () => {
+    setBucketFilter('all'); setTerminalFilter('all'); setRecencyFilter('all')
+    setHasActivations(false); setCrossScopeOnly(false); setStrengthMin(0)
+  }
   const activePreset: PresetName | 'custom' = (Object.keys(PRESETS) as PresetName[]).find((name) => {
     const preset = PRESETS[name]
     return (Object.keys(DEFAULT_LENS) as (keyof Lens)[]).every((key) => lens[key] === preset.lens[key]) &&
@@ -371,7 +413,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     <Header project={project} load={load} loading={loading} />
     {error && <div className="obs-error" role="alert">{error}</div>}
     <div className="experience-meta">
-      <span>{model.runs.filter((run) => !run.parentRun).length} team runs · {model.rows.length} experiences · {model.scopes.length} scopes · {model.totals.events} events</span>
+      <span>{model.runs.filter((run) => !run.parentRun).length} team runs · {view.visibleRows.length}{view.visibleRows.length < model.rows.length ? `/${model.rows.length}` : ''} experiences · {model.scopes.length} scopes · {model.totals.events} events</span>
       <span className="experience-note">
         active {model.rows.filter((row) => stateBucket(row.state) === 'active').length} · stale {model.rows.filter((row) => stateBucket(row.state) === 'stale').length} · invalidated {model.rows.filter((row) => stateBucket(row.state) === 'invalidated').length} · archived {model.rows.filter((row) => stateBucket(row.state) === 'archived').length} · activations {model.links.length}
       </span>
@@ -396,6 +438,13 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       {LIFECYCLE_KINDS.map((kind) => (
         <button key={kind} className={`kind-chip ${kinds.has(kind) ? 'on' : ''}`} style={{ ['--chip' as string]: LIFECYCLE_COLORS[kind] }} onClick={() => toggleKind(kind)}>{kind}</button>
       ))}
+      <span className="lens-sep" />
+      {MEMORY_LENS_PRESETS.map((preset) => (
+        <button key={preset.label} className="preset-chip" onClick={() => { setBucketFilter(preset.bucket); setTerminalFilter(preset.terminal); setRecencyFilter(preset.recency); setHasActivations(preset.activated); setCrossScopeOnly(preset.xscope); setStrengthMin(preset.strength) }}>{preset.label}</button>
+      ))}
+      {(bucketFilter !== 'all' || terminalFilter !== 'all' || recencyFilter !== 'all' || hasActivations || crossScopeOnly || strengthMin > 0) && (
+        <button className="preset-chip" onClick={resetMemoryLens} style={{ color: '#f7768e', borderColor: '#f7768e' }}>reset</button>
+      )}
     </div>
     <div className="experience-filters">
       <label>role
@@ -415,6 +464,27 @@ export default function ExperienceTimeline({ project }: { project: string }) {
           <option value="all">all</option>
           {MEMORY_BUCKETS.map((bucket) => <option key={bucket} value={bucket}>{bucket}</option>)}
         </select>
+      </label>
+      <label>alive
+        <select value={terminalFilter} onChange={(change) => setTerminalFilter(change.target.value as TerminalFilter)}>
+          {([['all','all'],['alive','alive only'],['dead','dead only']] as const).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </label>
+      <label>recency
+        <select value={recencyFilter} onChange={(change) => setRecencyFilter(change.target.value as RecencyFilter)}>
+          {RECENCY_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+        </select>
+      </label>
+      <label>strength ≥ {strengthMin.toFixed(2)}
+        <input type="range" min={0} max={1} step={0.05} value={strengthMin} onChange={(change) => setStrengthMin(parseFloat(change.target.value))} style={{ width: '80px', verticalAlign: 'middle' }} />
+      </label>
+      <label className={`lens-toggle ${hasActivations ? 'on' : ''}`}>
+        <input type="checkbox" checked={hasActivations} onChange={(change) => setHasActivations(change.target.checked)} />
+        activated
+      </label>
+      <label className={`lens-toggle ${crossScopeOnly ? 'on' : ''}`}>
+        <input type="checkbox" checked={crossScopeOnly} onChange={(change) => setCrossScopeOnly(change.target.checked)} />
+        cross-scope
       </label>
       <label>search
         <input type="search" value={query} onChange={(change) => setQuery(change.target.value)} placeholder="claim text / id" title="filter experiences by proposition or id" />
