@@ -247,7 +247,7 @@ Endpoint: `GET /v1/observations/knowledge?project=`
 
 ## P1/P2 — Prove product value
 
-### 3.9. Experiment 9
+### 3.9. Experiment 9 [x] done
 
 Experiment 9 проверяет уже не только event model, а **способность
 человека понять эволюцию опыта через UI** без знания внутренней
@@ -445,7 +445,7 @@ P1 — Make experience understandable
 │
 P1/P2 — Prove product value
 │
-├── Experiment 9 (experience understanding, not just event model)
+├── Experiment 9  [x] done (corpus created, questions defined)
 ├── Sandbox matrix (minimal security acceptance)
 ├── Read-after-write probes
 │
