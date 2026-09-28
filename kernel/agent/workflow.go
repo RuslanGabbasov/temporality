@@ -3,6 +3,7 @@ package agent
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -225,7 +226,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				// effect could land (effect=none); neighboring calls of this
 				// response survive instead of failing the whole completion.
 				argumentsHash = rawArgumentsHash(call.ArgsRaw)
-				if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID}); err != nil {
+				if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "arguments": compactJSON(call.Args, 500)}); err != nil {
 					return result, err
 				}
 				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "malformed_arguments", "effect": "none", "detail": call.ArgsError}); err != nil {
@@ -236,7 +237,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			callKey := dedupSignature(call.Name, call.Args) // legacy key format: call.Name + "\x00" + argumentsHash
 			if original, duplicate := executed[callKey]; duplicate {
-				if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "duplicate_of": original.operationID}); err != nil {
+				if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "arguments": compactJSON(call.Args, 500), "duplicate_of": original.operationID}); err != nil {
 					return result, err
 				}
 				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "duplicate_of": original.operationID}); err != nil {
@@ -255,7 +256,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					return nil
 				}
 				toolStarted = true
-				return emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID})
+				return emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "arguments": compactJSON(call.Args, 500)})
 			}
 			startMCP := func() error {
 				if !isMCP {
@@ -316,7 +317,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 							return result, eventErr
 						}
 						toolResult.Content = toolFailureMessage(call.Name, err)
-					} else if eventErr := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); eventErr != nil {
+					} else if eventErr := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000)}); eventErr != nil {
 						return result, eventErr
 					}
 				} else {
@@ -391,6 +392,10 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					// tool activity itself succeeded.
 					if toolResult.ExitCode != nil {
 						completed["exit_code"] = *toolResult.ExitCode
+					}
+					// Truncated output for trace visibility.
+					if toolResult.Content != "" {
+						completed["output"] = compactJSON(toolResult.Content, 1000)
 					}
 					if eventErr := emit(activityCtx, state, "tool.completed", completed); eventErr != nil {
 						return result, eventErr
@@ -580,6 +585,20 @@ func resultContentRef(content string) string {
 // execution (fixable, safe to re-issue), "uncertain" means the failure
 // happened at or after the execution boundary, where the operator — not the
 // model — must decide whether the side effect landed.
+
+// compactJSON serializes v as JSON, truncating to maxLen characters.
+// Returns empty string if marshaling fails.
+func compactJSON(v any, maxLen int) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	if len(b) > maxLen {
+		return string(b[:maxLen]) + "…"
+	}
+	return string(b)
+}
+
 func toolFailureData(operationID, argumentsHash, tool string, err error) map[string]any {
 	data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": tool, "error_type": "activity_failed"}
 	var application *temporal.ApplicationError

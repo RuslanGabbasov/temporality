@@ -54,15 +54,40 @@ function eventSummary(event: ObservationEvent): { icon: string; label: string; d
       const parts = [tokens, latency, calls].filter(Boolean).join(' · ')
       return { icon: '🧠', label: 'Model response', detail: parts, color: '#bb9af7' }
     }
-    case 'tool.started':
-      return { icon: '🔧', label: String(d.tool ?? 'tool'), detail: 'started', color: '#e0af68' }
+    case 'tool.started': {
+      const args = d.arguments
+      let preview = ''
+      if (typeof args === 'string') {
+        try {
+          const parsed = JSON.parse(args)
+          if (Array.isArray(parsed.command)) preview = parsed.command.join(' ')
+          else if (parsed.path) preview = parsed.path
+          else if (parsed.query) preview = String(parsed.query).slice(0, 60)
+          else if (parsed.proposition) preview = String(parsed.proposition).slice(0, 60)
+          else preview = args.slice(0, 60)
+        } catch { preview = String(args).slice(0, 60) }
+      }
+      return { icon: '🔧', label: String(d.tool ?? 'tool'), detail: preview || 'started', color: '#e0af68' }
+    }
     case 'tool.completed': {
       const exit = d.exit_code !== undefined ? `exit ${d.exit_code}` : ''
       const ms = d.latency_ms ? `${(Number(d.latency_ms) / 1000).toFixed(1)}s` : ''
-      return { icon: d.exit_code === 0 ? '✓' : '✗', label: String(d.tool ?? 'tool'), detail: [exit, ms].filter(Boolean).join(' · '), color: d.exit_code === 0 ? '#9ece6a' : '#f7768e' }
+      const output = typeof d.output === 'string' ? d.output.slice(0, 80).replace(/\n/g, ' ') : ''
+      return { icon: d.exit_code === 0 ? '✓' : '✗', label: String(d.tool ?? 'tool'), detail: [exit, ms, output].filter(Boolean).join(' · '), color: d.exit_code === 0 ? '#9ece6a' : '#f7768e' }
     }
-    case 'tool.failed':
-      return { icon: '✗', label: String(d.tool ?? "tool"), detail: d.error ? String(d.error).slice(0, 60) : 'failed', color: '#f7768e' }
+    case 'tool.failed': {
+      const errDetail = d.error ? String(d.error).slice(0, 60) : 'failed'
+      const args = d.arguments
+      let preview = ''
+      if (typeof args === 'string') {
+        try {
+          const parsed = JSON.parse(args)
+          if (Array.isArray(parsed.command)) preview = parsed.command.join(' ')
+          else if (parsed.path) preview = parsed.path
+        } catch { /* ignore */ }
+      }
+      return { icon: '✗', label: String(d.tool ?? 'tool'), detail: preview ? `${preview} → ${errDetail}` : errDetail, color: '#f7768e' }
+    }
     case 'knowledge.proposed':
       return { icon: '💡', label: 'Learned', detail: String(d.proposition ?? '').slice(0, 60), color: '#73daca' }
     case 'knowledge.recalled':
@@ -98,7 +123,7 @@ function EventDetail({ event }: { event: ObservationEvent }) {
   for (const [k, v] of Object.entries(d)) {
     if (skipFields.has(k)) continue
     if (v === '' || v === null || v === undefined) continue
-    if (['tool', 'turn', 'total_tokens', 'latency_ms', 'exit_code', 'tool_call_count', 'finish_reason', 'model', 'provider', 'error', 'proposition', 'answer'].includes(k)) {
+    if (['tool', 'turn', 'total_tokens', 'latency_ms', 'exit_code', 'tool_call_count', 'finish_reason', 'model', 'provider', 'error', 'proposition', 'answer', 'arguments', 'output'].includes(k)) {
       importantFields.push([k, v])
     } else {
       otherFields.push([k, v])
