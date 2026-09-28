@@ -89,7 +89,7 @@ export default function Providers() {
                 <div>
                   <strong>{p.name}</strong>
                   <p style={{ color: '#7e8a9c', fontSize: '0.75rem', marginTop: '0.25rem', wordBreak: 'break-all' }}>{p.base_url}</p>
-                  {p.api_key_ref && <Tag type="gray" size="sm" style={{ marginTop: '0.25rem' }}>key: {p.api_key_ref}</Tag>}
+                  {p.api_key_ref && <Tag type="gray" size="sm" style={{ marginTop: '0.25rem' }}>key: {'••••••••'}</Tag>}
                   {p.models?.length ? (
                     <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                       {p.models.map((m) => <Tag key={m} type="blue" size="sm">{m}</Tag>)}
@@ -113,7 +113,7 @@ export default function Providers() {
             <Stack gap={3}>
               <TextInput id="prov-name" labelText="Name" value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="z.ai" autoFocus />
               <TextInput id="prov-url" labelText="Base URL" value={form.base_url ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, base_url: e.target.value })} placeholder="https://api.z-ai.com/v1" />
-              <TextInput id="prov-key" labelText="API Key Env Var" value={form.api_key_ref ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key_ref: e.target.value })} placeholder="Z_AI_API_KEY" />
+              <TextInput id="prov-key" labelText="API Key / Env Var" value={form.api_key_ref ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key_ref: e.target.value })} placeholder="Z_AI_API_KEY or actual key" helperText="Env var name (e.g. Z_AI_API_KEY) or the actual key" />
               <TextInput id="prov-models" labelText="Models (comma-separated)" value={form.models?.join(', ') ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, models: e.target.value.split(',').map((m) => m.trim()).filter(Boolean) })} placeholder="z-ai-turbo, z-ai-pro" />
               <Stack orientation="horizontal" gap={2}>
                 <Button onClick={() => void save()}>{editing ? 'Save' : 'Create'}</Button>
