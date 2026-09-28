@@ -145,12 +145,12 @@ export default function Layout({ children, activePage }: LayoutProps) {
               {project}
             </Button>
             {showProjectPanel && (
-              <HeaderPanel expanded style={{ position: 'absolute', right: 0, top: '100%', zIndex: 1000, minWidth: '280px' }}>
+              <HeaderPanel expanded>
                 <Switcher aria-label="Projects">
                   {projects.map((p) => (
                     <SwitcherItem
                       key={p.id}
-                      selected={p.id === project}
+                      aria-labelledby={p.id}
                       onClick={() => { setProject(p.id); setShowProjectPanel(false) }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
@@ -162,7 +162,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
                       </div>
                     </SwitcherItem>
                   ))}
-                  <SwitcherItem onClick={() => { setEditProject(null); setShowProjectPanel(false); setNewProjectName(''); setNewProjectDesc('') }}>
+                  <SwitcherItem onClick={() => { setEditProject(null); setShowProjectPanel(false); setNewProjectName(''); setNewProjectDesc('') }} aria-labelledby="new-project">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <Add size={16} /> New project
                     </div>

@@ -506,4 +506,5 @@ export default function Workspace({ project }: { project: string; setProject: (p
       )}
     </Grid>
   )
-}}
+}
+}
