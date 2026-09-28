@@ -262,9 +262,9 @@ export default function Workspace({ project }: { project: string }) {
   }
 
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 3rem)', background: '#080b10' }}>
+    <div className="workspace-root">
       {/* Left panel: conversations */}
-      <div style={{ width: '280px', borderRight: '1px solid #202a38', display: 'flex', flexDirection: 'column', background: '#0d1118', flexShrink: 0 }}>
+      <div className="workspace-sidebar">
         <div style={{ padding: '0.75rem', borderBottom: '1px solid #202a38' }}>
           <Button renderIcon={Add} size="sm" onClick={() => setShowNewChat(true)} style={{ width: '100%' }}>New chat</Button>
         </div>
@@ -305,7 +305,7 @@ export default function Workspace({ project }: { project: string }) {
       </div>
 
       {/* Right panel: active chat */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div className="workspace-main">
         {activeConv ? (
           <>
             {/* Chat header */}
@@ -315,7 +315,7 @@ export default function Workspace({ project }: { project: string }) {
             </div>
 
             {/* Chat messages */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', minHeight: 0 }}>
+            <div className="workspace-messages">
               {activeConv.messages.length === 0 && (
                 <div style={{ textAlign: 'center', color: '#7e8a9c', padding: '3rem 1rem' }}>
                   <Heading>Temporality Agent</Heading>
@@ -362,7 +362,7 @@ export default function Workspace({ project }: { project: string }) {
             </div>
 
             {/* Input area */}
-            <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid #202a38', background: '#0d1118', flexShrink: 0 }}>
+            <div className="workspace-input-bar">
               {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '0.5rem' }} />}
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end' }}>
                 <div style={{ flex: 1 }}>
