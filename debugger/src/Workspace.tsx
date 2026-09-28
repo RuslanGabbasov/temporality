@@ -68,7 +68,7 @@ export default function Workspace({ project }: { project: string }) {
     if (!project) return
     try {
       const [a, t] = await Promise.all([
-        workspaceApi.listAgents(project),
+        workspaceApi.listAgentsByProject(project),
         workspaceApi.listTasks(project),
       ])
       setAgents(a.agents ?? [])
