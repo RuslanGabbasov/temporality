@@ -6,8 +6,6 @@ import {
   HeaderMenuItem,
   HeaderGlobalBar,
   HeaderPanel,
-  Switcher,
-  SwitcherItem,
   Content,
   Theme,
   Button,
@@ -149,26 +147,30 @@ export default function Layout({ children, activePage }: LayoutProps) {
             </Button>
             {showProjectPanel && (
               <HeaderPanel expanded>
-                <Switcher aria-label="Projects">
-                  {projects.map((p) => (
-                    <SwitcherItem
-                      key={p.id}
-                      aria-labelledby={p.id}
-                      onClick={() => { setProject(p.id); setShowProjectPanel(false) }}
-                    >
-                      <span>{p.name}</span>
-                      <div className="project-actions">
-                        <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription="Edit" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setEditProject(p); setShowProjectPanel(false) }} />
-                        <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} iconDescription="Delete" onClick={(e: React.MouseEvent) => { e.stopPropagation(); void deleteProject(p.id) }} />
+                <div style={{ padding: '0.5rem' }}>
+                  <div style={{ fontSize: '0.75rem', color: '#7e8a9c', padding: '0.5rem 0.5rem 0.25rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Projects</div>
+                  <div style={{ display: 'grid', gap: '1px' }}>
+                    {projects.map((p) => (
+                      <div
+                        key={p.id}
+                        onClick={() => { setProject(p.id); setShowProjectPanel(false) }}
+                        style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.5rem 0.5rem', cursor: 'pointer', background: p.id === project ? '#121823' : 'transparent', borderRadius: '4px', minWidth: 0 }}
+                      >
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                        <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
+                          <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription="Edit" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setEditProject(p); setShowProjectPanel(false) }} />
+                          <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} iconDescription="Delete" onClick={(e: React.MouseEvent) => { e.stopPropagation(); void deleteProject(p.id) }} />
+                        </div>
                       </div>
-                    </SwitcherItem>
-                  ))}
-                  <SwitcherItem onClick={() => { setEditProject(null); setShowProjectPanel(false); setNewProjectName(''); setNewProjectDesc('') }} aria-labelledby="new-project">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    ))}
+                    <div
+                      onClick={() => { setEditProject(null); setShowProjectPanel(false); setNewProjectName(''); setNewProjectDesc('') }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.5rem', cursor: 'pointer', color: '#57d7e8', borderRadius: '4px' }}
+                    >
                       <Add size={16} /> New project
                     </div>
-                  </SwitcherItem>
-                </Switcher>
+                  </div>
+                </div>
               </HeaderPanel>
             )}
           </div>
