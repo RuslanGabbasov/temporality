@@ -131,6 +131,7 @@ export const workspaceApi = {
       `/v1/workspace/tasks/${taskId}/runs`, { method: 'POST', body: JSON.stringify(data ?? {}) }),
   getRun: (runId: string) => request<Run>(`/v1/workspace/runs/${runId}`),
   getTrajectory: (runId: string) => request<any>(`/v1/workspace/runs/${runId}/trajectory`),
+  getProjection: (projectId: string) => request<any>(`/v1/workspace/projects/${projectId}/projection`),
   listRuns: (taskId: string) =>
     request<{ runs: Run[] }>(`/v1/workspace/tasks/${taskId}/runs`),
 

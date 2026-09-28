@@ -45,6 +45,8 @@ export default function Observability({ project }: { project: string }) {
   const [clusterFilter, setClusterFilter] = useState('all')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [projection, setProjection] = useState<any>(null)
+  const [showProjection, setShowProjection] = useState(false)
   const [actor, setActor] = useState('human')
   const [reason, setReason] = useState('')
   const [operationError, setOperationError] = useState('')
