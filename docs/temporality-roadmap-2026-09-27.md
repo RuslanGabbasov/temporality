@@ -455,7 +455,7 @@ P2 — Economics / scale
 
 Research — Experience Priming
 │
-├── broad retrieval → patterns → cues pipeline
+├── broad retrieval → patterns → cues pipeline  [x] first impl
 ├── acceptance corpus (baseline / RAG / priming / priming+JIT)
 └── metric: useful experience per context token
 ```
