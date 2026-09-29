@@ -57,8 +57,8 @@ func (s *Store) GetProject(ctx context.Context, id string) (Project, error) {
 	var p Project
 	var agentID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, description, default_agent_id, default_model, created_at, updated_at FROM workspace_project WHERE id = $1`, id).
-		Scan(&p.ID, &p.Name, &p.Description, &agentID, &p.DefaultModel, &p.CreatedAt, &p.UpdatedAt)
+		`SELECT id, name, description, default_agent_id, default_model, archived, created_at, updated_at FROM workspace_project WHERE id = $1`, id).
+		Scan(&p.ID, &p.Name, &p.Description, &agentID, &p.DefaultModel, &p.Archived, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -67,7 +67,7 @@ func (s *Store) GetProject(ctx context.Context, id string) (Project, error) {
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, description, default_agent_id, default_model, created_at, updated_at FROM workspace_project ORDER BY created_at DESC`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, description, default_agent_id, default_model, archived, created_at, updated_at FROM workspace_project ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 	for rows.Next() {
 		var p Project
 		var agentID *string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &agentID, &p.DefaultModel, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &agentID, &p.DefaultModel, &p.Archived, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.DefaultAgentID = derefPtr(agentID)
@@ -100,13 +100,20 @@ func (s *Store) UpdateProject(ctx context.Context, p Project) error {
 }
 
 func (s *Store) DeleteProject(ctx context.Context, id string) error {
+	// Try deleting from workspace_project first
 	tag, err := s.pool.Exec(ctx, `DELETE FROM workspace_project WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+	if tag.RowsAffected() > 0 {
+		return nil
 	}
+	// Project only exists in observation_events (append-only, can't delete).
+	// Create an archived workspace_project entry so ListAllProjects hides it.
+	now := time.Now().UTC()
+	_, _ = s.pool.Exec(ctx,
+		`INSERT INTO workspace_project (id, name, description, archived, created_at, updated_at) VALUES ($1, $2, '', true, $3, $3) ON CONFLICT (id) DO UPDATE SET archived = true, updated_at = $3`,
+		id, id, now)
 	return nil
 }
 
@@ -555,8 +562,13 @@ func (s *Store) ListAllProjects(ctx context.Context) ([]Project, error) {
 		return nil, err
 	}
 	byID := map[string]Project{}
+	archived := map[string]bool{}
 	for _, p := range wp {
-		byID[p.ID] = p
+		if p.Archived {
+			archived[p.ID] = true
+		} else {
+			byID[p.ID] = p
+		}
 	}
 	rows, err := s.pool.Query(ctx, `SELECT DISTINCT project_id FROM observation_events WHERE project_id != '' ORDER BY project_id`)
 	if err != nil {
@@ -568,7 +580,7 @@ func (s *Store) ListAllProjects(ctx context.Context) ([]Project, error) {
 		if err := rows.Scan(&pid); err != nil {
 			continue
 		}
-		if _, exists := byID[pid]; !exists {
+		if _, exists := byID[pid]; !exists && !archived[pid] {
 			byID[pid] = Project{ID: pid, Name: pid}
 		}
 	}

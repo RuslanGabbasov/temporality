@@ -187,7 +187,7 @@ export default function Observability({ project }: { project: string }) {
 
       {/* Top bar: project + filters */}
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-        <Button size="sm" onClick={load} disabled={loading}>Load</Button>
+        <button onClick={() => void load()} disabled={loading} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <details style={{ fontSize: '0.75rem' }}>
             <summary style={{ cursor: 'pointer', color: 'var(--tm-text-3)', padding: '0.25rem 0' }}>Bitemporal filters</summary>

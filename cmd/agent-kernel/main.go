@@ -101,6 +101,10 @@ func main() {
 		log.Error("migrate workspace v25", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000026_project_archive.up.sql"); err != nil {
+		log.Error("migrate workspace v26", "error", err)
+		os.Exit(1)
+	}
 	activities, err := agent.NewActivities(events)
 	if err != nil {
 		log.Error("configure activities", "error", err)

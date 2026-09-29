@@ -12,6 +12,7 @@ type Project struct {
 	Description    string    `json:"description"`
 	DefaultAgentID string    `json:"default_agent_id,omitempty"`
 	DefaultModel   string    `json:"default_model,omitempty"`
+	Archived       bool      `json:"archived,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }

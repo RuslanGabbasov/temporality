@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Layout, { type AppState } from './Layout'
+import { I18nProvider } from './i18n'
 import Observability from './Observability'
 import AgentRuns from './AgentRuns'
 import Operations from './Operations'
@@ -47,6 +48,7 @@ export default function App() {
   }, [])
 
   return (
+    <I18nProvider>
     <Layout activePage={page}>
       {({ project, setProject, projectDefaultAgent, projectDefaultModel }: AppState) => {
         switch (page) {
@@ -73,5 +75,6 @@ export default function App() {
         }
       }}
     </Layout>
+    </I18nProvider>
   )
 }

@@ -176,9 +176,8 @@ export default function Operations({ project }: { project: string }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Heading style={{ fontSize: '1rem' }}>Operations</Heading>
                 {ops.length > 0 && <Tag type="red" size="sm">{ops.length}</Tag>}
-                {identity && <Tag type="gray" size="sm">{identity.subject}</Tag>}
               </div>
-              <Button kind="ghost" size="sm" onClick={() => void load()} disabled={busy} style={{ minWidth: 0, padding: '0 0.5rem' }}>↻</Button>
+              <button onClick={() => void load()} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
             </div>
             <Stack gap={1}>
               {ops.length === 0 && (

@@ -11,10 +11,14 @@ import {
   Select,
   SelectItem,
   Modal,
+  Heading,
 } from '@carbon/react'
 import { User, Settings, Add, Edit, TrashCan, Folder } from '@carbon/icons-react'
 import { Menu } from '@carbon/icons-react'
 import { TOKEN_STORAGE_KEY, authToken, authHeaders } from './api'
+import Onboarding from './Onboarding'
+import { useI18n, type Locale } from './i18n'
+import { whoami, type Whoami } from './kernelApi'
 
 const KERNEL_API = '/kernel-api'
 
@@ -32,14 +36,14 @@ interface LayoutProps {
 
 const NAV_ITEMS = [
   { path: '/workspace', label: 'Workspace' },
-  { path: '/agents', label: 'Runs' },
-  { path: '/operations', label: 'Operations' },
-  { path: '/observability', label: 'Knowledge' },
-  { path: '/experience', label: 'Timeline' },
-  { path: '/agent-config', label: 'Agents' },
-  { path: '/triggers', label: 'Triggers' },
-  { path: '/providers', label: 'Providers' },
-  { path: '/users', label: 'Users' },
+  { path: '/agents', label: 'nav.runs' },
+  { path: '/operations', label: 'nav.operations' },
+  { path: '/observability', label: 'nav.knowledge' },
+  { path: '/experience', label: 'nav.timeline' },
+  { path: '/agent-config', label: 'nav.agents' },
+  { path: '/triggers', label: 'nav.triggers' },
+  { path: '/providers', label: 'nav.providers' },
+  { path: '/users', label: 'nav.users' },
 ]
 
 interface Project {
@@ -52,13 +56,17 @@ interface Project {
 
 export default function Layout({ children, activePage }: LayoutProps) {
   const params = new URLSearchParams(window.location.search)
-  const [project, setProject] = useState(params.get('project') ?? 'lighthouse')
+  const [project, setProject] = useState(params.get('project') ?? '')
   const [projects, setProjects] = useState<Project[]>([])
   const [allAgents, setAllAgents] = useState<{ id: string; name: string }[]>([])
   const [showProjectPanel, setShowProjectPanel] = useState(false)
   const [showNewProject, setShowNewProject] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [identity, setIdentity] = useState<Whoami | null>(null)
+  const [showUserMenu, setShowUserMenu] = useState(false)
+  const { locale, setLocale, t } = useI18n()
   const [token, setToken] = useState(authToken() ?? '')
   const [loggedIn, setLoggedIn] = useState(!!authToken())
 
@@ -121,12 +129,18 @@ export default function Layout({ children, activePage }: LayoutProps) {
       const resp = await fetch('/kernel-api/v1/workspace/projects', { headers: { ...authHeaders() } })
       if (resp.ok) {
         const data = await resp.json()
-        setProjects(data.projects ?? [])
+        const list: Project[] = data.projects ?? []
+        setProjects(list)
+        setProject((current) => {
+          if (!current || !list.some((p) => p.id === current)) return list[0]?.id ?? ''
+          return current
+        })
       }
     } catch { /* ignore */ }
   }, [])
 
   useEffect(() => { void loadProjects() }, [loadProjects])
+  useEffect(() => { void whoami().then(setIdentity).catch(() => {}) }, [])
 
   useEffect(() => {
     const loadAgents = async () => {
@@ -184,16 +198,15 @@ export default function Layout({ children, activePage }: LayoutProps) {
   }
 
   const deleteProject = async (id: string) => {
-    if (!confirm('Delete this project?')) return
     await fetch(`/kernel-api/v1/workspace/projects/${id}`, { method: 'DELETE', headers: { ...authHeaders() } })
-    if (project === id) setProject('lighthouse')
+    if (project === id) setProject(projects.find((p) => p.id !== id)?.id ?? '')
     void loadProjects()
   }
 
   return (
     <Theme theme="g100">
       <Header aria-label="Temporality">
-        <HeaderName href="/experience" prefix="" onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate('/experience') }}>
+        <HeaderName href="/workspace" prefix="" onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate('/workspace') }}>
           <img src="/temporality.svg" alt="" style={{ height: '20px', width: 'auto', marginRight: '0.5rem', verticalAlign: 'middle' }} />
           Temporality
         </HeaderName>
@@ -207,7 +220,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
               className={`header-nav-link ${activePage === path.slice(1) ? 'active' : ''}`}
               onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path) }}
             >
-              {label}
+              {t(label)}
               {path === '/operations' && pendingOps > 0 && (
                 <span className="nav-badge" style={{ background: '#f7768e' }}>{pendingOps}</span>
               )}
@@ -228,7 +241,52 @@ export default function Layout({ children, activePage }: LayoutProps) {
         </button>
 
         <HeaderGlobalBar>
-          {/* Project switcher */}
+          {/* User menu */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.4rem',
+                background: showUserMenu ? 'rgba(255,255,255,0.08)' : 'transparent',
+                border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-sm)',
+                padding: '0.3rem 0.6rem', cursor: 'pointer',
+                color: 'var(--tm-text)', fontSize: 'var(--tm-text-sm)',
+                fontFamily: 'var(--tm-font)',
+              }}
+            >
+              <User size={14} />
+              <span>{identity?.subject ?? 'User'}</span>
+              <span style={{ fontSize: '0.6rem', color: 'var(--tm-muted)' }}>{showUserMenu ? '▴' : '▾'}</span>
+            </button>
+            {showUserMenu && (
+              <HeaderPanel expanded>
+                <div style={{ padding: '0.75rem', minWidth: '180px' }}>
+                  {identity && (
+                    <div style={{ marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)' }}>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 500 }}>{identity.subject}</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.15rem' }}>{identity.role}</div>
+                    </div>
+                  )}
+                  <div
+                    onClick={() => { setLocale(locale === 'en' ? 'ru' : 'en'); setShowUserMenu(false) }}
+                    style={{ padding: '0.4rem 0.5rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-text-2)' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    {t('settings.language')}: {locale === 'en' ? 'English' : 'Русский'}
+                  </div>
+                  <div
+                    onClick={() => { doLogout(); setShowUserMenu(false) }}
+                    style={{ padding: '0.4rem 0.5rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-danger)', marginTop: '0.25rem' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    {loggedIn ? 'Logout' : 'Login'}
+                  </div>
+                </div>
+              </HeaderPanel>
+            )}
+          </div>
           <div style={{ position: 'relative', marginRight: '0.5rem' }}>
             <button
               onClick={() => setShowProjectPanel(!showProjectPanel)}
@@ -248,7 +306,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
             {showProjectPanel && (
               <HeaderPanel expanded>
                 <div style={{ padding: '0.5rem' }}>
-                  <div style={{ fontSize: '0.75rem', color: '#7e8a9c', padding: '0.5rem 0.5rem 0.25rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Projects</div>
+                  <div style={{ fontSize: '0.75rem', color: '#7e8a9c', padding: '0.5rem 0.5rem 0.25rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t('projects.title')}</div>
                   <div style={{ display: 'grid', gap: '1px' }}>
                     {projects.map((p) => {
                       const defaultAgent = allAgents.find((a) => a.id === p.default_agent_id)
@@ -268,7 +326,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
                         </div>
                         <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
                           <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setEditProject(p); setShowProjectPanel(false) }} />
-                          <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={(e: React.MouseEvent) => { e.stopPropagation(); void deleteProject(p.id) }} />
+                          <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setConfirmDelete(p.id) }} />
                         </div>
                       </div>
                       )
@@ -277,24 +335,13 @@ export default function Layout({ children, activePage }: LayoutProps) {
                       onClick={() => { setNewProjectName(''); setNewProjectDesc(''); setShowProjectPanel(false); setShowNewProject(true) }}
                       style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.5rem', cursor: 'pointer', color: '#57d7e8', borderRadius: '4px' }}
                     >
-                      <Add size={16} /> New project
+                      <Add size={20} /> {t('new.project')}
                     </div>
                   </div>
                 </div>
               </HeaderPanel>
             )}
           </div>
-
-          {/* Login/Logout */}
-          {loggedIn ? (
-            <Button kind="ghost" size="sm" renderIcon={User} onClick={doLogout} style={{ color: '#e5e9f0' }}>
-              Logout
-            </Button>
-          ) : (
-            <Button kind="ghost" size="sm" renderIcon={User} onClick={() => setShowLogin(true)} style={{ color: '#e5e9f0' }}>
-              Login
-            </Button>
-          )}
         </HeaderGlobalBar>
 
         {/* Mobile nav dropdown */}
@@ -307,7 +354,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
                 className={`header-mobile-link ${activePage === path.slice(1) ? 'active' : ''}`}
                 onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path); setMobileNavOpen(false) }}
               >
-                {label}
+                {t(label)}
                 {path === '/operations' && pendingOps > 0 && (
                   <span className="nav-badge" style={{ background: '#f7768e' }}>{pendingOps}</span>
                 )}
@@ -402,6 +449,22 @@ export default function Layout({ children, activePage }: LayoutProps) {
         )}
       </Modal>
 
+      {confirmDelete && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '460px' }}>
+            <Heading>{t('projects.delete_confirm')}</Heading>
+            <p style={{ color: 'var(--tm-text-3)', margin: '0.75rem 0' }}>
+              {t('projects.delete_warning', { name: projects.find((p) => p.id === confirmDelete)?.name ?? confirmDelete })}
+            </p>
+            <div className="form-actions">
+              <Button kind="secondary" onClick={() => setConfirmDelete(null)}>{t('action.cancel')}</Button>
+              <Button kind="danger" onClick={() => { const id = confirmDelete; setConfirmDelete(null); void deleteProject(id) }}>{t('action.delete')}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {projects.length === 0 && <Onboarding onComplete={() => void loadProjects()} />}
       <Content id="main-content">
         {children({ project, setProject, projectDefaultAgent: projects.find((p) => p.id === project)?.default_agent_id, projectDefaultModel: projects.find((p) => p.id === project)?.default_model })}
       </Content>

@@ -1,0 +1,1 @@
+PGPASSWORD=temporality psql -h 127.0.0.1 -U temporality -d temporality -t -A -c "SELECT id, name FROM workspace_project ORDER BY created_at;"
