@@ -138,9 +138,9 @@ body, #root, #main-content {
 .cds--text-area,
 .cds--select-input,
 .cds--number input[type="number"] {
-  background-color: var(--tm-elevated) !important;
+  background-color: #3a3328 !important;
   color: var(--tm-text) !important;
-  border: 1px solid var(--tm-border) !important;
+  border: 1px solid rgba(237, 232, 223, 0.15) !important;
   border-radius: var(--tm-radius-md) !important;
   font-family: var(--tm-font);
   font-size: var(--tm-text-md);
@@ -151,9 +151,9 @@ body, #root, #main-content {
 .cds--text-area:focus,
 .cds--select-input:focus,
 .cds--number input:focus {
-  border-color: var(--tm-teal) !important;
+  border-color: #eb9b52 !important;
   outline: none !important;
-  box-shadow: 0 0 0 1px var(--tm-teal) !important;
+  box-shadow: 0 0 0 1px #eb9b52 !important;
 }
 
 .cds--text-input::placeholder,
@@ -175,28 +175,29 @@ body, #root, #main-content {
 // ═══════════════════════════════════════════════════════════════
 
 .cds--btn--primary {
-  background-color: var(--tm-teal) !important;
-  border-color: var(--tm-teal) !important;
-  color: var(--tm-white) !important;
+  background-color: #eb9b52 !important;
+  border-color: #eb9b52 !important;
+  color: #0F1F1D !important;
   border-radius: var(--tm-radius-md) !important;
   font-weight: 500;
 }
 
 .cds--btn--primary:hover {
-  background-color: #358580 !important;
-  border-color: #358580 !important;
+  background-color: #d48a3f !important;
+  border-color: #d48a3f !important;
 }
 
 .cds--btn--secondary {
   background-color: transparent !important;
-  border: 1px solid var(--tm-border-strong) !important;
+  border: 1px solid rgba(237, 232, 223, 0.2) !important;
   color: var(--tm-text) !important;
   border-radius: var(--tm-radius-md) !important;
 }
 
 .cds--btn--secondary:hover {
-  border-color: var(--tm-teal) !important;
-  background-color: var(--tm-elevated) !important;
+  border-color: #eb9b52 !important;
+  color: #eb9b52 !important;
+  background-color: rgba(235, 155, 82, 0.08) !important;
 }
 
 .cds--btn--ghost {
@@ -447,8 +448,8 @@ body, #root, #main-content {
 }
 
 .modal-panel {
-  background: var(--tm-elevated);
-  border: 1px solid var(--tm-border-strong);
+  background: #59513c;
+  border: 1px solid rgba(235, 155, 82, 0.15);
   border-radius: var(--tm-radius-xl);
   padding: 1.5rem;
   width: 520px;
@@ -462,7 +463,7 @@ body, #root, #main-content {
 
 .modal-panel .cds--label,
 .modal-panel .cds--form__helper-text {
-  color: var(--tm-text-2) !important;
+  color: rgba(237, 232, 223, 0.7) !important;
 }
 
 .modal-panel .cds--form-item {
