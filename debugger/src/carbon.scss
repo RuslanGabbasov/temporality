@@ -447,8 +447,8 @@ body, #root, #main-content {
 }
 
 .modal-panel {
-  background: var(--tm-surface);
-  border: 1px solid var(--tm-border-strong);
+  background: var(--tm-cream);
+  border: 1px solid rgba(15, 31, 29, 0.12);
   border-radius: var(--tm-radius-xl);
   padding: 1.5rem;
   width: 520px;
@@ -458,6 +458,17 @@ body, #root, #main-content {
   flex-direction: column;
   gap: 0.75rem;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  color: var(--tm-ink);
+}
+
+.modal-panel .cds--label,
+.modal-panel .cds--form__helper-text {
+  color: var(--tm-text-2) !important;
+}
+
+.modal-panel h2,
+.modal-panel .cds--modal-header__label {
+  color: var(--tm-ink) !important;
 }
 
 .modal-panel .cds--form-item {
@@ -469,7 +480,7 @@ body, #root, #main-content {
   justify-content: flex-end;
   gap: 0.5rem;
   padding-top: 0.75rem;
-  border-top: 1px solid var(--tm-border);
+  border-top: 1px solid rgba(15, 31, 29, 0.12);
   margin-top: 0.5rem;
 }
 
