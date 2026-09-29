@@ -27,6 +27,7 @@ export default function Users() {
   const [form, setForm] = useState<Partial<User>>({})
   const [generatedToken, setGeneratedToken] = useState<string | null>(null)
   const [tokenUser, setTokenUser] = useState<User | null>(null)
+  const [confirmRegen, setConfirmRegen] = useState<User | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -82,12 +83,20 @@ export default function Users() {
     finally { setLoading(false) }
   }
 
-  const generateToken = (u: User) => {
+  const doGenerateToken = (u: User) => {
     const bytes = new Uint8Array(32)
     crypto.getRandomValues(bytes)
     const token = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
     setGeneratedToken(token)
     setTokenUser(u)
+  }
+
+  const generateToken = (u: User) => {
+    if (u.token) {
+      setConfirmRegen(u)
+    } else {
+      doGenerateToken(u)
+    }
   }
 
   const copyToClipboard = (text: string) => {
@@ -163,10 +172,25 @@ export default function Users() {
             <div style={{ background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all', marginBottom: '1rem' }}>
               {generatedToken}
             </div>
-            <Stack orientation="horizontal" gap={2}>
-              <Button onClick={() => { copyToClipboard(generatedToken); setGeneratedToken(null); setTokenUser(null) }}>Copy & Close</Button>
+            <div className="form-actions">
               <Button kind="secondary" onClick={() => { setGeneratedToken(null); setTokenUser(null) }}>Close</Button>
-            </Stack>
+              <Button onClick={() => { copyToClipboard(generatedToken); setGeneratedToken(null); setTokenUser(null) }}>Copy & Close</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmRegen && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '460px' }}>
+            <Heading>Regenerate token?</Heading>
+            <p style={{ color: 'var(--tm-text-3)', margin: '0.75rem 0' }}>
+              <strong>{confirmRegen.name}</strong> already has an active token. Generating a new one will invalidate the current token immediately — the user will be logged out.
+            </p>
+            <div className="form-actions">
+              <Button kind="secondary" onClick={() => setConfirmRegen(null)}>Cancel</Button>
+              <Button kind="danger" onClick={() => { const u = confirmRegen; setConfirmRegen(null); doGenerateToken(u) }}>Regenerate</Button>
+            </div>
           </div>
         </div>
       )}

@@ -48,7 +48,7 @@ export default function App() {
 
   return (
     <Layout activePage={page}>
-      {({ project, setProject }: AppState) => {
+      {({ project, setProject, projectDefaultAgent, projectDefaultModel }: AppState) => {
         switch (page) {
           case 'agents':
             return <AgentRuns project={project} />
@@ -58,9 +58,9 @@ export default function App() {
             return <Observability project={project} />
           case 'workspace':
             // @ts-ignore
-            return <Workspace project={project} setProject={setProject} />
+            return <Workspace project={project} setProject={setProject} defaultAgentId={projectDefaultAgent} defaultModel={projectDefaultModel} />
           case 'agent-config':
-            return <Agents />
+            return <Agents defaultAgentId={projectDefaultAgent} />
           case 'providers':
             return <Providers />
           case 'users':

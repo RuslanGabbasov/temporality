@@ -291,21 +291,15 @@ export default function AgentRuns({ project }: { project: string }) {
       )}
 
       <Grid>
-        <Column sm={4} md={8} lg={16}>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
-            <Button onClick={() => { setSelected(''); setTimeline([]); void loadRuns(true) }} disabled={busy}>
-              Refresh
-            </Button>
-            {selected && <Tag type="gray" size="sm">{selected}</Tag>}
-          </div>
-        </Column>
-      </Grid>
-
-      <Grid>
         {/* Run list */}
         <Column sm={4} md={3} lg={4}>
-          <Section level={3}>
-            <Heading>Runs ({runs.length})</Heading>
+          <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', marginBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
+              <Heading style={{ fontSize: '1rem' }}>Runs ({runs.length})</Heading>
+              <Button kind="ghost" size="sm" onClick={() => { setSelected(''); setTimeline([]); void loadRuns(true) }} disabled={busy} style={{ minWidth: 0, padding: '0 0.5rem' }}>
+                ↻
+              </Button>
+            </div>
             <Stack gap={1}>
               {runs.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>No runs for this project</Tile>}
               {runs.map((event) => {
@@ -325,7 +319,7 @@ export default function AgentRuns({ project }: { project: string }) {
                 )
               })}
             </Stack>
-          </Section>
+          </div>
         </Column>
 
         {/* Run detail */}

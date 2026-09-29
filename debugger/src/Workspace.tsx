@@ -23,7 +23,7 @@ function shortTime(iso: string) {
 
 const STATUS_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'red'> = {
   completed: 'green', failed: 'red', running: 'blue', turn_limit: 'warm-gray', pending: 'gray',
-  started: 'blue',
+  started: 'blue', cancelled: 'warm-gray',
 }
 
 interface ChatMessage {
@@ -91,7 +91,7 @@ function formatStreamEvent(type: string, outer: any): string | null {
   }
 }
 
-export default function Workspace({ project }: { project: string }) {
+export default function Workspace({ project, defaultAgentId, defaultModel }: { project: string; defaultAgentId?: string; defaultModel?: string }) {
   const [allAgents, setAllAgents] = useState<Agent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -339,11 +339,22 @@ export default function Workspace({ project }: { project: string }) {
   const fetchFinalAnswer = async (runId: string, convId: string) => {
     try {
       const run = await workspaceApi.getRun(runId)
-      if (run.status === 'completed' || run.status === 'failed' || run.status === 'turn_limit') {
+      if (run.status === 'completed' || run.status === 'failed' || run.status === 'turn_limit' || run.status === 'cancelled') {
         const answer = run.answer || run.error || 'No answer received'
         updateMsg(convId, runId, { content: answer, status: run.status })
       }
     } catch { /* ignore */ }
+  }
+
+  const cancelRun = async (runId: string) => {
+    try {
+      await workspaceApi.cancelRun(runId)
+      if (activeConv) {
+        const es = streamRef.current.get(activeConv.id)
+        if (es) { es.close(); streamRef.current.delete(activeConv.id) }
+        updateMsg(activeConv.id, runId, { status: 'cancelled', content: 'Run cancelled by user', streamLines: [] })
+      }
+    } catch (f) { setError(message(f)) }
   }
 
   const sendMessage = async () => {
@@ -410,7 +421,7 @@ export default function Workspace({ project }: { project: string }) {
       {/* Left panel: conversations */}
       <div className="workspace-sidebar">
         <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--tm-border)' }}>
-          <Button renderIcon={Add} size="sm" onClick={() => setShowNewChat(true)} style={{ width: '100%' }}>New chat</Button>
+          <Button renderIcon={Add} size="sm" onClick={() => { setNewChatAgentId(defaultAgentId ?? ''); setShowNewChat(true) }} style={{ width: '100%' }}>New chat</Button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
           {conversations.length === 0 && (
@@ -433,7 +444,7 @@ export default function Workspace({ project }: { project: string }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.title}</div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
-                    {conv.agentId ? agentName(conv.agentId) : 'Default'} · {conv.messages.length} msgs
+                    {conv.agentId ? agentName(conv.agentId) : (defaultAgentId ? agentName(defaultAgentId) : 'No agent')}{defaultModel ? ` · ${defaultModel}` : ''} · {conv.messages.length} msgs
                   </div>
                 </div>
                 <button
@@ -502,6 +513,13 @@ export default function Workspace({ project }: { project: string }) {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.25rem' }}>
                           <span className="spinner" />
                           <span style={{ fontSize: '0.7rem', color: 'var(--tm-teal)' }}>streaming…</span>
+                          {msg.runId && (
+                            <button
+                              onClick={() => cancelRun(msg.runId!)}
+                              style={{ background: 'none', border: '1px solid var(--tm-danger)', borderRadius: '4px', color: 'var(--tm-danger)', cursor: 'pointer', fontSize: '0.65rem', padding: '0.1rem 0.4rem', marginLeft: '0.25rem' }}
+                              title="Cancel this run"
+                            >Stop</button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -552,7 +570,7 @@ export default function Workspace({ project }: { project: string }) {
             <div style={{ textAlign: 'center' }}>
               <Heading>Temporality Agent</Heading>
               <p style={{ marginTop: '0.5rem' }}>Select a conversation or start a new one.</p>
-              <Button renderIcon={Add} onClick={() => setShowNewChat(true)} style={{ marginTop: '1rem' }}>New chat</Button>
+              <Button renderIcon={Add} onClick={() => { setNewChatAgentId(defaultAgentId ?? ''); setShowNewChat(true) }} style={{ marginTop: '1rem' }}>New chat</Button>
             </div>
           </div>
         )}
@@ -573,8 +591,8 @@ export default function Workspace({ project }: { project: string }) {
           value={newChatAgentId}
           onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewChatAgentId(e.target.value)}
         >
-          <SelectItem value="" text="Default agent" />
-          {allAgents.map((a) => <SelectItem key={a.id} value={a.id} text={`${a.name}${a.model ? ` (${a.model})` : ''}`} />)}
+          <SelectItem value="" text={defaultAgentId ? `Project default (${allAgents.find((a) => a.id === defaultAgentId)?.name ?? defaultAgentId})` : 'No default'} />
+          {allAgents.filter((a) => a.id !== defaultAgentId).map((a) => <SelectItem key={a.id} value={a.id} text={`${a.name}${a.model ? ` (${a.model})` : ''}`} />)}
         </Select>
       </Modal>
 

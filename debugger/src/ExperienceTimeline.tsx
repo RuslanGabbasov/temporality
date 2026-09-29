@@ -97,6 +97,18 @@ function clock(iso: string) {
   const date = new Date(iso)
   return Number.isNaN(date.getTime()) ? '' : date.toTimeString().slice(0, 8)
 }
+
+/** Format tick label adaptively based on visible time span. */
+function formatTick(ms: number, span: number): string {
+  const d = new Date(ms)
+  if (Number.isNaN(d.getTime())) return ''
+  if (span <= 3 * 3600e3) return d.toTimeString().slice(0, 8)           // HH:MM:SS
+  if (span <= 86400e3) return d.toTimeString().slice(0, 5)               // HH:MM
+  const day = d.toLocaleDateString('en', { month: 'short', day: 'numeric' })
+  const hm = d.toTimeString().slice(0, 5)
+  if (span <= 7 * 86400e3) return `${day} ${hm}`                          // Mon DD HH:MM
+  return day                                                                 // Mon DD
+}
 function ms(iso: string) { return new Date(iso).getTime() }
 
 /** Gutter label budget is ~180px of .66rem mono ≈ 30 chars: propositions,
@@ -235,6 +247,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     const recencyCutoff = recencyFilter === 'all' ? 0 : recencyFilter === 'last-run' ? (model.runs.length ? ms(model.runs[model.runs.length - 1].startedAt) : 0) : recencyFilter === '24h' ? now - 86400e3 : recencyFilter === '7d' ? now - 7 * 86400e3 : now - 30 * 86400e3
     const visibleRun = (run: RunInfo) => !hiddenRoots.has(run.parentRun ?? '') && !hiddenRoots.has(run.id.split('/')[0]) && (roleFilter === 'all' || run.role === roleFilter || !run.role) && (recencyFilter === 'all' || ms(run.startedAt) >= recencyCutoff)
     const visibleRuns = model.runs.filter(visibleRun)
+    const visibleRunIds = new Set(visibleRuns.map((r) => r.id))
     const visibleRow = (row: KnowledgeRow) =>
       (bucketFilter === 'all' || stateBucket(row.state) === bucketFilter) &&
       (scopeFilter === 'all' || row.scopes.primary === scopeFilter) &&
@@ -295,7 +308,18 @@ export default function ExperienceTimeline({ project }: { project: string }) {
         y += 4
       }
     }
-    return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleScopes, aggregatedIds, conflictsPresent, showEpisodes, runLaneY, rowY, scopeHeaderY, bandY, populationY, height: y + 8 }
+    const visibleLinks = model.links.filter((link) => {
+      const offeredRun = link.offeredRun?.split('/')[0] ?? ''
+      const usedRun = link.usedRun?.split('/')[0] ?? ''
+      if (hiddenRoots.has(offeredRun) || hiddenRoots.has(usedRun)) return false
+      if (recencyFilter !== 'all') {
+        const offeredVisible = link.offeredRun ? visibleRunIds.has(link.offeredRun) : false
+        const usedVisible = link.usedRun ? visibleRunIds.has(link.usedRun) : false
+        if (!offeredVisible && !usedVisible) return false
+      }
+      return visibleRowIds.has(link.knowledgeId)
+    })
+    return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleRunIds, visibleLinks, visibleScopes, aggregatedIds, conflictsPresent, showEpisodes, runLaneY, rowY, scopeHeaderY, bandY, populationY, height: y + 8 }
   }, [model, window_, hiddenRoots, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, kinds, lens.experience, laneOverrides, query])
 
   const activity = useMemo(() => {
@@ -422,7 +446,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     <div className="experience-meta">
       <span>{model.runs.filter((run) => !run.parentRun).length} team runs · {view.visibleRows.length}{view.visibleRows.length < model.rows.length ? `/${model.rows.length}` : ''} experiences · {model.scopes.length} scopes · {model.totals.events} events</span>
       <span className="experience-note">
-        active {model.rows.filter((row) => stateBucket(row.state) === 'active').length} · stale {model.rows.filter((row) => stateBucket(row.state) === 'stale').length} · invalidated {model.rows.filter((row) => stateBucket(row.state) === 'invalidated').length} · archived {model.rows.filter((row) => stateBucket(row.state) === 'archived').length} · activations {model.links.length}
+        active {model.rows.filter((row) => stateBucket(row.state) === 'active').length} · stale {model.rows.filter((row) => stateBucket(row.state) === 'stale').length} · invalidated {model.rows.filter((row) => stateBucket(row.state) === 'invalidated').length} · archived {model.rows.filter((row) => stateBucket(row.state) === 'archived').length} · activations {view.visibleLinks.length}
       </span>
       {lens.conflicts && !view.conflictsPresent && <span className="experience-note">No contradicted / weakened / archived points in this project yet</span>}
     </div>
@@ -550,7 +574,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
           <g>
             {ticks.map((tick) => <g key={tick}>
               <line x1={x(tick)} x2={x(tick)} y1={20} y2={view.height} stroke="#1c2530" strokeWidth={1} />
-              <text x={x(tick)} y={14} textAnchor="middle" className="tick-label">{clock(new Date(tick).toISOString())}</text>
+              <text x={x(tick)} y={14} textAnchor="middle" className="tick-label">{formatTick(tick, view.active.t1 - view.active.t0)}</text>
             </g>)}
           </g>
           {/* Activation links target run lanes: keep the lanes rendered
@@ -588,7 +612,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             const headerY = view.scopeHeaderY.get(scope.id)!
             const aggregated = view.aggregatedIds.has(scope.id)
             const toggleLane = () => setLaneOverrides((current) => ({ ...current, [scope.id]: !aggregated }))
-            const activations = model.links.filter((link) => scope.rows.some((row) => row.knowledgeId === link.knowledgeId)).length
+            const activations = view.visibleLinks.filter((link) => scope.rows.some((row) => row.knowledgeId === link.knowledgeId)).length
             const retired = scope.rows.filter((row) => row.terminal).length
             const alive = rows.length - retired
             return <g key={scope.id} className="scope-section">
@@ -697,7 +721,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
               <title>{`${edge.fromId} → ${edge.toId} · ${edge.inferred ? 'inferred' : 'explicit'}${edge.reason ? `\n${edge.reason}` : ''}`}</title>
             </g>
           })}
-          {lens.activation && model.links.map((link) => {
+          {lens.activation && view.visibleLinks.map((link) => {
             if (hiddenRoots.has(link.offeredRun?.split('/')[0] ?? '')) return null
             const rowLaneY = view.rowY.get(link.knowledgeId)
             const runY = view.runLaneY.get(link.usedRun ?? '')

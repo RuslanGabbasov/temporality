@@ -89,6 +89,18 @@ func main() {
 		log.Error("migrate workspace v22", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000023_user_tokens.up.sql"); err != nil {
+		log.Error("migrate workspace v23", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000024_project_defaults.up.sql"); err != nil {
+		log.Error("migrate workspace v24", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000025_triggers.up.sql"); err != nil {
+		log.Error("migrate workspace v25", "error", err)
+		os.Exit(1)
+	}
 	activities, err := agent.NewActivities(events)
 	if err != nil {
 		log.Error("configure activities", "error", err)
@@ -261,6 +273,23 @@ func main() {
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
+	})
+	mux.HandleFunc("POST /v1/agent/runs/{runID}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if project == "" {
+			writeError(w, 400, errors.New("project query parameter is required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleWriter, project) {
+			return
+		}
+		sourceID := querySourceID(r, activities.SourceID)
+		workflowID := workflowIDFor(sourceID, project, r.PathValue("runID"))
+		if err := temporalClient.CancelWorkflow(r.Context(), workflowID, ""); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		writeJSON(w, 200, map[string]string{"run_id": r.PathValue("runID"), "status": "cancel_requested"})
 	})
 	mux.HandleFunc("GET /v1/agent/outbox", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleOperator) {
@@ -747,6 +776,27 @@ func main() {
 			}
 		}
 		writeJSON(w, 200, run)
+	})
+	mux.HandleFunc("POST /v1/workspace/runs/{runID}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		run, err := ws.GetRun(r.Context(), r.PathValue("runID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		workflowID := workflowIDFor(activities.SourceID, run.ProjectID, run.RunID)
+		if err := temporalClient.CancelWorkflow(r.Context(), workflowID, ""); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		_ = ws.UpdateRunStatus(r.Context(), run.ID, "cancelled", "", 0, "")
+		writeJSON(w, 200, map[string]string{"run_id": run.RunID, "status": "cancel_requested"})
 	})
 	// SSE stream for a workspace run — pushes model.completed, turn.completed,
 	// tool.* and run.completed events as they land in the journal.

@@ -20,7 +20,9 @@ const KERNEL_API = '/kernel-api'
 
 export interface AppState {
   project: string
-  setProject: (project: string) => void
+  setProject: (p: string) => void
+  projectDefaultAgent?: string
+  projectDefaultModel?: string
 }
 
 interface LayoutProps {
@@ -248,19 +250,29 @@ export default function Layout({ children, activePage }: LayoutProps) {
                 <div style={{ padding: '0.5rem' }}>
                   <div style={{ fontSize: '0.75rem', color: '#7e8a9c', padding: '0.5rem 0.5rem 0.25rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Projects</div>
                   <div style={{ display: 'grid', gap: '1px' }}>
-                    {projects.map((p) => (
+                    {projects.map((p) => {
+                      const defaultAgent = allAgents.find((a) => a.id === p.default_agent_id)
+                      return (
                       <div
                         key={p.id}
                         onClick={() => { setProject(p.id); setShowProjectPanel(false) }}
                         style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.5rem 0.5rem', cursor: 'pointer', background: p.id === project ? '#121823' : 'transparent', borderRadius: '4px', minWidth: 0 }}
                       >
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                          {(defaultAgent || p.default_model) && (
+                            <div style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
+                              {defaultAgent ? defaultAgent.name : 'no agent'}{p.default_model ? ` · ${p.default_model}` : ''}
+                            </div>
+                          )}
+                        </div>
                         <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
                           <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setEditProject(p); setShowProjectPanel(false) }} />
                           <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={(e: React.MouseEvent) => { e.stopPropagation(); void deleteProject(p.id) }} />
                         </div>
                       </div>
-                    ))}
+                      )
+                    })}
                     <div
                       onClick={() => { setNewProjectName(''); setNewProjectDesc(''); setShowProjectPanel(false); setShowNewProject(true) }}
                       style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.5rem', cursor: 'pointer', color: '#57d7e8', borderRadius: '4px' }}
@@ -391,7 +403,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
       </Modal>
 
       <Content id="main-content">
-        {children({ project, setProject })}
+        {children({ project, setProject, projectDefaultAgent: projects.find((p) => p.id === project)?.default_agent_id, projectDefaultModel: projects.find((p) => p.id === project)?.default_model })}
       </Content>
     </Theme>
   )

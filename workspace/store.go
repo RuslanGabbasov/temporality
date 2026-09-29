@@ -457,6 +457,9 @@ func (s *Store) CreateTrigger(ctx context.Context, t *Trigger) error {
 	now := time.Now().UTC()
 	t.CreatedAt = now
 	t.UpdatedAt = now
+	if len(t.Config) == 0 {
+		t.Config = json.RawMessage(`{}`)
+	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO workspace_trigger (id, project_id, agent_id, name, type, enabled, config, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -523,7 +526,7 @@ func (s *Store) ListAllTriggers(ctx context.Context) ([]Trigger, error) {
 func (s *Store) UpdateTrigger(ctx context.Context, t Trigger) error {
 	t.UpdatedAt = time.Now().UTC()
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_trigger SET name=$2, agent_id=$3, type=$4, enabled=$5, config=COALESCE($6, config), updated_at=$7 WHERE id=$1`,
+		`UPDATE workspace_trigger SET name=$2, agent_id=$3, type=COALESCE(NULLIF($4,''),type), enabled=$5, config=COALESCE($6, config), updated_at=$7 WHERE id=$1`,
 		t.ID, t.Name, nullString(t.AgentID), t.Type, t.Enabled, nullRawMessage(t.Config), t.UpdatedAt)
 	if err != nil {
 		return err

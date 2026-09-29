@@ -138,7 +138,7 @@ body, #root, #main-content {
 .cds--text-area,
 .cds--select-input,
 .cds--number input[type="number"] {
-  background-color: #3a3328 !important;
+  background-color: #1e1e1e !important;
   color: var(--tm-text) !important;
   border: 1px solid rgba(237, 232, 223, 0.15) !important;
   border-radius: var(--tm-radius-md) !important;
@@ -154,6 +154,24 @@ body, #root, #main-content {
   border-color: #eb9b52 !important;
   outline: none !important;
   box-shadow: 0 0 0 1px #eb9b52 !important;
+}
+
+// NumberInput stepper — kill white strips above/below +/- buttons
+.cds--number__controls {
+  background: transparent !important;
+  border: none !important;
+}
+.cds--number__control-btn {
+  background: transparent !important;
+  color: var(--tm-text-2) !important;
+  border: none !important;
+}
+.cds--number__control-btn:hover {
+  background: var(--tm-elevated) !important;
+  color: var(--tm-text) !important;
+}
+.cds--number__rule-divider {
+  display: none !important;
 }
 
 .cds--text-input::placeholder,
@@ -448,8 +466,8 @@ body, #root, #main-content {
 }
 
 .modal-panel {
-  background: #59513c;
-  border: 1px solid rgba(235, 155, 82, 0.15);
+  background: #262626;
+  border: 1px solid rgba(237, 232, 223, 0.08);
   border-radius: var(--tm-radius-xl);
   padding: 1.5rem;
   width: 520px;
@@ -475,8 +493,16 @@ body, #root, #main-content {
   justify-content: flex-end;
   gap: 0.5rem;
   padding-top: 0.75rem;
-  border-top: 1px solid rgba(15, 31, 29, 0.12);
+  border-top: 1px solid rgba(237, 232, 223, 0.08);
   margin-top: 0.5rem;
+}
+
+// Carbon ModalFooter — buttons together on the right
+.cds--modal-footer {
+  justify-content: flex-end !important;
+}
+.cds--modal-close-btn {
+  order: -1;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -687,7 +713,8 @@ body, #root, #main-content {
 .strength-track { stroke-linecap: round; }
 
 // Forensic
-.forensic-block { margin-bottom: 0.75rem; }
+.forensic-block { margin-bottom: 0.6rem; padding-bottom: 0.4rem; }
+.forensic-block + .forensic-block { border-top: 1px solid var(--tm-border); padding-top: 0.4rem; }
 .forensic-head { color: var(--tm-text); font-size: 0.75rem; font-weight: 500; }
 .forensic-head.clickable { cursor: pointer; }
 .forensic-head.clickable:hover { color: var(--tm-amber); }
@@ -697,18 +724,29 @@ body, #root, #main-content {
 .forensic-commands { font-size: 0.68rem; }
 .forensic-commands summary { cursor: pointer; color: var(--tm-text-3); }
 .forensic-activations { list-style: none; padding: 0; margin: 0.3rem 0 0; }
+.forensic-activations li { display: flex; align-items: baseline; gap: 0.4rem; padding: 0.15rem 0; font-size: 0.72rem; cursor: pointer; }
+.forensic-activations li:hover { color: var(--tm-amber); }
+.forensic-activations li[data-status="failed"] { color: var(--tm-danger); }
 .forensic-reason { font-size: 0.68rem; color: var(--tm-text-3); font-style: italic; }
 .forensic-successor { font-size: 0.68rem; }
 
 // Cluster
 .cluster-details { padding: 1rem; }
+.cluster-details section { margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px solid var(--tm-border); }
+.cluster-details section:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
+.cluster-details h4 { font-size: 0.75rem; font-weight: 600; color: var(--tm-text-2); margin: 0 0 0.35rem; letter-spacing: 0.03em; text-transform: uppercase; }
 .cluster-episodes { margin-top: 0.5rem; }
 .cluster-points { display: flex; flex-wrap: wrap; gap: 0.25rem; margin: 0.3rem 0; }
+.cluster-points li { display: flex; align-items: center; gap: 0.25rem; font-size: 0.68rem; padding: 0.15rem 0.35rem; background: var(--tm-elevated); border-radius: 3px; cursor: pointer; }
+.cluster-points li:hover { background: var(--tm-raised); }
 .cluster-stats { font-size: 0.68rem; color: var(--tm-text-3); margin: 0.3rem 0; }
 .cluster-variants { font-size: 0.68rem; margin: 0.3rem 0; }
 
 .lineage-link { cursor: pointer; }
-.lineage-list, .related-list { list-style: none; padding: 0; }
+.lineage-list, .related-list { list-style: none; padding: 0; margin: 0.25rem 0; }
+.related-list li { display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0; font-size: 0.75rem; }
+.related-list li code { font-size: 0.7rem; }
+.related-list .member-state { font-size: 0.6rem; padding: 0.1rem 0.35rem; border-radius: 3px; }
 .member-counts { font-size: 0.68rem; color: var(--tm-text-3); }
 .population-lane { opacity: 0.7; }
 

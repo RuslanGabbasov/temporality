@@ -142,6 +142,7 @@ export const workspaceApi = {
     request<{ run_id: string; task_id: string; project: string; status: string }>(
       `/v1/workspace/tasks/${taskId}/runs`, { method: 'POST', body: JSON.stringify(data ?? {}) }),
   getRun: (runId: string) => request<Run>(`/v1/workspace/runs/${runId}`),
+  cancelRun: (runId: string) => request<{ run_id: string; status: string }>(`/v1/workspace/runs/${runId}/cancel`, { method: 'POST' }),
   getTrajectory: (runId: string) => request<any>(`/v1/workspace/runs/${runId}/trajectory`),
   getProjection: (projectId: string) => request<any>(`/v1/workspace/projects/${projectId}/projection`),
   compareRuns: (runA: string, runB: string) => request<any>(`/v1/workspace/runs/compare?a=${runA}&b=${runB}`),

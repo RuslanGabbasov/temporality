@@ -22,7 +22,7 @@ import { workspaceApi, type Agent, type Provider } from './workspaceApi'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
-export default function Agents() {
+export default function Agents({ defaultAgentId }: { defaultAgentId?: string }) {
   const [agents, setAgents] = useState<Agent[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
   const [loading, setLoading] = useState(false)
@@ -152,6 +152,7 @@ const startCreate = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <strong>{a.name}</strong>
+                  {a.id === defaultAgentId && <Tag type="green" size="sm" style={{ marginLeft: '0.5rem' }}>project default</Tag>}
                   {a.description && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{a.description}</p>}
                   <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                     <Tag type="blue" size="sm">{a.model || 'no model'}</Tag>

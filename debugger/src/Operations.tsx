@@ -169,20 +169,17 @@ export default function Operations({ project }: { project: string }) {
       )}
 
       <Grid>
-        <Column sm={4} md={8} lg={16}>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
-            <Button onClick={() => void load()} disabled={busy}>Refresh</Button>
-            {identity && <Tag type="gray" size="sm">{identity.subject} ({identity.role})</Tag>}
-            {ops.length > 0 && <Tag type="red" size="sm">{ops.length} unresolved</Tag>}
-          </div>
-        </Column>
-      </Grid>
-
-      <Grid>
         {/* Operation list */}
         <Column sm={4} md={4} lg={5}>
-          <Section level={3}>
-            <Heading>Pending Operations</Heading>
+          <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', marginBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Heading style={{ fontSize: '1rem' }}>Operations</Heading>
+                {ops.length > 0 && <Tag type="red" size="sm">{ops.length}</Tag>}
+                {identity && <Tag type="gray" size="sm">{identity.subject}</Tag>}
+              </div>
+              <Button kind="ghost" size="sm" onClick={() => void load()} disabled={busy} style={{ minWidth: 0, padding: '0 0.5rem' }}>↻</Button>
+            </div>
             <Stack gap={1}>
               {ops.length === 0 && (
                 <Tile style={{ textAlign: 'center', padding: '2rem', color: 'var(--tm-text-3)' }}>
@@ -235,7 +232,7 @@ export default function Operations({ project }: { project: string }) {
                 )
               })}
             </Stack>
-          </Section>
+          </div>
         </Column>
 
         {/* Detail panel */}
