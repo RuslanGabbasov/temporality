@@ -64,11 +64,12 @@ Kernel вызывает провайдера через OpenAI-compatible Chat C
 | `TEMPORALITY_MODEL_API_KEY` | Ключ (пустой для Ollama) | — |
 | `TEMPORALITY_MODEL_TEMPERATURE` | `0..2` | `0` |
 | `TEMPORALITY_MODEL_TIMEOUT` | Go duration | `180s` |
-| `TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS` | `64..65536` | `1024` |
+| `TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS` | `64..1000000` | `16384` |
 | `TEMPORALITY_MODEL_REASONING` | `off` / `exclude` / `low` / `medium` / `high` | — |
 
-Для reasoning-моделей ставьте `MAX_OUTPUT_TOKENS` с запасом (например
-`16384`), иначе ответ может быть пустым с `finish_reason=length`.
+Для reasoning-моделей CoT считается в том же бюджете — ставьте
+с запасом (например `16384` или больше), иначе ответ может остаться
+пустым с `finish_reason=length`. Default уже `16384`.
 
 Примеры:
 

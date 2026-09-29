@@ -100,7 +100,7 @@ func ConfigFromEnv() (Config, error) {
 		APIKey:          strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_API_KEY")),
 		Temperature:     0,
 		Timeout:         180 * time.Second,
-		MaxOutputTokens: 1024,
+		MaxOutputTokens: 16384,
 		Reasoning:       strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_REASONING")),
 	}
 	if cfg.BaseURL == "" || cfg.Model == "" {
@@ -122,7 +122,7 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if raw := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS")); raw != "" {
 		value, err := strconv.Atoi(raw)
-		if err != nil || value < 64 || value > 65536 {
+		if err != nil || value < 64 || value > 1000000 {
 			return cfg, fmt.Errorf("invalid TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS: %s", raw)
 		}
 		cfg.MaxOutputTokens = value
