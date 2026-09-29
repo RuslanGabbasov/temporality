@@ -229,12 +229,12 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     const roleRuns = model.runs.filter((run) => run.role)
     const roles = [...new Set(roleRuns.map((run) => run.role))].sort()
     const scopes = model.scopes.map((scope) => scope.id).sort()
-    const visibleRun = (run: RunInfo) => !hiddenRoots.has(run.parentRun ?? '') && !hiddenRoots.has(run.id.split('/')[0]) && (roleFilter === 'all' || run.role === roleFilter || !run.role) && (recencyFilter === 'all' || ms(run.startedAt) >= recencyCutoff)
-    const visibleRuns = model.runs.filter(visibleRun)
     const needle = query.trim().toLowerCase()
     const lastRunId = model.runs.length ? model.runs[model.runs.length - 1].id : ''
     const now = Date.now()
     const recencyCutoff = recencyFilter === 'all' ? 0 : recencyFilter === 'last-run' ? (model.runs.length ? ms(model.runs[model.runs.length - 1].startedAt) : 0) : recencyFilter === '24h' ? now - 86400e3 : recencyFilter === '7d' ? now - 7 * 86400e3 : now - 30 * 86400e3
+    const visibleRun = (run: RunInfo) => !hiddenRoots.has(run.parentRun ?? '') && !hiddenRoots.has(run.id.split('/')[0]) && (roleFilter === 'all' || run.role === roleFilter || !run.role) && (recencyFilter === 'all' || ms(run.startedAt) >= recencyCutoff)
+    const visibleRuns = model.runs.filter(visibleRun)
     const visibleRow = (row: KnowledgeRow) =>
       (bucketFilter === 'all' || stateBucket(row.state) === bucketFilter) &&
       (scopeFilter === 'all' || row.scopes.primary === scopeFilter) &&
@@ -244,7 +244,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       row.runs.some((run) => !hiddenRoots.has(run.split('/')[0])) &&
       row.strength >= strengthMin &&
       (recencyFilter === 'all' || ms(row.lastAt) >= recencyCutoff) &&
-      (!hasActivations || row.points.some((p) => ['recalled', 'injected', 'reused'].includes(p.kind))) &&
+      (!hasActivations || row.points.some((pt) => ['recalled', 'injected', 'reused'].includes(pt.kind))) &&
       (!crossScopeOnly || row.scopes.secondary.length > 0) &&
       (terminalFilter === 'all' || (terminalFilter === 'alive' ? !row.terminal : !!row.terminal))
     const visibleRows = model.rows.filter(visibleRow)
