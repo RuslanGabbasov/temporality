@@ -939,7 +939,10 @@ body, #root, #main-content {
   gap: 0.75rem;
 }
 
-.onboarding-step h1,
+.onboarding-step h1 {
+  text-align: center;
+}
+
 .onboarding-step h2,
 .onboarding-step .cds--heading {
   font-size: 1.25rem;

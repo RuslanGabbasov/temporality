@@ -256,6 +256,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
             >
               <User size={14} />
               <span>{identity?.subject ?? 'User'}</span>
+              {identity?.role && <span style={{ fontSize: '0.65rem', color: 'var(--tm-muted)' }}>{identity.role}</span>}
               <span style={{ fontSize: '0.6rem', color: 'var(--tm-muted)' }}>{showUserMenu ? '▴' : '▾'}</span>
             </button>
             {showUserMenu && (
