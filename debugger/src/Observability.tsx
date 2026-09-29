@@ -25,7 +25,7 @@ type Tab = 'overview' | 'knowledge' | 'patterns'
 
 export default function Observability({ project }: { project: string }) {
   const initParams = new URLSearchParams(window.location.search)
-  const [tab, setTab] = useState<Tab>((['overview', 'knowledge', 'patterns'].includes(initParams.get('tab') as Tab) ? initParams.get('tab') : 'knowledge') as Tab)
+  const [tab, setTab] = useState<Tab>((['overview', 'knowledge', 'patterns'].includes(initParams.get('tab') as Tab) ? initParams.get('tab') : 'overview') as Tab)
   const [asOf, setAsOf] = useState(initParams.get('as_of') ?? '')
   const [compareAsOf, setCompareAsOf] = useState(initParams.get('compare') ?? '')
   const [knownAt, setKnownAt] = useState(initParams.get('known_at') ?? '')
@@ -206,15 +206,20 @@ export default function Observability({ project }: { project: string }) {
       {/* ═══════════ OVERVIEW TAB ═══════════ */}
       {tab === 'overview' && !loading && (
         <div>
-          {/* Health summary */}
+          {/* Health summary — clickable to Knowledge tab */}
           <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-            {[
-              { label: 'Total', count: health.total, color: 'var(--tm-text)' },
-              { label: 'Alive', count: health.alive, color: 'var(--tm-success)' },
-              { label: 'Stale', count: health.stale, color: 'var(--tm-amber)' },
-              { label: 'Invalidated', count: health.invalidated, color: 'var(--tm-danger)' },
-            ].map((s) => (
-              <Tile key={s.label} style={{ padding: '0.75rem 1.25rem', minWidth: '100px', textAlign: 'center' }}>
+            {([
+              { label: 'Total', count: health.total, color: 'var(--tm-text)', bucket: 'all' as const },
+              { label: 'Alive', count: health.alive, color: 'var(--tm-success)', bucket: 'active' as const },
+              { label: 'Stale', count: health.stale, color: 'var(--tm-amber)', bucket: 'stale' as const },
+              { label: 'Invalidated', count: health.invalidated, color: 'var(--tm-danger)', bucket: 'invalidated' as const },
+            ]).map((s) => (
+              <Tile
+                key={s.label}
+                className="workspace-tile"
+                onClick={() => { setTab('knowledge') }}
+                style={{ padding: '0.75rem 1.25rem', minWidth: '100px', textAlign: 'center', cursor: 'pointer' }}
+              >
                 <div style={{ fontSize: '1.5rem', fontWeight: 700, color: s.color }}>{s.count}</div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{s.label}</div>
               </Tile>
@@ -486,9 +491,9 @@ export default function Observability({ project }: { project: string }) {
                   <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Knowledge Lifecycle</h5>
                   <Stack gap={1}>
                     {projection.knowledge_lifecycle.map((k: any, i: number) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', padding: '0.3rem 0', borderBottom: '1px solid #1a2332' }}>
-                        <Tag type={k.is_alive ? 'green' : 'red'} size="sm">{k.current_state}</Tag>
-                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k.proposition || k.knowledge_id}</span>
+                      <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8rem', padding: '0.4rem 0', borderBottom: '1px solid #1a2332' }}>
+                        <Tag type={k.is_alive ? 'green' : 'red'} size="sm" style={{ flexShrink: 0 }}>{k.current_state}</Tag>
+                        <span style={{ flex: 1, wordBreak: 'break-word' }}>{k.proposition || k.knowledge_id}</span>
                         <span style={{ color: 'var(--tm-text-3)', flexShrink: 0 }}>{k.run_count} runs</span>
                       </div>
                     ))}
