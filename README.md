@@ -1,34 +1,43 @@
 # Temporality
 
-Temporality — это опыт и память для программных агентов. Любой harness
-отправляет события о том, что агент делал и наблюдал; Temporality хранит
-их как append-only журнал, проектирует из них знания с полным жизненным
-циклом (proposed → confirmed → reused → contradicted → invalidated) и
-возвращает подсказки, которые агент использует в следующих запусках.
-Experience Timeline показывает, как память агента рождалась,
-активировалась, конфликтовала и умирала во времени.
+Temporality — система наблюдаемости и накопления опыта для ИИ-агентов.
+
+Агент выполняет задачу; Temporality фиксирует, что он знал и делал, откуда
+взялись эти знания, как они применялись, что подтвердилось или оказалось
+ложным, и как опыт менялся со временем. При новом запуске система
+подсказывает релевантный прошлый опыт в компактном виде, не перегружая
+контекст; при необходимости агент может обратиться к исходным данным.
 
 ```text
 Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge / Hints
-     ▲                      │                        │
+     ▲                      │                         │
      └──────── hints ◀──────┴──── Experience Timeline ┘
 ```
 
-Состав репозитория:
+## Состав
 
-| Компонент | Путь | Что делает |
+| Компонент | Путь | Назначение |
 |---|---|---|
-| Observation Journal | `observation/`, `cmd/temporality-journal` | append-only события, knowledge-проекция, hint retrieval, bitemporal запросы (`as_of`/`known_at`) |
-| Agent Kernel | `kernel/`, `cmd/agent-kernel` | durable agent harness на Temporal: model gateway, MCP, sandbox, approvals, delegation, публикация событий в journal |
-| Experience Timeline | `debugger/` | UI: `/experience` (таймлайн жизни памяти), `/agents` (запуски kernel и approvals), `/observability` (knowledge и инвалидации) |
+| Journal | `observation/`, `cmd/temporality-journal` | append-only события, knowledge-проекция, hint retrieval, bitemporal запросы |
+| Agent Kernel | `kernel/`, `cmd/agent-kernel` | durable agent harness на Temporal: model gateway, MCP, sandbox, approvals, delegation |
+| Workspace | `debugger/src/Workspace.tsx` | чат с агентом: SSE streaming, reasoning, conversations, branching |
+| Debugger | `debugger/` | UI для наблюдения и анализа опыта агента |
+| Control Plane | `controlplane/` | auth/RBAC, bearer-токены, project-scoping |
 
-Схема события: [`schemas/temporality.event.v1.schema.json`](schemas/temporality.event.v1.schema.json).
-Контракты и модели: [`docs/temporality-contract.md`](docs/temporality-contract.md),
-[`docs/knowledge-model.md`](docs/knowledge-model.md), [`docs/event-model.md`](docs/event-model.md),
-[`docs/architecture.md`](docs/architecture.md). Инвентаризация продукта и
-направление развития: [`docs/product-architecture.md`](docs/product-architecture.md).
+### Страницы UI
 
-## Запуск полного стека
+| Путь | Назначение |
+|---|---|
+| `/workspace` | Чат с агентом — SSE streaming, reasoning, Markdown, conversations |
+| `/agent-config` | Управление агентами — CRUD, шаблоны, полная конфигурация |
+| `/agents` | Traces запусков — timeline событий, trajectory extraction |
+| `/operations` | Uncertain operations — batch reconcile, verdict buttons |
+| `/observability` | Knowledge — lifecycle, activation chains, patterns, projection |
+| `/experience` | Experience Timeline — memory lens, semantic zoom, forensics |
+| `/providers` | Model providers — OpenAI-compatible endpoints |
+| `/users` | Users — RBAC, tokens, project access |
+
+## Запуск
 
 ```sh
 cp .env.example .env   # настроить TEMPORALITY_MODEL_* и опционально sandbox
@@ -38,40 +47,30 @@ docker compose up --build -d
 Поднимаются: PostgreSQL, Journal (`:8080`), debugger (`:3000`), Temporal
 dev server (UI на `:8233`) и Agent Kernel (`:8090`).
 
-- Experience Timeline — [http://localhost:3000/experience](http://localhost:3000/experience)
-- Agent runs и approvals — [http://localhost:3000/agents](http://localhost:3000/agents)
-- Knowledge observability — [http://localhost:3000/observability](http://localhost:3000/observability)
-
-Остановить приложение, сохранив данные PostgreSQL:
+Остановить, сохранив данные:
 
 ```sh
 make stack-stop
 ```
 
-## Настройка модели (OpenAI-compatible)
+## Настройка модели
 
 Kernel вызывает провайдера через OpenAI-compatible Chat Completions API.
-Переменные в `.env`:
 
-- `TEMPORALITY_MODEL_BASE_URL` — корень API, обычно с суффиксом `/v1`;
-- `TEMPORALITY_MODEL_ID` — идентификатор модели у провайдера;
-- `TEMPORALITY_MODEL_API_KEY` — ключ (пустой для Ollama; ключ никогда не
-  возвращается в provenance);
-- `TEMPORALITY_MODEL_TEMPERATURE` — `0..2`, по умолчанию `0`;
-- `TEMPORALITY_MODEL_TIMEOUT` — Go duration, по умолчанию `180s`;
-- `TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS` — `64..65536`, по умолчанию
-  `1024`. Для reasoning-моделей CoT считается в том же бюджете — ставьте
-  с запасом (например `16384`), иначе ответ может остаться пустым с
-  `finish_reason=length`;
-- `TEMPORALITY_MODEL_REASONING` — `off` / `exclude` / `low` / `medium` /
-  `high`; пусто — поле не отправляется. У моделей, которые рассуждают
-  всегда (DeepSeek-R1 и т.п.), ризонинг выключить нельзя — выберите
-  неризонинг-вариант;
-- `TEMPORALITY_MODEL_LOG_PAYLOADS` — opt-in логирование JSON-запросов и
-  ответов (по умолчанию `false`); `TEMPORALITY_MODEL_LOG_MAX_BYTES` —
-  лимит payload (по умолчанию `65536`).
+| Переменная | Описание | По умолчанию |
+|---|---|---|
+| `TEMPORALITY_MODEL_BASE_URL` | Корень API (с `/v1`) | — |
+| `TEMPORALITY_MODEL_ID` | ID модели у провайдера | — |
+| `TEMPORALITY_MODEL_API_KEY` | Ключ (пустой для Ollama) | — |
+| `TEMPORALITY_MODEL_TEMPERATURE` | `0..2` | `0` |
+| `TEMPORALITY_MODEL_TIMEOUT` | Go duration | `180s` |
+| `TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS` | `64..65536` | `1024` |
+| `TEMPORALITY_MODEL_REASONING` | `off` / `exclude` / `low` / `medium` / `high` | — |
 
-Примеры провайдеров:
+Для reasoning-моделей ставьте `MAX_OUTPUT_TOKENS` с запасом (например
+`16384`), иначе ответ может быть пустым с `finish_reason=length`.
+
+Примеры:
 
 ```dotenv
 # OpenAI
@@ -84,206 +83,125 @@ TEMPORALITY_MODEL_BASE_URL=https://openrouter.ai/api/v1
 TEMPORALITY_MODEL_ID=openai/gpt-4.1-mini
 TEMPORALITY_MODEL_API_KEY=your-openrouter-key
 
-# Локальный Ollama (из compose-контейнера)
+# Локальный Ollama
 TEMPORALITY_MODEL_BASE_URL=http://host.docker.internal:11434/v1
 TEMPORALITY_MODEL_ID=llama3.2
 TEMPORALITY_MODEL_API_KEY=
 ```
 
-После изменения `.env` пересоздайте стек: `docker compose up --build -d`.
+## Auth
 
-## Auth (bearer-токены)
+Bearer-токены с RBAC и project-scoping. Пустые переменные = auth выключен
+(только для локальной разработки).
 
-Journal и Agent Kernel поддерживают bearer-токены с RBAC и project-scoping
-(минимум enterprise control plane). Пустые переменные = auth выключен
-(только для локальной разработки; при старте печатается предупреждение).
-
-Формат записи: `token:subject:role:projects`, записи разделяются `;` или
-переносами строк. Роли: `reader < writer < operator < admin`. Projects —
-`*` или список через запятую. Токены: `openssl rand -hex 24`.
+Формат: `token:subject:role:projects`, записи через `;` или переносы строк.
+Роли: `reader < writer < operator < admin`. Projects — `*` или список через
+запятую. Токены: `openssl rand -hex 24`.
 
 ```sh
 # .env
-JOURNAL_AUTH_TOKENS=reader-token:alice:reader:*;writer-token:bob:writer:lighthouse;operator-token:carol:operator:*
-KERNEL_AUTH_TOKENS=reader-token:alice:reader:*;writer-token:bob:writer:lighthouse;operator-token:carol:operator:*
-TEMPORALITY_API_TOKEN=writer-token   # ядро → journal (ingest + hints)
+JOURNAL_AUTH_TOKENS=token1:alice:reader:*;token2:bob:writer:lighthouse
+KERNEL_AUTH_TOKENS=token1:alice:reader:*;token2:bob:writer:lighthouse
+TEMPORALITY_API_TOKEN=token2   # ядро → journal
 ```
-
-Права:
 
 | Слой | reader | writer | operator | admin |
 |---|---|---|---|---|
-| journal | чтение, hints | ingest событий | + invalidation | всё |
-| kernel | GET runs | POST runs | + approvals, outbox | всё |
+| journal | чтение, hints | ingest | + invalidation | всё |
+| kernel | GET runs | POST runs | + approvals, reconcile | всё |
 
-Листинг без фильтра проекта требует `*`-scope. `/healthz` открыт.
-В UI debugger токен вводится в поле в хедере любой страницы (хранится в
-localStorage, отправляется на journal и kernel).
-
-```sh
-curl -H 'Authorization: Bearer reader-token' 'http://localhost:8080/v1/observations/knowledge?project=repo-a'
-```
-
-## Journal API
-
-Приём событий (1–100 на batch; повторная доставка того же
-`(source.id, event_id)` с тем же содержимым — `repeated`, с другим —
-конфликт):
-
-```sh
-curl -X POST http://localhost:8080/v1/observations/events \
-  -H 'content-type: application/json' \
-  -d '{"events":[{
-    "schema":"temporality.event/1",
-    "event_id":"run-42-tool-1",
-    "occurred_at":"2026-09-24T10:00:00Z",
-    "source":{"id":"worker-1","integration":"example-harness","version":"1"},
-    "context":{"project":"repo-a","run":"run-42","task":"task-7","actor":{"id":"agent-a","type":"agent"}},
-    "type":"tool.completed",
-    "data":{"tool":"tests","status":"failed"}
-  }]}'
-
-curl 'http://localhost:8080/v1/observations/events?project=repo-a&run=run-42&limit=100'
-```
-
-Knowledge lifecycle: `knowledge.proposed` (с `data.knowledge_id` и
-`data.proposition`), затем `knowledge.used` / `confirmed` / `challenged` /
-`corrected` / `superseded` / `invalidated` / `disproved` с тем же ID и
-evidence-ссылками. Текущее состояние и история — проекция из событий:
-
-```sh
-curl 'http://localhost:8080/v1/observations/knowledge?project=repo-a'
-# bitemporal восстановление состояния
-curl 'http://localhost:8080/v1/observations/knowledge?project=repo-a&as_of=2026-09-24T10:00:00Z&known_at=2026-09-24T10:01:00Z&knowledge_id=claim-42'
-
-curl -X POST http://localhost:8080/v1/observations/knowledge/invalidate \
-  -H 'content-type: application/json' \
-  -d '{"knowledge_id":"claim-42","project":"repo-a","actor":{"id":"reviewer-1","type":"human"},"reason":"A later test disproved this claim","evidence":[{"ref":"test-run-918","type":"execution"}]}'
-```
-
-Подсказки после tool-результата (детерминированный lexical/entity/topic
-матчинг; corrected/superseded/invalidated знания исключаются,
-возвращается `context_block` для модели):
-
-```sh
-curl -X POST http://localhost:8080/v1/observations/hints \
-  -H 'content-type: application/json' \
-  -d '{"project":"repo-a","run":"run-42","query":"login returns 401 with PAT","tool":"test-runner","tool_result":"authentication test failed with status 401","limit":8}'
-```
-
-Harness может затем сообщать `hint.used` / `hint.ignored` /
-`hint.outcome` с `data.hint_id` — projection считает offer/use/outcome.
-
-Клиенты без зависимостей: [`examples/python/temporality_client.py`](examples/python/temporality_client.py),
-[`examples/javascript/temporality.mjs`](examples/javascript/temporality.mjs).
+В UI токен вводится через Login в хедере (хранится в localStorage).
 
 ## Agent Kernel
 
-Durable Temporal workflow: OpenAI-compatible model calls, approvals,
-`remember` knowledge proposals, автоматический capture наблюдений
-успешных verification/build команд (project-stable identity — первой
-успешный запуск предлагает знание, повторные подтверждают/reuse),
-at-least-once outbox в journal, опциональный MCP stdio adapter и Docker
-command sandbox.
+Durable Temporal workflow: model calls, approvals, `remember` proposals,
+auto-capture verification observations, at-least-once outbox, MCP stdio
+adapter, Docker command sandbox.
 
-Запуск вне compose (нужны запущенные postgres, journal и Temporal dev
-server):
+### Sandbox
 
-```sh
-DATABASE_URL='postgres://temporality:temporality@localhost:5432/temporality?sslmode=disable' \
-TEMPORALITY_URL=http://localhost:8080 \
-TEMPORAL_ADDRESS=localhost:7233 \
-TEMPORALITY_MODEL_BASE_URL=... TEMPORALITY_MODEL_ID=... TEMPORALITY_MODEL_API_KEY=... \
-make kernel-run
-```
+`KERNEL_SANDBOX_ROOT` + `KERNEL_SANDBOX_IMAGE` — изолированный контейнер
+для `run_command`: no network (или `bridge` если `network_access: true`),
+read-only root, dropped capabilities, resource limits, bounded output.
 
-Запуск и статус:
+### MCP
 
-```sh
-curl -X POST http://localhost:8090/v1/agent/runs \
-  -H 'content-type: application/json' \
-  -d '{"run_id":"demo-1","project":"repo-a","task_id":"hello","prompt":"Say hello and explain what you can do."}'
-curl 'http://localhost:8090/v1/agent/runs/demo-1?project=repo-a'
-```
-
-MCP: `KERNEL_MCP_COMMAND`, `KERNEL_MCP_ARGS` (JSON array),
-`KERNEL_MCP_ALLOW` (список tools), `KERNEL_MCP_APPROVAL` (subset,
-требующий human approval). Sandbox: `KERNEL_SANDBOX_ROOT` +
-`KERNEL_SANDBOX_IMAGE` (`name@sha256:...`, `--pull=never`), после чего
-запросы с абсолютным `workspace_path` получают approval-gated
-`run_command` (no network, read-only root, dropped capabilities,
-resource limits, bounded output). Approval waits — 1 час по умолчанию
-(`approval_timeout_seconds`, максимум 24h).
-
-Lead → Coder → Reviewer → QA пример — [`examples/lead_coder_reviewer_qa`](examples/lead_coder_reviewer_qa),
-в compose включён build-тегом `agent_examples`.
+`KERNEL_MCP_COMMAND`, `KERNEL_MCP_ARGS` (JSON array), `KERNEL_MCP_ALLOW`
+(tools list), `KERNEL_MCP_APPROVAL` (subset requiring human approval).
 
 ### Failure reconciliation
 
-`tool.failed` несёт семантику эффекта: `effect=none` (отказ до исполнения —
-безопасно повторять) vs `effect=uncertain` (сбой на/после границы
-исполнения). Неурегулированные операции проецируются из event stream
-по запросу:
+`tool.failed` несёт семантику эффекта: `effect=none` (отказ до исполнения)
+vs `effect=uncertain` (сбой на границе исполнения). Read-only tools
+(read_file, search, grep) автоматически получают `effect=none`.
+
+Неурегулированные операции видны на `/operations` с batch reconcile.
 
 ```sh
-curl 'http://localhost:8090/v1/agent/operations?project=repo-a' \
-  -H "Authorization: Bearer $READER_TOKEN"
+curl 'http://localhost:8090/v1/agent/operations?project=repo-a' -H "Authorization: Bearer $TOKEN"
 curl -X POST http://localhost:8090/v1/agent/operations/reconcile \
-  -H "Authorization: Bearer $OPERATOR_TOKEN" -H 'content-type: application/json' \
-  -d '{"project":"repo-a","run_id":"demo-1","operation_id":"...","effect":"occurred","note":"verified downstream","actor_id":"ops","started_event_id":"..."}'
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"project":"repo-a","run_id":"...","operation_id":"...","effect":"occurred","note":"verified","actor_id":"ops","started_event_id":"..."}'
 ```
 
-`effect` — закрытый словарь `none|occurred|unknown`; записанный вердикт
-сеттлит операцию (производный `operation.reconciled` с `parent_event_id`
-на `tool.started`). Операции с неурегулированным эффектом видны и
-реконсайлятся из UI: экран **Operations** (`/operations`) в debugger,
-форма записи вердикта доступна токенам с ролью operator. Live-drill:
-`KERNEL_FAULT_AFTER_EFFECT=<operation-id
-или tool-name>` — эффект реально выполняется, после чего воркер
-«падает», и операция честно попадает в listing как uncertain
-(см. [`docs/failure-reconciliation.md`](docs/failure-reconciliation.md)).
+## Trajectory & Experience
 
-## Control plane
+Trajectory extraction строит из event stream структурированные данные:
+turns, tool calls, knowledge events, repeating patterns. Experience
+projection агрегирует trajectories across runs: tool patterns, knowledge
+lifecycle, scopes, success rates.
 
-Auth/RBAC: bearer-токены `token:subject:role:projects` (reader < writer <
-operator < admin), project-scoping на journal и kernel API
-(`JOURNAL_AUTH_TOKENS` / `KERNEL_AUTH_TOKENS`).
+| Endpoint | Описание |
+|---|---|
+| `GET /v1/workspace/runs/{id}/trajectory` | Пер-run extraction |
+| `GET /v1/workspace/projects/{id}/projection` | Cross-run aggregation |
+| `GET /v1/workspace/runs/compare?a=X&b=Y` | Side-by-side diff |
+| `GET /v1/workspace/runs/{id}/artifacts` | Reusable tool sequences |
+| `GET /v1/workspace/knowledge/{id}/chain` | Activation chain |
+| `GET /v1/workspace/projects/{id}/chains` | All chains |
+| `GET /v1/workspace/runs/{id}/stream` | SSE event stream |
+| `GET /v1/workspace/runs/{id}/stream` | + model.text_delta, model.reasoning |
 
-Квоты (kernel): `KERNEL_RUN_QUOTAS="*:50,forge:200"` — лимит запусков
-агентов в UTC-день на проект; `*` задаёт дефолт, отсутствие записи —
-безлимит. Слот расходуется только на валидно принятый запуск (422/422-класс
-ошибок квоту не жгут), превышение — 429 с `Retry-After` и телом
-`{quota: {allowed, limit, used, reset_at}}`. Текущее использование:
+## Workspace
 
-```sh
-curl 'http://localhost:8090/v1/agent/quotas?project=repo-a' \
-  -H "Authorization: Bearer $READER_TOKEN"
-```
+Чат с агентом через SSE streaming. Каждое сообщение → task + run.
+Follow-up messages reuse the same task (PATCH prompt). Conversation
+history передаётся как context. Agent selector при создании чата.
+Branching — форк из любой точки.
 
-Секреты: конвенция `<VAR>_FILE` — если переменная не задана напрямую, а
-`<VAR>_FILE` указывает на файл, значение берётся из файла (без хвостового
-переноса строки). Поддержаны `DATABASE_URL`,
-`TEMPORALITY_MODEL_API_KEY`, `TEMPORALITY_API_TOKEN`,
-`KERNEL_AUTH_TOKENS` (kernel) и `JOURNAL_AUTH_TOKENS` (journal) — так
-docker compose secrets подключаются без попадания ключей в окружение.
-Прямое env-значение всегда приоритетнее файла.
+Features:
+- SSE streaming: model.text_delta, model.reasoning, tool events
+- Markdown rendering для ответов
+- Reasoning/thinking block (collapsible)
+- Conversation persistence (localStorage)
+- Agent templates (Coder, Reviewer, Researcher, DevOps)
+- Project settings (default agent, default model)
+
+## Control Plane
+
+- **Auth**: bearer-токены `token:subject:role:projects`
+- **Quotas**: `KERNEL_RUN_QUOTAS="*:50,project:200"` — лимит запусков/день
+- **Secrets**: конвенция `<VAR>_FILE` — значение берётся из файла
+- **Providers**: OpenAI-compatible model endpoints, API key masking
+- **Users**: CRUD with token generation, RBAC roles
 
 ## Experience Timeline
 
-Главный экран — `/experience`: runs по горизонтали, knowledge-полосы по
-временени с lifecycle-событиями (appeared/recalled/injected/reused/
-validated/contradicted/invalidated), lens-режимы (trajectory /
-experience / lifecycle / conflicts / activation), semantic zoom
-cluster → knowledge → episode, forensic-панель с evidence и lineage.
-Первые acceptance-корпуса — эксперименты 4–8
-([`docs/experiment4-rejected-path.md`](docs/experiment4-rejected-path.md) …
-[`docs/experiment8-long-horizon-evolution.md`](docs/experiment8-long-horizon-evolution.md)),
-фикстуры в `debugger/src/fixtures`.
+`/experience` — визуализация жизни памяти агента:
+
+- **Runs** по горизонтали, **knowledge-полосы** по вертикали
+- **Lifecycle**: appeared → recalled → injected → reused → validated → contradicted → invalidated
+- **Memory Lens filters**: strength, recency, activated, cross-scope, terminal state
+- **Semantic zoom**: scope lanes → knowledge rows → episode detail
+- **Forensic panel**: formation evidence, activation chain, lineage
+- **Conflicts lens**: supersession arrows (K82 → K73)
+- **Population lane**: active memory count over time
+- **Shareable URLs**: full investigation state in URL
 
 ## Разработка
 
 ```sh
-make fmt          # gofmt cmd kernel observation examples
+make fmt          # gofmt
 make test         # go test ./...
 make race         # go test -race ./...
 make build        # bin/temporality-journal + bin/temporality-agent-kernel
@@ -294,8 +212,17 @@ make debugger-build
 Debugger dev-сервер (`npm --prefix debugger run dev`) проксирует `/api`
 на `localhost:8080` (journal) и `/kernel-api` на `localhost:8090`.
 
+## Схемы и контракты
+
+- Схема события: [`schemas/temporality.event.v1.schema.json`](schemas/temporality.event.v1.schema.json)
+- Контракты: [`docs/temporality-contract.md`](docs/temporality-contract.md)
+- Knowledge model: [`docs/knowledge-model.md`](docs/knowledge-model.md)
+- Event model: [`docs/event-model.md`](docs/event-model.md)
+- Architecture: [`docs/architecture.md`](docs/architecture.md)
+- Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+
 ## История
 
-Репозиторий прошёл три эпохи гипотез: FRP cognitive runtime (эпоха 1),
-AML benchmark harness (эпоха 2), Agent Kernel + Temporality journal
-(продукт). Документы эпох и старые бенчмарки — в [`docs/history/`](docs/history/).
+Репозиторий прошёл три эпохи: FRP cognitive runtime (эпоха 1), AML
+benchmark harness (эпоха 2), Agent Kernel + Temporality journal (продукт).
+Документы эпох — в [`docs/history/`](docs/history/).
