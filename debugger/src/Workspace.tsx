@@ -516,7 +516,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                           {msg.runId && (
                             <button
                               onClick={() => cancelRun(msg.runId!)}
-                              style={{ background: 'none', border: '1px solid var(--tm-danger)', borderRadius: '4px', color: 'var(--tm-danger)', cursor: 'pointer', fontSize: '0.65rem', padding: '0.1rem 0.4rem', marginLeft: '0.25rem' }}
+                              style={{ background: 'none', border: '1px solid var(--tm-danger)', borderRadius: '4px', color: 'var(--tm-danger)', cursor: 'pointer', fontSize: '0.65rem', padding: '0.1rem 0.4rem', marginLeft: 'auto' }}
                               title="Cancel this run"
                             >Stop</button>
                           )}
@@ -530,7 +530,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                         {activeConv && (
                           <button
                             onClick={() => branchConversation(activeConv.id, i)}
-                            style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
+                            style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem', marginLeft: 'auto' }}
                             title="Branch conversation from this point"
                           >Branch</button>
                         )}
