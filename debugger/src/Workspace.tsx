@@ -470,7 +470,7 @@ export default function Workspace({ project }: { project: string }) {
                 <div key={i} style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div style={{
                     maxWidth: '80%', padding: '0.75rem 1rem', borderRadius: '8px',
-                    background: msg.role === 'user' ? 'var(--tm-teal)' : 'var(--tm-surface)',
+                    background: msg.role === 'user' ? 'var(--tm-teal)' : 'var(--cds-layer)',
                     color: msg.role === 'user' ? 'var(--tm-cream)' : 'var(--tm-text)',
                     border: msg.role === 'user' ? 'none' : '1px solid var(--tm-border)',
                   }}>
