@@ -76,6 +76,41 @@ body, #root, #main-content {
   font-size: var(--tm-text-md);
 }
 
+// Override Carbon layer tokens to match dark forest theme
+:root {
+  --cds-layer: var(--tm-surface);
+  --cds-layer-active: var(--tm-elevated);
+  --cds-layer-hover: var(--tm-elevated);
+  --cds-ui-background: var(--tm-bg);
+  --cds-ui-01: var(--tm-surface);
+  --cds-ui-02: var(--tm-elevated);
+  --cds-ui-03: var(--tm-forest);
+  --cds-ui-04: var(--tm-border);
+  --cds-ui-05: var(--tm-border);
+  --cds-text-01: var(--tm-text);
+  --cds-text-02: var(--tm-text-2);
+  --cds-text-03: var(--tm-text-3);
+  --cds-text-04: var(--tm-text-3);
+  --cds-text-error: var(--tm-danger);
+  --cds-text-helper: var(--tm-text-3);
+  --cds-text-on-color: var(--tm-cream);
+  --cds-text-placeholder: var(--tm-text-3);
+  --cds-interactive-01: var(--tm-forest);
+  --cds-interactive-02: var(--tm-border);
+  --cds-interactive-03: var(--tm-teal);
+  --cds-interactive-04: var(--tm-amber);
+  --cds-border-01: var(--tm-border);
+  --cds-border-02: var(--tm-border);
+  --cds-border-03: var(--tm-border);
+  --cds-border-subtle: var(--tm-border);
+  --cds-border-strong: var(--tm-teal);
+  --cds-support-01: var(--tm-danger);
+  --cds-support-02: var(--tm-success);
+  --cds-support-03: var(--tm-warning);
+  --cds-support-04: var(--tm-info);
+  --cds-highlight: var(--tm-amber);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Carbon component overrides — dark forest theme
 // ═══════════════════════════════════════════════════════════════
@@ -89,6 +124,80 @@ body, #root, #main-content {
 // Non-workspace pages get standard padding
 .cds--content > *:not(.workspace-root) {
   padding: 1rem;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Buttons — forest green primary, teal secondary
+// ═══════════════════════════════════════════════════════════════
+
+.cds--btn--primary {
+  background-color: var(--tm-forest) !important;
+  border-color: var(--tm-forest) !important;
+  color: var(--tm-cream) !important;
+}
+
+.cds--btn--primary:hover {
+  background-color: var(--tm-teal) !important;
+  border-color: var(--tm-teal) !important;
+}
+
+.cds--btn--secondary {
+  background-color: transparent !important;
+  border-color: var(--tm-border) !important;
+  color: var(--tm-text) !important;
+}
+
+.cds--btn--secondary:hover {
+  border-color: var(--tm-teal) !important;
+  color: var(--tm-teal) !important;
+}
+
+.cds--btn--ghost {
+  background-color: transparent !important;
+  color: var(--tm-text-2) !important;
+}
+
+.cds--btn--ghost:hover {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  color: var(--tm-text) !important;
+}
+
+.cds--btn--danger {
+  background-color: var(--tm-danger) !important;
+  border-color: var(--tm-danger) !important;
+  color: var(--tm-cream) !important;
+}
+
+.cds--btn--danger--ghost {
+  color: var(--tm-danger) !important;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Tags
+// ═══════════════════════════════════════════════════════════════
+
+.cds--tag--blue { background-color: var(--tm-teal) !important; color: var(--tm-cream) !important; }
+.cds--tag--green { background-color: var(--tm-success) !important; color: var(--tm-cream) !important; }
+.cds--tag--red { background-color: var(--tm-danger) !important; color: var(--tm-cream) !important; }
+.cds--tag--warm-gray { background-color: var(--tm-amber) !important; color: var(--tm-ink) !important; }
+.cds--tag--cyan { background-color: var(--tm-teal) !important; color: var(--tm-cream) !important; }
+.cds--tag--gray { background-color: var(--tm-border) !important; color: var(--tm-text) !important; }
+
+// ═══════════════════════════════════════════════════════════════
+// Notifications
+// ═══════════════════════════════════════════════════════════════
+
+.cds--inline-notification--info { background-color: rgba(42, 107, 99, 0.15) !important; border-color: var(--tm-teal) !important; }
+.cds--inline-notification--error { background-color: rgba(185, 107, 97, 0.15) !important; border-color: var(--tm-danger) !important; }
+.cds--inline-notification--success { background-color: rgba(94, 136, 122, 0.15) !important; border-color: var(--tm-success) !important; }
+.cds--inline-notification--warning { background-color: rgba(224, 155, 90, 0.15) !important; border-color: var(--tm-amber) !important; }
+
+// ═══════════════════════════════════════════════════════════════
+// Toggle
+// ═══════════════════════════════════════════════════════════════
+
+.cds--toggle-input:checked + .cds--toggle-input__label > .cds--toggle__switch {
+  background-color: var(--tm-teal) !important;
 }
 
 // Inputs
