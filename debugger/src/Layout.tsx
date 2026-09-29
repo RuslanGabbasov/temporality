@@ -192,6 +192,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
     <Theme theme="g100">
       <Header aria-label="Temporality">
         <HeaderName href="/experience" prefix="" onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate('/experience') }}>
+          <img src="/temporality.svg" alt="" style={{ height: '20px', width: 'auto', marginRight: '0.5rem', verticalAlign: 'middle' }} />
           Temporality
         </HeaderName>
 
@@ -232,14 +233,15 @@ export default function Layout({ children, activePage }: LayoutProps) {
               style={{
                 display: 'flex', alignItems: 'center', gap: '0.4rem',
                 background: showProjectPanel ? 'rgba(255,255,255,0.08)' : 'transparent',
-                border: '1px solid #344258', borderRadius: '4px',
+                border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-sm)',
                 padding: '0.3rem 0.6rem', cursor: 'pointer',
-                color: '#e5e9f0', fontSize: '0.8rem',
+                color: 'var(--tm-text)', fontSize: 'var(--tm-text-sm)',
+                fontFamily: 'var(--tm-font)',
               }}
             >
-              <Folder size={14} style={{ color: '#57d7e8' }} />
+              <Folder size={14} style={{ color: 'var(--tm-teal)' }} />
               <span>{project}</span>
-              <span style={{ fontSize: '0.6rem', color: '#7e8a9c' }}>{showProjectPanel ? '▴' : '▾'}</span>
+              <span style={{ fontSize: '0.6rem', color: 'var(--tm-muted)' }}>{showProjectPanel ? '▴' : '▾'}</span>
             </button>
             {showProjectPanel && (
               <HeaderPanel expanded>
