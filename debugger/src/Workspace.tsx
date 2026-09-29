@@ -29,6 +29,7 @@ const STATUS_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'r
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  reasoning?: string
   timestamp: Date
   runId?: string
   status?: string
@@ -238,6 +239,25 @@ export default function Workspace({ project }: { project: string }) {
       } catch { /* ignore */ }
     })
 
+    // model.reasoning carries the model's thinking/reasoning text
+    es.addEventListener('model.reasoning', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const text = d.text ?? ''
+        if (text) {
+          setConversations((prev) => prev.map((c) => {
+            if (c.id !== convId) return c
+            return { ...c, messages: c.messages.map((m) => {
+              if (m.runId !== runId) return m
+              if (m.status && m.status !== 'running') return m
+              return { ...m, reasoning: text }
+            })}
+          }))
+        }
+      } catch { /* ignore */ }
+    })
+
     // agent.summary arrives via SSE but the answer in observation_events
     // loses newlines (JSONB storage). Always fetch the real answer from REST.
     es.addEventListener('agent.summary', (e) => {
@@ -422,6 +442,18 @@ export default function Workspace({ project }: { project: string }) {
                     color: msg.role === 'user' ? '#080b10' : '#e5e9f0',
                     border: msg.role === 'user' ? 'none' : '1px solid #344258',
                   }}>
+                    {/* Reasoning/thinking block — collapsible */}
+                    {msg.reasoning && (
+                      <details style={{ marginBottom: '0.5rem', borderRadius: '4px', border: '1px solid #344258', background: '#0b1016' }}>
+                        <summary style={{ padding: '0.4rem 0.6rem', cursor: 'pointer', fontSize: '0.75rem', color: '#7e8a9c', fontWeight: 600, letterSpacing: '0.03em' }}>
+                          💭 Thinking
+                        </summary>
+                        <div style={{ padding: '0.5rem 0.6rem', fontSize: '0.78rem', color: '#9d7cd8', lineHeight: 1.5, whiteSpace: 'pre-wrap', borderTop: '1px solid #202a38' }}>
+                          {msg.reasoning}
+                        </div>
+                      </details>
+                    )}
+
                     {msg.content && msg.role === 'assistant' && msg.status && msg.status !== 'running' ? (
                       <Markdown content={msg.content} />
                     ) : msg.content ? (

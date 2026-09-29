@@ -204,6 +204,16 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				return result, err
 			}
 		}
+		// Emit reasoning content if the model provided it.
+		if completion.Reasoning != "" {
+			truncated := completion.Reasoning
+			if len(truncated) > 4096 {
+				truncated = truncated[:4096]
+			}
+			if err := emit(activityCtx, state, "model.reasoning", map[string]any{"turn": turn, "text": truncated}); err != nil {
+				return result, err
+			}
+		}
 		if len(completion.ToolCalls) == 0 {
 			result.Answer = completion.Content
 			result.Status = "completed"

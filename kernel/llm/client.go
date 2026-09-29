@@ -55,6 +55,7 @@ type ToolCall struct {
 // Completion is one assistant turn.
 type Completion struct {
 	Content   string
+	Reasoning string // model's reasoning/thinking text (reasoning_content)
 	ToolCalls []ToolCall
 	Usage     Usage
 	Finish    string
@@ -191,8 +192,9 @@ type chatRequest struct {
 type chatResponse struct {
 	Choices []struct {
 		Message struct {
-			Content   string         `json:"content"`
-			ToolCalls []toolCallWire `json:"tool_calls"`
+			Content          string         `json:"content"`
+			ReasoningContent string         `json:"reasoning_content"`
+			ToolCalls        []toolCallWire `json:"tool_calls"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -211,8 +213,9 @@ type chatResponse struct {
 type chatStreamChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content   string              `json:"content"`
-			ToolCalls []toolCallWireDelta `json:"tool_calls"`
+			Content          string              `json:"content"`
+			ReasoningContent string              `json:"reasoning_content"`
+			ToolCalls        []toolCallWireDelta `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -377,6 +380,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 64*1024), 64*1024)
 	var accumulated strings.Builder
+	var reasoning strings.Builder
 	toolCallAccum := make(map[int]*ToolCall)
 	var finish string
 	var usage Usage
@@ -417,6 +421,10 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 				stop = true
 			}
 		}
+		// Accumulate reasoning content
+		if choice.Delta.ReasoningContent != "" {
+			reasoning.WriteString(choice.Delta.ReasoningContent)
+		}
 		// Accumulate tool calls
 		for _, tc := range choice.Delta.ToolCalls {
 			existing, ok := toolCallAccum[tc.Index]
@@ -446,6 +454,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	// Build final completion
 	completion := Completion{
 		Content:    accumulated.String(),
+		Reasoning:  reasoning.String(),
 		Finish:     finish,
 		Provider:   c.providerHost,
 		LatencyMs:  time.Since(started).Milliseconds(),
@@ -532,7 +541,7 @@ func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {
 		return Completion{}, errors.New("provider returned no choices")
 	}
 	choice := decoded.Choices[0]
-	completion := Completion{Content: choice.Message.Content, Finish: choice.FinishReason}
+	completion := Completion{Content: choice.Message.Content, Reasoning: choice.Message.ReasoningContent, Finish: choice.FinishReason}
 	for _, call := range choice.Message.ToolCalls {
 		args := map[string]any{}
 		argsError := ""
