@@ -434,7 +434,7 @@ body, #root, #main-content {
 .workspace-root {
   display: flex;
   height: calc(100vh - 3rem);
-  background: var(--tm-bg);
+  background: var(--tm-surface);
   overflow: hidden;
 }
 

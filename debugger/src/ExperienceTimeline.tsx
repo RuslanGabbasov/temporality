@@ -559,7 +559,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             const acts = activity.get(run.id)
             return <g key={run.id} className={`run-lane ${selected === run.id ? 'selected' : ''}`}>
               <text x={8} y={yLane + 3} className="lane-label run-label">{shortRun(run.id)}{run.status ? ` · ${run.status}` : ''}</text>
-              <rect x={GUTTER} y={yLane - RUN_LANE / 2 + 3} width={track} height={RUN_LANE - 6} fill="#0b1016" rx={3} />
+              <rect x={GUTTER} y={yLane - RUN_LANE / 2 + 3} width={track} height={RUN_LANE - 6} fill="var(--tm-ink)" rx={3} />
               <rect x={Math.max(GUTTER, x0)} width={Math.max(2, Math.min(x1, GUTTER + track) - Math.max(GUTTER, x0))} y={yLane - RUN_LANE / 2 + 3} height={RUN_LANE - 6} fill={roleColor(run.role, index)} opacity={0.28} rx={3} />
               {acts?.tools.map((at, index) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <line key={`t${index}`} x1={px} x2={px} y1={yLane - 6} y2={yLane + 6} stroke={roleColor(run.role, index)} strokeWidth={1} opacity={0.55} /> : null })}
               {acts?.models.map((at, index) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <circle key={`m${index}`} cx={px} cy={yLane} r={1.8} fill="#e8e8e8" opacity={0.7} /> : null })}
@@ -645,7 +645,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                     const isFocus = focus?.eventId === point.eventId
                     return <g key={point.eventId}>
                       {isFocus && <circle cx={px} cy={yLane} r={8} className="point-focus-ring" />}
-                      <circle cx={px} cy={yLane} r={point.kind === 'appeared' ? 4.5 : 3.4} fill={hollow ? '#0b1016' : LIFECYCLE_COLORS[point.kind]} fillOpacity={point.kind === 'appeared' ? 0.25 : 0.95} stroke={LIFECYCLE_COLORS[point.kind]} strokeWidth={isFocus ? 2.4 : 1.4}>
+                      <circle cx={px} cy={yLane} r={point.kind === 'appeared' ? 4.5 : 3.4} fill={hollow ? 'var(--tm-ink)' : LIFECYCLE_COLORS[point.kind]} fillOpacity={point.kind === 'appeared' ? 0.25 : 0.95} stroke={LIFECYCLE_COLORS[point.kind]} strokeWidth={isFocus ? 2.4 : 1.4}>
                         <title>{`${point.kind} · ${point.at} · ${point.run ?? ''}${point.role ? ` (${point.role})` : ''}${point.rule ? ` · ${point.rule}` : ''}`}</title>
                       </circle>
                     </g>

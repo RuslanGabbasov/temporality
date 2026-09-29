@@ -476,7 +476,7 @@ export default function Workspace({ project }: { project: string }) {
                   }}>
                     {/* Reasoning/thinking block — collapsible */}
                     {msg.reasoning && (
-                      <details style={{ marginBottom: '0.5rem', borderRadius: '4px', border: '1px solid var(--tm-border)', background: '#0b1016' }}>
+                      <details style={{ marginBottom: '0.5rem', borderRadius: '4px', border: '1px solid var(--tm-border)', background: 'var(--tm-ink)' }}>
                         <summary style={{ padding: '0.4rem 0.6rem', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--tm-text-3)', fontWeight: 600, letterSpacing: '0.03em' }}>
                           💭 Thinking
                         </summary>
