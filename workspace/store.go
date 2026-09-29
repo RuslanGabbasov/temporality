@@ -451,6 +451,100 @@ func (s *Store) StreamRunEvents(ctx context.Context, projectID, runID, afterCurs
 	return events, lastID, rows.Err()
 }
 
+// Triggers
+
+func (s *Store) CreateTrigger(ctx context.Context, t *Trigger) error {
+	now := time.Now().UTC()
+	t.CreatedAt = now
+	t.UpdatedAt = now
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO workspace_trigger (id, project_id, agent_id, name, type, enabled, config, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		t.ID, t.ProjectID, nullString(t.AgentID), t.Name, t.Type, t.Enabled, t.Config, t.CreatedAt, t.UpdatedAt)
+	return err
+}
+
+func (s *Store) GetTrigger(ctx context.Context, id string) (Trigger, error) {
+	var t Trigger
+	var agentID *string
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, project_id, agent_id, name, type, enabled, config, created_at, updated_at
+		 FROM workspace_trigger WHERE id = $1`, id).
+		Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &t.CreatedAt, &t.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return t, ErrNotFound
+	}
+	t.AgentID = derefPtr(agentID)
+	return t, err
+}
+
+func (s *Store) ListTriggers(ctx context.Context, projectID string) ([]Trigger, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, project_id, agent_id, name, type, enabled, config, created_at, updated_at
+		 FROM workspace_trigger WHERE project_id = $1 ORDER BY created_at DESC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Trigger
+	for rows.Next() {
+		var t Trigger
+		var agentID *string
+		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		t.AgentID = derefPtr(agentID)
+		result = append(result, t)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) ListAllTriggers(ctx context.Context) ([]Trigger, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, project_id, agent_id, name, type, enabled, config, created_at, updated_at
+		 FROM workspace_trigger WHERE enabled = true ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Trigger
+	for rows.Next() {
+		var t Trigger
+		var agentID *string
+		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		t.AgentID = derefPtr(agentID)
+		result = append(result, t)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) UpdateTrigger(ctx context.Context, t Trigger) error {
+	t.UpdatedAt = time.Now().UTC()
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_trigger SET name=$2, agent_id=$3, type=$4, enabled=$5, config=$6, updated_at=$7 WHERE id=$1`,
+		t.ID, t.Name, nullString(t.AgentID), t.Type, t.Enabled, t.Config, t.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteTrigger(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM workspace_trigger WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ListAllProjects returns workspace projects merged with journal projects.
 func (s *Store) ListAllProjects(ctx context.Context) ([]Project, error) {
 	wp, err := s.ListProjects(ctx)

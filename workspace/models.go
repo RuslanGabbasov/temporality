@@ -1,6 +1,9 @@
 package workspace
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Project groups tasks and runs. Agents are top-level and reusable across projects.
 type Project struct {
@@ -69,6 +72,40 @@ type Run struct {
 	Error     string    `json:"error,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Trigger is a configurable mechanism to launch agent runs.
+type Trigger struct {
+	ID        string          `json:"id"`
+	ProjectID string          `json:"project_id"`
+	AgentID   string          `json:"agent_id,omitempty"`
+	Name      string          `json:"name"`
+	Type      string          `json:"type"` // schedule, webhook, event
+	Enabled   bool            `json:"enabled"`
+	Config    json.RawMessage `json:"config"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// ScheduleConfig is the config JSON for schedule triggers.
+type ScheduleConfig struct {
+	Cron     string `json:"cron"`
+	Prompt   string `json:"prompt"`
+	Timezone string `json:"timezone,omitempty"`
+}
+
+// WebhookConfig is the config JSON for webhook triggers.
+type WebhookConfig struct {
+	Path           string `json:"path"`
+	Secret         string `json:"secret,omitempty"`
+	PromptTemplate string `json:"prompt_template"`
+}
+
+// EventConfig is the config JSON for event triggers.
+type EventConfig struct {
+	EventType string            `json:"event_type"`
+	Filter    map[string]string `json:"filter,omitempty"`
+	Prompt    string            `json:"prompt"`
 }
 
 // Provider is an OpenAI-compatible model endpoint (e.g. z.ai, xiaomi).

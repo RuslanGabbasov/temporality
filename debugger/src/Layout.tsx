@@ -36,6 +36,7 @@ const NAV_ITEMS = [
   { path: '/observability', label: 'Knowledge' },
   { path: '/experience', label: 'Timeline' },
   { path: '/providers', label: 'Providers' },
+  { path: '/triggers', label: 'Triggers' },
   { path: '/users', label: 'Users' },
 ]
 

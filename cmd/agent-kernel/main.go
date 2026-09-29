@@ -1195,6 +1195,229 @@ func main() {
 		writeJSON(w, 200, map[string]any{"deleted": true})
 	})
 
+	// Triggers
+	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/triggers", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		triggers, err := ws.ListTriggers(r.Context(), r.PathValue("projectID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"triggers": triggers})
+	})
+	mux.HandleFunc("POST /v1/workspace/triggers", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req workspace.Trigger
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if req.ID == "" {
+			req.ID = slugify(req.Name) + "-" + time.Now().UTC().Format("20060102-150405")
+		}
+		if req.Type == "" || req.ProjectID == "" {
+			writeError(w, 422, errors.New("type and project_id are required"))
+			return
+		}
+		if err := ws.CreateTrigger(r.Context(), &req); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		writeJSON(w, 201, req)
+	})
+	mux.HandleFunc("GET /v1/workspace/triggers/{triggerID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		trigger, err := ws.GetTrigger(r.Context(), r.PathValue("triggerID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, trigger)
+	})
+	mux.HandleFunc("PUT /v1/workspace/triggers/{triggerID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req workspace.Trigger
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		req.ID = r.PathValue("triggerID")
+		if err := ws.UpdateTrigger(r.Context(), req); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, req)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/triggers/{triggerID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		if err := ws.DeleteTrigger(r.Context(), r.PathValue("triggerID")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+
+	// Webhook triggers: POST /v1/workspace/webhook/{projectID}/{path}
+	// Matches webhook triggers by projectID and config.path.
+	mux.HandleFunc("POST /v1/workspace/webhook/{projectID}/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		projectID := r.PathValue("projectID")
+		path := r.PathValue("path")
+		triggers, err := ws.ListTriggers(r.Context(), projectID)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		var matched *workspace.Trigger
+		for i, t := range triggers {
+			if t.Type == "webhook" && t.Enabled {
+				var cfg workspace.WebhookConfig
+				if json.Unmarshal(t.Config, &cfg) == nil && cfg.Path == path {
+					matched = &triggers[i]
+					break
+				}
+			}
+		}
+		if matched == nil {
+			writeError(w, 404, errors.New("no webhook trigger found for this path"))
+			return
+		}
+		var cfg workspace.WebhookConfig
+		_ = json.Unmarshal(matched.Config, &cfg)
+		// Build prompt from template + request body
+		var body map[string]any
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body)
+		prompt := cfg.PromptTemplate
+		for k, v := range body {
+			prompt = strings.ReplaceAll(prompt, "{{body."+k+"}}", fmt.Sprintf("%v", v))
+		}
+		// Create task and start run
+		taskID := "trigger-" + matched.ID + "-" + time.Now().UTC().Format("20060102-150405")
+		task := &workspace.Task{ID: taskID, ProjectID: projectID, AgentID: matched.AgentID, Title: "Webhook: " + matched.Name, Prompt: prompt}
+		if err := ws.CreateTask(r.Context(), task); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		input := agent.RunInput{RunID: taskID + "-" + time.Now().UTC().Format("150405"), Project: projectID, TaskID: taskID, Prompt: prompt}
+		if matched.AgentID != "" {
+			if a, aErr := ws.GetAgent(r.Context(), matched.AgentID); aErr == nil {
+				if a.Model != "" {
+					input.Model = a.Model
+				}
+				if a.SystemPrompt != "" {
+					input.SystemPrompt = a.SystemPrompt
+				}
+				if a.NetworkAccess != nil && *a.NetworkAccess {
+					input.NetworkAccess = true
+				}
+			}
+		}
+		if err := activities.PrepareRun(&input); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		input.ActorID = "webhook-" + matched.ID
+		workflowID := workflowIDFor(activities.SourceID, projectID, input.RunID)
+		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
+		run, wfErr := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
+		if wfErr != nil {
+			writeError(w, 409, wfErr)
+			return
+		}
+		wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: projectID, AgentID: matched.AgentID, RunID: input.RunID, Status: "started", Model: input.Model}
+		_ = ws.CreateRun(r.Context(), wsRun)
+		writeJSON(w, 202, map[string]string{"trigger_id": matched.ID, "run_id": input.RunID, "workflow_id": run.GetID()})
+	})
+
+	// Schedule trigger loop: polls all enabled schedule triggers every minute.
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		lastRun := map[string]time.Time{} // triggerID → last fire time
+		for range ticker.C {
+			triggers, err := ws.ListAllTriggers(context.Background())
+			if err != nil {
+				slog.Error("list triggers", "error", err)
+				continue
+			}
+			now := time.Now().UTC()
+			for _, t := range triggers {
+				if t.Type != "schedule" || !t.Enabled {
+					continue
+				}
+				var cfg workspace.ScheduleConfig
+				if err := json.Unmarshal(t.Config, &cfg); err != nil || cfg.Cron == "" || cfg.Prompt == "" {
+					continue
+				}
+				// Simple cron matching: check if current minute matches
+				if !cronMatches(cfg.Cron, now) {
+					continue
+				}
+				// Don't fire twice in the same minute
+				if last, ok := lastRun[t.ID]; ok && now.Sub(last) < 55*time.Second {
+					continue
+				}
+				lastRun[t.ID] = now
+				// Create task and start run
+				taskID := "trigger-" + t.ID + "-" + now.Format("20060102-150405")
+				task := &workspace.Task{ID: taskID, ProjectID: t.ProjectID, AgentID: t.AgentID, Title: "Scheduled: " + t.Name, Prompt: cfg.Prompt}
+				if err := ws.CreateTask(context.Background(), task); err != nil {
+					slog.Error("create trigger task", "trigger", t.ID, "error", err)
+					continue
+				}
+				input := agent.RunInput{RunID: taskID + "-" + now.Format("150405"), Project: t.ProjectID, TaskID: taskID, Prompt: cfg.Prompt}
+				if t.AgentID != "" {
+					if a, aErr := ws.GetAgent(context.Background(), t.AgentID); aErr == nil {
+						if a.Model != "" {
+							input.Model = a.Model
+						}
+						if a.SystemPrompt != "" {
+							input.SystemPrompt = a.SystemPrompt
+						}
+					}
+				}
+				if err := activities.PrepareRun(&input); err != nil {
+					slog.Error("prepare trigger run", "trigger", t.ID, "error", err)
+					continue
+				}
+				input.ActorID = "schedule-" + t.ID
+				workflowID := workflowIDFor(activities.SourceID, t.ProjectID, input.RunID)
+				options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
+				if _, wfErr := temporalClient.ExecuteWorkflow(context.Background(), options, "AgentRun", input); wfErr != nil {
+					slog.Error("start trigger run", "trigger", t.ID, "error", wfErr)
+					continue
+				}
+				wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: t.ProjectID, AgentID: t.AgentID, RunID: input.RunID, Status: "started", Model: input.Model}
+				_ = ws.CreateRun(context.Background(), wsRun)
+				slog.Info("scheduled trigger fired", "trigger", t.ID, "name", t.Name, "run", input.RunID)
+			}
+		}
+	}()
+
 	// Users
 	mux.HandleFunc("GET /v1/workspace/users", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
@@ -1359,6 +1582,72 @@ func requiredEnv(name string) string {
 		panic(name + " is required")
 	}
 	return value
+}
+
+// cronMatches does a simple cron field check. Supports:
+//
+//	"* * * * *" — every minute
+//	"0 9 * * 1-5" — weekdays at 9:00
+//	"*/5 * * * *" — every 5 minutes
+//
+// Format: minute hour dayOfMonth month dayOfWeek (standard 5-field cron).
+func cronMatches(expr string, t time.Time) bool {
+	fields := strings.Fields(expr)
+	if len(fields) != 5 {
+		return false
+	}
+	checks := []struct {
+		value  int
+		ranges [2]int // min, max
+	}{
+		{t.Minute(), [2]int{0, 59}},
+		{t.Hour(), [2]int{0, 23}},
+		{t.Day(), [2]int{1, 31}},
+		{int(t.Month()), [2]int{1, 12}},
+		{int(t.Weekday()), [2]int{0, 6}},
+	}
+	for i, field := range fields {
+		if field == "*" {
+			continue
+		}
+		if strings.HasPrefix(field, "*/") {
+			step, err := strconv.Atoi(strings.TrimPrefix(field, "*/"))
+			if err != nil || step <= 0 {
+				return false
+			}
+			if checks[i].value%step != 0 {
+				return false
+			}
+			continue
+		}
+		if strings.Contains(field, "-") {
+			parts := strings.SplitN(field, "-", 2)
+			lo, err1 := strconv.Atoi(parts[0])
+			hi, err2 := strconv.Atoi(parts[1])
+			if err1 != nil || err2 != nil || checks[i].value < lo || checks[i].value > hi {
+				return false
+			}
+			continue
+		}
+		if strings.Contains(field, ",") {
+			match := false
+			for _, part := range strings.Split(field, ",") {
+				if v, err := strconv.Atoi(strings.TrimSpace(part)); err == nil && v == checks[i].value {
+					match = true
+					break
+				}
+			}
+			if !match {
+				return false
+			}
+			continue
+		}
+		v, err := strconv.Atoi(field)
+		if err != nil || v != checks[i].value {
+			return false
+		}
+	}
+	return true
 }
 
 func slugify(name string) string {

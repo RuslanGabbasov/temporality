@@ -57,6 +57,18 @@ export interface Run {
   updated_at: string
 }
 
+export interface Trigger {
+  id: string
+  project_id: string
+  agent_id?: string
+  name: string
+  type: 'schedule' | 'webhook' | 'event'
+  enabled: boolean
+  config: any
+  created_at: string
+  updated_at: string
+}
+
 export interface Provider {
   id: string
   name: string
@@ -146,6 +158,16 @@ export const workspaceApi = {
     request<Provider>(`/v1/workspace/providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProvider: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/providers/${id}`, { method: 'DELETE' }),
+
+  // Triggers
+  listTriggers: (projectId: string) =>
+    request<{ triggers: Trigger[] }>(`/v1/workspace/projects/${projectId}/triggers`),
+  createTrigger: (data: Partial<Trigger>) =>
+    request<Trigger>('/v1/workspace/triggers', { method: 'POST', body: JSON.stringify(data) }),
+  updateTrigger: (id: string, data: Partial<Trigger>) =>
+    request<Trigger>(`/v1/workspace/triggers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteTrigger: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/workspace/triggers/${id}`, { method: 'DELETE' }),
 
   // Users
   listUsers: () => request<{ users: User[] }>('/v1/workspace/users'),

@@ -8,6 +8,7 @@ import Workspace from './Workspace'
 import Agents from './Agents'
 import Providers from './Providers'
 import Users from './Users'
+import Triggers from './Triggers'
 
 const Routes = {
   experience: /^\/experience(\/|$)/,
@@ -18,9 +19,10 @@ const Routes = {
   'agent-config': /^\/agent-config(\/|$)/,
   providers: /^\/providers(\/|$)/,
   users: /^\/users(\/|$)/,
+  triggers: /^\/triggers(\/|$)/,
 } as const
 
-type Page = 'experience' | 'agents' | 'operations' | 'observability' | 'workspace' | 'agent-config' | 'providers' | 'users'
+type Page = 'experience' | 'agents' | 'operations' | 'observability' | 'workspace' | 'agent-config' | 'providers' | 'users' | 'triggers'
 
 function pageFor(pathname: string): Page {
   if (Routes.agents.test(pathname)) return 'agents'
@@ -30,6 +32,7 @@ function pageFor(pathname: string): Page {
   if (Routes['agent-config'].test(pathname)) return 'agent-config'
   if (Routes.providers.test(pathname)) return 'providers'
   if (Routes.users.test(pathname)) return 'users'
+  if (Routes.triggers.test(pathname)) return 'triggers'
   return 'experience'
 }
 
@@ -63,6 +66,8 @@ export default function App() {
           case 'users':
             // @ts-ignore — Users returns JSX but TS infers void due to bare returns in callbacks
             return <Users />
+          case 'triggers':
+            return <Triggers project={project} />
           default:
             return <ExperienceTimeline project={project} />
         }
