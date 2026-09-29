@@ -272,6 +272,38 @@ export default function Workspace({ project }: { project: string }) {
       } catch { /* ignore */ }
     })
 
+    // Approval events — show in stream lines
+    es.addEventListener('approval.requested', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const action = d.action ?? d.operation?.tool ?? 'action'
+        lines.push(`⚠ Approval needed: ${action}`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('approval.granted', (e) => {
+      try {
+        lines.push('✓ Approval granted')
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('approval.rejected', (e) => {
+      try {
+        lines.push('✗ Approval rejected')
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('approval.auto_granted', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const tool = d.operation?.tool ?? d.policy_id ?? 'tool'
+        lines.push(`✓ Auto-approved: ${tool}`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+
     es.addEventListener('run.completed', handleEvent('run.completed'))
 
     es.addEventListener('run.failed', (e) => {
