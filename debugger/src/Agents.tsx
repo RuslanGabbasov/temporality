@@ -200,8 +200,8 @@ const startCreate = () => {
 
       {/* Edit/Create modal */}
       {showForm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#0d1118', border: '1px solid #344258', borderRadius: '8px', padding: '1.5rem', width: '600px', maxHeight: '90vh', overflow: 'auto' }}>
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '600px' }}>
             <Heading>{editing ? 'Edit Agent' : 'New Agent'}</Heading>
             <Stack gap={3}>
               <TextInput id="agent-name" labelText="Name" value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="coder" autoFocus />
@@ -227,10 +227,10 @@ const startCreate = () => {
                 <Toggle id="agent-network" labelText="Network" toggled={form.network_access ?? false} onToggle={(checked: boolean) => setForm({ ...form, network_access: checked })} />
                 <Toggle id="agent-readonly" labelText="Read-only" toggled={form.read_only ?? false} onToggle={(checked: boolean) => setForm({ ...form, read_only: checked })} />
               </div>
-              <Stack orientation="horizontal" gap={2}>
-                <Button onClick={() => void saveAgent()}>{editing ? 'Save' : 'Create'}</Button>
+              <div className="form-actions">
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>Cancel</Button>
-              </Stack>
+                <Button onClick={() => void saveAgent()}>{editing ? 'Save' : 'Create'}</Button>
+              </div>
             </Stack>
           </div>
         </div>
@@ -240,8 +240,8 @@ const startCreate = () => {
 
       {/* Template selection modal */}
       {showTemplates && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#0d1118', border: '1px solid #344258', borderRadius: '8px', padding: '1.5rem', width: '500px', maxHeight: '80vh', overflow: 'auto' }}>
+        <div className="modal-overlay">
+          <div className="modal-panel">
             <Heading>Choose a template</Heading>
             <p style={{ color: '#7e8a9c', fontSize: '0.8rem', marginBottom: '1rem' }}>Start with a pre-configured agent and customize as needed.</p>
             <Stack gap={2}>
@@ -263,7 +263,9 @@ const startCreate = () => {
                 </Tile>
               ))}
             </Stack>
-            <Button kind="secondary" onClick={() => setShowTemplates(false)} style={{ marginTop: '1rem' }}>Cancel</Button>
+            <div className="form-actions">
+              <Button kind="secondary" onClick={() => setShowTemplates(false)}>Cancel</Button>
+            </div>
           </div>
         </div>
       )}

@@ -135,8 +135,8 @@ export default function Users() {
       </Grid>
 
       {showForm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#0d1118', border: '1px solid #344258', borderRadius: '8px', padding: '1.5rem', width: '500px' }}>
+        <div className="modal-overlay">
+          <div className="modal-panel">
             <Heading>{editing ? 'Edit User' : 'New User'}</Heading>
             <Stack gap={3}>
               <TextInput id="user-name" labelText="Name" value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="John Doe" autoFocus />
@@ -146,18 +146,18 @@ export default function Users() {
                 <SelectItem value="operator" text="Operator (run + reconcile)" />
                 <SelectItem value="admin" text="Admin (full access)" />
               </Select>
-              <Stack orientation="horizontal" gap={2}>
-                <Button onClick={() => void save()}>{editing ? 'Save' : 'Create'}</Button>
+              <div className="form-actions">
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>Cancel</Button>
-              </Stack>
+                <Button onClick={() => void save()}>{editing ? 'Save' : 'Create'}</Button>
+              </div>
             </Stack>
           </div>
         </div>
       )}
 
       {generatedToken && tokenUser && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#0d1118', border: '1px solid #344258', borderRadius: '8px', padding: '1.5rem', width: '600px' }}>
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '600px' }}>
             <Heading>Token for {tokenUser.name}</Heading>
             <p style={{ color: '#7e8a9c', marginBottom: '1rem' }}>Token stored in database. User can log in immediately after kernel restart.</p>
             <div style={{ background: '#121823', border: '1px solid #344258', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all', marginBottom: '1rem' }}>

@@ -107,18 +107,18 @@ export default function Providers() {
       </Grid>
 
       {showForm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#0d1118', border: '1px solid #344258', borderRadius: '8px', padding: '1.5rem', width: '500px' }}>
+        <div className="modal-overlay">
+          <div className="modal-panel">
             <Heading>{editing ? 'Edit Provider' : 'New Provider'}</Heading>
             <Stack gap={3}>
               <TextInput id="prov-name" labelText="Name" value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="z.ai" autoFocus />
               <TextInput id="prov-url" labelText="Base URL" value={form.base_url ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, base_url: e.target.value })} placeholder="https://api.z-ai.com/v1" />
               <TextInput id="prov-key" labelText="API Key / Env Var" value={form.api_key_ref ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key_ref: e.target.value })} placeholder="Z_AI_API_KEY or actual key" helperText="Env var name (e.g. Z_AI_API_KEY) or the actual key" />
               <TextInput id="prov-models" labelText="Models (comma-separated)" value={form.models?.join(', ') ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, models: e.target.value.split(',').map((m) => m.trim()).filter(Boolean) })} placeholder="z-ai-turbo, z-ai-pro" />
-              <Stack orientation="horizontal" gap={2}>
-                <Button onClick={() => void save()}>{editing ? 'Save' : 'Create'}</Button>
+              <div className="form-actions">
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>Cancel</Button>
-              </Stack>
+                <Button onClick={() => void save()}>{editing ? 'Save' : 'Create'}</Button>
+              </div>
             </Stack>
           </div>
         </div>

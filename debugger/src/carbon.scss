@@ -562,6 +562,40 @@
   resize: vertical;
 }
 
+/* === Standard form modal === */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-panel {
+  background: #0d1118;
+  border: 1px solid #344258;
+  border-radius: 8px;
+  padding: 1.5rem;
+  width: 560px;
+  max-height: 85vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.modal-panel .cds--form-item {
+  margin-bottom: 0;
+}
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #202a38;
+  margin-top: 0.5rem;
+}
+
 /* Ensure consistent dark background */
 body, #root, #main-content {
   background: #080b10;
