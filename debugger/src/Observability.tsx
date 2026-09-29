@@ -126,7 +126,7 @@ export default function Observability({ project }: { project: string }) {
     finally { setProjectionLoading(false) }
   }
 
-  useEffect(() => { void load() }, [project, asOf, compareAsOf, knownAt])
+  useEffect(() => { void load() }, [project])
   useEffect(() => { if (tab === 'patterns') void loadProjection() }, [tab])
 
   // Fetch activation chain
@@ -179,16 +179,24 @@ export default function Observability({ project }: { project: string }) {
 
       {/* Top bar: project + filters */}
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-        <div style={{ minWidth: '130px' }}>
-          <TextInput id="as-of" labelText="As of" type="datetime-local" value={asOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAsOf(e.target.value)} size="sm" />
-        </div>
-        <div style={{ minWidth: '130px' }}>
-          <TextInput id="compare" labelText="Compare" type="datetime-local" value={compareAsOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompareAsOf(e.target.value)} size="sm" />
-        </div>
-        <div style={{ minWidth: '130px' }}>
-          <TextInput id="known-at" labelText="Known by" type="datetime-local" value={knownAt} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKnownAt(e.target.value)} size="sm" />
-        </div>
         <Button size="sm" onClick={load} disabled={loading}>Load</Button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <details style={{ fontSize: '0.75rem' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--tm-text-3)', padding: '0.25rem 0' }}>Bitemporal filters</summary>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap', marginTop: '0.35rem' }}>
+              <div style={{ minWidth: '130px' }}>
+                <TextInput id="as-of" labelText="As of" type="datetime-local" value={asOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAsOf(e.target.value)} size="sm" />
+              </div>
+              <div style={{ minWidth: '130px' }}>
+                <TextInput id="compare" labelText="Compare" type="datetime-local" value={compareAsOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompareAsOf(e.target.value)} size="sm" />
+              </div>
+              <div style={{ minWidth: '130px' }}>
+                <TextInput id="known-at" labelText="Known by" type="datetime-local" value={knownAt} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKnownAt(e.target.value)} size="sm" />
+              </div>
+              <Button size="sm" onClick={load} disabled={loading}>Apply</Button>
+            </div>
+          </details>
+        </div>
       </div>
 
       {/* Tab bar */}
