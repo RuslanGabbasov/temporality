@@ -30,11 +30,11 @@ interface LayoutProps {
 
 const NAV_ITEMS = [
   { path: '/workspace', label: 'Workspace' },
-  { path: '/agent-config', label: 'Agents' },
   { path: '/agents', label: 'Runs' },
   { path: '/operations', label: 'Operations' },
   { path: '/observability', label: 'Knowledge' },
   { path: '/experience', label: 'Timeline' },
+  { path: '/agent-config', label: 'Agents' },
   { path: '/triggers', label: 'Triggers' },
   { path: '/providers', label: 'Providers' },
   { path: '/users', label: 'Users' },
