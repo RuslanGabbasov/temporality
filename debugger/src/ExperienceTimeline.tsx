@@ -229,7 +229,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     const roleRuns = model.runs.filter((run) => run.role)
     const roles = [...new Set(roleRuns.map((run) => run.role))].sort()
     const scopes = model.scopes.map((scope) => scope.id).sort()
-    const visibleRun = (run: RunInfo) => !hiddenRoots.has(run.parentRun ?? '') && !hiddenRoots.has(run.id.split('/')[0]) && (roleFilter === 'all' || run.role === roleFilter || !run.role)
+    const visibleRun = (run: RunInfo) => !hiddenRoots.has(run.parentRun ?? '') && !hiddenRoots.has(run.id.split('/')[0]) && (roleFilter === 'all' || run.role === roleFilter || !run.role) && (recencyFilter === 'all' || ms(run.startedAt) >= recencyCutoff)
     const visibleRuns = model.runs.filter(visibleRun)
     const needle = query.trim().toLowerCase()
     const lastRunId = model.runs.length ? model.runs[model.runs.length - 1].id : ''
