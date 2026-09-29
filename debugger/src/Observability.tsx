@@ -83,15 +83,15 @@ export default function Observability({ project }: { project: string }) {
 
   // URL sync
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search)
-    p.set('project', project)
-    p.set('tab', tab)
-    if (asOf) p.set('as_of', asOf); else p.delete('as_of')
-    if (compareAsOf) p.set('compare', compareAsOf); else p.delete('compare')
-    if (knownAt) p.set('known_at', knownAt); else p.delete('known_at')
-    if (selectedID) p.set('selected', selectedID); else p.delete('selected')
-    if (clusterFilter !== 'all') p.set('cluster', clusterFilter); else p.delete('cluster')
-    window.history.replaceState(null, '', `${window.location.pathname}?${p.toString()}`)
+    const urlP = new URLSearchParams(window.location.search)
+    urlP.set('project', project)
+    urlP.set('tab', tab)
+    if (asOf) urlP.set('as_of', asOf); else urlP.delete('as_of')
+    if (compareAsOf) urlP.set('compare', compareAsOf); else urlP.delete('compare')
+    if (knownAt) urlP.set('known_at', knownAt); else urlP.delete('known_at')
+    if (selectedID) urlP.set('selected', selectedID); else urlP.delete('selected')
+    if (clusterFilter !== 'all') urlP.set('cluster', clusterFilter); else urlP.delete('cluster')
+    window.history.replaceState(null, '', `${window.location.pathname}?${urlP.toString()}`)
   }, [project, tab, asOf, compareAsOf, knownAt, selectedID, clusterFilter])
 
   // Load knowledge
