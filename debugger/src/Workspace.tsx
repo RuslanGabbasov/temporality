@@ -217,6 +217,27 @@ export default function Workspace({ project }: { project: string }) {
     es.addEventListener('tool.completed', handleEvent('tool.completed'))
     es.addEventListener('knowledge.proposed', handleEvent('knowledge.proposed'))
 
+    // model.text_delta carries the model's response text — show it in real-time
+    es.addEventListener('model.text_delta', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const text = d.text ?? ''
+        if (text) {
+          // Update the message content with the model's response
+          setConversations((prev) => prev.map((c) => {
+            if (c.id !== convId) return c
+            return { ...c, messages: c.messages.map((m) => {
+              if (m.runId !== runId) return m
+              // Only update if we don't already have a final answer
+              if (m.status && m.status !== 'running') return m
+              return { ...m, content: text }
+            })}
+          }))
+        }
+      } catch { /* ignore */ }
+    })
+
     // agent.summary arrives via SSE but the answer in observation_events
     // loses newlines (JSONB storage). Always fetch the real answer from REST.
     es.addEventListener('agent.summary', (e) => {

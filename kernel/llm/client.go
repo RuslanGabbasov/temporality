@@ -6,6 +6,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -184,6 +185,7 @@ type chatRequest struct {
 	Temperature       float64        `json:"temperature"`
 	MaxTokens         int            `json:"max_tokens"`
 	Reasoning         map[string]any `json:"reasoning,omitempty"`
+	Stream            bool           `json:"stream,omitempty"`
 }
 
 type chatResponse struct {
@@ -203,6 +205,32 @@ type chatResponse struct {
 		Message string `json:"message"`
 		Code    int    `json:"code"`
 	} `json:"error"`
+}
+
+// chatStreamChunk is a single SSE chunk in a streaming response.
+type chatStreamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content   string              `json:"content"`
+			ToolCalls []toolCallWireDelta `json:"tool_calls"`
+		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
+}
+
+// toolCallWireDelta is a partial tool call in a streaming chunk.
+type toolCallWireDelta struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id,omitempty"`
+	Function struct {
+		Name      string `json:"name,omitempty"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 // reasoningRequest maps the reasoning preset onto the provider field the same
@@ -287,6 +315,162 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 		}
 	}
 	return Completion{}, fmt.Errorf("giving up after retries: %w", lastErr)
+}
+
+// TokenCallback is called for each streamed token/chunk.
+// Return true to stop streaming early.
+type TokenCallback func(delta string, toolCalls []ToolCallDelta) bool
+
+// ToolCallDelta is a partial tool call in a streaming chunk.
+type ToolCallDelta struct {
+	Index     int
+	ID        string
+	Name      string
+	ArgsDelta string
+}
+
+// StreamComplete sends a streaming request and calls onToken for each chunk.
+// The final Completion is returned with accumulated content and tool calls.
+func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools []ToolDef, onToken TokenCallback) (Completion, error) {
+	req := chatRequest{
+		Model:       c.cfg.Model,
+		Messages:    toRequestMessages(messages),
+		Temperature: c.cfg.Temperature,
+		MaxTokens:   c.cfg.MaxOutputTokens,
+		Reasoning:   reasoningRequest(c.cfg.Reasoning),
+		Stream:      true,
+	}
+	if len(tools) > 0 {
+		req.ToolChoice = "auto"
+		parallel := false
+		req.ParallelToolCalls = &parallel
+	}
+	for _, tool := range tools {
+		req.Tools = append(req.Tools, chatTool{Type: "function", Function: tool})
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return Completion{}, err
+	}
+
+	started := time.Now()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.cfg.BaseURL, "/")+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return Completion{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "text/event-stream")
+	if c.cfg.APIKey != "" {
+		request.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return Completion{}, &transportError{err: err}
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+		return Completion{}, &statusError{code: response.StatusCode, body: truncate(string(body), 400)}
+	}
+
+	// Parse SSE stream
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 64*1024), 64*1024)
+	var accumulated strings.Builder
+	toolCallAccum := make(map[int]*ToolCall)
+	var finish string
+	var usage Usage
+	stop := false
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+		var chunk chatStreamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+		if len(chunk.Choices) == 0 {
+			// Might be a usage-only chunk
+			if chunk.Usage != nil {
+				usage = Usage{
+					PromptTokens:     chunk.Usage.PromptTokens,
+					CompletionTokens: chunk.Usage.CompletionTokens,
+					TotalTokens:      chunk.Usage.TotalTokens,
+				}
+			}
+			continue
+		}
+		choice := chunk.Choices[0]
+		if choice.FinishReason != "" {
+			finish = choice.FinishReason
+		}
+		// Accumulate content
+		if choice.Delta.Content != "" {
+			accumulated.WriteString(choice.Delta.Content)
+			if onToken != nil && onToken(choice.Delta.Content, nil) {
+				stop = true
+			}
+		}
+		// Accumulate tool calls
+		for _, tc := range choice.Delta.ToolCalls {
+			existing, ok := toolCallAccum[tc.Index]
+			if !ok {
+				existing = &ToolCall{ID: tc.ID, Name: tc.Function.Name}
+				toolCallAccum[tc.Index] = existing
+			}
+			if tc.ID != "" {
+				existing.ID = tc.ID
+			}
+			if tc.Function.Name != "" {
+				existing.Name = tc.Function.Name
+			}
+			existing.ArgsRaw += tc.Function.Arguments
+			if onToken != nil {
+				onToken("", []ToolCallDelta{{Index: tc.Index, ID: tc.ID, Name: tc.Function.Name, ArgsDelta: tc.Function.Arguments}})
+			}
+		}
+		if stop {
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return Completion{}, fmt.Errorf("stream read: %w", err)
+	}
+
+	// Build final completion
+	completion := Completion{
+		Content:    accumulated.String(),
+		Finish:     finish,
+		Provider:   c.providerHost,
+		LatencyMs:  time.Since(started).Milliseconds(),
+		Usage:      usage,
+		RequestRef: contentRef(payload),
+	}
+	for _, tc := range toolCallAccum {
+		args := map[string]any{}
+		argsError := ""
+		if strings.TrimSpace(tc.ArgsRaw) != "" {
+			if err := json.Unmarshal([]byte(tc.ArgsRaw), &args); err != nil {
+				args = nil
+				argsError = err.Error()
+			}
+		}
+		completion.ToolCalls = append(completion.ToolCalls, ToolCall{
+			ID:        tc.ID,
+			Name:      tc.Name,
+			Args:      args,
+			ArgsRaw:   tc.ArgsRaw,
+			ArgsError: argsError,
+		})
+	}
+	completion.ResponseRef = contentRef([]byte(completion.Content))
+	return completion, nil
 }
 
 func transient(err error) bool {
