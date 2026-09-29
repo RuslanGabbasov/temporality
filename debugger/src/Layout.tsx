@@ -2,8 +2,6 @@ import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
 import {
   Header,
   HeaderName,
-  HeaderNavigation,
-  HeaderMenuItem,
   HeaderGlobalBar,
   HeaderPanel,
   Content,
@@ -15,6 +13,7 @@ import {
   Modal,
 } from '@carbon/react'
 import { User, Settings, Add, Edit, TrashCan } from '@carbon/icons-react'
+import { Menu } from '@carbon/icons-react'
 import { TOKEN_STORAGE_KEY, authToken, authHeaders } from './api'
 
 const KERNEL_API = '/kernel-api'
@@ -55,6 +54,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [allAgents, setAllAgents] = useState<{ id: string; name: string }[]>([])
   const [showProjectPanel, setShowProjectPanel] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [token, setToken] = useState(authToken() ?? '')
   const [loggedIn, setLoggedIn] = useState(!!authToken())
 
@@ -193,44 +193,34 @@ export default function Layout({ children, activePage }: LayoutProps) {
           Temporality
         </HeaderName>
 
-        <HeaderNavigation aria-label="Main navigation">
+        {/* Desktop nav — hidden below 1100px */}
+        <nav className="header-nav-desktop" aria-label="Main navigation">
           {NAV_ITEMS.map(({ path, label }) => (
-            <HeaderMenuItem
+            <a
               key={path}
               href={path}
-              isActive={activePage === path.slice(1)}
+              className={`header-nav-link ${activePage === path.slice(1) ? 'active' : ''}`}
               onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path) }}
             >
               {label}
               {path === '/operations' && pendingOps > 0 && (
-                <span style={{
-                  marginLeft: '0.35rem',
-                  background: '#f7768e',
-                  color: '#080b10',
-                  fontSize: '0.6rem',
-                  fontWeight: 700,
-                  padding: '0.1rem 0.4rem',
-                  borderRadius: '999px',
-                  lineHeight: 1,
-                  verticalAlign: 'middle',
-                }}>{pendingOps}</span>
+                <span className="nav-badge" style={{ background: '#f7768e' }}>{pendingOps}</span>
               )}
               {path === '/agents' && pendingApprovals > 0 && (
-                <span style={{
-                  marginLeft: '0.35rem',
-                  background: '#e6b85c',
-                  color: '#080b10',
-                  fontSize: '0.6rem',
-                  fontWeight: 700,
-                  padding: '0.1rem 0.4rem',
-                  borderRadius: '999px',
-                  lineHeight: 1,
-                  verticalAlign: 'middle',
-                }}>{pendingApprovals}</span>
+                <span className="nav-badge" style={{ background: '#e6b85c' }}>{pendingApprovals}</span>
               )}
-            </HeaderMenuItem>
+            </a>
           ))}
-        </HeaderNavigation>
+        </nav>
+
+        {/* Mobile hamburger — visible below 1100px */}
+        <button
+          className="header-hamburger"
+          onClick={() => setMobileNavOpen(!mobileNavOpen)}
+          aria-label="Toggle navigation"
+        >
+          <Menu size={20} />
+        </button>
 
         <HeaderGlobalBar>
           {/* Project switcher */}
@@ -284,6 +274,28 @@ export default function Layout({ children, activePage }: LayoutProps) {
             </Button>
           )}
         </HeaderGlobalBar>
+
+        {/* Mobile nav dropdown */}
+        {mobileNavOpen && (
+          <div className="header-mobile-nav">
+            {NAV_ITEMS.map(({ path, label }) => (
+              <a
+                key={path}
+                href={path}
+                className={`header-mobile-link ${activePage === path.slice(1) ? 'active' : ''}`}
+                onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path); setMobileNavOpen(false) }}
+              >
+                {label}
+                {path === '/operations' && pendingOps > 0 && (
+                  <span className="nav-badge" style={{ background: '#f7768e' }}>{pendingOps}</span>
+                )}
+                {path === '/agents' && pendingApprovals > 0 && (
+                  <span className="nav-badge" style={{ background: '#e6b85c' }}>{pendingApprovals}</span>
+                )}
+              </a>
+            ))}
+          </div>
+        )}
       </Header>
 
       {/* Login modal */}
