@@ -322,24 +322,30 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       // keep native page scrolling instead of zooming.
       const rect = element.getBoundingClientRect()
       if (wheel.clientX - rect.left < GUTTER) return
-      // Input intent: a trackpad PINCH arrives as ctrl+wheel; Firefox-class
-      // mice report line-mode deltas; pixel-mode mouse notches are large
-      // integers (Chrome ±100/±120). Trackpad two-finger swipes are small —
-      // Safari rounds them to integers too, so the notch threshold must sit
-      // well above real swipe values, or one swipe splits into scroll + zoom.
-      const mouseWheel = wheel.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || (Number.isInteger(wheel.deltaY) && Math.abs(wheel.deltaY) >= 40)
-      if (!wheel.ctrlKey && !mouseWheel) {
-        if (Math.abs(wheel.deltaX) <= Math.abs(wheel.deltaY)) return
+
+      // Detect pinch-to-zoom: ctrl+wheel (desktop trackpad) or very large deltaY
+      // with no deltaX (touchscreen pinch).
+      const isPinch = wheel.ctrlKey || (Math.abs(wheel.deltaY) > 30 && wheel.deltaX === 0 && !Number.isInteger(wheel.deltaY))
+
+      // Horizontal pan: only horizontal movement, not a pinch
+      if (!isPinch && Math.abs(wheel.deltaX) > Math.abs(wheel.deltaY) && Math.abs(wheel.deltaX) > 2) {
         wheel.preventDefault()
         setWindow((current) => {
           const state = current ?? view.full
           const msPerPx = (state.t1 - state.t0) / Math.max(1, rect.width - GUTTER)
-          // keep the span, slide the window inside corpus bounds
           const bounded = Math.min(view.full.t1 - state.t1, Math.max(view.full.t0 - state.t0, wheel.deltaX * msPerPx))
           return { t0: state.t0 + bounded, t1: state.t1 + bounded }
         })
         return
       }
+
+      // Vertical scroll (not pinch, not horizontal): let the page scroll
+      if (!isPinch && Math.abs(wheel.deltaY) > Math.abs(wheel.deltaX)) {
+        return // don't preventDefault — let the page scroll normally
+      }
+
+      // Pinch zoom
+      if (!isPinch) return
       wheel.preventDefault()
       const x = wheel.clientX - rect.left - GUTTER
       setWindow((current) => {
@@ -347,18 +353,15 @@ export default function ExperienceTimeline({ project }: { project: string }) {
         const span = state.t1 - state.t0
         const ratio = Math.min(1, Math.max(0, x / Math.max(1, rect.width - GUTTER)))
         const pivot = state.t0 + span * ratio
-        // pinch streams small continuous deltas — scale smoothly; discrete
-        // wheels (mouse, ctrl+mouse) keep the fixed step
-        const factor = wheel.ctrlKey && !mouseWheel
-          ? Math.min(2, Math.max(0.5, Math.exp(wheel.deltaY * 0.01)))
-          : wheel.deltaY > 0 ? 1.25 : 0.8
+        // Smooth exponential scale for pinch
+        const factor = Math.min(2, Math.max(0.5, Math.exp(wheel.deltaY * 0.005)))
         let next0 = pivot - (pivot - state.t0) * factor
         let next1 = pivot + (state.t1 - pivot) * factor
         if (next1 - next0 < 5000) return state
         const min = view.full.t0, max = view.full.t1
         if (next0 < min) { next1 += min - next0; next0 = min }
         if (next1 > max) { next0 -= next1 - max; next1 = max }
-        return { t0: Math.max(min, next0), t1: Math.min(max, next1) }
+        return { t0: next0, t1: next1 }
       })
     }
     element.addEventListener('wheel', onWheel, { passive: false })
