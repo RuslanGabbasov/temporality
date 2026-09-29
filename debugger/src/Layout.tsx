@@ -35,8 +35,8 @@ const NAV_ITEMS = [
   { path: '/operations', label: 'Operations' },
   { path: '/observability', label: 'Knowledge' },
   { path: '/experience', label: 'Timeline' },
-  { path: '/providers', label: 'Providers' },
   { path: '/triggers', label: 'Triggers' },
+  { path: '/providers', label: 'Providers' },
   { path: '/users', label: 'Users' },
 ]
 

@@ -112,12 +112,7 @@ export default function Triggers({ project }: { project: string }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <Heading>Triggers</Heading>
-        <Select id="new-trigger-type" labelText="" hideLabel value="" onChange={(e: React.ChangeEvent<HTMLSelectElement>) => { if (e.target.value) startCreate(e.target.value as any) }} size="sm" style={{ width: 'auto' }}>
-          <SelectItem value="" text="+ New trigger" />
-          <SelectItem value="schedule" text="⏰ Schedule" />
-          <SelectItem value="webhook" text="🔗 Webhook" />
-          <SelectItem value="event" text="📡 Event" />
-        </Select>
+        <Button renderIcon={Add} onClick={() => startCreate('schedule')}>New Trigger</Button>
       </div>
 
       {triggers.length === 0 && !loading && (
@@ -136,7 +131,7 @@ export default function Triggers({ project }: { project: string }) {
               <Tile style={{ marginBottom: '0.75rem', opacity: t.enabled ? 1 : 0.5 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                       <span>{info.icon}</span>
                       <strong>{t.name}</strong>
                       <Tag type={info.color} size="sm">{info.label}</Tag>
@@ -144,7 +139,7 @@ export default function Triggers({ project }: { project: string }) {
                     </div>
                     <div style={{ fontSize: '0.75rem', color: '#7e8a9c', marginTop: '0.35rem' }}>
                       {t.type === 'schedule' && cfg.cron && <span>cron: <code>{cfg.cron}</code></span>}
-                      {t.type === 'webhook' && cfg.path && <span>POST <code>{webhookUrl(t)}</code></span>}
+                      {t.type === 'webhook' && cfg.path && <span>POST <code style={{ fontSize: '0.65rem' }}>{webhookUrl(t)}</code></span>}
                       {t.type === 'event' && cfg.event_type && <span>on <code>{cfg.event_type}</code></span>}
                     </div>
                     {t.agent_id && (
@@ -153,10 +148,10 @@ export default function Triggers({ project }: { project: string }) {
                       </div>
                     )}
                   </div>
-                  <div style={{ display: 'flex', gap: '0.25rem' }}>
+                  <Stack orientation="horizontal" gap={1}>
                     <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(t)} />
                     <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(t)} />
-                  </div>
+                  </Stack>
                 </div>
                 <div style={{ marginTop: '0.5rem' }}>
                   <Toggle id={`toggle-${t.id}`} labelText="" toggled={t.enabled} onToggle={() => void toggleEnabled(t)} size="sm" />
@@ -174,6 +169,19 @@ export default function Triggers({ project }: { project: string }) {
         <div className="modal-overlay">
           <div className="modal-panel" style={{ width: '600px' }}>
             <Heading>{editing ? 'Edit Trigger' : 'New Trigger'}</Heading>
+            <Select id="trigger-type" labelText="Type" value={form.type ?? 'schedule'} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+              const type = e.target.value as 'schedule' | 'webhook' | 'event'
+              const defaultConfig = type === 'schedule'
+                ? { cron: '0 9 * * 1-5', prompt: '', timezone: 'UTC' }
+                : type === 'webhook'
+                ? { path: '', secret: '', prompt_template: '' }
+                : { event_type: 'tool.failed', filter: {}, prompt: '' }
+              setForm({ ...form, type, config: defaultConfig })
+            }}>
+              <SelectItem value="schedule" text="⏰ Schedule" />
+              <SelectItem value="webhook" text="🔗 Webhook" />
+              <SelectItem value="event" text="📡 Event" />
+            </Select>
             <TextInput id="trigger-name" labelText="Name" value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="Daily report" />
             <Select id="trigger-agent" labelText="Agent" value={form.agent_id ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, agent_id: e.target.value })}>
               <SelectItem value="" text="Default agent" />
@@ -183,8 +191,7 @@ export default function Triggers({ project }: { project: string }) {
             {/* Schedule config */}
             {form.type === 'schedule' && (
               <>
-                <TextInput id="trigger-cron" labelText="Cron expression" value={form.config?.cron ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, cron: e.target.value } })} placeholder="0 9 * * 1-5" />
-                <p style={{ fontSize: '0.7rem', color: '#7e8a9c', marginTop: '-0.5rem' }}>minute hour day month weekday — e.g. <code>0 9 * * 1-5</code> = weekdays at 9:00</p>
+                <TextInput id="trigger-cron" labelText="Cron expression" value={form.config?.cron ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, cron: e.target.value } })} placeholder="0 9 * * 1-5" helperText="minute hour day month weekday — e.g. 0 9 * * 1-5 = weekdays at 9:00" />
                 <TextArea id="trigger-prompt" labelText="Prompt" value={form.config?.prompt ?? ''} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, config: { ...form.config, prompt: e.target.value } })} rows={4} placeholder="Review recent changes and generate a daily summary." />
               </>
             )}
@@ -192,11 +199,9 @@ export default function Triggers({ project }: { project: string }) {
             {/* Webhook config */}
             {form.type === 'webhook' && (
               <>
-                <TextInput id="trigger-path" labelText="Webhook path" value={form.config?.path ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, path: e.target.value } })} placeholder="deploy-notify" />
-                <p style={{ fontSize: '0.7rem', color: '#7e8a9c', marginTop: '-0.5rem' }}>Endpoint: POST /kernel-api/v1/workspace/webhook/{project}/{form.config?.path || '...'}</p>
+                <TextInput id="trigger-path" labelText="Webhook path" value={form.config?.path ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, path: e.target.value } })} placeholder="deploy-notify" helperText={`Endpoint: POST /kernel-api/v1/workspace/webhook/${project}/${form.config?.path || '...'}`} />
                 <TextInput id="trigger-secret" labelText="Secret (optional)" value={form.config?.secret ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, secret: e.target.value } })} placeholder="hmac-secret" />
-                <TextArea id="trigger-prompt-tpl" labelText="Prompt template" value={form.config?.prompt_template ?? ''} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, config: { ...form.config, prompt_template: e.target.value } })} rows={4} placeholder="Deploy completed: {{body.tag}}. Review changes and verify." />
-                <p style={{ fontSize: '0.7rem', color: '#7e8a9c', marginTop: '-0.5rem' }}>Use {'{{body.field}}'} to insert values from the JSON request body.</p>
+                <TextArea id="trigger-prompt-tpl" labelText="Prompt template" value={form.config?.prompt_template ?? ''} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, config: { ...form.config, prompt_template: e.target.value } })} rows={4} placeholder="Deploy completed: {{body.tag}}. Review changes and verify." helperText="Use {{body.field}} to insert values from the JSON request body." />
               </>
             )}
 
