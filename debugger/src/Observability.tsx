@@ -294,8 +294,8 @@ export default function Observability({ project }: { project: string }) {
             </Stack>
           </div>
 
-          {/* Right: detail panel */}
-          <div style={{ minWidth: 0 }}>
+          {/* Right: detail panel — sticky so it stays visible while left list scrolls */}
+          <div style={{ minWidth: 0, position: 'sticky', top: '3rem', alignSelf: 'start', maxHeight: 'calc(100vh - 5rem)', overflowY: 'auto' }}>
             {!selected ? (
               <Tile style={{ textAlign: 'center', color: '#7e8a9c', padding: '2rem' }}>
                 <p>Select a knowledge item to inspect</p>
