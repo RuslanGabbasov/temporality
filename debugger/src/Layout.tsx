@@ -264,7 +264,6 @@ export default function Layout({ children, activePage }: LayoutProps) {
                   {identity && (
                     <div style={{ marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)' }}>
                       <div style={{ fontSize: '0.8rem', fontWeight: 500 }}>{identity.subject}</div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.15rem' }}>{identity.role}</div>
                     </div>
                   )}
                   <div
@@ -281,7 +280,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
-                    {loggedIn ? 'Logout' : 'Login'}
+                    {loggedIn ? t('action.logout') ?? 'Logout' : t('action.login') ?? 'Login'}
                   </div>
                 </div>
               </HeaderPanel>

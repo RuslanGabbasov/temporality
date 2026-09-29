@@ -34,6 +34,8 @@ const translations: Record<Locale, Record<string, string>> = {
     'action.confirm': 'Confirm',
     'action.regenerate': 'Regenerate',
     'action.add': 'Add',
+    'action.logout': 'Logout',
+    'action.login': 'Login',
 
     // New entity buttons
     'new.project': 'New project',
@@ -199,6 +201,8 @@ const translations: Record<Locale, Record<string, string>> = {
     'action.confirm': 'Подтвердить',
     'action.regenerate': 'Пересоздать',
     'action.add': 'Добавить',
+    'action.logout': 'Выйти',
+    'action.login': 'Войти',
 
     // New entity buttons
     'new.project': 'Новый проект',

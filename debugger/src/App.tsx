@@ -34,7 +34,7 @@ function pageFor(pathname: string): Page {
   if (Routes.providers.test(pathname)) return 'providers'
   if (Routes.users.test(pathname)) return 'users'
   if (Routes.triggers.test(pathname)) return 'triggers'
-  return 'experience'
+  return 'workspace'
 }
 
 export default function App() {
