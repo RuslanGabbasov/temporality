@@ -270,6 +270,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			toolCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 4 * time.Minute, ScheduleToCloseTimeout: 5 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 			isMCP := strings.HasPrefix(call.Name, "mcp__")
+			recentlyApproved := false // set true after request_approval succeeds
 			approvalRequired := call.Name == "request_approval" || contains(input.ApprovalTools, call.Name)
 			autoApproved := call.Name == "run_command" && contains(input.AutoApproveTools, call.Name)
 			toolStarted := false
@@ -289,7 +290,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			var toolResult ToolResult
 			toolFailed := false
 			toolBlocked := false
-			if call.Name == "request_approval" || contains(input.ApprovalTools, call.Name) {
+			if approvalRequired && !recentlyApproved {
 				action, reason := call.Name, ""
 				if call.Name == "request_approval" {
 					action, _ = call.Args["action"].(string)
@@ -329,6 +330,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 							return result, err
 						}
 						toolResult.Content = "Approval granted. Continue with the requested action, but perform it only through an available tool."
+						recentlyApproved = true
 					} else if err := startTool(); err != nil {
 						return result, err
 					} else if err := startMCP(); err != nil {
