@@ -523,8 +523,8 @@ func (s *Store) ListAllTriggers(ctx context.Context) ([]Trigger, error) {
 func (s *Store) UpdateTrigger(ctx context.Context, t Trigger) error {
 	t.UpdatedAt = time.Now().UTC()
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_trigger SET name=$2, agent_id=$3, type=$4, enabled=$5, config=$6, updated_at=$7 WHERE id=$1`,
-		t.ID, t.Name, nullString(t.AgentID), t.Type, t.Enabled, t.Config, t.UpdatedAt)
+		`UPDATE workspace_trigger SET name=$2, agent_id=$3, type=$4, enabled=$5, config=COALESCE($6, config), updated_at=$7 WHERE id=$1`,
+		t.ID, t.Name, nullString(t.AgentID), t.Type, t.Enabled, nullRawMessage(t.Config), t.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -744,6 +744,13 @@ func nullString(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func nullRawMessage(b json.RawMessage) interface{} {
+	if len(b) == 0 || string(b) == "null" || string(b) == "{}" {
+		return nil
+	}
+	return b
 }
 
 func derefPtr(p *string) string {

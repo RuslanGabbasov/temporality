@@ -33,6 +33,7 @@ export default function Observability({ project }: { project: string }) {
   const [comparisonKnowledge, setComparisonKnowledge] = useState<KnowledgeItem[] | null>(null)
   const [selectedID, setSelectedID] = useState(initParams.get('selected') ?? '')
   const [clusterFilter, setClusterFilter] = useState(initParams.get('cluster') ?? 'all')
+  const [stateFilter, setStateFilter] = useState<string>(initParams.get('state') ?? 'all')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [chain, setChain] = useState<any>(null)
@@ -56,7 +57,11 @@ export default function Observability({ project }: { project: string }) {
     }
     return [...groups.entries()].sort((a, b) => b[1].length - a[1].length)
   }, [knowledge])
-  const visibleKnowledge = clusterFilter === 'all' ? knowledge : knowledge.filter((item) => (item.topics?.[0] || item.entities?.[0] || 'Unscoped') === clusterFilter)
+  const visibleKnowledge = knowledge.filter((item) => {
+    if (clusterFilter !== 'all' && (item.topics?.[0] || item.entities?.[0] || 'Unscoped') !== clusterFilter) return false
+    if (stateFilter !== 'all' && item.state !== stateFilter) return false
+    return true
+  })
 
   // Health summary
   const health = useMemo(() => {
@@ -209,15 +214,15 @@ export default function Observability({ project }: { project: string }) {
           {/* Health summary — clickable to Knowledge tab */}
           <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
             {([
-              { label: 'Total', count: health.total, color: 'var(--tm-text)', bucket: 'all' as const },
-              { label: 'Alive', count: health.alive, color: 'var(--tm-success)', bucket: 'active' as const },
-              { label: 'Stale', count: health.stale, color: 'var(--tm-amber)', bucket: 'stale' as const },
-              { label: 'Invalidated', count: health.invalidated, color: 'var(--tm-danger)', bucket: 'invalidated' as const },
+              { label: 'Total', count: health.total, color: 'var(--tm-text)', state: 'all' },
+              { label: 'Alive', count: health.alive, color: 'var(--tm-success)', state: 'alive' },
+              { label: 'Stale', count: health.stale, color: 'var(--tm-amber)', state: 'stale' },
+              { label: 'Invalidated', count: health.invalidated, color: 'var(--tm-danger)', state: 'invalidated' },
             ]).map((s) => (
               <Tile
                 key={s.label}
                 className="workspace-tile"
-                onClick={() => { setTab('knowledge') }}
+                onClick={() => { setStateFilter(s.state); setTab('knowledge') }}
                 style={{ padding: '0.75rem 1.25rem', minWidth: '100px', textAlign: 'center', cursor: 'pointer' }}
               >
                 <div style={{ fontSize: '1.5rem', fontWeight: 700, color: s.color }}>{s.count}</div>
@@ -267,6 +272,13 @@ export default function Observability({ project }: { project: string }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 380px', gap: '1rem' }}>
           {/* Left: knowledge list */}
           <div style={{ minWidth: 0 }}>
+            {/* Active state filter indicator */}
+            {stateFilter !== 'all' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <Tag type="blue" size="sm">Showing: {stateFilter}</Tag>
+                <button onClick={() => setStateFilter('all')} style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.75rem' }}>✕ Clear filter</button>
+              </div>
+            )}
             {/* Cluster filter chips */}
             {clusters.length > 1 && (
               <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
