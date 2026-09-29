@@ -12,7 +12,7 @@ import {
   SelectItem,
   Modal,
 } from '@carbon/react'
-import { User, Settings, Add, Edit, TrashCan } from '@carbon/icons-react'
+import { User, Settings, Add, Edit, TrashCan, Folder } from '@carbon/icons-react'
 import { Menu } from '@carbon/icons-react'
 import { TOKEN_STORAGE_KEY, authToken, authHeaders } from './api'
 
@@ -54,6 +54,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [projects, setProjects] = useState<Project[]>([])
   const [allAgents, setAllAgents] = useState<{ id: string; name: string }[]>([])
   const [showProjectPanel, setShowProjectPanel] = useState(false)
+  const [showNewProject, setShowNewProject] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [token, setToken] = useState(authToken() ?? '')
@@ -226,14 +227,20 @@ export default function Layout({ children, activePage }: LayoutProps) {
         <HeaderGlobalBar>
           {/* Project switcher */}
           <div style={{ position: 'relative', marginRight: '0.5rem' }}>
-            <Button
-              kind="ghost"
-              size="sm"
+            <button
               onClick={() => setShowProjectPanel(!showProjectPanel)}
-              style={{ color: '#e5e9f0' }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.4rem',
+                background: showProjectPanel ? 'rgba(255,255,255,0.08)' : 'transparent',
+                border: '1px solid #344258', borderRadius: '4px',
+                padding: '0.3rem 0.6rem', cursor: 'pointer',
+                color: '#e5e9f0', fontSize: '0.8rem',
+              }}
             >
-              {project}
-            </Button>
+              <Folder size={14} style={{ color: '#57d7e8' }} />
+              <span>{project}</span>
+              <span style={{ fontSize: '0.6rem', color: '#7e8a9c' }}>{showProjectPanel ? '▴' : '▾'}</span>
+            </button>
             {showProjectPanel && (
               <HeaderPanel expanded>
                 <div style={{ padding: '0.5rem' }}>
@@ -253,7 +260,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
                       </div>
                     ))}
                     <div
-                      onClick={() => { setEditProject(null); setShowProjectPanel(false); setNewProjectName(''); setNewProjectDesc('') }}
+                      onClick={() => { setNewProjectName(''); setNewProjectDesc(''); setShowProjectPanel(false); setShowNewProject(true) }}
                       style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.5rem', cursor: 'pointer', color: '#57d7e8', borderRadius: '4px' }}
                     >
                       <Add size={16} /> New project
@@ -321,10 +328,10 @@ export default function Layout({ children, activePage }: LayoutProps) {
         />
       </Modal>
 
-      {/* Project edit modal */}
+      {/* Project edit/create modal */}
       <Modal
-        open={!!editProject || (showProjectPanel === false && newProjectName !== '')}
-        onRequestClose={() => { setEditProject(null); setNewProjectName(''); setNewProjectDesc('') }}
+        open={!!editProject || showNewProject}
+        onRequestClose={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectDesc('') }}
         modalHeading={editProject ? 'Edit Project' : 'New Project'}
         primaryButtonText={editProject ? 'Save' : 'Create'}
         secondaryButtonText="Cancel"
