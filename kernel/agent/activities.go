@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -192,6 +193,14 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		}
 		exitCode := result.ExitCode
 		return ToolResult{Content: fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, result.Output), ExitCode: &exitCode}, nil
+	case "list_triggers":
+		return a.handleListTriggers(ctx, request)
+	case "create_trigger":
+		return a.handleCreateTrigger(ctx, request)
+	case "update_trigger":
+		return a.handleUpdateTrigger(ctx, request)
+	case "delete_trigger":
+		return a.handleDeleteTrigger(ctx, request)
 	default:
 		if a.MCP != nil && a.MCP.HasTool(request.Name) {
 			if faultAfterEffect(request.RunID, request.Name, request.OperationID) {
@@ -209,6 +218,138 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		}
 		return ToolResult{}, fmt.Errorf("tool %q is not registered", request.Name)
 	}
+}
+
+// Trigger tool handlers — call the kernel's own HTTP API.
+
+func (a *Activities) handleListTriggers(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	project := request.Project
+	if project == "" {
+		return ToolResult{Content: "error: project not set"}, nil
+	}
+	url := fmt.Sprintf("%s/v1/workspace/projects/%s/triggers", a.TemporalityURL, project)
+	body, err := a.kernelGET(ctx, url)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	return ToolResult{Content: body}, nil
+}
+
+func (a *Activities) handleCreateTrigger(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	name, _ := request.Arguments["name"].(string)
+	typ, _ := request.Arguments["type"].(string)
+	prompt, _ := request.Arguments["prompt"].(string)
+	if name == "" || typ == "" || prompt == "" {
+		return ToolResult{Content: "error: name, type, and prompt are required"}, nil
+	}
+	config := map[string]any{"prompt": prompt}
+	if cron, ok := request.Arguments["cron"].(string); ok && cron != "" {
+		config["cron"] = cron
+	}
+	if path, ok := request.Arguments["path"].(string); ok && path != "" {
+		config["path"] = path
+		config["prompt_template"] = prompt
+		delete(config, "prompt")
+	}
+	if eventType, ok := request.Arguments["event_type"].(string); ok && eventType != "" {
+		config["event_type"] = eventType
+	}
+	trigger := map[string]any{
+		"project_id": request.Project,
+		"name":       name,
+		"type":       typ,
+		"enabled":    true,
+		"config":     config,
+	}
+	if agentID, ok := request.Arguments["agent_id"].(string); ok && agentID != "" {
+		trigger["agent_id"] = agentID
+	}
+	body, err := a.kernelPOST(ctx, a.TemporalityURL+"/v1/workspace/triggers", trigger)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	return ToolResult{Content: body}, nil
+}
+
+func (a *Activities) handleUpdateTrigger(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	triggerID, _ := request.Arguments["trigger_id"].(string)
+	if triggerID == "" {
+		return ToolResult{Content: "error: trigger_id is required"}, nil
+	}
+	update := map[string]any{}
+	if enabled, ok := request.Arguments["enabled"].(bool); ok {
+		update["enabled"] = enabled
+	}
+	if name, ok := request.Arguments["name"].(string); ok && name != "" {
+		update["name"] = name
+	}
+	if cron, ok := request.Arguments["cron"].(string); ok && cron != "" {
+		update["config"] = map[string]any{"cron": cron}
+	}
+	if prompt, ok := request.Arguments["prompt"].(string); ok && prompt != "" {
+		cfg, _ := update["config"].(map[string]any)
+		if cfg == nil {
+			cfg = map[string]any{}
+		}
+		cfg["prompt"] = prompt
+		update["config"] = cfg
+	}
+	body, err := a.kernelPOST(ctx, a.TemporalityURL+"/v1/workspace/triggers/"+triggerID, update)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	return ToolResult{Content: body}, nil
+}
+
+func (a *Activities) handleDeleteTrigger(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	triggerID, _ := request.Arguments["trigger_id"].(string)
+	if triggerID == "" {
+		return ToolResult{Content: "error: trigger_id is required"}, nil
+	}
+	url := fmt.Sprintf("%s/v1/workspace/triggers/%s", a.TemporalityURL, triggerID)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	req.Header.Set("Authorization", "Bearer "+a.APIToken)
+	resp, err := a.HTTP.Do(req)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	defer resp.Body.Close()
+	return ToolResult{Content: fmt.Sprintf("deleted trigger %s (HTTP %d)", triggerID, resp.StatusCode)}, nil
+}
+
+func (a *Activities) kernelGET(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+a.APIToken)
+	resp, err := a.HTTP.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return string(b), nil
+}
+
+func (a *Activities) kernelPOST(ctx context.Context, url string, body any) (string, error) {
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(b))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.APIToken)
+	resp, err := a.HTTP.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	rb, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return string(rb), nil
 }
 
 func stringArgs(value any) ([]string, error) {
