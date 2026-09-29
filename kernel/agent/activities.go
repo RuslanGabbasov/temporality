@@ -67,7 +67,7 @@ func NewActivities(events EventOutbox) (*Activities, error) {
 func (a *Activities) ToolDefs() []llm.ToolDef {
 	defs := a.MCP.ToolDefs()
 	if a.Sandbox != nil {
-		defs = append(defs, llm.ToolDef{Name: "run_command", Description: "Run a command in the isolated workspace container. Network access depends on agent configuration. Write access depends on the agent's read_only setting. Provide argv as an array.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}}})
+		defs = append(defs, llm.ToolDef{Name: "run_command", Description: "Run a command in an isolated sandbox container. The working directory is /workspace which persists between calls — save ALL files there. /tmp and /scratch are ephemeral and disappear between calls. Network access depends on agent configuration. Provide argv as an array.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}}})
 	}
 	return defs
 }
