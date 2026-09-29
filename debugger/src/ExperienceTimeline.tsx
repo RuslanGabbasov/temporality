@@ -184,26 +184,26 @@ export default function ExperienceTimeline({ project }: { project: string }) {
 
   // Sync investigation state to URL for shareable links.
   useEffect(() => {
-    const p = new URLSearchParams()
-    p.set('project', project)
+    const urlParams = new URLSearchParams()
+    urlParams.set('project', project)
     const lensObj: Record<string, boolean> = {}
     for (const [k, v] of Object.entries(lens)) { if (v !== DEFAULT_LENS[k as keyof Lens]) lensObj[k] = v }
-    if (Object.keys(lensObj).length) p.set('lens', JSON.stringify(lensObj))
+    if (Object.keys(lensObj).length) urlParams.set('lens', JSON.stringify(lensObj))
     const kindArr = [...kinds]
-    if (kindArr.length !== LIFECYCLE_KINDS.length || !LIFECYCLE_KINDS.every((k) => kinds.has(k))) p.set('kinds', kindArr.join(','))
-    if (roleFilter !== 'all') p.set('role', roleFilter)
-    if (scopeFilter !== 'all') p.set('scope', scopeFilter)
-    if (bucketFilter !== 'all') p.set('bucket', bucketFilter)
-    if (strengthMin > 0) p.set('str', strengthMin.toFixed(2))
-    if (recencyFilter !== 'all') p.set('recency', recencyFilter)
-    if (hasActivations) p.set('activated', '1')
-    if (crossScopeOnly) p.set('xscope', '1')
-    if (terminalFilter !== 'all') p.set('life', terminalFilter)
-    if (hiddenRoots.size) p.set('hidden', [...hiddenRoots].join(','))
-    if (query) p.set('q', query)
-    if (selected) p.set('selected', selected)
-    if (window_) p.set('w', `${window_.t0},${window_.t1}`)
-    window.history.replaceState(null, '', `/experience?${p}`)
+    if (kindArr.length !== LIFECYCLE_KINDS.length || !LIFECYCLE_KINDS.every((k) => kinds.has(k))) urlParams.set('kinds', kindArr.join(','))
+    if (roleFilter !== 'all') urlParams.set('role', roleFilter)
+    if (scopeFilter !== 'all') urlParams.set('scope', scopeFilter)
+    if (bucketFilter !== 'all') urlParams.set('bucket', bucketFilter)
+    if (strengthMin > 0) urlParams.set('str', strengthMin.toFixed(2))
+    if (recencyFilter !== 'all') urlParams.set('recency', recencyFilter)
+    if (hasActivations) urlParams.set('activated', '1')
+    if (crossScopeOnly) urlParams.set('xscope', '1')
+    if (terminalFilter !== 'all') urlParams.set('life', terminalFilter)
+    if (hiddenRoots.size) urlParams.set('hidden', [...hiddenRoots].join(','))
+    if (query) urlParams.set('q', query)
+    if (selected) urlParams.set('selected', selected)
+    if (window_) urlParams.set('w', `${window_.t0},${window_.t1}`)
+    window.history.replaceState(null, '', `/experience?${urlParams.toString()}`)
   }, [project, lens, kinds, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, hiddenRoots, query, selected, window_])
 
   const model = useMemo(() => (events.length ? foldExperience(events) : null), [events])
