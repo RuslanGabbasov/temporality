@@ -84,15 +84,16 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 	input.MCPServer = MCPServerName()
 	a.NetworkAccess = input.NetworkAccess
 	if a.Sandbox != nil {
-		input.AutoApproveTools = []string{"run_command"}
+		autoApproveTools := []string{"run_command"}
+		input.AutoApproveTools = autoApproveTools
 		if input.WorkspacePath == "" {
-			// Workspace runs and API calls that don't specify a workspace
-			// get an isolated temporary directory inside the sandbox root.
-			dir, err := os.MkdirTemp(a.Sandbox.SandboxRoot(), "ws-"+input.RunID+"-*")
-			if err != nil {
-				return fmt.Errorf("create workspace: %w", err)
+			// Persistent workspace per project: shared across agents and runs,
+			// so build caches (node_modules, go mod, pip) and artifacts persist.
+			projectDir := filepath.Join(a.Sandbox.SandboxRoot(), "projects", input.Project)
+			if err := os.MkdirAll(projectDir, 0o777); err != nil {
+				return fmt.Errorf("create project workspace: %w", err)
 			}
-			input.WorkspacePath = dir
+			input.WorkspacePath = projectDir
 		}
 		workspace, err := a.Sandbox.ResolveWorkspace(input.WorkspacePath)
 		if err != nil {
