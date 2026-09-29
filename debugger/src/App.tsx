@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Layout, { type AppState } from './Layout'
 import { I18nProvider } from './i18n'
+import { ThemePrefProvider } from './theme'
 import Observability from './Observability'
 import AgentRuns from './AgentRuns'
 import Operations from './Operations'
@@ -30,6 +31,7 @@ function pageFor(pathname: string): Page {
   if (Routes.operations.test(pathname)) return 'operations'
   if (Routes.observability.test(pathname)) return 'observability'
   if (Routes.workspace.test(pathname)) return 'workspace'
+  if (Routes.experience.test(pathname)) return 'experience'
   if (Routes['agent-config'].test(pathname)) return 'agent-config'
   if (Routes.providers.test(pathname)) return 'providers'
   if (Routes.users.test(pathname)) return 'users'
@@ -48,6 +50,7 @@ export default function App() {
   }, [])
 
   return (
+    <ThemePrefProvider>
     <I18nProvider>
     <Layout activePage={page}>
       {({ project, setProject, projectDefaultAgent, projectDefaultModel }: AppState) => {
@@ -76,5 +79,6 @@ export default function App() {
       }}
     </Layout>
     </I18nProvider>
+    </ThemePrefProvider>
   )
 }

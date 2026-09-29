@@ -12,6 +12,7 @@ const translations: Record<Locale, Record<string, string>> = {
   en: {
     // Navigation
     'nav.timeline': 'Timeline',
+    'nav.workspace': 'Workspace',
     'nav.runs': 'Runs',
     'nav.operations': 'Operations',
     'nav.knowledge': 'Knowledge',
@@ -168,6 +169,10 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Settings
     'settings.language': 'Language',
+    'settings.theme': 'Theme',
+    'settings.light': 'Light',
+    'settings.dark': 'Dark',
+    'settings.system': 'System',
 
     // Status
     'status.completed': 'completed',
@@ -179,6 +184,7 @@ const translations: Record<Locale, Record<string, string>> = {
   ru: {
     // Navigation
     'nav.timeline': 'Таймлайн',
+    'nav.workspace': 'Главная',
     'nav.runs': 'Запуски',
     'nav.operations': 'Операции',
     'nav.knowledge': 'Знания',
@@ -335,6 +341,10 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Settings
     'settings.language': 'Язык',
+    'settings.theme': 'Тема',
+    'settings.light': 'Светлая',
+    'settings.dark': 'Тёмная',
+    'settings.system': 'Системная',
 
     // Status
     'status.completed': 'завершён',

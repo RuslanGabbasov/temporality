@@ -71,6 +71,94 @@ $css--font-face: false;
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Light theme
+// ═══════════════════════════════════════════════════════════════
+
+:root[data-theme="light"] {
+  --tm-bg: #F7F5F0;
+  --tm-surface: #EDE8DF;
+  --tm-elevated: #FFFFFF;
+  --tm-raised: #E2DDD4;
+  --tm-border: rgba(15, 31, 29, 0.12);
+  --tm-border-strong: rgba(15, 31, 29, 0.20);
+
+  --tm-text: #0F1F1D;
+  --tm-text-2: #56635F;
+  --tm-text-3: #8A928F;
+  --tm-text-4: #A8AFA9;
+
+  --tm-success: #3D7A5F;
+  --tm-warning: #C47D2E;
+  --tm-danger: #A84B42;
+  --tm-info: #3D7A6E;
+}
+
+:root[data-theme="light"] body {
+  background: var(--tm-bg);
+  color: var(--tm-text);
+}
+
+:root[data-theme="light"] .cds--btn--primary {
+  background-color: var(--tm-teal) !important;
+  border-color: var(--tm-teal) !important;
+  color: #fff !important;
+}
+
+:root[data-theme="light"] .cds--btn--primary:hover {
+  background-color: #236B5E !important;
+  border-color: #236B5E !important;
+}
+
+:root[data-theme="light"] .cds--btn--secondary {
+  border-color: var(--tm-border-strong) !important;
+  color: var(--tm-text) !important;
+}
+
+:root[data-theme="light"] .cds--text-input,
+:root[data-theme="light"] .cds--text-area,
+:root[data-theme="light"] .cds--select-input,
+:root[data-theme="light"] .cds--number input[type="number"] {
+  background-color: #fff !important;
+  color: var(--tm-text) !important;
+  border: 1px solid var(--tm-border-strong) !important;
+}
+
+:root[data-theme="light"] .modal-panel {
+  background: #fff;
+  border: 1px solid var(--tm-border);
+}
+
+:root[data-theme="light"] .modal-overlay {
+  background: rgba(15, 31, 29, 0.3);
+}
+
+:root[data-theme="light"] .cds--header {
+  background: var(--tm-forest) !important;
+}
+
+:root[data-theme="light"] .cds--header__name {
+  color: #fff !important;
+}
+
+:root[data-theme="light"] .header-nav-link {
+  color: rgba(255,255,255,0.75);
+}
+
+:root[data-theme="light"] .header-nav-link:hover,
+:root[data-theme="light"] .header-nav-link.active {
+  color: #fff;
+}
+
+:root[data-theme="light"] .cds--header-global-bar {
+  background: var(--tm-forest);
+}
+
+:root[data-theme="light"] .cds--tag {
+  background: var(--tm-raised);
+  color: var(--tm-text);
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Carbon token overrides — dark warm theme
 // ═══════════════════════════════════════════════════════════════
 
@@ -940,7 +1028,10 @@ body, #root, #main-content {
 }
 
 .onboarding-step h1 {
+  font-size: 1.5rem;
+  font-weight: 500;
   text-align: center;
+  color: var(--tm-text);
 }
 
 .onboarding-step h2,
@@ -949,6 +1040,7 @@ body, #root, #main-content {
   font-weight: 500;
   text-align: center;
   width: 100%;
+  color: var(--tm-text);
 }
 
 .onboarding-desc {

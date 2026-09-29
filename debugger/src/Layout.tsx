@@ -18,6 +18,7 @@ import { Menu } from '@carbon/icons-react'
 import { TOKEN_STORAGE_KEY, authToken, authHeaders } from './api'
 import Onboarding from './Onboarding'
 import { useI18n, type Locale } from './i18n'
+import { useTheme } from './theme'
 import { whoami, type Whoami } from './kernelApi'
 
 const KERNEL_API = '/kernel-api'
@@ -35,7 +36,7 @@ interface LayoutProps {
 }
 
 const NAV_ITEMS = [
-  { path: '/workspace', label: 'Workspace' },
+  { path: '/workspace', label: 'nav.workspace' },
   { path: '/agents', label: 'nav.runs' },
   { path: '/operations', label: 'nav.operations' },
   { path: '/observability', label: 'nav.knowledge' },
@@ -67,6 +68,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [identity, setIdentity] = useState<Whoami | null>(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const { locale, setLocale, t } = useI18n()
+  const { theme, setTheme, resolved } = useTheme()
   const [token, setToken] = useState(authToken() ?? '')
   const [loggedIn, setLoggedIn] = useState(!!authToken())
 
@@ -255,9 +257,9 @@ export default function Layout({ children, activePage }: LayoutProps) {
               }}
             >
               <User size={14} />
-              <span>{identity?.subject ?? 'User'}</span>
-              {identity?.role && <span style={{ fontSize: '0.65rem', color: 'var(--tm-muted)' }}>{identity.role}</span>}
-              <span style={{ fontSize: '0.6rem', color: 'var(--tm-muted)' }}>{showUserMenu ? '▴' : '▾'}</span>
+              <span style={{ color: '#fff' }}>{identity?.subject ?? 'User'}</span>
+              {identity?.role && <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.55)' }}>{identity.role}</span>}
+              <span style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.45)' }}>{showUserMenu ? '▴' : '▾'}</span>
             </button>
             {showUserMenu && (
               <HeaderPanel expanded>
@@ -267,17 +269,21 @@ export default function Layout({ children, activePage }: LayoutProps) {
                       <div style={{ fontSize: '0.8rem', fontWeight: 500 }}>{identity.subject}</div>
                     </div>
                   )}
-                  <div
-                    onClick={() => { setLocale(locale === 'en' ? 'ru' : 'en'); setShowUserMenu(false) }}
-                    style={{ padding: '0.4rem 0.5rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-text-2)' }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                  >
-                    {t('settings.language')}: {locale === 'en' ? 'English' : 'Русский'}
-                  </div>
+                  <div style={{ padding: '0.4rem 0.5rem', fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.25rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.5rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('settings.language') ?? 'Language'}</div>
+                  {(['en', 'ru'] as const).map((opt) => (
+                    <div key={opt} onClick={() => { setLocale(opt); setShowUserMenu(false) }} style={{ padding: '0.3rem 0.5rem 0.3rem 1.2rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: locale === opt ? 'var(--tm-amber)' : 'var(--tm-text-2)', fontWeight: locale === opt ? 500 : 400, display: 'flex', alignItems: 'center', gap: '0.4rem' }} onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+                      <span style={{ width: '0.75rem', textAlign: 'center', fontSize: '0.7rem' }}>{locale === opt ? '✓' : ''}</span>{opt === 'en' ? 'English' : 'Русский'}
+                    </div>
+                  ))}
+                  <div style={{ padding: '0.4rem 0.5rem', fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.25rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.5rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('settings.theme') ?? 'Theme'}</div>
+                  {(['light', 'dark', 'system'] as const).map((opt) => (
+                    <div key={opt} onClick={() => { setTheme(opt); setShowUserMenu(false) }} style={{ padding: '0.3rem 0.5rem 0.3rem 1.2rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: theme === opt ? 'var(--tm-amber)' : 'var(--tm-text-2)', fontWeight: theme === opt ? 500 : 400, display: 'flex', alignItems: 'center', gap: '0.4rem' }} onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+                      <span style={{ width: '0.75rem', textAlign: 'center', fontSize: '0.7rem' }}>{theme === opt ? '✓' : ''}</span>{opt === 'light' ? (t('settings.light') ?? 'Light') : opt === 'dark' ? (t('settings.dark') ?? 'Dark') : (t('settings.system') ?? 'System')}
+                    </div>
+                  ))}
                   <div
                     onClick={() => { doLogout(); setShowUserMenu(false) }}
-                    style={{ padding: '0.4rem 0.5rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-danger)', marginTop: '0.25rem' }}
+                    style={{ padding: '0.4rem 0.5rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-danger)', marginTop: '0.5rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.5rem' }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
@@ -299,9 +305,9 @@ export default function Layout({ children, activePage }: LayoutProps) {
                 fontFamily: 'var(--tm-font)',
               }}
             >
-              <Folder size={14} style={{ color: 'var(--tm-teal)' }} />
-              <span>{project}</span>
-              <span style={{ fontSize: '0.6rem', color: 'var(--tm-muted)' }}>{showProjectPanel ? '▴' : '▾'}</span>
+              <Folder size={14} style={{ color: 'rgba(255,255,255,0.6)' }} />
+              <span style={{ color: '#fff' }}>{project}</span>
+              <span style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.45)' }}>{showProjectPanel ? '▴' : '▾'}</span>
             </button>
             {showProjectPanel && (
               <HeaderPanel expanded>
