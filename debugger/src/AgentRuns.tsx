@@ -96,14 +96,28 @@ function eventSummary(event: ObservationEvent): { icon: string; label: string; d
       return { icon: '🔍', label: 'Memory lookup', detail: `${d.candidate_count ?? 0} candidates`, color: '#7e8a9c' }
     case 'memory.read':
       return { icon: '📖', label: 'Memory read', detail: `${d.hint_count ?? 0} hints loaded`, color: '#7e8a9c' }
+    case 'mcp.call.started':
+      return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: `→ ${d.server ?? ''}`, color: '#bb9af7' }
+    case 'mcp.call.completed':
+      return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: 'completed', color: '#9ece6a' }
+    case 'mcp.call.failed':
+      return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: String(d.error_type ?? 'failed'), color: '#f7768e' }
+    case 'approval.requested': {
+      const op = d.operation as Record<string, unknown> | undefined
+      return { icon: '⚠', label: 'Approval needed', detail: String(d.action ?? op?.tool ?? ''), color: '#e6b85c' }
+    }
+    case 'approval.granted':
+      return { icon: '✓', label: 'Approved', detail: d.approver ? `by ${String(d.approver)}` : '', color: '#9ece6a' }
+    case 'approval.auto_granted': {
+      const op2 = d.operation as Record<string, unknown> | undefined
+      return { icon: '✓', label: 'Auto-approved', detail: String(op2?.tool ?? d.policy_id ?? ''), color: '#9ece6a' }
+    }
+    case 'tool.blocked':
+      return { icon: '🚫', label: 'Blocked', detail: String(d.reason ?? ''), color: '#f7768e' }
     case 'agent.summary':
       return { icon: '📋', label: 'Summary', detail: String(d.kind ?? ''), color: '#57d7e8' }
-    case 'approval.requested':
-      return { icon: '⚠', label: 'Approval needed', detail: String(d.action ?? d.reason ?? ''), color: '#e6b85c' }
-    case 'approval.granted':
-      return { icon: '✓', label: 'Approved', detail: '', color: '#9ece6a' }
     case 'approval.rejected':
-      return { icon: '✗', label: 'Rejected', detail: '', color: '#f7768e' }
+      return { icon: '✗', label: 'Rejected', detail: String(d.reason ?? ''), color: '#f7768e' }
     case 'delegation.started':
       return { icon: '↗', label: 'Delegation', detail: `→ ${d.child_run_id ?? '?'}`, color: '#7aa2f7' }
     default:
