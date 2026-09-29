@@ -59,7 +59,15 @@ export default function Observability({ project }: { project: string }) {
   }, [knowledge])
   const visibleKnowledge = knowledge.filter((item) => {
     if (clusterFilter !== 'all' && (item.topics?.[0] || item.entities?.[0] || 'Unscoped') !== clusterFilter) return false
-    if (stateFilter !== 'all' && item.state !== stateFilter) return false
+    if (stateFilter !== 'all') {
+      if (stateFilter === 'alive') {
+        if (item.state === 'invalidated' || item.state === 'superseded' || item.state === 'corrected') return false
+      } else if (stateFilter === 'stale') {
+        if (!item.at_risk) return false
+      } else if (item.state !== stateFilter) {
+        return false
+      }
+    }
     return true
   })
 
