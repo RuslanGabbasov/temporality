@@ -409,12 +409,12 @@ export default function Workspace({ project }: { project: string }) {
     <div className="workspace-root">
       {/* Left panel: conversations */}
       <div className="workspace-sidebar">
-        <div style={{ padding: '0.75rem', borderBottom: '1px solid #202a38' }}>
+        <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--tm-border)' }}>
           <Button renderIcon={Add} size="sm" onClick={() => setShowNewChat(true)} style={{ width: '100%' }}>New chat</Button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
           {conversations.length === 0 && (
-            <p style={{ color: '#7e8a9c', fontSize: '0.75rem', padding: '1rem', textAlign: 'center' }}>No conversations yet</p>
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', padding: '1rem', textAlign: 'center' }}>No conversations yet</p>
           )}
           {conversations.map((conv) => (
             <div
@@ -425,20 +425,20 @@ export default function Workspace({ project }: { project: string }) {
                 marginBottom: '0.25rem',
                 borderRadius: '6px',
                 cursor: 'pointer',
-                background: conv.id === activeConvId ? '#121823' : 'transparent',
-                border: conv.id === activeConvId ? '1px solid #344258' : '1px solid transparent',
+                background: conv.id === activeConvId ? 'var(--tm-elevated)' : 'transparent',
+                border: conv.id === activeConvId ? '1px solid var(--tm-border)' : '1px solid transparent',
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.title}</div>
-                  <div style={{ fontSize: '0.75rem', color: '#7e8a9c', marginTop: '0.25rem' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
                     {conv.agentId ? agentName(conv.agentId) : 'Default'} · {conv.messages.length} msgs
                   </div>
                 </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id) }}
-                  style={{ background: 'none', border: 'none', color: '#7e8a9c', cursor: 'pointer', padding: '0.25rem' }}
+                  style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', padding: '0.25rem' }}
                 >
                   <TrashCan size={16} />
                 </button>
@@ -453,7 +453,7 @@ export default function Workspace({ project }: { project: string }) {
         {activeConv ? (
           <>
             {/* Chat header */}
-            <div style={{ padding: '0.5rem 1rem', borderBottom: '1px solid #202a38', background: '#0d1118', display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
+            <div style={{ padding: '0.5rem 1rem', borderBottom: '1px solid var(--tm-border)', background: 'var(--tm-surface)', display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
               <strong style={{ fontSize: '0.875rem' }}>{activeConv.title}</strong>
               {activeConv.agentId && <Tag type="blue" size="sm">{agentName(activeConv.agentId)}</Tag>}
             </div>
@@ -461,7 +461,7 @@ export default function Workspace({ project }: { project: string }) {
             {/* Chat messages */}
             <div className="workspace-messages">
               {activeConv.messages.length === 0 && (
-                <div style={{ textAlign: 'center', color: '#7e8a9c', padding: '3rem 1rem' }}>
+                <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '3rem 1rem' }}>
                   <Heading>Temporality Agent</Heading>
                   <p>Send a message to start the conversation.</p>
                 </div>
@@ -470,17 +470,17 @@ export default function Workspace({ project }: { project: string }) {
                 <div key={i} style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div style={{
                     maxWidth: '80%', padding: '0.75rem 1rem', borderRadius: '8px',
-                    background: msg.role === 'user' ? '#57d7e8' : '#121823',
-                    color: msg.role === 'user' ? '#080b10' : '#e5e9f0',
-                    border: msg.role === 'user' ? 'none' : '1px solid #344258',
+                    background: msg.role === 'user' ? 'var(--tm-teal)' : 'var(--tm-elevated)',
+                    color: msg.role === 'user' ? 'var(--tm-bg)' : 'var(--tm-text)',
+                    border: msg.role === 'user' ? 'none' : '1px solid var(--tm-border)',
                   }}>
                     {/* Reasoning/thinking block — collapsible */}
                     {msg.reasoning && (
-                      <details style={{ marginBottom: '0.5rem', borderRadius: '4px', border: '1px solid #344258', background: '#0b1016' }}>
-                        <summary style={{ padding: '0.4rem 0.6rem', cursor: 'pointer', fontSize: '0.75rem', color: '#7e8a9c', fontWeight: 600, letterSpacing: '0.03em' }}>
+                      <details style={{ marginBottom: '0.5rem', borderRadius: '4px', border: '1px solid var(--tm-border)', background: '#0b1016' }}>
+                        <summary style={{ padding: '0.4rem 0.6rem', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--tm-text-3)', fontWeight: 600, letterSpacing: '0.03em' }}>
                           💭 Thinking
                         </summary>
-                        <div style={{ padding: '0.5rem 0.6rem', fontSize: '0.78rem', color: '#9d7cd8', lineHeight: 1.5, whiteSpace: 'pre-wrap', borderTop: '1px solid #202a38' }}>
+                        <div style={{ padding: '0.5rem 0.6rem', fontSize: '0.78rem', color: '#9d7cd8', lineHeight: 1.5, whiteSpace: 'pre-wrap', borderTop: '1px solid var(--tm-border)' }}>
                           {msg.reasoning}
                         </div>
                       </details>
@@ -495,24 +495,24 @@ export default function Workspace({ project }: { project: string }) {
                     {msg.status === 'running' && msg.streamLines && msg.streamLines.length > 0 && (
                       <div style={{ marginTop: msg.content ? '0.5rem' : 0 }}>
                         {msg.streamLines.map((line, li) => (
-                          <div key={li} style={{ fontSize: '0.75rem', color: '#7e8a9c', fontFamily: '"SFMono-Regular", Consolas, monospace', lineHeight: 1.6 }}>
+                          <div key={li} style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', fontFamily: '"SFMono-Regular", Consolas, monospace', lineHeight: 1.6 }}>
                             <span style={{ color: '#4fd6be', marginRight: '0.4rem' }}>›</span>{line}
                           </div>
                         ))}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.25rem' }}>
                           <span className="spinner" />
-                          <span style={{ fontSize: '0.7rem', color: '#57d7e8' }}>streaming…</span>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--tm-teal)' }}>streaming…</span>
                         </div>
                       </div>
                     )}
 
                     {msg.runId && msg.status && msg.status !== 'running' && (
-                      <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: msg.role === 'user' ? '#080b10' : '#7e8a9c', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: msg.role === 'user' ? 'var(--tm-bg)' : 'var(--tm-text-3)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Tag type={STATUS_COLORS[msg.status] || 'gray'} size="sm">{msg.status}</Tag>
                         {activeConv && (
                           <button
                             onClick={() => branchConversation(activeConv.id, i)}
-                            style={{ background: 'none', border: '1px solid #344258', borderRadius: '4px', color: '#57d7e8', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
+                            style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem' }}
                             title="Branch conversation from this point"
                           >Branch</button>
                         )}
@@ -548,7 +548,7 @@ export default function Workspace({ project }: { project: string }) {
             </div>
           </>
         ) : (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#7e8a9c' }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tm-text-3)' }}>
             <div style={{ textAlign: 'center' }}>
               <Heading>Temporality Agent</Heading>
               <p style={{ marginTop: '0.5rem' }}>Select a conversation or start a new one.</p>

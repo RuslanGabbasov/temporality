@@ -116,7 +116,7 @@ export default function Triggers({ project }: { project: string }) {
       </div>
 
       {triggers.length === 0 && !loading && (
-        <Tile style={{ textAlign: 'center', padding: '3rem', color: '#7e8a9c' }}>
+        <Tile style={{ textAlign: 'center', padding: '3rem', color: 'var(--tm-text-3)' }}>
           <p>No triggers configured.</p>
           <p style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>Triggers launch agent runs automatically based on schedules, webhooks, or events.</p>
         </Tile>
@@ -137,13 +137,13 @@ export default function Triggers({ project }: { project: string }) {
                       <Tag type={info.color} size="sm">{info.label}</Tag>
                       <Tag type={t.enabled ? 'green' : 'red'} size="sm">{t.enabled ? 'on' : 'off'}</Tag>
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: '#7e8a9c', marginTop: '0.35rem' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.35rem' }}>
                       {t.type === 'schedule' && cfg.cron && <span>cron: <code>{cfg.cron}</code></span>}
                       {t.type === 'webhook' && cfg.path && <span>POST <code style={{ fontSize: '0.65rem' }}>{webhookUrl(t)}</code></span>}
                       {t.type === 'event' && cfg.event_type && <span>on <code>{cfg.event_type}</code></span>}
                     </div>
                     {t.agent_id && (
-                      <div style={{ fontSize: '0.7rem', color: '#7e8a9c', marginTop: '0.2rem' }}>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', marginTop: '0.2rem' }}>
                         agent: {agents.find((a) => a.id === t.agent_id)?.name ?? t.agent_id}
                       </div>
                     )}

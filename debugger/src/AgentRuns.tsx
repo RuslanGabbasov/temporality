@@ -36,17 +36,17 @@ function eventSummary(event: ObservationEvent): { icon: string; label: string; d
   const d = event.data ?? {}
   switch (event.type) {
     case 'run.started':
-      return { icon: '▶', label: 'Run started', detail: d.model ? `model ${d.model}` : '', color: '#57d7e8' }
+      return { icon: '▶', label: 'Run started', detail: d.model ? `model ${d.model}` : '', color: 'var(--tm-teal)' }
     case 'run.completed':
       return { icon: '✓', label: 'Run completed', detail: `${d.turns ?? '?'} turns`, color: '#9ece6a' }
     case 'run.failed':
       return { icon: '✗', label: 'Run failed', detail: d.error ? String(d.error).slice(0, 80) : '', color: '#f7768e' }
     case 'turn.started':
-      return { icon: '→', label: `Turn ${d.turn ?? '?'}`, detail: 'started', color: '#7e8a9c' }
+      return { icon: '→', label: `Turn ${d.turn ?? '?'}`, detail: 'started', color: 'var(--tm-text-3)' }
     case 'turn.completed':
-      return { icon: '←', label: `Turn ${d.turn ?? '?'}`, detail: d.tool_calls ? `${d.tool_calls} tool calls` : 'completed', color: '#7e8a9c' }
+      return { icon: '←', label: `Turn ${d.turn ?? '?'}`, detail: d.tool_calls ? `${d.tool_calls} tool calls` : 'completed', color: 'var(--tm-text-3)' }
     case 'model.started':
-      return { icon: '⏳', label: 'Model call', detail: String(d.model ?? "started"), color: '#7e8a9c' }
+      return { icon: '⏳', label: 'Model call', detail: String(d.model ?? "started"), color: 'var(--tm-text-3)' }
     case 'model.completed': {
       const tokens = d.total_tokens ? `${d.total_tokens} tok` : ''
       const latency = d.latency_ms ? `${(Number(d.latency_ms) / 1000).toFixed(1)}s` : ''
@@ -93,9 +93,9 @@ function eventSummary(event: ObservationEvent): { icon: string; label: string; d
     case 'knowledge.recalled':
       return { icon: '📚', label: 'Recalled', detail: String(d.proposition ?? '').slice(0, 60), color: '#9d7cd8' }
     case 'hint.query':
-      return { icon: '🔍', label: 'Memory lookup', detail: `${d.candidate_count ?? 0} candidates`, color: '#7e8a9c' }
+      return { icon: '🔍', label: 'Memory lookup', detail: `${d.candidate_count ?? 0} candidates`, color: 'var(--tm-text-3)' }
     case 'memory.read':
-      return { icon: '📖', label: 'Memory read', detail: `${d.hint_count ?? 0} hints loaded`, color: '#7e8a9c' }
+      return { icon: '📖', label: 'Memory read', detail: `${d.hint_count ?? 0} hints loaded`, color: 'var(--tm-text-3)' }
     case 'mcp.call.started':
       return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: `→ ${d.server ?? ''}`, color: '#bb9af7' }
     case 'mcp.call.completed':
@@ -115,13 +115,13 @@ function eventSummary(event: ObservationEvent): { icon: string; label: string; d
     case 'tool.blocked':
       return { icon: '🚫', label: 'Blocked', detail: String(d.reason ?? ''), color: '#f7768e' }
     case 'agent.summary':
-      return { icon: '📋', label: 'Summary', detail: String(d.kind ?? ''), color: '#57d7e8' }
+      return { icon: '📋', label: 'Summary', detail: String(d.kind ?? ''), color: 'var(--tm-teal)' }
     case 'approval.rejected':
       return { icon: '✗', label: 'Rejected', detail: String(d.reason ?? ''), color: '#f7768e' }
     case 'delegation.started':
       return { icon: '↗', label: 'Delegation', detail: `→ ${d.child_run_id ?? '?'}`, color: '#7aa2f7' }
     default:
-      return { icon: '•', label: event.type, detail: '', color: '#7e8a9c' }
+      return { icon: '•', label: event.type, detail: '', color: 'var(--tm-text-3)' }
   }
 }
 
@@ -148,7 +148,7 @@ function EventDetail({ event }: { event: ObservationEvent }) {
     <div>
       <button
         onClick={() => setExpanded(!expanded)}
-        style={{ background: 'none', border: 'none', color: '#7e8a9c', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+        style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
       >
         {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         {expanded ? 'hide details' : 'show details'}
@@ -158,21 +158,21 @@ function EventDetail({ event }: { event: ObservationEvent }) {
           {/* Show answer/content if present */}
           {typeof d.answer === 'string' && (
             <div style={{ marginBottom: '0.5rem' }}>
-              <div style={{ color: '#7e8a9c', marginBottom: '0.25rem' }}>answer:</div>
-              <div style={{ whiteSpace: 'pre-wrap', color: '#e5e9f0', background: '#121823', padding: '0.5rem', borderRadius: '3px', maxHeight: '150px', overflowY: 'auto' }}>{d.answer.slice(0, 2000)}</div>
+              <div style={{ color: 'var(--tm-text-3)', marginBottom: '0.25rem' }}>answer:</div>
+              <div style={{ whiteSpace: 'pre-wrap', color: 'var(--tm-text)', background: 'var(--tm-elevated)', padding: '0.5rem', borderRadius: '3px', maxHeight: '150px', overflowY: 'auto' }}>{d.answer.slice(0, 2000)}</div>
             </div>
           )}
           {/* Show other data */}
           {[...importantFields, ...otherFields].map(([k, v]) => (
             <div key={k} style={{ marginBottom: '0.2rem' }}>
-              <span style={{ color: '#7e8a9c' }}>{k}: </span>
-              <span style={{ color: '#e5e9f0' }}>
+              <span style={{ color: 'var(--tm-text-3)' }}>{k}: </span>
+              <span style={{ color: 'var(--tm-text)' }}>
                 {typeof v === 'object' ? JSON.stringify(v).slice(0, 200) : String(v).slice(0, 200)}
               </span>
             </div>
           ))}
           {/* Event metadata */}
-          <div style={{ marginTop: '0.35rem', borderTop: '1px solid #202a38', paddingTop: '0.35rem', color: '#565f89' }}>
+          <div style={{ marginTop: '0.35rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.35rem', color: 'var(--tm-muted)' }}>
             event_id: {event.event_id}
           </div>
         </div>
@@ -307,7 +307,7 @@ export default function AgentRuns({ project }: { project: string }) {
           <Section level={3}>
             <Heading>Runs ({runs.length})</Heading>
             <Stack gap={1}>
-              {runs.length === 0 && <Tile style={{ color: '#7e8a9c', textAlign: 'center' }}>No runs for this project</Tile>}
+              {runs.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>No runs for this project</Tile>}
               {runs.map((event) => {
                 const id = runID(event)
                 return (
@@ -318,7 +318,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     style={{ padding: '0.5rem 0.75rem', cursor: 'pointer' }}
                   >
                     <div style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{id}</div>
-                    <div style={{ fontSize: '0.7rem', color: '#7e8a9c' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
                       {String(event.data?.role ?? 'agent')} · {shortTime(event.occurred_at)}
                     </div>
                   </Tile>
@@ -332,7 +332,7 @@ export default function AgentRuns({ project }: { project: string }) {
         <Column sm={4} md={5} lg={12}>
           <Section level={3}>
             {!selected ? (
-              <div style={{ textAlign: 'center', color: '#7e8a9c', padding: '3rem 1rem' }}>
+              <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '3rem 1rem' }}>
                 <Heading>Select a run</Heading>
                 <p style={{ marginTop: '0.5rem' }}>Click a run on the left to see its trace.</p>
               </div>
@@ -422,8 +422,8 @@ export default function AgentRuns({ project }: { project: string }) {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
                             <span style={{ color: info.color, width: '1.2rem', textAlign: 'center', flexShrink: 0 }}>{info.icon}</span>
                             <strong style={{ color: info.color, minWidth: '100px' }}>{info.label}</strong>
-                            <span style={{ color: '#7e8a9c', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{info.detail}</span>
-                            <span style={{ color: '#565f89', fontSize: '0.7rem', flexShrink: 0 }}>{shortTime(event.occurred_at)}</span>
+                            <span style={{ color: 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{info.detail}</span>
+                            <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{shortTime(event.occurred_at)}</span>
                           </div>
                           <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>
                             <EventDetail event={event} />
@@ -455,12 +455,12 @@ export default function AgentRuns({ project }: { project: string }) {
                     {/* Turns */}
                     {trajectory.turns?.length > 0 && (
                       <div style={{ marginBottom: '0.75rem' }}>
-                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Turns</h5>
+                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Turns</h5>
                         {trajectory.turns.map((turn: any) => (
                           <div key={turn.number} style={{ padding: '0.4rem 0.5rem', borderLeft: '3px solid #bb9af7', marginBottom: '0.25rem', background: 'rgba(255,255,255,0.02)', borderRadius: '0 4px 4px 0', fontSize: '0.8rem' }}>
                             <strong>Turn {turn.number}</strong>
-                            {turn.tokens > 0 && <span style={{ color: '#7e8a9c', marginLeft: '0.5rem' }}>{turn.tokens} tok</span>}
-                            {turn.latency_ms > 0 && <span style={{ color: '#7e8a9c', marginLeft: '0.5rem' }}>{(turn.latency_ms / 1000).toFixed(1)}s</span>}
+                            {turn.tokens > 0 && <span style={{ color: 'var(--tm-text-3)', marginLeft: '0.5rem' }}>{turn.tokens} tok</span>}
+                            {turn.latency_ms > 0 && <span style={{ color: 'var(--tm-text-3)', marginLeft: '0.5rem' }}>{(turn.latency_ms / 1000).toFixed(1)}s</span>}
                             {turn.tools?.length > 0 && (
                               <div style={{ marginTop: '0.25rem', display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
                                 {turn.tools.map((tool: any, ti: number) => (
@@ -475,12 +475,12 @@ export default function AgentRuns({ project }: { project: string }) {
                     {/* Patterns */}
                     {trajectory.patterns?.length > 0 && (
                       <div style={{ marginBottom: '0.75rem' }}>
-                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Repeating patterns</h5>
+                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Repeating patterns</h5>
                         {trajectory.patterns.map((p: any, i: number) => (
-                          <div key={i} style={{ fontSize: '0.8rem', marginBottom: '0.25rem', color: '#e5e9f0' }}>
+                          <div key={i} style={{ fontSize: '0.8rem', marginBottom: '0.25rem', color: 'var(--tm-text)' }}>
                             <Tag type="cyan" size="sm">×{p.count}</Tag>
                             <code style={{ marginLeft: '0.5rem', color: '#9e8cff' }}>{p.signature}</code>
-                            <span style={{ color: '#7e8a9c', marginLeft: '0.5rem' }}>turns {p.turns.join(', ')}</span>
+                            <span style={{ color: 'var(--tm-text-3)', marginLeft: '0.5rem' }}>turns {p.turns.join(', ')}</span>
                           </div>
                         ))}
                       </div>
@@ -488,7 +488,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     {/* Knowledge events */}
                     {trajectory.knowledge?.length > 0 && (
                       <div>
-                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Knowledge</h5>
+                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Knowledge</h5>
                         {trajectory.knowledge.map((k: any, i: number) => (
                           <div key={i} style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>
                             <Tag type={k.kind === 'proposed' ? 'blue' : k.kind === 'recalled' ? 'purple' : 'red'} size="sm">{k.kind}</Tag>

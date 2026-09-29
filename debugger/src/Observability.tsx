@@ -187,15 +187,15 @@ export default function Observability({ project }: { project: string }) {
       </div>
 
       {/* Tab bar */}
-      <div style={{ display: 'flex', gap: '0', borderBottom: '1px solid #202a38', marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', gap: '0', borderBottom: '1px solid var(--tm-border)', marginBottom: '1rem' }}>
         {TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
             style={{
-              padding: '0.5rem 1rem', background: tab === t.key ? '#121823' : 'transparent',
-              border: 'none', borderBottom: tab === t.key ? '2px solid #57d7e8' : '2px solid transparent',
-              color: tab === t.key ? '#57d7e8' : '#7e8a9c', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600,
+              padding: '0.5rem 1rem', background: tab === t.key ? 'var(--tm-elevated)' : 'transparent',
+              border: 'none', borderBottom: tab === t.key ? '2px solid var(--tm-teal)' : '2px solid transparent',
+              color: tab === t.key ? 'var(--tm-teal)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600,
             }}
           >{t.label}</button>
         ))}
@@ -209,14 +209,14 @@ export default function Observability({ project }: { project: string }) {
           {/* Health summary */}
           <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
             {[
-              { label: 'Total', count: health.total, color: '#e5e9f0' },
-              { label: 'Alive', count: health.alive, color: '#9ece6a' },
-              { label: 'Stale', count: health.stale, color: '#e0af68' },
-              { label: 'Invalidated', count: health.invalidated, color: '#f7768e' },
+              { label: 'Total', count: health.total, color: 'var(--tm-text)' },
+              { label: 'Alive', count: health.alive, color: 'var(--tm-success)' },
+              { label: 'Stale', count: health.stale, color: 'var(--tm-amber)' },
+              { label: 'Invalidated', count: health.invalidated, color: 'var(--tm-danger)' },
             ].map((s) => (
               <Tile key={s.label} style={{ padding: '0.75rem 1.25rem', minWidth: '100px', textAlign: 'center' }}>
                 <div style={{ fontSize: '1.5rem', fontWeight: 700, color: s.color }}>{s.count}</div>
-                <div style={{ fontSize: '0.7rem', color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{s.label}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{s.label}</div>
               </Tile>
             ))}
           </div>
@@ -239,9 +239,9 @@ export default function Observability({ project }: { project: string }) {
                 {clusters.map(([name, items]) => {
                   const alive = items.filter((k) => k.state !== 'invalidated' && k.state !== 'superseded' && !k.at_risk).length
                   return (
-                    <div key={name} style={{ padding: '0.5rem 0.75rem', background: '#0b1016', borderRadius: '6px', border: '1px solid #202a38', minWidth: '120px' }}>
+                    <div key={name} style={{ padding: '0.5rem 0.75rem', background: 'var(--tm-ink)', borderRadius: '6px', border: '1px solid var(--tm-border)', minWidth: '120px' }}>
                       <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.25rem' }}>{name}</div>
-                      <div style={{ fontSize: '0.7rem', color: '#7e8a9c' }}>{items.length} items · {alive} alive</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{items.length} items · {alive} alive</div>
                     </div>
                   )
                 })}
@@ -250,7 +250,7 @@ export default function Observability({ project }: { project: string }) {
           )}
 
           {knowledge.length === 0 && !loading && (
-            <div style={{ textAlign: 'center', color: '#7e8a9c', padding: '3rem 1rem' }}>
+            <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '3rem 1rem' }}>
               <p>No knowledge found for this project. Load a project to see agent knowledge.</p>
             </div>
           )}
@@ -286,7 +286,7 @@ export default function Observability({ project }: { project: string }) {
                   <Tag type={STATE_COLORS[item.state] || 'gray'} size="sm">{item.at_risk ? 'at risk' : item.state}</Tag>
                   <strong style={{ fontSize: '0.875rem', marginLeft: '0.35rem' }}>{item.proposition}</strong>
                   <br />
-                  <small style={{ color: '#7e8a9c' }}>
+                  <small style={{ color: 'var(--tm-text-3)' }}>
                     {item.history.length} events · reused {item.reuse_count} · hints {item.hint_uses}/{item.hint_offers}
                   </small>
                 </Tile>
@@ -297,7 +297,7 @@ export default function Observability({ project }: { project: string }) {
           {/* Right: detail panel — sticky so it stays visible while left list scrolls */}
           <div style={{ minWidth: 0, position: 'sticky', top: '3rem', alignSelf: 'start', maxHeight: 'calc(100vh - 5rem)', overflowY: 'auto' }}>
             {!selected ? (
-              <Tile style={{ textAlign: 'center', color: '#7e8a9c', padding: '2rem' }}>
+              <Tile style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '2rem' }}>
                 <p>Select a knowledge item to inspect</p>
               </Tile>
             ) : (
@@ -305,38 +305,38 @@ export default function Observability({ project }: { project: string }) {
                 <Tile>
                   <Tag type={STATE_COLORS[selected.state] || 'gray'}>{selected.state}</Tag>
                   <p style={{ fontSize: '0.875rem', fontWeight: 600, marginTop: '0.5rem', lineHeight: 1.4 }}>{selected.proposition}</p>
-                  <small style={{ color: '#7e8a9c' }}>ID: {selected.id}</small>
-                  <p style={{ fontSize: '0.75rem', color: '#7e8a9c', marginTop: '0.25rem' }}>
+                  <small style={{ color: 'var(--tm-text-3)' }}>ID: {selected.id}</small>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
                     Created: {new Date(selected.created_at).toLocaleString()} · Updated: {new Date(selected.updated_at).toLocaleString()}
                   </p>
-                  <p style={{ fontSize: '0.75rem', color: '#7e8a9c' }}>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>
                     Reuse: {selected.reuse_count} · Hints: {selected.hint_uses}/{selected.hint_offers} · Helpful: {selected.helpful_outcomes} · Harmful: {selected.harmful_outcomes}
                   </p>
                   {selected.at_risk && <InlineNotification kind="warning" title="At risk" subtitle={`Depends on: ${selected.risk_sources?.join(', ')}`} lowContrast />}
                   {selected.relationships?.length ? (
                     <>
-                      <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', marginTop: '0.75rem' }}>Relations</h5>
+                      <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', marginTop: '0.75rem' }}>Relations</h5>
                       {selected.relationships.map((r) => <div key={r.event_id} style={{ fontSize: '0.8rem' }}>{r.type} → <code>{r.target_id}</code></div>)}
                     </>
                   ) : null}
                   {selected.evidence?.length ? (
                     <>
-                      <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', marginTop: '0.75rem' }}>Evidence</h5>
+                      <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', marginTop: '0.75rem' }}>Evidence</h5>
                       {selected.evidence.map((e) => <div key={e.ref} style={{ fontSize: '0.8rem' }}><code>{e.ref}</code> ({e.type})</div>)}
                     </>
-                  ) : <p style={{ color: '#7e8a9c', fontSize: '0.8rem' }}>No evidence attached</p>}
+                  ) : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>No evidence attached</p>}
                 </Tile>
 
                 {/* Lifecycle */}
                 <Tile>
-                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Lifecycle</h5>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Lifecycle</h5>
                   <Stack gap={1}>
                     {selected.history.map((entry) => (
                       <div key={entry.event_id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.75rem' }}>
-                        <small style={{ color: '#7e8a9c', minWidth: '7rem' }}>{new Date(entry.at).toLocaleString()}</small>
+                        <small style={{ color: 'var(--tm-text-3)', minWidth: '7rem' }}>{new Date(entry.at).toLocaleString()}</small>
                         <Tag type="gray" size="sm">{entry.type}</Tag>
                         <span>{entry.state}{entry.rule ? ` · ${entry.rule}` : ''}</span>
-                        {entry.reason && <small style={{ color: '#7e8a9c' }}>{entry.reason}</small>}
+                        {entry.reason && <small style={{ color: 'var(--tm-text-3)' }}>{entry.reason}</small>}
                       </div>
                     ))}
                   </Stack>
@@ -345,12 +345,12 @@ export default function Observability({ project }: { project: string }) {
                 {/* Activation chain */}
                 {chain && chain.activations?.length > 0 && (
                   <Tile>
-                    <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
+                    <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
                       Activation Chain — {chain.total_runs} runs · {chain.activations.length} activations · {chain.is_alive ? 'alive' : 'dead'}
                     </h5>
                     {chain.formation_evidence?.length > 0 && (
-                      <div style={{ marginBottom: '0.5rem', padding: '0.4rem 0.5rem', borderLeft: '3px solid #57d7e8', background: 'rgba(87,215,232,0.05)', borderRadius: '0 4px 4px 0' }}>
-                        <div style={{ fontSize: '0.75rem', color: '#57d7e8', fontWeight: 600, marginBottom: '0.25rem' }}>Formed in {chain.formed_in} turn {chain.formed_turn}</div>
+                      <div style={{ marginBottom: '0.5rem', padding: '0.4rem 0.5rem', borderLeft: '3px solid var(--tm-teal)', background: 'rgba(87,215,232,0.05)', borderRadius: '0 4px 4px 0' }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--tm-teal)', fontWeight: 600, marginBottom: '0.25rem' }}>Formed in {chain.formed_in} turn {chain.formed_turn}</div>
                         <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
                           {chain.formation_evidence.map((t: any, i: number) => (
                             <Tag key={i} type={t.success ? 'green' : 'red'} size="sm">{t.tool}{t.exit_code !== undefined && t.exit_code !== 0 ? ` (${t.exit_code})` : ''}</Tag>
@@ -359,23 +359,23 @@ export default function Observability({ project }: { project: string }) {
                       </div>
                     )}
                     {chain.activations.map((a: any, i: number) => (
-                      <div key={i} style={{ padding: '0.4rem 0.5rem', borderLeft: `3px solid ${a.outcome === 'success' ? '#9ece6a' : a.outcome === 'failure' ? '#f7768e' : '#7e8a9c'}`, marginBottom: '0.25rem', background: 'rgba(255,255,255,0.02)', borderRadius: '0 4px 4px 0', fontSize: '0.8rem' }}>
+                      <div key={i} style={{ padding: '0.4rem 0.5rem', borderLeft: `3px solid ${a.outcome === 'success' ? 'var(--tm-success)' : a.outcome === 'failure' ? 'var(--tm-danger)' : 'var(--tm-text-3)'}`, marginBottom: '0.25rem', background: 'rgba(255,255,255,0.02)', borderRadius: '0 4px 4px 0', fontSize: '0.8rem' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <strong>Turn {a.turn}</strong>
-                          <span style={{ color: '#7e8a9c' }}>{a.run_id}</span>
+                          <span style={{ color: 'var(--tm-text-3)' }}>{a.run_id}</span>
                           {a.tool_name && <Tag type={a.tool_success ? 'green' : 'red'} size="sm">{a.tool_name}</Tag>}
                           {a.outcome && <Tag type={a.outcome === 'success' ? 'green' : 'red'} size="sm">{a.outcome}</Tag>}
                         </div>
-                        <div style={{ fontSize: '0.7rem', color: '#7e8a9c', marginTop: '0.15rem' }}>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', marginTop: '0.15rem' }}>
                           recalled {new Date(a.recalled_at).toLocaleString()}
                           {a.injected_at && ` → injected ${new Date(a.injected_at).toLocaleString()}`}
                         </div>
                       </div>
                     ))}
                     {chain.invalidation && (
-                      <div style={{ padding: '0.4rem 0.5rem', borderLeft: '3px solid #f7768e', marginTop: '0.25rem', background: 'rgba(247,118,142,0.05)', borderRadius: '0 4px 4px 0', fontSize: '0.8rem' }}>
-                        <strong style={{ color: '#f7768e' }}>{chain.invalidation.kind}</strong>
-                        <span style={{ color: '#7e8a9c', marginLeft: '0.5rem' }}>{chain.invalidation.run_id} · {new Date(chain.invalidation.at).toLocaleString()}</span>
+                      <div style={{ padding: '0.4rem 0.5rem', borderLeft: '3px solid var(--tm-danger)', marginTop: '0.25rem', background: 'rgba(247,118,142,0.05)', borderRadius: '0 4px 4px 0', fontSize: '0.8rem' }}>
+                        <strong style={{ color: 'var(--tm-danger)' }}>{chain.invalidation.kind}</strong>
+                        <span style={{ color: 'var(--tm-text-3)', marginLeft: '0.5rem' }}>{chain.invalidation.run_id} · {new Date(chain.invalidation.at).toLocaleString()}</span>
                       </div>
                     )}
                   </Tile>
@@ -384,7 +384,7 @@ export default function Observability({ project }: { project: string }) {
                 {/* Manual invalidation */}
                 {selected.state !== 'invalidated' && selected.state !== 'corrected' && selected.state !== 'superseded' && (
                   <Tile>
-                    <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Manual Invalidation</h5>
+                    <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Manual Invalidation</h5>
                     <Stack gap={2}>
                       <TextInput id="actor" labelText="Actor" value={actor} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setActor(e.target.value)} size="sm" />
                       <TextArea id="reason" labelText="Reason" value={reason} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setReason(e.target.value)} rows={2} />
@@ -395,7 +395,7 @@ export default function Observability({ project }: { project: string }) {
 
                 {/* Memory hints */}
                 <Tile>
-                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Memory Lookup</h5>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Memory Lookup</h5>
                   <Stack gap={2}>
                     <TextArea id="query" labelText="Query" value={query} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setQuery(e.target.value)} rows={2} placeholder="What is the agent trying to do?" />
                     <TextInput id="tool" labelText="Tool" value={tool} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTool(e.target.value)} placeholder="test-runner" size="sm" />
@@ -409,7 +409,7 @@ export default function Observability({ project }: { project: string }) {
                         <Tag type="gray" size="sm">{hint.state}</Tag>
                         <strong style={{ fontSize: '0.85rem' }}>{hint.proposition}</strong>
                         {hint.caution && <small style={{ color: '#e6b85c', display: 'block', marginTop: '0.25rem' }}>{hint.caution}</small>}
-                        <small style={{ color: '#7e8a9c', display: 'block' }}>Matched by: {hint.matched_by.join(', ')}</small>
+                        <small style={{ color: 'var(--tm-text-3)', display: 'block' }}>Matched by: {hint.matched_by.join(', ')}</small>
                       </Tile>
                     ))}
                   </Stack>
@@ -425,7 +425,7 @@ export default function Observability({ project }: { project: string }) {
         <div>
           {projectionLoading && <Loading withOverlay={false} />}
           {!projection && !projectionLoading && (
-            <div style={{ textAlign: 'center', color: '#7e8a9c', padding: '3rem 1rem' }}>
+            <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '3rem 1rem' }}>
               <p>No projection data yet. Click Load to fetch experience patterns.</p>
               <Button onClick={loadProjection} style={{ marginTop: '1rem' }}>Load patterns</Button>
             </div>
@@ -435,21 +435,21 @@ export default function Observability({ project }: { project: string }) {
               {/* Summary */}
               <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                 {[
-                  { label: 'Runs', count: projection.run_count, color: '#57d7e8' },
-                  { label: 'Tool patterns', count: projection.summary?.total_tool_patterns ?? 0, color: '#9ece6a' },
-                  { label: 'Knowledge', count: projection.summary?.total_knowledge ?? 0, color: '#bb9af7' },
-                  { label: 'Alive', count: projection.summary?.alive_knowledge ?? 0, color: '#9ece6a' },
-                  { label: 'Dead', count: projection.summary?.dead_knowledge ?? 0, color: '#f7768e' },
+                  { label: 'Runs', count: projection.run_count, color: 'var(--tm-teal)' },
+                  { label: 'Tool patterns', count: projection.summary?.total_tool_patterns ?? 0, color: 'var(--tm-success)' },
+                  { label: 'Knowledge', count: projection.summary?.total_knowledge ?? 0, color: 'var(--tm-teal)' },
+                  { label: 'Alive', count: projection.summary?.alive_knowledge ?? 0, color: 'var(--tm-success)' },
+                  { label: 'Dead', count: projection.summary?.dead_knowledge ?? 0, color: 'var(--tm-danger)' },
                 ].map((s) => (
                   <Tile key={s.label} style={{ padding: '0.5rem 1rem', minWidth: '80px', textAlign: 'center' }}>
                     <div style={{ fontSize: '1.25rem', fontWeight: 700, color: s.color }}>{s.count}</div>
-                    <div style={{ fontSize: '0.65rem', color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{s.label}</div>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{s.label}</div>
                   </Tile>
                 ))}
                 {projection.summary?.avg_success_rate > 0 && (
                   <Tile style={{ padding: '0.5rem 1rem', textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#73daca' }}>{(projection.summary.avg_success_rate * 100).toFixed(0)}%</div>
-                    <div style={{ fontSize: '0.65rem', color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Success rate</div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--tm-success)' }}>{(projection.summary.avg_success_rate * 100).toFixed(0)}%</div>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Success rate</div>
                   </Tile>
                 )}
               </div>
@@ -457,7 +457,7 @@ export default function Observability({ project }: { project: string }) {
               {/* Top tools */}
               {projection.summary?.most_used_tools?.length > 0 && (
                 <Tile>
-                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Most used tools</h5>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Most used tools</h5>
                   <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
                     {projection.summary.most_used_tools.map((t: string) => <Tag key={t} type="blue" size="sm">{t}</Tag>)}
                   </div>
@@ -467,13 +467,13 @@ export default function Observability({ project }: { project: string }) {
               {/* Tool patterns */}
               {projection.tool_patterns?.length > 0 && (
                 <Tile>
-                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Tool Patterns</h5>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Tool Patterns</h5>
                   <Stack gap={1}>
                     {projection.tool_patterns.map((p: any, i: number) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', padding: '0.3rem 0', borderBottom: '1px solid #1a2332' }}>
                         <Tag type="cyan" size="sm">{p.count}x</Tag>
                         <code style={{ color: '#9e8cff', fontSize: '0.78rem' }}>{p.signature}</code>
-                        <span style={{ color: '#7e8a9c', marginLeft: 'auto' }}>{p.run_count} runs · {(p.success_rate * 100).toFixed(0)}% success</span>
+                        <span style={{ color: 'var(--tm-text-3)', marginLeft: 'auto' }}>{p.run_count} runs · {(p.success_rate * 100).toFixed(0)}% success</span>
                       </div>
                     ))}
                   </Stack>
@@ -483,13 +483,13 @@ export default function Observability({ project }: { project: string }) {
               {/* Knowledge lifecycle */}
               {projection.knowledge_lifecycle?.length > 0 && (
                 <Tile>
-                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Knowledge Lifecycle</h5>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Knowledge Lifecycle</h5>
                   <Stack gap={1}>
                     {projection.knowledge_lifecycle.map((k: any, i: number) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', padding: '0.3rem 0', borderBottom: '1px solid #1a2332' }}>
                         <Tag type={k.is_alive ? 'green' : 'red'} size="sm">{k.current_state}</Tag>
                         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k.proposition || k.knowledge_id}</span>
-                        <span style={{ color: '#7e8a9c', flexShrink: 0 }}>{k.run_count} runs</span>
+                        <span style={{ color: 'var(--tm-text-3)', flexShrink: 0 }}>{k.run_count} runs</span>
                       </div>
                     ))}
                   </Stack>
@@ -499,12 +499,12 @@ export default function Observability({ project }: { project: string }) {
               {/* Scopes */}
               {projection.scopes?.length > 0 && (
                 <Tile>
-                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: '#7e8a9c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Scopes</h5>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Scopes</h5>
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                     {projection.scopes.map((s: any, i: number) => (
-                      <div key={i} style={{ padding: '0.4rem 0.6rem', background: '#0b1016', borderRadius: '4px', border: '1px solid #202a38', fontSize: '0.8rem' }}>
+                      <div key={i} style={{ padding: '0.4rem 0.6rem', background: 'var(--tm-ink)', borderRadius: '4px', border: '1px solid var(--tm-border)', fontSize: '0.8rem' }}>
                         <strong>{s.scope}</strong>
-                        <span style={{ color: '#7e8a9c', marginLeft: '0.5rem' }}>{s.tool_count} tools · {s.run_ids?.length ?? 0} runs</span>
+                        <span style={{ color: 'var(--tm-text-3)', marginLeft: '0.5rem' }}>{s.tool_count} tools · {s.run_ids?.length ?? 0} runs</span>
                       </div>
                     ))}
                   </div>

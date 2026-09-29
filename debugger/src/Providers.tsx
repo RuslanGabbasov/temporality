@@ -88,13 +88,13 @@ export default function Providers() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <strong>{p.name}</strong>
-                  <p style={{ color: '#7e8a9c', fontSize: '0.75rem', marginTop: '0.25rem', wordBreak: 'break-all' }}>{p.base_url}</p>
+                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem', wordBreak: 'break-all' }}>{p.base_url}</p>
                   {p.api_key_ref && <Tag type="gray" size="sm" style={{ marginTop: '0.25rem' }}>key: {'••••••••'}</Tag>}
                   {p.models?.length ? (
                     <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                       {p.models.map((m) => <Tag key={m} type="blue" size="sm">{m}</Tag>)}
                     </div>
-                  ) : <p style={{ color: '#7e8a9c', fontSize: '0.75rem', marginTop: '0.5rem' }}>No models listed</p>}
+                  ) : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.5rem' }}>No models listed</p>}
                 </div>
                 <Stack orientation="horizontal" gap={1}>
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(p)} />

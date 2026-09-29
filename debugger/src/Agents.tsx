@@ -152,7 +152,7 @@ const startCreate = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <strong>{a.name}</strong>
-                  {a.description && <p style={{ color: '#7e8a9c', fontSize: '0.75rem', marginTop: '0.25rem' }}>{a.description}</p>}
+                  {a.description && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{a.description}</p>}
                   <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                     <Tag type="blue" size="sm">{a.model || 'no model'}</Tag>
                     {a.provider && <Tag type="cyan" size="sm">{a.provider}</Tag>}
@@ -174,21 +174,21 @@ const startCreate = () => {
               {expandedId === a.id && (
                 <div style={{ marginTop: '0.75rem', fontSize: '0.75rem' }}>
                   <dl>
-                    <dt style={{ color: '#7e8a9c' }}>System prompt</dt>
+                    <dt style={{ color: 'var(--tm-text-3)' }}>System prompt</dt>
                     <dd style={{ marginBottom: '0.5rem' }}>{a.system_prompt || '(none)'}</dd>
-                    <dt style={{ color: '#7e8a9c' }}>Temperature</dt>
+                    <dt style={{ color: 'var(--tm-text-3)' }}>Temperature</dt>
                     <dd style={{ marginBottom: '0.5rem' }}>{a.temperature ?? 'default'}</dd>
-                    <dt style={{ color: '#7e8a9c' }}>Max tokens</dt>
+                    <dt style={{ color: 'var(--tm-text-3)' }}>Max tokens</dt>
                     <dd style={{ marginBottom: '0.5rem' }}>{a.max_tokens ?? 'default'}</dd>
-                    <dt style={{ color: '#7e8a9c' }}>Max turns</dt>
+                    <dt style={{ color: 'var(--tm-text-3)' }}>Max turns</dt>
                     <dd style={{ marginBottom: '0.5rem' }}>{a.max_turns ?? 'unlimited'}</dd>
-                    <dt style={{ color: '#7e8a9c' }}>Skills</dt>
+                    <dt style={{ color: 'var(--tm-text-3)' }}>Skills</dt>
                     <dd style={{ marginBottom: '0.5rem' }}>{a.skills?.length ? a.skills.join(', ') : '(none)'}</dd>
-                    <dt style={{ color: '#7e8a9c' }}>MCP servers</dt>
+                    <dt style={{ color: 'var(--tm-text-3)' }}>MCP servers</dt>
                     <dd style={{ marginBottom: '0.5rem' }}>{a.mcp_servers?.length ? a.mcp_servers.join(', ') : '(none)'}</dd>
-                    <dt style={{ color: '#7e8a9c' }}>Network</dt>
+                    <dt style={{ color: 'var(--tm-text-3)' }}>Network</dt>
                     <dd style={{ marginBottom: '0.5rem' }}>{a.network_access ? 'enabled' : 'blocked'}</dd>
-                    <dt style={{ color: '#7e8a9c' }}>Read-only</dt>
+                    <dt style={{ color: 'var(--tm-text-3)' }}>Read-only</dt>
                     <dd>{a.read_only ? 'yes' : 'no'}</dd>
                   </dl>
                 </div>
@@ -243,7 +243,7 @@ const startCreate = () => {
         <div className="modal-overlay">
           <div className="modal-panel">
             <Heading>Choose a template</Heading>
-            <p style={{ color: '#7e8a9c', fontSize: '0.8rem', marginBottom: '1rem' }}>Start with a pre-configured agent and customize as needed.</p>
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', marginBottom: '1rem' }}>Start with a pre-configured agent and customize as needed.</p>
             <Stack gap={2}>
               {TEMPLATES.map((t) => (
                 <Tile key={t.name} style={{ cursor: 'pointer' }} onClick={() => {
@@ -253,7 +253,7 @@ const startCreate = () => {
                   setShowTemplates(false)
                 }}>
                   <strong>{t.name}</strong>
-                  <p style={{ color: '#7e8a9c', fontSize: '0.75rem', marginTop: '0.25rem' }}>{t.description}</p>
+                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{t.description}</p>
                   <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.25rem' }}>
                     <Tag type="gray" size="sm">{t.sandbox_profile}</Tag>
                     {t.network_access ? <Tag type="green" size="sm">network</Tag> : <Tag type="red" size="sm">no network</Tag>}

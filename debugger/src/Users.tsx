@@ -116,7 +116,7 @@ export default function Users() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <strong>{u.name}</strong>
-                  {u.email && <p style={{ color: '#7e8a9c', fontSize: '0.75rem', marginTop: '0.25rem' }}>{u.email}</p>}
+                  {u.email && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{u.email}</p>}
                   <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                     <Tag type={ROLE_COLORS[u.role] || 'gray'} size="sm">{u.role}</Tag>
                     <Tag type={u.active ? 'green' : 'red'} size="sm">{u.active ? 'active' : 'inactive'}</Tag>
@@ -159,8 +159,8 @@ export default function Users() {
         <div className="modal-overlay">
           <div className="modal-panel" style={{ width: '600px' }}>
             <Heading>Token for {tokenUser.name}</Heading>
-            <p style={{ color: '#7e8a9c', marginBottom: '1rem' }}>Token stored in database. User can log in immediately after kernel restart.</p>
-            <div style={{ background: '#121823', border: '1px solid #344258', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all', marginBottom: '1rem' }}>
+            <p style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>Token stored in database. User can log in immediately after kernel restart.</p>
+            <div style={{ background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all', marginBottom: '1rem' }}>
               {generatedToken}
             </div>
             <Stack orientation="horizontal" gap={2}>

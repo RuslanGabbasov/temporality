@@ -185,14 +185,14 @@ export default function Operations({ project }: { project: string }) {
             <Heading>Pending Operations</Heading>
             <Stack gap={1}>
               {ops.length === 0 && (
-                <Tile style={{ textAlign: 'center', padding: '2rem', color: '#7e8a9c' }}>
+                <Tile style={{ textAlign: 'center', padding: '2rem', color: 'var(--tm-text-3)' }}>
                   <p>No unresolved operations</p>
                   <p style={{ fontSize: '0.75rem', marginTop: '0.5rem' }}>All tool executions have been confirmed.</p>
                 </Tile>
               )}
               {selectedSet.size > 0 && operator && (
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', padding: '0.5rem', marginBottom: '0.5rem', background: '#121823', borderRadius: '6px', border: '1px solid #344258' }}>
-                  <span style={{ fontSize: '0.8rem', color: '#7e8a9c' }}>{selectedSet.size} selected</span>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', padding: '0.5rem', marginBottom: '0.5rem', background: 'var(--tm-elevated)', borderRadius: '6px', border: '1px solid var(--tm-border)' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--tm-text-3)' }}>{selectedSet.size} selected</span>
                   <Button size="sm" kind="ghost" onClick={() => void batchReconcile('occurred')} disabled={busy}>All occurred</Button>
                   <Button size="sm" kind="ghost" onClick={() => void batchReconcile('none')} disabled={busy}>All none</Button>
                   <Button size="sm" kind="ghost" onClick={() => void batchReconcile('unknown')} disabled={busy}>All unknown</Button>
@@ -216,12 +216,12 @@ export default function Operations({ project }: { project: string }) {
                         checked={isChecked}
                         onClick={(e) => { e.stopPropagation(); toggleSelect(op.operation_id) }}
                         onChange={() => {}}
-                        style={{ accentColor: '#57d7e8', flexShrink: 0 }}
+                        style={{ accentColor: 'var(--tm-teal)', flexShrink: 0 }}
                       />
                       <span style={{ fontSize: '1.1rem' }}>{info.icon}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{info.label}</div>
-                        <div style={{ fontSize: '0.75rem', color: '#7e8a9c' }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>
                           {info.category}
                           {turn && ` · turn ${turn}`}
                         </div>
@@ -242,7 +242,7 @@ export default function Operations({ project }: { project: string }) {
         <Column sm={4} md={4} lg={11}>
           <Section level={3}>
             {!selected ? (
-              <div style={{ textAlign: 'center', color: '#7e8a9c', padding: '3rem 1rem' }}>
+              <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '3rem 1rem' }}>
                 <Heading>Select an operation</Heading>
                 <p style={{ marginTop: '0.5rem' }}>Click an operation on the left to inspect it and record your verdict.</p>
               </div>
@@ -254,7 +254,7 @@ export default function Operations({ project }: { project: string }) {
                     <span style={{ fontSize: '1.5rem' }}>{toolInfo(selected.tool, selected.server).icon}</span>
                     <div>
                       <Heading style={{ fontSize: '1.1rem' }}>{toolInfo(selected.tool, selected.server).label}</Heading>
-                      <div style={{ fontSize: '0.75rem', color: '#7e8a9c' }}>{toolInfo(selected.tool, selected.server).category}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{toolInfo(selected.tool, selected.server).category}</div>
                     </div>
                   </div>
 
@@ -267,7 +267,7 @@ export default function Operations({ project }: { project: string }) {
                   }}>
                     <div style={{ fontWeight: 600, color: '#e0af68', marginBottom: '0.25rem' }}>⚠ What happened</div>
                     <p style={{ fontSize: '0.875rem', color: '#c0caf5' }}>{reasonText(selected.reason)}</p>
-                    <p style={{ fontSize: '0.75rem', color: '#7e8a9c', marginTop: '0.5rem' }}>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.5rem' }}>
                       The agent executed this tool but the system couldn't confirm whether the side effect actually happened.
                       You need to check the external system and tell Temporality the outcome.
                     </p>
@@ -279,11 +279,11 @@ export default function Operations({ project }: { project: string }) {
                   <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>Context</Heading>
                   <dl style={{ fontSize: '0.875rem' }}>
                     <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.35rem' }}>
-                      <dt style={{ color: '#7e8a9c', minWidth: '100px' }}>Run</dt>
+                      <dt style={{ color: 'var(--tm-text-3)', minWidth: '100px' }}>Run</dt>
                       <dd>
                         <a
                           href={`/agents?project=${encodeURIComponent(selected.project)}&run=${encodeURIComponent(selected.run_id)}`}
-                          style={{ color: '#57d7e8' }}
+                          style={{ color: 'var(--tm-teal)' }}
                         >
                           {selected.run_id}
                         </a>
@@ -291,21 +291,21 @@ export default function Operations({ project }: { project: string }) {
                     </div>
                     {turnOf(selected.operation_id) && (
                       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.35rem' }}>
-                        <dt style={{ color: '#7e8a9c', minWidth: '100px' }}>Turn</dt>
+                        <dt style={{ color: 'var(--tm-text-3)', minWidth: '100px' }}>Turn</dt>
                         <dd>Turn {turnOf(selected.operation_id)}</dd>
                       </div>
                     )}
                     <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.35rem' }}>
-                      <dt style={{ color: '#7e8a9c', minWidth: '100px' }}>When</dt>
+                      <dt style={{ color: 'var(--tm-text-3)', minWidth: '100px' }}>When</dt>
                       <dd>{new Date(selected.started_at).toLocaleString()}</dd>
                     </div>
                     <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.35rem' }}>
-                      <dt style={{ color: '#7e8a9c', minWidth: '100px' }}>Tool</dt>
+                      <dt style={{ color: 'var(--tm-text-3)', minWidth: '100px' }}>Tool</dt>
                       <dd><code style={{ fontSize: '0.8rem' }}>{selected.tool}{selected.server ? ` @ ${selected.server}` : ''}</code></dd>
                     </div>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <dt style={{ color: '#7e8a9c', minWidth: '100px' }}>Args hash</dt>
-                      <dd><code style={{ fontSize: '0.7rem', color: '#565f89' }}>{selected.arguments_hash ?? '—'}</code></dd>
+                      <dt style={{ color: 'var(--tm-text-3)', minWidth: '100px' }}>Args hash</dt>
+                      <dd><code style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{selected.arguments_hash ?? '—'}</code></dd>
                     </div>
                   </dl>
                 </Tile>
@@ -313,7 +313,7 @@ export default function Operations({ project }: { project: string }) {
                 {/* Verdict */}
                 {!operator ? (
                   <Tile>
-                    <p style={{ color: '#7e8a9c' }}>
+                    <p style={{ color: 'var(--tm-text-3)' }}>
                       Recording a verdict requires an operator token.
                       {identity?.role && <> Current role: <strong>{identity.role}</strong>.</>}
                     </p>
@@ -321,7 +321,7 @@ export default function Operations({ project }: { project: string }) {
                 ) : (
                   <Tile>
                     <Heading style={{ fontSize: '0.875rem', marginBottom: '0.75rem' }}>Record your verdict</Heading>
-                    <p style={{ fontSize: '0.75rem', color: '#7e8a9c', marginBottom: '0.75rem' }}>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginBottom: '0.75rem' }}>
                       Check the external system (database, API, file system) and tell Temporality what actually happened.
                     </p>
                     <Stack gap={3}>
@@ -334,9 +334,9 @@ export default function Operations({ project }: { project: string }) {
                               flex: 1,
                               padding: '0.75rem',
                               borderRadius: '6px',
-                              border: `2px solid ${effect === option ? (option === 'occurred' ? '#9ece6a' : option === 'none' ? '#f7768e' : '#e0af68') : '#344258'}`,
+                              border: `2px solid ${effect === option ? (option === 'occurred' ? '#9ece6a' : option === 'none' ? '#f7768e' : '#e0af68') : 'var(--tm-border)'}`,
                               background: effect === option ? (option === 'occurred' ? 'rgba(158,206,106,0.1)' : option === 'none' ? 'rgba(247,118,142,0.1)' : 'rgba(224,175,104,0.1)') : 'transparent',
-                              color: '#e5e9f0',
+                              color: 'var(--tm-text)',
                               cursor: 'pointer',
                               textAlign: 'center',
                               fontSize: '0.875rem',
@@ -345,7 +345,7 @@ export default function Operations({ project }: { project: string }) {
                             <div style={{ fontWeight: 600, marginBottom: '0.25rem', color: option === 'occurred' ? '#9ece6a' : option === 'none' ? '#f7768e' : '#e0af68' }}>
                               {option === 'occurred' ? '✓ Happened' : option === 'none' ? '✗ Did NOT happen' : '? Unknown'}
                             </div>
-                            <div style={{ fontSize: '0.7rem', color: '#7e8a9c' }}>{EFFECT_HELP[option]}</div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{EFFECT_HELP[option]}</div>
                           </button>
                         ))}
                       </div>
