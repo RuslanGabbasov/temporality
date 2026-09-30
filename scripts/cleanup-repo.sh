@@ -44,7 +44,7 @@ rmdir docs/benchmarks 2>/dev/null || true
 # 5. Sandbox workspaces (keep projects/ and lighthouse/)
 echo "Removing old sandbox workspaces..."
 cd .sandbox
-rm -rf ws-* ws--* smoke-* mcp-e2e fault-drill
+rm -rf ws-* ws--* smoke-* fault-drill
 rm -rf calculator forge gatekeeper nightlybox relay
 cd ..
 
