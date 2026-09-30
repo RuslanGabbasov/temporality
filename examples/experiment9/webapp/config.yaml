@@ -1,2 +1,0 @@
-# Database configuration
-database_url: postgres://user:pass@localhost/webapp

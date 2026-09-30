@@ -1,1 +1,0 @@
-lighthouse-20260925-09|The CLI in this repository was upgraded to v3. Verify whether your report conclusion still holds on the v3 build; if it broke, find how reporting works now, verify empirically, and record the correction with the remember tool. Definition of done: `go test ./...` must pass — run it before you finish.

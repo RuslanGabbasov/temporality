@@ -1,1 +1,0 @@
-lighthouse-20260925-08|The CLI in this repository was upgraded again, to v3. Verify whether your login conclusion still holds on the v3 build; if it broke, find how login works now, verify empirically, and record the correction with the remember tool. Definition of done: `go test ./...` must pass — run it before you finish.

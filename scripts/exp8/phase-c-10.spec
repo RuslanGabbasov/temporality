@@ -1,1 +1,0 @@
-lighthouse-20260925-10|Run the full pipeline on the v3 CLI: login, build, deploy, report — every step must actually succeed. Reuse your knowledge of this repo; where a step fails, correct your notes. Record the corrected complete setup with the remember tool if it differs from what you knew. Definition of done: `go test ./...` must pass — run it before you finish.
