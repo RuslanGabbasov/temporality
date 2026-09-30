@@ -937,6 +937,113 @@ body, #root, #main-content {
   padding: 0.75rem 1rem;
   overflow-x: auto;
   margin: 0.5em 0;
+  color: var(--tm-text);
+}
+
+.markdown-body pre code {
+  background: transparent;
+  color: var(--tm-text);
+  padding: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  color: var(--tm-text);
+  margin: 1em 0 0.5em;
+  font-weight: 600;
+}
+
+.markdown-body h1 { font-size: 1.15rem; }
+.markdown-body h2 { font-size: 1.05rem; }
+.markdown-body h3 { font-size: 0.95rem; }
+.markdown-body h4 { font-size: 0.875rem; }
+.markdown-body h5 { font-size: 0.825rem; }
+.markdown-body h6 { font-size: 0.8rem; }
+
+.markdown-body blockquote {
+  border-left: 3px solid var(--tm-border-strong);
+  padding-left: 1em;
+  color: var(--tm-text-2);
+  margin: 0.5em 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.markdown-body li {
+  margin: 0.25em 0;
+}
+
+.markdown-body a {
+  color: var(--tm-teal);
+  text-decoration: none;
+}
+
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid var(--tm-border);
+  margin: 1em 0;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--tm-border);
+  padding: 0.5em;
+  text-align: left;
+}
+
+.markdown-body th {
+  background: var(--tm-raised);
+  font-weight: 600;
+}
+
+// Light theme overrides for markdown
+:root[data-theme="light"] .markdown-body strong {
+  color: var(--tm-ink);
+}
+
+:root[data-theme="light"] .markdown-body pre {
+  background: var(--tm-raised);
+  border-color: var(--tm-border);
+}
+
+:root[data-theme="light"] .markdown-body pre code {
+  color: var(--tm-text);
+}
+
+:root[data-theme="light"] .markdown-body code {
+  background: var(--tm-raised);
+  color: var(--tm-teal);
+}
+
+:root[data-theme="light"] .markdown-body blockquote {
+  border-left-color: var(--tm-border-strong);
+  color: var(--tm-text-2);
+}
+
+:root[data-theme="light"] .markdown-body th {
+  background: var(--tm-surface);
+}
+
+:root[data-theme="light"] .markdown-body a {
+  color: var(--tm-teal);
 }
 
 .markdown-body pre code {
