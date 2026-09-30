@@ -1,0 +1,1 @@
+ALTER TABLE workspace_project DROP COLUMN IF EXISTS allowed_users;

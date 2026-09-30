@@ -10,4 +10,3 @@ __pycache__/
 .sandbox/
 .delta/
 .mimocode/
-agent-kernel

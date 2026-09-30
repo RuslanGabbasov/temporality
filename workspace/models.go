@@ -13,6 +13,7 @@ type Project struct {
 	DefaultAgentID string    `json:"default_agent_id,omitempty"`
 	DefaultModel   string    `json:"default_model,omitempty"`
 	Archived       bool      `json:"archived,omitempty"`
+	AllowedUsers   []string  `json:"allowed_users,omitempty"` // "*" = all, empty = admin only, ["user-1"] = specific users
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -136,11 +137,12 @@ type User struct {
 
 // CreateProjectRequest is the payload for creating a project.
 type CreateProjectRequest struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	DefaultAgentID string `json:"default_agent_id"`
-	DefaultModel   string `json:"default_model"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	DefaultAgentID string   `json:"default_agent_id"`
+	DefaultModel   string   `json:"default_model"`
+	AllowedUsers   []string `json:"allowed_users,omitempty"` // "*" = all, empty = admin only
 }
 
 // CreateAgentRequest is the payload for creating an agent.

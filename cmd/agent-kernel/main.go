@@ -105,6 +105,10 @@ func main() {
 		log.Error("migrate workspace v26", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000027_project_allowed_users.up.sql"); err != nil {
+		log.Error("migrate workspace v27", "error", err)
+		os.Exit(1)
+	}
 	activities, err := agent.NewActivities(events)
 	if err != nil {
 		log.Error("configure activities", "error", err)
@@ -380,26 +384,23 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		projects, err := ws.ListAllProjects(r.Context())
+		// Get user from token for project filtering
+		var userID string
+		var isAdmin bool
+		if principal, ok := controlplane.FromContext(r.Context()); ok {
+			isAdmin = principal.Role >= controlplane.RoleAdmin
+			// Try to find user by token to get their ID
+			token, _ := controlplane.BearerToken(r)
+			if token != "" {
+				if user, err := ws.GetUserByToken(r.Context(), token); err == nil {
+					userID = user.ID
+				}
+			}
+		}
+		projects, err := ws.ListProjectsForUser(r.Context(), userID, isAdmin)
 		if err != nil {
 			writeError(w, 500, err)
 			return
-		}
-		// Filter projects by user access
-		if principal, ok := controlplane.FromContext(r.Context()); ok {
-			if !principal.AllowsAllProjects() {
-				allowed := map[string]bool{}
-				for _, p := range principal.Projects {
-					allowed[p] = true
-				}
-				filtered := make([]workspace.Project, 0, len(projects))
-				for _, p := range projects {
-					if allowed[p.ID] {
-						filtered = append(filtered, p)
-					}
-				}
-				projects = filtered
-			}
 		}
 		writeJSON(w, 200, map[string]any{"projects": projects})
 	})
@@ -419,7 +420,7 @@ func main() {
 		if req.ID == "" {
 			req.ID = slugify(req.Name)
 		}
-		project := &workspace.Project{ID: req.ID, Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel}
+		project := &workspace.Project{ID: req.ID, Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel, AllowedUsers: req.AllowedUsers}
 		if err := ws.CreateProject(r.Context(), project); err != nil {
 			writeError(w, 409, err)
 			return
@@ -450,7 +451,7 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
-		project := workspace.Project{ID: r.PathValue("projectID"), Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel}
+		project := workspace.Project{ID: r.PathValue("projectID"), Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel, AllowedUsers: req.AllowedUsers}
 		if err := ws.UpdateProject(r.Context(), project); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)

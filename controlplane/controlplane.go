@@ -170,7 +170,7 @@ func (g *Gate) Authenticate(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		token, ok := bearerToken(r)
+		token, ok := BearerToken(r)
 		principal, known := g.byToken[token]
 		if !ok || !known {
 			writeError(w, http.StatusUnauthorized, "a valid bearer token is required")
@@ -180,7 +180,8 @@ func (g *Gate) Authenticate(next http.Handler) http.Handler {
 	})
 }
 
-func bearerToken(r *http.Request) (string, bool) {
+// BearerToken extracts the bearer token from the request.
+func BearerToken(r *http.Request) (string, bool) {
 	header := strings.TrimSpace(r.Header.Get("Authorization"))
 	if header != "" {
 		if token, ok := strings.CutPrefix(header, "Bearer "); ok {
@@ -218,7 +219,7 @@ func (g *Gate) Allow(w http.ResponseWriter, r *http.Request, min Role, projects 
 		// An unfiltered cross-project query is only valid for tokens that
 		// explicitly span all projects.
 		if project == "" {
-			if !principal.allowsAllProjects() {
+			if !principal.AllowsAllProjects() {
 				writeError(w, http.StatusForbidden, fmt.Sprintf("token %q may not query across projects; set a project filter", principal.Subject))
 				return false
 			}

@@ -6,6 +6,10 @@ export interface Project {
   id: string
   name: string
   description: string
+  default_agent_id?: string
+  default_model?: string
+  archived?: boolean
+  allowed_users?: string[] // '*' = all, [] = admin only, ['user-1'] = specific users
   created_at: string
   updated_at: string
 }
@@ -107,9 +111,9 @@ export const workspaceApi = {
   // Projects
   listProjects: () => request<{ projects: Project[] }>('/v1/workspace/projects'),
   getProject: (id: string) => request<Project>(`/v1/workspace/projects/${id}`),
-  createProject: (data: { id?: string; name: string; description?: string }) =>
+  createProject: (data: { id?: string; name: string; description?: string; allowed_users?: string[] }) =>
     request<Project>('/v1/workspace/projects', { method: 'POST', body: JSON.stringify(data) }),
-  updateProject: (id: string, data: { name: string; description?: string }) =>
+  updateProject: (id: string, data: { name: string; description?: string; allowed_users?: string[] }) =>
     request<Project>(`/v1/workspace/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProject: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/projects/${id}`, { method: 'DELETE' }),

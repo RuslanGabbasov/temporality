@@ -53,6 +53,7 @@ interface Project {
   description: string
   default_agent_id?: string
   default_model?: string
+  allowed_users?: string[]
 }
 
 export default function Layout({ children, activePage }: LayoutProps) {
@@ -76,6 +77,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [editProject, setEditProject] = useState<Project | null>(null)
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectDesc, setNewProjectDesc] = useState('')
+  const [allUsers, setAllUsers] = useState<{ id: string; name: string }[]>([])
 
   // Pending operations badge
   const [pendingOps, setPendingOps] = useState(0)
@@ -154,6 +156,16 @@ export default function Layout({ children, activePage }: LayoutProps) {
     void loadAgents()
   }, [])
 
+  useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        const resp = await fetch('/kernel-api/v1/workspace/users', { headers: { ...authHeaders() } })
+        if (resp.ok) { const data = await resp.json(); setAllUsers(data.users ?? []) }
+      } catch { /* ignore */ }
+    }
+    void loadUsers()
+  }, [])
+
   const navigate = (path: string) => {
     window.history.pushState(null, '', path)
     window.dispatchEvent(new PopStateEvent('popstate'))
@@ -191,6 +203,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
       description: editProject ? editProject.description : newProjectDesc.trim(),
       default_agent_id: editProject?.default_agent_id ?? '',
       default_model: editProject?.default_model ?? '',
+      allowed_users: editProject?.allowed_users ?? ['*'],
     }
     const url = editProject ? `/kernel-api/v1/workspace/projects/${id}` : '/kernel-api/v1/workspace/projects'
     const method = editProject ? 'PUT' : 'POST'
@@ -450,6 +463,42 @@ export default function Layout({ children, activePage }: LayoutProps) {
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditProject({ ...editProject, default_model: e.target.value })}
                   placeholder={t('projects.default_model_placeholder') ?? 'Leave empty to use agent\'s model'}
                 />
+                <fieldset style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.75rem', marginTop: '0.5rem' }}>
+                  <legend style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)', padding: '0 0.25rem' }}>{t('projects.allowed_users') ?? 'Allowed users'}</legend>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={(editProject.allowed_users ?? ['*']).includes('*')}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setEditProject({ ...editProject, allowed_users: ['*'] })
+                          } else {
+                            setEditProject({ ...editProject, allowed_users: [] })
+                          }
+                        }}
+                      />
+                      {t('projects.all_users') ?? 'All users (public project)'}
+                    </label>
+                    {!(editProject.allowed_users ?? ['*']).includes('*') && allUsers.map((u) => (
+                      <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem', paddingLeft: '1rem' }}>
+                        <input
+                          type="checkbox"
+                          checked={(editProject.allowed_users ?? []).includes(u.id)}
+                          onChange={(e) => {
+                            const current = editProject.allowed_users ?? []
+                            if (e.target.checked) {
+                              setEditProject({ ...editProject, allowed_users: [...current, u.id] })
+                            } else {
+                              setEditProject({ ...editProject, allowed_users: current.filter((id: string) => id !== u.id) })
+                            }
+                          }}
+                        />
+                        {u.name}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
               </>
             )}
             <div className="form-actions">

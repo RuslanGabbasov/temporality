@@ -47,27 +47,37 @@ func (s *Store) CreateProject(ctx context.Context, p *Project) error {
 	now := time.Now().UTC()
 	p.CreatedAt = now
 	p.UpdatedAt = now
+	// Default to all users if not specified
+	allowedUsers := p.AllowedUsers
+	if allowedUsers == nil {
+		allowedUsers = []string{"*"}
+	}
+	allowedUsersJSON, _ := json.Marshal(allowedUsers)
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_project (id, name, description, default_agent_id, default_model, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		p.ID, p.Name, p.Description, nullString(p.DefaultAgentID), p.DefaultModel, p.CreatedAt, p.UpdatedAt)
+		`INSERT INTO workspace_project (id, name, description, default_agent_id, default_model, allowed_users, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		p.ID, p.Name, p.Description, nullString(p.DefaultAgentID), p.DefaultModel, allowedUsersJSON, p.CreatedAt, p.UpdatedAt)
 	return err
 }
 
 func (s *Store) GetProject(ctx context.Context, id string) (Project, error) {
 	var p Project
 	var agentID *string
+	var allowedUsersJSON []byte
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, description, default_agent_id, default_model, archived, created_at, updated_at FROM workspace_project WHERE id = $1`, id).
-		Scan(&p.ID, &p.Name, &p.Description, &agentID, &p.DefaultModel, &p.Archived, &p.CreatedAt, &p.UpdatedAt)
+		`SELECT id, name, description, default_agent_id, default_model, archived, allowed_users, created_at, updated_at FROM workspace_project WHERE id = $1`, id).
+		Scan(&p.ID, &p.Name, &p.Description, &agentID, &p.DefaultModel, &p.Archived, &allowedUsersJSON, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ErrNotFound
 	}
 	p.DefaultAgentID = derefPtr(agentID)
+	if len(allowedUsersJSON) > 0 {
+		_ = json.Unmarshal(allowedUsersJSON, &p.AllowedUsers)
+	}
 	return p, err
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, description, default_agent_id, default_model, archived, created_at, updated_at FROM workspace_project ORDER BY created_at DESC`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, description, default_agent_id, default_model, archived, allowed_users, created_at, updated_at FROM workspace_project ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -76,10 +86,14 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 	for rows.Next() {
 		var p Project
 		var agentID *string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &agentID, &p.DefaultModel, &p.Archived, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var allowedUsersJSON []byte
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &agentID, &p.DefaultModel, &p.Archived, &allowedUsersJSON, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.DefaultAgentID = derefPtr(agentID)
+		if len(allowedUsersJSON) > 0 {
+			_ = json.Unmarshal(allowedUsersJSON, &p.AllowedUsers)
+		}
 		result = append(result, p)
 	}
 	return result, rows.Err()
@@ -87,9 +101,14 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 
 func (s *Store) UpdateProject(ctx context.Context, p Project) error {
 	p.UpdatedAt = time.Now().UTC()
+	allowedUsers := p.AllowedUsers
+	if allowedUsers == nil {
+		allowedUsers = []string{"*"}
+	}
+	allowedUsersJSON, _ := json.Marshal(allowedUsers)
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_project SET name = $2, description = $3, default_agent_id = $4, default_model = $5, updated_at = $6 WHERE id = $1`,
-		p.ID, p.Name, p.Description, nullString(p.DefaultAgentID), p.DefaultModel, p.UpdatedAt)
+		`UPDATE workspace_project SET name = $2, description = $3, default_agent_id = $4, default_model = $5, allowed_users = $6, updated_at = $7 WHERE id = $1`,
+		p.ID, p.Name, p.Description, nullString(p.DefaultAgentID), p.DefaultModel, allowedUsersJSON, p.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -590,6 +609,42 @@ func (s *Store) ListAllProjects(ctx context.Context) ([]Project, error) {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil
+}
+
+// ListProjectsForUser returns projects visible to a specific user.
+// A project is visible if:
+// - allowed_users contains "*" (public project)
+// - allowed_users contains the user ID
+// - the user has admin role (sees everything)
+func (s *Store) ListProjectsForUser(ctx context.Context, userID string, isAdmin bool) ([]Project, error) {
+	allProjects, err := s.ListAllProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if isAdmin {
+		return allProjects, nil
+	}
+	var result []Project
+	for _, p := range allProjects {
+		if isUserAllowed(p.AllowedUsers, userID) {
+			result = append(result, p)
+		}
+	}
+	return result, nil
+}
+
+// isUserAllowed checks if a user is in the allowed_users list.
+// "*" means all users are allowed.
+func isUserAllowed(allowedUsers []string, userID string) bool {
+	if len(allowedUsers) == 0 {
+		return false // empty = admin only
+	}
+	for _, u := range allowedUsers {
+		if u == "*" || u == userID {
+			return true
+		}
+	}
+	return false
 }
 
 // Providers

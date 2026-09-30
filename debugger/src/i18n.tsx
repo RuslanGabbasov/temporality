@@ -296,6 +296,8 @@ const translations: Record<Locale, Record<string, string>> = {
     'projects.default_model': 'Default model (override)',
     'projects.default_model_placeholder': 'Leave empty to use agent\'s model',
     'projects.none_user_chooses': 'None (user chooses)',
+    'projects.allowed_users': 'Allowed users',
+    'projects.all_users': 'All users (public project)',
     'projects.delete_confirm': 'Delete project?',
     'projects.delete_warning': 'Project "{{name}}" and all its runs, tasks, and knowledge will be permanently deleted.',
 
@@ -800,6 +802,8 @@ const translations: Record<Locale, Record<string, string>> = {
     'projects.default_model': 'Модель по умолчанию (переопределение)',
     'projects.default_model_placeholder': 'Оставьте пустым для использования модели агента',
     'projects.none_user_chooses': 'Не задан (пользователь выбирает)',
+    'projects.allowed_users': 'Доступ пользователей',
+    'projects.all_users': 'Все пользователи (публичный проект)',
     'projects.delete_confirm': 'Удалить проект?',
     'projects.delete_warning': 'Проект «{{name}}» и все его запуски, задачи и знания будут удалены безвозвратно.',
 
