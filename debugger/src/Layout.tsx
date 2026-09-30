@@ -246,7 +246,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
           {/* User menu */}
           <div style={{ position: 'relative' }}>
             <button
-              onClick={() => setShowUserMenu(!showUserMenu)}
+              onClick={() => { setShowUserMenu(!showUserMenu); if (!showUserMenu) setShowProjectPanel(false) }}
               style={{
                 display: 'flex', alignItems: 'center', gap: '0.4rem',
                 background: showUserMenu ? 'rgba(255,255,255,0.08)' : 'transparent',
@@ -295,7 +295,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
           </div>
           <div style={{ position: 'relative', marginRight: '0.5rem' }}>
             <button
-              onClick={() => setShowProjectPanel(!showProjectPanel)}
+              onClick={() => { setShowProjectPanel(!showProjectPanel); if (!showProjectPanel) setShowUserMenu(false) }}
               style={{
                 display: 'flex', alignItems: 'center', gap: '0.4rem',
                 background: showProjectPanel ? 'rgba(255,255,255,0.08)' : 'transparent',
@@ -312,7 +312,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
             {showProjectPanel && (
               <HeaderPanel expanded>
                 <div style={{ padding: '0.5rem' }}>
-                  <div style={{ fontSize: '0.75rem', color: '#7e8a9c', padding: '0.5rem 0.5rem 0.25rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t('projects.title')}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', padding: '0.5rem 0.5rem 0.25rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t('projects.title')}</div>
                   <div style={{ display: 'grid', gap: '1px' }}>
                     {projects.map((p) => {
                       const defaultAgent = allAgents.find((a) => a.id === p.default_agent_id)
@@ -320,7 +320,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
                       <div
                         key={p.id}
                         onClick={() => { setProject(p.id); setShowProjectPanel(false) }}
-                        style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.5rem 0.5rem', cursor: 'pointer', background: p.id === project ? '#121823' : 'transparent', borderRadius: '4px', minWidth: 0 }}
+                        style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.5rem 0.5rem', cursor: 'pointer', background: p.id === project ? 'var(--tm-elevated)' : 'transparent', borderRadius: '4px', minWidth: 0 }}
                       >
                         <div style={{ minWidth: 0 }}>
                           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
@@ -339,7 +339,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
                     })}
                     <div
                       onClick={() => { setNewProjectName(''); setNewProjectDesc(''); setShowProjectPanel(false); setShowNewProject(true) }}
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.5rem', cursor: 'pointer', color: '#57d7e8', borderRadius: '4px' }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.5rem', cursor: 'pointer', color: 'var(--tm-teal)', borderRadius: '4px' }}
                     >
                       <Add size={20} /> {t('new.project')}
                     </div>
@@ -374,86 +374,91 @@ export default function Layout({ children, activePage }: LayoutProps) {
       </Header>
 
       {/* Login modal */}
-      <Modal
-        open={showLogin}
-        onRequestClose={() => setShowLogin(false)}
-        modalHeading={t('action.login') ?? 'Sign in'}
-        primaryButtonText={t('action.login') ?? 'Sign in'}
-        secondaryButtonText={t('action.cancel') ?? 'Cancel'}
-        onRequestSubmit={doLogin}
-      >
-        <p style={{ marginBottom: '1rem', color: '#7e8a9c' }}>
-          {t('login.description') ?? 'Enter your API token to access the Temporality workspace.'}
-        </p>
-        <TextInput
-          id="api-token"
-          labelText={t('login.token') ?? 'API Token'}
-          type="password"
-          value={token}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setToken(e.target.value)}
-          placeholder={t('login.placeholder') ?? 'Enter your bearer token'}
-        />
-      </Modal>
+      {showLogin && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '420px' }}>
+            <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{t('action.login') ?? 'Sign in'}</Heading>
+            <p style={{ marginBottom: '1rem', color: 'var(--tm-text-2)' }}>
+              {t('login.description') ?? 'Enter your API token to access the Temporality workspace.'}
+            </p>
+            <TextInput
+              id="api-token"
+              labelText={t('login.token') ?? 'API Token'}
+              type="password"
+              value={token}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setToken(e.target.value)}
+              placeholder={t('login.placeholder') ?? 'Enter your bearer token'}
+              onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') doLogin() }}
+            />
+            <div className="form-actions">
+              <Button kind="secondary" onClick={() => setShowLogin(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button onClick={doLogin} disabled={!token.trim()}>{t('action.login') ?? 'Sign in'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Project edit/create modal */}
-      <Modal
-        open={!!editProject || showNewProject}
-        onRequestClose={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectDesc('') }}
-        modalHeading={editProject ? (t('action.edit') ?? 'Edit') + ' ' + (t('nav.projects') ?? 'project') : (t('new.project') ?? 'New project')}
-        primaryButtonText={editProject ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}
-        secondaryButtonText={t('action.cancel') ?? 'Cancel'}
-        onRequestSubmit={saveProject}
-      >
-        {!editProject && (
-          <TextInput
-            id="project-id"
-            labelText={t('projects.id') ?? 'Project ID'}
-            value={newProjectName}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewProjectName(e.target.value)}
-            placeholder="my-project"
-          />
-        )}
-        <TextInput
-          id="project-name"
-          labelText={t('projects.name') ?? 'Name'}
-          value={editProject?.name ?? newProjectName}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-            if (editProject) setEditProject({ ...editProject, name: e.target.value })
-            else setNewProjectName(e.target.value)
-          }}
-          placeholder="My Project"
-        />
-        <TextInput
-          id="project-desc"
-          labelText={t('projects.description') ?? 'Description'}
-          value={editProject?.description ?? newProjectDesc}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-            if (editProject) setEditProject({ ...editProject, description: e.target.value })
-            else setNewProjectDesc(e.target.value)
-          }}
-          placeholder={t('projects.description_placeholder') ?? 'What this project is about'}
-        />
-        {editProject && (
-          <>
-            <Select
-              id="project-agent"
-              labelText={t('projects.default_agent') ?? 'Default agent'}
-              value={editProject.default_agent_id ?? ''}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEditProject({ ...editProject, default_agent_id: e.target.value })}
-            >
-              <SelectItem value="" text={t('projects.none_user_chooses') ?? 'None (user chooses)'} />
-              {allAgents.map((a) => <SelectItem key={a.id} value={a.id} text={a.name} />)}
-            </Select>
+      {(!!editProject || showNewProject) && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '460px' }}>
+            <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{editProject ? (t('action.edit') ?? 'Edit') + ' ' + (t('nav.projects') ?? 'project') : (t('new.project') ?? 'New project')}</Heading>
+            {!editProject && (
+              <TextInput
+                id="project-id"
+                labelText={t('projects.id') ?? 'Project ID'}
+                value={newProjectName}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewProjectName(e.target.value)}
+                placeholder="my-project"
+              />
+            )}
             <TextInput
-              id="project-model"
-              labelText={t('projects.default_model') ?? 'Default model (override)'}
-              value={editProject.default_model ?? ''}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditProject({ ...editProject, default_model: e.target.value })}
-              placeholder={t('projects.default_model_placeholder') ?? 'Leave empty to use agent\'s model'}
+              id="project-name"
+              labelText={t('projects.name') ?? 'Name'}
+              value={editProject?.name ?? newProjectName}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                if (editProject) setEditProject({ ...editProject, name: e.target.value })
+                else setNewProjectName(e.target.value)
+              }}
+              placeholder="My Project"
             />
-          </>
-        )}
-      </Modal>
+            <TextInput
+              id="project-desc"
+              labelText={t('projects.description') ?? 'Description'}
+              value={editProject?.description ?? newProjectDesc}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                if (editProject) setEditProject({ ...editProject, description: e.target.value })
+                else setNewProjectDesc(e.target.value)
+              }}
+              placeholder={t('projects.description_placeholder') ?? 'What this project is about'}
+            />
+            {editProject && (
+              <>
+                <Select
+                  id="project-agent"
+                  labelText={t('projects.default_agent') ?? 'Default agent'}
+                  value={editProject.default_agent_id ?? ''}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEditProject({ ...editProject, default_agent_id: e.target.value })}
+                >
+                  <SelectItem value="" text={t('projects.none_user_chooses') ?? 'None (user chooses)'} />
+                  {allAgents.map((a) => <SelectItem key={a.id} value={a.id} text={a.name} />)}
+                </Select>
+                <TextInput
+                  id="project-model"
+                  labelText={t('projects.default_model') ?? 'Default model (override)'}
+                  value={editProject.default_model ?? ''}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditProject({ ...editProject, default_model: e.target.value })}
+                  placeholder={t('projects.default_model_placeholder') ?? 'Leave empty to use agent\'s model'}
+                />
+              </>
+            )}
+            <div className="form-actions">
+              <Button kind="secondary" onClick={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectDesc('') }}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button onClick={() => void saveProject()}>{editProject ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmDelete && (
         <div className="modal-overlay">

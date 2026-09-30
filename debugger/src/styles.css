@@ -8,18 +8,18 @@
   --cds-interactive-03: #93e8c0;
   --cds-interactive-04: #e6b85c;
   --cds-interactive-05: #ff7285;
-  
+
   /* Backgrounds */
   --cds-ui-background: #080b10;
   --cds-ui-01: #0d1118;
   --cds-ui-02: #121823;
   --cds-ui-03: #172130;
-  
+
   /* Text */
   --cds-text-01: #e5e9f0;
   --cds-text-02: #7e8a9c;
   --cds-text-03: #565f89;
-  
+
   /* Borders */
   --cds-ui-04: #202a38;
   --cds-ui-05: #344258;
@@ -334,6 +334,12 @@ body {
 .cds--heading {
   color: var(--cds-text-01);
   margin-bottom: 1rem;
+}
+
+.experience-hint {
+  color: var(--tm-text-2);
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
 }
 
 /* Scrollbar */

@@ -320,6 +320,36 @@ $css--font-face: false;
   color: var(--tm-text) !important;
 }
 
+:root[data-theme="light"] .cds--btn--ghost {
+  color: var(--tm-text-2) !important;
+}
+
+:root[data-theme="light"] .cds--btn--ghost:hover {
+  background: var(--tm-raised) !important;
+  color: var(--tm-text) !important;
+}
+
+:root[data-theme="light"] .cds--btn--danger--ghost {
+  color: var(--tm-danger) !important;
+}
+
+:root[data-theme="light"] .cds--btn--danger--ghost:hover {
+  background: rgba(168, 75, 66, 0.08) !important;
+}
+
+:root[data-theme="light"] .cds--btn--ghost[aria-label] svg,
+:root[data-theme="light"] .cds--btn--ghost svg {
+  fill: var(--tm-text-2) !important;
+}
+
+:root[data-theme="light"] .cds--btn--ghost:hover svg {
+  fill: var(--tm-text) !important;
+}
+
+:root[data-theme="light"] .cds--btn--danger--ghost svg {
+  fill: var(--tm-danger) !important;
+}
+
 :root[data-theme="light"] .chat-bubble-user {
   background: var(--tm-teal);
   color: #fff;

@@ -15,10 +15,12 @@ import {
 } from '@carbon/react'
 import { Add, Edit, TrashCan, Key } from '@carbon/icons-react'
 import { workspaceApi, type User } from './workspaceApi'
+import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
 export default function Users() {
+  const t = useT()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -74,7 +76,7 @@ export default function Users() {
   }
 
   const remove = async (u: User) => {
-    if (!confirm(`Delete user "${u.name}"?`)) return
+    if (!confirm(t('users.delete_confirm', { name: u.name }) ?? `Delete user "${u.name}"?`)) return
     setLoading(true); setError('')
     try {
       await workspaceApi.deleteUser(u.id)
@@ -111,11 +113,11 @@ export default function Users() {
 
   return (
     <div style={{ padding: '1rem' }}>
-      {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
+      {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <Heading>Users</Heading>
-        <Button renderIcon={Add} onClick={startCreate}>New User</Button>
+        <Heading>{t('users.title') ?? 'Users'}</Heading>
+        <Button renderIcon={Add} onClick={startCreate}>{t('new.user') ?? 'New User'}</Button>
       </div>
 
       <Grid>
@@ -128,14 +130,14 @@ export default function Users() {
                   {u.email && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{u.email}</p>}
                   <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                     <Tag type={ROLE_COLORS[u.role] || 'gray'} size="sm">{u.role}</Tag>
-                    <Tag type={u.active ? 'green' : 'red'} size="sm">{u.active ? 'active' : 'inactive'}</Tag>
-                    {u.projects?.length ? u.projects.map((p) => <Tag key={p} type="gray" size="sm">{p}</Tag>) : <Tag type="gray" size="sm">all projects</Tag>}
+                    <Tag type={u.active ? 'green' : 'red'} size="sm">{u.active ? (t('users.active') ?? 'active') : (t('users.inactive') ?? 'inactive')}</Tag>
+                    {u.projects?.length ? u.projects.map((p) => <Tag key={p} type="gray" size="sm">{p}</Tag>) : <Tag type="gray" size="sm">{t('users.all_projects') ?? 'all projects'}</Tag>}
                   </div>
                 </div>
                 <Stack orientation="horizontal" gap={1}>
-                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Key} iconDescription="Generate Token" onClick={() => generateToken(u)} />
-                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(u)} />
-                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(u)} />
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Key} iconDescription={t('users.generate_token') ?? 'Generate Token'} onClick={() => generateToken(u)} />
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} onClick={() => startEdit(u)} />
+                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(u)} />
                 </Stack>
               </div>
             </Tile>
@@ -146,18 +148,18 @@ export default function Users() {
       {showForm && (
         <div className="modal-overlay">
           <div className="modal-panel">
-            <Heading>{editing ? 'Edit User' : 'New User'}</Heading>
+            <Heading>{editing ? (t('users.edit_user') ?? 'Edit User') : (t('new.user') ?? 'New User')}</Heading>
             <Stack gap={3}>
-              <TextInput id="user-name" labelText="Name" value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="John Doe" autoFocus />
-              <TextInput id="user-email" labelText="Email" value={form.email ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, email: e.target.value })} placeholder="john@example.com" />
-              <Select id="user-role" labelText="Role" value={form.role ?? 'viewer'} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, role: e.target.value })}>
-                <SelectItem value="viewer" text="Viewer (read-only)" />
-                <SelectItem value="operator" text="Operator (run + reconcile)" />
-                <SelectItem value="admin" text="Admin (full access)" />
+              <TextInput id="user-name" labelText={t('users.name_label') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="John Doe" autoFocus />
+              <TextInput id="user-email" labelText={t('users.email_label') ?? 'Email'} value={form.email ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, email: e.target.value })} placeholder="john@example.com" />
+              <Select id="user-role" labelText={t('users.role_label') ?? 'Role'} value={form.role ?? 'viewer'} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, role: e.target.value })}>
+                <SelectItem value="viewer" text={t('users.role_viewer') ?? 'Viewer (read-only)'} />
+                <SelectItem value="operator" text={t('users.role_operator') ?? 'Operator (run + reconcile)'} />
+                <SelectItem value="admin" text={t('users.role_admin') ?? 'Admin (full access)'} />
               </Select>
               <div className="form-actions">
-                <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>Cancel</Button>
-                <Button onClick={() => void save()}>{editing ? 'Save' : 'Create'}</Button>
+                <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
+                <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
               </div>
             </Stack>
           </div>
@@ -167,14 +169,14 @@ export default function Users() {
       {generatedToken && tokenUser && (
         <div className="modal-overlay">
           <div className="modal-panel" style={{ width: '600px' }}>
-            <Heading>Token for {tokenUser.name}</Heading>
-            <p style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>Token stored in database. User can log in immediately after kernel restart.</p>
+            <Heading>{t('users.token_for', { name: tokenUser.name }) ?? `Token for ${tokenUser.name}`}</Heading>
+            <p style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>{t('users.token_hint') ?? 'Token stored in database. User can log in immediately after kernel restart.'}</p>
             <div style={{ background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all', marginBottom: '1rem' }}>
               {generatedToken}
             </div>
             <div className="form-actions">
-              <Button kind="secondary" onClick={() => { setGeneratedToken(null); setTokenUser(null) }}>Close</Button>
-              <Button onClick={() => { copyToClipboard(generatedToken); setGeneratedToken(null); setTokenUser(null) }}>Copy & Close</Button>
+              <Button kind="secondary" onClick={() => { setGeneratedToken(null); setTokenUser(null) }}>{t('action.close') ?? 'Close'}</Button>
+              <Button onClick={() => { copyToClipboard(generatedToken); setGeneratedToken(null); setTokenUser(null) }}>{t('users.copy_close') ?? 'Copy & Close'}</Button>
             </div>
           </div>
         </div>
@@ -183,13 +185,13 @@ export default function Users() {
       {confirmRegen && (
         <div className="modal-overlay">
           <div className="modal-panel" style={{ width: '460px' }}>
-            <Heading>Regenerate token?</Heading>
+            <Heading>{t('users.regenerate_confirm') ?? 'Regenerate token?'}</Heading>
             <p style={{ color: 'var(--tm-text-3)', margin: '0.75rem 0' }}>
-              <strong>{confirmRegen.name}</strong> already has an active token. Generating a new one will invalidate the current token immediately — the user will be logged out.
+              {t('users.regenerate_warning', { name: confirmRegen.name }) ?? `${confirmRegen.name} already has an active token. Generating a new one will invalidate the current token immediately — the user will be logged out.`}
             </p>
             <div className="form-actions">
-              <Button kind="secondary" onClick={() => setConfirmRegen(null)}>Cancel</Button>
-              <Button kind="danger" onClick={() => { const u = confirmRegen; setConfirmRegen(null); doGenerateToken(u) }}>Regenerate</Button>
+              <Button kind="secondary" onClick={() => setConfirmRegen(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button kind="danger" onClick={() => { const u = confirmRegen; setConfirmRegen(null); doGenerateToken(u) }}>{t('action.regenerate') ?? 'Regenerate'}</Button>
             </div>
           </div>
         </div>
