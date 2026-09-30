@@ -190,6 +190,32 @@ $css--font-face: false;
   color: var(--tm-text);
 }
 
+:root[data-theme="light"] .cds--header-panel {
+  background: var(--tm-elevated) !important;
+  color: var(--tm-text) !important;
+  border-color: var(--tm-border) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
+:root[data-theme="light"] .cds--header-panel * {
+  color: var(--tm-text) !important;
+}
+
+:root[data-theme="light"] .run-picker-panel {
+  background: var(--tm-elevated) !important;
+  color: var(--tm-text) !important;
+  border-color: var(--tm-border) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
+:root[data-theme="light"] .obs-panel {
+  background: var(--tm-surface) !important;
+}
+
+:root[data-theme="light"] .obs-panel > header strong {
+  color: var(--tm-text-2) !important;
+}
+
 :root[data-theme="light"] .cds--structured-list,
 :root[data-theme="light"] .cds--structured-list-row {
   background: var(--tm-elevated) !important;

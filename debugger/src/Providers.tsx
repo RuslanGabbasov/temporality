@@ -13,10 +13,12 @@ import {
 } from '@carbon/react'
 import { Add, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Provider } from './workspaceApi'
+import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
 export default function Providers() {
+  const t = useT()
   const [providers, setProviders] = useState<Provider[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -63,7 +65,7 @@ export default function Providers() {
   }
 
   const remove = async (p: Provider) => {
-    if (!confirm(`Delete provider "${p.name}"?`)) return
+    if (!confirm(t('providers.delete_confirm', { name: p.name }) ?? `Delete provider "${p.name}"?`)) return
     setLoading(true); setError('')
     try {
       await workspaceApi.deleteProvider(p.id)
@@ -74,11 +76,11 @@ export default function Providers() {
 
   return (
     <div style={{ padding: '1rem' }}>
-      {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
+      {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <Heading>Model Providers</Heading>
-        <Button renderIcon={Add} onClick={startCreate}>New Provider</Button>
+        <Heading>{t('providers.title') ?? 'Model Providers'}</Heading>
+        <Button renderIcon={Add} onClick={startCreate}>{t('providers.new_provider') ?? 'New Provider'}</Button>
       </div>
 
       <Grid>
@@ -94,7 +96,7 @@ export default function Providers() {
                     <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                       {p.models.map((m) => <Tag key={m} type="blue" size="sm">{m}</Tag>)}
                     </div>
-                  ) : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.5rem' }}>No models listed</p>}
+                  ) : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.5rem' }}>{t('providers.no_models') ?? 'No models listed'}</p>}
                 </div>
                 <Stack orientation="horizontal" gap={1}>
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(p)} />
@@ -109,15 +111,15 @@ export default function Providers() {
       {showForm && (
         <div className="modal-overlay">
           <div className="modal-panel">
-            <Heading>{editing ? 'Edit Provider' : 'New Provider'}</Heading>
+            <Heading>{editing ? (t('providers.edit_provider') ?? 'Edit Provider') : (t('providers.new_provider') ?? 'New Provider')}</Heading>
             <Stack gap={3}>
-              <TextInput id="prov-name" labelText="Name" value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="z.ai" autoFocus />
-              <TextInput id="prov-url" labelText="Base URL" value={form.base_url ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, base_url: e.target.value })} placeholder="https://api.z-ai.com/v1" />
-              <TextInput id="prov-key" labelText="API Key / Env Var" value={form.api_key_ref ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key_ref: e.target.value })} placeholder="Z_AI_API_KEY or actual key" helperText="Env var name (e.g. Z_AI_API_KEY) or the actual key" />
-              <TextInput id="prov-models" labelText="Models (comma-separated)" value={form.models?.join(', ') ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, models: e.target.value.split(',').map((m) => m.trim()).filter(Boolean) })} placeholder="z-ai-turbo, z-ai-pro" />
+              <TextInput id="prov-name" labelText={t('providers.name_label') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="z.ai" autoFocus />
+              <TextInput id="prov-url" labelText={t('providers.url_label') ?? 'Base URL'} value={form.base_url ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, base_url: e.target.value })} placeholder="https://api.z-ai.com/v1" />
+              <TextInput id="prov-key" labelText={t('providers.key_label') ?? 'API Key / Env Var'} value={form.api_key_ref ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key_ref: e.target.value })} placeholder="Z_AI_API_KEY or actual key" helperText={t('providers.key_helper') ?? 'Env var name (e.g. Z_AI_API_KEY) or the actual key'} />
+              <TextInput id="prov-models" labelText={t('providers.models_label') ?? 'Models (comma-separated)'} value={form.models?.join(', ') ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, models: e.target.value.split(',').map((m) => m.trim()).filter(Boolean) })} placeholder="z-ai-turbo, z-ai-pro" />
               <div className="form-actions">
-                <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>Cancel</Button>
-                <Button onClick={() => void save()}>{editing ? 'Save' : 'Create'}</Button>
+                <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
+                <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
               </div>
             </Stack>
           </div>

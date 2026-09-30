@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { API_BASE, authHeaders } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
 import Markdown from './Markdown'
+import { useT } from './i18n'
 import {
   Button,
   TextInput,
@@ -32,27 +33,27 @@ function shortTime(iso: string) {
 }
 
 /** Format an event into a human-readable summary line. */
-function eventSummary(event: ObservationEvent): { icon: string; label: string; detail: string; color: string } {
+function eventSummary(event: ObservationEvent, t: (key: string, vars?: Record<string, string>) => string): { icon: string; label: string; detail: string; color: string } {
   const d = event.data ?? {}
   switch (event.type) {
     case 'run.started':
-      return { icon: '▶', label: 'Run started', detail: d.model ? `model ${d.model}` : '', color: 'var(--tm-teal)' }
+      return { icon: '▶', label: t('runs.event.run_started'), detail: d.model ? t('runs.model', { name: String(d.model) }) : '', color: 'var(--tm-teal)' }
     case 'run.completed':
-      return { icon: '✓', label: 'Run completed', detail: `${d.turns ?? '?'} turns`, color: '#9ece6a' }
+      return { icon: '✓', label: t('runs.event.run_completed'), detail: `${d.turns ?? '?'} ${t('runs.turns')}`, color: '#9ece6a' }
     case 'run.failed':
-      return { icon: '✗', label: 'Run failed', detail: d.error ? String(d.error).slice(0, 80) : '', color: '#f7768e' }
+      return { icon: '✗', label: t('runs.event.run_failed'), detail: d.error ? String(d.error).slice(0, 80) : '', color: '#f7768e' }
     case 'turn.started':
-      return { icon: '→', label: `Turn ${d.turn ?? '?'}`, detail: 'started', color: 'var(--tm-text-3)' }
+      return { icon: '→', label: t('runs.turn', { turn: String(d.turn ?? '?') }), detail: t('runs.event.started'), color: 'var(--tm-text-3)' }
     case 'turn.completed':
-      return { icon: '←', label: `Turn ${d.turn ?? '?'}`, detail: d.tool_calls ? `${d.tool_calls} tool calls` : 'completed', color: 'var(--tm-text-3)' }
+      return { icon: '←', label: t('runs.turn', { turn: String(d.turn ?? '?') }), detail: d.tool_calls ? t('runs.tool_calls_n', { count: String(d.tool_calls) }) : t('runs.event.completed'), color: 'var(--tm-text-3)' }
     case 'model.started':
-      return { icon: '⏳', label: 'Model call', detail: String(d.model ?? "started"), color: 'var(--tm-text-3)' }
+      return { icon: '⏳', label: t('runs.event.model_call'), detail: String(d.model ?? t('runs.event.started')), color: 'var(--tm-text-3)' }
     case 'model.completed': {
       const tokens = d.total_tokens ? `${d.total_tokens} tok` : ''
       const latency = d.latency_ms ? `${(Number(d.latency_ms) / 1000).toFixed(1)}s` : ''
       const calls = d.tool_call_count ? `${d.tool_call_count} tools` : ''
       const parts = [tokens, latency, calls].filter(Boolean).join(' · ')
-      return { icon: '🧠', label: 'Model response', detail: parts, color: '#bb9af7' }
+      return { icon: '🧠', label: t('runs.event.model_response'), detail: parts, color: '#bb9af7' }
     }
     case 'tool.started': {
       const args = d.arguments
@@ -67,7 +68,7 @@ function eventSummary(event: ObservationEvent): { icon: string; label: string; d
           else preview = args.slice(0, 60)
         } catch { preview = String(args).slice(0, 60) }
       }
-      return { icon: '🔧', label: String(d.tool ?? 'tool'), detail: preview || 'started', color: '#e0af68' }
+      return { icon: '🔧', label: String(d.tool ?? 'tool'), detail: preview || t('runs.event.started'), color: '#e0af68' }
     }
     case 'tool.completed': {
       const exit = d.exit_code !== undefined ? `exit ${d.exit_code}` : ''
@@ -89,44 +90,44 @@ function eventSummary(event: ObservationEvent): { icon: string; label: string; d
       return { icon: '✗', label: String(d.tool ?? 'tool'), detail: preview ? `${preview} → ${errDetail}` : errDetail, color: '#f7768e' }
     }
     case 'knowledge.proposed':
-      return { icon: '💡', label: 'Learned', detail: String(d.proposition ?? '').slice(0, 60), color: '#73daca' }
+      return { icon: '💡', label: t('runs.event.learned'), detail: String(d.proposition ?? '').slice(0, 60), color: '#73daca' }
     case 'knowledge.recalled':
-      return { icon: '📚', label: 'Recalled', detail: String(d.proposition ?? '').slice(0, 60), color: '#9d7cd8' }
+      return { icon: '📚', label: t('runs.event.recalled'), detail: String(d.proposition ?? '').slice(0, 60), color: '#9d7cd8' }
     case 'hint.query':
-      return { icon: '🔍', label: 'Memory lookup', detail: `${d.candidate_count ?? 0} candidates`, color: 'var(--tm-text-3)' }
+      return { icon: '🔍', label: t('runs.event.memory_lookup'), detail: t('runs.candidates', { count: String(d.candidate_count ?? 0) }), color: 'var(--tm-text-3)' }
     case 'memory.read':
-      return { icon: '📖', label: 'Memory read', detail: `${d.hint_count ?? 0} hints loaded`, color: 'var(--tm-text-3)' }
+      return { icon: '📖', label: t('runs.event.memory_read'), detail: t('runs.hints_loaded', { count: String(d.hint_count ?? 0) }), color: 'var(--tm-text-3)' }
     case 'mcp.call.started':
       return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: `→ ${d.server ?? ''}`, color: '#bb9af7' }
     case 'mcp.call.completed':
-      return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: 'completed', color: '#9ece6a' }
+      return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: t('runs.event.completed'), color: '#9ece6a' }
     case 'mcp.call.failed':
       return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: String(d.error_type ?? 'failed'), color: '#f7768e' }
     case 'approval.requested': {
       const op = d.operation as Record<string, unknown> | undefined
-      return { icon: '⚠', label: 'Approval needed', detail: String(d.action ?? op?.tool ?? ''), color: '#e6b85c' }
+      return { icon: '⚠', label: t('runs.event.approval_needed'), detail: String(d.action ?? op?.tool ?? ''), color: '#e6b85c' }
     }
     case 'approval.granted':
-      return { icon: '✓', label: 'Approved', detail: d.approver ? `by ${String(d.approver)}` : '', color: '#9ece6a' }
+      return { icon: '✓', label: t('runs.event.approved'), detail: d.approver ? `by ${String(d.approver)}` : '', color: '#9ece6a' }
     case 'approval.auto_granted': {
       const op2 = d.operation as Record<string, unknown> | undefined
-      return { icon: '✓', label: 'Auto-approved', detail: String(op2?.tool ?? d.policy_id ?? ''), color: '#9ece6a' }
+      return { icon: '✓', label: t('runs.event.auto_approved'), detail: String(op2?.tool ?? d.policy_id ?? ''), color: '#9ece6a' }
     }
     case 'tool.blocked':
-      return { icon: '🚫', label: 'Blocked', detail: String(d.reason ?? ''), color: '#f7768e' }
+      return { icon: '🚫', label: t('runs.event.blocked'), detail: String(d.reason ?? ''), color: '#f7768e' }
     case 'agent.summary':
-      return { icon: '📋', label: 'Summary', detail: String(d.kind ?? ''), color: 'var(--tm-teal)' }
+      return { icon: '📋', label: t('runs.event.summary'), detail: String(d.kind ?? ''), color: 'var(--tm-teal)' }
     case 'approval.rejected':
-      return { icon: '✗', label: 'Rejected', detail: String(d.reason ?? ''), color: '#f7768e' }
+      return { icon: '✗', label: t('runs.event.rejected'), detail: String(d.reason ?? ''), color: '#f7768e' }
     case 'delegation.started':
-      return { icon: '↗', label: 'Delegation', detail: `→ ${d.child_run_id ?? '?'}`, color: '#7aa2f7' }
+      return { icon: '↗', label: t('runs.event.delegation'), detail: `→ ${d.child_run_id ?? '?'}`, color: '#7aa2f7' }
     default:
       return { icon: '•', label: event.type, detail: '', color: 'var(--tm-text-3)' }
   }
 }
 
 /** Expandable event detail showing raw data. */
-function EventDetail({ event }: { event: ObservationEvent }) {
+function EventDetail({ event, t }: { event: ObservationEvent; t: (key: string, vars?: Record<string, string>) => string }) {
   const [expanded, setExpanded] = useState(false)
   const d = event.data ?? {}
 
@@ -151,7 +152,7 @@ function EventDetail({ event }: { event: ObservationEvent }) {
         style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
       >
         {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        {expanded ? 'hide details' : 'show details'}
+        {expanded ? t('runs.hide_details') : t('runs.show_details')}
       </button>
       {expanded && (
         <div style={{ marginTop: '0.35rem', padding: '0.5rem', background: '#0b1016', borderRadius: '4px', fontSize: '0.7rem', fontFamily: '"SFMono-Regular", Consolas, monospace', maxHeight: '300px', overflowY: 'auto' }}>
@@ -182,6 +183,7 @@ function EventDetail({ event }: { event: ObservationEvent }) {
 }
 
 export default function AgentRuns({ project }: { project: string }) {
+  const t = useT()
   const [runs, setRuns] = useState<ObservationEvent[]>([])
   const [selected, setSelected] = useState('')
   const [timeline, setTimeline] = useState<ObservationEvent[]>([])
@@ -287,7 +289,7 @@ export default function AgentRuns({ project }: { project: string }) {
   return (
     <div style={{ padding: '1rem' }}>
       {error && (
-        <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />
+        <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />
       )}
 
       <Grid>
@@ -295,11 +297,11 @@ export default function AgentRuns({ project }: { project: string }) {
         <Column sm={4} md={3} lg={4}>
           <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', marginBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
-              <Heading style={{ fontSize: '1rem' }}>Runs ({runs.length})</Heading>
+              <Heading style={{ fontSize: '1rem' }}>{t('runs.count', { count: String(runs.length) })}</Heading>
               <button onClick={() => { setSelected(''); setTimeline([]); void loadRuns(true) }} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
             </div>
             <Stack gap={1}>
-              {runs.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>No runs for this project</Tile>}
+              {runs.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('runs.no_runs') ?? 'No runs for this project'}</Tile>}
               {runs.map((event) => {
                 const id = runID(event)
                 return (
@@ -325,8 +327,8 @@ export default function AgentRuns({ project }: { project: string }) {
           <Section level={3}>
             {!selected ? (
               <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '3rem 1rem' }}>
-                <Heading>Select a run</Heading>
-                <p style={{ marginTop: '0.5rem' }}>Click a run on the left to see its trace.</p>
+                <Heading>{t('runs.select') ?? 'Select a run'}</Heading>
+                <p style={{ marginTop: '0.5rem' }}>{t('runs.select_hint') ?? 'Click a run on the left to see its trace.'}</p>
               </div>
             ) : (
               <Stack gap={3}>
@@ -334,7 +336,7 @@ export default function AgentRuns({ project }: { project: string }) {
                 {typeof answer === 'string' && (
                   <Tile>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                      <Heading style={{ fontSize: '0.875rem' }}>Agent Answer</Heading>
+                      <Heading style={{ fontSize: '0.875rem' }}>{t('runs.answer') ?? 'Agent Answer'}</Heading>
                       <Tag type={result?.status === 'completed' ? 'green' : 'red'} size="sm">{String(result?.status ?? '')}</Tag>
                     </div>
                     <Markdown content={answer} />
@@ -356,7 +358,7 @@ export default function AgentRuns({ project }: { project: string }) {
                 {/* Raw result if no answer */}
                 {result?.result !== undefined && !answer && (
                   <Tile>
-                    <Heading style={{ fontSize: '0.875rem' }}>Run Result</Heading>
+                    <Heading style={{ fontSize: '0.875rem' }}>{t('runs.result') ?? 'Run Result'}</Heading>
                     <pre style={{ background: '#0b1016', padding: '0.75rem', fontSize: '0.75rem', overflow: 'auto', borderRadius: '4px', maxHeight: '300px' }}>
                       {json(result.result)}
                     </pre>
@@ -372,23 +374,23 @@ export default function AgentRuns({ project }: { project: string }) {
                   const risk = event.data?.risk as Record<string, unknown> | undefined
                   return (
                     <Tile key={event.event_id} style={{ borderLeft: '3px solid #e6b85c' }}>
-                      <Heading style={{ fontSize: '0.875rem' }}>⚠ Approval Required</Heading>
-                      <p style={{ fontSize: '0.875rem', margin: '0.5rem 0' }}>{String(operation?.summary ?? event.data?.reason ?? event.data?.action ?? 'Agent requested approval')}</p>
+                      <Heading style={{ fontSize: '0.875rem' }}>⚠ {t('runs.approval_required') ?? 'Approval Required'}</Heading>
+                      <p style={{ fontSize: '0.875rem', margin: '0.5rem 0' }}>{String(operation?.summary ?? event.data?.reason ?? event.data?.action ?? t('runs.approval_requested') ?? 'Agent requested approval')}</p>
                       {details && (
                         <>
                           <Tag type="warm-gray" size="sm">{String(details.tool)}</Tag>
-                          <Tag type="gray" size="sm">risk {String(risk?.level ?? 'unknown')}</Tag>
+                          <Tag type="gray" size="sm">{t('runs.risk', { level: String(risk?.level ?? 'unknown') })}</Tag>
                           <pre style={{ background: '#0b1016', padding: '0.5rem', fontSize: '0.75rem', marginTop: '0.5rem', borderRadius: '4px' }}>
                             {Array.isArray(command) ? command.join(' ') : json(operation?.arguments ?? details)}
                           </pre>
                         </>
                       )}
                       <div style={{ marginTop: '0.75rem' }}>
-                        <TextInput id="decision-note" labelText="Decision note" value={reason} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)} />
+                        <TextInput id="decision-note" labelText={t('runs.decision_note') ?? 'Decision note'} value={reason} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)} />
                       </div>
                       <Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem' }}>
-                        <Button onClick={() => void decide(event, true)} disabled={busy}>Approve</Button>
-                        <Button kind="secondary" onClick={() => void decide(event, false)} disabled={busy}>Reject</Button>
+                        <Button onClick={() => void decide(event, true)} disabled={busy}>{t('runs.approve') ?? 'Approve'}</Button>
+                        <Button kind="secondary" onClick={() => void decide(event, false)} disabled={busy}>{t('runs.reject') ?? 'Reject'}</Button>
                       </Stack>
                     </Tile>
                   )
@@ -396,10 +398,10 @@ export default function AgentRuns({ project }: { project: string }) {
 
                 {/* Timeline — the main trace view */}
                 <Tile>
-                  <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>Trace ({timeline.length} events)</Heading>
+                  <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{t('runs.trace') ?? 'Trace'} ({t('runs.events_count', { count: String(timeline.length) })})</Heading>
                   <Stack gap={0}>
                     {[...timeline].reverse().map((event) => {
-                      const info = eventSummary(event)
+                      const info = eventSummary(event, t)
                       return (
                         <div
                           key={`${event.source.id}:${event.event_id}`}
@@ -418,7 +420,7 @@ export default function AgentRuns({ project }: { project: string }) {
                             <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{shortTime(event.occurred_at)}</span>
                           </div>
                           <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>
-                            <EventDetail event={event} />
+                            <EventDetail event={event} t={t} />
                           </div>
                         </div>
                       )
@@ -429,15 +431,15 @@ export default function AgentRuns({ project }: { project: string }) {
                 {/* Trajectory extraction */}
                 {trajectory && (
                   <Tile>
-                    <Heading style={{ fontSize: '0.875rem', marginBottom: '0.75rem' }}>Trajectory</Heading>
+                    <Heading style={{ fontSize: '0.875rem', marginBottom: '0.75rem' }}>{t('runs.trajectory') ?? 'Trajectory'}</Heading>
                     {/* Summary */}
                     <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.75rem', fontSize: '0.8rem' }}>
-                      <span><strong>{trajectory.summary?.total_turns ?? 0}</strong> turns</span>
-                      <span><strong>{trajectory.summary?.total_tools ?? 0}</strong> tool calls</span>
-                      <span><strong>{trajectory.summary?.total_tokens ?? 0}</strong> tokens</span>
-                      <span><strong>{trajectory.summary?.knowledge_formed ?? 0}</strong> learned</span>
-                      <span><strong>{trajectory.summary?.knowledge_recalled ?? 0}</strong> recalled</span>
-                      {trajectory.summary?.failed_tools > 0 && <span style={{ color: '#f7768e' }}><strong>{trajectory.summary.failed_tools}</strong> failed</span>}
+                      <span><strong>{trajectory.summary?.total_turns ?? 0}</strong> {t('runs.turns') ?? 'turns'}</span>
+                      <span><strong>{trajectory.summary?.total_tools ?? 0}</strong> {t('runs.tool_calls') ?? 'tool calls'}</span>
+                      <span><strong>{trajectory.summary?.total_tokens ?? 0}</strong> {t('runs.tokens') ?? 'tokens'}</span>
+                      <span><strong>{trajectory.summary?.knowledge_formed ?? 0}</strong> {t('runs.learned') ?? 'learned'}</span>
+                      <span><strong>{trajectory.summary?.knowledge_recalled ?? 0}</strong> {t('runs.recalled') ?? 'recalled'}</span>
+                      {trajectory.summary?.failed_tools > 0 && <span style={{ color: '#f7768e' }}><strong>{trajectory.summary.failed_tools}</strong> {t('runs.failed') ?? 'failed'}</span>}
                     </div>
                     {trajectory.summary?.tools_used?.length > 0 && (
                       <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
@@ -447,7 +449,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     {/* Turns */}
                     {trajectory.turns?.length > 0 && (
                       <div style={{ marginBottom: '0.75rem' }}>
-                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Turns</h5>
+                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('runs.turns_heading') ?? 'Turns'}</h5>
                         {trajectory.turns.map((turn: any) => (
                           <div key={turn.number} style={{ padding: '0.4rem 0.5rem', borderLeft: '3px solid #bb9af7', marginBottom: '0.25rem', background: 'rgba(255,255,255,0.02)', borderRadius: '0 4px 4px 0', fontSize: '0.8rem' }}>
                             <strong>Turn {turn.number}</strong>
@@ -467,7 +469,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     {/* Patterns */}
                     {trajectory.patterns?.length > 0 && (
                       <div style={{ marginBottom: '0.75rem' }}>
-                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Repeating patterns</h5>
+                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('runs.patterns_heading') ?? 'Repeating patterns'}</h5>
                         {trajectory.patterns.map((p: any, i: number) => (
                           <div key={i} style={{ fontSize: '0.8rem', marginBottom: '0.25rem', color: 'var(--tm-text)' }}>
                             <Tag type="cyan" size="sm">×{p.count}</Tag>
@@ -480,7 +482,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     {/* Knowledge events */}
                     {trajectory.knowledge?.length > 0 && (
                       <div>
-                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Knowledge</h5>
+                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('runs.knowledge_heading') ?? 'Knowledge'}</h5>
                         {trajectory.knowledge.map((k: any, i: number) => (
                           <div key={i} style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>
                             <Tag type={k.kind === 'proposed' ? 'blue' : k.kind === 'recalled' ? 'purple' : 'red'} size="sm">{k.kind}</Tag>
