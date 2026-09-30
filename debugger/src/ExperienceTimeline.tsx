@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_BASE } from './api'
+import { useT } from './i18n'
 import { observationApi, type ObservationEvent } from './observationApi'
 import { aliveRowAt, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type RunInfo } from './experience'
 
@@ -24,11 +25,11 @@ const MEMORY_BUCKETS: MemoryBucket[] = ['active', 'stale', 'invalidated', 'archi
 type RecencyFilter = 'all' | 'last-run' | '24h' | '7d' | '30d'
 type TerminalFilter = 'all' | 'alive' | 'dead'
 const RECENCY_OPTIONS: { value: RecencyFilter; label: string }[] = [
-  { value: 'all', label: 'All time' },
-  { value: 'last-run', label: 'Last run' },
-  { value: '24h', label: 'Last 24 hours' },
-  { value: '7d', label: 'Last 7 days' },
-  { value: '30d', label: 'Last 30 days' },
+  { value: 'all', label: 'timeline.recency.all' },
+  { value: 'last-run', label: 'timeline.recency.last_run' },
+  { value: '24h', label: 'timeline.recency.24h' },
+  { value: '7d', label: 'timeline.recency.7d' },
+  { value: '30d', label: 'timeline.recency.30d' },
 ]
 
 const LIFECYCLE_COLORS: Record<LifecycleKind, string> = {
@@ -76,12 +77,12 @@ type PresetName = keyof typeof PRESETS
 
 type MemoryLensPreset = { label: string; bucket: 'all' | MemoryBucket; terminal: TerminalFilter; recency: RecencyFilter; activated: boolean; xscope: boolean; strength: number }
 const MEMORY_LENS_PRESETS: MemoryLensPreset[] = [
-  { label: 'All', bucket: 'all', terminal: 'all', recency: 'all', activated: false, xscope: false, strength: 0 },
-  { label: 'Active only', bucket: 'active', terminal: 'alive', recency: 'all', activated: false, xscope: false, strength: 0 },
-  { label: 'Activated', bucket: 'all', terminal: 'all', recency: 'all', activated: true, xscope: false, strength: 0 },
-  { label: 'Cross-scope', bucket: 'all', terminal: 'all', recency: 'all', activated: false, xscope: true, strength: 0 },
-  { label: 'Strong & recent', bucket: 'active', terminal: 'alive', recency: '7d', activated: false, xscope: false, strength: 0.5 },
-  { label: 'Dead', bucket: 'all', terminal: 'dead', recency: 'all', activated: false, xscope: false, strength: 0 },
+  { label: 'timeline.all', bucket: 'all', terminal: 'all', recency: 'all', activated: false, xscope: false, strength: 0 },
+  { label: 'timeline.active_only', bucket: 'active', terminal: 'alive', recency: 'all', activated: false, xscope: false, strength: 0 },
+  { label: 'timeline.activated', bucket: 'all', terminal: 'all', recency: 'all', activated: true, xscope: false, strength: 0 },
+  { label: 'timeline.cross_scope', bucket: 'all', terminal: 'all', recency: 'all', activated: false, xscope: true, strength: 0 },
+  { label: 'timeline.strong_recent', bucket: 'active', terminal: 'alive', recency: '7d', activated: false, xscope: false, strength: 0.5 },
+  { label: 'timeline.dead', bucket: 'all', terminal: 'dead', recency: 'all', activated: false, xscope: false, strength: 0 },
 ]
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -133,6 +134,7 @@ function tickStep(span: number, width: number): number {
 }
 
 export default function ExperienceTimeline({ project }: { project: string }) {
+  const t = useT()
   const params = new URLSearchParams(window.location.search)
   const [events, setEvents] = useState<ObservationEvent[]>([])
   const [loading, setLoading] = useState(false)
@@ -444,91 +446,91 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     <Header project={project} load={load} loading={loading} />
     {error && <div className="obs-error" role="alert">{error}</div>}
     <div className="experience-meta">
-      <span>{model.runs.filter((run) => !run.parentRun).length} team runs · {view.visibleRows.length}{view.visibleRows.length < model.rows.length ? `/${model.rows.length}` : ''} experiences · {model.scopes.length} scopes · {model.totals.events} events</span>
+      <span>{model.runs.filter((run) => !run.parentRun).length} {t('timeline.team_runs')} · {view.visibleRows.length}{view.visibleRows.length < model.rows.length ? `/${model.rows.length}` : ''} {t('timeline.experiences')} · {model.scopes.length} {t('timeline.scopes')} · {model.totals.events} {t('timeline.events')}</span>
       <span className="experience-note">
-        active {model.rows.filter((row) => stateBucket(row.state) === 'active').length} · stale {model.rows.filter((row) => stateBucket(row.state) === 'stale').length} · invalidated {model.rows.filter((row) => stateBucket(row.state) === 'invalidated').length} · archived {model.rows.filter((row) => stateBucket(row.state) === 'archived').length} · activations {view.visibleLinks.length}
+        {t('timeline.active')} {model.rows.filter((row) => stateBucket(row.state) === 'active').length} · {t('timeline.stale')} {model.rows.filter((row) => stateBucket(row.state) === 'stale').length} · {t('timeline.invalidated')} {model.rows.filter((row) => stateBucket(row.state) === 'invalidated').length} · {t('timeline.archived')} {model.rows.filter((row) => stateBucket(row.state) === 'archived').length} · {t('timeline.activations')} {view.visibleLinks.length}
       </span>
-      {lens.conflicts && !view.conflictsPresent && <span className="experience-note">No contradicted / weakened / archived points in this project yet</span>}
+      {lens.conflicts && !view.conflictsPresent && <span className="experience-note">{t('timeline.no_conflicts')}</span>}
     </div>
     <div className="experience-lens">
       {(Object.keys(DEFAULT_LENS) as (keyof Lens)[]).map((key) => (
         <label key={key} className={`lens-toggle ${lens[key] ? 'on' : ''}`}>
           <input type="checkbox" checked={lens[key]} onChange={(change) => setLens((current) => ({ ...current, [key]: change.target.checked }))} />
-          {key}
+          {t(`timeline.${key}`)}
         </label>
       ))}
       <span className="lens-sep" />
       {(Object.keys(PRESETS) as PresetName[]).map((name) => (
-        <button key={name} className={`preset-chip ${activePreset === name ? 'on' : ''}`} onClick={() => { setLens(PRESETS[name].lens); setKinds(new Set(PRESETS[name].kinds)) }}>{name === 'all' ? 'all' : `${name} only`}</button>
+        <button key={name} className={`preset-chip ${activePreset === name ? 'on' : ''}`} onClick={() => { setLens(PRESETS[name].lens); setKinds(new Set(PRESETS[name].kinds)) }}>{t(`timeline.preset.${name}`)}</button>
       ))}
       <span className="lens-sep" />
-      <button onClick={() => { setWindow(null); setFocus(null); setLaneOverrides({ execution: true }) }}>fit</button>
-      <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 0.6))}>zoom +</button>
-      <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 1.6))}>zoom −</button>
+      <button onClick={() => { setWindow(null); setFocus(null); setLaneOverrides({ execution: true }) }}>{t('timeline.fit')}</button>
+      <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 0.6))}>{t('timeline.zoom_in')}</button>
+      <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 1.6))}>{t('timeline.zoom_out')}</button>
       <span className="lens-sep" />
       {LIFECYCLE_KINDS.map((kind) => (
-        <button key={kind} className={`kind-chip ${kinds.has(kind) ? 'on' : ''}`} style={{ ['--chip' as string]: LIFECYCLE_COLORS[kind] }} onClick={() => toggleKind(kind)}>{kind}</button>
+        <button key={kind} className={`kind-chip ${kinds.has(kind) ? 'on' : ''}`} style={{ ['--chip' as string]: LIFECYCLE_COLORS[kind] }} onClick={() => toggleKind(kind)}>{t(`timeline.kind.${kind}`)}</button>
       ))}
       <span className="lens-sep" />
       {MEMORY_LENS_PRESETS.map((preset) => (
-        <button key={preset.label} className="preset-chip" onClick={() => { setBucketFilter(preset.bucket); setTerminalFilter(preset.terminal); setRecencyFilter(preset.recency); setHasActivations(preset.activated); setCrossScopeOnly(preset.xscope); setStrengthMin(preset.strength) }}>{preset.label}</button>
+        <button key={preset.label} className="preset-chip" onClick={() => { setBucketFilter(preset.bucket); setTerminalFilter(preset.terminal); setRecencyFilter(preset.recency); setHasActivations(preset.activated); setCrossScopeOnly(preset.xscope); setStrengthMin(preset.strength) }}>{t(preset.label)}</button>
       ))}
       {(bucketFilter !== 'all' || terminalFilter !== 'all' || recencyFilter !== 'all' || hasActivations || crossScopeOnly || strengthMin > 0) && (
-        <button className="preset-chip" onClick={resetMemoryLens} style={{ color: '#f7768e', borderColor: '#f7768e' }}>reset</button>
+        <button className="preset-chip" onClick={resetMemoryLens} style={{ color: '#f7768e', borderColor: '#f7768e' }}>{t('timeline.reset')}</button>
       )}
     </div>
     <div className="experience-filters">
-      <label>role
+      <label>{t('timeline.filter.role')}
         <select value={roleFilter} onChange={(change) => setRoleFilter(change.target.value)}>
-          <option value="all">all</option>
+          <option value="all">{t('timeline.terminal.all')}</option>
           {view.roles.map((role) => <option key={role} value={role}>{role}</option>)}
         </select>
       </label>
-      <label>scope
+      <label>{t('timeline.filter.scope')}
         <select value={scopeFilter} onChange={(change) => setScopeFilter(change.target.value)}>
-          <option value="all">all</option>
+          <option value="all">{t('timeline.terminal.all')}</option>
           {view.scopes.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
         </select>
       </label>
-      <label>memory
+      <label>{t('timeline.filter.memory')}
         <select value={bucketFilter} onChange={(change) => setBucketFilter(change.target.value as 'all' | MemoryBucket)}>
-          <option value="all">all</option>
+          <option value="all">{t('timeline.terminal.all')}</option>
           {MEMORY_BUCKETS.map((bucket) => <option key={bucket} value={bucket}>{bucket}</option>)}
         </select>
       </label>
-      <label>alive
+      <label>{t('timeline.filter.terminal')}
         <select value={terminalFilter} onChange={(change) => setTerminalFilter(change.target.value as TerminalFilter)}>
-          {([['all','all'],['alive','alive only'],['dead','dead only']] as const).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          {([['all','timeline.terminal.all'],['alive','timeline.terminal.alive'],['dead','timeline.terminal.dead']] as const).map(([v, l]) => <option key={v} value={v}>{t(l)}</option>)}
         </select>
       </label>
-      <label>recency
+      <label>{t('timeline.filter.recency')}
         <select value={recencyFilter} onChange={(change) => setRecencyFilter(change.target.value as RecencyFilter)}>
-          {RECENCY_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          {RECENCY_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{t(opt.label)}</option>)}
         </select>
       </label>
-      <label>strength ≥ {strengthMin.toFixed(2)}
+      <label>{t('timeline.filter.strength')} ≥ {strengthMin.toFixed(2)}
         <input type="range" min={0} max={1} step={0.05} value={strengthMin} onChange={(change) => setStrengthMin(parseFloat(change.target.value))} style={{ width: '80px', verticalAlign: 'middle' }} />
       </label>
       <label className={`lens-toggle ${hasActivations ? 'on' : ''}`}>
         <input type="checkbox" checked={hasActivations} onChange={(change) => setHasActivations(change.target.checked)} />
-        activated
+        {t('timeline.filter.activated')}
       </label>
       <label className={`lens-toggle ${crossScopeOnly ? 'on' : ''}`}>
         <input type="checkbox" checked={crossScopeOnly} onChange={(change) => setCrossScopeOnly(change.target.checked)} />
-        cross-scope
+        {t('timeline.filter.cross_scope')}
       </label>
-      <label>search
-        <input type="search" value={query} onChange={(change) => setQuery(change.target.value)} placeholder="claim text / id" title="filter experiences by proposition or id" />
+      <label>{t('timeline.filter.search')}
+        <input type="search" value={query} onChange={(change) => setQuery(change.target.value)} placeholder={t('timeline.claim_text_id')} title={t('timeline.filter_experiences')} />
       </label>
       <div className="run-picker">
         {runsOpen && <div className="run-picker-backdrop" onClick={() => setRunsOpen(false)} />}
         <button className={`run-picker-toggle ${hiddenRoots.size ? 'filtered' : ''}`} onClick={() => setRunsOpen((open) => !open)}>
-          runs {view.roots.filter((root) => !hiddenRoots.has(root.id)).length}/{view.roots.length} {runsOpen ? '▴' : '▾'}
+          {t('timeline.runs_abbr')} {view.roots.filter((root) => !hiddenRoots.has(root.id)).length}/{view.roots.length} {runsOpen ? '▴' : '▾'}
         </button>
         {runsOpen && <div className="run-picker-panel">
           <div className="run-picker-actions">
-            <button onClick={() => setHiddenRoots(new Set())}>all</button>
-            <button onClick={() => setHiddenRoots(new Set(view.roots.map((root) => root.id)))}>none</button>
+            <button onClick={() => setHiddenRoots(new Set())}>{t('timeline.runs_all')}</button>
+            <button onClick={() => setHiddenRoots(new Set(view.roots.map((root) => root.id)))}>{t('timeline.runs_none')}</button>
           </div>
           <ul>
             {view.roots.map((root) => (
@@ -593,8 +595,8 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             </g>
           })}
           {lens.experience && <g className="population-lane">
-            <text x={8} y={view.populationY + 12} className="lane-label population-label">memory population</text>
-            <text x={8} y={view.populationY + 24} className="lane-sublabel">alive experiences at each run start</text>
+            <text x={8} y={view.populationY + 12} className="lane-label population-label">{t('timeline.memory_population')}</text>
+            <text x={8} y={view.populationY + 24} className="lane-sublabel">{t('timeline.alive_at_run_start')}</text>
             {view.roots.filter((run) => !hiddenRoots.has(run.id)).map((run) => {
               const alive = aliveRowAt(model.rows, run.startedAt)
               const px = x(run.startedAt)
@@ -602,7 +604,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
               const base = view.populationY + POPULATION_LANE - 8
               return <g key={run.id}>
                 <rect x={px - 4} y={base - alive * 5} width={8} height={alive * 5} fill="#4fd6be" opacity={0.65} rx={1.5}>
-                  <title>{`${shortRun(run.id)} · ${alive} experiences alive at run start`}</title>
+                  <title>{`${shortRun(run.id)} · ${alive} ${t('timeline.tooltip_alive_at_start')}`}</title>
                 </rect>
                 <text x={px} y={base - alive * 5 - 3} textAnchor="middle" className="population-count">{alive}</text>
               </g>
@@ -617,10 +619,10 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             const alive = rows.length - retired
             return <g key={scope.id} className="scope-section">
               <text x={8} y={headerY - 2} className="lane-label scope-label" onClick={toggleLane} style={{ cursor: 'pointer' }}>
-                <title>{aggregated ? 'expand into individual experiences' : 'collapse into a summary band'}</title>
+                <title>{aggregated ? t('timeline.expand') : t('timeline.collapse')}</title>
                 {aggregated ? '▸' : '▾'} {scope.title.toUpperCase()}
               </text>
-              <text x={8} y={headerY + 10} className="lane-sublabel">{rows.length} exp · {scope.runs.length} runs · {activations} act{retired ? ` · ${retired} retired` : ''}</text>
+              <text x={8} y={headerY + 10} className="lane-sublabel">{rows.length} {t('timeline.exp_abbr')} · {scope.runs.length} {t('timeline.runs_abbr')} · {activations} {t('timeline.act_abbr')}{retired ? ` · ${retired} ${t('timeline.retired')}` : ''}</text>
               <line x1={GUTTER - 6} x2={width} y1={headerY + SCOPE_HEADER / 2 - 2} y2={headerY + SCOPE_HEADER / 2 - 2} stroke="#1c2530" strokeWidth={1} />
               {aggregated ? (() => {
                 const bandCenter = view.bandY.get(scope.id)!
@@ -630,13 +632,13 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                 return <g className="scope-band" onClick={expand} style={{ cursor: 'pointer' }}>
                   <rect x={0} y={bandCenter - AGGREGATE_LANE / 2} width={width} height={AGGREGATE_LANE} fill="transparent" onClick={expand} />
                   <rect x={bx0} y={bandCenter - 4} width={Math.max(3, bx1 - bx0)} height={8} rx={4} fill="#7aa2f7" opacity={0.16}>
-                    <title>{`${scope.title}: ${rows.length} experiences · ${alive} alive · ${retired} retired · ${clock(scope.firstAt)} → ${clock(scope.lastAt)}`}</title>
+                    <title>{`${scope.title}: ${rows.length} ${t('timeline.experiences')} · ${alive} ${t('timeline.alive')} · ${retired} ${t('timeline.retired')} · ${clock(scope.firstAt)} → ${clock(scope.lastAt)}`}</title>
                   </rect>
                   {rows.map((row) => {
                     const px = x(row.firstAt)
                     if (px < GUTTER || px > GUTTER + track) return null
                     return <line key={`born-${row.knowledgeId}`} x1={px} x2={px} y1={bandCenter - 9} y2={bandCenter - 4} stroke={STATE_COLORS[row.state] ?? '#7aa2f7'} strokeWidth={1.8} >
-                      <title>{`${row.knowledgeId} appeared · ${clock(row.firstAt)}`}</title>
+                      <title>{`${row.knowledgeId} ${t('timeline.appeared')} · ${clock(row.firstAt)}`}</title>
                     </line>
                   })}
                   {rows.map((row) => row.terminal && (() => {
@@ -648,7 +650,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                       <title>{`${row.knowledgeId} ${row.terminal.kind} · ${clock(row.terminal.at)}`}</title>
                     </g>
                   })())}
-                  <text x={Math.min(bx1 + 8, width - 78)} y={bandCenter + 3} className="lane-sublabel">{rows.length} exp · {alive} alive</text>
+                  <text x={Math.min(bx1 + 8, width - 78)} y={bandCenter + 3} className="lane-sublabel">{rows.length} {t('timeline.exp_abbr')} · {alive} {t('timeline.alive')}</text>
                 </g>
               })() : rows.map((row) => {
                 const yLane = view.rowY.get(row.knowledgeId)!
@@ -663,7 +665,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                   </circle>
                   <text x={20} y={yLane + 3} className="row-label"><title>{`${row.knowledgeId} · ${row.state}`}</title>{claimLabel(row.proposition)}</text>
                   <rect x={Math.max(GUTTER, x0)} width={Math.max(3, Math.min(x1, GUTTER + track) - Math.max(GUTTER, x0))} y={yLane - 2} height={4} rx={2} fill={stateColor} opacity={0.25 + row.strength * 0.55}>
-                    <title>{`${row.knowledgeId} · ${row.state} · strength ${row.strength.toFixed(2)} (derived)${row.terminal ? ` · died ${row.terminal.at}` : ' · alive'}`}</title>
+                    <title>{`${row.knowledgeId} · ${t('timeline.state.' + row.state) || row.state} · ${t('timeline.strength_abbr')} ${row.strength.toFixed(2)} (${t('timeline.derived')})${row.terminal ? ` · ${t('timeline.died')} ${row.terminal.at}` : ` · ${t('timeline.alive')}`}`}</title>
                   </rect>
                   {points.map((point) => {
                     const px = x(point.at)
@@ -718,7 +720,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             const bend = Math.max(20, Math.abs(x2 - x1) * 0.35)
             return <g key={`${edge.eventId}-${edge.fromId}`} className="lineage-link">
               <path d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`} fill="none" stroke="#ff9e64" strokeWidth={1.2} opacity={0.8} markerEnd="url(#lineage-arrow)" />
-              <title>{`${edge.fromId} → ${edge.toId} · ${edge.inferred ? 'inferred' : 'explicit'}${edge.reason ? `\n${edge.reason}` : ''}`}</title>
+              <title>{`${edge.fromId} → ${edge.toId} · ${edge.inferred ? t('timeline.inferred') : t('timeline.explicit')}${edge.reason ? `\n${edge.reason}` : ''}`}</title>
             </g>
           })}
           {lens.activation && view.visibleLinks.map((link) => {
@@ -757,10 +759,10 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             </marker>
           </defs>
         </svg>
-        <p className="experience-hint">pinch / wheel — zoom · drag or two-finger swipe — pan · row click — details · bars are lifespans, points are events, ✕ marks death</p>
+        <p className="experience-hint">{t('timeline.hint')}</p>
       </section>
       {selectedRow && <aside className="obs-panel experience-detail">
-        <button className="detail-close" title="close the detail panel" onClick={() => setSelected('')} aria-label="Close details">×</button>
+        <button className="detail-close" title={t('timeline.close_details')} onClick={() => setSelected('')} aria-label="Close details">×</button>
         <RowDetails row={selectedRow} lineage={model.lineage} forensic={forensicOf(selectedRow, model)} onFocus={focusOn} related={selectedRow.relatedIds.map((id) => rowOf.get(id)).filter((row): row is KnowledgeRow => Boolean(row))} project={project} />
       </aside>}
     </main>
@@ -782,10 +784,11 @@ function Header({ project, load, loading }: { project: string; load: (project: s
 }
 
 function RowDetails({ row, lineage, forensic, onFocus, related, project }: { row: KnowledgeRow; lineage: KnowledgeLineage[]; forensic: ForensicRecord; onFocus: (at: string, eventId: string, label: string) => void; related: KnowledgeRow[]; project: string }) {
+  const t = useT()
   const counts = LIFECYCLE_KINDS.map((kind) => {
     const count = row.points.filter((point) => point.kind === kind).length
-    return count ? `${kind} ×${count}` : ''
-  }).filter(Boolean).join(' · ') || 'no lifecycle points'
+    return count ? `${t(`timeline.kind.${kind}`)} ×${count}` : ''
+  }).filter(Boolean).join(' · ') || t('timeline.no_lifecycle_points')
   const supersedes = lineage.filter((edge) => edge.fromId === row.knowledgeId)
   const supersededBy = lineage.filter((edge) => edge.toId === row.knowledgeId)
   const stateColor = STATE_COLORS[row.state] ?? '#7aa2f7'
@@ -795,56 +798,56 @@ function RowDetails({ row, lineage, forensic, onFocus, related, project }: { row
       <strong title={row.knowledgeId}>{shortKnowledge(row.knowledgeId)}</strong>
     </header>
     <div className="cluster-stats">
-      <span>state <strong style={{ color: stateColor }}>{row.state}</strong></span>
-      <span>runs {row.runs.length}</span>
-      <span>roles {row.roles.join(', ') || '—'}</span>
-      <span>episodes {row.episodes.length}</span>
-      <span>{row.terminal ? `died ${row.terminal.at}` : 'alive'}</span>
+      <span>{t('timeline.state_label')} <strong style={{ color: stateColor }}>{row.state}</strong></span>
+      <span>{t('timeline.runs_label')} {row.runs.length}</span>
+      <span>{t('timeline.roles')} {row.roles.join(', ') || '—'}</span>
+      <span>{t('timeline.episodes')} {row.episodes.length}</span>
+      <span>{row.terminal ? `${t('timeline.died')} ${row.terminal.at}` : t('timeline.alive')}</span>
     </div>
-    <div className="strength-meter" title="derived from lifecycle state + reuse telemetry, not a model output">
-      <span>strength</span>
+    <div className="strength-meter" title={t('timeline.strength_title')}>
+      <span>{t('timeline.strength_label')}</span>
       <div className="strength-track"><div style={{ width: `${Math.round(row.strength * 100)}%`, background: stateColor }} /></div>
       <data>{row.strength.toFixed(2)}</data>
     </div>
     <p className="row-proposition">{row.proposition}</p>
-    {row.command && <p className="cluster-variants">command: {row.command}</p>}
+    {row.command && <p className="cluster-variants">{t('timeline.command')} {row.command}</p>}
     <section>
-      <h4>Forensics</h4>
+      <h4>{t('timeline.forensics')}</h4>
       {forensic.formed && <div className="forensic-block">
-        <p className="forensic-head clickable" title="locate on timeline" onClick={() => onFocus(forensic.formed!.at, row.points.find((point) => point.kind === 'appeared')?.eventId ?? '', `formed · ${shortKnowledge(row.knowledgeId)}`)}>formed <time>{clock(forensic.formed.at)}</time>{forensic.formed.run ? ` · ${shortRun(forensic.formed.run)}` : ''}{forensic.formed.role ? ` · ${forensic.formed.role}` : ''}{forensic.formed.actor ? ` · by ${forensic.formed.actor}` : ''}</p>
+        <p className="forensic-head clickable" title={t('timeline.locate')} onClick={() => onFocus(forensic.formed!.at, row.points.find((point) => point.kind === 'appeared')?.eventId ?? '', `${t('timeline.formed')} · ${shortKnowledge(row.knowledgeId)}`)}>{t('timeline.formed')} <time>{clock(forensic.formed.at)}</time>{forensic.formed.run ? ` · ${shortRun(forensic.formed.run)}` : ''}{forensic.formed.role ? ` · ${forensic.formed.role}` : ''}{forensic.formed.actor ? ` · by ${forensic.formed.actor}` : ''}</p>
         {forensic.formed.evidence.length > 0 && <ul className="forensic-evidence">
-          {forensic.formed.evidence.map((item, index) => <li key={index} className="clickable" title="locate on timeline" onClick={() => onFocus(item.at, '', `evidence · ${item.ref}`)}>{item.ref}{item.run ? <small> · {shortRun(item.run)}</small> : null}</li>)}
+          {forensic.formed.evidence.map((item, index) => <li key={index} className="clickable" title={t('timeline.locate')} onClick={() => onFocus(item.at, '', `evidence · ${item.ref}`)}>{item.ref}{item.run ? <small> · {shortRun(item.run)}</small> : null}</li>)}
         </ul>}
         {forensic.formed.commands.length > 0 && <details className="forensic-commands">
-          <summary>prior commands · {forensic.formed.commands.length}</summary>
+          <summary>{t('timeline.prior_commands')} · {forensic.formed.commands.length}</summary>
           <ol>{forensic.formed.commands.map((command) => <li key={command.eventId}><code>{command.command}</code></li>)}</ol>
         </details>}
       </div>}
       {forensic.activations.length > 0 && <div className="forensic-block">
-        <p className="forensic-head">activations · {forensic.activations.length}</p>
+        <p className="forensic-head">{t('timeline.activations_label')} · {forensic.activations.length}</p>
         <ul className="forensic-activations">
-          {forensic.activations.map((activation) => <li key={`${activation.offeredAt}-${activation.usedRun ?? 'unused'}`} data-status={activation.usedRunStatus} title="locate on timeline" onClick={() => onFocus(activation.usedAt ?? activation.offeredAt, '', `activation → ${activation.usedRun ?? 'not used'}`)}>
-            <span>{activation.usedRun ? shortRun(activation.usedRun) : 'not used'}</span>
+          {forensic.activations.map((activation) => <li key={`${activation.offeredAt}-${activation.usedRun ?? 'unused'}`} data-status={activation.usedRunStatus} title={t('timeline.locate')} onClick={() => onFocus(activation.usedAt ?? activation.offeredAt, '', `activation → ${activation.usedRun ?? t('timeline.not_used')}`)}>
+            <span>{activation.usedRun ? shortRun(activation.usedRun) : t('timeline.not_used')}</span>
             <small>{activation.usedAt ? clock(activation.usedAt) : clock(activation.offeredAt)}{activation.usedRunStatus ? ` · run ${activation.usedRunStatus}` : ''}</small>
             {activation.commands.length > 0 && <details>
-              <summary>+{activation.commands.length} commands</summary>
+              <summary>+{activation.commands.length} {t('timeline.commands')}</summary>
               <ol>{activation.commands.map((command) => <li key={command.eventId}><code>{command.command}</code></li>)}</ol>
             </details>}
           </li>)}
         </ul>
       </div>}
       {forensic.deaths.map((death) => <div className="forensic-block forensic-death" key={death.eventId}>
-        <p className="forensic-head clickable" title="locate on timeline" onClick={() => onFocus(death.at, death.eventId, `${death.kind} · ${shortKnowledge(row.knowledgeId)}`)}>{death.kind} <time>{clock(death.at)}</time>{death.actor ? ` · by ${death.actor}` : ''}{death.run ? ` · ${shortRun(death.run)}` : ' · manual'}</p>
+        <p className="forensic-head clickable" title={t('timeline.locate')} onClick={() => onFocus(death.at, death.eventId, `${death.kind} · ${shortKnowledge(row.knowledgeId)}`)}>{death.kind} <time>{clock(death.at)}</time>{death.actor ? ` · by ${death.actor}` : ''}{death.run ? ` · ${shortRun(death.run)}` : ` · ${t('timeline.manual')}`}</p>
         {death.reason && <p className="forensic-reason" title={death.reason}>{death.reason}</p>}
-        {death.supersededBy.length > 0 && <p className="forensic-successor">superseded by → {death.supersededBy.map(shortKnowledge).join(', ')}</p>}
+        {death.supersededBy.length > 0 && <p className="forensic-successor">{t('timeline.superseded_by')} → {death.supersededBy.map(shortKnowledge).join(', ')}</p>}
       </div>)}
-      {!forensic.formed && forensic.activations.length === 0 && forensic.deaths.length === 0 && <p className="obs-empty">Недостаточно событий для реконструкции цепочки.</p>}
+      {!forensic.formed && forensic.activations.length === 0 && forensic.deaths.length === 0 && <p className="obs-empty">{t('timeline.insufficient_events')}</p>}
     </section>
     <section>
-      <h4>Lifecycle</h4>
+      <h4>{t('timeline.lifecycle_heading')}</h4>
       <p className="member-counts">{counts}</p>
       <ol className="cluster-points">
-        {row.points.map((point) => <li key={point.eventId} data-kind={point.kind} title="locate on timeline" onClick={() => onFocus(point.at, point.eventId, `${point.kind} · ${shortKnowledge(row.knowledgeId)}`)}>
+        {row.points.map((point) => <li key={point.eventId} data-kind={point.kind} title={t('timeline.locate')} onClick={() => onFocus(point.at, point.eventId, `${point.kind} · ${shortKnowledge(row.knowledgeId)}`)}>
           <span className="point-dot" style={{ background: LIFECYCLE_COLORS[point.kind] }} />
           <time>{point.at}</time>
           <strong>{point.kind}</strong>
@@ -853,30 +856,30 @@ function RowDetails({ row, lineage, forensic, onFocus, related, project }: { row
       </ol>
     </section>
     {row.episodes.length > 0 && <section>
-      <h4>Episodes</h4>
+      <h4>{t('timeline.episodes')}</h4>
       <ul className="cluster-episodes">
-        {row.episodes.map((episode, index) => <li key={`${episode.ref}-${index}`} className="clickable" title="locate on timeline" onClick={() => onFocus(episode.at, '', `episode · ${episode.ref}`)}><span className={`episode-kind ${episode.kind}`} />{episode.ref}<small>{episode.run ? `${shortRun(episode.run)} · ` : ''}{episode.at}</small></li>)}
+        {row.episodes.map((episode, index) => <li key={`${episode.ref}-${index}`} className="clickable" title={t('timeline.locate')} onClick={() => onFocus(episode.at, '', `episode · ${episode.ref}`)}><span className={`episode-kind ${episode.kind}`} />{episode.ref}<small>{episode.run ? `${shortRun(episode.run)} · ` : ''}{episode.at}</small></li>)}
       </ul>
     </section>}
     {(supersedes.length > 0 || supersededBy.length > 0) && <section>
-      <h4>Lineage</h4>
+      <h4>{t('timeline.lineage')}</h4>
       <ul className="lineage-list">
-        {supersedes.map((edge) => <li key={`out-${edge.eventId}`}>supersedes <code>{edge.toId}</code>{edge.inferred ? ' · inferred' : ''}{edge.reason ? <small>{edge.reason}</small> : null}</li>)}
-        {supersededBy.map((edge) => <li key={`in-${edge.eventId}`}>superseded by <code>{edge.fromId}</code>{edge.inferred ? ' · inferred' : ''}{edge.reason ? <small>{edge.reason}</small> : null}</li>)}
+        {supersedes.map((edge) => <li key={`out-${edge.eventId}`}>{t('timeline.supersedes')} <code>{edge.toId}</code>{edge.inferred ? ` · ${t('timeline.inferred')}` : ''}{edge.reason ? <small>{edge.reason}</small> : null}</li>)}
+        {supersededBy.map((edge) => <li key={`in-${edge.eventId}`}>{t('timeline.superseded_by')} <code>{edge.fromId}</code>{edge.inferred ? ` · ${t('timeline.inferred')}` : ''}{edge.reason ? <small>{edge.reason}</small> : null}</li>)}
       </ul>
     </section>}
     {related.length > 0 && <section>
-      <h4>Related experiences</h4>
+      <h4>{t('timeline.related_experiences')}</h4>
       <ul className="related-list">
         {related.map((item) => <li key={item.knowledgeId}><code>{shortKnowledge(item.knowledgeId)}</code><span className={`member-state ${item.state}`}>{item.state}</span><small>{item.scopes.primary}</small></li>)}
       </ul>
     </section>}
     <section style={{ marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid #202a38' }}>
-      <h4>Investigate</h4>
+      <h4>{t('timeline.investigate')}</h4>
       <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.35rem' }}>
-        <a href={`/observability?project=${encodeURIComponent(project)}&selected=${encodeURIComponent(row.knowledgeId)}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>Knowledge page</a>
-        {row.runs[0] && <a href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(row.runs[0])}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>First run trace</a>}
-        {row.runs.length > 1 && <a href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(row.runs[row.runs.length - 1])}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>Last run trace</a>}
+        <a href={`/observability?project=${encodeURIComponent(project)}&selected=${encodeURIComponent(row.knowledgeId)}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>{t('timeline.knowledge_page')}</a>
+        {row.runs[0] && <a href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(row.runs[0])}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>{t('timeline.first_run_trace')}</a>}
+        {row.runs.length > 1 && <a href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(row.runs[row.runs.length - 1])}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>{t('timeline.last_run_trace')}</a>}
       </div>
     </section>
   </div>

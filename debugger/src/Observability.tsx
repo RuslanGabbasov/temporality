@@ -12,6 +12,7 @@ import {
   Stack,
   Heading,
 } from '@carbon/react'
+import { useT } from './i18n'
 
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 function utcValue(local: string) { return local ? new Date(local).toISOString() : undefined }
@@ -24,6 +25,7 @@ const STATE_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 're
 type Tab = 'overview' | 'knowledge' | 'patterns'
 
 export default function Observability({ project }: { project: string }) {
+  const t = useT()
   const initParams = new URLSearchParams(window.location.search)
   const [tab, setTab] = useState<Tab>((['overview', 'knowledge', 'patterns'].includes(initParams.get('tab') as Tab) ? initParams.get('tab') : 'overview') as Tab)
   const [asOf, setAsOf] = useState(initParams.get('as_of') ?? '')
@@ -109,7 +111,7 @@ export default function Observability({ project }: { project: string }) {
 
   // Load knowledge
   async function load() {
-    if (!project.trim()) { setError('Enter a project ID.'); return }
+    if (!project.trim()) { setError(t('knowledge.enter_project') ?? 'Enter a project ID.'); return }
     setLoading(true); setError('')
     try {
       const [history, comparison] = await Promise.all([
@@ -176,9 +178,9 @@ export default function Observability({ project }: { project: string }) {
   }
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'overview', label: 'Overview' },
-    { key: 'knowledge', label: 'Knowledge' },
-    { key: 'patterns', label: 'Patterns' },
+    { key: 'overview', label: t('knowledge.overview') ?? 'Overview' },
+    { key: 'knowledge', label: t('knowledge.title') ?? 'Knowledge' },
+    { key: 'patterns', label: t('knowledge.patterns') ?? 'Patterns' },
   ]
 
   return (
@@ -190,18 +192,18 @@ export default function Observability({ project }: { project: string }) {
         <button onClick={() => void load()} disabled={loading} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <details style={{ fontSize: '0.75rem' }}>
-            <summary style={{ cursor: 'pointer', color: 'var(--tm-text-3)', padding: '0.25rem 0' }}>Bitemporal filters</summary>
+            <summary style={{ cursor: 'pointer', color: 'var(--tm-text-3)', padding: '0.25rem 0' }}>{t('knowledge.bitemporal_filters') ?? 'Bitemporal filters'}</summary>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap', marginTop: '0.35rem' }}>
               <div style={{ minWidth: '130px' }}>
-                <TextInput id="as-of" labelText="As of" type="datetime-local" value={asOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAsOf(e.target.value)} size="sm" />
+                <TextInput id="as-of" labelText={t('knowledge.as_of') ?? 'As of'} type="datetime-local" value={asOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAsOf(e.target.value)} size="sm" />
               </div>
               <div style={{ minWidth: '130px' }}>
-                <TextInput id="compare" labelText="Compare" type="datetime-local" value={compareAsOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompareAsOf(e.target.value)} size="sm" />
+                <TextInput id="compare" labelText={t('knowledge.compare') ?? 'Compare'} type="datetime-local" value={compareAsOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompareAsOf(e.target.value)} size="sm" />
               </div>
               <div style={{ minWidth: '130px' }}>
-                <TextInput id="known-at" labelText="Known by" type="datetime-local" value={knownAt} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKnownAt(e.target.value)} size="sm" />
+                <TextInput id="known-at" labelText={t('knowledge.known_by') ?? 'Known by'} type="datetime-local" value={knownAt} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKnownAt(e.target.value)} size="sm" />
               </div>
-              <Button size="sm" onClick={load} disabled={loading}>Apply</Button>
+              <Button size="sm" onClick={load} disabled={loading}>{t('knowledge.apply') ?? 'Apply'}</Button>
             </div>
           </details>
         </div>
@@ -230,10 +232,10 @@ export default function Observability({ project }: { project: string }) {
           {/* Health summary — clickable to Knowledge tab */}
           <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
             {([
-              { label: 'Total', count: health.total, color: 'var(--tm-text)', state: 'all' },
-              { label: 'Alive', count: health.alive, color: 'var(--tm-success)', state: 'alive' },
-              { label: 'Stale', count: health.stale, color: 'var(--tm-amber)', state: 'stale' },
-              { label: 'Invalidated', count: health.invalidated, color: 'var(--tm-danger)', state: 'invalidated' },
+              { label: t('knowledge.total') ?? 'Total', count: health.total, color: 'var(--tm-text)', state: 'all' },
+              { label: t('knowledge.alive') ?? 'Alive', count: health.alive, color: 'var(--tm-success)', state: 'alive' },
+              { label: t('knowledge.stale') ?? 'Stale', count: health.stale, color: 'var(--tm-amber)', state: 'stale' },
+              { label: t('knowledge.invalidated') ?? 'Invalidated', count: health.invalidated, color: 'var(--tm-danger)', state: 'invalidated' },
             ]).map((s) => (
               <Tile
                 key={s.label}
@@ -260,7 +262,7 @@ export default function Observability({ project }: { project: string }) {
           {/* Cluster summary */}
           {clusters.length > 0 && (
             <Tile style={{ marginBottom: '1rem' }}>
-              <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>Knowledge by scope</Heading>
+              <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{t('knowledge.by_scope') ?? 'Knowledge by scope'}</Heading>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                 {clusters.map(([name, items]) => {
                   const alive = items.filter((k) => k.state !== 'invalidated' && k.state !== 'superseded' && !k.at_risk).length
@@ -277,7 +279,7 @@ export default function Observability({ project }: { project: string }) {
 
           {knowledge.length === 0 && !loading && (
             <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '3rem 1rem' }}>
-              <p>No knowledge found for this project. Load a project to see agent knowledge.</p>
+              <p>{t('knowledge.no_knowledge') ?? 'No knowledge found for this project. Load a project to see agent knowledge.'}</p>
             </div>
           )}
         </div>
@@ -291,14 +293,14 @@ export default function Observability({ project }: { project: string }) {
             {/* Active state filter indicator */}
             {stateFilter !== 'all' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                <Tag type="blue" size="sm">Showing: {stateFilter}</Tag>
-                <button onClick={() => setStateFilter('all')} style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.75rem' }}>✕ Clear filter</button>
+                <Tag type="blue" size="sm">{t('knowledge.showing') ?? 'Showing'}: {stateFilter}</Tag>
+                <button onClick={() => setStateFilter('all')} style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.75rem' }}>✕ {t('knowledge.clear_filter') ?? 'Clear filter'}</button>
               </div>
             )}
             {/* Cluster filter chips */}
             {clusters.length > 1 && (
               <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-                <Tag type={clusterFilter === 'all' ? 'blue' : 'gray'} size="sm" onClick={() => { setClusterFilter('all'); setSelectedID(knowledge[0]?.id ?? '') }} style={{ cursor: 'pointer' }}>All ({knowledge.length})</Tag>
+                <Tag type={clusterFilter === 'all' ? 'blue' : 'gray'} size="sm" onClick={() => { setClusterFilter('all'); setSelectedID(knowledge[0]?.id ?? '') }} style={{ cursor: 'pointer' }}>{t('knowledge.all') ?? 'All'} ({knowledge.length})</Tag>
                 {clusters.map(([name, items]) => (
                   <Tag key={name} type={clusterFilter === name ? 'blue' : 'gray'} size="sm" onClick={() => { setClusterFilter(name); setSelectedID(items[0]?.id ?? '') }} style={{ cursor: 'pointer' }}>
                     {name} ({items.length})
@@ -331,7 +333,7 @@ export default function Observability({ project }: { project: string }) {
           <div style={{ minWidth: 0, position: 'sticky', top: '3rem', alignSelf: 'start', maxHeight: 'calc(100vh - 5rem)', overflowY: 'auto' }}>
             {!selected ? (
               <Tile style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '2rem' }}>
-                <p>Select a knowledge item to inspect</p>
+                <p>{t('knowledge.select_item') ?? 'Select a knowledge item to inspect'}</p>
               </Tile>
             ) : (
               <Stack gap={2}>
@@ -348,21 +350,21 @@ export default function Observability({ project }: { project: string }) {
                   {selected.at_risk && <InlineNotification kind="warning" title="At risk" subtitle={`Depends on: ${selected.risk_sources?.join(', ')}`} lowContrast />}
                   {selected.relationships?.length ? (
                     <>
-                      <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', marginTop: '0.75rem' }}>Relations</h5>
+                      <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', marginTop: '0.75rem' }}>{t('knowledge.relations') ?? 'Relations'}</h5>
                       {selected.relationships.map((r) => <div key={r.event_id} style={{ fontSize: '0.8rem' }}>{r.type} → <code>{r.target_id}</code></div>)}
                     </>
                   ) : null}
                   {selected.evidence?.length ? (
                     <>
-                      <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', marginTop: '0.75rem' }}>Evidence</h5>
+                      <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', marginTop: '0.75rem' }}>{t('knowledge.evidence') ?? 'Evidence'}</h5>
                       {selected.evidence.map((e) => <div key={e.ref} style={{ fontSize: '0.8rem' }}><code>{e.ref}</code> ({e.type})</div>)}
                     </>
-                  ) : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>No evidence attached</p>}
+                  ) : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('knowledge.no_evidence') ?? 'No evidence attached'}</p>}
                 </Tile>
 
                 {/* Lifecycle */}
                 <Tile>
-                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Lifecycle</h5>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('knowledge.lifecycle') ?? 'Lifecycle'}</h5>
                   <Stack gap={1}>
                     {selected.history.map((entry) => (
                       <div key={entry.event_id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.75rem' }}>
@@ -379,11 +381,11 @@ export default function Observability({ project }: { project: string }) {
                 {chain && chain.activations?.length > 0 && (
                   <Tile>
                     <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
-                      Activation Chain — {chain.total_runs} runs · {chain.activations.length} activations · {chain.is_alive ? 'alive' : 'dead'}
+                      {t('knowledge.activation_chain') ?? 'Activation Chain'} — {chain.total_runs} {t('knowledge.runs')?.toLowerCase() ?? 'runs'} · {chain.activations.length} {t('knowledge.activations') ?? 'activations'} · {chain.is_alive ? (t('knowledge.alive')?.toLowerCase() ?? 'alive') : (t('knowledge.dead')?.toLowerCase() ?? 'dead')}
                     </h5>
                     {chain.formation_evidence?.length > 0 && (
                       <div style={{ marginBottom: '0.5rem', padding: '0.4rem 0.5rem', borderLeft: '3px solid var(--tm-teal)', background: 'rgba(87,215,232,0.05)', borderRadius: '0 4px 4px 0' }}>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--tm-teal)', fontWeight: 600, marginBottom: '0.25rem' }}>Formed in {chain.formed_in} turn {chain.formed_turn}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--tm-teal)', fontWeight: 600, marginBottom: '0.25rem' }}>{t('knowledge.formed_in') ?? 'Formed in'} {chain.formed_in} {t('knowledge.turn') ?? 'turn'} {chain.formed_turn}</div>
                         <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
                           {chain.formation_evidence.map((t: any, i: number) => (
                             <Tag key={i} type={t.success ? 'green' : 'red'} size="sm">{t.tool}{t.exit_code !== undefined && t.exit_code !== 0 ? ` (${t.exit_code})` : ''}</Tag>
@@ -417,24 +419,24 @@ export default function Observability({ project }: { project: string }) {
                 {/* Manual invalidation */}
                 {selected.state !== 'invalidated' && selected.state !== 'corrected' && selected.state !== 'superseded' && (
                   <Tile>
-                    <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Manual Invalidation</h5>
+                    <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('knowledge.manual_invalidation') ?? 'Manual Invalidation'}</h5>
                     <Stack gap={2}>
-                      <TextInput id="actor" labelText="Actor" value={actor} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setActor(e.target.value)} size="sm" />
-                      <TextArea id="reason" labelText="Reason" value={reason} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setReason(e.target.value)} rows={2} />
-                      <Button kind="danger" size="sm" onClick={invalidate} disabled={!reason.trim()}>Invalidate</Button>
+                      <TextInput id="actor" labelText={t('knowledge.actor') ?? 'Actor'} value={actor} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setActor(e.target.value)} size="sm" />
+                      <TextArea id="reason" labelText={t('knowledge.reason') ?? 'Reason'} value={reason} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setReason(e.target.value)} rows={2} />
+                      <Button kind="danger" size="sm" onClick={invalidate} disabled={!reason.trim()}>{t('knowledge.invalidate') ?? 'Invalidate'}</Button>
                     </Stack>
                   </Tile>
                 )}
 
                 {/* Memory hints */}
                 <Tile>
-                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Memory Lookup</h5>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('knowledge.memory_lookup') ?? 'Memory Lookup'}</h5>
                   <Stack gap={2}>
-                    <TextArea id="query" labelText="Query" value={query} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setQuery(e.target.value)} rows={2} placeholder="What is the agent trying to do?" />
-                    <TextInput id="tool" labelText="Tool" value={tool} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTool(e.target.value)} placeholder="test-runner" size="sm" />
-                    <TextArea id="tool-result" labelText="Tool result" value={toolResult} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setToolResult(e.target.value)} rows={2} placeholder="Relevant excerpt" />
+                    <TextArea id="query" labelText={t('knowledge.query') ?? 'Query'} value={query} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setQuery(e.target.value)} rows={2} placeholder="What is the agent trying to do?" />
+                    <TextInput id="tool" labelText={t('knowledge.tool') ?? 'Tool'} value={tool} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTool(e.target.value)} placeholder="test-runner" size="sm" />
+                    <TextArea id="tool-result" labelText={t('knowledge.tool_result') ?? 'Tool result'} value={toolResult} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setToolResult(e.target.value)} rows={2} placeholder="Relevant excerpt" />
                     <Button size="sm" onClick={retrieveHints} disabled={hintBusy || (!query.trim() && !toolResult.trim())}>
-                      {hintBusy ? 'Searching…' : 'Retrieve hints'}
+                      {hintBusy ? (t('knowledge.searching') ?? 'Searching…') : (t('knowledge.retrieve_hints') ?? 'Retrieve hints')}
                     </Button>
                     {hintError && <InlineNotification kind="error" title="Error" subtitle={hintError} lowContrast />}
                     {hints.map((hint) => (
@@ -442,7 +444,7 @@ export default function Observability({ project }: { project: string }) {
                         <Tag type="gray" size="sm">{hint.state}</Tag>
                         <strong style={{ fontSize: '0.85rem' }}>{hint.proposition}</strong>
                         {hint.caution && <small style={{ color: '#e6b85c', display: 'block', marginTop: '0.25rem' }}>{hint.caution}</small>}
-                        <small style={{ color: 'var(--tm-text-3)', display: 'block' }}>Matched by: {hint.matched_by.join(', ')}</small>
+                        <small style={{ color: 'var(--tm-text-3)', display: 'block' }}>{t('knowledge.matched_by') ?? 'Matched by'}: {hint.matched_by.join(', ')}</small>
                       </Tile>
                     ))}
                   </Stack>
@@ -459,8 +461,8 @@ export default function Observability({ project }: { project: string }) {
           {projectionLoading && <Loading withOverlay={false} />}
           {!projection && !projectionLoading && (
             <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '3rem 1rem' }}>
-              <p>No projection data yet. Click Load to fetch experience patterns.</p>
-              <Button onClick={loadProjection} style={{ marginTop: '1rem' }}>Load patterns</Button>
+              <p>{t('knowledge.no_projection') ?? 'No projection data yet. Click Load to fetch experience patterns.'}</p>
+              <Button onClick={loadProjection} style={{ marginTop: '1rem' }}>{t('knowledge.load_patterns') ?? 'Load patterns'}</Button>
             </div>
           )}
           {projection && (
@@ -468,11 +470,11 @@ export default function Observability({ project }: { project: string }) {
               {/* Summary */}
               <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                 {[
-                  { label: 'Runs', count: projection.run_count, color: 'var(--tm-teal)' },
-                  { label: 'Tool patterns', count: projection.summary?.total_tool_patterns ?? 0, color: 'var(--tm-success)' },
-                  { label: 'Knowledge', count: projection.summary?.total_knowledge ?? 0, color: 'var(--tm-teal)' },
-                  { label: 'Alive', count: projection.summary?.alive_knowledge ?? 0, color: 'var(--tm-success)' },
-                  { label: 'Dead', count: projection.summary?.dead_knowledge ?? 0, color: 'var(--tm-danger)' },
+                  { label: t('knowledge.runs') ?? 'Runs', count: projection.run_count, color: 'var(--tm-teal)' },
+                  { label: t('knowledge.tool_patterns') ?? 'Tool patterns', count: projection.summary?.total_tool_patterns ?? 0, color: 'var(--tm-success)' },
+                  { label: t('knowledge.title') ?? 'Knowledge', count: projection.summary?.total_knowledge ?? 0, color: 'var(--tm-teal)' },
+                  { label: t('knowledge.alive') ?? 'Alive', count: projection.summary?.alive_knowledge ?? 0, color: 'var(--tm-success)' },
+                  { label: t('knowledge.dead') ?? 'Dead', count: projection.summary?.dead_knowledge ?? 0, color: 'var(--tm-danger)' },
                 ].map((s) => (
                   <Tile key={s.label} style={{ padding: '0.5rem 1rem', minWidth: '80px', textAlign: 'center' }}>
                     <div style={{ fontSize: '1.25rem', fontWeight: 700, color: s.color }}>{s.count}</div>
@@ -482,7 +484,7 @@ export default function Observability({ project }: { project: string }) {
                 {projection.summary?.avg_success_rate > 0 && (
                   <Tile style={{ padding: '0.5rem 1rem', textAlign: 'center' }}>
                     <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--tm-success)' }}>{(projection.summary.avg_success_rate * 100).toFixed(0)}%</div>
-                    <div style={{ fontSize: '0.65rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Success rate</div>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('knowledge.success_rate') ?? 'Success rate'}</div>
                   </Tile>
                 )}
               </div>
@@ -490,7 +492,7 @@ export default function Observability({ project }: { project: string }) {
               {/* Top tools */}
               {projection.summary?.most_used_tools?.length > 0 && (
                 <Tile>
-                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Most used tools</h5>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('knowledge.most_used_tools') ?? 'Most used tools'}</h5>
                   <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
                     {projection.summary.most_used_tools.map((t: string) => <Tag key={t} type="blue" size="sm">{t}</Tag>)}
                   </div>
@@ -500,7 +502,7 @@ export default function Observability({ project }: { project: string }) {
               {/* Tool patterns */}
               {projection.tool_patterns?.length > 0 && (
                 <Tile>
-                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Tool Patterns</h5>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('knowledge.tool_patterns') ?? 'Tool Patterns'}</h5>
                   <Stack gap={1}>
                     {projection.tool_patterns.map((p: any, i: number) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', padding: '0.3rem 0', borderBottom: '1px solid #1a2332' }}>
@@ -516,7 +518,7 @@ export default function Observability({ project }: { project: string }) {
               {/* Knowledge lifecycle */}
               {projection.knowledge_lifecycle?.length > 0 && (
                 <Tile>
-                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Knowledge Lifecycle</h5>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('knowledge.knowledge_lifecycle') ?? 'Knowledge Lifecycle'}</h5>
                   <Stack gap={1}>
                     {projection.knowledge_lifecycle.map((k: any, i: number) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8rem', padding: '0.4rem 0', borderBottom: '1px solid #1a2332' }}>
@@ -532,7 +534,7 @@ export default function Observability({ project }: { project: string }) {
               {/* Scopes */}
               {projection.scopes?.length > 0 && (
                 <Tile>
-                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Scopes</h5>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('knowledge.scopes') ?? 'Scopes'}</h5>
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                     {projection.scopes.map((s: any, i: number) => (
                       <div key={i} style={{ padding: '0.4rem 0.6rem', background: 'var(--tm-ink)', borderRadius: '4px', border: '1px solid var(--tm-border)', fontSize: '0.8rem' }}>
