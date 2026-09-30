@@ -14,6 +14,7 @@ import {
 import { Add, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent } from './workspaceApi'
 import Markdown from './Markdown'
+import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 function shortTime(iso: string) {
@@ -92,6 +93,7 @@ function formatStreamEvent(type: string, outer: any): string | null {
 }
 
 export default function Workspace({ project, defaultAgentId, defaultModel }: { project: string; defaultAgentId?: string; defaultModel?: string }) {
+  const t = useT()
   const [allAgents, setAllAgents] = useState<Agent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -149,12 +151,12 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const scrollToBottom = () => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }
   useEffect(scrollToBottom, [activeConv?.messages])
 
-  const agentName = (id: string) => allAgents.find((a) => a.id === id)?.name ?? 'Default'
+  const agentName = (id: string) => allAgents.find((a) => a.id === id)?.name ?? (t('chat.default_agent') ?? 'Default')
 
   const createConversation = () => {
     const conv: Conversation = {
       id: crypto.randomUUID(),
-      title: 'New conversation',
+      title: t('new.conversation') ?? 'New conversation',
       messages: [],
       agentId: newChatAgentId,
       taskId: '',
@@ -265,7 +267,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         if (d.answer) {
-          lines.push('Answer received')
+          lines.push(t('chat.answer_received') ?? 'Answer received')
           updateMsg(convId, runId, { streamLines: [...lines] })
           void fetchFinalAnswer(runId, convId)
         }
@@ -314,7 +316,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         if (line) lines.push(line)
         updateMsg(convId, runId, { content: `Failed: ${d.error ?? 'unknown'}`, status: 'failed', streamLines: [...lines] })
       } catch {
-        updateMsg(convId, runId, { content: 'Run failed', status: 'failed', streamLines: [...lines] })
+        updateMsg(convId, runId, { content: t('chat.run_failed') ?? 'Run failed', status: 'failed', streamLines: [...lines] })
       }
       es.close(); streamRef.current.delete(convId)
     })
@@ -352,7 +354,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       if (activeConv) {
         const es = streamRef.current.get(activeConv.id)
         if (es) { es.close(); streamRef.current.delete(activeConv.id) }
-        updateMsg(activeConv.id, runId, { status: 'cancelled', content: 'Run cancelled by user', streamLines: [] })
+        updateMsg(activeConv.id, runId, { status: 'cancelled', content: t('chat.run_cancelled') ?? 'Run cancelled by user', streamLines: [] })
       }
     } catch (f) { setError(message(f)) }
   }
@@ -403,7 +405,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       const result = await workspaceApi.startRun(taskId, { agent_id: activeConv.agentId || undefined })
       const runId = result.run_id
 
-      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: ['Run started · streaming…'] }
+      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: new Date(), status: 'running', runId, streamLines: [`${t('chat.run_started') ?? 'Run started'} · ${t('chat.streaming') ?? 'streaming…'}`] }
       const withAssistant = { ...updatedConv, messages: [...updatedConv.messages, assistantMsg] }
       setConversations((prev) => prev.map((c) => c.id === withAssistant.id ? withAssistant : c))
 
@@ -421,7 +423,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       {/* Left panel: conversations */}
       <div className="workspace-sidebar">
         <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--tm-border)' }}>
-          <Button renderIcon={Add} size="sm" onClick={() => { setNewChatAgentId(defaultAgentId ?? ''); setShowNewChat(true) }} style={{ width: '100%' }}>New chat</Button>
+          <Button renderIcon={Add} size="sm" onClick={() => { setNewChatAgentId(defaultAgentId ?? ''); setShowNewChat(true) }} style={{ width: '100%' }}>{t('new.chat') ?? 'New chat'}</Button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
           {conversations.length === 0 && (
@@ -444,7 +446,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: '0.875rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.title}</div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
-                    {conv.agentId ? agentName(conv.agentId) : (defaultAgentId ? agentName(defaultAgentId) : 'No agent')}{defaultModel ? ` · ${defaultModel}` : ''} · {conv.messages.length} msgs
+                    {conv.agentId ? agentName(conv.agentId) : (defaultAgentId ? agentName(defaultAgentId) : (t('chat.no_agent') ?? 'No agent'))}{defaultModel ? ` · ${defaultModel}` : ''} · {conv.messages.length} {t('chat.msgs') ?? 'msgs'}
                   </div>
                 </div>
                 <button
@@ -479,19 +481,14 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
               )}
               {activeConv.messages.map((msg, i) => (
                 <div key={i} style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                  <div style={{
-                    maxWidth: '80%', padding: '0.75rem 1rem', borderRadius: '8px',
-                    background: msg.role === 'user' ? 'var(--tm-teal)' : 'var(--cds-layer)',
-                    color: msg.role === 'user' ? 'var(--tm-cream)' : 'var(--tm-text)',
-                    border: msg.role === 'user' ? 'none' : '1px solid var(--tm-border)',
-                  }}>
+                  <div className={msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant'}>
                     {/* Reasoning/thinking block — collapsible */}
                     {msg.reasoning && (
-                      <details style={{ marginBottom: '0.5rem', borderRadius: '4px', border: '1px solid var(--tm-border)', background: 'var(--tm-ink)' }}>
-                        <summary style={{ padding: '0.4rem 0.6rem', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--tm-text-3)', fontWeight: 600, letterSpacing: '0.03em' }}>
-                          💭 Thinking
+                      <details className="chat-thinking">
+                        <summary>
+                          💭 {t('chat.thinking') ?? 'Thinking'}
                         </summary>
-                        <div style={{ padding: '0.5rem 0.6rem', fontSize: '0.78rem', color: '#9d7cd8', lineHeight: 1.5, whiteSpace: 'pre-wrap', borderTop: '1px solid var(--tm-border)' }}>
+                        <div className="chat-thinking-content">
                           {msg.reasoning}
                         </div>
                       </details>
@@ -506,33 +503,33 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     {msg.status === 'running' && msg.streamLines && msg.streamLines.length > 0 && (
                       <div style={{ marginTop: msg.content ? '0.5rem' : 0 }}>
                         {msg.streamLines.map((line, li) => (
-                          <div key={li} style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', fontFamily: '"SFMono-Regular", Consolas, monospace', lineHeight: 1.6 }}>
-                            <span style={{ color: '#4fd6be', marginRight: '0.4rem' }}>›</span>{line}
+                          <div key={li} className="chat-stream-line">
+                            <span className="chat-stream-prefix">›</span>{line}
                           </div>
                         ))}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.25rem' }}>
                           <span className="spinner" />
-                          <span style={{ fontSize: '0.7rem', color: 'var(--tm-teal)' }}>streaming…</span>
+                          <span className="chat-streaming">{t('chat.streaming') ?? 'streaming…'}</span>
                           {msg.runId && (
                             <button
                               onClick={() => cancelRun(msg.runId!)}
                               style={{ background: 'none', border: '1px solid var(--tm-danger)', borderRadius: '4px', color: 'var(--tm-danger)', cursor: 'pointer', fontSize: '0.65rem', padding: '0.1rem 0.4rem', marginLeft: 'auto' }}
-                              title="Cancel this run"
-                            >Stop</button>
+                              title={t('chat.cancel_run') ?? 'Cancel this run'}
+                            >{t('chat.stop') ?? 'Stop'}</button>
                           )}
                         </div>
                       </div>
                     )}
 
                     {msg.runId && msg.status && msg.status !== 'running' && (
-                      <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: msg.role === 'user' ? 'var(--tm-bg)' : 'var(--tm-text-3)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div className={msg.role === 'user' ? 'chat-status chat-status-user' : 'chat-status'}>
                         <Tag type={STATUS_COLORS[msg.status] || 'gray'} size="sm">{msg.status}</Tag>
                         {activeConv && (
                           <button
                             onClick={() => branchConversation(activeConv.id, i)}
                             style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0.5rem', marginLeft: 'auto' }}
-                            title="Branch conversation from this point"
-                          >Branch</button>
+                            title={t('chat.branch_title') ?? 'Branch conversation from this point'}
+                          >{t('chat.branch') ?? 'Branch'}</button>
                         )}
                       </div>
                     )}
@@ -553,7 +550,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     hideLabel
                     value={inputValue}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInputValue(e.target.value)}
-                    placeholder="Type a message… (Shift+Enter for newline)"
+                    placeholder={t('chat.placeholder') ?? 'Type a message… (Shift+Enter for newline)'}
                     rows={3}
                     onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage() }
@@ -568,33 +565,35 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         ) : (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tm-text-3)' }}>
             <div style={{ textAlign: 'center' }}>
-              <Heading>Temporality Agent</Heading>
-              <p style={{ marginTop: '0.5rem' }}>Select a conversation or start a new one.</p>
-              <Button renderIcon={Add} onClick={() => { setNewChatAgentId(defaultAgentId ?? ''); setShowNewChat(true) }} style={{ marginTop: '1rem' }}>New chat</Button>
+              <Heading>{t('chat.title') ?? 'Temporality Agent'}</Heading>
+              <p style={{ marginTop: '0.5rem' }}>{t('chat.select_conversation') ?? 'Select a conversation or start a new one.'}</p>
+              <Button renderIcon={Add} onClick={() => { setNewChatAgentId(defaultAgentId ?? ''); setShowNewChat(true) }} style={{ marginTop: '1rem' }}>{t('new.chat') ?? 'New chat'}</Button>
             </div>
           </div>
         )}
       </div>
 
-      {/* New chat modal — agent selector lives here, not in the input bar */}
-      <Modal
-        open={showNewChat}
-        onRequestClose={() => setShowNewChat(false)}
-        modalHeading="New conversation"
-        primaryButtonText="Create"
-        secondaryButtonText="Cancel"
-        onRequestSubmit={createConversation}
-      >
-        <Select
-          id="new-chat-agent"
-          labelText="Agent"
-          value={newChatAgentId}
-          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewChatAgentId(e.target.value)}
-        >
-          <SelectItem value="" text={defaultAgentId ? `Project default (${allAgents.find((a) => a.id === defaultAgentId)?.name ?? defaultAgentId})` : 'No default'} />
-          {allAgents.filter((a) => a.id !== defaultAgentId).map((a) => <SelectItem key={a.id} value={a.id} text={`${a.name}${a.model ? ` (${a.model})` : ''}`} />)}
-        </Select>
-      </Modal>
+      {/* New chat modal */}
+      {showNewChat && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '420px' }}>
+            <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{t('new.conversation') ?? 'New conversation'}</Heading>
+            <Select
+              id="new-chat-agent"
+              labelText={t('chat.agent') ?? 'Agent'}
+              value={newChatAgentId}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewChatAgentId(e.target.value)}
+            >
+              <SelectItem value="" text={defaultAgentId ? `${t('chat.project_default') ?? 'Project default'} (${allAgents.find((a) => a.id === defaultAgentId)?.name ?? defaultAgentId})` : t('chat.no_default') ?? 'No default'} />
+              {allAgents.filter((a) => a.id !== defaultAgentId).map((a) => <SelectItem key={a.id} value={a.id} text={`${a.name}${a.model ? ` (${a.model})` : ''}`} />)}
+            </Select>
+            <div className="form-actions">
+              <Button kind="secondary" onClick={() => setShowNewChat(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button onClick={createConversation}>{t('action.create') ?? 'Create'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading && <Loading withOverlay={false} />}
     </div>

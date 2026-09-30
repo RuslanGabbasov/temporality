@@ -20,6 +20,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.triggers': 'Triggers',
     'nav.providers': 'Providers',
     'nav.users': 'Users',
+    'nav.projects': 'Projects',
 
     // Common actions
     'action.create': 'Create',
@@ -36,7 +37,11 @@ const translations: Record<Locale, Record<string, string>> = {
     'action.regenerate': 'Regenerate',
     'action.add': 'Add',
     'action.logout': 'Logout',
-    'action.login': 'Login',
+    'action.login': 'Sign in',
+
+    'login.description': 'Enter your API token to continue.',
+    'login.token': 'API Token',
+    'login.placeholder': 'Enter your bearer token',
 
     // New entity buttons
     'new.project': 'New project',
@@ -57,13 +62,19 @@ const translations: Record<Locale, Record<string, string>> = {
     'chat.no_default': 'No default',
     'chat.project_default': 'Project default',
     'chat.agent': 'Agent',
-    'chat.select_agent': 'Select agent',
+    'chat.no_agent': 'No agent',
+    'chat.msgs': 'msgs',
     'chat.no_messages': 'Send a message to start the conversation.',
     'chat.title': 'Temporality Agent',
+    'chat.select_conversation': 'Select a conversation or start a new one.',
     'chat.run_started': 'Run started',
     'chat.run_cancelled': 'Run cancelled by user',
     'chat.run_failed': 'Run failed',
     'chat.no_answer': 'No answer received',
+    'chat.answer_received': 'Answer received',
+    'chat.cancel_run': 'Cancel this run',
+    'chat.branch_title': 'Branch conversation from this point',
+    'chat.placeholder': 'Type a message… (Shift+Enter for newline)',
 
     // Runs
     'runs.title': 'Runs',
@@ -129,6 +140,14 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Projects
     'projects.title': 'Projects',
+    'projects.id': 'Project ID',
+    'projects.name': 'Name',
+    'projects.description': 'Description',
+    'projects.description_placeholder': 'What this project is about',
+    'projects.default_agent': 'Default agent',
+    'projects.default_model': 'Default model (override)',
+    'projects.default_model_placeholder': 'Leave empty to use agent\'s model',
+    'projects.none_user_chooses': 'None (user chooses)',
     'projects.delete_confirm': 'Delete project?',
     'projects.delete_warning': 'Project "{{name}}" and all its runs, tasks, and knowledge will be permanently deleted.',
 
@@ -192,6 +211,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.triggers': 'Триггеры',
     'nav.providers': 'Провайдеры',
     'nav.users': 'Пользователи',
+    'nav.projects': 'Проекты',
 
     // Common actions
     'action.create': 'Создать',
@@ -209,6 +229,10 @@ const translations: Record<Locale, Record<string, string>> = {
     'action.add': 'Добавить',
     'action.logout': 'Выйти',
     'action.login': 'Войти',
+
+    'login.description': 'Введите API-токен для продолжения.',
+    'login.token': 'API-токен',
+    'login.placeholder': 'Введите ваш bearer-токен',
 
     // New entity buttons
     'new.project': 'Новый проект',
@@ -229,13 +253,20 @@ const translations: Record<Locale, Record<string, string>> = {
     'chat.no_default': 'Не задан',
     'chat.project_default': 'Агент проекта',
     'chat.agent': 'Агент',
+    'chat.no_agent': 'Нет агента',
+    'chat.msgs': 'сообщ.',
     'chat.select_agent': 'Выберите агента',
     'chat.no_messages': 'Отправьте сообщение, чтобы начать разговор.',
     'chat.title': 'Агент Temporality',
+    'chat.select_conversation': 'Выберите разговор или начните новый.',
     'chat.run_started': 'Запуск начат',
     'chat.run_cancelled': 'Запуск отменён пользователем',
     'chat.run_failed': 'Запуск завершился ошибкой',
     'chat.no_answer': 'Ответ не получен',
+    'chat.answer_received': 'Ответ получен',
+    'chat.cancel_run': 'Остановить запуск',
+    'chat.branch_title': 'Создать ветку разговора с этого момента',
+    'chat.placeholder': 'Введите сообщение… (Shift+Enter для новой строки)',
 
     // Runs
     'runs.title': 'Запуски',
@@ -301,6 +332,14 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Projects
     'projects.title': 'Проекты',
+    'projects.id': 'ID проекта',
+    'projects.name': 'Название',
+    'projects.description': 'Описание',
+    'projects.description_placeholder': 'О чём этот проект',
+    'projects.default_agent': 'Агент по умолчанию',
+    'projects.default_model': 'Модель по умолчанию (переопределение)',
+    'projects.default_model_placeholder': 'Оставьте пустым для использования модели агента',
+    'projects.none_user_chooses': 'Не задан (пользователь выбирает)',
     'projects.delete_confirm': 'Удалить проект?',
     'projects.delete_warning': 'Проект «{{name}}» и все его запуски, задачи и знания будут удалены безвозвратно.',
 

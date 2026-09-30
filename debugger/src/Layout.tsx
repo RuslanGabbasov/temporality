@@ -282,7 +282,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
                     </div>
                   ))}
                   <div
-                    onClick={() => { doLogout(); setShowUserMenu(false) }}
+                    onClick={() => { loggedIn ? doLogout() : setShowLogin(true); setShowUserMenu(false) }}
                     style={{ padding: '0.4rem 0.5rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-danger)', marginTop: '0.5rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.5rem' }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
@@ -377,21 +377,21 @@ export default function Layout({ children, activePage }: LayoutProps) {
       <Modal
         open={showLogin}
         onRequestClose={() => setShowLogin(false)}
-        modalHeading="Sign in"
-        primaryButtonText="Sign in"
-        secondaryButtonText="Cancel"
+        modalHeading={t('action.login') ?? 'Sign in'}
+        primaryButtonText={t('action.login') ?? 'Sign in'}
+        secondaryButtonText={t('action.cancel') ?? 'Cancel'}
         onRequestSubmit={doLogin}
       >
         <p style={{ marginBottom: '1rem', color: '#7e8a9c' }}>
-          Enter your API token to access the Temporality workspace.
+          {t('login.description') ?? 'Enter your API token to access the Temporality workspace.'}
         </p>
         <TextInput
           id="api-token"
-          labelText="API Token"
+          labelText={t('login.token') ?? 'API Token'}
           type="password"
           value={token}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setToken(e.target.value)}
-          placeholder="Enter your bearer token"
+          placeholder={t('login.placeholder') ?? 'Enter your bearer token'}
         />
       </Modal>
 
@@ -399,15 +399,15 @@ export default function Layout({ children, activePage }: LayoutProps) {
       <Modal
         open={!!editProject || showNewProject}
         onRequestClose={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectDesc('') }}
-        modalHeading={editProject ? 'Edit Project' : 'New Project'}
-        primaryButtonText={editProject ? 'Save' : 'Create'}
-        secondaryButtonText="Cancel"
+        modalHeading={editProject ? (t('action.edit') ?? 'Edit') + ' ' + (t('nav.projects') ?? 'project') : (t('new.project') ?? 'New project')}
+        primaryButtonText={editProject ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}
+        secondaryButtonText={t('action.cancel') ?? 'Cancel'}
         onRequestSubmit={saveProject}
       >
         {!editProject && (
           <TextInput
             id="project-id"
-            labelText="Project ID"
+            labelText={t('projects.id') ?? 'Project ID'}
             value={newProjectName}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewProjectName(e.target.value)}
             placeholder="my-project"
@@ -415,7 +415,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
         )}
         <TextInput
           id="project-name"
-          labelText="Name"
+          labelText={t('projects.name') ?? 'Name'}
           value={editProject?.name ?? newProjectName}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
             if (editProject) setEditProject({ ...editProject, name: e.target.value })
@@ -425,31 +425,31 @@ export default function Layout({ children, activePage }: LayoutProps) {
         />
         <TextInput
           id="project-desc"
-          labelText="Description"
+          labelText={t('projects.description') ?? 'Description'}
           value={editProject?.description ?? newProjectDesc}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
             if (editProject) setEditProject({ ...editProject, description: e.target.value })
             else setNewProjectDesc(e.target.value)
           }}
-          placeholder="What this project is about"
+          placeholder={t('projects.description_placeholder') ?? 'What this project is about'}
         />
         {editProject && (
           <>
             <Select
               id="project-agent"
-              labelText="Default agent"
+              labelText={t('projects.default_agent') ?? 'Default agent'}
               value={editProject.default_agent_id ?? ''}
               onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEditProject({ ...editProject, default_agent_id: e.target.value })}
             >
-              <SelectItem value="" text="None (user chooses)" />
+              <SelectItem value="" text={t('projects.none_user_chooses') ?? 'None (user chooses)'} />
               {allAgents.map((a) => <SelectItem key={a.id} value={a.id} text={a.name} />)}
             </Select>
             <TextInput
               id="project-model"
-              labelText="Default model (override)"
+              labelText={t('projects.default_model') ?? 'Default model (override)'}
               value={editProject.default_model ?? ''}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditProject({ ...editProject, default_model: e.target.value })}
-              placeholder="Leave empty to use agent's model"
+              placeholder={t('projects.default_model_placeholder') ?? 'Leave empty to use agent\'s model'}
             />
           </>
         )}
@@ -470,10 +470,33 @@ export default function Layout({ children, activePage }: LayoutProps) {
         </div>
       )}
 
-      {projects.length === 0 && <Onboarding onComplete={() => void loadProjects()} />}
-      <Content id="main-content">
-        {children({ project, setProject, projectDefaultAgent: projects.find((p) => p.id === project)?.default_agent_id, projectDefaultModel: projects.find((p) => p.id === project)?.default_model })}
-      </Content>
+      {!loggedIn ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 3rem)', padding: '1rem' }}>
+          <div style={{ maxWidth: '380px', width: '100%', textAlign: 'center' }}>
+            <img src="/temporality.svg" alt="Temporality" style={{ height: '48px', marginBottom: '1rem' }} />
+            <h1 style={{ fontSize: '1.25rem', fontWeight: 500, marginBottom: '0.5rem', color: 'var(--tm-text)' }}>Temporality</h1>
+            <p style={{ color: 'var(--tm-text-2)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>{t('login.description') ?? 'Enter your API token to continue.'}</p>
+            <TextInput
+              id="login-token"
+              labelText={t('login.token') ?? 'API Token'}
+              type="password"
+              value={token}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setToken(e.target.value)}
+              placeholder={t('login.placeholder') ?? 'Enter your bearer token'}
+              onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') doLogin() }}
+              style={{ marginBottom: '1rem' }}
+            />
+            <Button onClick={doLogin} style={{ width: '100%' }} disabled={!token.trim()}>{t('action.login') ?? 'Sign in'}</Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {projects.length === 0 && <Onboarding onComplete={() => void loadProjects()} />}
+          <Content id="main-content">
+            {children({ project, setProject, projectDefaultAgent: projects.find((p) => p.id === project)?.default_agent_id, projectDefaultModel: projects.find((p) => p.id === project)?.default_model })}
+          </Content>
+        </>
+      )}
     </Theme>
   )
 }

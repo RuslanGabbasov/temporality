@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button, TextInput, Heading } from '@carbon/react'
 import { Add } from '@carbon/icons-react'
 import { useT } from './i18n'
+import { authHeaders } from './api'
 
 interface OnboardingProps {
   onComplete: () => void
@@ -38,7 +39,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     try {
       const resp = await fetch('/kernel-api/v1/workspace/projects', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ name: projectName.trim() }),
       })
       if (!resp.ok) throw new Error(await resp.text())
@@ -53,7 +54,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     try {
       const resp = await fetch('/kernel-api/v1/workspace/providers', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           name: providerName.trim(),
           base_url: providerUrl.trim(),
@@ -74,7 +75,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     try {
       const resp = await fetch('/kernel-api/v1/workspace/agents', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           name: agentName.trim(),
           model: agentModel.trim(),
