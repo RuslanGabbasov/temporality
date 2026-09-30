@@ -385,6 +385,22 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		// Filter projects by user access
+		if principal, ok := controlplane.FromContext(r.Context()); ok {
+			if !principal.AllowsAllProjects() {
+				allowed := map[string]bool{}
+				for _, p := range principal.Projects {
+					allowed[p] = true
+				}
+				filtered := make([]workspace.Project, 0, len(projects))
+				for _, p := range projects {
+					if allowed[p.ID] {
+						filtered = append(filtered, p)
+					}
+				}
+				projects = filtered
+			}
+		}
 		writeJSON(w, 200, map[string]any{"projects": projects})
 	})
 	mux.HandleFunc("POST /v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) {

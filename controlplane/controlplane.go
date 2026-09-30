@@ -84,7 +84,7 @@ func (p Principal) AllowsProject(project string) bool {
 	return false
 }
 
-func (p Principal) allowsAllProjects() bool {
+func (p Principal) AllowsAllProjects() bool {
 	for _, allowed := range p.Projects {
 		if allowed == "*" {
 			return true

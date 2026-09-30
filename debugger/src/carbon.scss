@@ -900,6 +900,12 @@ body, #root, #main-content {
   flex-direction: column;
   gap: 0.75rem;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  color: var(--tm-text);
+}
+
+.modal-panel h2,
+.modal-panel .cds--heading {
+  color: var(--tm-text) !important;
 }
 
 .modal-panel .cds--label,
