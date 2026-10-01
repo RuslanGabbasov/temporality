@@ -1,6 +1,6 @@
 # Temporality Roadmap
 
-## Status: September 2026
+## Status: October 2026
 
 ### Done (P0)
 
@@ -22,41 +22,53 @@
 - [x] **Tool arguments in traces** — tool.started has arguments, tool.completed has output
 - [x] **Cost accounting v1** — model prices, per-call costs (per-run/project aggregation pending)
 
+### Done (Platform wave, Sept–Oct 2026)
+
+- [x] **Triggers** — schedule (cron), webhook (HTTP endpoint), event listeners; agent tools list/create/update/delete triggers
+- [x] **Approvals in chat** — approval step for consequential tools, approval badge on Runs tab
+- [x] **Run cancel** — POST /runs/{id}/cancel + Stop button in chat
+- [x] **Thinking display** — reasoning stream shown compactly in chat widget
+- [x] **i18n** — full EN/RU localization, auto-detect browser language
+- [x] **Light/dark themes** — OS auto-detect via prefers-color-scheme, persisted choice
+- [x] **Onboarding wizard** — welcome → project → provider → agent → done, shown on empty workspace
+- [x] **Project-centric permissions** — allowed_users on projects, per-user project visibility, admin bypass
+- [x] **Auth gate** — clean token-entry screen for logged-out users
+- [x] **Design system** — forest/teal/amber identity per DESIGN.md, favicons, consistent dialogs
+
 ---
 
-## P0/P1 — Trajectory-derived experience
+## P0 — Living Skills MVP
 
-- [x] **Trajectory extraction primitive**
-  - Extract repeating steps, tool-call sequences, decisions and outcomes from completed runs.
-  - No separate storage: result is built from event stream.
-  - Separate deterministic features from LLM-derived conclusions.
-  - Acceptance: for a selected run, get a set of repeating structures with provenance to original events.
+Source spec: `docs/living-skills.md` (§43 MVP).
 
-- [x] **Experience pattern projection**
-  - Aggregate similar memories/events into experience patterns.
-  - Account for relevance, recency, validation, outcome, recurrence, contradiction, supersession.
-  - Store provenance and links to original events.
-  - Acceptance: hundreds of candidates collapse into a compact set of patterns without losing ability to expand to original evidence.
+- [x] **Skill package** — `SKILL.md` + `skill.yaml` manifest; legacy loading (manifest inferred from SKILL.md, fields marked inferred)
+- [x] **Skill registry** — project-scoped storage, immutable versions, CRUD API
+- [x] **Contract validation** — manifest schema, capabilities, tools, runtime requirements checked before use
+- [x] **Prompt injection** — compact skill digests in agent system prompt with token budget
+- [x] **Agent tools** — `skill_search`, `skill_inspect`, `skill_validate`, `skill_history`, `skill_executions`, `skill_memory`
+- [x] **Execution linkage** — runs record skill versions used; executions listed per skill
+- [x] **Memory linkage** — `remember` accepts `skill_id`/`capability`; per-skill memory view
+- [x] **Skills UI** — tab with overview/contract/executions/memory/versions; skill selection on agent form
+- [ ] **CLI** — `temporality skill list/inspect/validate/history/executions/memory`
 
-- [x] **Experience Priming experiment**
-  - Add optional pre-run stage: candidates → patterns → ranking → 3–7 cues.
-  - Limit priming with strict token budget.
-  - Don't put raw hundreds of memories in prompt.
-  - Allow agent to JIT-retrieve details through existing tools/memory.
-  - Acceptance: compare baseline / conventional RAG / priming / priming+JIT by task success, trajectory length, token usage, unnecessary retrieval/tool calls, wrong-memory activation, contradiction rate and latency.
-  - Fix regressions: priming is not mandatory until value is confirmed.
+Not in MVP: agent-driven skill mutation, evaluation engine, marketplace, policy engine (Phase 2).
 
-- [x] **Trajectory comparison / fork**
-  - Allow running controlled variants from one source task/configuration.
-  - Compare trajectories and derived experience between variants.
-  - Minimum set: no priming vs priming.
-  - Acceptance: differences visible at step level, tool calls, cost and outcome, not just final answer.
+### Phase 2 (after MVP)
 
-- [x] **Trajectory-to-artifact extraction**
-  - Build general interface for extracting reusable artifacts from trajectory.
-  - Minimum two types: experience pattern and repeatable workflow fragment.
-  - Each artifact must have provenance to source trajectory/events.
-  - Don't implement automatic agent-loop-to-workflow replacement yet.
+- [ ] Evolution proposals — agent/human-driven, evidence-backed, approval workflow
+- [ ] Skill diff / rollback / snapshots
+- [ ] Evaluations — suites referenced by manifest
+- [ ] Contextual memory retrieval per skill/capability
+- [ ] Evolution analytics
+
+---
+
+## P0 — MCP server registry
+
+- [ ] **MCP servers tab** — configure servers per transport: stdio, SSE, Streamable HTTP
+- [ ] **Agent MCP assignment** — select configured servers on agent form
+- [ ] **Agent tools panel** — per-agent tool availability toggles, including MCP-provided tools
+- [ ] **Connection test** — validate server config before save
 
 ---
 
@@ -75,7 +87,7 @@
 ## P1 — Platform usability
 
 - [x] **State-at-T as product feature** — not just an API endpoint. "What did the system know when this decision was made?" needs a proper UI accessible from timeline/trace.
-- [ ] **Streaming improvements** — show model tokens as they arrive (not just turn-level)
+- [ ] **Streaming improvements** — show model tokens as they arrive (not just turn-level). LLM client supports it (`StreamComplete` + `TokenCallback`); workflow/journal/SSE wiring missing.
 - [ ] **Conversation branching** — fork a conversation from a specific point
 - [x] **Agent templates** — pre-configured agents for common tasks (coder, reviewer, researcher)
 - [x] **Project settings** — per-project defaults for agent, model, sandbox
@@ -85,60 +97,66 @@
 
 ## P1 — Sandbox security matrix
 
-Minimal automated security acceptance (not a sandbox platform):
+Automated security acceptance (not a sandbox platform).
 
-- [ ] `../` workspace escape — blocked
-- [ ] Network egress — blocked per profile
+Existing coverage in `kernel/sandbox/docker_test.go`:
+
+- [x] `../` workspace escape — blocked (symlink escape test)
+- [x] Docker socket / privileged — inaccessible (`--cap-drop=ALL`, no `--privileged`, image digest pinned)
+- [x] Memory/CPU/PIDs — limited (args enforced in test)
+- [x] Output — bounded (limited buffer truncation test)
+- [x] Read-only workspace for reviewer/qa roles — enforced via args
+
+Missing:
+
+- [ ] Network egress — blocked per profile (live test against real Docker, not just args)
 - [ ] Credentials — inaccessible
-- [ ] Docker socket — inaccessible
-- [ ] Memory/CPU/PIDs — limited
 - [ ] Timeout — process guaranteed to terminate
-- [ ] Output — bounded
-- [ ] `/scratch` — isolated
-- [ ] Reviewer/QA — read-only restrictions enforced
-
-Result: automated tests, expected-vs-actual matrix, explicitly documented accepted risks.
+- [ ] `/scratch` — isolated between agents
+- [ ] Expected-vs-actual matrix doc with explicitly accepted risks
 
 ---
 
 ## P1 — Before inviting first users (Minimum Usable Experience)
 
 ### Setup
-- [ ] project
-- [ ] agent
-- [ ] system prompt
-- [ ] model
-- [ ] skill
-- [ ] MCP
-- [ ] sandbox
+- [x] project
+- [x] agent
+- [x] system prompt
+- [x] model
+- [x] skill — via Living Skills MVP (skills tab, agent skill selection)
+- [ ] MCP — tracked in MCP server registry above
+- [x] sandbox
 
 ### Execution
-- [ ] task
-- [ ] run
-- [ ] streaming/status
-- [ ] tool execution
-- [ ] approval
-- [ ] result
+- [x] task
+- [x] run
+- [x] streaming/status
+- [x] tool execution
+- [x] approval
+- [x] result
+- [x] run cancel
 
 ### Observation
-- [ ] run timeline
-- [ ] tool calls with arguments/output
-- [ ] model calls
-- [ ] MCP provenance
-- [ ] operations
-- [ ] uncertain operations
+- [x] run timeline
+- [x] tool calls with arguments/output
+- [x] model calls
+- [x] MCP provenance
+- [x] operations
+- [x] uncertain operations
 
 ### Experience
-- [ ] knowledge
-- [ ] activation chain
-- [ ] state-at-T
-- [ ] replay
-- [ ] diff
+- [x] knowledge
+- [x] activation chain
+- [x] state-at-T
+- [x] replay
+- [x] diff
 
 ### Iteration
-- [ ] change prompt/skill
-- [ ] re-run
-- [ ] compare runs
+- [x] change prompt
+- [x] re-run
+- [x] compare runs
+- [x] change skill — skill versions are immutable; edit a skill and bump the version
 
 If this exists, we can invite a small team and stop relying only on fixtures.
 
@@ -215,6 +233,8 @@ The immediate goal is NOT to close all Phase 2 remnants.
 The immediate goal:
 
 > **Collect a minimum end-to-end working loop where a real person runs a real agent and Temporality turns the resulting experience into an investigable temporal picture.**
+
+Living Skills extend this loop: the skill a person installs becomes an observable, versioned capability whose usage produces memory and evidence.
 
 After that, every experiment must be simultaneously:
 - acceptance corpus
