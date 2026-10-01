@@ -201,6 +201,10 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleUpdateTrigger(ctx, request)
 	case "delete_trigger":
 		return a.handleDeleteTrigger(ctx, request)
+	case "skill_search":
+		return a.handleSkillSearch(ctx, request)
+	case "skill_inspect", "skill_validate", "skill_history", "skill_executions", "skill_memory":
+		return a.handleSkillAction(ctx, request)
 	default:
 		if a.MCP != nil && a.MCP.HasTool(request.Name) {
 			if faultAfterEffect(request.RunID, request.Name, request.OperationID) {
@@ -333,6 +337,99 @@ func (a *Activities) kernelGET(ctx context.Context, url string) (string, error) 
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return string(b), nil
+}
+
+// Skill tool handlers — read-only navigation over the skill registry. Skills
+// change only through proposals and approval, never from a run
+// (docs/living-skills.md §26).
+func (a *Activities) handleSkillSearch(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	project := request.Project
+	if project == "" {
+		return ToolResult{Content: "error: project not set"}, nil
+	}
+	url := fmt.Sprintf("%s/v1/workspace/skills?project=%s", a.TemporalityURL, urlQueryEscape(project))
+	body, err := a.kernelGET(ctx, url)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	query, _ := request.Arguments["query"].(string)
+	if query == "" {
+		return ToolResult{Content: compactJSON(body, 4000)}, nil
+	}
+	var page struct {
+		Skills []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Version  string `json:"version"`
+			Manifest struct {
+				Capabilities []string `json:"capabilities"`
+				Tools        []string `json:"tools"`
+			} `json:"manifest"`
+		} `json:"skills"`
+	}
+	if err := json.Unmarshal([]byte(body), &page); err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	needle := strings.ToLower(query)
+	var matches []map[string]any
+	for _, s := range page.Skills {
+		haystack := strings.ToLower(s.ID + " " + s.Name + " " + strings.Join(s.Manifest.Capabilities, " ") + " " + strings.Join(s.Manifest.Tools, " "))
+		if strings.Contains(haystack, needle) {
+			matches = append(matches, map[string]any{"id": s.ID, "name": s.Name, "version": s.Version, "capabilities": s.Manifest.Capabilities, "tools": s.Manifest.Tools})
+		}
+	}
+	encoded, _ := json.Marshal(map[string]any{"skills": matches, "count": len(matches)})
+	return ToolResult{Content: string(encoded)}, nil
+}
+
+func (a *Activities) handleSkillAction(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	skillID, _ := request.Arguments["skill_id"].(string)
+	if skillID == "" {
+		return ToolResult{Content: "error: skill_id is required"}, nil
+	}
+	var url string
+	switch request.Name {
+	case "skill_inspect":
+		url = fmt.Sprintf("%s/v1/workspace/skills/%s", a.TemporalityURL, skillID)
+	case "skill_validate":
+		return a.handleSkillValidate(ctx, skillID)
+	case "skill_history":
+		url = fmt.Sprintf("%s/v1/workspace/skills/%s/versions", a.TemporalityURL, skillID)
+	case "skill_executions":
+		url = fmt.Sprintf("%s/v1/workspace/skills/%s/executions", a.TemporalityURL, skillID)
+	case "skill_memory":
+		url = fmt.Sprintf("%s/v1/workspace/skills/%s/memory", a.TemporalityURL, skillID)
+	default:
+		return ToolResult{Content: "error: unknown skill tool " + request.Name}, nil
+	}
+	body, err := a.kernelGET(ctx, url)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	return ToolResult{Content: compactJSON(body, 6000)}, nil
+}
+
+// handleSkillValidate fetches the stored skill and re-checks its contract.
+func (a *Activities) handleSkillValidate(ctx context.Context, skillID string) (ToolResult, error) {
+	body, err := a.kernelGET(ctx, fmt.Sprintf("%s/v1/workspace/skills/%s", a.TemporalityURL, skillID))
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	var skill struct {
+		Markdown     string          `json:"markdown"`
+		ManifestYAML json.RawMessage `json:"manifest"`
+	}
+	if err := json.Unmarshal([]byte(body), &skill); err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	response, err := a.kernelPOST(ctx, fmt.Sprintf("%s/v1/workspace/skills/%s/validate", a.TemporalityURL, skillID), map[string]any{
+		"markdown":      skill.Markdown,
+		"manifest_yaml": string(skill.ManifestYAML),
+	})
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	return ToolResult{Content: compactJSON(response, 4000)}, nil
 }
 
 func (a *Activities) kernelPOST(ctx context.Context, url string, body any) (string, error) {

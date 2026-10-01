@@ -40,6 +40,7 @@ type RunInput struct {
 	AutoApproveTools       []string      `json:"auto_approve_tools,omitempty"`
 	Role                   string        `json:"role,omitempty"`
 	SystemPrompt           string        `json:"system_prompt,omitempty"`
+	Skills                 []SkillRef    `json:"skills,omitempty"`
 	ParentRunID            string        `json:"parent_run_id,omitempty"`
 	ParentFrameID          string        `json:"parent_frame_id,omitempty"`
 	ParentEventID          string        `json:"parent_event_id,omitempty"`
@@ -48,6 +49,16 @@ type RunInput struct {
 	WorkspacePath          string        `json:"workspace_path,omitempty"`
 	MCPServer              string        `json:"mcp_server,omitempty"`
 	NetworkAccess          bool          `json:"network_access,omitempty"`
+}
+
+// SkillRef is a skill resolved for a run: identity plus a budgeted digest for
+// prompt injection. Execution→version linkage is recorded by the kernel before
+// the workflow starts (docs/living-skills.md §13).
+type SkillRef struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	Name    string `json:"name"`
+	Digest  string `json:"digest,omitempty"`
 }
 
 type RunResult struct {
@@ -140,6 +151,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	systemPrompt := systemPromptForRole(input.Role)
 	if input.SystemPrompt != "" {
 		systemPrompt = input.SystemPrompt
+	}
+	if skillSection := skillsPromptSection(input.Skills); skillSection != "" {
+		systemPrompt += "\n\n" + skillSection
 	}
 	messages := []llm.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: input.Prompt}}
 	for _, hint := range priorHints {
@@ -665,6 +679,23 @@ func systemPromptForRole(role string) string {
 	return base + " Your assigned team role is " + role + "; stay within that responsibility and ground handoffs in observed evidence."
 }
 
+// skillsPromptSection renders the agent's skills as a compact canonical
+// section of the system prompt. Skills describe HOW the work should be done;
+// per-run experience arrives separately as knowledge hints, never here
+// (docs/living-skills.md §2, §15).
+func skillsPromptSection(refs []SkillRef) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Skills\nCanonical capabilities assigned to you. When a task matches a skill, follow its procedure; use skill_inspect for the full text. Skill knowledge is contextual: record discoveries with remember (include skill_id and capability).")
+	for _, ref := range refs {
+		b.WriteString("\n\n")
+		b.WriteString(ref.Digest)
+	}
+	return b.String()
+}
+
 func awaitApproval(ctx workflow.Context, operationID string, timeout time.Duration) (bool, Approval, bool, error) {
 	channel := workflow.GetSignalChannel(ctx, ApprovalSignal)
 	var approval Approval
@@ -729,6 +760,15 @@ func emit(ctx workflow.Context, state *eventState, kind string, data map[string]
 
 func emitKnowledge(ctx workflow.Context, state *eventState, id, proposition, operationID string, args map[string]any) error {
 	data := map[string]any{"knowledge_id": id, "proposition": proposition, "kind": "claim", "operation_id": operationID, "arguments_hash": operationArgumentsHash(args)}
+	// Skill linkage: knowledge born from applying a skill points at the skill
+	// (and optionally the capability) so memory stays navigable per skill
+	// without ever modifying the skill itself (docs/living-skills.md §14-16).
+	if skillID, _ := args["skill_id"].(string); skillID != "" {
+		data["skill_id"] = skillID
+	}
+	if capability, _ := args["capability"].(string); capability != "" {
+		data["capability"] = capability
+	}
 	var evidence []observation.Evidence
 	if raw, ok := args["evidence"].([]any); ok {
 		for _, value := range raw {
@@ -794,11 +834,17 @@ func emitKnowledgeEvent(ctx workflow.Context, state *eventState, eventType strin
 func KernelTools() []llm.ToolDef {
 	return []llm.ToolDef{
 		{Name: "echo", Description: "Return a short text value for debugging the harness tool path", Parameters: map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}, "required": []string{"text"}}},
-		{Name: "remember", Description: "Record a high-confidence durable conclusion with optional evidence refs. Verification and build outcomes are recorded automatically; use this only for conclusions you are confident in and can ground in evidence", Parameters: map[string]any{"type": "object", "properties": map[string]any{"proposition": map[string]any{"type": "string"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "required": []string{"proposition"}}},
+		{Name: "remember", Description: "Record a high-confidence durable conclusion with optional evidence refs. Verification and build outcomes are recorded automatically; use this only for conclusions you are confident in and can ground in evidence. If the conclusion came from applying a skill, include skill_id and capability", Parameters: map[string]any{"type": "object", "properties": map[string]any{"proposition": map[string]any{"type": "string"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "skill_id": map[string]any{"type": "string", "description": "Skill this knowledge came from, e.g. deploy-service"}, "capability": map[string]any{"type": "string", "description": "Specific capability of the skill, e.g. verify"}}, "required": []string{"proposition"}}},
 		{Name: "request_approval", Description: "Pause this run and request a human decision before a consequential action", Parameters: map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"}}, "required": []string{"action"}}},
 		{Name: "list_triggers", Description: "List all configured triggers (schedules, webhooks, event listeners) for this project", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
 		{Name: "create_trigger", Description: "Create a new trigger to automatically launch agent runs. Types: schedule (cron-based), webhook (HTTP endpoint), event (reacts to journal events).", Parameters: map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}, "type": map[string]any{"type": "string", "enum": []string{"schedule", "webhook", "event"}}, "cron": map[string]any{"type": "string", "description": "Cron expression for schedule triggers, e.g. '0 9 * * 1-5'"}, "prompt": map[string]any{"type": "string", "description": "The prompt sent to the agent when the trigger fires"}, "path": map[string]any{"type": "string", "description": "URL path for webhook triggers"}, "event_type": map[string]any{"type": "string", "description": "Event type to react to for event triggers, e.g. 'tool.failed'"}, "agent_id": map[string]any{"type": "string", "description": "Agent to use (optional, uses default if empty)"}}, "required": []string{"name", "type", "prompt"}}},
 		{Name: "update_trigger", Description: "Update an existing trigger's configuration (enable/disable, change cron, update prompt, etc.)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}, "enabled": map[string]any{"type": "boolean"}, "cron": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},
 		{Name: "delete_trigger", Description: "Delete a trigger by ID", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},
+		{Name: "skill_search", Description: "List skills available in this project with name, version, capabilities and tools", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "Optional substring to filter by name, capability or tool"}}}},
+		{Name: "skill_inspect", Description: "Show a skill's full SKILL.md and manifest contract (capabilities, tools, runtime, preconditions, postconditions, evidence)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
+		{Name: "skill_validate", Description: "Validate a skill's manifest and return issues", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
+		{Name: "skill_history", Description: "List a skill's versions", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
+		{Name: "skill_executions", Description: "List recent executions of a skill (runs with this skill attached)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
+		{Name: "skill_memory", Description: "List knowledge recorded from a skill's executions (memory stays a separate temporal layer; it never modifies the skill)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 	}
 }

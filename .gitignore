@@ -10,3 +10,6 @@ __pycache__/
 .sandbox/
 .delta/
 .mimocode/
+
+# stray local go build output
+/agent-kernel

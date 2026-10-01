@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -24,6 +26,7 @@ import (
 	"github.com/temporality-project/temporality/kernel/outbox"
 	"github.com/temporality-project/temporality/kernel/priming"
 	"github.com/temporality-project/temporality/kernel/quota"
+	"github.com/temporality-project/temporality/skills"
 	"github.com/temporality-project/temporality/workspace"
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/activity"
@@ -107,6 +110,10 @@ func main() {
 	}
 	if err = ws.Migrate(ctx, "migrations/000027_project_allowed_users.up.sql"); err != nil {
 		log.Error("migrate workspace v27", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000028_skills.up.sql"); err != nil {
+		log.Error("migrate workspace v28", "error", err)
 		os.Exit(1)
 	}
 	activities, err := agent.NewActivities(events)
@@ -732,6 +739,7 @@ func main() {
 			if agentCfg.NetworkAccess != nil && *agentCfg.NetworkAccess {
 				input.NetworkAccess = true
 			}
+			resolveAgentSkills(r.Context(), ws, agentCfg, &input)
 		}
 		if req.Model != "" {
 			input.Model = req.Model
@@ -1350,6 +1358,179 @@ func main() {
 		writeJSON(w, 200, map[string]bool{"deleted": true})
 	})
 
+	// Skills (Living Skills registry — docs/living-skills.md)
+	mux.HandleFunc("GET /v1/workspace/skills", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		if project := r.URL.Query().Get("project"); project != "" {
+			list, err := ws.ListSkills(r.Context(), project)
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			writeJSON(w, 200, map[string]any{"skills": list, "count": len(list)})
+			return
+		}
+		list, err := ws.ListAllSkills(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"skills": list, "count": len(list)})
+	})
+	mux.HandleFunc("POST /v1/workspace/skills", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req skillRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		skill, err := req.toSkill("")
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		if skill.ID == "" {
+			writeError(w, 422, errors.New("id is required"))
+			return
+		}
+		if skill.ProjectID == "" {
+			writeError(w, 422, errors.New("project_id is required"))
+			return
+		}
+		if _, err := ws.GetProject(r.Context(), skill.ProjectID); err != nil {
+			writeError(w, 422, errors.New("project not found"))
+			return
+		}
+		if err := ws.CreateSkill(r.Context(), &skill); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		writeJSON(w, 201, skill)
+	})
+	mux.HandleFunc("GET /v1/workspace/skills/{skillID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		skill, err := ws.GetSkill(r.Context(), r.PathValue("skillID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, skill)
+	})
+	mux.HandleFunc("PUT /v1/workspace/skills/{skillID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req skillRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		skill, err := req.toSkill(r.PathValue("skillID"))
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		current, err := ws.GetSkill(r.Context(), skill.ID)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if skill.ProjectID == "" {
+			skill.ProjectID = current.ProjectID
+		}
+		if err := ws.UpdateSkill(r.Context(), &skill); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, skill)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/skills/{skillID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		if err := ws.DeleteSkill(r.Context(), r.PathValue("skillID")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+	mux.HandleFunc("GET /v1/workspace/skills/{skillID}/versions", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		versions, err := ws.ListSkillVersions(r.Context(), r.PathValue("skillID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"versions": versions})
+	})
+	mux.HandleFunc("POST /v1/workspace/skills/{skillID}/validate", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		var req skillRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		_, issues := req.parse()
+		writeJSON(w, 200, map[string]any{"valid": len(issues) == 0, "issues": issues})
+	})
+	mux.HandleFunc("GET /v1/workspace/skills/{skillID}/executions", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		limit := 0
+		if parsed, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil {
+			limit = parsed
+		}
+		executions, err := ws.ListSkillExecutions(r.Context(), r.PathValue("skillID"), limit)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"executions": executions})
+	})
+	mux.HandleFunc("GET /v1/workspace/skills/{skillID}/memory", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		skill, err := ws.GetSkill(r.Context(), r.PathValue("skillID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		memory, err := skillMemory(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), skill.ProjectID, skill.ID)
+		if err != nil {
+			writeError(w, 502, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"memory": memory})
+	})
+
 	// Webhook triggers: POST /v1/workspace/webhook/{projectID}/{path}
 	// Matches webhook triggers by projectID and config.path.
 	mux.HandleFunc("POST /v1/workspace/webhook/{projectID}/{path...}", func(w http.ResponseWriter, r *http.Request) {
@@ -1405,6 +1586,7 @@ func main() {
 				if a.NetworkAccess != nil && *a.NetworkAccess {
 					input.NetworkAccess = true
 				}
+				resolveAgentSkills(r.Context(), ws, &a, &input)
 			}
 		}
 		if err := activities.PrepareRun(&input); err != nil {
@@ -1469,6 +1651,7 @@ func main() {
 						if a.SystemPrompt != "" {
 							input.SystemPrompt = a.SystemPrompt
 						}
+						resolveAgentSkills(context.Background(), ws, &a, &input)
 					}
 				}
 				if err := activities.PrepareRun(&input); err != nil {
@@ -1638,6 +1821,207 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
+}
+
+// resolveAgentSkills loads the agent's skills, builds compact digests for the
+// system prompt and records the execution → skill version linkage (immutable:
+// later skill edits never re-bind this run, docs/living-skills.md §39).
+func resolveAgentSkills(ctx context.Context, ws *workspace.Store, a *workspace.Agent, input *agent.RunInput) {
+	if a == nil || len(a.Skills) == 0 {
+		return
+	}
+	var all []workspace.Skill
+	if a.ProjectID != "" {
+		all, _ = ws.ListSkills(ctx, a.ProjectID)
+	}
+	if len(all) == 0 {
+		all, _ = ws.ListAllSkills(ctx)
+	}
+	byID := make(map[string]workspace.Skill, len(all))
+	for _, s := range all {
+		byID[s.ID] = s
+	}
+	for _, id := range a.Skills {
+		s, ok := byID[id]
+		if !ok {
+			continue
+		}
+		manifest, err := skills.ParseManifest(string(s.Manifest))
+		if err != nil {
+			// Stored manifests are parsed-JSON; YAML accepts JSON, so this only
+			// fails on corrupt rows — degrade to digest without contract fields.
+			manifest = skills.Manifest{Name: s.Name, Version: s.Version}
+		}
+		if manifest.Name == "" {
+			manifest.Name = s.Name
+		}
+		if manifest.Version == "" {
+			manifest.Version = s.Version
+		}
+		input.Skills = append(input.Skills, agent.SkillRef{
+			ID: s.ID, Version: s.Version, Name: s.Name,
+			Digest: skills.Digest(s.Name, s.Version, s.Markdown, manifest, 1500),
+		})
+		_ = ws.RecordSkillExecution(ctx, &workspace.SkillExecution{
+			SkillID: s.ID, SkillVersion: s.Version, ProjectID: input.Project,
+			RunID: input.RunID, AgentID: a.ID, StartedAt: time.Now().UTC(),
+		})
+	}
+}
+
+// skillRequest is the API shape for skill create/update: manifest arrives as
+// YAML text (skill.yaml) and is stored parsed.
+type skillRequest struct {
+	ID           string `json:"id"`
+	ProjectID    string `json:"project_id"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Version      string `json:"version"`
+	Markdown     string `json:"markdown"`
+	ManifestYAML string `json:"manifest_yaml"`
+}
+
+// parse decodes the manifest, falling back to legacy inference from SKILL.md
+// when no skill.yaml is provided (docs/living-skills.md §40).
+func (req skillRequest) parse() (skills.Manifest, []skills.Issue) {
+	manifest, err := skills.ParseManifest(req.ManifestYAML)
+	if err != nil {
+		return manifest, []skills.Issue{{Field: "manifest_yaml", Message: err.Error()}}
+	}
+	if manifest.ID == "" && manifest.Name == "" {
+		manifest = skills.InferFromMarkdown(req.Markdown)
+	}
+	if manifest.ID == "" {
+		manifest.ID = slugify(req.Name)
+	}
+	if manifest.Name == "" {
+		manifest.Name = req.Name
+	}
+	if manifest.Version == "" {
+		manifest.Version = "1.0.0"
+	}
+	return manifest, manifest.Validate()
+}
+
+func (req skillRequest) toSkill(skillID string) (workspace.Skill, error) {
+	manifest, issues := req.parse()
+	if len(issues) > 0 {
+		messages := make([]string, 0, len(issues))
+		for _, issue := range issues {
+			messages = append(messages, issue.Field+": "+issue.Message)
+		}
+		return workspace.Skill{}, errors.New("invalid skill manifest: " + strings.Join(messages, "; "))
+	}
+	id := req.ID
+	if skillID != "" {
+		id = skillID
+	}
+	name := req.Name
+	if name == "" {
+		name = manifest.Name
+	}
+	version := req.Version
+	if version == "" {
+		version = manifest.Version
+	}
+	return workspace.Skill{
+		ID: id, ProjectID: req.ProjectID, Name: name, Description: req.Description,
+		Version: version, Markdown: req.Markdown, Manifest: skills.MarshalJSONForStorage(manifest),
+	}, nil
+}
+
+// skillMemory returns knowledge linked to a skill: knowledge.proposed events
+// carrying data.skill_id, enriched with current state from the knowledge
+// projection.
+func skillMemory(ctx context.Context, observationURL, apiToken, project, skillID string) ([]map[string]any, error) {
+	query := func(path string) ([]byte, error) {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, observationURL+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		if apiToken != "" {
+			request.Header.Set("Authorization", "Bearer "+apiToken)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			return nil, err
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+		if err != nil {
+			return nil, err
+		}
+		if response.StatusCode != 200 {
+			return nil, fmt.Errorf("journal %s: %s", path, strings.TrimSpace(string(body)))
+		}
+		return body, nil
+	}
+	// Current states from the knowledge projection.
+	states := map[string]string{}
+	if body, err := query("/v1/observations/knowledge?project=" + url.QueryEscape(project)); err == nil {
+		var projection struct {
+			Knowledge []struct {
+				ID    string `json:"id"`
+				State string `json:"state"`
+			} `json:"knowledge"`
+		}
+		if json.Unmarshal(body, &projection) == nil {
+			for _, item := range projection.Knowledge {
+				states[item.ID] = item.State
+			}
+		}
+	}
+	var result []map[string]any
+	cursor := ""
+	for {
+		path := "/v1/observations/events?project=" + url.QueryEscape(project) + "&type=knowledge.proposed&limit=500"
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		body, err := query(path)
+		if err != nil {
+			return nil, err
+		}
+		var page struct {
+			Events []struct {
+				EventID    string `json:"event_id"`
+				OccurredAt string `json:"occurred_at"`
+				Context    struct {
+					Run string `json:"run"`
+				} `json:"context"`
+				Data map[string]any `json:"data"`
+			} `json:"events"`
+			NextCursor string `json:"next_cursor"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, err
+		}
+		for _, event := range page.Events {
+			if id, _ := event.Data["skill_id"].(string); id != skillID {
+				continue
+			}
+			knowledgeID, _ := event.Data["knowledge_id"].(string)
+			item := map[string]any{
+				"knowledge_id": knowledgeID,
+				"proposition":  event.Data["proposition"],
+				"capability":   event.Data["capability"],
+				"run_id":       event.Context.Run,
+				"event_id":     event.EventID,
+				"occurred_at":  event.OccurredAt,
+			}
+			if state, ok := states[knowledgeID]; ok {
+				item["state"] = state
+			} else {
+				item["state"] = "proposed"
+			}
+			result = append(result, item)
+		}
+		if page.NextCursor == "" || len(result) >= 500 {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	return result, nil
 }
 
 func env(name, fallback string) string {

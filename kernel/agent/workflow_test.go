@@ -63,8 +63,19 @@ func TestAgentRunRecordsApprovalAndKnowledgeTrajectory(t *testing.T) {
 	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
 	modelCalls := 0
 	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
-		if len(request.Messages) == 0 || len(request.Tools) != 3 {
+		if len(request.Messages) == 0 {
 			t.Fatalf("unexpected model request: %#v", request)
+		}
+		// Kernel tools grow over time (triggers, skills); assert the ones this
+		// trajectory exercises instead of an exact count.
+		names := make(map[string]bool, len(request.Tools))
+		for _, tool := range request.Tools {
+			names[tool.Name] = true
+		}
+		for _, required := range []string{"remember", "request_approval", "skill_inspect"} {
+			if !names[required] {
+				t.Fatalf("model request missing kernel tool %q: %#v", required, request.Tools)
+			}
 		}
 		modelCalls++
 		switch modelCalls {
