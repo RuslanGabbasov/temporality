@@ -14,7 +14,7 @@ import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
 import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue } from './workspaceApi'
 import { useT } from './i18n'
 import Markdown from './Markdown'
-import SkillManifestEditor, { manifestToYaml, type SkillManifest } from './SkillManifestEditor'
+import SkillManifestEditor, { manifestToYaml, type SkillManifest, type ManifestSuggestions } from './SkillManifestEditor'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -63,6 +63,37 @@ export default function Skills({ project }: { project: string }) {
   const [form, setForm] = useState<{ id: string; name: string; description: string; version: string; markdown: string; manifest: SkillManifest }>({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest: STARTER_MANIFEST })
   const [validation, setValidation] = useState<SkillValidationIssue[] | null>(null)
   const [openVersion, setOpenVersion] = useState<string | null>(null)
+  const [suggestions, setSuggestions] = useState<ManifestSuggestions>({})
+
+  // Autosuggest values for the manifest editor: tools from builtins + MCP,
+  // capabilities collected from existing skills, mcp from server names.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const [toolsData, serversData] = await Promise.all([
+          workspaceApi.listMCPTools(),
+          workspaceApi.listMCPServers(),
+        ])
+        if (cancelled) return
+        const tools = new Set<string>()
+        for (const tool of toolsData.builtins ?? []) tools.add(tool.model_name || tool.name)
+        for (const server of Object.values(toolsData.servers ?? {})) {
+          for (const tool of server.tools ?? []) tools.add(tool.model_name || tool.name)
+        }
+        setSuggestions({
+          tools: [...tools].sort(),
+          mcp: (serversData.servers ?? []).map((s) => s.name).sort(),
+        })
+      } catch {
+        // suggestions are optional — ignore load errors
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  // Capabilities come from the already-loaded skills list.
+  const capabilitySuggestions = [...new Set(skills.flatMap((s) => Array.isArray(s.manifest?.capabilities) ? s.manifest.capabilities.map(String) : []))].sort()
 
   const load = useCallback(async () => {
     if (!project.trim()) return
@@ -315,7 +346,7 @@ export default function Skills({ project }: { project: string }) {
             <TextInput id="skill-description" labelText={t('skills.description') ?? 'Description'} value={form.description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, description: e.target.value })} />
             <TextInput id="skill-version" labelText={t('skills.version') ?? 'Version'} value={form.version} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, version: e.target.value })} helperText={editing ? (t('skills.version_helper') ?? 'Increase the version to record a new immutable version') : '1.0.0'} />
             <TextArea id="skill-markdown" labelText="SKILL.md" rows={10} value={form.markdown} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, markdown: e.target.value })} style={{ fontFamily: 'monospace', fontSize: '0.8rem' }} />
-            <SkillManifestEditor manifest={form.manifest} onChange={(manifest) => setForm({ ...form, manifest })} />
+            <SkillManifestEditor manifest={form.manifest} onChange={(manifest) => setForm({ ...form, manifest })} suggestions={{ ...suggestions, capabilities: capabilitySuggestions }} />
             {validation && (
               <div style={{ margin: '0.5rem 0' }}>
                 {validation.length === 0

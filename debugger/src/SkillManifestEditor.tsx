@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { TextInput, Select, SelectItem, Checkbox, TextArea, InlineNotification, Button } from '@carbon/react'
 import { Add, TrashCan } from '@carbon/icons-react'
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml'
@@ -32,6 +32,15 @@ export interface SkillManifest {
   evaluation?: { suite?: string }
 }
 
+/** Known values offered as chip autosuggest, derived from the workspace. */
+export interface ManifestSuggestions {
+  tools?: string[]
+  capabilities?: string[]
+  mcp?: string[]
+}
+
+const FIELD_TYPES = ['string', 'number', 'boolean', 'object', 'artifact']
+
 /** Recursively drop empty strings, arrays and objects so yaml.dump stays clean. */
 export function cleanManifest(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -61,10 +70,33 @@ const sectionLabel: React.CSSProperties = {
   letterSpacing: '0.05em',
   textTransform: 'uppercase',
   color: 'var(--tm-text-3)',
-  margin: '0 0 0.4rem',
+  margin: 0,
 }
 
-function ChipInput({ values, onChange, placeholder }: { values: string[]; onChange: (next: string[]) => void; placeholder?: string }) {
+function AddRowButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button type="button" className="add-row-button" onClick={onClick}>
+      <Add size={16} />
+      <span>{label}</span>
+    </button>
+  )
+}
+
+function RemoveButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button type="button" className="remove-row-button" aria-label={label} title={label} onClick={onClick}>
+      <TrashCan size={16} />
+    </button>
+  )
+}
+
+function ChipInput({ values, onChange, placeholder, suggestions }: {
+  values: string[]
+  onChange: (next: string[]) => void
+  placeholder?: string
+  suggestions?: string[]
+}) {
+  const listId = useId()
   const [draft, setDraft] = useState('')
   const commit = () => {
     const v = draft.trim()
@@ -81,15 +113,28 @@ function ChipInput({ values, onChange, placeholder }: { values: string[]; onChan
       ))}
       <input
         className="chip-field"
+        list={suggestions?.length ? listId : undefined}
         value={draft}
         placeholder={placeholder}
-        onChange={(change) => { const v = change.target.value; if (v.endsWith(',')) { setDraft(''); const item = v.slice(0, -1).trim(); if (item && !values.includes(item)) onChange([...values, item]) } else setDraft(v) }}
+        onChange={(change) => {
+          const v = change.target.value
+          if (v.endsWith(',')) {
+            setDraft('')
+            const item = v.slice(0, -1).trim()
+            if (item && !values.includes(item)) onChange([...values, item])
+          } else setDraft(v)
+        }}
         onKeyDown={(change) => {
           if (change.key === 'Enter') { change.preventDefault(); commit() }
           if (change.key === 'Backspace' && !draft && values.length) onChange(values.slice(0, -1))
         }}
         onBlur={commit}
       />
+      {suggestions?.length ? (
+        <datalist id={listId}>
+          {suggestions.filter((s) => !values.includes(s)).map((s) => <option key={s} value={s} />)}
+        </datalist>
+      ) : null}
     </div>
   )
 }
@@ -97,9 +142,9 @@ function ChipInput({ values, onChange, placeholder }: { values: string[]; onChan
 function StringListEditor({ values, onChange, placeholder }: { values: string[]; onChange: (next: string[]) => void; placeholder?: string }) {
   const t = useT()
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
       {values.map((v, i) => (
-        <div key={i} style={{ display: 'flex', gap: '0.35rem', alignItems: 'flex-start' }}>
+        <div key={i} className="condition-row">
           <TextInput
             id={`cond-${i}`}
             hideLabel
@@ -108,10 +153,10 @@ function StringListEditor({ values, onChange, placeholder }: { values: string[];
             placeholder={placeholder}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(values.map((x, j) => (j === i ? e.target.value : x)))}
           />
-          <Button kind="ghost" size="sm" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => onChange(values.filter((_, j) => j !== i))} style={{ flexShrink: 0, color: 'var(--tm-text-3)' }} />
+          <RemoveButton label={t('action.delete') ?? 'Delete'} onClick={() => onChange(values.filter((_, j) => j !== i))} />
         </div>
       ))}
-      <Button kind="ghost" size="sm" renderIcon={Add} onClick={() => onChange([...values, ''])} style={{ alignSelf: 'flex-start', padding: 0, color: 'var(--tm-teal)' }}>{t('skills.editor.add_condition') ?? 'Add condition'}</Button>
+      <AddRowButton label={t('skills.editor.add_condition') ?? 'Add condition'} onClick={() => onChange([...values, ''])} />
     </div>
   )
 }
@@ -123,6 +168,7 @@ function FieldMapEditor({ fields, onChange, addLabel, namePlaceholder }: {
   namePlaceholder: string
 }) {
   const t = useT()
+  const typeListId = useId()
   const entries = Object.entries(fields ?? {})
   const setEntry = (name: string, patch: Partial<ManifestField>) => onChange({ ...fields, [name]: { ...fields[name], ...patch } })
   const renameEntry = (oldName: string, newName: string) => {
@@ -133,26 +179,36 @@ function FieldMapEditor({ fields, onChange, addLabel, namePlaceholder }: {
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      <datalist id={typeListId}>{FIELD_TYPES.map((ft) => <option key={ft} value={ft} />)}</datalist>
       {entries.map(([name, field]) => (
-        <div key={name} className="manifest-field-row">
-          <TextInput
-            id={`field-name-${name}`}
-            hideLabel
-            labelText="name"
-            value={name}
-            placeholder={namePlaceholder}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => renameEntry(name, e.target.value)}
-            style={{ flex: '0 0 34%' }}
-          />
-          <TextInput
-            id={`field-type-${name}`}
-            hideLabel
-            labelText="type"
-            value={field.type ?? ''}
-            placeholder="string"
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEntry(name, { type: e.target.value })}
-            style={{ flex: '0 0 18%' }}
-          />
+        <div key={name} className="manifest-field">
+          <div className="manifest-field-grid">
+            <TextInput
+              id={`field-name-${name}`}
+              hideLabel
+              labelText="name"
+              value={name}
+              placeholder={namePlaceholder}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => renameEntry(name, e.target.value)}
+            />
+            <TextInput
+              id={`field-type-${name}`}
+              hideLabel
+              labelText="type"
+              value={field.type ?? ''}
+              placeholder="string"
+              list={typeListId}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEntry(name, { type: e.target.value })}
+            />
+            <Checkbox
+              id={`field-required-${name}`}
+              labelText={t('skills.editor.field_required') ?? 'Required'}
+              checked={Boolean(field.required)}
+              onChange={(_e: React.ChangeEvent<HTMLInputElement>, data: { checked: boolean }) => setEntry(name, { required: data.checked })}
+              title={t('skills.editor.field_required') ?? 'Required'}
+            />
+            <RemoveButton label={t('action.delete') ?? 'Delete'} onClick={() => { const next = { ...fields }; delete next[name]; onChange(next) }} />
+          </div>
           <TextInput
             id={`field-desc-${name}`}
             hideLabel
@@ -160,19 +216,11 @@ function FieldMapEditor({ fields, onChange, addLabel, namePlaceholder }: {
             value={field.description ?? ''}
             placeholder={t('skills.editor.field_description') ?? 'Description'}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEntry(name, { description: e.target.value })}
-            style={{ flex: 1 }}
+            style={{ width: '100%', boxSizing: 'border-box' }}
           />
-          <Checkbox
-            id={`field-required-${name}`}
-            labelText={t('skills.editor.field_required') ?? 'Required'}
-            checked={Boolean(field.required)}
-            onChange={(_e: React.ChangeEvent<HTMLInputElement>, data: { checked: boolean }) => setEntry(name, { required: data.checked })}
-            title={t('skills.editor.field_required') ?? 'Required'}
-          />
-          <Button kind="ghost" size="sm" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => { const next = { ...fields }; delete next[name]; onChange(next) }} style={{ flexShrink: 0, color: 'var(--tm-text-3)' }} />
         </div>
       ))}
-      <Button kind="ghost" size="sm" renderIcon={Add} onClick={() => onChange({ ...fields, '': { type: 'string' } })} style={{ alignSelf: 'flex-start', padding: 0, color: 'var(--tm-teal)' }}>{addLabel}</Button>
+      <AddRowButton label={addLabel} onClick={() => onChange({ ...fields, '': { type: 'string' } })} />
     </div>
   )
 }
@@ -181,7 +229,11 @@ function FieldMapEditor({ fields, onChange, addLabel, namePlaceholder }: {
  * Structured editor for skill.yaml — form controls for the formal manifest
  * sections, with a raw-YAML escape hatch for power users.
  */
-export default function SkillManifestEditor({ manifest, onChange }: { manifest: SkillManifest; onChange: (next: SkillManifest) => void }) {
+export default function SkillManifestEditor({ manifest, onChange, suggestions }: {
+  manifest: SkillManifest
+  onChange: (next: SkillManifest) => void
+  suggestions?: ManifestSuggestions
+}) {
   const t = useT()
   const [rawMode, setRawMode] = useState(false)
   const [rawText, setRawText] = useState('')
@@ -225,7 +277,7 @@ export default function SkillManifestEditor({ manifest, onChange }: { manifest: 
 
   return (
     <div className="manifest-editor">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h3 style={sectionLabel}>{t('skills.editor.contract') ?? 'Contract'}</h3>
         <Button kind="ghost" size="sm" onClick={enterRaw}>{t('skills.editor.raw_yaml') ?? 'Edit as YAML'}</Button>
       </div>
@@ -242,12 +294,12 @@ export default function SkillManifestEditor({ manifest, onChange }: { manifest: 
 
       <div className="manifest-section">
         <div style={sectionLabel}>{t('skills.editor.capabilities') ?? 'Capabilities'}</div>
-        <ChipInput values={manifest.capabilities ?? []} onChange={(capabilities) => patch({ capabilities })} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} />
+        <ChipInput values={manifest.capabilities ?? []} onChange={(capabilities) => patch({ capabilities })} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} suggestions={suggestions?.capabilities} />
       </div>
 
       <div className="manifest-section">
         <div style={sectionLabel}>{t('skills.editor.tools') ?? 'Tools'}</div>
-        <ChipInput values={manifest.tools ?? []} onChange={(tools) => patch({ tools })} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} />
+        <ChipInput values={manifest.tools ?? []} onChange={(tools) => patch({ tools })} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} suggestions={suggestions?.tools} />
       </div>
 
       <div className="manifest-section">
@@ -268,34 +320,34 @@ export default function SkillManifestEditor({ manifest, onChange }: { manifest: 
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
           <div>
-            <div style={{ ...sectionLabel, marginBottom: 0 }}>{t('skills.editor.fs_read') ?? 'Filesystem read'}</div>
+            <div style={sectionLabel}>{t('skills.editor.fs_read') ?? 'Filesystem read'}</div>
             <ChipInput values={runtime.filesystem?.read ?? []} onChange={(read) => patchRuntime({ filesystem: { ...runtime.filesystem, read } })} placeholder="/etc, ./repo" />
           </div>
           <div>
-            <div style={{ ...sectionLabel, marginBottom: 0 }}>{t('skills.editor.fs_write') ?? 'Filesystem write'}</div>
+            <div style={sectionLabel}>{t('skills.editor.fs_write') ?? 'Filesystem write'}</div>
             <ChipInput values={runtime.filesystem?.write ?? []} onChange={(write) => patchRuntime({ filesystem: { ...runtime.filesystem, write } })} placeholder="/tmp, ./dist" />
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
           <div>
-            <div style={{ ...sectionLabel, marginBottom: 0 }}>{t('skills.editor.credentials') ?? 'Credentials'}</div>
+            <div style={sectionLabel}>{t('skills.editor.credentials') ?? 'Credentials'}</div>
             <ChipInput values={runtime.credentials ?? []} onChange={(credentials) => patchRuntime({ credentials })} placeholder="registry-token" />
           </div>
           <div>
-            <div style={{ ...sectionLabel, marginBottom: 0 }}>{t('skills.editor.mcp') ?? 'MCP servers'}</div>
-            <ChipInput values={runtime.mcp ?? []} onChange={(mcp) => patchRuntime({ mcp })} placeholder="tracker" />
+            <div style={sectionLabel}>{t('skills.editor.mcp') ?? 'MCP servers'}</div>
+            <ChipInput values={runtime.mcp ?? []} onChange={(mcp) => patchRuntime({ mcp })} placeholder="tracker" suggestions={suggestions?.mcp} />
           </div>
         </div>
       </div>
 
       <div className="manifest-section">
         <div style={sectionLabel}>{t('skills.editor.preconditions') ?? 'Preconditions'}</div>
-        <StringListEditor values={manifest.preconditions ?? []} onChange={(preconditions) => patch({ preconditions })} placeholder={t('skills.editor.condition_placeholder') ?? 'Must hold before the skill runs'} />
+        <StringListEditor values={manifest.preconditions ?? []} onChange={(preconditions) => patch({ preconditions })} placeholder={t('skills.editor.condition_placeholder') ?? 'Describe a condition'} />
       </div>
 
       <div className="manifest-section">
         <div style={sectionLabel}>{t('skills.editor.postconditions') ?? 'Postconditions'}</div>
-        <StringListEditor values={manifest.postconditions ?? []} onChange={(postconditions) => patch({ postconditions })} placeholder={t('skills.editor.condition_placeholder') ?? 'Must hold after the skill runs'} />
+        <StringListEditor values={manifest.postconditions ?? []} onChange={(postconditions) => patch({ postconditions })} placeholder={t('skills.editor.condition_placeholder') ?? 'Describe a condition'} />
       </div>
 
       <div className="manifest-section">

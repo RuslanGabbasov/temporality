@@ -754,10 +754,69 @@ button.header-nav-link {
   gap: 0.4rem;
 }
 
-.manifest-field-row {
+.manifest-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  background: var(--tm-raised, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--tm-border);
+  border-radius: var(--tm-radius-sm);
+}
+
+.manifest-field-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.7fr) auto auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.condition-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.add-row-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: none;
+  border: none;
+  padding: 0.3rem 0;
+  color: var(--tm-teal);
+  font-size: var(--tm-text-sm);
+  font-family: var(--tm-font);
+  font-weight: 500;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.add-row-button:hover {
+  color: var(--tm-text);
+}
+
+.add-row-button svg {
+  flex-shrink: 0;
+}
+
+.remove-row-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  background: none;
+  border: none;
+  border-radius: var(--tm-radius-sm);
+  color: var(--tm-text-3);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.remove-row-button:hover {
+  color: var(--tm-danger, #B96B61);
+  background: rgba(185, 107, 97, 0.1);
 }
 
 .chip-input {
