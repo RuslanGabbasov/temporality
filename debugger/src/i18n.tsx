@@ -23,6 +23,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.providers': 'Providers',
     'nav.users': 'Users',
     'nav.projects': 'Projects',
+    'nav.settings': 'Settings',
 
     // Common actions
     'action.create': 'Create',
@@ -596,6 +597,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.providers': 'Провайдеры',
     'nav.users': 'Пользователи',
     'nav.projects': 'Проекты',
+    'nav.settings': 'Настройки',
 
     // Common actions
     'action.create': 'Создать',

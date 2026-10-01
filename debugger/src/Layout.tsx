@@ -35,16 +35,21 @@ interface LayoutProps {
   activePage: string
 }
 
+// Primary work surfaces — always visible in the header.
 const NAV_ITEMS = [
   { path: '/workspace', label: 'nav.workspace' },
   { path: '/agents', label: 'nav.runs' },
   { path: '/operations', label: 'nav.operations' },
   { path: '/observability', label: 'nav.knowledge' },
   { path: '/experience', label: 'nav.timeline' },
+  { path: '/triggers', label: 'nav.triggers' },
+]
+
+// Configuration surfaces — grouped under the Settings dropdown.
+const CONFIG_ITEMS = [
   { path: '/agent-config', label: 'nav.agents' },
   { path: '/skills', label: 'nav.skills' },
   { path: '/mcp', label: 'nav.mcp' },
-  { path: '/triggers', label: 'nav.triggers' },
   { path: '/providers', label: 'nav.providers' },
   { path: '/users', label: 'nav.users' },
 ]
@@ -70,6 +75,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [identity, setIdentity] = useState<Whoami | null>(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showConfigMenu, setShowConfigMenu] = useState(false)
   const { locale, setLocale, t } = useI18n()
   const { theme, setTheme, resolved } = useTheme()
   const [token, setToken] = useState(authToken() ?? '')
@@ -246,6 +252,29 @@ export default function Layout({ children, activePage }: LayoutProps) {
               )}
             </a>
           ))}
+          <div className="header-config-dropdown">
+            <button
+              className={`header-nav-link ${CONFIG_ITEMS.some((i) => activePage === i.path.slice(1)) ? 'active' : ''}`}
+              onClick={() => setShowConfigMenu(!showConfigMenu)}
+            >
+              {t('nav.settings') ?? 'Settings'}
+              <span style={{ fontSize: '0.6rem', marginLeft: '0.35rem', color: 'var(--tm-text-3)' }}>{showConfigMenu ? '▴' : '▾'}</span>
+            </button>
+            {showConfigMenu && (
+              <div className="header-config-menu">
+                {CONFIG_ITEMS.map(({ path, label }) => (
+                  <a
+                    key={path}
+                    href={path}
+                    className={`header-config-link ${activePage === path.slice(1) ? 'active' : ''}`}
+                    onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path); setShowConfigMenu(false) }}
+                  >
+                    {t(label)}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
         </nav>
 
         {/* Mobile hamburger — visible below 1100px */}
@@ -258,10 +287,66 @@ export default function Layout({ children, activePage }: LayoutProps) {
         </button>
 
         <HeaderGlobalBar>
-          {/* User menu */}
-          <div style={{ position: 'relative' }}>
+          {/* Project selector */}
+          <div style={{ position: 'relative', marginRight: '0.5rem' }}>
             <button
-              onClick={() => { setShowUserMenu(!showUserMenu); if (!showUserMenu) setShowProjectPanel(false) }}
+              onClick={() => { setShowProjectPanel(!showProjectPanel); if (!showProjectPanel) { setShowUserMenu(false); setShowConfigMenu(false) } }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.4rem',
+                background: showProjectPanel ? 'rgba(255,255,255,0.08)' : 'transparent',
+                border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-sm)',
+                padding: '0.3rem 0.6rem', cursor: 'pointer',
+                color: 'var(--tm-text)', fontSize: 'var(--tm-text-sm)',
+                fontFamily: 'var(--tm-font)',
+              }}
+            >
+              <Folder size={14} style={{ color: 'rgba(255,255,255,0.6)' }} />
+              <span style={{ color: '#fff' }}>{project}</span>
+              <span style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.45)' }}>{showProjectPanel ? '▴' : '▾'}</span>
+            </button>
+            {showProjectPanel && (
+              <HeaderPanel expanded>
+                <div style={{ padding: '0.5rem' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', padding: '0.5rem 0.5rem 0.25rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t('projects.title')}</div>
+                  <div style={{ display: 'grid', gap: '1px' }}>
+                    {projects.map((p) => {
+                      const defaultAgent = allAgents.find((a) => a.id === p.default_agent_id)
+                      return (
+                        <div
+                          key={p.id}
+                          onClick={() => { setProject(p.id); setShowProjectPanel(false) }}
+                          style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.5rem 0.5rem', cursor: 'pointer', background: p.id === project ? 'var(--tm-elevated)' : 'transparent', borderRadius: '4px', minWidth: 0 }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                            {(defaultAgent || p.default_model) && (
+                              <div style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
+                                {defaultAgent ? defaultAgent.name : 'no agent'}{p.default_model ? ` · ${p.default_model}` : ''}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
+                            <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setEditProject(p); setShowProjectPanel(false) }} />
+                            <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setConfirmDelete(p.id) }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                    <div
+                      onClick={() => { setNewProjectName(''); setNewProjectDesc(''); setShowProjectPanel(false); setShowNewProject(true) }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.5rem', cursor: 'pointer', color: 'var(--tm-teal)', borderRadius: '4px' }}
+                    >
+                      <Add size={20} /> {t('new.project')}
+                    </div>
+                  </div>
+                </div>
+              </HeaderPanel>
+            )}
+          </div>
+          {/* User menu */}
+          <div style={{ position: 'relative', marginRight: '0.5rem' }}>
+            <button
+              onClick={() => { setShowUserMenu(!showUserMenu); if (!showUserMenu) { setShowProjectPanel(false); setShowConfigMenu(false) } }}
               style={{
                 display: 'flex', alignItems: 'center', gap: '0.4rem',
                 background: showUserMenu ? 'rgba(255,255,255,0.08)' : 'transparent',
@@ -308,61 +393,6 @@ export default function Layout({ children, activePage }: LayoutProps) {
               </HeaderPanel>
             )}
           </div>
-          <div style={{ position: 'relative', marginRight: '0.5rem' }}>
-            <button
-              onClick={() => { setShowProjectPanel(!showProjectPanel); if (!showProjectPanel) setShowUserMenu(false) }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.4rem',
-                background: showProjectPanel ? 'rgba(255,255,255,0.08)' : 'transparent',
-                border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-sm)',
-                padding: '0.3rem 0.6rem', cursor: 'pointer',
-                color: 'var(--tm-text)', fontSize: 'var(--tm-text-sm)',
-                fontFamily: 'var(--tm-font)',
-              }}
-            >
-              <Folder size={14} style={{ color: 'rgba(255,255,255,0.6)' }} />
-              <span style={{ color: '#fff' }}>{project}</span>
-              <span style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.45)' }}>{showProjectPanel ? '▴' : '▾'}</span>
-            </button>
-            {showProjectPanel && (
-              <HeaderPanel expanded>
-                <div style={{ padding: '0.5rem' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', padding: '0.5rem 0.5rem 0.25rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t('projects.title')}</div>
-                  <div style={{ display: 'grid', gap: '1px' }}>
-                    {projects.map((p) => {
-                      const defaultAgent = allAgents.find((a) => a.id === p.default_agent_id)
-                      return (
-                      <div
-                        key={p.id}
-                        onClick={() => { setProject(p.id); setShowProjectPanel(false) }}
-                        style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.5rem 0.5rem', cursor: 'pointer', background: p.id === project ? 'var(--tm-elevated)' : 'transparent', borderRadius: '4px', minWidth: 0 }}
-                      >
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
-                          {(defaultAgent || p.default_model) && (
-                            <div style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
-                              {defaultAgent ? defaultAgent.name : 'no agent'}{p.default_model ? ` · ${p.default_model}` : ''}
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
-                          <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setEditProject(p); setShowProjectPanel(false) }} />
-                          <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setConfirmDelete(p.id) }} />
-                        </div>
-                      </div>
-                      )
-                    })}
-                    <div
-                      onClick={() => { setNewProjectName(''); setNewProjectDesc(''); setShowProjectPanel(false); setShowNewProject(true) }}
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.5rem', cursor: 'pointer', color: 'var(--tm-teal)', borderRadius: '4px' }}
-                    >
-                      <Add size={20} /> {t('new.project')}
-                    </div>
-                  </div>
-                </div>
-              </HeaderPanel>
-            )}
-          </div>
         </HeaderGlobalBar>
 
         {/* Mobile nav dropdown */}
@@ -382,6 +412,17 @@ export default function Layout({ children, activePage }: LayoutProps) {
                 {path === '/agents' && pendingApprovals > 0 && (
                   <span className="nav-badge" style={{ background: '#e6b85c' }}>{pendingApprovals}</span>
                 )}
+              </a>
+            ))}
+            <div className="header-mobile-divider" />
+            {CONFIG_ITEMS.map(({ path, label }) => (
+              <a
+                key={path}
+                href={path}
+                className={`header-mobile-link ${activePage === path.slice(1) ? 'active' : ''}`}
+                onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path); setMobileNavOpen(false) }}
+              >
+                {t(label)}
               </a>
             ))}
           </div>
