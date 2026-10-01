@@ -19,7 +19,7 @@ import {
   Checkbox,
 } from '@carbon/react'
 import { Add, Edit, TrashCan, Copy } from '@carbon/icons-react'
-import { workspaceApi, type Agent, type Provider, type Skill } from './workspaceApi'
+import { workspaceApi, type Agent, type Provider, type Skill, type MCPServer, type MCPServerTools, type MCPToolInfo } from './workspaceApi'
 import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -29,6 +29,9 @@ export default function Agents({ defaultAgentId }: { defaultAgentId?: string }) 
   const [agents, setAgents] = useState<Agent[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([])
+  const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
+  const [mcpTools, setMcpTools] = useState<MCPServerTools[]>([])
+  const [builtinTools, setBuiltinTools] = useState<MCPToolInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -42,14 +45,19 @@ export default function Agents({ defaultAgentId }: { defaultAgentId?: string }) 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [agentsData, providersData, skillsData] = await Promise.all([
+      const [agentsData, providersData, skillsData, mcpData, toolsData] = await Promise.all([
         workspaceApi.listAllAgents(),
         workspaceApi.listProviders(),
         workspaceApi.listSkills(''),
+        workspaceApi.listMCPServers(),
+        workspaceApi.listMCPTools(),
       ])
       setAgents(agentsData.agents ?? [])
       setProviders(providersData.providers ?? [])
       setAvailableSkills(skillsData.skills ?? [])
+      setMcpServers(mcpData.servers ?? [])
+      setMcpTools(Object.values(toolsData.servers ?? {}))
+      setBuiltinTools(toolsData.builtins ?? [])
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }, [])
@@ -98,7 +106,7 @@ export default function Agents({ defaultAgentId }: { defaultAgentId?: string }) 
 
 const startCreate = () => {
     setEditing(null)
-    setForm({ name: '', model: '', system_prompt: '', skills: [], mcp_servers: [] })
+    setForm({ name: '', model: '', system_prompt: '', skills: [], mcp_servers: [], tools: [] })
     setShowForm(true)
   }
 
@@ -193,6 +201,8 @@ const startCreate = () => {
                     <dd style={{ marginBottom: '0.5rem' }}>{a.skills?.length ? a.skills.join(', ') : (t('agents.none') ?? '(none)')}</dd>
                     <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.mcp_servers') ?? 'MCP servers'}</dt>
                     <dd style={{ marginBottom: '0.5rem' }}>{a.mcp_servers?.length ? a.mcp_servers.join(', ') : (t('agents.none') ?? '(none)')}</dd>
+                    <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.tools') ?? 'Tools'}</dt>
+                    <dd style={{ marginBottom: '0.5rem' }}>{a.tools?.length ? (t('agents.tools_count', { count: String(a.tools.length) }) ?? `${a.tools.length} tools`) : (t('agents.tools_all') ?? 'all available')}</dd>
                     <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.network') ?? 'Network'}</dt>
                     <dd style={{ marginBottom: '0.5rem' }}>{a.network_access ? (t('agents.enabled') ?? 'enabled') : (t('agents.blocked') ?? 'blocked')}</dd>
                     <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.read_only') ?? 'Read-only'}</dt>
@@ -253,6 +263,32 @@ const startCreate = () => {
                   </div>
                 </div>
               )}
+              {mcpServers.length > 0 && (
+                <div>
+                  <p className="cds--label" style={{ marginBottom: '0.5rem' }}>{t('agents.mcp_servers') ?? 'MCP servers'}</p>
+                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>{t('agents.mcp_hint') ?? 'Selected servers add their tools to this agent. Bind servers on the MCP tab.'}</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 1rem', maxHeight: '8rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
+                    {mcpServers.map((s) => (
+                      <Checkbox
+                        key={s.id}
+                        id={`agent-mcp-${s.id}`}
+                        labelText={s.name}
+                        title={s.id}
+                        checked={form.mcp_servers?.includes(s.id) ?? false}
+                        onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) =>
+                          setForm({ ...form, mcp_servers: checked ? [...(form.mcp_servers ?? []), s.id] : (form.mcp_servers ?? []).filter((x) => x !== s.id) })}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+              <ToolsPanel
+                builtins={builtinTools}
+                servers={mcpTools.filter((s) => form.mcp_servers?.includes(s.id))}
+                allSelected={form.mcp_servers ?? []}
+                selected={form.tools ?? []}
+                onChange={(tools) => setForm({ ...form, tools })}
+              />
               <div className="form-actions">
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
                 <Button onClick={() => void saveAgent()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
@@ -274,7 +310,7 @@ const startCreate = () => {
               {TEMPLATES.map((tpl) => (
                 <Tile key={tpl.name} style={{ cursor: 'pointer' }} onClick={() => {
                   setEditing(null)
-                  setForm({ name: tpl.name, model: tpl.model, system_prompt: tpl.system_prompt, skills: [], mcp_servers: [], sandbox_profile: tpl.sandbox_profile, network_access: tpl.network_access, read_only: tpl.read_only, max_turns: tpl.max_turns })
+                  setForm({ name: tpl.name, model: tpl.model, system_prompt: tpl.system_prompt, skills: [], mcp_servers: [], tools: [], sandbox_profile: tpl.sandbox_profile, network_access: tpl.network_access, read_only: tpl.read_only, max_turns: tpl.max_turns })
                   setShowForm(true)
                   setShowTemplates(false)
                 }}>
@@ -295,6 +331,73 @@ const startCreate = () => {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function ToolsPanel({
+  builtins,
+  servers,
+  selected,
+  onChange,
+}: {
+  builtins: MCPToolInfo[]
+  servers: MCPServerTools[]
+  allSelected: string[]
+  selected: string[]
+  onChange: (tools: string[]) => void
+}) {
+  const t = useT()
+  if (builtins.length === 0 && servers.length === 0) return null
+  // Empty selection = all tools allowed; show every checkbox checked.
+  const allMode = selected.length === 0
+  const total = builtins.length + servers.reduce((sum, s) => sum + s.tools.length, 0)
+
+  const toggle = (name: string, checked: boolean) => {
+    if (allMode && checked) return // cannot check further when everything is on
+    let next = checked ? [...selected, name] : selected.filter((x) => x !== name)
+    if (next.length === total) next = [] // everything selected = allow all
+    onChange(next)
+  }
+
+  const row = (tool: MCPToolInfo, key: string) => (
+    <div key={key} style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', padding: '0.2rem 0' }}>
+      <Checkbox
+        id={`agent-tool-${key}`}
+        labelText={tool.name}
+        title={tool.description || tool.name}
+        checked={allMode || selected.includes(tool.model_name || tool.name)}
+        onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => toggle(tool.model_name || tool.name, checked)}
+      />
+      {tool.description && (
+        <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tool.description}>
+          {tool.description}
+        </span>
+      )}
+    </div>
+  )
+
+  return (
+    <div>
+      <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.tools') ?? 'Tools'}</p>
+      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>
+        {allMode
+          ? (t('agents.tools_all_hint') ?? 'All tools are allowed. Uncheck one to restrict the agent.')
+          : (t('agents.tools_restricted_hint', { count: String(selected.length) }) ?? `${selected.length} tools allowed.`)}
+      </p>
+      <div style={{ maxHeight: '12rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
+        <p className="cds--label" style={{ fontSize: '0.7rem', margin: '0 0 0.25rem' }}>{t('agents.tools_builtin') ?? 'Built-in'}</p>
+        {builtins.map((tool) => row(tool, `b-${tool.name}`))}
+        {servers.map((server) => (
+          <div key={server.id}>
+            <p className="cds--label" style={{ fontSize: '0.7rem', margin: '0.5rem 0 0.25rem' }}>{server.name}</p>
+            {server.tools.length === 0 && (
+              <p style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', margin: 0 }}>{t('agents.tools_no_tools') ?? 'no tools discovered'}</p>
+            )}
+            {server.tools.map((tool) => row(tool, `s-${server.id}-${tool.name}`))}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

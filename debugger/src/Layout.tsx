@@ -43,6 +43,7 @@ const NAV_ITEMS = [
   { path: '/experience', label: 'nav.timeline' },
   { path: '/agent-config', label: 'nav.agents' },
   { path: '/skills', label: 'nav.skills' },
+  { path: '/mcp', label: 'nav.mcp' },
   { path: '/triggers', label: 'nav.triggers' },
   { path: '/providers', label: 'nav.providers' },
   { path: '/users', label: 'nav.users' },

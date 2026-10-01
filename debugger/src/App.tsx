@@ -12,6 +12,7 @@ import Providers from './Providers'
 import Users from './Users'
 import Triggers from './Triggers'
 import Skills from './Skills'
+import Mcp from './Mcp'
 
 const Routes = {
   experience: /^\/experience(\/|$)/,
@@ -21,12 +22,13 @@ const Routes = {
   workspace: /^\/workspace(\/|$)/,
   'agent-config': /^\/agent-config(\/|$)/,
   skills: /^\/skills(\/|$)/,
+  mcp: /^\/mcp(\/|$)/,
   providers: /^\/providers(\/|$)/,
   users: /^\/users(\/|$)/,
   triggers: /^\/triggers(\/|$)/,
 } as const
 
-type Page = 'experience' | 'agents' | 'operations' | 'observability' | 'workspace' | 'agent-config' | 'skills' | 'providers' | 'users' | 'triggers'
+type Page = 'experience' | 'agents' | 'operations' | 'observability' | 'workspace' | 'agent-config' | 'skills' | 'mcp' | 'providers' | 'users' | 'triggers'
 
 function pageFor(pathname: string): Page {
   if (Routes.agents.test(pathname)) return 'agents'
@@ -36,6 +38,7 @@ function pageFor(pathname: string): Page {
   if (Routes.experience.test(pathname)) return 'experience'
   if (Routes['agent-config'].test(pathname)) return 'agent-config'
   if (Routes.skills.test(pathname)) return 'skills'
+  if (Routes.mcp.test(pathname)) return 'mcp'
   if (Routes.providers.test(pathname)) return 'providers'
   if (Routes.users.test(pathname)) return 'users'
   if (Routes.triggers.test(pathname)) return 'triggers'
@@ -71,6 +74,8 @@ export default function App() {
             return <Agents defaultAgentId={projectDefaultAgent} />
           case 'skills':
             return <Skills project={project} />
+          case 'mcp':
+            return <Mcp project={project} />
           case 'providers':
             return <Providers />
           case 'users':

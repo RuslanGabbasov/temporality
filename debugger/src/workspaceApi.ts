@@ -26,6 +26,7 @@ export interface Agent {
   max_tokens?: number
   skills: string[]
   mcp_servers: string[]
+  tools?: string[]
   sandbox_profile: string
   network_access?: boolean
   read_only?: boolean
@@ -128,6 +129,41 @@ export interface SkillInput {
   version: string
   markdown: string
   manifest_yaml: string
+}
+
+export interface MCPServer {
+  id: string
+  project_id: string
+  name: string
+  type: 'stdio' | 'sse' | 'http'
+  url?: string
+  command?: string
+  args: string[]
+  env: string[]
+  headers: Record<string, string>
+  allowed_tools: string[]
+  approval_tools: string[]
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface MCPToolInfo {
+  name: string
+  description?: string
+  model_name: string
+  requires_approval: boolean
+}
+
+export interface MCPServerTools {
+  id: string
+  name: string
+  type: string
+  tools: MCPToolInfo[]
+}
+
+export interface MCPDiscoverResult {
+  tools: MCPToolInfo[]
 }
 
 export interface Provider {
@@ -249,6 +285,24 @@ export const workspaceApi = {
     request<{ executions: SkillExecution[] }>(`/v1/workspace/skills/${id}/executions`),
   listSkillMemory: (id: string) =>
     request<{ memory: SkillMemoryItem[] }>(`/v1/workspace/skills/${id}/memory`),
+
+  // MCP servers
+  listMCPServers: (projectId?: string) =>
+    request<{ servers: MCPServer[]; count: number }>(
+      projectId
+        ? `/v1/workspace/mcp-servers?project=${encodeURIComponent(projectId)}`
+        : '/v1/workspace/mcp-servers'),
+  getMCPServer: (id: string) => request<MCPServer>(`/v1/workspace/mcp-servers/${id}`),
+  createMCPServer: (data: Partial<MCPServer> & { name: string; project_id: string }) =>
+    request<MCPServer>('/v1/workspace/mcp-servers', { method: 'POST', body: JSON.stringify(data) }),
+  updateMCPServer: (id: string, data: Partial<MCPServer>) =>
+    request<MCPServer>(`/v1/workspace/mcp-servers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteMCPServer: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/workspace/mcp-servers/${id}`, { method: 'DELETE' }),
+  discoverMCPServer: (data: Partial<MCPServer>) =>
+    request<MCPDiscoverResult>('/v1/workspace/mcp-servers/discover', { method: 'POST', body: JSON.stringify(data) }),
+  listMCPTools: () =>
+    request<{ servers: Record<string, MCPServerTools>; builtins: MCPToolInfo[] }>('/v1/workspace/mcp-tools'),
 
   // Users
   listUsers: () => request<{ users: User[] }>('/v1/workspace/users'),
