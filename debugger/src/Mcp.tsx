@@ -237,23 +237,41 @@ export default function Mcp({ project }: { project: string }) {
                     {discovered.map((tool) => {
                       const allowed = (form.allowed_tools ?? []).includes(tool.name)
                       return (
-                        <div key={tool.name} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.25rem 0', borderBottom: '1px solid var(--tm-border)' }}>
-                          <Checkbox
-                            id={`mcp-tool-${tool.name}`}
-                            labelText={tool.name}
-                            title={tool.description || tool.name}
-                            checked={allowed}
-                            onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => toggleTool(tool.name, checked)}
-                          />
-                          {allowed && (
+                        <div key={tool.name} style={{ padding: '0.25rem 0', borderBottom: '1px solid var(--tm-border)', minWidth: 0, overflowWrap: 'anywhere' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                             <Checkbox
-                              id={`mcp-approval-${tool.name}`}
-                              labelText={t('mcp.approval') ?? 'Approval'}
-                              checked={(form.approval_tools ?? []).includes(tool.name)}
-                              onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => toggleApproval(tool.name, checked)}
+                              id={`mcp-tool-${tool.name}`}
+                              labelText={tool.name}
+                              title={tool.description || tool.name}
+                              checked={allowed}
+                              onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => toggleTool(tool.name, checked)}
                             />
+                            {allowed && (
+                              <Checkbox
+                                id={`mcp-approval-${tool.name}`}
+                                labelText={t('mcp.approval') ?? 'Approval'}
+                                checked={(form.approval_tools ?? []).includes(tool.name)}
+                                onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => toggleApproval(tool.name, checked)}
+                              />
+                            )}
+                          </div>
+                          {tool.description && (
+                            <div
+                              style={{
+                                color: 'var(--tm-text-3)',
+                                fontSize: '0.7rem',
+                                paddingLeft: '1.5rem',
+                                maxWidth: '100%',
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                              }}
+                              title={tool.description}
+                            >
+                              {tool.description}
+                            </div>
                           )}
-                          {tool.description && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', marginLeft: 'auto', maxWidth: '45%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tool.description}>{tool.description}</span>}
                         </div>
                       )
                     })}

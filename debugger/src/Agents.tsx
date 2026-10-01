@@ -218,7 +218,7 @@ const startCreate = () => {
       {/* Edit/Create modal */}
       {showForm && (
         <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '600px' }}>
+          <div className="modal-panel" style={{ width: '680px', maxWidth: 'calc(100vw - 2rem)' }}>
             <Heading>{editing ? (t('agents.edit_agent') ?? 'Edit Agent') : (t('agents.new_agent') ?? 'New Agent')}</Heading>
             <Stack gap={3}>
               <TextInput id="agent-name" labelText={t('agents.name') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="coder" autoFocus />
@@ -361,7 +361,7 @@ function ToolsPanel({
   }
 
   const row = (tool: MCPToolInfo, key: string) => (
-    <div key={key} style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', padding: '0.2rem 0' }}>
+    <div key={key} style={{ padding: '0.2rem 0', minWidth: 0, overflowWrap: 'anywhere' }}>
       <Checkbox
         id={`agent-tool-${key}`}
         labelText={tool.name}
@@ -370,9 +370,22 @@ function ToolsPanel({
         onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => toggle(tool.model_name || tool.name, checked)}
       />
       {tool.description && (
-        <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tool.description}>
+        <div
+          style={{
+            color: 'var(--tm-text-3)',
+            fontSize: '0.7rem',
+            marginTop: '-0.15rem',
+            paddingLeft: '1.5rem',
+            maxWidth: '100%',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+          title={tool.description}
+        >
           {tool.description}
-        </span>
+        </div>
       )}
     </div>
   )

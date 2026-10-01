@@ -894,6 +894,8 @@ body, #root, #main-content {
   border-radius: var(--tm-radius-xl);
   padding: 1.5rem;
   width: 520px;
+  max-width: calc(100vw - 2rem);
+  box-sizing: border-box;
   max-height: 85vh;
   overflow-y: auto;
   display: flex;
