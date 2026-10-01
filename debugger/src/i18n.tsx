@@ -731,7 +731,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'operations.check_external': 'Проверьте внешнюю систему (база данных, API, файловая система) и сообщите Temporality, что произошло на самом деле.',
     'operations.operator_required': 'Для записи оценки требуется токен оператора.',
     'operations.current_role': 'Текущая роль:',
-    'operations.submit_verdict': 'Отправить оценку',
+    'operations.submit_verdict': 'Сохранить и подтвердить',
     'operations.happened': 'Произошло',
     'operations.did_not_happen': 'НЕ произошло',
     'operations.unknown_verdict': 'Неизвестно',

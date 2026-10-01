@@ -355,12 +355,12 @@ export default function Operations({ project }: { project: string }) {
                         placeholder={t('operations.find_placeholder') ?? 'e.g. Checked the database — the row was inserted twice. Or: File was not created, safe to retry.'}
                         rows={3}
                       />
-                      <Stack orientation="horizontal" gap={2}>
+                      <div className="form-actions">
+                        <Button kind="secondary" onClick={() => setSelected(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
                         <Button onClick={() => void submit()} disabled={busy}>
                           {t('operations.submit_verdict') ?? 'Submit verdict'}
                         </Button>
-                        <Button kind="secondary" onClick={() => setSelected(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
-                      </Stack>
+                      </div>
                     </Stack>
                   </Tile>
                 )}
