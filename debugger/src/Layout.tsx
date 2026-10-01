@@ -42,6 +42,7 @@ const NAV_ITEMS = [
   { path: '/observability', label: 'nav.knowledge' },
   { path: '/experience', label: 'nav.timeline' },
   { path: '/agent-config', label: 'nav.agents' },
+  { path: '/skills', label: 'nav.skills' },
   { path: '/triggers', label: 'nav.triggers' },
   { path: '/providers', label: 'nav.providers' },
   { path: '/users', label: 'nav.users' },

@@ -16,9 +16,10 @@ import {
   Heading,
   Toggle,
   NumberInput,
+  Checkbox,
 } from '@carbon/react'
 import { Add, Edit, TrashCan, Copy } from '@carbon/icons-react'
-import { workspaceApi, type Agent, type Provider } from './workspaceApi'
+import { workspaceApi, type Agent, type Provider, type Skill } from './workspaceApi'
 import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -27,6 +28,7 @@ export default function Agents({ defaultAgentId }: { defaultAgentId?: string }) 
   const t = useT()
   const [agents, setAgents] = useState<Agent[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
+  const [availableSkills, setAvailableSkills] = useState<Skill[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -40,12 +42,14 @@ export default function Agents({ defaultAgentId }: { defaultAgentId?: string }) 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [agentsData, providersData] = await Promise.all([
+      const [agentsData, providersData, skillsData] = await Promise.all([
         workspaceApi.listAllAgents(),
         workspaceApi.listProviders(),
+        workspaceApi.listSkills(''),
       ])
       setAgents(agentsData.agents ?? [])
       setProviders(providersData.providers ?? [])
+      setAvailableSkills(skillsData.skills ?? [])
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }, [])
@@ -230,6 +234,25 @@ const startCreate = () => {
                 <Toggle id="agent-network" labelText={t('agents.network') ?? 'Network'} toggled={form.network_access ?? false} onToggle={(checked: boolean) => setForm({ ...form, network_access: checked })} />
                 <Toggle id="agent-readonly" labelText={t('agents.read_only') ?? 'Read-only'} toggled={form.read_only ?? false} onToggle={(checked: boolean) => setForm({ ...form, read_only: checked })} />
               </div>
+              {availableSkills.length > 0 && (
+                <div>
+                  <p className="cds--label" style={{ marginBottom: '0.5rem' }}>{t('agents.skills') ?? 'Skills'}</p>
+                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>{t('agents.skills_hint') ?? 'Selected skills are injected into the system prompt at run time.'}</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 1rem', maxHeight: '10rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
+                    {availableSkills.map((s) => (
+                      <Checkbox
+                        key={s.id}
+                        id={`agent-skill-${s.id}`}
+                        labelText={s.name}
+                        title={s.id}
+                        checked={form.skills?.includes(s.id) ?? false}
+                        onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) =>
+                          setForm({ ...form, skills: checked ? [...(form.skills ?? []), s.id] : (form.skills ?? []).filter((x) => x !== s.id) })}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="form-actions">
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
                 <Button onClick={() => void saveAgent()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>

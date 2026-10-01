@@ -73,6 +73,63 @@ export interface Trigger {
   updated_at: string
 }
 
+export interface Skill {
+  id: string
+  project_id: string
+  name: string
+  description: string
+  version: string
+  markdown: string
+  manifest: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface SkillVersion {
+  skill_id: string
+  version: string
+  markdown: string
+  manifest: Record<string, unknown>
+  created_at: string
+}
+
+export interface SkillExecution {
+  id: string
+  skill_id: string
+  skill_version: string
+  project_id: string
+  run_id: string
+  agent_id: string
+  started_at: string
+}
+
+export interface SkillMemoryItem {
+  knowledge_id: string
+  proposition: string
+  capability: string
+  state: string
+  run_id: string
+  occurred_at: string
+}
+
+export interface SkillValidationIssue {
+  field: string
+  message: string
+}
+
+export interface SkillValidation {
+  valid: boolean
+  issues: SkillValidationIssue[]
+}
+
+export interface SkillInput {
+  name: string
+  description: string
+  version: string
+  markdown: string
+  manifest_yaml: string
+}
+
 export interface Provider {
   id: string
   name: string
@@ -173,6 +230,25 @@ export const workspaceApi = {
     request<Trigger>(`/v1/workspace/triggers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteTrigger: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/triggers/${id}`, { method: 'DELETE' }),
+
+  // Skills
+  listSkills: (projectId: string) =>
+    request<{ skills: Skill[]; count: number }>(`/v1/workspace/skills?project=${encodeURIComponent(projectId)}`),
+  getSkill: (id: string) => request<Skill>(`/v1/workspace/skills/${id}`),
+  createSkill: (data: { id: string; project_id: string; name: string; description: string; version: string; markdown: string; manifest_yaml: string }) =>
+    request<Skill>('/v1/workspace/skills', { method: 'POST', body: JSON.stringify(data) }),
+  updateSkill: (id: string, data: SkillInput) =>
+    request<Skill>(`/v1/workspace/skills/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSkill: (id: string) =>
+    request<{ status: string }>(`/v1/workspace/skills/${id}`, { method: 'DELETE' }),
+  listSkillVersions: (id: string) =>
+    request<{ versions: SkillVersion[] }>(`/v1/workspace/skills/${id}/versions`),
+  validateSkill: (id: string, data: { markdown: string; manifest_yaml: string }) =>
+    request<SkillValidation>(`/v1/workspace/skills/${id}/validate`, { method: 'POST', body: JSON.stringify(data) }),
+  listSkillExecutions: (id: string) =>
+    request<{ executions: SkillExecution[] }>(`/v1/workspace/skills/${id}/executions`),
+  listSkillMemory: (id: string) =>
+    request<{ memory: SkillMemoryItem[] }>(`/v1/workspace/skills/${id}/memory`),
 
   // Users
   listUsers: () => request<{ users: User[] }>('/v1/workspace/users'),
