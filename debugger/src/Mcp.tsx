@@ -160,6 +160,13 @@ export default function Mcp({ project }: { project: string }) {
         <Button renderIcon={Add} onClick={startCreate}>{t('mcp.new_server') ?? 'New Server'}</Button>
       </div>
 
+      {servers.length === 0 && !loading && (
+        <Tile style={{ textAlign: 'center', padding: '3rem', color: 'var(--tm-text-3)' }}>
+          <p>{t('mcp.no_servers') ?? 'No MCP servers yet.'}</p>
+          <p style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>{t('mcp.no_servers_hint') ?? 'Connect an MCP server over stdio, SSE or HTTP to give agents access to external tools.'}</p>
+        </Tile>
+      )}
+
       <Grid>
         {servers.map((s) => (
           <Column key={s.id} sm={4} md={4} lg={4}>
