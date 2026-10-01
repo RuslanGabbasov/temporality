@@ -597,12 +597,12 @@ func TestMCPCallEventsCarryServerAndResultRef(t *testing.T) {
 	env.RegisterActivityWithOptions(func(_ context.Context, _ ModelRequest) (llm.Completion, error) {
 		modelCalls++
 		if modelCalls == 1 {
-			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "mcp-1", Name: "mcp__github__create_issue", Args: map[string]any{"title": "flaky test"}}}}, nil
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "mcp-1", Name: "mcp__create_issue", Args: map[string]any{"title": "flaky test"}}}}, nil
 		}
 		return llm.Completion{Content: "issue filed"}, nil
 	}, activity.RegisterOptions{Name: ActivityCallModel})
 	env.RegisterActivityWithOptions(func(_ context.Context, request ToolRequest) (ToolResult, error) {
-		require.Equal(t, "mcp__github__create_issue", request.Name)
+		require.Equal(t, "mcp__create_issue", request.Name)
 		return ToolResult{Content: "issue created: #42"}, nil
 	}, activity.RegisterOptions{Name: ActivityRunTool})
 	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-mcp", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "file the issue", MaxTurns: 3, MCPServer: "github-mcp"})
@@ -615,7 +615,7 @@ func TestMCPCallEventsCarryServerAndResultRef(t *testing.T) {
 		case "mcp.call.started":
 			started++
 			require.Equal(t, "github-mcp", event.Data["server"])
-			require.Equal(t, "mcp__github__create_issue", event.Data["tool"])
+			require.Equal(t, "mcp__create_issue", event.Data["tool"])
 			require.Equal(t, "run-mcp/turn/01/mcp-1", event.Data["operation_id"])
 		case "mcp.call.completed":
 			completed++

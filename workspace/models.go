@@ -36,6 +36,7 @@ type Agent struct {
 	// Tools & capabilities
 	Skills     []string `json:"skills,omitempty"`
 	MCPServers []string `json:"mcp_servers,omitempty"`
+	Tools      []string `json:"tools,omitempty"` // model tool names; empty = all available tools
 	// Sandbox constraints
 	SandboxProfile string `json:"sandbox_profile,omitempty"` // restricted, standard, privileged
 	NetworkAccess  *bool  `json:"network_access,omitempty"`
@@ -158,6 +159,7 @@ type CreateAgentRequest struct {
 	MaxTokens      *int              `json:"max_tokens,omitempty"`
 	Skills         []string          `json:"skills,omitempty"`
 	MCPServers     []string          `json:"mcp_servers,omitempty"`
+	Tools          []string          `json:"tools,omitempty"`
 	SandboxProfile string            `json:"sandbox_profile,omitempty"`
 	NetworkAccess  *bool             `json:"network_access,omitempty"`
 	ReadOnly       *bool             `json:"read_only,omitempty"`

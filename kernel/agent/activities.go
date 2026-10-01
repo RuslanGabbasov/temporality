@@ -43,7 +43,7 @@ type Activities struct {
 	// when the journal requires bearer auth; it mirrors TEMPORALITY_API_TOKEN
 	// used by the event outbox publisher.
 	APIToken      string
-	MCP           *mcpclient.Client
+	MCP           *mcpclient.Registry
 	SourceID      string
 	Sandbox       SandboxRunner
 	NetworkAccess bool
@@ -54,19 +54,39 @@ func NewActivities(events EventOutbox) (*Activities, error) {
 	if err != nil {
 		return nil, err
 	}
-	mcpTools, err := mcpclient.FromEnv(context.Background())
+	registry := mcpclient.NewRegistry()
+	legacy, err := mcpclient.FromEnv(context.Background())
 	if err != nil {
 		return nil, err
+	}
+	if legacy != nil {
+		registry.AdoptLegacy(legacy)
 	}
 	sandboxRunner, err := sandbox.NewFromEnv()
 	if err != nil {
 		return nil, err
 	}
-	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), APIToken: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), MCP: mcpTools, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandboxRunner}, nil
+	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), APIToken: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), MCP: registry, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandboxRunner}, nil
 }
 
 func (a *Activities) ToolDefs() []llm.ToolDef {
-	defs := a.MCP.ToolDefs()
+	return a.ToolDefsFor(nil)
+}
+
+// BuiltinToolDefs returns kernel tools plus run_command (when the sandbox is
+// configured) — the tool surface independent of any MCP server.
+func (a *Activities) BuiltinToolDefs() []llm.ToolDef {
+	defs := KernelTools()
+	if a.Sandbox != nil {
+		defs = append(defs, llm.ToolDef{Name: "run_command", Description: "Run a command in an isolated sandbox container. The working directory is /workspace which persists between calls — save ALL files there. /tmp and /scratch are ephemeral and disappear between calls. Network access depends on agent configuration. Provide argv as an array.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}}})
+	}
+	return defs
+}
+
+// ToolDefsFor returns configured MCP tools for the given servers plus the
+// sandbox tool. An empty server list keeps the legacy env server only.
+func (a *Activities) ToolDefsFor(servers []string) []llm.ToolDef {
+	defs := a.MCP.ToolDefsFor(servers)
 	if a.Sandbox != nil {
 		defs = append(defs, llm.ToolDef{Name: "run_command", Description: "Run a command in an isolated sandbox container. The working directory is /workspace which persists between calls — save ALL files there. /tmp and /scratch are ephemeral and disappear between calls. Network access depends on agent configuration. Provide argv as an array.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}}})
 	}
@@ -74,13 +94,17 @@ func (a *Activities) ToolDefs() []llm.ToolDef {
 }
 
 func (a *Activities) ApprovalTools() []string {
-	return a.MCP.ApprovalTools()
+	return a.ApprovalToolsFor(nil)
+}
+
+func (a *Activities) ApprovalToolsFor(servers []string) []string {
+	return a.MCP.ApprovalToolsFor(servers)
 }
 
 func (a *Activities) PrepareRun(input *RunInput) error {
 	input.SourceID = a.SourceID
-	input.Tools = a.ToolDefs()
-	input.ApprovalTools = a.ApprovalTools()
+	input.Tools = a.ToolDefsFor(input.MCPServers)
+	input.ApprovalTools = a.ApprovalToolsFor(input.MCPServers)
 	input.AutoApproveTools = nil
 	input.MCPServer = MCPServerName()
 	a.NetworkAccess = input.NetworkAccess
@@ -148,6 +172,12 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 }
 
 func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	if len(request.AllowedTools) > 0 && !allowedForAgent(request.AllowedTools, request.Name) {
+		// Defense in depth: the workflow already filters the tools advertised to
+		// the model; this rejects calls to tools outside the agent's allowlist.
+		return ToolResult{}, temporal.NewNonRetryableApplicationError(
+			fmt.Sprintf("tool %q is not allowed for this agent", request.Name), "ToolNotAllowed", nil)
+	}
 	switch request.Name {
 	case "echo":
 		value, _ := request.Arguments["text"].(string)
@@ -222,6 +252,15 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		}
 		return ToolResult{}, fmt.Errorf("tool %q is not registered", request.Name)
 	}
+}
+
+func allowedForAgent(allowed []string, name string) bool {
+	for _, candidate := range allowed {
+		if candidate == name {
+			return true
+		}
+	}
+	return false
 }
 
 // Trigger tool handlers — call the kernel's own HTTP API.

@@ -144,14 +144,15 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent) error {
 	a.UpdatedAt = now
 	skills, _ := json.Marshal(a.Skills)
 	mcp, _ := json.Marshal(a.MCPServers)
+	tools, _ := json.Marshal(a.Tools)
 	labels, _ := json.Marshal(a.Labels)
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO workspace_agent
-		 (id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers,
+		 (id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools,
 		  sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
 		a.ID, nullString(a.ProjectID), a.Name, a.Description, a.Model, a.Provider,
-		a.SystemPrompt, skills, mcp, a.SandboxProfile,
+		a.SystemPrompt, skills, mcp, tools, a.SandboxProfile,
 		a.Temperature, a.MaxTokens, a.NetworkAccess, a.ReadOnly,
 		a.MaxTurns, a.ApprovalMode, labels, a.CreatedAt, a.UpdatedAt)
 	return err
@@ -159,14 +160,14 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent) error {
 
 func (s *Store) GetAgent(ctx context.Context, id string) (Agent, error) {
 	var a Agent
-	var skills, mcp, labels []byte
+	var skills, mcp, tools, labels []byte
 	var projectID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers,
+		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels, created_at, updated_at
 		 FROM workspace_agent WHERE id = $1`, id).
 		Scan(&a.ID, &projectID, &a.Name, &a.Description, &a.Model, &a.Provider,
-			&a.SystemPrompt, &skills, &mcp, &a.SandboxProfile,
+			&a.SystemPrompt, &skills, &mcp, &tools, &a.SandboxProfile,
 			&a.Temperature, &a.MaxTokens, &a.NetworkAccess, &a.ReadOnly,
 			&a.MaxTurns, &a.ApprovalMode, &labels, &a.CreatedAt, &a.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -178,13 +179,14 @@ func (s *Store) GetAgent(ctx context.Context, id string) (Agent, error) {
 	a.ProjectID = derefPtr(projectID)
 	_ = json.Unmarshal(skills, &a.Skills)
 	_ = json.Unmarshal(mcp, &a.MCPServers)
+	_ = json.Unmarshal(tools, &a.Tools)
 	_ = json.Unmarshal(labels, &a.Labels)
 	return a, nil
 }
 
 func (s *Store) ListAllAgents(ctx context.Context) ([]Agent, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers,
+		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels, created_at, updated_at
 		 FROM workspace_agent ORDER BY created_at`)
 	if err != nil {
@@ -196,7 +198,7 @@ func (s *Store) ListAllAgents(ctx context.Context) ([]Agent, error) {
 
 func (s *Store) ListAgentsByProject(ctx context.Context, projectID string) ([]Agent, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers,
+		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels, created_at, updated_at
 		 FROM workspace_agent WHERE project_id = $1 ORDER BY created_at`, projectID)
 	if err != nil {
@@ -214,10 +216,10 @@ func scanAgents(rows interface {
 	var result []Agent
 	for rows.Next() {
 		var a Agent
-		var skills, mcp, labels []byte
+		var skills, mcp, tools, labels []byte
 		var projectID *string
 		if err := rows.Scan(&a.ID, &projectID, &a.Name, &a.Description, &a.Model, &a.Provider,
-			&a.SystemPrompt, &skills, &mcp, &a.SandboxProfile,
+			&a.SystemPrompt, &skills, &mcp, &tools, &a.SandboxProfile,
 			&a.Temperature, &a.MaxTokens, &a.NetworkAccess, &a.ReadOnly,
 			&a.MaxTurns, &a.ApprovalMode, &labels, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
@@ -225,6 +227,7 @@ func scanAgents(rows interface {
 		a.ProjectID = derefPtr(projectID)
 		_ = json.Unmarshal(skills, &a.Skills)
 		_ = json.Unmarshal(mcp, &a.MCPServers)
+		_ = json.Unmarshal(tools, &a.Tools)
 		_ = json.Unmarshal(labels, &a.Labels)
 		result = append(result, a)
 	}
@@ -235,15 +238,16 @@ func (s *Store) UpdateAgent(ctx context.Context, a Agent) error {
 	a.UpdatedAt = time.Now().UTC()
 	skills, _ := json.Marshal(a.Skills)
 	mcp, _ := json.Marshal(a.MCPServers)
+	tools, _ := json.Marshal(a.Tools)
 	labels, _ := json.Marshal(a.Labels)
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_agent
 		 SET project_id=$2, name=$3, description=$4, model=$5, provider=$6, system_prompt=$7,
-		     skills=$8, mcp_servers=$9, sandbox_profile=$10, temperature=$11, max_tokens=$12,
-		     network_access=$13, read_only=$14, max_turns=$15, approval_mode=$16, labels=$17, updated_at=$18
+		     skills=$8, mcp_servers=$9, tools=$10, sandbox_profile=$11, temperature=$12, max_tokens=$13,
+		     network_access=$14, read_only=$15, max_turns=$16, approval_mode=$17, labels=$18, updated_at=$19
 		 WHERE id=$1`,
 		a.ID, nullString(a.ProjectID), a.Name, a.Description, a.Model, a.Provider,
-		a.SystemPrompt, skills, mcp, a.SandboxProfile,
+		a.SystemPrompt, skills, mcp, tools, a.SandboxProfile,
 		a.Temperature, a.MaxTokens, a.NetworkAccess, a.ReadOnly,
 		a.MaxTurns, a.ApprovalMode, labels, a.UpdatedAt)
 	if err != nil {

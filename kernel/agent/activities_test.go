@@ -108,7 +108,9 @@ func TestRunToolMCPFaultCommitsEffectBeforeCrash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("discover stdio MCP server: %v", err)
 	}
-	activities := &Activities{MCP: client}
+	registry := mcpclient.NewRegistry()
+	registry.AdoptLegacy(client)
+	activities := &Activities{MCP: registry}
 
 	_, err = activities.RunTool(ctx, ToolRequest{
 		RunID: "run-mcp-fault", OperationID: "frame-1/call-9", Name: "mcp__create_issue",

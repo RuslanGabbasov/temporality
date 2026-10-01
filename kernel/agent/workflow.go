@@ -48,7 +48,13 @@ type RunInput struct {
 	ApprovalTimeoutSeconds int           `json:"approval_timeout_seconds,omitempty"`
 	WorkspacePath          string        `json:"workspace_path,omitempty"`
 	MCPServer              string        `json:"mcp_server,omitempty"`
-	NetworkAccess          bool          `json:"network_access,omitempty"`
+	// MCPServers selects registry servers for this run; empty keeps the
+	// legacy env server (docs: MCP server registry).
+	MCPServers []string `json:"mcp_servers,omitempty"`
+	// ToolAllowlist restricts the tools offered to (and executed for) this
+	// run across kernel and MCP tools; empty allows everything configured.
+	ToolAllowlist []string `json:"tool_allowlist,omitempty"`
+	NetworkAccess bool     `json:"network_access,omitempty"`
 }
 
 // SkillRef is a skill resolved for a run: identity plus a budgeted digest for
@@ -82,6 +88,9 @@ type ToolRequest struct {
 	WorkspacePath string         `json:"workspace_path,omitempty"`
 	Project       string         `json:"project,omitempty"`
 	Arguments     map[string]any `json:"arguments"`
+	// AllowedTools mirrors RunInput.ToolAllowlist so the activity also
+	// rejects calls to tools that were never advertised to the model.
+	AllowedTools []string `json:"allowed_tools,omitempty"`
 }
 
 type ToolResult struct {
@@ -181,7 +190,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			// last tool turn on more calls and the run ends with an empty handoff.
 			turnMessages = append(slices.Clone(messages), llm.Message{Role: "system", Content: "This is the final turn with tools. Complete only the remaining essential checks; your next message must be the final answer to the request."})
 		}
-		modelReq := ModelRequest{Model: input.Model, Messages: turnMessages, Tools: append(KernelTools(), input.Tools...)}
+		modelReq := ModelRequest{Model: input.Model, Messages: turnMessages, Tools: advertisedTools(&input)}
 		if err := emit(activityCtx, state, "model.started", map[string]any{"turn": turn, "model": input.Model}); err != nil {
 			return result, err
 		}
@@ -299,7 +308,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if !isMCP {
 					return nil
 				}
-				return emit(activityCtx, state, "mcp.call.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": input.MCPServer, "approval_required": approvalRequired})
+				return emit(activityCtx, state, "mcp.call.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": mcpServerForTool(call.Name, input.MCPServer), "approval_required": approvalRequired})
 			}
 			var toolResult ToolResult
 			toolFailed := false
@@ -331,7 +340,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					}
 					if isMCP {
-						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": input.MCPServer, "reason": "approval_timeout"}); err != nil {
+						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": mcpServerForTool(call.Name, input.MCPServer), "reason": "approval_timeout"}); err != nil {
 							return result, err
 						}
 					}
@@ -349,7 +358,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					} else if err := startMCP(); err != nil {
 						return result, err
-					} else if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args}).Get(ctx, &toolResult); err != nil {
+					} else if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args, AllowedTools: input.ToolAllowlist}).Get(ctx, &toolResult); err != nil {
 						toolFailed = true
 						if eventErr := emit(activityCtx, state, "tool.failed", toolFailureData(operationID, argumentsHash, call.Name, err)); eventErr != nil {
 							return result, eventErr
@@ -376,7 +385,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					}
 					if isMCP {
-						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": input.MCPServer, "reason": "approval_rejected"}); err != nil {
+						if err := emit(activityCtx, state, "mcp.call.blocked", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": mcpServerForTool(call.Name, input.MCPServer), "reason": "approval_rejected"}); err != nil {
 							return result, err
 						}
 					}
@@ -417,7 +426,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := startMCP(); err != nil {
 					return result, err
 				}
-				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args}).Get(ctx, &toolResult); err != nil {
+				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args, AllowedTools: input.ToolAllowlist}).Get(ctx, &toolResult); err != nil {
 					toolFailed = true
 					if eventErr := emit(activityCtx, state, "tool.failed", toolFailureData(operationID, argumentsHash, call.Name, err)); eventErr != nil {
 						return result, eventErr
@@ -447,7 +456,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			if isMCP && !toolBlocked {
 				eventType := "mcp.call.completed"
-				data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": input.MCPServer}
+				data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": mcpServerForTool(call.Name, input.MCPServer)}
 				if toolFailed {
 					eventType = "mcp.call.failed"
 					data["error_type"] = "activity_failed"
@@ -637,6 +646,42 @@ func compactJSON(v any, maxLen int) string {
 	return string(b)
 }
 
+// advertisedTools merges kernel and configured MCP tools, then applies the
+// run's tool allowlist when one is set.
+func advertisedTools(input *RunInput) []llm.ToolDef {
+	tools := append(KernelTools(), input.Tools...)
+	if len(input.ToolAllowlist) == 0 {
+		return tools
+	}
+	allowed := make(map[string]bool, len(input.ToolAllowlist))
+	for _, name := range input.ToolAllowlist {
+		allowed[name] = true
+	}
+	var filtered []llm.ToolDef
+	for _, tool := range tools {
+		if allowed[tool.Name] {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
+}
+
+// mcpServerForTool attributes an mcp__ tool to its server for the event
+// stream: namespaced tools carry the server id, legacy mcp__<tool> names fall
+// back to the run's single-server field.
+func mcpServerForTool(name, legacy string) string {
+	rest, ok := strings.CutPrefix(name, prefix)
+	if !ok {
+		return legacy
+	}
+	if server, _, found := strings.Cut(rest, "__"); found {
+		return server
+	}
+	return legacy
+}
+
+const prefix = "mcp__"
+
 // readOnlyTools are tools that never produce side effects — they only
 // observe state. If they fail, there's nothing to reconcile.
 var readOnlyTools = map[string]bool{
@@ -647,9 +692,25 @@ var readOnlyTools = map[string]bool{
 	"grep": true, "mcp__grep": true,
 }
 
+// isReadOnlyTool classifies a tool as side-effect free. Namespaced MCP tools
+// (mcp__<server>__<tool>) classify by their bare tool name.
+func isReadOnlyTool(tool string) bool {
+	if readOnlyTools[tool] {
+		return true
+	}
+	rest, ok := strings.CutPrefix(tool, prefix)
+	if !ok {
+		return false
+	}
+	if _, bare, found := strings.Cut(rest, "__"); found {
+		return readOnlyTools[prefix+bare]
+	}
+	return false
+}
+
 func toolFailureData(operationID, argumentsHash, tool string, err error) map[string]any {
 	data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": tool, "error_type": "activity_failed"}
-	if readOnlyTools[tool] {
+	if isReadOnlyTool(tool) {
 		// Read-only tools have no side effect regardless of where they fail.
 		data["effect"] = "none"
 	} else {

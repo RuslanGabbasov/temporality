@@ -23,6 +23,7 @@ import (
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/cost"
+	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/outbox"
 	"github.com/temporality-project/temporality/kernel/priming"
 	"github.com/temporality-project/temporality/kernel/quota"
@@ -116,11 +117,16 @@ func main() {
 		log.Error("migrate workspace v28", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000029_mcp_servers.up.sql"); err != nil {
+		log.Error("migrate workspace v29", "error", err)
+		os.Exit(1)
+	}
 	activities, err := agent.NewActivities(events)
 	if err != nil {
 		log.Error("configure activities", "error", err)
 		os.Exit(1)
 	}
+	loadMCPServers(ctx, log, ws, activities.MCP)
 	temporalClient, err := client.Dial(client.Options{HostPort: env("TEMPORAL_ADDRESS", client.DefaultHostPort)})
 	if err != nil {
 		log.Error("connect Temporal", "error", err)
@@ -525,7 +531,7 @@ func main() {
 			ID: req.ID, ProjectID: req.ProjectID, Name: req.Name, Description: req.Description,
 			Model: req.Model, Provider: req.Provider, SystemPrompt: req.SystemPrompt,
 			Temperature: req.Temperature, MaxTokens: req.MaxTokens,
-			Skills: req.Skills, MCPServers: req.MCPServers,
+			Skills: req.Skills, MCPServers: req.MCPServers, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
 			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels,
 		}
@@ -563,7 +569,7 @@ func main() {
 			ID: r.PathValue("agentID"), ProjectID: req.ProjectID, Name: req.Name, Description: req.Description,
 			Model: req.Model, Provider: req.Provider, SystemPrompt: req.SystemPrompt,
 			Temperature: req.Temperature, MaxTokens: req.MaxTokens,
-			Skills: req.Skills, MCPServers: req.MCPServers,
+			Skills: req.Skills, MCPServers: req.MCPServers, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
 			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels,
 		}
@@ -740,6 +746,7 @@ func main() {
 				input.NetworkAccess = true
 			}
 			resolveAgentSkills(r.Context(), ws, agentCfg, &input)
+			resolveAgentMCP(agentCfg, &input)
 		}
 		if req.Model != "" {
 			input.Model = req.Model
@@ -1531,6 +1538,172 @@ func main() {
 		writeJSON(w, 200, map[string]any{"memory": memory})
 	})
 
+	// MCP servers (project-scoped registry; stdio / sse / http)
+	mux.HandleFunc("GET /v1/workspace/mcp-servers", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		if project := r.URL.Query().Get("project"); project != "" {
+			list, err := ws.ListMCPServers(r.Context(), project)
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			writeJSON(w, 200, map[string]any{"servers": list, "count": len(list)})
+			return
+		}
+		list, err := ws.ListAllMCPServers(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"servers": list, "count": len(list)})
+	})
+	mux.HandleFunc("POST /v1/workspace/mcp-servers", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req mcpServerRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Name) == "" {
+			writeError(w, 422, errors.New("name is required"))
+			return
+		}
+		if req.ID == "" {
+			req.ID = slugify(req.Name)
+		}
+		if req.ProjectID == "" {
+			writeError(w, 422, errors.New("project_id is required"))
+			return
+		}
+		if _, err := ws.GetProject(r.Context(), req.ProjectID); err != nil {
+			writeError(w, 422, errors.New("project not found"))
+			return
+		}
+		server := req.toServer("")
+		cfg := mcpConfig(server)
+		if err := cfg.Validate(); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		if cfg.Enabled {
+			if err := activities.MCP.Apply(r.Context(), cfg); err != nil {
+				writeError(w, 422, fmt.Errorf("connect MCP server: %w", err))
+				return
+			}
+		}
+		if err := ws.CreateMCPServer(r.Context(), &server); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		writeJSON(w, 201, server)
+	})
+	mux.HandleFunc("GET /v1/workspace/mcp-servers/{serverID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		server, err := ws.GetMCPServer(r.Context(), r.PathValue("serverID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, server)
+	})
+	mux.HandleFunc("PUT /v1/workspace/mcp-servers/{serverID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req mcpServerRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		current, err := ws.GetMCPServer(r.Context(), r.PathValue("serverID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		server := req.toServer(current.ID)
+		server.ProjectID = current.ProjectID
+		cfg := mcpConfig(server)
+		if err := cfg.Validate(); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		if cfg.Enabled {
+			if err := activities.MCP.Apply(r.Context(), cfg); err != nil {
+				writeError(w, 422, fmt.Errorf("connect MCP server: %w", err))
+				return
+			}
+		} else {
+			activities.MCP.Remove(cfg.ID)
+		}
+		if err := ws.UpdateMCPServer(r.Context(), &server); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, server)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/mcp-servers/{serverID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		id := r.PathValue("serverID")
+		if err := ws.DeleteMCPServer(r.Context(), id); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		activities.MCP.Remove(id)
+		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+	// Discover: connect with the posted config, list tools, do not persist.
+	mux.HandleFunc("POST /v1/workspace/mcp-servers/discover", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req mcpServerRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		cfg := mcpConfig(req.toServer(""))
+		if err := cfg.Validate(); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		tools, err := activities.MCP.Discover(r.Context(), cfg)
+		if err != nil {
+			writeError(w, 422, fmt.Errorf("connect MCP server: %w", err))
+			return
+		}
+		writeJSON(w, 200, map[string]any{"tools": tools})
+	})
+	// mcp-tools aggregates tools across all registered servers for the agent tools panel.
+	mux.HandleFunc("GET /v1/workspace/mcp-tools", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		writeJSON(w, 200, map[string]any{
+			"servers":  activities.MCP.ServerTools(),
+			"builtins": builtinToolInfo(activities),
+		})
+	})
+
 	// Webhook triggers: POST /v1/workspace/webhook/{projectID}/{path}
 	// Matches webhook triggers by projectID and config.path.
 	mux.HandleFunc("POST /v1/workspace/webhook/{projectID}/{path...}", func(w http.ResponseWriter, r *http.Request) {
@@ -1587,6 +1760,7 @@ func main() {
 					input.NetworkAccess = true
 				}
 				resolveAgentSkills(r.Context(), ws, &a, &input)
+				resolveAgentMCP(&a, &input)
 			}
 		}
 		if err := activities.PrepareRun(&input); err != nil {
@@ -1652,6 +1826,7 @@ func main() {
 							input.SystemPrompt = a.SystemPrompt
 						}
 						resolveAgentSkills(context.Background(), ws, &a, &input)
+						resolveAgentMCP(&a, &input)
 					}
 				}
 				if err := activities.PrepareRun(&input); err != nil {
@@ -1867,6 +2042,104 @@ func resolveAgentSkills(ctx context.Context, ws *workspace.Store, a *workspace.A
 			RunID: input.RunID, AgentID: a.ID, StartedAt: time.Now().UTC(),
 		})
 	}
+}
+
+// resolveAgentMCP binds the agent's MCP servers and tool allowlist to the run
+// input. Empty MCPServers keeps the legacy env-configured server; empty Tools
+// allows every advertised tool.
+func resolveAgentMCP(a *workspace.Agent, input *agent.RunInput) {
+	if a == nil {
+		return
+	}
+	input.MCPServers = a.MCPServers
+	input.ToolAllowlist = a.Tools
+}
+
+// mcpConfig converts a stored workspace.MCPServer into a registry config.
+func mcpConfig(m workspace.MCPServer) mcpclient.ServerConfig {
+	return mcpclient.ServerConfig{
+		ID: m.ID, Name: m.Name, Type: m.Type,
+		Command: m.Command, Args: m.Args, Env: m.Env,
+		URL: m.URL, Headers: m.Headers,
+		Allow: m.AllowedTools, Approval: m.ApprovalTools,
+		Enabled: m.Enabled,
+	}
+}
+
+// mcpServerRequest is the API payload for creating/updating MCP servers.
+type mcpServerRequest struct {
+	ID            string            `json:"id"`
+	ProjectID     string            `json:"project_id"`
+	Name          string            `json:"name"`
+	Type          string            `json:"type"`
+	URL           string            `json:"url"`
+	Command       string            `json:"command"`
+	Args          []string          `json:"args"`
+	Env           []string          `json:"env"`
+	Headers       map[string]string `json:"headers"`
+	AllowedTools  []string          `json:"allowed_tools"`
+	ApprovalTools []string          `json:"approval_tools"`
+	Enabled       *bool             `json:"enabled"`
+}
+
+func (req mcpServerRequest) toServer(id string) workspace.MCPServer {
+	serverID := id
+	if serverID == "" {
+		serverID = req.ID
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	return workspace.MCPServer{
+		ID: serverID, ProjectID: req.ProjectID, Name: req.Name, Type: strings.ToLower(strings.TrimSpace(req.Type)),
+		URL: strings.TrimSpace(req.URL), Command: strings.TrimSpace(req.Command),
+		Args: req.Args, Env: req.Env, Headers: req.Headers,
+		AllowedTools: req.AllowedTools, ApprovalTools: req.ApprovalTools,
+		Enabled: enabled,
+	}
+}
+
+// builtinToolInfo lists kernel tools (plus run_command when the sandbox is
+// configured) in the registry ToolInfo shape, so the agent tools panel shows
+// the exact tool surface the kernel would advertise.
+func builtinToolInfo(a *agent.Activities) []mcpclient.ToolInfo {
+	defs := a.BuiltinToolDefs()
+	result := make([]mcpclient.ToolInfo, 0, len(defs))
+	for _, def := range defs {
+		result = append(result, mcpclient.ToolInfo{Name: def.Name, Description: def.Description, ModelName: def.Name})
+	}
+	return result
+}
+
+// loadMCPServers applies every stored MCP server to the registry and starts a
+// periodic refresher so restarted servers and changed tool sets stay current.
+func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, registry *mcpclient.Registry) {
+	apply := func() {
+		servers, err := ws.ListAllMCPServers(context.Background())
+		if err != nil {
+			log.Error("list mcp servers", "error", err)
+			return
+		}
+		for _, server := range servers {
+			if err := registry.Apply(context.Background(), mcpConfig(server)); err != nil {
+				log.Error("apply mcp server", "server", server.ID, "error", err)
+			}
+		}
+	}
+	apply()
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				apply()
+			}
+		}
+	}()
 }
 
 // skillRequest is the API shape for skill create/update: manifest arrives as
