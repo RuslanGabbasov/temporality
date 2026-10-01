@@ -14,13 +14,15 @@
     "@carbon/icons-react": "^11.50.0",
     "@carbon/react": "^1.64.0",
     "@carbon/styles": "^1.64.0",
+    "js-yaml": "^5.4.2",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1",
-    "remark-breaks": "^4.0.0"
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",

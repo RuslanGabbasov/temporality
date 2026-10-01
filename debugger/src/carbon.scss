@@ -731,6 +731,104 @@ button.header-nav-link {
   background: var(--tm-border);
 }
 
+.chevron-flip {
+  margin-left: 0.3rem;
+  transition: transform var(--tm-duration-normal) ease;
+}
+
+.chevron-flip[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+// ── Skill manifest structured editor ─────────────────────────────
+
+.manifest-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.manifest-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.manifest-field-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chip-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--tm-raised, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--tm-border);
+  border-radius: var(--tm-radius-sm);
+  min-height: 2.4rem;
+  box-sizing: border-box;
+}
+
+.chip-input:focus-within {
+  border-color: var(--tm-teal);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.3rem 0.1rem 0.55rem;
+  background: rgba(42, 107, 99, 0.25);
+  border: 1px solid rgba(42, 107, 99, 0.5);
+  border-radius: 999px;
+  color: var(--tm-text);
+  font-size: 0.75rem;
+  font-family: var(--tm-font-mono, monospace);
+  line-height: 1.4;
+}
+
+.chip button {
+  background: none;
+  border: none;
+  color: var(--tm-text-3);
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.chip button:hover {
+  color: var(--tm-text);
+}
+
+.chip-field {
+  flex: 1;
+  min-width: 8rem;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--tm-text);
+  font-size: 0.8rem;
+  font-family: var(--tm-font);
+  padding: 0.2rem 0;
+}
+
+.chip-field::placeholder {
+  color: var(--tm-text-3);
+}
+
+:root[data-theme="light"] .chip {
+  background: rgba(42, 107, 99, 0.12);
+}
+
+:root[data-theme="light"] .chip button {
+  color: var(--tm-text-2);
+}
+
 .nav-badge {
   margin-left: 0.35rem;
   color: var(--tm-ink);

@@ -14,6 +14,7 @@ import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
 import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue } from './workspaceApi'
 import { useT } from './i18n'
 import Markdown from './Markdown'
+import SkillManifestEditor, { manifestToYaml, type SkillManifest } from './SkillManifestEditor'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -37,18 +38,11 @@ When the agent should apply this skill.
 - What must never happen.
 `
 
-const STARTER_MANIFEST = `id: my-skill
-version: 1.0.0
-name: My skill
-description: >
-  One-line description used by agents to select this skill.
-capabilities:
-  - do-the-thing
-tools:
-  - run_command
-runtime:
-  sandbox: optional
-`
+const STARTER_MANIFEST: SkillManifest = {
+  capabilities: [],
+  tools: [],
+  runtime: { sandbox: 'optional' },
+}
 
 function manifestList(manifest: Record<string, unknown>, key: string): string[] {
   const value = manifest?.[key]
@@ -66,7 +60,7 @@ export default function Skills({ project }: { project: string }) {
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Skill | null>(null)
-  const [form, setForm] = useState({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest_yaml: STARTER_MANIFEST })
+  const [form, setForm] = useState<{ id: string; name: string; description: string; version: string; markdown: string; manifest: SkillManifest }>({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest: STARTER_MANIFEST })
   const [validation, setValidation] = useState<SkillValidationIssue[] | null>(null)
   const [openVersion, setOpenVersion] = useState<string | null>(null)
 
@@ -103,27 +97,39 @@ export default function Skills({ project }: { project: string }) {
   const startCreate = () => {
     setEditing(null)
     setValidation(null)
-    setForm({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest_yaml: STARTER_MANIFEST })
+    setForm({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest: STARTER_MANIFEST })
     setShowForm(true)
   }
 
   const startEdit = (skill: Skill) => {
     setEditing(skill)
     setValidation(null)
+    let manifest: SkillManifest = {}
+    try { manifest = JSON.parse(JSON.stringify(skill.manifest ?? {})) as SkillManifest } catch { manifest = {} }
     setForm({
       id: skill.id,
       name: skill.name,
       description: skill.description,
       version: skill.version,
       markdown: skill.markdown,
-      manifest_yaml: JSON.stringify(skill.manifest, null, 2),
+      manifest,
     })
     setShowForm(true)
   }
 
+  // Manifest yaml is derived from the structured form so name/description/version
+  // stay in sync with the top-level fields instead of being edited twice.
+  const manifestYaml = () => manifestToYaml({
+    ...form.manifest,
+    id: editing?.id ?? form.id.trim(),
+    name: form.name,
+    description: form.description,
+    version: form.version,
+  })
+
   const validate = async () => {
     try {
-      const result = await workspaceApi.validateSkill(editing?.id ?? 'draft', { markdown: form.markdown, manifest_yaml: form.manifest_yaml })
+      const result = await workspaceApi.validateSkill(editing?.id ?? 'draft', { markdown: form.markdown, manifest_yaml: manifestYaml() })
       setValidation(result.issues ?? [])
     } catch (f) { setError(message(f)) }
   }
@@ -135,13 +141,13 @@ export default function Skills({ project }: { project: string }) {
       if (editing) {
         await workspaceApi.updateSkill(editing.id, {
           name: form.name, description: form.description, version: form.version,
-          markdown: form.markdown, manifest_yaml: form.manifest_yaml,
+          markdown: form.markdown, manifest_yaml: manifestYaml(),
         })
       } else {
         await workspaceApi.createSkill({
           id: form.id.trim() || form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
           project_id: project, name: form.name, description: form.description, version: form.version,
-          markdown: form.markdown, manifest_yaml: form.manifest_yaml,
+          markdown: form.markdown, manifest_yaml: manifestYaml(),
         })
       }
       setShowForm(false); setEditing(null)
@@ -243,7 +249,7 @@ export default function Skills({ project }: { project: string }) {
 
               <Tile style={{ marginBottom: '0.75rem' }}>
                 <Heading style={{ fontSize: '0.9rem' }}>{t('skills.manifest_section') ?? 'Manifest (skill.yaml)'}</Heading>
-                <pre style={{ fontSize: '0.75rem', whiteSpace: 'pre-wrap', margin: 0 }}>{JSON.stringify(selected.manifest, null, 2)}</pre>
+                <pre style={{ fontSize: '0.75rem', whiteSpace: 'pre-wrap', margin: 0 }}>{manifestToYaml(selected.manifest as SkillManifest)}</pre>
               </Tile>
 
               <Tile style={{ marginBottom: '0.75rem' }}>
@@ -300,7 +306,7 @@ export default function Skills({ project }: { project: string }) {
       {/* Create/Edit modal */}
       {showForm && (
         <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '680px', maxHeight: '85vh', overflow: 'auto' }}>
+          <div className="modal-panel" style={{ width: '760px', maxHeight: '85vh', overflow: 'auto' }}>
             <Heading>{editing ? (t('skills.edit_skill') ?? 'Edit Skill') : (t('skills.new_skill') ?? 'New Skill')}</Heading>
             {!editing && (
               <TextInput id="skill-id" labelText={t('skills.id') ?? 'ID'} value={form.id} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, id: e.target.value })} placeholder="deploy-service" helperText={t('skills.id_helper') ?? 'Lowercase with dashes; auto-generated from name if empty'} />
@@ -309,7 +315,7 @@ export default function Skills({ project }: { project: string }) {
             <TextInput id="skill-description" labelText={t('skills.description') ?? 'Description'} value={form.description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, description: e.target.value })} />
             <TextInput id="skill-version" labelText={t('skills.version') ?? 'Version'} value={form.version} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, version: e.target.value })} helperText={editing ? (t('skills.version_helper') ?? 'Increase the version to record a new immutable version') : '1.0.0'} />
             <TextArea id="skill-markdown" labelText="SKILL.md" rows={10} value={form.markdown} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, markdown: e.target.value })} style={{ fontFamily: 'monospace', fontSize: '0.8rem' }} />
-            <TextArea id="skill-manifest" labelText="skill.yaml" rows={10} value={form.manifest_yaml} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, manifest_yaml: e.target.value })} style={{ fontFamily: 'monospace', fontSize: '0.8rem' }} />
+            <SkillManifestEditor manifest={form.manifest} onChange={(manifest) => setForm({ ...form, manifest })} />
             {validation && (
               <div style={{ margin: '0.5rem 0' }}>
                 {validation.length === 0
