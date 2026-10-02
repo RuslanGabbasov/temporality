@@ -72,6 +72,21 @@ Not in MVP: agent-driven skill mutation beyond 0.x drafts (full evolution workfl
 
 ---
 
+## P0 — Evaluable Agent (agent definition & prompt compiler)
+
+Source spec: `docs/evaluable-agent.md`, work plan: `docs/plan-evaluable-agent.md`.
+
+- [ ] **Agent definition** — structured `definition` JSONB (purpose, capabilities, constraints, completion) instead of free-form system prompt; immutable `workspace_agent_version` per change
+- [ ] **Prompt compiler** — deterministic compile from semantic components (base evidence contract + role + constraints + completion + env policy); no tool/skill duplication, no step-by-step instructions
+- [ ] **Capability enforcement** — toggles actually restrict (modify_files → read-only + no write tools, run_commands, network, skills, knowledge)
+- [ ] **Agent builder** — NL description → structured draft (pattern: skill builder), wizard with provenance badges and questions
+- [ ] **Regenerate with diff** — field-level diff vs current definition, manual edits highlighted, accept/cancel
+- [ ] **Meaning-first UI** — card shows Purpose/Can/Cannot/Before-done summary; compiled prompt as a secondary view with optional manual override
+- [ ] **Built-in agents** — Coder/Reviewer/Researcher/DevOps seeded per project, editable via the same UI
+- [ ] **Evolution tab** — version timeline + per-version run stats (runs link `agent_version`)
+
+---
+
 ## P1 — Make experience understandable
 
 - [x] **Activation chain UI** — click knowledge → see where it arose, where recalled, where injected, what decision followed, what actions, what outcome, where validated/invalidated/superseded. Distinguish: reused/validated, failed, invalidated, superseded, resurrected.
