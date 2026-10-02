@@ -35,10 +35,19 @@ type SandboxRunner interface {
 }
 
 type Activities struct {
-	Events         EventOutbox
-	Model          *llm.Client
-	HTTP           *http.Client
+	Events EventOutbox
+	Model  *llm.Client
+	HTTP   *http.Client
+	// TemporalityURL is the journal base URL (observations, hints, events).
 	TemporalityURL string
+	// WorkspaceURL is the base URL of the kernel's own workspace API
+	// (skills, triggers, projects). Agent tools that read or write workspace
+	// entities must call this, not the journal.
+	WorkspaceURL string
+	// WorkspaceToken authenticates loopback calls against the kernel's own
+	// workspace API when the kernel gate is enabled. It is a startup-random
+	// internal credential injected in main, never exposed via config.
+	WorkspaceToken string
 	// APIToken authenticates direct journal calls (hints, knowledge lookup)
 	// when the journal requires bearer auth; it mirrors TEMPORALITY_API_TOKEN
 	// used by the event outbox publisher.
@@ -66,7 +75,7 @@ func NewActivities(events EventOutbox) (*Activities, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), APIToken: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), MCP: registry, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandboxRunner}, nil
+	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), WorkspaceURL: strings.TrimRight(env("KERNEL_WORKSPACE_URL", "http://localhost:8090"), "/"), APIToken: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), MCP: registry, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandboxRunner}, nil
 }
 
 func (a *Activities) ToolDefs() []llm.ToolDef {
@@ -270,10 +279,13 @@ func (a *Activities) handleListTriggers(ctx context.Context, request ToolRequest
 	if project == "" {
 		return ToolResult{Content: "error: project not set"}, nil
 	}
-	url := fmt.Sprintf("%s/v1/workspace/projects/%s/triggers", a.TemporalityURL, project)
-	body, err := a.kernelGET(ctx, url)
+	url := fmt.Sprintf("%s/v1/workspace/projects/%s/triggers", a.WorkspaceURL, project)
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: list triggers failed (HTTP %d): %s", status, truncate(body, 400))}, nil
 	}
 	return ToolResult{Content: body}, nil
 }
@@ -307,9 +319,12 @@ func (a *Activities) handleCreateTrigger(ctx context.Context, request ToolReques
 	if agentID, ok := request.Arguments["agent_id"].(string); ok && agentID != "" {
 		trigger["agent_id"] = agentID
 	}
-	body, err := a.kernelPOST(ctx, a.TemporalityURL+"/v1/workspace/triggers", trigger)
+	body, status, err := a.workspaceDo(ctx, http.MethodPost, a.WorkspaceURL+"/v1/workspace/triggers", trigger)
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: create trigger failed (HTTP %d): %s", status, truncate(body, 400))}, nil
 	}
 	return ToolResult{Content: body}, nil
 }
@@ -337,9 +352,12 @@ func (a *Activities) handleUpdateTrigger(ctx context.Context, request ToolReques
 		cfg["prompt"] = prompt
 		update["config"] = cfg
 	}
-	body, err := a.kernelPOST(ctx, a.TemporalityURL+"/v1/workspace/triggers/"+triggerID, update)
+	body, status, err := a.workspaceDo(ctx, http.MethodPost, a.WorkspaceURL+"/v1/workspace/triggers/"+triggerID, update)
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: update trigger failed (HTTP %d): %s", status, truncate(body, 400))}, nil
 	}
 	return ToolResult{Content: body}, nil
 }
@@ -349,33 +367,46 @@ func (a *Activities) handleDeleteTrigger(ctx context.Context, request ToolReques
 	if triggerID == "" {
 		return ToolResult{Content: "error: trigger_id is required"}, nil
 	}
-	url := fmt.Sprintf("%s/v1/workspace/triggers/%s", a.TemporalityURL, triggerID)
-	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	url := fmt.Sprintf("%s/v1/workspace/triggers/%s", a.WorkspaceURL, triggerID)
+	body, status, err := a.workspaceDo(ctx, http.MethodDelete, url, nil)
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
 	}
-	req.Header.Set("Authorization", "Bearer "+a.APIToken)
-	resp, err := a.HTTP.Do(req)
-	if err != nil {
-		return ToolResult{Content: "error: " + err.Error()}, nil
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: delete trigger failed (HTTP %d): %s", status, truncate(body, 400))}, nil
 	}
-	defer resp.Body.Close()
-	return ToolResult{Content: fmt.Sprintf("deleted trigger %s (HTTP %d)", triggerID, resp.StatusCode)}, nil
+	return ToolResult{Content: fmt.Sprintf("deleted trigger %s", triggerID)}, nil
 }
 
-func (a *Activities) kernelGET(ctx context.Context, url string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return "", err
+// workspaceDo performs an authenticated request against the kernel's own
+// workspace API (skills, triggers). It returns the response body and status;
+// transport failures come back as errors so tool results never present a
+// 404 payload as usable content.
+func (a *Activities) workspaceDo(ctx context.Context, method, url string, body any) (string, int, error) {
+	var reader io.Reader
+	if body != nil {
+		encoded, _ := json.Marshal(body)
+		reader = bytes.NewReader(encoded)
 	}
-	req.Header.Set("Authorization", "Bearer "+a.APIToken)
+	req, err := http.NewRequestWithContext(ctx, method, url, reader)
+	if err != nil {
+		return "", 0, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	token := a.WorkspaceToken
+	if token == "" {
+		token = a.APIToken
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := a.HTTP.Do(req)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	return string(b), nil
+	return string(b), resp.StatusCode, nil
 }
 
 // Skill tool handlers — read-only navigation over the skill registry. Skills
@@ -386,10 +417,13 @@ func (a *Activities) handleSkillSearch(ctx context.Context, request ToolRequest)
 	if project == "" {
 		return ToolResult{Content: "error: project not set"}, nil
 	}
-	url := fmt.Sprintf("%s/v1/workspace/skills?project=%s", a.TemporalityURL, urlQueryEscape(project))
-	body, err := a.kernelGET(ctx, url)
+	url := fmt.Sprintf("%s/v1/workspace/skills?project=%s", a.WorkspaceURL, urlQueryEscape(project))
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: skill search failed (HTTP %d): %s", status, truncate(body, 400))}, nil
 	}
 	query, _ := request.Arguments["query"].(string)
 	if query == "" {
@@ -429,30 +463,39 @@ func (a *Activities) handleSkillAction(ctx context.Context, request ToolRequest)
 	var url string
 	switch request.Name {
 	case "skill_inspect":
-		url = fmt.Sprintf("%s/v1/workspace/skills/%s", a.TemporalityURL, skillID)
+		url = fmt.Sprintf("%s/v1/workspace/skills/%s", a.WorkspaceURL, skillID)
 	case "skill_validate":
 		return a.handleSkillValidate(ctx, skillID)
 	case "skill_history":
-		url = fmt.Sprintf("%s/v1/workspace/skills/%s/versions", a.TemporalityURL, skillID)
+		url = fmt.Sprintf("%s/v1/workspace/skills/%s/versions", a.WorkspaceURL, skillID)
 	case "skill_executions":
-		url = fmt.Sprintf("%s/v1/workspace/skills/%s/executions", a.TemporalityURL, skillID)
+		url = fmt.Sprintf("%s/v1/workspace/skills/%s/executions", a.WorkspaceURL, skillID)
 	case "skill_memory":
-		url = fmt.Sprintf("%s/v1/workspace/skills/%s/memory", a.TemporalityURL, skillID)
+		url = fmt.Sprintf("%s/v1/workspace/skills/%s/memory", a.WorkspaceURL, skillID)
 	default:
 		return ToolResult{Content: "error: unknown skill tool " + request.Name}, nil
 	}
-	body, err := a.kernelGET(ctx, url)
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status == 404 {
+		return ToolResult{Content: fmt.Sprintf("error: skill %q not found; use skill_search to list ids", skillID)}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: %s failed (HTTP %d): %s", request.Name, status, truncate(body, 400))}, nil
 	}
 	return ToolResult{Content: compactJSON(body, 6000)}, nil
 }
 
 // handleSkillValidate fetches the stored skill and re-checks its contract.
 func (a *Activities) handleSkillValidate(ctx context.Context, skillID string) (ToolResult, error) {
-	body, err := a.kernelGET(ctx, fmt.Sprintf("%s/v1/workspace/skills/%s", a.TemporalityURL, skillID))
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, fmt.Sprintf("%s/v1/workspace/skills/%s", a.WorkspaceURL, skillID), nil)
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: skill %q not readable (HTTP %d)", skillID, status)}, nil
 	}
 	var skill struct {
 		Markdown     string          `json:"markdown"`
@@ -461,31 +504,25 @@ func (a *Activities) handleSkillValidate(ctx context.Context, skillID string) (T
 	if err := json.Unmarshal([]byte(body), &skill); err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
 	}
-	response, err := a.kernelPOST(ctx, fmt.Sprintf("%s/v1/workspace/skills/%s/validate", a.TemporalityURL, skillID), map[string]any{
+	response, status, err := a.workspaceDo(ctx, http.MethodPost, fmt.Sprintf("%s/v1/workspace/skills/%s/validate", a.WorkspaceURL, skillID), map[string]any{
 		"markdown":      skill.Markdown,
 		"manifest_yaml": string(skill.ManifestYAML),
 	})
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
 	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: validate failed (HTTP %d): %s", status, truncate(response, 400))}, nil
+	}
 	return ToolResult{Content: compactJSON(response, 4000)}, nil
 }
 
-func (a *Activities) kernelPOST(ctx context.Context, url string, body any) (string, error) {
-	b, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(b))
-	if err != nil {
-		return "", err
+// truncate shortens s for inclusion in a compact tool error message.
+func truncate(s string, limit int) string {
+	if len(s) <= limit {
+		return s
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+a.APIToken)
-	resp, err := a.HTTP.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	rb, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	return string(rb), nil
+	return s[:limit] + "…"
 }
 
 func stringArgs(value any) ([]string, error) {

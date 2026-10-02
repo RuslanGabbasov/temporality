@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +49,44 @@ func TestRunToolWithoutFaultExecutesNormally(t *testing.T) {
 	}
 	if len(runner.commands) != 1 {
 		t.Fatalf("expected one execution, got %d", len(runner.commands))
+	}
+}
+
+func TestSkillSearchReportsHTTPErrorsAsToolErrors(t *testing.T) {
+	// The registry lives on the kernel's own workspace API; a miss there must
+	// surface as a tool error, never as a "404 page not found" payload the
+	// model could mistake for usable content.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/workspace/skills" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer internal" {
+			t.Errorf("authorization = %q, want internal workspace token", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"skills": []any{}})
+	}))
+	defer server.Close()
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+
+	result, err := activities.RunTool(context.Background(), ToolRequest{
+		Project: "demo", Name: "skill_search", Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("skill_search: %v", err)
+	}
+	if !strings.Contains(result.Content, "skills") {
+		t.Fatalf("unexpected content: %q", result.Content)
+	}
+
+	result, err = activities.RunTool(context.Background(), ToolRequest{
+		Project: "demo", Name: "skill_inspect", Arguments: map[string]any{"skill_id": "missing"},
+	})
+	if err != nil {
+		t.Fatalf("skill_inspect: %v", err)
+	}
+	if !strings.Contains(result.Content, "error:") || strings.Contains(result.Content, "404 page not found") {
+		t.Fatalf("expected a tool error for missing skill, got %q", result.Content)
 	}
 }
 

@@ -176,6 +176,21 @@ func main() {
 	} else {
 		log.Info("kernel authentication enabled", "tokens", gate.TokenCount())
 	}
+	// Workspace self-access: agent tools (skills, triggers) call this kernel's
+	// own workspace API over loopback. A startup-random internal token lets the
+	// calls pass the gate without exposing a reusable credential; when the gate
+	// is disabled no token is needed.
+	address := env("KERNEL_HTTP_ADDR", ":8090")
+	if gate.Enabled() {
+		internalToken := generateToken()
+		if internalGate, igErr := controlplane.NewGate(internalToken + ":kernel-internal:operator:*"); igErr == nil {
+			gate = gate.Merge(internalGate)
+			activities.WorkspaceToken = internalToken
+		}
+	}
+	if os.Getenv("KERNEL_WORKSPACE_URL") == "" {
+		activities.WorkspaceURL = "http://localhost" + address
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]bool{"ok": true}) })
 	mux.HandleFunc("GET /v1/agent/whoami", func(w http.ResponseWriter, r *http.Request) {
@@ -1920,7 +1935,6 @@ func main() {
 	})
 
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
-	address := env("KERNEL_HTTP_ADDR", ":8090")
 	server := &http.Server{Addr: address, Handler: gate.Authenticate(mux), ReadHeaderTimeout: 5 * time.Second}
 	go func() { <-ctx.Done(); _ = server.Shutdown(context.Background()) }()
 	log.Info("agent kernel started", "address", address, "task_queue", taskQueue)
