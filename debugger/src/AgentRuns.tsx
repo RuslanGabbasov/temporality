@@ -356,7 +356,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     key={event.event_id}
                     onClick={() => setSelected(id)}
                     className={`workspace-tile ${selected === id ? 'selected' : ''}`}
-                    style={{ padding: '0.5rem 0.75rem', cursor: 'pointer' }}
+                    style={{ padding: '0.5rem 0.75rem', cursor: 'pointer', minWidth: 0, overflow: 'hidden' }}
                   >
                     <div style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title || id}</div>
                     <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
@@ -438,7 +438,7 @@ export default function AgentRuns({ project }: { project: string }) {
                         <>
                           <Tag type="warm-gray" size="sm">{String(details.tool)}</Tag>
                           <Tag type="gray" size="sm">{t('runs.risk', { level: String(risk?.level ?? 'unknown') })}</Tag>
-                          <pre style={{ background: 'var(--tm-raised)', color: 'var(--tm-text)', padding: '0.5rem', fontSize: '0.75rem', marginTop: '0.5rem', borderRadius: '4px' }}>
+                          <pre style={{ background: 'var(--tm-raised)', color: 'var(--tm-text)', padding: '0.5rem', fontSize: '0.75rem', marginTop: '0.5rem', borderRadius: '4px', maxWidth: '100%', overflowX: 'auto' }}>
                             {Array.isArray(command) ? command.join(' ') : json(operation?.arguments ?? details)}
                           </pre>
                         </>
@@ -470,6 +470,11 @@ export default function AgentRuns({ project }: { project: string }) {
                             marginBottom: '0.15rem',
                             background: 'var(--tm-surface)',
                             borderRadius: '0 4px 4px 0',
+                            // The rows live in a CSS-grid Stack; without min-width:0
+                            // a long nowrap detail line inflates the row's intrinsic
+                            // width and stretches every row past the column edge.
+                            minWidth: 0,
+                            overflow: 'hidden',
                           }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
@@ -532,7 +537,7 @@ export default function AgentRuns({ project }: { project: string }) {
                         {trajectory.patterns.map((p: any, i: number) => (
                           <div key={i} style={{ fontSize: '0.8rem', marginBottom: '0.25rem', color: 'var(--tm-text)' }}>
                             <Tag type="cyan" size="sm">×{p.count}</Tag>
-                            <code style={{ marginLeft: '0.5rem', color: '#9e8cff' }}>{p.signature}</code>
+                            <code style={{ marginLeft: '0.5rem', color: '#9e8cff', overflowWrap: 'anywhere' }}>{p.signature}</code>
                             <span style={{ color: 'var(--tm-text-3)', marginLeft: '0.5rem' }}>turns {p.turns.join(', ')}</span>
                           </div>
                         ))}
