@@ -221,9 +221,3 @@ Debugger dev-сервер (`npm --prefix debugger run dev`) проксирует
 - Event model: [`docs/event-model.md`](docs/event-model.md)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
 - Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
-
-## История
-
-Репозиторий прошёл три эпохи: FRP cognitive runtime (эпоха 1), AML
-benchmark harness (эпоха 2), Agent Kernel + Temporality journal (продукт).
-Документы эпох — в [`docs/history/`](docs/history/).
