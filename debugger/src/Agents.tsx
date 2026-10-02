@@ -485,12 +485,12 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         </Stack>
       </div>
 
-      <Grid>
+      <Grid style={{ rowGap: '0.75rem' }}>
         {agents.map((a) => {
           const prompt = promptFor[a.id]
           return (
             <Column key={a.id} sm={4} md={8} lg={8}>
-              <Tile className="agent-card" style={{ marginBottom: '0.75rem' }}>
+              <Tile className="agent-card">
                 <div className="agent-card-head">
                   <div className="agent-card-title">
                     <strong>{a.name}</strong>
