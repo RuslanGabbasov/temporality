@@ -103,8 +103,17 @@ Rules:
 - Ask at most 3 short questions, and only when the answer changes the contract.
 - Write the markdown instructions in the same language as the user description.`
 
-// BuildSkillDraft runs the single model call behind the wizard.
-func BuildSkillDraft(ctx context.Context, model *llm.Client, description, toolsSummary string) (SkillDraft, error) {
+func draftPrompt(final bool) string {
+	if final {
+		return draftSystemPrompt + finalRoundInstruction
+	}
+	return draftSystemPrompt
+}
+
+// BuildSkillDraft runs the single model call behind the wizard. final marks a
+// follow-up round where the user already answered the builder's questions:
+// no new questions are asked or returned.
+func BuildSkillDraft(ctx context.Context, model *llm.Client, description, toolsSummary string, final bool) (SkillDraft, error) {
 	if model == nil {
 		return SkillDraft{}, errors.New("model client is not configured")
 	}
@@ -116,13 +125,21 @@ func BuildSkillDraft(ctx context.Context, model *llm.Client, description, toolsS
 		user += "\n\nAvailable tools and MCP servers in this workspace:\n" + toolsSummary
 	}
 	completion, err := model.Complete(ctx, []llm.Message{
-		{Role: "system", Content: draftSystemPrompt},
+		{Role: "system", Content: draftPrompt(final)},
 		{Role: "user", Content: user},
 	}, nil)
 	if err != nil {
 		return SkillDraft{}, fmt.Errorf("model call failed: %w", err)
 	}
-	return parseDraftCompletion(completion.Content)
+	draft, err := parseDraftCompletion(completion.Content)
+	if err != nil {
+		return SkillDraft{}, err
+	}
+	if final {
+		// Hard guarantee: one clarification round, ever.
+		draft.Questions = nil
+	}
+	return draft, nil
 }
 
 // parseDraftCompletion tolerates fenced code blocks around the JSON payload.

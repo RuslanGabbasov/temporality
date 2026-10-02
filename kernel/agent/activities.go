@@ -591,7 +591,7 @@ func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest
 	if strings.TrimSpace(description) == "" {
 		return ToolResult{Content: "error: description is required"}, nil
 	}
-	draft, err := BuildSkillDraft(ctx, a.Model, description, a.ToolsSummary())
+	draft, err := BuildSkillDraft(ctx, a.Model, description, a.ToolsSummary(), false)
 	if err != nil {
 		return ToolResult{Content: "error: skill builder failed: " + err.Error()}, nil
 	}

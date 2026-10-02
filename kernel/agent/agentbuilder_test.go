@@ -70,7 +70,25 @@ func TestParseAgentDraftInvalidJSON(t *testing.T) {
 }
 
 func TestBuildAgentDraftRequiresDescription(t *testing.T) {
-	if _, err := BuildAgentDraft(nil, nil, "  ", ""); err == nil || !strings.Contains(err.Error(), "description") {
+	if _, err := BuildAgentDraft(nil, nil, "  ", "", false); err == nil || !strings.Contains(err.Error(), "description") {
 		t.Fatalf("blank description must be rejected, got %v", err)
+	}
+}
+
+func TestBuilderFinalRoundPrompt(t *testing.T) {
+	if agentDraftPrompt(false) != agentDraftSystemPrompt {
+		t.Fatal("first round must use the base prompt")
+	}
+	final := agentDraftPrompt(true)
+	if !strings.Contains(final, agentDraftSystemPrompt) {
+		t.Fatal("final round prompt must extend the base prompt")
+	}
+	for _, marker := range []string{"follow-up round", "empty \"questions\" array", "Clarifications"} {
+		if !strings.Contains(final, marker) {
+			t.Fatalf("final round prompt must mention %q", marker)
+		}
+	}
+	if draftPrompt(true) == draftSystemPrompt {
+		t.Fatal("skill builder final round prompt must extend the base prompt")
 	}
 }

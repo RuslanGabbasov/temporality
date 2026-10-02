@@ -243,7 +243,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
           return `- ${q}\n  Answer: ${a.trim()}`
         }).join('\n')
       }
-      const draft = await workspaceApi.draftAgent(description)
+      // Follow-up round: questions were already asked once — this call must
+      // not generate new ones (single clarification round by design).
+      const draft = await workspaceApi.draftAgent(description, draftQuestions.length > 0)
       applyDraft(draft, draft.questions ?? [])
     } catch (f) {
       setWizardError(message(f))
@@ -375,7 +377,8 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     if (!form.description?.trim()) return
     setRegenBusy(true); setError('')
     try {
-      const draft = await workspaceApi.draftAgent(form.description.trim())
+      // Rebuild is always a final round: make assumptions, no new questions.
+      const draft = await workspaceApi.draftAgent(form.description.trim(), true)
       setRegenDraft(draft)
     } catch (f) { setError(message(f)) }
     finally { setRegenBusy(false) }
@@ -685,6 +688,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                 {draftQuestions.length > 0 && (
                   <div className="wizard-questions">
                     <div className="skill-subheading">{t('skills.agent_questions') ?? 'The agent asks for clarification'}</div>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>{t('skills.agent_questions_hint')}</p>
                     {draftQuestions.map((q, i) => (
                       <div key={i} style={{ marginBottom: '0.5rem' }}>
                         <p style={{ margin: '0 0 0.25rem', fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>{q.question}</p>

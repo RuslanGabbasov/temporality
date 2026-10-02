@@ -739,6 +739,7 @@ func main() {
 		}
 		var req struct {
 			Description string `json:"description"`
+			Final       bool   `json:"final"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 			writeError(w, 400, err)
@@ -748,7 +749,7 @@ func main() {
 			writeError(w, 422, errors.New("description is required"))
 			return
 		}
-		draft, err := agent.BuildAgentDraft(r.Context(), activities.Model, req.Description, activities.ToolsSummary())
+		draft, err := agent.BuildAgentDraft(r.Context(), activities.Model, req.Description, activities.ToolsSummary(), req.Final)
 		if err != nil {
 			writeError(w, 502, err)
 			return
@@ -1630,6 +1631,7 @@ func main() {
 		}
 		var req struct {
 			Description string `json:"description"`
+			Final       bool   `json:"final"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 			writeError(w, 400, err)
@@ -1639,7 +1641,7 @@ func main() {
 			writeError(w, 422, errors.New("description is required"))
 			return
 		}
-		draft, err := agent.BuildSkillDraft(r.Context(), activities.Model, req.Description, activities.ToolsSummary())
+		draft, err := agent.BuildSkillDraft(r.Context(), activities.Model, req.Description, activities.ToolsSummary(), req.Final)
 		if err != nil {
 			writeError(w, 502, err)
 			return

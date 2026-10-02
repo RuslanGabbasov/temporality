@@ -194,7 +194,9 @@ export default function Skills({ project }: { project: string }) {
           return `- ${q}\n  Answer: ${a.trim()}`
         }).join('\n')
       }
-      const draft = await workspaceApi.draftSkill(description)
+      // Follow-up round: questions were already asked once — this call must
+      // not generate new ones (single clarification round by design).
+      const draft = await workspaceApi.draftSkill(description, draftQuestions.length > 0)
       applyDraft(draft, draft.questions ?? [])
       setWizardOpen(false)
     } catch (f) {

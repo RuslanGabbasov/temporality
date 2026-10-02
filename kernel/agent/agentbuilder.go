@@ -85,8 +85,25 @@ Rules:
 - Ask at most 3 short questions, and only when the answer changes the definition.
 - Write description, constraints and completion in the same language as the user description.`
 
-// BuildAgentDraft runs the single model call behind the agent wizard.
-func BuildAgentDraft(ctx context.Context, model *llm.Client, description, toolsSummary string) (AgentDraft, error) {
+// finalRoundInstruction is appended to builder prompts on follow-up rounds,
+// after the user has answered the builder's questions. Clarification is a
+// single round by design (docs/living-skills.md §46, docs/evaluable-agent.md
+// §4): the builder must not interrogate the user in a loop.
+const finalRoundInstruction = `
+
+This is a follow-up round: the user has already answered your previous questions (see the Clarifications section of the description). Do not ask new questions — return an empty "questions" array. Where things remain unclear, choose reasonable defaults that match the spirit of the description.`
+
+func agentDraftPrompt(final bool) string {
+	if final {
+		return agentDraftSystemPrompt + finalRoundInstruction
+	}
+	return agentDraftSystemPrompt
+}
+
+// BuildAgentDraft runs the single model call behind the agent wizard. final
+// marks a follow-up round where the user already answered the builder's
+// questions: no new questions are asked or returned.
+func BuildAgentDraft(ctx context.Context, model *llm.Client, description, toolsSummary string, final bool) (AgentDraft, error) {
 	if strings.TrimSpace(description) == "" {
 		return AgentDraft{}, errors.New("description is required")
 	}
@@ -98,13 +115,21 @@ func BuildAgentDraft(ctx context.Context, model *llm.Client, description, toolsS
 		user += "\n\nTools available to agents in this workspace:\n" + toolsSummary
 	}
 	completion, err := model.Complete(ctx, []llm.Message{
-		{Role: "system", Content: agentDraftSystemPrompt},
+		{Role: "system", Content: agentDraftPrompt(final)},
 		{Role: "user", Content: user},
 	}, nil)
 	if err != nil {
 		return AgentDraft{}, fmt.Errorf("model call failed: %w", err)
 	}
-	return parseAgentDraft(completion.Content)
+	draft, err := parseAgentDraft(completion.Content)
+	if err != nil {
+		return AgentDraft{}, err
+	}
+	if final {
+		// Hard guarantee: one clarification round, ever.
+		draft.Questions = nil
+	}
+	return draft, nil
 }
 
 // parseAgentDraft tolerates fenced code blocks around the JSON payload and

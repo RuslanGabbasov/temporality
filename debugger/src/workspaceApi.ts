@@ -301,8 +301,8 @@ export const workspaceApi = {
     request<{ agent_id: string; version: number; source: string; prompt: string }>(`/v1/workspace/agents/${id}/prompt`),
   listBuiltinAgents: () =>
     request<{ builtins: BuiltinAgentSpec[] }>('/v1/workspace/agents/builtins'),
-  draftAgent: (description: string) =>
-    request<AgentDraft>('/v1/workspace/agents/draft', { method: 'POST', body: JSON.stringify({ description }) }),
+  draftAgent: (description: string, final?: boolean) =>
+    request<AgentDraft>('/v1/workspace/agents/draft', { method: 'POST', body: JSON.stringify({ description, final: final ?? false }) }),
 
   // Tasks
   listTasks: (projectId: string) =>
@@ -362,8 +362,8 @@ export const workspaceApi = {
     request<{ versions: SkillVersion[] }>(`/v1/workspace/skills/${id}/versions`),
   validateSkill: (id: string, data: { markdown: string; manifest_yaml: string }) =>
     request<SkillValidation>(`/v1/workspace/skills/${id}/validate`, { method: 'POST', body: JSON.stringify(data) }),
-  draftSkill: (description: string) =>
-    request<SkillDraft>('/v1/workspace/skills/draft', { method: 'POST', body: JSON.stringify({ description }) }),
+  draftSkill: (description: string, final?: boolean) =>
+    request<SkillDraft>('/v1/workspace/skills/draft', { method: 'POST', body: JSON.stringify({ description, final: final ?? false }) }),
   listSkillExecutions: (id: string) =>
     request<{ executions: SkillExecution[] }>(`/v1/workspace/skills/${id}/executions`),
   listSkillMemory: (id: string) =>
