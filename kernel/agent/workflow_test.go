@@ -139,6 +139,30 @@ func TestAgentRunTimesOutAnUnansweredApproval(t *testing.T) {
 	require.False(t, types["approval.granted"])
 }
 
+func TestAgentRunRecordsGeneratedTitle(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error { recorded = append(recorded, event); return nil }, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	env.RegisterActivityWithOptions(func(context.Context, TitleRequest) (string, error) { return "Fix login timeout", nil }, activity.RegisterOptions{Name: ActivityGenerateTitle})
+	env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
+		return llm.Completion{Content: "done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-titled", Project: "repo-a", Prompt: "please fix the login timeout", MaxTurns: 1})
+	require.NoError(t, env.GetWorkflowError())
+	var started *observation.Event
+	for index := range recorded {
+		if recorded[index].Type == "run.started" {
+			started = &recorded[index]
+			break
+		}
+	}
+	require.NotNil(t, started, "run.started must be recorded")
+	require.Equal(t, "Fix login timeout", started.Data["title"])
+}
+
 func TestApprovedToolOperationIsVisibleAndHashBound(t *testing.T) {
 	run := func(t *testing.T, signalHash string) ([]observation.Event, bool) {
 		var suite testsuite.WorkflowTestSuite

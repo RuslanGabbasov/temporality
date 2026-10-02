@@ -26,6 +26,7 @@ const (
 	ActivityKnowledgeHints  = "kernel.knowledge_hints"
 	ActivityKnowledgeLookup = "kernel.knowledge_lookup"
 	ActivityResolveAgent    = "kernel.resolve_agent"
+	ActivityGenerateTitle   = "kernel.generate_run_title"
 	ApprovalSignal          = "kernel.approval"
 
 	// MaxDelegationDepth bounds agent-to-agent delegation chains
@@ -177,6 +178,16 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	if input.AgentVersion > 0 {
 		started["agent_version"] = input.AgentVersion
+	}
+	if input.ParentRunID == "" {
+		// Root runs get a short human title for the Runs list; delegated child
+		// runs are shown inside their parent. Best effort only: on any failure
+		// the UI falls back to the run ID, so this must not fail the run.
+		titleCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 25 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+		var title string
+		if err := workflow.ExecuteActivity(titleCtx, ActivityGenerateTitle, TitleRequest{Prompt: input.Prompt}).Get(ctx, &title); err == nil && strings.TrimSpace(title) != "" {
+			started["title"] = strings.TrimSpace(title)
+		}
 	}
 	if err := emit(activityCtx, state, "run.started", started); err != nil {
 		return result, err
