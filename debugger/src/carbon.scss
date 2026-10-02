@@ -1270,6 +1270,52 @@ button.header-nav-link {
   color: var(--tm-teal);
 }
 
+/* Model response shown inside a model.completed trace row (Run tab).
+ * `overflow-wrap: anywhere` (unlike word-break) also shrinks min-content,
+ * so long URLs/hashes/code lines wrap instead of stretching the trace card. */
+.run-model-response {
+  max-height: 260px;
+  overflow-y: auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  padding: 0.5rem 0.6rem;
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.run-model-response pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+.run-model-reasoning summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  color: var(--tm-text-3);
+  padding: 0.25rem 0;
+  user-select: none;
+}
+
+.run-model-reasoning-content {
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--tm-text-2);
+  line-height: 1.5;
+  padding: 0.4rem 0.5rem;
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  border-radius: 6px;
+}
+
 .chat-status {
   margin-top: 0.5rem;
   font-size: 0.75rem;
@@ -1497,6 +1543,10 @@ button.header-nav-link {
   line-height: 1.65;
   color: var(--tm-text);
   word-break: break-word;
+  /* `anywhere` (not just break-word) keeps min-content small so long
+   * URLs/hashes wrap instead of stretching flex/grid ancestor cards. */
+  overflow-wrap: anywhere;
+  min-width: 0;
   font-family: var(--tm-font);
 }
 

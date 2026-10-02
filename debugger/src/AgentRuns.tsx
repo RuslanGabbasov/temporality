@@ -126,13 +126,21 @@ function eventSummary(event: ObservationEvent, t: (key: string, vars?: Record<st
   }
 }
 
-/** Expandable event detail showing raw data. */
-function EventDetail({ event, t }: { event: ObservationEvent; t: (key: string, vars?: Record<string, string>) => string }) {
+/** Expandable event detail. For model.completed rows the response text (from
+ * the run's model.text_delta/model.reasoning events) is shown as the primary
+ * content; the observability payload is reduced to what the summary line
+ * doesn't already say. */
+function EventDetail({ event, t, response, reasoning }: { event: ObservationEvent; t: (key: string, vars?: Record<string, string>) => string; response?: string; reasoning?: string }) {
   const [expanded, setExpanded] = useState(false)
   const d = event.data ?? {}
 
   // Show useful fields first, skip noise
   const skipFields = new Set(['caused_by', 'frame_id', 'parent_frame_id', 'sequence'])
+  if (event.type === 'model.completed') {
+    // tokens/latency/tools are already in the row summary; refs, retries and
+    // token splits are plumbing nobody reads.
+    for (const k of ['turn', 'total_tokens', 'latency_ms', 'tool_call_count', 'finish_reason', 'model', 'provider', 'prompt_tokens', 'completion_tokens', 'input_ref', 'output_ref', 'truncated', 'attempts']) skipFields.add(k)
+  }
   const importantFields: [string, unknown][] = []
   const otherFields: [string, unknown][] = []
   for (const [k, v] of Object.entries(d)) {
@@ -144,39 +152,56 @@ function EventDetail({ event, t }: { event: ObservationEvent; t: (key: string, v
       otherFields.push([k, v])
     }
   }
+  const fields = [...importantFields, ...otherFields]
 
   return (
     <div>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-      >
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        {expanded ? t('runs.hide_details') : t('runs.show_details')}
-      </button>
-      {expanded && (
-        <div style={{ marginTop: '0.35rem', padding: '0.5rem', background: '#0b1016', borderRadius: '4px', fontSize: '0.7rem', fontFamily: '"SFMono-Regular", Consolas, monospace', maxHeight: '300px', overflowY: 'auto' }}>
-          {/* Show answer/content if present */}
-          {typeof d.answer === 'string' && (
-            <div style={{ marginBottom: '0.5rem' }}>
-              <div style={{ color: 'var(--tm-text-3)', marginBottom: '0.25rem' }}>answer:</div>
-              <div style={{ whiteSpace: 'pre-wrap', color: 'var(--tm-text)', background: 'var(--tm-elevated)', padding: '0.5rem', borderRadius: '3px', maxHeight: '150px', overflowY: 'auto' }}>{d.answer.slice(0, 2000)}</div>
+      {/* Model response for this turn — the thing the reader actually wants */}
+      {response && (
+        <div className="run-model-response">
+          <Markdown content={response} />
+        </div>
+      )}
+      {reasoning && (
+        <details className="run-model-reasoning">
+          <summary>💭 {t('runs.reasoning')}</summary>
+          <div className="run-model-reasoning-content">{reasoning}</div>
+        </details>
+      )}
+      {fields.length > 0 && (
+        <>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+          >
+            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            {expanded ? t('runs.hide_details') : t('runs.show_details')}
+          </button>
+          {expanded && (
+            <div style={{ marginTop: '0.35rem', padding: '0.5rem', background: 'var(--tm-raised)', borderRadius: '4px', fontSize: '0.7rem', fontFamily: '"SFMono-Regular", Consolas, monospace', maxHeight: '300px', overflowY: 'auto', minWidth: 0, overflowWrap: 'anywhere' }}>
+              {/* Show answer/content if present */}
+              {typeof d.answer === 'string' && (
+                <div style={{ marginBottom: '0.5rem' }}>
+                  <div style={{ color: 'var(--tm-text-3)', marginBottom: '0.25rem' }}>answer:</div>
+                  <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--tm-text)', background: 'var(--tm-elevated)', padding: '0.5rem', borderRadius: '3px', maxHeight: '150px', overflowY: 'auto' }}>{d.answer.slice(0, 2000)}</div>
+                </div>
+              )}
+              {/* Show other data */}
+              {fields.map(([k, v]) => (
+                <div key={k} style={{ marginBottom: '0.2rem' }}>
+                  <span style={{ color: 'var(--tm-text-3)' }}>{k}: </span>
+                  <span style={{ color: 'var(--tm-text)' }}>
+                    {typeof v === 'object' ? JSON.stringify(v).slice(0, 200) : String(v).slice(0, 200)}
+                  </span>
+                </div>
+              ))}
+              {/* Event metadata */}
+              <div style={{ marginTop: '0.35rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.35rem', color: 'var(--tm-muted)' }}>
+                event_id: {event.event_id}
+              </div>
             </div>
           )}
-          {/* Show other data */}
-          {[...importantFields, ...otherFields].map(([k, v]) => (
-            <div key={k} style={{ marginBottom: '0.2rem' }}>
-              <span style={{ color: 'var(--tm-text-3)' }}>{k}: </span>
-              <span style={{ color: 'var(--tm-text)' }}>
-                {typeof v === 'object' ? JSON.stringify(v).slice(0, 200) : String(v).slice(0, 200)}
-              </span>
-            </div>
-          ))}
-          {/* Event metadata */}
-          <div style={{ marginTop: '0.35rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.35rem', color: 'var(--tm-muted)' }}>
-            event_id: {event.event_id}
-          </div>
-        </div>
+        </>
       )}
     </div>
   )
@@ -193,6 +218,23 @@ export default function AgentRuns({ project }: { project: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const pending = useMemo(() => pendingApprovals(timeline), [timeline])
+  // model.text_delta/model.reasoning carry each turn's response text. They are
+  // joined into their model.completed row instead of polluting the trace with
+  // duplicate per-turn entries.
+  const trace = useMemo(() => {
+    const responseByKey = new Map<string, string>()
+    const reasoningByKey = new Map<string, string>()
+    for (const event of timeline) {
+      const turn = event.data?.turn
+      const text = event.data?.text
+      if (turn === undefined || turn === null || typeof text !== 'string' || !text) continue
+      const key = `${runID(event)}:${turn}`
+      if (event.type === 'model.text_delta') responseByKey.set(key, text)
+      if (event.type === 'model.reasoning') reasoningByKey.set(key, text)
+    }
+    const visible = timeline.filter((event) => event.type !== 'model.text_delta' && event.type !== 'model.reasoning')
+    return { visible, responseByKey, reasoningByKey }
+  }, [timeline])
 
   const loadRuns = useCallback(async (autoSelect = false) => {
     if (!project.trim()) return
@@ -294,7 +336,7 @@ export default function AgentRuns({ project }: { project: string }) {
 
       <Grid>
         {/* Run list */}
-        <Column sm={4} md={3} lg={4}>
+        <Column sm={4} md={3} lg={4} style={{ minWidth: 0 }}>
           <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', marginBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
               <Heading style={{ fontSize: '1rem' }}>{t('runs.count', { count: String(runs.length) })}</Heading>
@@ -322,8 +364,9 @@ export default function AgentRuns({ project }: { project: string }) {
           </div>
         </Column>
 
-        {/* Run detail */}
-        <Column sm={4} md={5} lg={12}>
+        {/* Run detail — min-width: 0 lets the column shrink below the
+         * min-content of long unbreakable strings in trace rows */}
+        <Column sm={4} md={5} lg={12} style={{ minWidth: 0 }}>
           <Section level={3}>
             {!selected ? (
               <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '3rem 1rem' }}>
@@ -359,7 +402,7 @@ export default function AgentRuns({ project }: { project: string }) {
                 {result?.result !== undefined && !answer && (
                   <Tile>
                     <Heading style={{ fontSize: '0.875rem' }}>{t('runs.result') ?? 'Run Result'}</Heading>
-                    <pre style={{ background: '#0b1016', padding: '0.75rem', fontSize: '0.75rem', overflow: 'auto', borderRadius: '4px', maxHeight: '300px' }}>
+                    <pre style={{ background: 'var(--tm-raised)', color: 'var(--tm-text)', padding: '0.75rem', fontSize: '0.75rem', overflow: 'auto', borderRadius: '4px', maxHeight: '300px' }}>
                       {json(result.result)}
                     </pre>
                   </Tile>
@@ -380,7 +423,7 @@ export default function AgentRuns({ project }: { project: string }) {
                         <>
                           <Tag type="warm-gray" size="sm">{String(details.tool)}</Tag>
                           <Tag type="gray" size="sm">{t('runs.risk', { level: String(risk?.level ?? 'unknown') })}</Tag>
-                          <pre style={{ background: '#0b1016', padding: '0.5rem', fontSize: '0.75rem', marginTop: '0.5rem', borderRadius: '4px' }}>
+                          <pre style={{ background: 'var(--tm-raised)', color: 'var(--tm-text)', padding: '0.5rem', fontSize: '0.75rem', marginTop: '0.5rem', borderRadius: '4px' }}>
                             {Array.isArray(command) ? command.join(' ') : json(operation?.arguments ?? details)}
                           </pre>
                         </>
@@ -398,10 +441,11 @@ export default function AgentRuns({ project }: { project: string }) {
 
                 {/* Timeline — the main trace view */}
                 <Tile>
-                  <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{t('runs.trace') ?? 'Trace'} ({t('runs.events_count', { count: String(timeline.length) })})</Heading>
+                  <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{t('runs.trace') ?? 'Trace'} ({t('runs.events_count', { count: String(trace.visible.length) })})</Heading>
                   <Stack gap={0}>
-                    {[...timeline].reverse().map((event) => {
+                    {[...trace.visible].reverse().map((event) => {
                       const info = eventSummary(event, t)
+                      const turnKey = event.type === 'model.completed' ? `${runID(event)}:${event.data?.turn}` : undefined
                       return (
                         <div
                           key={`${event.source.id}:${event.event_id}`}
@@ -409,7 +453,7 @@ export default function AgentRuns({ project }: { project: string }) {
                             padding: '0.4rem 0.5rem',
                             borderLeft: `3px solid ${info.color}`,
                             marginBottom: '0.15rem',
-                            background: 'rgba(255,255,255,0.02)',
+                            background: 'var(--tm-surface)',
                             borderRadius: '0 4px 4px 0',
                           }}
                         >
@@ -420,7 +464,7 @@ export default function AgentRuns({ project }: { project: string }) {
                             <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{shortTime(event.occurred_at)}</span>
                           </div>
                           <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>
-                            <EventDetail event={event} t={t} />
+                            <EventDetail event={event} t={t} response={turnKey ? trace.responseByKey.get(turnKey) : undefined} reasoning={turnKey ? trace.reasoningByKey.get(turnKey) : undefined} />
                           </div>
                         </div>
                       )
@@ -451,7 +495,7 @@ export default function AgentRuns({ project }: { project: string }) {
                       <div style={{ marginBottom: '0.75rem' }}>
                         <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('runs.turns_heading') ?? 'Turns'}</h5>
                         {trajectory.turns.map((turn: any) => (
-                          <div key={turn.number} style={{ padding: '0.4rem 0.5rem', borderLeft: '3px solid #bb9af7', marginBottom: '0.25rem', background: 'rgba(255,255,255,0.02)', borderRadius: '0 4px 4px 0', fontSize: '0.8rem' }}>
+                          <div key={turn.number} style={{ padding: '0.4rem 0.5rem', borderLeft: '3px solid #bb9af7', marginBottom: '0.25rem', background: 'var(--tm-surface)', borderRadius: '0 4px 4px 0', fontSize: '0.8rem' }}>
                             <strong>Turn {turn.number}</strong>
                             {turn.tokens > 0 && <span style={{ color: 'var(--tm-text-3)', marginLeft: '0.5rem' }}>{turn.tokens} tok</span>}
                             {turn.latency_ms > 0 && <span style={{ color: 'var(--tm-text-3)', marginLeft: '0.5rem' }}>{(turn.latency_ms / 1000).toFixed(1)}s</span>}
