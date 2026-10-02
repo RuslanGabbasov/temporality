@@ -336,12 +336,6 @@ body {
   margin-bottom: 1rem;
 }
 
-.experience-hint {
-  color: var(--tm-text-2);
-  font-size: 0.875rem;
-  margin-top: 0.5rem;
-}
-
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
