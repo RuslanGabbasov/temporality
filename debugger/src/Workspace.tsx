@@ -6,7 +6,6 @@ import {
   Select,
   SelectItem,
   InlineNotification,
-  Loading,
   Tag,
   Heading,
   Modal,
@@ -600,6 +599,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     style={{ resize: 'vertical', minHeight: '72px' }}
                   />
                 </div>
+                {loading && <span className="spinner" title={t('chat.sending') ?? 'Sending…'} style={{ alignSelf: 'center', flexShrink: 0 }} />}
                 <Button renderIcon={Send} onClick={() => void sendMessage()} disabled={loading || !inputValue.trim()} style={{ marginBottom: '2px' }}>{t('chat.send') ?? 'Send'}</Button>
               </div>
             </div>
@@ -641,8 +641,6 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
           </div>
         </div>
       )}
-
-      {loading && <Loading withOverlay={false} />}
     </div>
   )
 }

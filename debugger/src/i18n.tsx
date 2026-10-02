@@ -61,6 +61,7 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Workspace / Chat
     'chat.send': 'Send',
+    'chat.sending': 'Sending…',
     'chat.stop': 'Stop',
     'chat.branch': 'Branch',
     'chat.streaming': 'streaming…',
@@ -791,6 +792,7 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Workspace / Chat
     'chat.send': 'Отправить',
+    'chat.sending': 'Отправка…',
     'chat.stop': 'Стоп',
     'chat.branch': 'Ветка',
     'chat.streaming': 'загрузка…',
