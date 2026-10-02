@@ -403,6 +403,10 @@ $css--font-face: false;
   color: #fff;
 }
 
+:root[data-theme="light"] .chat-delegation-row:hover {
+  background: rgba(42, 107, 99, 0.08);
+}
+
 :root[data-theme="light"] .cds--label {
   color: var(--tm-text-2) !important;
 }
@@ -1269,6 +1273,79 @@ button.header-nav-link {
 
 .chat-status-user {
   color: var(--tm-bg);
+}
+
+// Delegation tree inside assistant bubbles
+.chat-delegation {
+  margin-top: 0.75rem;
+  border-top: 1px dashed var(--tm-border);
+  padding-top: 0.6rem;
+}
+
+.chat-delegation-title {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tm-text-3);
+  margin-bottom: 0.35rem;
+}
+
+.chat-delegation-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 0.3rem 0.4rem;
+  cursor: pointer;
+  color: var(--tm-text);
+  font-size: 0.8rem;
+  text-align: left;
+}
+
+.chat-delegation-row:hover {
+  background: rgba(128, 145, 140, 0.08);
+}
+
+.chat-delegation-arrow {
+  color: var(--tm-text-3);
+  font-size: 0.7rem;
+  width: 0.8rem;
+  flex-shrink: 0;
+}
+
+.chat-delegation-agent {
+  font-weight: 500;
+}
+
+.chat-delegation-meta {
+  font-size: 0.7rem;
+  color: var(--tm-text-3);
+}
+
+.chat-delegation-body {
+  border-left: 2px solid var(--tm-border);
+  margin: 0.25rem 0 0.4rem 0.35rem;
+  padding-left: 0.6rem;
+}
+
+.chat-delegation-answer {
+  font-size: 0.8rem;
+  color: var(--tm-text-2);
+  padding: 0.2rem 0;
+}
+
+.chat-delegation-error {
+  font-size: 0.78rem;
+  color: var(--tm-danger);
+  padding: 0.2rem 0;
+}
+
+.chat-delegation-nested {
+  margin-top: 0.25rem;
 }
 
 // ═══════════════════════════════════════════════════════════════

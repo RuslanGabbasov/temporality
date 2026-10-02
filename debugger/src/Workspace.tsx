@@ -14,6 +14,7 @@ import {
 import { Add, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent } from './workspaceApi'
 import Markdown from './Markdown'
+import DelegationTree from './DelegationTree'
 import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -308,6 +309,43 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
     es.addEventListener('run.completed', handleEvent('run.completed'))
 
+    // Delegation events — surface child agent activity in the stream
+    const delegationAgentName = (id: unknown) => {
+      const s = typeof id === 'string' ? id : ''
+      return allAgents.find((a) => a.id === s)?.name ?? s ?? 'agent'
+    }
+    es.addEventListener('delegation.started', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const name = delegationAgentName(d.agent_id)
+        lines.push(t('chat.delegation.stream_started', { name }) ?? `Delegated to ${name}`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('delegation.completed', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const name = delegationAgentName(d.agent_id)
+        const turns = d.turns != null ? String(d.turns) : ''
+        const line = turns
+          ? (t('chat.delegation.stream_completed', { name, count: turns }))
+          : `${name} · ${t('chat.delegation.completed')}`
+        lines.push(line)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('delegation.failed', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const name = delegationAgentName(d.agent_id)
+        lines.push(t('chat.delegation.stream_failed', { name }) ?? `${name} · failed`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+
     es.addEventListener('run.failed', (e) => {
       try {
         const outer = JSON.parse(e.data)
@@ -499,6 +537,10 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     ) : msg.content ? (
                       <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                     ) : null}
+
+                    {msg.role === 'assistant' && msg.runId && msg.status && msg.status !== 'running' && (
+                      <DelegationTree project={project} runId={msg.runId} agents={allAgents} />
+                    )}
 
                     {msg.status === 'running' && msg.streamLines && msg.streamLines.length > 0 && (
                       <div style={{ marginTop: msg.content ? '0.5rem' : 0 }}>
