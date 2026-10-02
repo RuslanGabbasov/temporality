@@ -17,7 +17,7 @@ import {
   NumberInput,
   Checkbox,
 } from '@carbon/react'
-import { Add, Edit, TrashCan, Copy, Star, Renew, Activity } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, Copy, Star, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
 import {
   workspaceApi,
@@ -106,7 +106,8 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Agent | null>(null)
   const [formTab, setFormTab] = useState<'general' | 'capabilities' | 'rules' | 'params' | 'bindings' | 'tools' | 'prompt'>('general')
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [detailTab, setDetailTab] = useState<'overview' | 'evolution'>('overview')
   const [promptFor, setPromptFor] = useState<Record<string, { source: string; prompt: string; version: number }>>({})
   const [showTemplates, setShowTemplates] = useState(false)
   const [fromWizard, setFromWizard] = useState(false)
@@ -125,9 +126,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [regenBusy, setRegenBusy] = useState(false)
 
   // Evolution (§15): versions × runs grouped by definition version.
-  const [evolution, setEvolution] = useState<Agent | null>(null)
   const [versions, setVersions] = useState<AgentVersion[]>([])
   const [agentRuns, setAgentRuns] = useState<Run[]>([])
+  const [evoLoadedFor, setEvoLoadedFor] = useState('')
 
   // Prompt tab preview (reflects the saved agent).
   const [promptPreview, setPromptPreview] = useState<{ source: string; prompt: string } | null>(null)
@@ -348,19 +349,38 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     }
   }, [formTab, editing, promptPreview])
 
-  const openEvolution = async (agent: Agent) => {
-    setEvolution(agent)
+  // ── Master-detail: selection + lazy tab data ───────────────────────
+
+  const selected = agents.find((a) => a.id === selectedId) ?? null
+
+  // Auto-select the first agent once the list is loaded.
+  useEffect(() => {
+    if (!selectedId && agents.length > 0) setSelectedId(agents[0].id)
+  }, [agents, selectedId])
+
+  // Overview needs the compiled prompt; evolution needs versions × runs.
+  useEffect(() => {
+    if (!selectedId) return
+    if (!promptFor[selectedId]) void loadPromptFor(selectedId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId])
+
+  useEffect(() => {
+    if (detailTab !== 'evolution' || !selectedId || evoLoadedFor === selectedId) return
+    setEvoLoadedFor(selectedId)
     setVersions([])
     setAgentRuns([])
-    try {
-      const [vData, rData] = await Promise.all([
-        workspaceApi.listAgentVersions(agent.id),
-        workspaceApi.listAgentRuns(agent.id),
-      ])
-      setVersions(vData.versions ?? [])
-      setAgentRuns(rData.runs ?? [])
-    } catch (f) { setError(message(f)) }
-  }
+    void (async () => {
+      try {
+        const [vData, rData] = await Promise.all([
+          workspaceApi.listAgentVersions(selectedId),
+          workspaceApi.listAgentRuns(selectedId),
+        ])
+        setVersions(vData.versions ?? [])
+        setAgentRuns(rData.runs ?? [])
+      } catch (f) { setError(message(f)) }
+    })()
+  }, [detailTab, selectedId, evoLoadedFor])
 
   const runsByVersion = new Map<number, { total: number; completed: number; failed: number }>()
   for (const run of agentRuns) {
@@ -485,96 +505,174 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         </Stack>
       </div>
 
-      <Grid style={{ rowGap: '0.75rem' }}>
-        {agents.map((a) => {
-          const prompt = promptFor[a.id]
-          return (
-            <Column key={a.id} sm={4} md={8} lg={8}>
-              <Tile className="agent-card">
-                <div className="agent-card-head">
-                  <div className="agent-card-title">
-                    <strong>{a.name}</strong>
-                    {a.id === defaultAgentId && <Tag type="green" size="sm" style={{ marginLeft: '0.5rem' }}>{t('agents.project_default') ?? 'project default'}</Tag>}
-                    {a.labels?.builtin === 'true' && <Tag type="warm-gray" size="sm" style={{ marginLeft: '0.25rem' }}>{t('agents.builtin_tag') ?? 'builtin'}</Tag>}
-                    {!!a.definition_version && <Tag type="purple" size="sm" style={{ marginLeft: '0.25rem' }}>v{a.definition_version}</Tag>}
+      {/* Master-detail: agent list on the left, full profile with tabs on the right */}
+      <Grid style={{ rowGap: '1.5rem' }}>
+        {/* Agent list */}
+        <Column sm={4} md={3} lg={4}>
+          <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', marginBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
+              <Heading style={{ fontSize: '1rem' }}>{t('agents.count', { count: String(agents.length) }) ?? `Agents (${agents.length})`}</Heading>
+            </div>
+            <Stack gap={1}>
+              {agents.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('agents.none_created') ?? 'No agents yet'}</Tile>}
+              {agents.map((a) => (
+                <Tile
+                  key={a.id}
+                  onClick={() => setSelectedId(a.id)}
+                  className={`workspace-tile ${selectedId === a.id ? 'selected' : ''}`}
+                  style={{ padding: '0.5rem 0.75rem', cursor: 'pointer' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{a.name}</span>
+                    {a.id === defaultAgentId && <Tag type="green" size="sm">{t('agents.default') ?? 'default'}</Tag>}
                   </div>
-                  <Stack orientation="horizontal" gap={1} style={{ flexShrink: 0 }}>
-                    {project && a.id !== defaultAgentId && (
-                      <Button size="sm" kind="ghost" hasIconOnly renderIcon={Star} iconDescription={t('agents.make_default') ?? 'Make default'} title={t('agents.make_default') ?? 'Make default'} onClick={() => void makeDefault(a)} />
-                    )}
-                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Activity} iconDescription={t('agents.evolution') ?? 'Evolution'} title={t('agents.evolution') ?? 'Evolution'} onClick={() => void openEvolution(a)} />
-                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} onClick={() => startEdit(a)} />
-                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription={t('action.duplicate') ?? 'Duplicate'} onClick={() => duplicateAgent(a)} />
-                    <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void deleteAgent(a)} />
-                  </Stack>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.15rem' }}>
+                    <span>{a.model || (t('agents.no_model') ?? 'no model')}</span>
+                    {a.provider && <span>· {a.provider}</span>}
+                    {a.labels?.builtin === 'true' && <span>· {t('agents.builtin_tag') ?? 'builtin'}</span>}
+                    {!!a.definition_version && <span>· v{a.definition_version}</span>}
+                  </div>
+                </Tile>
+              ))}
+            </Stack>
+          </div>
+        </Column>
+
+        {/* Detail pane */}
+        <Column sm={4} md={5} lg={12}>
+          {!selected ? (
+            <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '3rem 1rem' }}>
+              <Heading>{t('agents.select') ?? 'Select an agent'}</Heading>
+              <p style={{ marginTop: '0.5rem' }}>{t('agents.select_hint') ?? 'Choose an agent on the left to see its definition, compiled prompt and evolution.'}</p>
+            </div>
+          ) : (
+            <Stack gap={3}>
+              {/* Profile header */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <Heading style={{ fontSize: '1.1rem' }}>{selected.name}</Heading>
+                    {selected.id === defaultAgentId && <Tag type="green" size="sm">{t('agents.project_default') ?? 'project default'}</Tag>}
+                    {selected.labels?.builtin === 'true' && <Tag type="warm-gray" size="sm">{t('agents.builtin_tag') ?? 'builtin'}</Tag>}
+                    {!!selected.definition_version && <Tag type="purple" size="sm">v{selected.definition_version}</Tag>}
+                  </div>
+                  {selected.description && <p style={{ color: 'var(--tm-text-2)', margin: '0.35rem 0 0', fontSize: '0.85rem' }}>{selected.description}</p>}
                 </div>
-                {a.description && <p className="agent-card-desc">{a.description}</p>}
-                <div className="agent-card-tags">
-                  <Tag type="blue" size="sm">{a.model || (t('agents.no_model') ?? 'no model')}</Tag>
-                  {a.provider && <Tag type="cyan" size="sm">{a.provider}</Tag>}
-                  <Tag type="gray" size="sm">{a.sandbox_profile || (t('agents.default') ?? 'default')}</Tag>
-                  {disabledCaps(a.definition?.capabilities).length > 0 && (
-                    <Tag type="warm-gray" size="sm">{t('agents.restricted_caps', { count: String(disabledCaps(a.definition?.capabilities).length) }) ?? `${disabledCaps(a.definition?.capabilities).length} ✕`}</Tag>
+                <Stack orientation="horizontal" gap={1} style={{ flexShrink: 0 }}>
+                  {project && selected.id !== defaultAgentId && (
+                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Star} iconDescription={t('agents.make_default') ?? 'Make default'} title={t('agents.make_default') ?? 'Make default'} onClick={() => void makeDefault(selected)} />
                   )}
-                  {a.project_id && <Tag type="warm-gray" size="sm">{a.project_id}</Tag>}
-                </div>
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} onClick={() => startEdit(selected)} />
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription={t('action.duplicate') ?? 'Duplicate'} onClick={() => duplicateAgent(selected)} />
+                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void deleteAgent(selected)} />
+                </Stack>
+              </div>
 
-                <Button size="sm" kind="ghost" className="agent-card-toggle" onClick={() => { setExpandedId(expandedId === a.id ? null : a.id); if (expandedId !== a.id && !promptFor[a.id]) void loadPromptFor(a.id) }}>
-                  {expandedId === a.id ? (t('agents.hide_details') ?? 'Hide details') : (t('agents.show_details') ?? 'Show details')}
-                </Button>
+              {/* Detail tabs */}
+              <div className="skill-tabs" role="tablist" style={{ padding: 0 }}>
+                <button role="tab" aria-selected={detailTab === 'overview'} className={`skill-tab ${detailTab === 'overview' ? 'active' : ''}`} onClick={() => setDetailTab('overview')}>
+                  {t('agents.tab_overview') ?? 'Overview'}
+                </button>
+                <button role="tab" aria-selected={detailTab === 'evolution'} className={`skill-tab ${detailTab === 'evolution' ? 'active' : ''}`} onClick={() => setDetailTab('evolution')}>
+                  {t('agents.evolution') ?? 'Evolution'}
+                </button>
+              </div>
 
-                {expandedId === a.id && (
-                  <div style={{ marginTop: '0.75rem', fontSize: '0.8rem' }}>
-                    {a.description && (
-                      <>
-                        <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.purpose') ?? 'Purpose'}</p>
-                        <p style={{ margin: '0 0 0.75rem' }}>{a.description}</p>
-                      </>
-                    )}
+              {detailTab === 'overview' && (
+                <Stack gap={4}>
+                  <div>
+                    <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.purpose') ?? 'Purpose'}</p>
+                    <p style={{ margin: 0 }}>{selected.description || <span style={{ color: 'var(--tm-text-3)' }}>{t('agents.none') ?? '(none)'}</span>}</p>
+                  </div>
+                  <div>
                     <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.can') ?? 'Can'}</p>
-                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-                      {enabledCaps(a.definition?.capabilities).map((key) => <Tag key={key} type="green" size="sm">{capLabel(key)}</Tag>)}
-                      {a.definition?.capabilities?.delegation === true && <Tag type="green" size="sm">{t('agents.cap.delegation') ?? 'Delegate to other agents'}</Tag>}
-                      {enabledCaps(a.definition?.capabilities).length === 0 && disabledCaps(a.definition?.capabilities).length === 0 && (
+                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                      {enabledCaps(selected.definition?.capabilities).map((key) => <Tag key={key} type="green" size="sm">{capLabel(key)}</Tag>)}
+                      {selected.definition?.capabilities?.delegation === true && <Tag type="green" size="sm">{t('agents.cap.delegation') ?? 'Delegate to other agents'}</Tag>}
+                      {enabledCaps(selected.definition?.capabilities).length === 0 && disabledCaps(selected.definition?.capabilities).length === 0 && (
                         <span style={{ color: 'var(--tm-text-3)' }}>{t('agents.all_caps') ?? 'All capabilities allowed'}</span>
                       )}
                     </div>
-                    {(disabledCaps(a.definition?.capabilities).length > 0 || cleanList(a.definition?.constraints).length > 0) && (
-                      <>
-                        <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.cannot') ?? 'Cannot'}</p>
-                        <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-                          {disabledCaps(a.definition?.capabilities).map((key) => <Tag key={key} type="red" size="sm">{capLabel(key)}</Tag>)}
-                        </div>
-                        <ul style={{ margin: '0.25rem 0 0.75rem', paddingLeft: '1rem', color: 'var(--tm-text-2)' }}>
-                          {cleanList(a.definition?.constraints).map((c, i) => <li key={i}>{c}</li>)}
-                        </ul>
-                      </>
-                    )}
-                    {cleanList(a.definition?.completion).length > 0 && (
-                      <>
-                        <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.before_done') ?? 'Before declaring done'}</p>
-                        <ul style={{ margin: '0 0 0.75rem', paddingLeft: '1rem', color: 'var(--tm-text-2)' }}>
-                          {cleanList(a.definition?.completion).map((c, i) => <li key={i}>{c}</li>)}
-                        </ul>
-                      </>
-                    )}
+                  </div>
+                  {(disabledCaps(selected.definition?.capabilities).length > 0 || cleanList(selected.definition?.constraints).length > 0) && (
+                    <div>
+                      <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.cannot') ?? 'Cannot'}</p>
+                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: cleanList(selected.definition?.constraints).length ? '0.25rem' : 0 }}>
+                        {disabledCaps(selected.definition?.capabilities).map((key) => <Tag key={key} type="red" size="sm">{capLabel(key)}</Tag>)}
+                      </div>
+                      <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1rem', color: 'var(--tm-text-2)' }}>
+                        {cleanList(selected.definition?.constraints).map((c, i) => <li key={i}>{c}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {cleanList(selected.definition?.completion).length > 0 && (
+                    <div>
+                      <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.before_done') ?? 'Before declaring done'}</p>
+                      <ul style={{ margin: 0, paddingLeft: '1rem', color: 'var(--tm-text-2)' }}>
+                        {cleanList(selected.definition?.completion).map((c, i) => <li key={i}>{c}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  <div>
                     <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.system_prompt') ?? 'System prompt'}</p>
-                    {prompt ? (
+                    {promptFor[selected.id] ? (
                       <>
-                        <Tag type="gray" size="sm" style={{ marginBottom: '0.25rem' }}>{promptSourceLabel(prompt.source)}</Tag>
+                        <Tag type="gray" size="sm" style={{ marginBottom: '0.25rem' }}>{promptSourceLabel(promptFor[selected.id].source)}</Tag>
                         <pre style={{ background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.75rem', fontFamily: 'var(--tm-mono, monospace)', fontSize: '0.72rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '14rem', overflow: 'auto', margin: 0 }}>
-                          {prompt.prompt || (t('agents.source_role') ?? 'base contract')}
+                          {promptFor[selected.id].prompt || (t('agents.source_role') ?? 'base contract')}
                         </pre>
                       </>
                     ) : (
                       <p style={{ color: 'var(--tm-text-3)' }}>{t('agents.none') ?? '(none)'}</p>
                     )}
                   </div>
-                )}
-              </Tile>
-            </Column>
-          )
-        })}
+                </Stack>
+              )}
+
+              {detailTab === 'evolution' && (
+                <div>
+                  {versions.length === 0 && (
+                    <p style={{ color: 'var(--tm-text-3)' }}>
+                      {t('agents.evolution_empty') ?? 'No definition versions yet. Versions appear when you edit the agent’s definition.'}
+                    </p>
+                  )}
+                  {[...versions].sort((a, b) => b.version - a.version).map((v, idx) => {
+                    const prev = [...versions].sort((a, b) => b.version - a.version)[idx + 1]
+                    const stats = runsByVersion.get(v.version)
+                    const changes = versionChanges(prev, v)
+                    const isCurrent = v.version === selected.definition_version
+                    return (
+                      <div key={v.version} style={{ borderLeft: '2px solid var(--tm-border)', paddingLeft: '0.75rem', marginBottom: '1rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          <strong>v{v.version}</strong>
+                          {isCurrent && <Tag type="green" size="sm">{t('agents.version_current') ?? 'current'}</Tag>}
+                          <Tag type="gray" size="sm">{v.prompt_source}</Tag>
+                          {v.generator_model && <Tag type="blue" size="sm">{v.generator_model}</Tag>}
+                          <span style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>
+                            {new Date(v.created_at).toLocaleString()}{v.author ? ` · ${v.author}` : ''}
+                          </span>
+                        </div>
+                        {changes.length > 0 ? (
+                          <p style={{ margin: '0.25rem 0', fontSize: '0.8rem' }}>
+                            {t('agents.changed') ?? 'Changed'}: {changes.join(', ')}
+                          </p>
+                        ) : (
+                          <p style={{ margin: '0.25rem 0', fontSize: '0.8rem', color: 'var(--tm-text-3)' }}>
+                            {prev ? (t('agents.no_changes') ?? 'no semantic changes') : (t('agents.initial_version') ?? 'initial definition')}
+                          </p>
+                        )}
+                        <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>
+                          {t('agents.runs_total') ?? 'Runs'}: <strong>{stats?.total ?? 0}</strong>
+                          {stats && <> · {t('agents.runs_completed') ?? 'completed'}: {stats.completed} · {t('agents.runs_failed') ?? 'failed'}: {stats.failed}</>}
+                        </p>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </Stack>
+          )}
+        </Column>
       </Grid>
 
       {/* Wizard: describe the specialist in natural language */}
@@ -942,57 +1040,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             <div className="form-actions">
               <Button kind="secondary" onClick={() => setRegenDraft(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button onClick={acceptRegen}>{t('agents.accept') ?? 'Accept'}</Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Evolution (§15): definition versions × run outcomes */}
-      {evolution && (
-        <div className="modal-overlay">
-          <div className="modal-panel tabbed" style={{ width: '680px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
-            <Heading>{(t('agents.evolution') ?? 'Evolution')} — {evolution.name}</Heading>
-            <div className="modal-scroll">
-              {versions.length === 0 && (
-                <p style={{ color: 'var(--tm-text-3)' }}>
-                  {t('agents.evolution_empty') ?? 'No definition versions yet. Versions appear when you edit the agent’s definition.'}
-                </p>
-              )}
-              {[...versions].sort((a, b) => b.version - a.version).map((v, idx) => {
-                const prev = [...versions].sort((a, b) => b.version - a.version)[idx + 1]
-                const stats = runsByVersion.get(v.version)
-                const changes = versionChanges(prev, v)
-                const isCurrent = v.version === evolution.definition_version
-                return (
-                  <div key={v.version} style={{ borderLeft: '2px solid var(--tm-border)', paddingLeft: '0.75rem', marginBottom: '1rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <strong>v{v.version}</strong>
-                      {isCurrent && <Tag type="green" size="sm">{t('agents.version_current') ?? 'current'}</Tag>}
-                      <Tag type="gray" size="sm">{v.prompt_source}</Tag>
-                      {v.generator_model && <Tag type="blue" size="sm">{v.generator_model}</Tag>}
-                      <span style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>
-                        {new Date(v.created_at).toLocaleString()}{v.author ? ` · ${v.author}` : ''}
-                      </span>
-                    </div>
-                    {changes.length > 0 ? (
-                      <p style={{ margin: '0.25rem 0', fontSize: '0.8rem' }}>
-                        {t('agents.changed') ?? 'Changed'}: {changes.join(', ')}
-                      </p>
-                    ) : (
-                      <p style={{ margin: '0.25rem 0', fontSize: '0.8rem', color: 'var(--tm-text-3)' }}>
-                        {prev ? (t('agents.no_changes') ?? 'no semantic changes') : (t('agents.initial_version') ?? 'initial definition')}
-                      </p>
-                    )}
-                    <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>
-                      {t('agents.runs_total') ?? 'Runs'}: <strong>{stats?.total ?? 0}</strong>
-                      {stats && <> · {t('agents.runs_completed') ?? 'completed'}: {stats.completed} · {t('agents.runs_failed') ?? 'failed'}: {stats.failed}</>}
-                    </p>
-                  </div>
-                )
-              })}
-            </div>
-            <div className="form-actions">
-              <Button kind="secondary" onClick={() => setEvolution(null)}>{t('action.close') ?? 'Close'}</Button>
             </div>
           </div>
         </div>

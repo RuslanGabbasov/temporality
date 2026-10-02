@@ -192,6 +192,11 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Agents
     'agents.title': 'Agents',
+    'agents.count': 'Agents ({{count}})',
+    'agents.none_created': 'No agents yet',
+    'agents.select': 'Select an agent',
+    'agents.select_hint': 'Choose an agent on the left to see its definition, compiled prompt and evolution.',
+    'agents.tab_overview': 'Overview',
     'agents.from_template': 'From template',
     'agents.project_default': 'project default',
     'agents.make_default': 'Make default',
@@ -918,6 +923,11 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Agents
     'agents.title': 'Агенты',
+    'agents.count': 'Агенты ({{count}})',
+    'agents.none_created': 'Агентов пока нет',
+    'agents.select': 'Выберите агента',
+    'agents.select_hint': 'Выберите агента в списке слева, чтобы увидеть его определение, скомпилированный промт и эволюцию.',
+    'agents.tab_overview': 'Обзор',
     'agents.from_template': 'Из шаблона',
     'agents.project_default': 'по умолчанию',
     'agents.make_default': 'Сделать основным',
