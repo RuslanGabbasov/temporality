@@ -21,6 +21,7 @@ export interface AgentCapabilities {
   network?: boolean
   skills?: boolean
   knowledge?: boolean
+  delegation?: boolean
 }
 
 /** Structured definition (docs/evaluable-agent.md): capabilities, hard

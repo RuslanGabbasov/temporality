@@ -164,7 +164,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const setDef = (part: Partial<AgentDefinition>) =>
     setForm((prev) => ({ ...prev, definition: { ...prev.definition, ...part } }))
 
-  const setCap = (key: CapKey, value: boolean | undefined) =>
+  const setCap = (key: CapKey | 'delegation', value: boolean | undefined) =>
     setForm((prev) => ({
       ...prev,
       definition: {
@@ -530,6 +530,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.can') ?? 'Can'}</p>
                     <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
                       {enabledCaps(a.definition?.capabilities).map((key) => <Tag key={key} type="green" size="sm">{capLabel(key)}</Tag>)}
+                      {a.definition?.capabilities?.delegation === true && <Tag type="green" size="sm">{t('agents.cap.delegation') ?? 'Delegate to other agents'}</Tag>}
                       {enabledCaps(a.definition?.capabilities).length === 0 && disabledCaps(a.definition?.capabilities).length === 0 && (
                         <span style={{ color: 'var(--tm-text-3)' }}>{t('agents.all_caps') ?? 'All capabilities allowed'}</span>
                       )}
@@ -707,6 +708,12 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     onToggle={(checked: boolean) => { touch('capabilities'); setCap(key, checked ? undefined : false) }}
                   />
                 ))}
+                <Toggle
+                  id="agent-cap-delegation"
+                  labelText={t('agents.cap.delegation') ?? 'Delegate to other agents'}
+                  toggled={form.definition?.capabilities?.delegation === true}
+                  onToggle={(checked: boolean) => { touch('capabilities'); setCap('delegation', checked ? true : undefined) }}
+                />
               </Stack>
             )}
             {formTab === 'rules' && (
