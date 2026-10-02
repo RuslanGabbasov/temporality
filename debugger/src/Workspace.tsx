@@ -92,6 +92,30 @@ function formatStreamEvent(type: string, outer: any): string | null {
   }
 }
 
+/** Live-activity feed with capped height. Auto-scrolls to the newest line
+ * unless the user has scrolled up to read earlier activity. */
+function ChatStreamLines({ lines }: { lines: string[] }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const mounted = useRef(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (!mounted.current || el.scrollHeight - el.scrollTop - el.clientHeight < 48) {
+      el.scrollTop = el.scrollHeight
+    }
+    mounted.current = true
+  }, [lines.length])
+  return (
+    <div ref={ref} className="chat-activity-scroll">
+      {lines.map((line, li) => (
+        <div key={li} className="chat-stream-line">
+          <span className="chat-stream-prefix">›</span>{line}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function Workspace({ project, defaultAgentId, defaultModel }: { project: string; defaultAgentId?: string; defaultModel?: string }) {
   const t = useT()
   const [allAgents, setAllAgents] = useState<Agent[]>([])
@@ -543,11 +567,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
                     {msg.status === 'running' && msg.streamLines && msg.streamLines.length > 0 && (
                       <div style={{ marginTop: msg.content ? '0.5rem' : 0 }}>
-                        {msg.streamLines.map((line, li) => (
-                          <div key={li} className="chat-stream-line">
-                            <span className="chat-stream-prefix">›</span>{line}
-                          </div>
-                        ))}
+                        <ChatStreamLines lines={msg.streamLines} />
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.25rem' }}>
                           <span className="spinner" />
                           <span className="chat-streaming">{t('chat.streaming') ?? 'streaming…'}</span>
