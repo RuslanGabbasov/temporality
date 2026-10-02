@@ -13,7 +13,7 @@ import {
   Modal,
   Heading,
 } from '@carbon/react'
-import { User, Settings, Add, Edit, TrashCan, Folder } from '@carbon/icons-react'
+import { User, Settings, Add, Edit, TrashCan, Folder, ChevronDown } from '@carbon/icons-react'
 import { Menu } from '@carbon/icons-react'
 import { TOKEN_STORAGE_KEY, authToken, authHeaders } from './api'
 import Onboarding from './Onboarding'
@@ -28,6 +28,7 @@ export interface AppState {
   setProject: (p: string) => void
   projectDefaultAgent?: string
   projectDefaultModel?: string
+  refreshProjects: () => void
 }
 
 interface LayoutProps {
@@ -258,7 +259,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
               onClick={() => setShowConfigMenu(!showConfigMenu)}
             >
               {t('nav.settings') ?? 'Settings'}
-              <span style={{ fontSize: '0.6rem', marginLeft: '0.35rem', color: 'var(--tm-text-3)' }}>{showConfigMenu ? '▴' : '▾'}</span>
+              <ChevronDown size={14} className="chevron-flip" data-open={showConfigMenu ? 'true' : 'false'} style={{ color: 'var(--tm-text-3)', flexShrink: 0 }} />
             </button>
             {showConfigMenu && (
               <div className="header-config-menu">
@@ -302,7 +303,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
             >
               <Folder size={14} style={{ color: 'rgba(255,255,255,0.6)' }} />
               <span style={{ color: '#fff' }}>{project}</span>
-              <span style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.45)' }}>{showProjectPanel ? '▴' : '▾'}</span>
+              <ChevronDown size={14} className="chevron-flip" data-open={showProjectPanel ? 'true' : 'false'} style={{ color: 'rgba(255,255,255,0.5)', flexShrink: 0 }} />
             </button>
             {showProjectPanel && (
               <HeaderPanel expanded>
@@ -359,7 +360,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
               <User size={14} />
               <span style={{ color: '#fff' }}>{identity?.subject ?? 'User'}</span>
               {identity?.role && <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.55)' }}>{identity.role}</span>}
-              <span style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.45)' }}>{showUserMenu ? '▴' : '▾'}</span>
+              <ChevronDown size={14} className="chevron-flip" data-open={showUserMenu ? 'true' : 'false'} style={{ color: 'rgba(255,255,255,0.5)', flexShrink: 0 }} />
             </button>
             {showUserMenu && (
               <HeaderPanel expanded>
@@ -590,7 +591,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
         <>
           {projects.length === 0 && <Onboarding onComplete={() => void loadProjects()} />}
           <Content id="main-content">
-            {children({ project, setProject, projectDefaultAgent: projects.find((p) => p.id === project)?.default_agent_id, projectDefaultModel: projects.find((p) => p.id === project)?.default_model })}
+            {children({ project, setProject, projectDefaultAgent: projects.find((p) => p.id === project)?.default_agent_id, projectDefaultModel: projects.find((p) => p.id === project)?.default_model, refreshProjects: () => { void loadProjects() } })}
           </Content>
         </>
       )}

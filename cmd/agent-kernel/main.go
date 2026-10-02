@@ -710,23 +710,19 @@ func main() {
 		}
 		var req workspace.StartRunRequest
 		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req)
-		// Resolve agent: explicit override > task default > none
+		// Resolve agent: explicit override > task default > project default.
 		agentID := req.AgentID
 		if agentID == "" {
 			agentID = task.AgentID
 		}
-		var agentCfg *workspace.Agent
-		if agentID != "" {
-			a, aErr := ws.GetAgent(r.Context(), agentID)
-			if aErr != nil {
-				if errors.Is(aErr, workspace.ErrNotFound) {
-					writeError(w, 404, errors.New("agent not found"))
-					return
-				}
-				writeError(w, 500, aErr)
+		agentID, agentCfg, aErr := resolveRunAgent(r.Context(), ws, task.ProjectID, agentID)
+		if aErr != nil {
+			if errors.Is(aErr, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("agent not found"))
 				return
 			}
-			agentCfg = &a
+			writeError(w, 500, aErr)
+			return
 		}
 		runID := task.ID + "-" + time.Now().UTC().Format("20060102-150405")
 		input := agent.RunInput{
@@ -735,19 +731,8 @@ func main() {
 			TaskID:  task.ID,
 			Prompt:  task.Prompt,
 		}
-		if agentCfg != nil {
-			if agentCfg.Model != "" {
-				input.Model = agentCfg.Model
-			}
-			if agentCfg.SystemPrompt != "" {
-				input.SystemPrompt = agentCfg.SystemPrompt
-			}
-			if agentCfg.NetworkAccess != nil && *agentCfg.NetworkAccess {
-				input.NetworkAccess = true
-			}
-			resolveAgentSkills(r.Context(), ws, agentCfg, &input)
-			resolveAgentMCP(agentCfg, &input)
-		}
+		applyAgentConfig(r.Context(), ws, agentCfg, &input)
+		applyProjectModel(r.Context(), ws, task.ProjectID, &input)
 		if req.Model != "" {
 			input.Model = req.Model
 		}
@@ -1772,21 +1757,13 @@ func main() {
 			return
 		}
 		input := agent.RunInput{RunID: taskID + "-" + time.Now().UTC().Format("150405"), Project: projectID, TaskID: taskID, Prompt: prompt}
-		if matched.AgentID != "" {
-			if a, aErr := ws.GetAgent(r.Context(), matched.AgentID); aErr == nil {
-				if a.Model != "" {
-					input.Model = a.Model
-				}
-				if a.SystemPrompt != "" {
-					input.SystemPrompt = a.SystemPrompt
-				}
-				if a.NetworkAccess != nil && *a.NetworkAccess {
-					input.NetworkAccess = true
-				}
-				resolveAgentSkills(r.Context(), ws, &a, &input)
-				resolveAgentMCP(&a, &input)
-			}
+		effectiveAgentID, triggerAgent, aErr := resolveRunAgent(r.Context(), ws, projectID, matched.AgentID)
+		if aErr != nil {
+			writeError(w, 500, aErr)
+			return
 		}
+		applyAgentConfig(r.Context(), ws, triggerAgent, &input)
+		applyProjectModel(r.Context(), ws, projectID, &input)
 		if err := activities.PrepareRun(&input); err != nil {
 			writeError(w, 422, err)
 			return
@@ -1799,7 +1776,7 @@ func main() {
 			writeError(w, 409, wfErr)
 			return
 		}
-		wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: projectID, AgentID: matched.AgentID, RunID: input.RunID, Status: "started", Model: input.Model}
+		wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: projectID, AgentID: effectiveAgentID, RunID: input.RunID, Status: "started", Model: input.Model}
 		_ = ws.CreateRun(r.Context(), wsRun)
 		writeJSON(w, 202, map[string]string{"trigger_id": matched.ID, "run_id": input.RunID, "workflow_id": run.GetID()})
 	})
@@ -1841,18 +1818,13 @@ func main() {
 					continue
 				}
 				input := agent.RunInput{RunID: taskID + "-" + now.Format("150405"), Project: t.ProjectID, TaskID: taskID, Prompt: cfg.Prompt}
-				if t.AgentID != "" {
-					if a, aErr := ws.GetAgent(context.Background(), t.AgentID); aErr == nil {
-						if a.Model != "" {
-							input.Model = a.Model
-						}
-						if a.SystemPrompt != "" {
-							input.SystemPrompt = a.SystemPrompt
-						}
-						resolveAgentSkills(context.Background(), ws, &a, &input)
-						resolveAgentMCP(&a, &input)
-					}
+				effectiveAgentID, triggerAgent, aErr := resolveRunAgent(context.Background(), ws, t.ProjectID, t.AgentID)
+				if aErr != nil {
+					slog.Error("resolve trigger agent", "trigger", t.ID, "error", aErr)
+					continue
 				}
+				applyAgentConfig(context.Background(), ws, triggerAgent, &input)
+				applyProjectModel(context.Background(), ws, t.ProjectID, &input)
 				if err := activities.PrepareRun(&input); err != nil {
 					slog.Error("prepare trigger run", "trigger", t.ID, "error", err)
 					continue
@@ -1864,7 +1836,7 @@ func main() {
 					slog.Error("start trigger run", "trigger", t.ID, "error", wfErr)
 					continue
 				}
-				wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: t.ProjectID, AgentID: t.AgentID, RunID: input.RunID, Status: "started", Model: input.Model}
+				wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: t.ProjectID, AgentID: effectiveAgentID, RunID: input.RunID, Status: "started", Model: input.Model}
 				_ = ws.CreateRun(context.Background(), wsRun)
 				slog.Info("scheduled trigger fired", "trigger", t.ID, "name", t.Name, "run", input.RunID)
 			}
@@ -2077,6 +2049,67 @@ func resolveAgentMCP(a *workspace.Agent, input *agent.RunInput) {
 	}
 	input.MCPServers = a.MCPServers
 	input.ToolAllowlist = a.Tools
+}
+
+// resolveRunAgent resolves the agent for a run: an explicit agent id wins,
+// otherwise the project's default agent is used. It returns the effective
+// agent id and its config; an empty id with nil config means a legacy
+// bare-model run. A missing project default agent degrades to a bare run
+// instead of failing, while a missing explicit agent stays an error so
+// callers learn about bad references immediately.
+func resolveRunAgent(ctx context.Context, ws *workspace.Store, projectID, agentID string) (string, *workspace.Agent, error) {
+	explicit := agentID != ""
+	if !explicit {
+		proj, err := ws.GetProject(ctx, projectID)
+		if err != nil {
+			return "", nil, nil
+		}
+		agentID = proj.DefaultAgentID
+	}
+	if agentID == "" {
+		return "", nil, nil
+	}
+	a, err := ws.GetAgent(ctx, agentID)
+	if err != nil {
+		if errors.Is(err, workspace.ErrNotFound) && !explicit {
+			return "", nil, nil
+		}
+		return "", nil, err
+	}
+	return agentID, &a, nil
+}
+
+// applyAgentConfig copies the resolved agent's settings onto the run input.
+func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Agent, input *agent.RunInput) {
+	if a == nil {
+		return
+	}
+	if a.Model != "" {
+		input.Model = a.Model
+	}
+	if a.SystemPrompt != "" {
+		input.SystemPrompt = a.SystemPrompt
+	}
+	if a.NetworkAccess != nil && *a.NetworkAccess {
+		input.NetworkAccess = true
+	}
+	resolveAgentSkills(ctx, ws, a, input)
+	resolveAgentMCP(a, input)
+}
+
+// applyProjectModel fills input.Model from the project default model when the
+// agent did not carry one.
+func applyProjectModel(ctx context.Context, ws *workspace.Store, projectID string, input *agent.RunInput) {
+	if input.Model != "" {
+		return
+	}
+	proj, err := ws.GetProject(ctx, projectID)
+	if err != nil {
+		return
+	}
+	if proj.DefaultModel != "" {
+		input.Model = proj.DefaultModel
+	}
 }
 
 // mcpConfig converts a stored workspace.MCPServer into a registry config.

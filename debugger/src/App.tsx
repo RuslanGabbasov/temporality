@@ -59,7 +59,7 @@ export default function App() {
     <ThemePrefProvider>
     <I18nProvider>
     <Layout activePage={page}>
-      {({ project, setProject, projectDefaultAgent, projectDefaultModel }: AppState) => {
+      {({ project, setProject, projectDefaultAgent, projectDefaultModel, refreshProjects }: AppState) => {
         switch (page) {
           case 'agents':
             return <AgentRuns project={project} />
@@ -71,7 +71,7 @@ export default function App() {
             // @ts-ignore
             return <Workspace project={project} setProject={setProject} defaultAgentId={projectDefaultAgent} defaultModel={projectDefaultModel} />
           case 'agent-config':
-            return <Agents defaultAgentId={projectDefaultAgent} />
+            return <Agents project={project} defaultAgentId={projectDefaultAgent} refreshProjects={refreshProjects} />
           case 'skills':
             return <Skills project={project} />
           case 'mcp':

@@ -18,13 +18,13 @@ import {
   NumberInput,
   Checkbox,
 } from '@carbon/react'
-import { Add, Edit, TrashCan, Copy } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, Copy, Star } from '@carbon/icons-react'
 import { workspaceApi, type Agent, type Provider, type Skill, type MCPServer, type MCPServerTools, type MCPToolInfo } from './workspaceApi'
 import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
-export default function Agents({ defaultAgentId }: { defaultAgentId?: string }) {
+export default function Agents({ project, defaultAgentId, refreshProjects }: { project: string; defaultAgentId?: string; refreshProjects?: () => void }) {
   const t = useT()
   const [agents, setAgents] = useState<Agent[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
@@ -147,6 +147,24 @@ const startCreate = () => {
     setShowForm(true)
   }
 
+  const makeDefault = async (agent: Agent) => {
+    if (!project) return
+    setLoading(true); setError('')
+    try {
+      // PUT replaces the whole project, so re-send every editable field.
+      const proj = await workspaceApi.getProject(project)
+      await workspaceApi.updateProject(project, {
+        name: proj.name,
+        description: proj.description,
+        default_agent_id: agent.id,
+        default_model: proj.default_model,
+        allowed_users: proj.allowed_users,
+      })
+      refreshProjects?.()
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }
+
   return (
     <div style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
@@ -176,9 +194,12 @@ const startCreate = () => {
                   </div>
                 </div>
                 <Stack orientation="horizontal" gap={1}>
-                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(a)} />
-                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription="Duplicate" onClick={() => duplicateAgent(a)} />
-                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void deleteAgent(a)} />
+                  {project && a.id !== defaultAgentId && (
+                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Star} iconDescription={t('agents.make_default') ?? 'Make default'} title={t('agents.make_default') ?? 'Make default'} onClick={() => void makeDefault(a)} />
+                  )}
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} onClick={() => startEdit(a)} />
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription={t('action.duplicate') ?? 'Duplicate'} onClick={() => duplicateAgent(a)} />
+                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void deleteAgent(a)} />
                 </Stack>
               </div>
 
