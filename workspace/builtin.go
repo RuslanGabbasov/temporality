@@ -10,14 +10,14 @@ package workspace
 
 // BuiltinAgentSpec describes one curated agent for project seeding.
 type BuiltinAgentSpec struct {
-	Slug           string            // stable suffix for the project-scoped id
-	Name           string            // display name
-	Description    string            // purpose
-	Definition     AgentDefinition   // structured definition
-	SandboxProfile string            // restricted | standard | privileged
-	NetworkAccess  *bool             // nil = environment default
-	ReadOnly       *bool             // nil = writable
-	Labels         map[string]string // builtin provenance marker
+	Slug           string            `json:"slug"`                     // stable suffix for the project-scoped id
+	Name           string            `json:"name"`                     // display name
+	Description    string            `json:"description"`              // purpose
+	Definition     AgentDefinition   `json:"definition"`               // structured definition
+	SandboxProfile string            `json:"sandbox_profile"`          // restricted | standard | privileged
+	NetworkAccess  *bool             `json:"network_access,omitempty"` // nil = environment default
+	ReadOnly       *bool             `json:"read_only,omitempty"`      // nil = writable
+	Labels         map[string]string `json:"labels,omitempty"`         // builtin provenance marker
 }
 
 func boolValue(v bool) *bool { return &v }
