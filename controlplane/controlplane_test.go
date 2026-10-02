@@ -142,6 +142,90 @@ func TestDisabledGateAllowsEverything(t *testing.T) {
 	}
 }
 
+func TestParseRoleViewerAlias(t *testing.T) {
+	role, err := ParseRole("viewer")
+	if err != nil || role != RoleReader {
+		t.Fatalf("ParseRole(viewer) = %v %v, want reader", role, err)
+	}
+	role, err = ParseRole("Viewer")
+	if err != nil || role != RoleReader {
+		t.Fatalf("ParseRole(Viewer) = %v %v, want reader", role, err)
+	}
+}
+
+func TestSetDBTokens(t *testing.T) {
+	handler, gate := newAuthedHandler(t)
+	subject := func(token string) (int, string) {
+		request := httptest.NewRequest(http.MethodGet, "/v1/observations/events", nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, request)
+		return rec.Code, rec.Body.String()
+	}
+
+	gate.SetDBTokens(map[string]Principal{
+		"db-token-123456789": {Subject: "dbuser", Role: RoleOperator, Projects: []string{"*"}},
+	})
+	if code, body := subject("db-token-123456789"); code != http.StatusOK || body != `{"subject":"dbuser"}` {
+		t.Fatalf("db token = %d %s, want 200 dbuser", code, body)
+	}
+	if code, _ := subject("unknown-token"); code != http.StatusUnauthorized {
+		t.Fatalf("unknown token = %d, want 401", code)
+	}
+	// Static env tokens keep working next to db tokens.
+	if code, body := subject("read-token-1234567890"); code != http.StatusOK || body != `{"subject":"alice"}` {
+		t.Fatalf("env token = %d %s, want 200 alice", code, body)
+	}
+	if got := gate.TokenCount(); got != 4 { // 3 env + 1 db
+		t.Fatalf("TokenCount = %d, want 4", got)
+	}
+
+	// Replacing the set revokes the old db token immediately.
+	gate.SetDBTokens(map[string]Principal{
+		"db-token-987654321": {Subject: "dbuser2", Role: RoleAdmin, Projects: []string{"*"}},
+	})
+	if code, _ := subject("db-token-123456789"); code != http.StatusUnauthorized {
+		t.Fatalf("revoked db token = %d, want 401", code)
+	}
+	if code, body := subject("db-token-987654321"); code != http.StatusOK || body != `{"subject":"dbuser2"}` {
+		t.Fatalf("new db token = %d %s, want 200 dbuser2", code, body)
+	}
+
+	// Empty tokens are ignored.
+	gate.SetDBTokens(map[string]Principal{"": {Subject: "x", Role: RoleAdmin, Projects: []string{"*"}}})
+	if got := gate.DBTokenCount(); got != 0 {
+		t.Fatalf("DBTokenCount = %d, want 0", got)
+	}
+}
+
+func TestMergePreservesDBTokens(t *testing.T) {
+	gate, err := NewGate("env-token-12345678:env:admin:*")
+	if err != nil {
+		t.Fatalf("NewGate: %v", err)
+	}
+	gate.SetDBTokens(map[string]Principal{
+		"db-token-123456789": {Subject: "dbuser", Role: RoleReader, Projects: []string{"*"}},
+	})
+	other, err := NewGate("internal-token-1234:kernel-internal:operator:*")
+	if err != nil {
+		t.Fatalf("NewGate: %v", err)
+	}
+	merged := gate.Merge(other)
+	if merged.DBTokenCount() != 1 {
+		t.Fatalf("Merge dropped db tokens: %d, want 1", merged.DBTokenCount())
+	}
+	request := httptest.NewRequest(http.MethodGet, "/x", nil)
+	request.Header.Set("Authorization", "Bearer db-token-123456789")
+	rec := httptest.NewRecorder()
+	merged.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, _ := FromContext(r.Context())
+		_, _ = w.Write([]byte(principal.Subject))
+	})).ServeHTTP(rec, request)
+	if rec.Code != http.StatusOK || rec.Body.String() != "dbuser" {
+		t.Fatalf("db token after merge = %d %s, want 200 dbuser", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminWildcardProjects(t *testing.T) {
 	gate, err := NewGate("admin-token-123456789:root:admin:*")
 	if err != nil {

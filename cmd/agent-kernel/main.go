@@ -168,27 +168,10 @@ func main() {
 		log.Error("parse KERNEL_AUTH_TOKENS", "error", err)
 		os.Exit(1)
 	}
-	// Merge database-stored user tokens with .env tokens. DB tokens added
-	// via the UI take effect after kernel restart.
-	if dbUsers, err := ws.ListUsers(ctx); err == nil {
-		var extra []string
-		for _, u := range dbUsers {
-			if u.Token != "" && u.Active {
-				projects := "*"
-				if len(u.Projects) > 0 {
-					projects = strings.Join(u.Projects, ",")
-				}
-				extra = append(extra, u.Token+":"+u.Name+":"+u.Role+":"+projects)
-			}
-		}
-		if len(extra) > 0 {
-			dbGate, err := controlplane.NewGate(strings.Join(extra, ";"))
-			if err == nil && dbGate != nil && dbGate.Enabled() {
-				gate = gate.Merge(dbGate)
-				log.Info("merged database user tokens", "count", len(extra))
-			}
-		}
-	}
+	// Workspace-user tokens live in the database and are loaded into a
+	// separate reloadable gate token set below (see refreshUserTokens), so
+	// the historical "restart the kernel after creating a user" limitation
+	// is gone.
 	if !gate.Enabled() {
 		log.Warn("KERNEL_AUTH_TOKENS is empty: authentication disabled; configure tokens before sharing this instance")
 	} else {
@@ -206,6 +189,38 @@ func main() {
 			activities.WorkspaceToken = internalToken
 		}
 	}
+	// refreshUserTokens reloads workspace-user tokens from the database into
+	// the gate. Called at startup and after every user mutation, so created,
+	// edited, deactivated, deleted and regenerated tokens apply immediately.
+	refreshUserTokens := func() {
+		reloadCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		users, err := ws.ListUsersWithTokens(reloadCtx)
+		if err != nil {
+			log.Error("load workspace user tokens", "error", err)
+			return
+		}
+		principals := make(map[string]controlplane.Principal, len(users))
+		for _, u := range users {
+			if u.Token == "" || !u.Active {
+				continue
+			}
+			role, err := controlplane.ParseRole(u.Role)
+			if err != nil {
+				log.Error("skip workspace user token: unknown role", "user", u.Name, "role", u.Role)
+				continue
+			}
+			projects := []string{"*"}
+			if len(u.Projects) > 0 {
+				projects = u.Projects
+			}
+			principals[u.Token] = controlplane.Principal{Subject: u.Name, Role: role, Projects: projects}
+		}
+		gate.SetDBTokens(principals)
+		log.Info("loaded workspace user tokens", "count", len(principals))
+	}
+	refreshUserTokens()
+
 	if os.Getenv("KERNEL_WORKSPACE_URL") == "" {
 		activities.WorkspaceURL = "http://localhost" + address
 	}
@@ -2042,6 +2057,7 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		refreshUserTokens()
 		writeJSON(w, 201, user)
 	})
 	mux.HandleFunc("PUT /v1/workspace/users/{userID}", func(w http.ResponseWriter, r *http.Request) {
@@ -2063,7 +2079,26 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		refreshUserTokens()
 		writeJSON(w, 200, user)
+	})
+	// Regenerate a user's bearer token server-side. The new token takes
+	// effect immediately and the old one is revoked at once.
+	mux.HandleFunc("POST /v1/workspace/users/{userID}/token", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		token := generateToken()
+		if err := ws.UpdateUserToken(r.Context(), r.PathValue("userID"), token); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		refreshUserTokens()
+		writeJSON(w, 200, map[string]any{"id": r.PathValue("userID"), "token": token})
 	})
 	mux.HandleFunc("DELETE /v1/workspace/users/{userID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleAdmin) {
@@ -2077,6 +2112,7 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		refreshUserTokens()
 		writeJSON(w, 200, map[string]any{"deleted": true})
 	})
 

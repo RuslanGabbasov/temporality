@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 )
 
 // Role is the permission ladder. Higher roles include all lower rights.
@@ -35,7 +36,7 @@ const (
 
 func ParseRole(raw string) (Role, error) {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
-	case "reader":
+	case "reader", "viewer": // viewer is the workspace Users-page alias for reader
 		return RoleReader, nil
 	case "writer":
 		return RoleWriter, nil
@@ -95,8 +96,15 @@ func (p Principal) AllowsAllProjects() bool {
 
 // Gate resolves bearer tokens to principals. A nil *Gate (or one created
 // from an empty token list) is disabled and authorizes everything.
+//
+// Static tokens from the environment live in byToken (immutable after
+// startup). Tokens of workspace users live in the database and can change
+// at runtime, so they are kept in a separate reloadable set guarded by a
+// mutex.
 type Gate struct {
-	byToken map[string]Principal
+	byToken   map[string]Principal
+	dbMu      sync.RWMutex
+	dbByToken map[string]Principal
 }
 
 // NewGate parses the token configuration. An empty raw value yields a
@@ -150,7 +158,52 @@ func (g *Gate) TokenCount() int {
 	if g == nil {
 		return 0
 	}
-	return len(g.byToken)
+	return len(g.byToken) + g.DBTokenCount()
+}
+
+// SetDBTokens atomically replaces the set of workspace-user tokens. The
+// static environment tokens are never affected. A nil gate is disabled
+// and ignores the call.
+func (g *Gate) SetDBTokens(principals map[string]Principal) {
+	if g == nil {
+		return
+	}
+	tokens := make(map[string]Principal, len(principals))
+	for token, p := range principals {
+		if token = strings.TrimSpace(token); token != "" {
+			tokens[token] = p
+		}
+	}
+	g.dbMu.Lock()
+	g.dbByToken = tokens
+	g.dbMu.Unlock()
+}
+
+// DBTokenCount returns the number of live workspace-user tokens.
+func (g *Gate) DBTokenCount() int {
+	if g == nil {
+		return 0
+	}
+	g.dbMu.RLock()
+	defer g.dbMu.RUnlock()
+	return len(g.dbByToken)
+}
+
+func (g *Gate) dbPrincipal(token string) (Principal, bool) {
+	g.dbMu.RLock()
+	defer g.dbMu.RUnlock()
+	p, ok := g.dbByToken[token]
+	return p, ok
+}
+
+func (g *Gate) dbTokensSnapshot() map[string]Principal {
+	g.dbMu.RLock()
+	defer g.dbMu.RUnlock()
+	snapshot := make(map[string]Principal, len(g.dbByToken))
+	for token, p := range g.dbByToken {
+		snapshot[token] = p
+	}
+	return snapshot
 }
 
 type contextKey struct{}
@@ -172,6 +225,9 @@ func (g *Gate) Authenticate(next http.Handler) http.Handler {
 		}
 		token, ok := BearerToken(r)
 		principal, known := g.byToken[token]
+		if !known {
+			principal, known = g.dbPrincipal(token)
+		}
 		if !ok || !known {
 			writeError(w, http.StatusUnauthorized, "a valid bearer token is required")
 			return
@@ -299,5 +355,8 @@ func (g *Gate) Merge(other *Gate) *Gate {
 	for token, p := range other.byToken {
 		merged.byToken[token] = p
 	}
+	// Preserve the reloadable database tokens of the receiver: Merge builds
+	// a fresh gate and must not silently drop them.
+	merged.SetDBTokens(g.dbTokensSnapshot())
 	return merged
 }

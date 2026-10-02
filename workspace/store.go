@@ -846,8 +846,32 @@ func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
 	return u, nil
 }
 
+// ListUsers returns users for API responses: the token value is never
+// included, only HasToken reporting whether one exists.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, '', projects, active, created_at, updated_at FROM workspace_user ORDER BY created_at`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, (token <> '') AS has_token, projects, active, created_at, updated_at FROM workspace_user ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []User
+	for rows.Next() {
+		var u User
+		var projects []byte
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.HasToken, &projects, &u.Active, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(projects, &u.Projects)
+		result = append(result, u)
+	}
+	return result, rows.Err()
+}
+
+// ListUsersWithTokens is the privileged variant used by the kernel auth
+// gate: it returns the raw bearer tokens. Its results must never be
+// serialized to API clients.
+func (s *Store) ListUsersWithTokens(ctx context.Context) ([]User, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, token, projects, active, created_at, updated_at FROM workspace_user ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -860,9 +884,22 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 			return nil, err
 		}
 		_ = json.Unmarshal(projects, &u.Projects)
+		u.HasToken = u.Token != ""
 		result = append(result, u)
 	}
 	return result, rows.Err()
+}
+
+// UpdateUserToken replaces a user's bearer token (regeneration).
+func (s *Store) UpdateUserToken(ctx context.Context, id, token string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE workspace_user SET token = $2, updated_at = now() WHERE id = $1`, id, token)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) UpdateUser(ctx context.Context, u User) error {

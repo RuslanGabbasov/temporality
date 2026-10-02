@@ -179,9 +179,10 @@ type User struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Email     string    `json:"email,omitempty"`
-	Role      string    `json:"role"`               // viewer, operator, admin
-	Token     string    `json:"token,omitempty"`    // bearer token (write-only, never returned in list)
-	Projects  []string  `json:"projects,omitempty"` // empty = all
+	Role      string    `json:"role"`                // viewer, operator, admin
+	Token     string    `json:"token,omitempty"`     // bearer token; only set in create/regenerate responses, never in list
+	HasToken  bool      `json:"has_token,omitempty"` // list responses: whether a token exists (value is never exposed)
+	Projects  []string  `json:"projects,omitempty"`  // empty = all
 	Active    bool      `json:"active"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
