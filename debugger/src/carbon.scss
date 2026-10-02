@@ -1361,6 +1361,52 @@ button.header-nav-link {
   border-color: var(--tm-border-strong);
 }
 
+// Agent cards — equal height within a grid row, stable internal layout
+.agent-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.agent-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.agent-card-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-card-title strong {
+  word-break: break-word;
+}
+
+.agent-card-desc {
+  color: var(--tm-text-3);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  margin: 0.25rem 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.agent-card-tags {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.agent-card-toggle {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
 .workspace-tile.selected {
   border-color: var(--tm-amber);
   background: var(--tm-elevated);

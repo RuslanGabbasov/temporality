@@ -490,25 +490,15 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
           const prompt = promptFor[a.id]
           return (
             <Column key={a.id} sm={4} md={8} lg={8}>
-              <Tile style={{ marginBottom: '0.75rem' }}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'flex-start' }}>
-                  <div style={{ minWidth: 0, flex: '1 1 260px' }}>
+              <Tile className="agent-card" style={{ marginBottom: '0.75rem' }}>
+                <div className="agent-card-head">
+                  <div className="agent-card-title">
                     <strong>{a.name}</strong>
                     {a.id === defaultAgentId && <Tag type="green" size="sm" style={{ marginLeft: '0.5rem' }}>{t('agents.project_default') ?? 'project default'}</Tag>}
                     {a.labels?.builtin === 'true' && <Tag type="warm-gray" size="sm" style={{ marginLeft: '0.25rem' }}>{t('agents.builtin_tag') ?? 'builtin'}</Tag>}
                     {!!a.definition_version && <Tag type="purple" size="sm" style={{ marginLeft: '0.25rem' }}>v{a.definition_version}</Tag>}
-                    {a.description && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{a.description}</p>}
-                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
-                      <Tag type="blue" size="sm">{a.model || (t('agents.no_model') ?? 'no model')}</Tag>
-                      {a.provider && <Tag type="cyan" size="sm">{a.provider}</Tag>}
-                      <Tag type="gray" size="sm">{a.sandbox_profile || (t('agents.default') ?? 'default')}</Tag>
-                      {disabledCaps(a.definition?.capabilities).length > 0 && (
-                        <Tag type="warm-gray" size="sm">{t('agents.restricted_caps', { count: String(disabledCaps(a.definition?.capabilities).length) }) ?? `${disabledCaps(a.definition?.capabilities).length} ✕`}</Tag>
-                      )}
-                      {a.project_id && <Tag type="warm-gray" size="sm">{a.project_id}</Tag>}
-                    </div>
                   </div>
-                  <Stack orientation="horizontal" gap={1} style={{ flexShrink: 0, marginLeft: 'auto' }}>
+                  <Stack orientation="horizontal" gap={1} style={{ flexShrink: 0 }}>
                     {project && a.id !== defaultAgentId && (
                       <Button size="sm" kind="ghost" hasIconOnly renderIcon={Star} iconDescription={t('agents.make_default') ?? 'Make default'} title={t('agents.make_default') ?? 'Make default'} onClick={() => void makeDefault(a)} />
                     )}
@@ -518,8 +508,18 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void deleteAgent(a)} />
                   </Stack>
                 </div>
+                {a.description && <p className="agent-card-desc">{a.description}</p>}
+                <div className="agent-card-tags">
+                  <Tag type="blue" size="sm">{a.model || (t('agents.no_model') ?? 'no model')}</Tag>
+                  {a.provider && <Tag type="cyan" size="sm">{a.provider}</Tag>}
+                  <Tag type="gray" size="sm">{a.sandbox_profile || (t('agents.default') ?? 'default')}</Tag>
+                  {disabledCaps(a.definition?.capabilities).length > 0 && (
+                    <Tag type="warm-gray" size="sm">{t('agents.restricted_caps', { count: String(disabledCaps(a.definition?.capabilities).length) }) ?? `${disabledCaps(a.definition?.capabilities).length} ✕`}</Tag>
+                  )}
+                  {a.project_id && <Tag type="warm-gray" size="sm">{a.project_id}</Tag>}
+                </div>
 
-                <Button size="sm" kind="ghost" onClick={() => { setExpandedId(expandedId === a.id ? null : a.id); if (expandedId !== a.id && !promptFor[a.id]) void loadPromptFor(a.id) }} style={{ marginTop: '0.5rem' }}>
+                <Button size="sm" kind="ghost" className="agent-card-toggle" onClick={() => { setExpandedId(expandedId === a.id ? null : a.id); if (expandedId !== a.id && !promptFor[a.id]) void loadPromptFor(a.id) }}>
                   {expandedId === a.id ? (t('agents.hide_details') ?? 'Hide details') : (t('agents.show_details') ?? 'Show details')}
                 </Button>
 
