@@ -238,12 +238,14 @@ function FieldMapEditor({ fields, onChange, addLabel, namePlaceholder }: {
  * Structured editor for skill.yaml — form controls for the formal manifest
  * sections, with a raw-YAML escape hatch for power users.
  */
-export default function SkillManifestEditor({ manifest, onChange, suggestions, provenance, onTouch }: {
+export default function SkillManifestEditor({ manifest, onChange, suggestions, provenance, onTouch, variant = 'all' }: {
   manifest: SkillManifest
   onChange: (next: SkillManifest) => void
   suggestions?: ManifestSuggestions
   provenance?: Record<string, SectionProvenance>
   onTouch?: (section: string) => void
+  /** Which sections to render: dialogs split the manifest across tabs. */
+  variant?: 'all' | 'contract' | 'runtime'
 }) {
   const t = useT()
   const [rawMode, setRawMode] = useState(false)
@@ -274,6 +276,13 @@ export default function SkillManifestEditor({ manifest, onChange, suggestions, p
     }
   }
 
+  // Dialog tabs split the manifest: the contract tab carries the identity
+  // sections (and the raw YAML toggle), the runtime tab the requirements.
+  const CONTRACT_SECTIONS = ['inputs', 'outputs', 'capabilities', 'tools']
+  const RUNTIME_SECTIONS = ['runtime', 'preconditions', 'postconditions', 'evidence', 'evaluation']
+  const show = (section: string) => variant === 'all'
+    || (variant === 'contract' ? CONTRACT_SECTIONS : RUNTIME_SECTIONS).includes(section)
+
   if (rawMode) {
     return (
       <div className="manifest-editor">
@@ -297,31 +306,42 @@ export default function SkillManifestEditor({ manifest, onChange, suggestions, p
 
   return (
     <div className="manifest-editor">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={sectionLabel}>{t('skills.editor.contract') ?? 'Contract'}</h3>
-        <Button kind="ghost" size="sm" onClick={enterRaw}>{t('skills.editor.raw_yaml') ?? 'Edit as YAML'}</Button>
-      </div>
+      {variant !== 'runtime' && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={sectionLabel}>{t('skills.editor.contract') ?? 'Contract'}</h3>
+          <Button kind="ghost" size="sm" onClick={enterRaw}>{t('skills.editor.raw_yaml') ?? 'Edit as YAML'}</Button>
+        </div>
+      )}
 
+      {show('inputs') && (
       <div className="manifest-section">
         <SectionLabel id="inputs">{t('skills.editor.inputs') ?? 'Inputs'}</SectionLabel>
         <FieldMapEditor fields={manifest.inputs ?? {}} onChange={(inputs) => { touch('inputs'); patch({ inputs }) }} addLabel={t('skills.editor.add_input') ?? 'Add input'} namePlaceholder="repository" />
       </div>
+      )}
 
+      {show('outputs') && (
       <div className="manifest-section">
         <SectionLabel id="outputs">{t('skills.editor.outputs') ?? 'Outputs'}</SectionLabel>
         <FieldMapEditor fields={manifest.outputs ?? {}} onChange={(outputs) => { touch('outputs'); patch({ outputs }) }} addLabel={t('skills.editor.add_output') ?? 'Add output'} namePlaceholder="deployment" />
       </div>
+      )}
 
+      {show('capabilities') && (
       <div className="manifest-section">
         <SectionLabel id="capabilities">{t('skills.editor.capabilities') ?? 'Capabilities'}</SectionLabel>
         <ChipInput values={manifest.capabilities ?? []} onChange={(capabilities) => { touch('capabilities'); patch({ capabilities }) }} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} suggestions={suggestions?.capabilities} />
       </div>
+      )}
 
+      {show('tools') && (
       <div className="manifest-section">
         <SectionLabel id="tools">{t('skills.editor.tools') ?? 'Tools'}</SectionLabel>
         <ChipInput values={manifest.tools ?? []} onChange={(tools) => { touch('tools'); patch({ tools }) }} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} suggestions={suggestions?.tools} />
       </div>
+      )}
 
+      {show('runtime') && (
       <div className="manifest-section">
         <SectionLabel id="runtime">{t('skills.editor.runtime') ?? 'Runtime'}</SectionLabel>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -359,22 +379,30 @@ export default function SkillManifestEditor({ manifest, onChange, suggestions, p
           </div>
         </div>
       </div>
+      )}
 
+      {show('preconditions') && (
       <div className="manifest-section">
         <SectionLabel id="preconditions">{t('skills.editor.preconditions') ?? 'Preconditions'}</SectionLabel>
         <StringListEditor values={manifest.preconditions ?? []} onChange={(preconditions) => { touch('preconditions'); patch({ preconditions }) }} placeholder={t('skills.editor.condition_placeholder') ?? 'Describe a condition'} />
       </div>
+      )}
 
+      {show('postconditions') && (
       <div className="manifest-section">
         <SectionLabel id="postconditions">{t('skills.editor.postconditions') ?? 'Postconditions'}</SectionLabel>
         <StringListEditor values={manifest.postconditions ?? []} onChange={(postconditions) => { touch('postconditions'); patch({ postconditions }) }} placeholder={t('skills.editor.condition_placeholder') ?? 'Describe a condition'} />
       </div>
+      )}
 
+      {show('evidence') && (
       <div className="manifest-section">
         <SectionLabel id="evidence">{t('skills.editor.evidence') ?? 'Evidence required'}</SectionLabel>
         <ChipInput values={manifest.evidence?.required ?? []} onChange={(required) => { touch('evidence'); patch({ evidence: { required } }) }} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} />
       </div>
+      )}
 
+      {show('evaluation') && (
       <div className="manifest-section">
         <SectionLabel id="evaluation">{t('skills.editor.evaluation') ?? 'Evaluation suite'}</SectionLabel>
         <TextInput
@@ -385,6 +413,7 @@ export default function SkillManifestEditor({ manifest, onChange, suggestions, p
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => { touch('evaluation'); patch({ evaluation: { suite: e.target.value } }) }}
         />
       </div>
+      )}
     </div>
   )
 }

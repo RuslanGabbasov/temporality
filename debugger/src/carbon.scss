@@ -1343,6 +1343,25 @@ button.header-nav-link {
   margin-top: 0.5rem;
 }
 
+/* Tabbed modal: tab bar and footer stay visible, only the body scrolls. */
+.modal-panel.tabbed { overflow: hidden; }
+
+.modal-tabs {
+  margin: 0 -1.5rem;
+  padding: 0 1.5rem;
+  flex-shrink: 0;
+}
+
+.modal-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-right: 0.25rem;
+}
+
 // Carbon ModalFooter — buttons together on the right
 .cds--modal-footer {
   justify-content: flex-end !important;

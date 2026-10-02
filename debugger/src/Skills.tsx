@@ -513,7 +513,7 @@ export default function Skills({ project }: { project: string }) {
       {/* Create/Edit form (prefilled by the agent after the wizard) */}
       {showForm && (
         <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '760px', maxHeight: '85vh', overflow: 'auto' }}>
+          <div className="modal-panel tabbed" style={{ width: '760px', maxHeight: '85vh', minHeight: '480px' }}>
             <SkillFormFields
               form={form}
               setForm={setForm}
@@ -540,6 +540,8 @@ export default function Skills({ project }: { project: string }) {
   )
 }
 
+type SkillFormTab = 'general' | 'instructions' | 'contract' | 'runtime'
+
 /** Shared CRUD fields: used by the create/edit modal (and available for inline editing). */
 function SkillFormFields({
   form, setForm, editing, provenance, onTouch, suggestions, validation, onValidate, onSave, onCancel,
@@ -562,8 +564,15 @@ function SkillFormFields({
   saving: boolean
 }) {
   const t = useT()
+  const [tab, setTab] = useState<SkillFormTab>('general')
+  const tabs: Array<{ key: SkillFormTab; label: string }> = [
+    { key: 'general', label: t('skills.ftab_general') ?? 'General' },
+    { key: 'instructions', label: t('skills.ftab_instructions') ?? 'Instructions' },
+    { key: 'contract', label: t('skills.ftab_contract') ?? 'Contract' },
+    { key: 'runtime', label: t('skills.ftab_runtime') ?? 'Runtime' },
+  ]
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', minHeight: 0, flex: 1 }}>
       <Heading>{editing ? (t('skills.edit_skill') ?? 'Edit Skill') : (t('skills.new_skill') ?? 'New Skill')}</Heading>
 
       {questions.length > 0 && (
@@ -587,22 +596,50 @@ function SkillFormFields({
         </div>
       )}
 
-      {!editing && (
-        <TextInput id="skill-id" labelText={t('skills.id') ?? 'ID'} value={form.id} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, id: e.target.value })} placeholder="deploy-service" helperText={t('skills.id_helper') ?? 'Lowercase with dashes; auto-generated from name if empty'} />
-      )}
-      <TextInput id="skill-name" labelText={t('skills.name') ?? 'Name'} value={form.name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { onTouch('name'); setForm({ ...form, name: e.target.value }) }} placeholder="Deploy service" />
-      <TextInput id="skill-description" labelText={t('skills.description') ?? 'Description'} value={form.description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { onTouch('description'); setForm({ ...form, description: e.target.value }) }} />
-      <TextInput id="skill-version" labelText={t('skills.version') ?? 'Version'} value={form.version} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, version: e.target.value })} helperText={editing ? (t('skills.version_helper') ?? 'Increase the version to record a new immutable version') : '1.0.0'} />
-      <TextArea id="skill-markdown" labelText={t('skills.instructions') ?? 'Instructions (SKILL.md)'} rows={10} value={form.markdown} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { onTouch('markdown'); setForm({ ...form, markdown: e.target.value }) }} />
-      <SkillManifestEditor manifest={form.manifest} onChange={(manifest) => setForm({ ...form, manifest })} suggestions={suggestions} provenance={provenance} onTouch={onTouch} />
+      <div className="skill-tabs modal-tabs" role="tablist">
+        {tabs.map(({ key, label }) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={tab === key}
+            className={`skill-tab ${tab === key ? 'active' : ''}`}
+            onClick={() => setTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="modal-scroll">
+        {tab === 'general' && (
+          <>
+            {!editing && (
+              <TextInput id="skill-id" labelText={t('skills.id') ?? 'ID'} value={form.id} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, id: e.target.value })} placeholder="deploy-service" helperText={t('skills.id_helper') ?? 'Lowercase with dashes; auto-generated from name if empty'} />
+            )}
+            <TextInput id="skill-name" labelText={t('skills.name') ?? 'Name'} value={form.name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { onTouch('name'); setForm({ ...form, name: e.target.value }) }} placeholder="Deploy service" />
+            <TextInput id="skill-description" labelText={t('skills.description') ?? 'Description'} value={form.description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { onTouch('description'); setForm({ ...form, description: e.target.value }) }} />
+            <TextInput id="skill-version" labelText={t('skills.version') ?? 'Version'} value={form.version} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, version: e.target.value })} helperText={editing ? (t('skills.version_helper') ?? 'Increase the version to record a new immutable version') : '1.0.0'} />
+          </>
+        )}
+        {tab === 'instructions' && (
+          <TextArea id="skill-markdown" labelText={t('skills.instructions') ?? 'Instructions (SKILL.md)'} rows={18} value={form.markdown} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { onTouch('markdown'); setForm({ ...form, markdown: e.target.value }) }} />
+        )}
+        {tab === 'contract' && (
+          <SkillManifestEditor manifest={form.manifest} onChange={(manifest) => setForm({ ...form, manifest })} suggestions={suggestions} provenance={provenance} onTouch={onTouch} variant="contract" />
+        )}
+        {tab === 'runtime' && (
+          <SkillManifestEditor manifest={form.manifest} onChange={(manifest) => setForm({ ...form, manifest })} suggestions={suggestions} provenance={provenance} onTouch={onTouch} variant="runtime" />
+        )}
+      </div>
+
       {validation && (
-        <div style={{ margin: '0.5rem 0' }}>
+        <div style={{ margin: 0 }}>
           {validation.length === 0
             ? <InlineNotification kind="success" title={t('skills.valid') ?? 'Valid'} subtitle={t('skills.valid_hint') ?? ''} lowContrast hideCloseButton />
             : <InlineNotification kind="warning" title={t('skills.invalid') ?? 'Issues found'} subtitle={validation.map((i) => `${i.field}: ${i.message}`).join(' · ')} lowContrast hideCloseButton />}
         </div>
       )}
-      <div className="form-actions">
+      <div className="form-actions" style={{ marginTop: 0 }}>
         <Button kind="secondary" onClick={onValidate}>{t('skills.validate') ?? 'Validate'}</Button>
         <Button kind="secondary" onClick={onCancel}>{t('action.cancel') ?? 'Cancel'}</Button>
         <Button onClick={onSave} disabled={saving}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>

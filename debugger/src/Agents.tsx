@@ -36,6 +36,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Agent | null>(null)
+  const [formTab, setFormTab] = useState<'general' | 'params' | 'bindings' | 'tools'>('general')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showTemplates, setShowTemplates] = useState(false)
 
@@ -106,12 +107,14 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
 
 const startCreate = () => {
     setEditing(null)
+    setFormTab('general')
     setForm({ name: '', model: '', system_prompt: '', skills: [], mcp_servers: [], tools: [] })
     setShowForm(true)
   }
 
   const startEdit = (agent: Agent) => {
     setEditing(agent)
+    setFormTab('general')
     setForm({ ...agent })
     setShowForm(true)
   }
@@ -143,6 +146,7 @@ const startCreate = () => {
 
   const duplicateAgent = (agent: Agent) => {
     setEditing(null)
+    setFormTab('general')
     setForm({ ...agent, id: undefined, name: agent.name + (t('agents.copy_suffix') ?? ' (copy)') })
     setShowForm(true)
   }
@@ -239,70 +243,99 @@ const startCreate = () => {
       {/* Edit/Create modal */}
       {showForm && (
         <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '680px', maxWidth: 'calc(100vw - 2rem)' }}>
+          <div className="modal-panel tabbed" style={{ width: '680px', maxWidth: 'calc(100vw - 2rem)', maxHeight: '85vh', minHeight: '480px' }}>
             <Heading>{editing ? (t('agents.edit_agent') ?? 'Edit Agent') : (t('agents.new_agent') ?? 'New Agent')}</Heading>
-            <Stack gap={3}>
-              <TextInput id="agent-name" labelText={t('agents.name') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="coder" autoFocus />
-              <TextInput id="agent-desc" labelText={t('agents.description') ?? 'Description'} value={form.description ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, description: e.target.value })} placeholder="A careful developer agent" />
-              <Select id="agent-provider" labelText={t('agents.provider') ?? 'Provider'} value={form.provider ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, provider: e.target.value })}>
-                <SelectItem value="" text={t('agents.default_label') ?? 'Default'} />
-                {providers.map((p) => <SelectItem key={p.id} value={p.id} text={p.name} />)}
-              </Select>
-              <TextInput id="agent-model" labelText={t('agents.model') ?? 'Model'} value={form.model ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, model: e.target.value })} placeholder="gpt-4o, claude-3-sonnet, etc." />
-              <TextArea id="agent-prompt" labelText={t('agents.system_prompt') ?? 'System prompt'} value={form.system_prompt ?? ''} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, system_prompt: e.target.value })} rows={6} placeholder="You are a careful developer..." />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
-                <NumberInput id="agent-temp" label={t('agents.temperature') ?? 'Temperature'} value={form.temperature ?? 0} onChange={(_, { value }) => setForm({ ...form, temperature: typeof value === 'number' ? value : 0 })} min={0} max={2} step={0.1} />
-                <NumberInput id="agent-tokens" label={t('agents.max_tokens') ?? 'Max tokens'} value={form.max_tokens ?? 16384} onChange={(_, { value }) => setForm({ ...form, max_tokens: typeof value === 'number' ? value : 16384 })} min={64} max={1000000} />
-                <NumberInput id="agent-turns" label={t('agents.max_turns') ?? 'Max turns'} value={form.max_turns ?? 20} onChange={(_, { value }) => setForm({ ...form, max_turns: typeof value === 'number' ? value : 20 })} min={1} max={100} />
-              </div>
-              <Select id="agent-sandbox" labelText={t('agents.sandbox_profile') ?? 'Sandbox profile'} value={form.sandbox_profile ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, sandbox_profile: e.target.value })}>
-                <SelectItem value="" text={t('agents.default_label') ?? 'Default'} />
-                <SelectItem value="restricted" text={t('agents.restricted') ?? 'Restricted'} />
-                <SelectItem value="standard" text={t('agents.standard') ?? 'Standard'} />
-                <SelectItem value="privileged" text={t('agents.privileged') ?? 'Privileged'} />
-              </Select>
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                <Toggle id="agent-network" labelText={t('agents.network') ?? 'Network'} toggled={form.network_access ?? false} onToggle={(checked: boolean) => setForm({ ...form, network_access: checked })} />
-                <Toggle id="agent-readonly" labelText={t('agents.read_only') ?? 'Read-only'} toggled={form.read_only ?? false} onToggle={(checked: boolean) => setForm({ ...form, read_only: checked })} />
-              </div>
-              {availableSkills.length > 0 && (
-                <div>
-                  <p className="cds--label" style={{ marginBottom: '0.5rem' }}>{t('agents.skills') ?? 'Skills'}</p>
-                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>{t('agents.skills_hint') ?? 'Selected skills are injected into the system prompt at run time.'}</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 1rem', maxHeight: '10rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
-                    {availableSkills.map((s) => (
-                      <Checkbox
-                        key={s.id}
-                        id={`agent-skill-${s.id}`}
-                        labelText={s.name}
-                        title={s.id}
-                        checked={form.skills?.includes(s.id) ?? false}
-                        onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) =>
-                          setForm({ ...form, skills: checked ? [...(form.skills ?? []), s.id] : (form.skills ?? []).filter((x) => x !== s.id) })}
-                      />
-                    ))}
-                  </div>
+            <div className="skill-tabs modal-tabs" role="tablist">
+              {(['general', 'params', 'bindings', 'tools'] as const).map((key) => (
+                <button
+                  key={key}
+                  role="tab"
+                  aria-selected={formTab === key}
+                  className={`skill-tab ${formTab === key ? 'active' : ''}`}
+                  onClick={() => setFormTab(key)}
+                >
+                  {t(`agents.ftab_${key}`) ?? key}
+                </button>
+              ))}
+            </div>
+            <div className="modal-scroll">
+            {formTab === 'general' && (
+              <Stack gap={3}>
+                <TextInput id="agent-name" labelText={t('agents.name') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="coder" autoFocus />
+                <TextInput id="agent-desc" labelText={t('agents.description') ?? 'Description'} value={form.description ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, description: e.target.value })} placeholder="A careful developer agent" />
+                <Select id="agent-provider" labelText={t('agents.provider') ?? 'Provider'} value={form.provider ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, provider: e.target.value })}>
+                  <SelectItem value="" text={t('agents.default_label') ?? 'Default'} />
+                  {providers.map((p) => <SelectItem key={p.id} value={p.id} text={p.name} />)}
+                </Select>
+                <TextInput id="agent-model" labelText={t('agents.model') ?? 'Model'} value={form.model ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, model: e.target.value })} placeholder="gpt-4o, claude-3-sonnet, etc." />
+                <TextArea id="agent-prompt" labelText={t('agents.system_prompt') ?? 'System prompt'} value={form.system_prompt ?? ''} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, system_prompt: e.target.value })} rows={10} placeholder="You are a careful developer..." />
+              </Stack>
+            )}
+            {formTab === 'params' && (
+              <Stack gap={3}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                  <NumberInput id="agent-temp" label={t('agents.temperature') ?? 'Temperature'} value={form.temperature ?? 0} onChange={(_, { value }) => setForm({ ...form, temperature: typeof value === 'number' ? value : 0 })} min={0} max={2} step={0.1} />
+                  <NumberInput id="agent-tokens" label={t('agents.max_tokens') ?? 'Max tokens'} value={form.max_tokens ?? 16384} onChange={(_, { value }) => setForm({ ...form, max_tokens: typeof value === 'number' ? value : 16384 })} min={64} max={1000000} />
+                  <NumberInput id="agent-turns" label={t('agents.max_turns') ?? 'Max turns'} value={form.max_turns ?? 20} onChange={(_, { value }) => setForm({ ...form, max_turns: typeof value === 'number' ? value : 20 })} min={1} max={100} />
                 </div>
-              )}
-              {mcpServers.length > 0 && (
-                <div>
-                  <p className="cds--label" style={{ marginBottom: '0.5rem' }}>{t('agents.mcp_servers') ?? 'MCP servers'}</p>
-                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>{t('agents.mcp_hint') ?? 'Selected servers add their tools to this agent. Bind servers on the MCP tab.'}</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 1rem', maxHeight: '8rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
-                    {mcpServers.map((s) => (
-                      <Checkbox
-                        key={s.id}
-                        id={`agent-mcp-${s.id}`}
-                        labelText={s.name}
-                        title={s.id}
-                        checked={form.mcp_servers?.includes(s.id) ?? false}
-                        onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) =>
-                          setForm({ ...form, mcp_servers: checked ? [...(form.mcp_servers ?? []), s.id] : (form.mcp_servers ?? []).filter((x) => x !== s.id) })}
-                      />
-                    ))}
-                  </div>
+                <Select id="agent-sandbox" labelText={t('agents.sandbox_profile') ?? 'Sandbox profile'} value={form.sandbox_profile ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, sandbox_profile: e.target.value })}>
+                  <SelectItem value="" text={t('agents.default_label') ?? 'Default'} />
+                  <SelectItem value="restricted" text={t('agents.restricted') ?? 'Restricted'} />
+                  <SelectItem value="standard" text={t('agents.standard') ?? 'Standard'} />
+                  <SelectItem value="privileged" text={t('agents.privileged') ?? 'Privileged'} />
+                </Select>
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <Toggle id="agent-network" labelText={t('agents.network') ?? 'Network'} toggled={form.network_access ?? false} onToggle={(checked: boolean) => setForm({ ...form, network_access: checked })} />
+                  <Toggle id="agent-readonly" labelText={t('agents.read_only') ?? 'Read-only'} toggled={form.read_only ?? false} onToggle={(checked: boolean) => setForm({ ...form, read_only: checked })} />
                 </div>
-              )}
+              </Stack>
+            )}
+            {formTab === 'bindings' && (
+              <Stack gap={4}>
+                {availableSkills.length > 0 && (
+                  <div>
+                    <p className="cds--label" style={{ marginBottom: '0.5rem' }}>{t('agents.skills') ?? 'Skills'}</p>
+                    <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>{t('agents.skills_hint') ?? 'Selected skills are injected into the system prompt at run time.'}</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 1rem', maxHeight: '14rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
+                      {availableSkills.map((s) => (
+                        <Checkbox
+                          key={s.id}
+                          id={`agent-skill-${s.id}`}
+                          labelText={s.name}
+                          title={s.id}
+                          checked={form.skills?.includes(s.id) ?? false}
+                          onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) =>
+                            setForm({ ...form, skills: checked ? [...(form.skills ?? []), s.id] : (form.skills ?? []).filter((x) => x !== s.id) })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {mcpServers.length > 0 && (
+                  <div>
+                    <p className="cds--label" style={{ marginBottom: '0.5rem' }}>{t('agents.mcp_servers') ?? 'MCP servers'}</p>
+                    <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>{t('agents.mcp_hint') ?? 'Selected servers add their tools to this agent. Bind servers on the MCP tab.'}</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 1rem', maxHeight: '10rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
+                      {mcpServers.map((s) => (
+                        <Checkbox
+                          key={s.id}
+                          id={`agent-mcp-${s.id}`}
+                          labelText={s.name}
+                          title={s.id}
+                          checked={form.mcp_servers?.includes(s.id) ?? false}
+                          onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) =>
+                            setForm({ ...form, mcp_servers: checked ? [...(form.mcp_servers ?? []), s.id] : (form.mcp_servers ?? []).filter((x) => x !== s.id) })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {availableSkills.length === 0 && mcpServers.length === 0 && (
+                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('agents.no_bindings') ?? 'No skills or MCP servers configured in this project yet.'}</p>
+                )}
+              </Stack>
+            )}
+            {formTab === 'tools' && (
               <ToolsPanel
                 builtins={builtinTools}
                 servers={mcpTools.filter((s) => form.mcp_servers?.includes(s.id))}
@@ -310,11 +343,12 @@ const startCreate = () => {
                 selected={form.tools ?? []}
                 onChange={(tools) => setForm({ ...form, tools })}
               />
-              <div className="form-actions">
-                <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
-                <Button onClick={() => void saveAgent()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
-              </div>
-            </Stack>
+            )}
+            </div>
+            <div className="form-actions" style={{ marginTop: 0 }}>
+              <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button onClick={() => void saveAgent()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
+            </div>
           </div>
         </div>
       )}
@@ -331,6 +365,7 @@ const startCreate = () => {
               {TEMPLATES.map((tpl) => (
                 <Tile key={tpl.name} style={{ cursor: 'pointer' }} onClick={() => {
                   setEditing(null)
+                  setFormTab('general')
                   setForm({ name: tpl.name, model: tpl.model, system_prompt: tpl.system_prompt, skills: [], mcp_servers: [], tools: [], sandbox_profile: tpl.sandbox_profile, network_access: tpl.network_access, read_only: tpl.read_only, max_turns: tpl.max_turns })
                   setShowForm(true)
                   setShowTemplates(false)
