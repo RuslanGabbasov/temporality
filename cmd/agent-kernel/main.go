@@ -1479,6 +1479,30 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]bool{"deleted": true})
 	})
+	// Skill creation wizard: natural language in, structured draft out.
+	// skill.yaml stays an internal artifact — the user never edits it directly.
+	mux.HandleFunc("POST /v1/workspace/skills/draft", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req struct {
+			Description string `json:"description"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Description) == "" {
+			writeError(w, 422, errors.New("description is required"))
+			return
+		}
+		draft, err := agent.BuildSkillDraft(r.Context(), activities.Model, req.Description, skillBuilderToolsSummary(activities))
+		if err != nil {
+			writeError(w, 502, err)
+			return
+		}
+		writeJSON(w, 200, draft)
+	})
 	mux.HandleFunc("GET /v1/workspace/skills/{skillID}/versions", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -2110,6 +2134,29 @@ func builtinToolInfo(a *agent.Activities) []mcpclient.ToolInfo {
 		result = append(result, mcpclient.ToolInfo{Name: def.Name, Description: def.Description, ModelName: def.Name})
 	}
 	return result
+}
+
+// skillBuilderToolsSummary renders builtin + MCP tools as a compact text list
+// for the skill builder prompt, so the draft references real tool names.
+func skillBuilderToolsSummary(a *agent.Activities) string {
+	var b strings.Builder
+	for _, tool := range builtinToolInfo(a) {
+		if tool.Description != "" {
+			fmt.Fprintf(&b, "- %s — %s\n", tool.Name, tool.Description)
+		} else {
+			fmt.Fprintf(&b, "- %s\n", tool.Name)
+		}
+	}
+	for name, server := range a.MCP.ServerTools() {
+		fmt.Fprintf(&b, "MCP server %q: ", name)
+		tools := make([]string, 0, len(server.Tools))
+		for _, tool := range server.Tools {
+			tools = append(tools, tool.ModelName)
+		}
+		b.WriteString(strings.Join(tools, ", "))
+		b.WriteByte('\n')
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // loadMCPServers applies every stored MCP server to the registry and starts a

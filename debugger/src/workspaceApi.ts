@@ -123,6 +123,19 @@ export interface SkillValidation {
   issues: SkillValidationIssue[]
 }
 
+export interface SkillDraftQuestion {
+  field: string
+  question: string
+}
+
+export interface SkillDraft {
+  name: string
+  description: string
+  markdown: string
+  manifest: Record<string, unknown>
+  questions?: SkillDraftQuestion[]
+}
+
 export interface SkillInput {
   name: string
   description: string
@@ -281,6 +294,8 @@ export const workspaceApi = {
     request<{ versions: SkillVersion[] }>(`/v1/workspace/skills/${id}/versions`),
   validateSkill: (id: string, data: { markdown: string; manifest_yaml: string }) =>
     request<SkillValidation>(`/v1/workspace/skills/${id}/validate`, { method: 'POST', body: JSON.stringify(data) }),
+  draftSkill: (description: string) =>
+    request<SkillDraft>('/v1/workspace/skills/draft', { method: 'POST', body: JSON.stringify({ description }) }),
   listSkillExecutions: (id: string) =>
     request<{ executions: SkillExecution[] }>(`/v1/workspace/skills/${id}/executions`),
   listSkillMemory: (id: string) =>

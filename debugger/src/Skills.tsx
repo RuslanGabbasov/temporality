@@ -11,10 +11,10 @@ import {
   Heading,
 } from '@carbon/react'
 import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
-import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue } from './workspaceApi'
+import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion } from './workspaceApi'
 import { useT } from './i18n'
 import Markdown from './Markdown'
-import SkillManifestEditor, { manifestToYaml, type SkillManifest, type ManifestSuggestions } from './SkillManifestEditor'
+import SkillManifestEditor, { manifestToYaml, type SkillManifest, type ManifestSuggestions, type SectionProvenance } from './SkillManifestEditor'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -44,15 +44,28 @@ const STARTER_MANIFEST: SkillManifest = {
   runtime: { sandbox: 'optional' },
 }
 
-function manifestList(manifest: Record<string, unknown>, key: string): string[] {
-  const value = manifest?.[key]
-  return Array.isArray(value) ? value.map(String) : []
+type SkillTab = 'main' | 'executions' | 'evolution' | 'evals'
+
+interface SkillFormState {
+  id: string
+  name: string
+  description: string
+  version: string
+  markdown: string
+  manifest: SkillManifest
+}
+
+/** Sections the agent asks questions about map onto editor sections. */
+function sectionOfField(field: string): string {
+  const head = field.split('.')[0].split('[')[0].trim()
+  return head || '*'
 }
 
 export default function Skills({ project }: { project: string }) {
   const t = useT()
   const [skills, setSkills] = useState<Skill[]>([])
   const [selected, setSelected] = useState<Skill | null>(null)
+  const [tab, setTab] = useState<SkillTab>('main')
   const [versions, setVersions] = useState<SkillVersion[]>([])
   const [executions, setExecutions] = useState<SkillExecution[]>([])
   const [memory, setMemory] = useState<SkillMemoryItem[]>([])
@@ -60,10 +73,30 @@ export default function Skills({ project }: { project: string }) {
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Skill | null>(null)
-  const [form, setForm] = useState<{ id: string; name: string; description: string; version: string; markdown: string; manifest: SkillManifest }>({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest: STARTER_MANIFEST })
+  const [form, setForm] = useState<SkillFormState>({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest: STARTER_MANIFEST })
   const [validation, setValidation] = useState<SkillValidationIssue[] | null>(null)
   const [openVersion, setOpenVersion] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<ManifestSuggestions>({})
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [wizardText, setWizardText] = useState('')
+  const [wizardBusy, setWizardBusy] = useState(false)
+  const [wizardError, setWizardError] = useState('')
+  const [draftQuestions, setDraftQuestions] = useState<SkillDraftQuestion[]>([])
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [provenance, setProvenance] = useState<Record<string, SectionProvenance>>({})
+
+  const load = useCallback(async () => {
+    if (!project.trim()) return
+    setLoading(true)
+    try {
+      const data = await workspaceApi.listSkills(project)
+      setSkills(data.skills ?? [])
+      setSelected((current) => current && data.skills?.some((s) => s.id === current.id) ? data.skills.find((s) => s.id === current.id)! : (data.skills?.[0] ?? null))
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }, [project])
+
+  useEffect(() => { void load() }, [load])
 
   // Autosuggest values for the manifest editor: tools from builtins + MCP,
   // capabilities collected from existing skills, mcp from server names.
@@ -95,21 +128,9 @@ export default function Skills({ project }: { project: string }) {
   // Capabilities come from the already-loaded skills list.
   const capabilitySuggestions = [...new Set(skills.flatMap((s) => Array.isArray(s.manifest?.capabilities) ? s.manifest.capabilities.map(String) : []))].sort()
 
-  const load = useCallback(async () => {
-    if (!project.trim()) return
-    setLoading(true)
-    try {
-      const data = await workspaceApi.listSkills(project)
-      setSkills(data.skills ?? [])
-      setSelected((current) => current && data.skills?.some((s) => s.id === current.id) ? data.skills.find((s) => s.id === current.id)! : (data.skills?.[0] ?? null))
-    } catch (f) { setError(message(f)) }
-    finally { setLoading(false) }
-  }, [project])
-
-  useEffect(() => { void load() }, [load])
-
   const openSkill = useCallback(async (skill: Skill) => {
     setSelected(skill)
+    setTab('main')
     setOpenVersion(null)
     try {
       const [v, e, m] = await Promise.all([
@@ -125,31 +146,74 @@ export default function Skills({ project }: { project: string }) {
 
   useEffect(() => { if (selected) void openSkill(selected) }, [selected, openSkill])
 
-  const startCreate = () => {
+  // ── Wizard: natural language → agent-built draft ──────────────────────
+
+  const startWizard = () => {
+    setWizardText('')
+    setWizardError('')
+    setWizardOpen(true)
+  }
+
+  const applyDraft = (draft: { name: string; description: string; markdown: string; manifest: Record<string, unknown> }, questions: SkillDraftQuestion[]) => {
+    const manifest = (draft.manifest ?? {}) as Record<string, unknown>
+    const prov: Record<string, SectionProvenance> = {}
+    for (const key of ['inputs', 'outputs', 'capabilities', 'tools', 'runtime', 'preconditions', 'postconditions', 'evidence', 'evaluation']) {
+      const value = manifest[key]
+      if (value && (Array.isArray(value) ? value.length : Object.keys(value as object).length) > 0) prov[key] = 'agent'
+    }
+    for (const q of questions) {
+      const section = sectionOfField(q.field)
+      prov[section] = prov[section] === 'agent' ? 'agent' : 'todo'
+    }
+    setProvenance(prov)
+    setDraftQuestions(questions)
+    setAnswers({})
+    setValidation(null)
+    setForm({
+      id: '',
+      name: draft.name || '',
+      description: draft.description || '',
+      version: '1.0.0',
+      markdown: draft.markdown || STARTER_MARKDOWN,
+      manifest,
+    })
+    setEditing(null)
+    setShowForm(true)
+  }
+
+  const generate = async (extraAnswers?: Record<string, string>) => {
+    if (!wizardText.trim()) return
+    setWizardBusy(true); setWizardError('')
+    try {
+      let description = wizardText.trim()
+      const filled = Object.entries(extraAnswers ?? answers).filter(([, a]) => a.trim())
+      if (filled.length) {
+        description += '\n\nClarifications:\n' + filled.map(([i, a]) => {
+          const q = draftQuestions[Number(i)]?.question ?? ''
+          return `- ${q}\n  Answer: ${a.trim()}`
+        }).join('\n')
+      }
+      const draft = await workspaceApi.draftSkill(description)
+      applyDraft(draft, draft.questions ?? [])
+      setWizardOpen(false)
+    } catch (f) {
+      setWizardError(message(f))
+    } finally {
+      setWizardBusy(false)
+    }
+  }
+
+  const startManual = () => {
     setEditing(null)
     setValidation(null)
+    setDraftQuestions([])
+    setProvenance({})
     setForm({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest: STARTER_MANIFEST })
     setShowForm(true)
   }
 
-  const startEdit = (skill: Skill) => {
-    setEditing(skill)
-    setValidation(null)
-    let manifest: SkillManifest = {}
-    try { manifest = JSON.parse(JSON.stringify(skill.manifest ?? {})) as SkillManifest } catch { manifest = {} }
-    setForm({
-      id: skill.id,
-      name: skill.name,
-      description: skill.description,
-      version: skill.version,
-      markdown: skill.markdown,
-      manifest,
-    })
-    setShowForm(true)
-  }
+  // ── CRUD ──────────────────────────────────────────────────────────────
 
-  // Manifest yaml is derived from the structured form so name/description/version
-  // stay in sync with the top-level fields instead of being edited twice.
   const manifestYaml = () => manifestToYaml({
     ...form.manifest,
     id: editing?.id ?? form.id.trim(),
@@ -170,18 +234,21 @@ export default function Skills({ project }: { project: string }) {
     setLoading(true); setError('')
     try {
       if (editing) {
-        await workspaceApi.updateSkill(editing.id, {
+        const updated = await workspaceApi.updateSkill(editing.id, {
           name: form.name, description: form.description, version: form.version,
           markdown: form.markdown, manifest_yaml: manifestYaml(),
         })
+        setShowForm(false); setEditing(null)
+        void openSkill(updated)
       } else {
-        await workspaceApi.createSkill({
+        const created = await workspaceApi.createSkill({
           id: form.id.trim() || form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
           project_id: project, name: form.name, description: form.description, version: form.version,
           markdown: form.markdown, manifest_yaml: manifestYaml(),
         })
+        setShowForm(false); setEditing(null)
+        void openSkill(created)
       }
-      setShowForm(false); setEditing(null)
       void load()
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
@@ -198,6 +265,19 @@ export default function Skills({ project }: { project: string }) {
     finally { setLoading(false) }
   }
 
+  const touchSection = (section: string) => {
+    setProvenance((current) => {
+      if (section === '*') {
+        // raw YAML edit touches everything
+        const next: Record<string, SectionProvenance> = {}
+        for (const key of Object.keys(current)) next[key] = 'user'
+        return next
+      }
+      if (current[section] === 'user') return current
+      return { ...current, [section]: 'user' }
+    })
+  }
+
   return (
     <div style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
@@ -206,7 +286,7 @@ export default function Skills({ project }: { project: string }) {
         <Heading>{t('skills.title') ?? 'Skills'}</Heading>
         <Stack orientation="horizontal" gap={3}>
           <Button kind="ghost" hasIconOnly renderIcon={Renew} iconDescription={t('action.refresh') ?? 'Refresh'} onClick={() => void load()} />
-          <Button renderIcon={Add} onClick={startCreate}>{t('skills.new_skill') ?? 'New Skill'}</Button>
+          <Button renderIcon={Add} onClick={startWizard}>{t('skills.new_skill') ?? 'New Skill'}</Button>
         </Stack>
       </div>
 
@@ -239,129 +319,294 @@ export default function Skills({ project }: { project: string }) {
             ))}
           </div>
 
-          {/* Detail panel */}
+          {/* Detail card with tabs */}
           {selected && (
-            <div>
-              <Tile style={{ marginBottom: '0.75rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <strong>{selected.name}</strong>
-                      <Tag size="sm">{selected.version}</Tag>
-                      <code style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{selected.id}</code>
-                    </div>
-                    {selected.description && <p style={{ color: 'var(--tm-text-2)', marginTop: '0.5rem' }}>{selected.description}</p>}
-                    {manifestList(selected.manifest as Record<string, unknown>, 'capabilities').length > 0 && (
-                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
-                        {manifestList(selected.manifest as Record<string, unknown>, 'capabilities').map((capability) => (
-                          <Tag key={capability} type="green" size="sm">{capability}</Tag>
-                        ))}
-                      </div>
-                    )}
-                    {manifestList(selected.manifest as Record<string, unknown>, 'tools').length > 0 && (
-                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
-                        {manifestList(selected.manifest as Record<string, unknown>, 'tools').map((tool) => (
-                          <Tag key={tool} type="blue" size="sm">{tool}</Tag>
-                        ))}
-                      </div>
-                    )}
+            <div className="skill-card">
+              <div className="skill-card-header">
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <strong style={{ fontSize: '1.1rem' }}>{selected.name}</strong>
+                    <Tag size="sm">{selected.version}</Tag>
+                    <code style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{selected.id}</code>
                   </div>
-                  <Stack orientation="horizontal" gap={1}>
-                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(selected)} />
-                    <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(selected)} />
-                  </Stack>
+                  {selected.description && <p style={{ color: 'var(--tm-text-2)', marginTop: '0.5rem' }}>{selected.description}</p>}
                 </div>
-              </Tile>
+                <Stack orientation="horizontal" gap={1}>
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} onClick={() => {
+                    setEditing(selected)
+                    setValidation(null)
+                    setDraftQuestions([])
+                    setProvenance({})
+                    let manifest: SkillManifest = {}
+                    try { manifest = JSON.parse(JSON.stringify(selected.manifest ?? {})) as SkillManifest } catch { manifest = {} }
+                    setForm({ id: selected.id, name: selected.name, description: selected.description, version: selected.version, markdown: selected.markdown, manifest })
+                    setShowForm(true)
+                  }} />
+                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
+                </Stack>
+              </div>
 
-              <Tile style={{ marginBottom: '0.75rem' }}>
-                <Heading style={{ fontSize: '0.9rem' }}>{t('skills.markdown_section') ?? 'SKILL.md'}</Heading>
-                <div style={{ color: 'var(--tm-text-2)' }}><Markdown content={selected.markdown} /></div>
-              </Tile>
+              <div className="skill-tabs" role="tablist">
+                {(['main', 'executions', 'evolution', 'evals'] as SkillTab[]).map((key) => (
+                  <button
+                    key={key}
+                    role="tab"
+                    aria-selected={tab === key}
+                    className={`skill-tab ${tab === key ? 'active' : ''}`}
+                    onClick={() => setTab(key)}
+                  >
+                    {t(`skills.tab_${key}`) ?? key}
+                    {key === 'executions' && executions.length > 0 && <span className="skill-tab-count">{executions.length}</span>}
+                    {key === 'evolution' && versions.length > 0 && <span className="skill-tab-count">{versions.length}</span>}
+                  </button>
+                ))}
+              </div>
 
-              <Tile style={{ marginBottom: '0.75rem' }}>
-                <Heading style={{ fontSize: '0.9rem' }}>{t('skills.manifest_section') ?? 'Manifest (skill.yaml)'}</Heading>
-                <pre style={{ fontSize: '0.75rem', whiteSpace: 'pre-wrap', margin: 0 }}>{manifestToYaml(selected.manifest as SkillManifest)}</pre>
-              </Tile>
-
-              <Tile style={{ marginBottom: '0.75rem' }}>
-                <Heading style={{ fontSize: '0.9rem' }}>{t('skills.versions_section', { count: String(versions.length) }) ?? `Versions (${versions.length})`}</Heading>
-                {versions.map((version) => (
-                  <div key={version.version} style={{ padding: '0.5rem 0' }}>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', cursor: 'pointer' }} onClick={() => setOpenVersion(openVersion === version.version ? null : version.version)}>
-                      <Tag size="sm">{version.version}</Tag>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{new Date(version.created_at).toLocaleString()}</span>
-                      {version.version === selected.version && <Tag size="sm" type="green">{t('skills.current') ?? 'current'}</Tag>}
+              <div className="skill-card-body">
+                {tab === 'main' && (
+                  <Stack gap={4}>
+                    <div>
+                      <div className="manifest-section-head"><div className="skill-subheading">{t('skills.instructions') ?? 'Instructions (SKILL.md)'}</div></div>
+                      <div className="skill-markdown"><Markdown content={selected.markdown} /></div>
                     </div>
-                    {openVersion === version.version && (
-                      <pre style={{ fontSize: '0.7rem', whiteSpace: 'pre-wrap', margin: '0.5rem 0 0', color: 'var(--tm-text-2)' }}>{version.markdown}</pre>
+                    <div>
+                      <div className="manifest-section-head"><div className="skill-subheading">{t('skills.editor.contract') ?? 'Contract'}</div></div>
+                      <pre className="skill-manifest-preview">{manifestToYaml(selected.manifest as SkillManifest)}</pre>
+                    </div>
+                    {Array.isArray((selected.manifest as SkillManifest)?.capabilities) && (selected.manifest as SkillManifest).capabilities!.length > 0 && (
+                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                        {(selected.manifest as SkillManifest).capabilities!.map((c) => <Tag key={c} type="green" size="sm">{c}</Tag>)}
+                      </div>
                     )}
-                  </div>
-                ))}
-              </Tile>
+                    {Array.isArray((selected.manifest as SkillManifest)?.tools) && (selected.manifest as SkillManifest).tools!.length > 0 && (
+                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                        {(selected.manifest as SkillManifest).tools!.map((tool) => <Tag key={tool} type="blue" size="sm">{tool}</Tag>)}
+                      </div>
+                    )}
+                  </Stack>
+                )}
 
-              <Tile style={{ marginBottom: '0.75rem' }}>
-                <Heading style={{ fontSize: '0.9rem' }}>{t('skills.executions_section', { count: String(executions.length) }) ?? `Executions (${executions.length})`}</Heading>
-                {executions.length === 0 && <p style={{ color: 'var(--tm-text-3)' }}>{t('skills.no_executions') ?? 'No runs used this skill yet.'}</p>}
-                {executions.map((execution) => (
-                  <div key={execution.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', padding: '0.35rem 0', fontSize: '0.8rem' }}>
-                    <Tag size="sm">{execution.skill_version}</Tag>
-                    <a href={`/agents?run=${execution.run_id}`} style={{ color: 'var(--tm-teal)' }}>{execution.run_id}</a>
-                    <span style={{ color: 'var(--tm-text-3)' }}>{execution.agent_id}</span>
-                    <span style={{ color: 'var(--tm-text-3)', marginLeft: 'auto' }}>{new Date(execution.started_at).toLocaleString()}</span>
-                  </div>
-                ))}
-              </Tile>
-
-              <Tile>
-                <Heading style={{ fontSize: '0.9rem' }}>{t('skills.memory_section', { count: String(memory.length) }) ?? `Memory (${memory.length})`}</Heading>
-                <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{t('skills.memory_hint') ?? 'Knowledge recorded from this skill — a separate temporal layer, never part of the skill file.'}</p>
-                {memory.map((item) => (
-                  <div key={item.knowledge_id} style={{ padding: '0.5rem 0', borderTop: '1px solid var(--tm-border)' }}>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                      <Tag size="sm" type={item.state === 'confirmed' ? 'green' : item.state === 'invalidated' || item.state === 'superseded' ? 'red' : 'gray'}>{item.state}</Tag>
-                      {item.capability && <Tag size="sm" type="blue">{item.capability}</Tag>}
-                      <code style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{item.knowledge_id}</code>
+                {tab === 'executions' && (
+                  <div>
+                    {executions.length === 0 && <p style={{ color: 'var(--tm-text-3)' }}>{t('skills.no_executions') ?? 'No runs have used this skill yet.'}</p>}
+                    {executions.map((execution) => (
+                      <div key={execution.id} className="skill-execution-row">
+                        <Tag size="sm">{execution.skill_version}</Tag>
+                        <a href={`/agents?run=${execution.run_id}`} style={{ color: 'var(--tm-teal)' }}>{execution.run_id}</a>
+                        <span style={{ color: 'var(--tm-text-3)' }}>{execution.agent_id}</span>
+                        <span style={{ color: 'var(--tm-text-3)', marginLeft: 'auto' }}>{new Date(execution.started_at).toLocaleString()}</span>
+                      </div>
+                    ))}
+                    <div style={{ marginTop: '1rem' }}>
+                      <div className="skill-subheading">{t('skills.memory_section', { count: String(memory.length) }) ?? `Memory (${memory.length})`}</div>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{t('skills.memory_hint') ?? ''}</p>
+                      {memory.map((item) => (
+                        <div key={item.knowledge_id} style={{ padding: '0.5rem 0', borderTop: '1px solid var(--tm-border)' }}>
+                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <Tag size="sm" type={item.state === 'confirmed' ? 'green' : item.state === 'invalidated' || item.state === 'superseded' ? 'red' : 'gray'}>{item.state}</Tag>
+                            {item.capability && <Tag size="sm" type="blue">{item.capability}</Tag>}
+                            <code style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{item.knowledge_id}</code>
+                          </div>
+                          <p style={{ margin: '0.25rem 0 0', color: 'var(--tm-text-2)' }}>{item.proposition}</p>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{item.run_id} · {new Date(item.occurred_at).toLocaleString()}</div>
+                        </div>
+                      ))}
                     </div>
-                    <p style={{ margin: '0.25rem 0 0', color: 'var(--tm-text-2)' }}>{item.proposition}</p>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{item.run_id} · {new Date(item.occurred_at).toLocaleString()}</div>
                   </div>
-                ))}
-              </Tile>
+                )}
+
+                {tab === 'evolution' && (
+                  <div>
+                    <div className="skill-subheading">{t('skills.stability') ?? 'Skill stability'}</div>
+                    <div className="skill-stats">
+                      <div className="skill-stat"><span className="skill-stat-value">{executions.length}</span><span className="skill-stat-label">{t('skills.stat_executions') ?? 'Executions'}</span></div>
+                      <div className="skill-stat"><span className="skill-stat-value">{memory.length}</span><span className="skill-stat-label">{t('skills.stat_knowledge') ?? 'Knowledge'}</span></div>
+                      <div className="skill-stat"><span className="skill-stat-value">{versions.length}</span><span className="skill-stat-label">{t('skills.stat_versions') ?? 'Versions'}</span></div>
+                      <div className="skill-stat"><span className="skill-stat-value">{selected.version}</span><span className="skill-stat-label">{t('skills.stat_current') ?? 'Current'}</span></div>
+                    </div>
+
+                    <div className="skill-evolution-timeline">
+                      {[...versions].reverse().map((version) => (
+                        <div key={version.version} className="skill-version">
+                          <button className="skill-version-head" onClick={() => setOpenVersion(openVersion === version.version ? null : version.version)}>
+                            <span className="skill-version-dot" />
+                            <Tag size="sm">{version.version}</Tag>
+                            {version.version === selected.version && <Tag size="sm" type="green">{t('skills.current') ?? 'current'}</Tag>}
+                            <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>
+                              {t('skills.published') ?? 'published'} {new Date(version.created_at).toLocaleDateString()}
+                            </span>
+                          </button>
+                          {openVersion === version.version && (
+                            <div className="skill-version-body">
+                              <div className="skill-subheading" style={{ fontSize: '0.7rem' }}>SKILL.md</div>
+                              <pre className="skill-manifest-preview">{version.markdown}</pre>
+                              <div className="skill-subheading" style={{ fontSize: '0.7rem', marginTop: '0.5rem' }}>skill.yaml</div>
+                              <pre className="skill-manifest-preview">{manifestToYaml(version.manifest as SkillManifest)}</pre>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {tab === 'evals' && (
+                  <div style={{ padding: '2rem 0', textAlign: 'center', color: 'var(--tm-text-3)' }}>
+                    <p>{t('skills.evals_empty') ?? 'Evaluation suites are not configured yet.'}</p>
+                    <p style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>{t('skills.evals_empty_hint') ?? ''}</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
       )}
 
-      {loading && <Loading withOverlay={false} />}
-
-      {/* Create/Edit modal */}
-      {showForm && (
+      {/* Wizard: describe the skill in natural language */}
+      {wizardOpen && (
         <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '760px', maxHeight: '85vh', overflow: 'auto' }}>
-            <Heading>{editing ? (t('skills.edit_skill') ?? 'Edit Skill') : (t('skills.new_skill') ?? 'New Skill')}</Heading>
-            {!editing && (
-              <TextInput id="skill-id" labelText={t('skills.id') ?? 'ID'} value={form.id} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, id: e.target.value })} placeholder="deploy-service" helperText={t('skills.id_helper') ?? 'Lowercase with dashes; auto-generated from name if empty'} />
-            )}
-            <TextInput id="skill-name" labelText={t('skills.name') ?? 'Name'} value={form.name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="Deploy service" />
-            <TextInput id="skill-description" labelText={t('skills.description') ?? 'Description'} value={form.description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, description: e.target.value })} />
-            <TextInput id="skill-version" labelText={t('skills.version') ?? 'Version'} value={form.version} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, version: e.target.value })} helperText={editing ? (t('skills.version_helper') ?? 'Increase the version to record a new immutable version') : '1.0.0'} />
-            <TextArea id="skill-markdown" labelText="SKILL.md" rows={10} value={form.markdown} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, markdown: e.target.value })} style={{ fontFamily: 'monospace', fontSize: '0.8rem' }} />
-            <SkillManifestEditor manifest={form.manifest} onChange={(manifest) => setForm({ ...form, manifest })} suggestions={{ ...suggestions, capabilities: capabilitySuggestions }} />
-            {validation && (
-              <div style={{ margin: '0.5rem 0' }}>
-                {validation.length === 0
-                  ? <InlineNotification kind="success" title={t('skills.valid') ?? 'Valid'} subtitle={t('skills.valid_hint') ?? 'Manifest passes contract validation'} lowContrast hideCloseButton />
-                  : <InlineNotification kind="warning" title={t('skills.invalid') ?? 'Issues found'} subtitle={validation.map((i) => `${i.field}: ${i.message}`).join(' · ')} lowContrast hideCloseButton />}
+          <div className="modal-panel" style={{ width: '560px' }}>
+            <Heading>{t('skills.wizard_title') ?? 'Create skill'}</Heading>
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
+              {t('skills.wizard_hint') ?? 'The agent will turn your description into a structured skill draft — you can adjust everything afterwards.'}
+            </p>
+            <TextArea
+              id="wizard-description"
+              hideLabel
+              labelText={t('skills.wizard_label') ?? 'Describe how the skill should work'}
+              rows={7}
+              value={wizardText}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setWizardText(e.target.value)}
+              placeholder={t('skills.wizard_placeholder') ?? 'Check pull requests: analyze changes, find problems, verify tests and leave comments…'}
+              autoFocus
+            />
+            {wizardError && <InlineNotification kind="error" title={t('skills.wizard_failed') ?? 'Generation failed'} subtitle={wizardError} lowContrast hideCloseButton style={{ marginTop: '0.5rem' }} />}
+            {draftQuestions.length > 0 && (
+              <div className="wizard-questions">
+                <div className="skill-subheading">{t('skills.agent_questions') ?? 'The agent asks for clarification'}</div>
+                {draftQuestions.map((q, i) => (
+                  <div key={i} style={{ marginBottom: '0.5rem' }}>
+                    <p style={{ margin: '0 0 0.25rem', fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>{q.question}</p>
+                    <TextInput
+                      id={`answer-${i}`}
+                      hideLabel
+                      labelText=""
+                      value={answers[String(i)] ?? ''}
+                      placeholder={t('skills.answer_placeholder') ?? 'Your answer'}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAnswers({ ...answers, [String(i)]: e.target.value })}
+                    />
+                  </div>
+                ))}
               </div>
             )}
             <div className="form-actions">
-              <Button kind="secondary" onClick={() => void validate()}>{t('skills.validate') ?? 'Validate'}</Button>
-              <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
-              <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
+              <Button kind="secondary" onClick={() => setWizardOpen(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button kind="secondary" onClick={startManual}>{t('skills.wizard_manual') ?? 'Fill manually'}</Button>
+              <Button onClick={() => void generate()} disabled={wizardBusy || !wizardText.trim()}>
+                {wizardBusy ? (t('skills.wizard_generating') ?? 'Generating…') : (draftQuestions.length ? (t('skills.send_answers') ?? 'Send answers') : (t('skills.wizard_generate') ?? 'Generate skill'))}
+              </Button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Create/Edit form (prefilled by the agent after the wizard) */}
+      {showForm && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '760px', maxHeight: '85vh', overflow: 'auto' }}>
+            <SkillFormFields
+              form={form}
+              setForm={setForm}
+              editing={editing}
+              provenance={provenance}
+              onTouch={touchSection}
+              suggestions={{ ...suggestions, capabilities: capabilitySuggestions }}
+              validation={validation}
+              onValidate={() => void validate()}
+              onSave={() => void save()}
+              onCancel={() => { setShowForm(false); setEditing(null) }}
+              questions={draftQuestions}
+              answers={answers}
+              setAnswers={setAnswers}
+              onSendAnswers={() => { setShowForm(false); setWizardOpen(true); void generate(answers) }}
+              saving={loading}
+            />
+          </div>
+        </div>
+      )}
+
+      {loading && <Loading withOverlay={false} />}
+    </div>
+  )
+}
+
+/** Shared CRUD fields: used by the create/edit modal (and available for inline editing). */
+function SkillFormFields({
+  form, setForm, editing, provenance, onTouch, suggestions, validation, onValidate, onSave, onCancel,
+  questions, answers, setAnswers, onSendAnswers, saving,
+}: {
+  form: SkillFormState
+  setForm: React.Dispatch<React.SetStateAction<SkillFormState>>
+  editing: Skill | null
+  provenance?: Record<string, SectionProvenance>
+  onTouch: (section: string) => void
+  suggestions?: ManifestSuggestions
+  validation: SkillValidationIssue[] | null
+  onValidate: () => void
+  onSave: () => void
+  onCancel: () => void
+  questions: SkillDraftQuestion[]
+  answers: Record<string, string>
+  setAnswers: React.Dispatch<React.SetStateAction<Record<string, string>>>
+  onSendAnswers: () => void
+  saving: boolean
+}) {
+  const t = useT()
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <Heading>{editing ? (t('skills.edit_skill') ?? 'Edit Skill') : (t('skills.new_skill') ?? 'New Skill')}</Heading>
+
+      {questions.length > 0 && (
+        <div className="wizard-questions">
+          <div className="skill-subheading">{t('skills.agent_questions') ?? 'The agent asks for clarification'}</div>
+          <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>{t('skills.agent_questions_hint') ?? ''}</p>
+          {questions.map((q, i) => (
+            <div key={i} style={{ marginBottom: '0.5rem' }}>
+              <p style={{ margin: '0 0 0.25rem', fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>{q.question}</p>
+              <TextInput
+                id={`form-answer-${i}`}
+                hideLabel
+                labelText=""
+                value={answers[String(i)] ?? ''}
+                placeholder={t('skills.answer_placeholder') ?? 'Your answer'}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAnswers({ ...answers, [String(i)]: e.target.value })}
+              />
+            </div>
+          ))}
+          <Button size="sm" kind="secondary" onClick={onSendAnswers}>{t('skills.send_answers') ?? 'Send answers'}</Button>
+        </div>
+      )}
+
+      {!editing && (
+        <TextInput id="skill-id" labelText={t('skills.id') ?? 'ID'} value={form.id} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, id: e.target.value })} placeholder="deploy-service" helperText={t('skills.id_helper') ?? 'Lowercase with dashes; auto-generated from name if empty'} />
+      )}
+      <TextInput id="skill-name" labelText={t('skills.name') ?? 'Name'} value={form.name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { onTouch('name'); setForm({ ...form, name: e.target.value }) }} placeholder="Deploy service" />
+      <TextInput id="skill-description" labelText={t('skills.description') ?? 'Description'} value={form.description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { onTouch('description'); setForm({ ...form, description: e.target.value }) }} />
+      <TextInput id="skill-version" labelText={t('skills.version') ?? 'Version'} value={form.version} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, version: e.target.value })} helperText={editing ? (t('skills.version_helper') ?? 'Increase the version to record a new immutable version') : '1.0.0'} />
+      <TextArea id="skill-markdown" labelText={t('skills.instructions') ?? 'Instructions (SKILL.md)'} rows={10} value={form.markdown} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { onTouch('markdown'); setForm({ ...form, markdown: e.target.value }) }} />
+      <SkillManifestEditor manifest={form.manifest} onChange={(manifest) => setForm({ ...form, manifest })} suggestions={suggestions} provenance={provenance} onTouch={onTouch} />
+      {validation && (
+        <div style={{ margin: '0.5rem 0' }}>
+          {validation.length === 0
+            ? <InlineNotification kind="success" title={t('skills.valid') ?? 'Valid'} subtitle={t('skills.valid_hint') ?? ''} lowContrast hideCloseButton />
+            : <InlineNotification kind="warning" title={t('skills.invalid') ?? 'Issues found'} subtitle={validation.map((i) => `${i.field}: ${i.message}`).join(' · ')} lowContrast hideCloseButton />}
+        </div>
+      )}
+      <div className="form-actions">
+        <Button kind="secondary" onClick={onValidate}>{t('skills.validate') ?? 'Validate'}</Button>
+        <Button kind="secondary" onClick={onCancel}>{t('action.cancel') ?? 'Cancel'}</Button>
+        <Button onClick={onSave} disabled={saving}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
+      </div>
     </div>
   )
 }

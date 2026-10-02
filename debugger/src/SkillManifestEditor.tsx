@@ -39,6 +39,15 @@ export interface ManifestSuggestions {
   mcp?: string[]
 }
 
+/** Where a section's current value came from. */
+export type SectionProvenance = 'agent' | 'user' | 'todo'
+
+function ProvenanceBadge({ kind }: { kind: SectionProvenance }) {
+  const t = useT()
+  const label = kind === 'agent' ? (t('skills.prov.agent') ?? 'from agent') : kind === 'todo' ? (t('skills.prov.todo') ?? 'needs clarification') : (t('skills.prov.user') ?? 'verified')
+  return <span className={`prov-badge prov-${kind}`}>{label}</span>
+}
+
 const FIELD_TYPES = ['string', 'number', 'boolean', 'object', 'artifact']
 
 /** Recursively drop empty strings, arrays and objects so yaml.dump stays clean. */
@@ -229,10 +238,12 @@ function FieldMapEditor({ fields, onChange, addLabel, namePlaceholder }: {
  * Structured editor for skill.yaml — form controls for the formal manifest
  * sections, with a raw-YAML escape hatch for power users.
  */
-export default function SkillManifestEditor({ manifest, onChange, suggestions }: {
+export default function SkillManifestEditor({ manifest, onChange, suggestions, provenance, onTouch }: {
   manifest: SkillManifest
   onChange: (next: SkillManifest) => void
   suggestions?: ManifestSuggestions
+  provenance?: Record<string, SectionProvenance>
+  onTouch?: (section: string) => void
 }) {
   const t = useT()
   const [rawMode, setRawMode] = useState(false)
@@ -240,14 +251,23 @@ export default function SkillManifestEditor({ manifest, onChange, suggestions }:
   const [rawError, setRawError] = useState('')
 
   const patch = (part: Partial<SkillManifest>) => onChange({ ...manifest, ...part })
+  const touch = (section: string) => onTouch?.(section)
+  const badge = (section: string) => provenance?.[section]
+  const SectionLabel = ({ id, children }: { id: string; children: React.ReactNode }) => (
+    <div className="manifest-section-head">
+      <div style={sectionLabel}>{children}</div>
+      {badge(id) && <ProvenanceBadge kind={badge(id)!} />}
+    </div>
+  )
   const runtime = manifest.runtime ?? {}
-  const patchRuntime = (part: Partial<NonNullable<SkillManifest['runtime']>>) => patch({ runtime: { ...runtime, ...part } })
+  const patchRuntime = (part: Partial<NonNullable<SkillManifest['runtime']>>) => { touch('runtime'); patch({ runtime: { ...runtime, ...part } }) }
 
   const enterRaw = () => { setRawText(manifestToYaml(manifest)); setRawError(''); setRawMode(true) }
   const leaveRaw = () => {
     try {
       const parsed = yamlLoad(rawText)
       onChange((parsed && typeof parsed === 'object' ? parsed : {}) as SkillManifest)
+      onTouch?.('*')
       setRawMode(false)
     } catch (err) {
       setRawError(err instanceof Error ? err.message : 'Invalid YAML')
@@ -283,27 +303,27 @@ export default function SkillManifestEditor({ manifest, onChange, suggestions }:
       </div>
 
       <div className="manifest-section">
-        <div style={sectionLabel}>{t('skills.editor.inputs') ?? 'Inputs'}</div>
-        <FieldMapEditor fields={manifest.inputs ?? {}} onChange={(inputs) => patch({ inputs })} addLabel={t('skills.editor.add_input') ?? 'Add input'} namePlaceholder="repository" />
+        <SectionLabel id="inputs">{t('skills.editor.inputs') ?? 'Inputs'}</SectionLabel>
+        <FieldMapEditor fields={manifest.inputs ?? {}} onChange={(inputs) => { touch('inputs'); patch({ inputs }) }} addLabel={t('skills.editor.add_input') ?? 'Add input'} namePlaceholder="repository" />
       </div>
 
       <div className="manifest-section">
-        <div style={sectionLabel}>{t('skills.editor.outputs') ?? 'Outputs'}</div>
-        <FieldMapEditor fields={manifest.outputs ?? {}} onChange={(outputs) => patch({ outputs })} addLabel={t('skills.editor.add_output') ?? 'Add output'} namePlaceholder="deployment" />
+        <SectionLabel id="outputs">{t('skills.editor.outputs') ?? 'Outputs'}</SectionLabel>
+        <FieldMapEditor fields={manifest.outputs ?? {}} onChange={(outputs) => { touch('outputs'); patch({ outputs }) }} addLabel={t('skills.editor.add_output') ?? 'Add output'} namePlaceholder="deployment" />
       </div>
 
       <div className="manifest-section">
-        <div style={sectionLabel}>{t('skills.editor.capabilities') ?? 'Capabilities'}</div>
-        <ChipInput values={manifest.capabilities ?? []} onChange={(capabilities) => patch({ capabilities })} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} suggestions={suggestions?.capabilities} />
+        <SectionLabel id="capabilities">{t('skills.editor.capabilities') ?? 'Capabilities'}</SectionLabel>
+        <ChipInput values={manifest.capabilities ?? []} onChange={(capabilities) => { touch('capabilities'); patch({ capabilities }) }} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} suggestions={suggestions?.capabilities} />
       </div>
 
       <div className="manifest-section">
-        <div style={sectionLabel}>{t('skills.editor.tools') ?? 'Tools'}</div>
-        <ChipInput values={manifest.tools ?? []} onChange={(tools) => patch({ tools })} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} suggestions={suggestions?.tools} />
+        <SectionLabel id="tools">{t('skills.editor.tools') ?? 'Tools'}</SectionLabel>
+        <ChipInput values={manifest.tools ?? []} onChange={(tools) => { touch('tools'); patch({ tools }) }} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} suggestions={suggestions?.tools} />
       </div>
 
       <div className="manifest-section">
-        <div style={sectionLabel}>{t('skills.editor.runtime') ?? 'Runtime'}</div>
+        <SectionLabel id="runtime">{t('skills.editor.runtime') ?? 'Runtime'}</SectionLabel>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
           <Select id="runtime-sandbox" labelText={t('skills.editor.sandbox') ?? 'Sandbox'} value={runtime.sandbox ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => patchRuntime({ sandbox: e.target.value })}>
             <SelectItem value="" text="—" />
@@ -341,27 +361,28 @@ export default function SkillManifestEditor({ manifest, onChange, suggestions }:
       </div>
 
       <div className="manifest-section">
-        <div style={sectionLabel}>{t('skills.editor.preconditions') ?? 'Preconditions'}</div>
-        <StringListEditor values={manifest.preconditions ?? []} onChange={(preconditions) => patch({ preconditions })} placeholder={t('skills.editor.condition_placeholder') ?? 'Describe a condition'} />
+        <SectionLabel id="preconditions">{t('skills.editor.preconditions') ?? 'Preconditions'}</SectionLabel>
+        <StringListEditor values={manifest.preconditions ?? []} onChange={(preconditions) => { touch('preconditions'); patch({ preconditions }) }} placeholder={t('skills.editor.condition_placeholder') ?? 'Describe a condition'} />
       </div>
 
       <div className="manifest-section">
-        <div style={sectionLabel}>{t('skills.editor.postconditions') ?? 'Postconditions'}</div>
-        <StringListEditor values={manifest.postconditions ?? []} onChange={(postconditions) => patch({ postconditions })} placeholder={t('skills.editor.condition_placeholder') ?? 'Describe a condition'} />
+        <SectionLabel id="postconditions">{t('skills.editor.postconditions') ?? 'Postconditions'}</SectionLabel>
+        <StringListEditor values={manifest.postconditions ?? []} onChange={(postconditions) => { touch('postconditions'); patch({ postconditions }) }} placeholder={t('skills.editor.condition_placeholder') ?? 'Describe a condition'} />
       </div>
 
       <div className="manifest-section">
-        <div style={sectionLabel}>{t('skills.editor.evidence') ?? 'Evidence required'}</div>
-        <ChipInput values={manifest.evidence?.required ?? []} onChange={(required) => patch({ evidence: { required } })} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} />
+        <SectionLabel id="evidence">{t('skills.editor.evidence') ?? 'Evidence required'}</SectionLabel>
+        <ChipInput values={manifest.evidence?.required ?? []} onChange={(required) => { touch('evidence'); patch({ evidence: { required } }) }} placeholder={t('skills.editor.chip_hint') ?? 'Type and press Enter'} />
       </div>
 
       <div className="manifest-section">
+        <SectionLabel id="evaluation">{t('skills.editor.evaluation') ?? 'Evaluation suite'}</SectionLabel>
         <TextInput
           id="evaluation-suite"
           labelText={t('skills.editor.evaluation') ?? 'Evaluation suite'}
           value={manifest.evaluation?.suite ?? ''}
           placeholder="deploy-service/default"
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => patch({ evaluation: { suite: e.target.value } })}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => { touch('evaluation'); patch({ evaluation: { suite: e.target.value } }) }}
         />
       </div>
     </div>
