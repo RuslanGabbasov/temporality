@@ -14,6 +14,25 @@ export interface Project {
   updated_at: string
 }
 
+export interface AgentCapabilities {
+  read_files?: boolean
+  modify_files?: boolean
+  run_commands?: boolean
+  network?: boolean
+  skills?: boolean
+  knowledge?: boolean
+}
+
+/** Structured definition (docs/evaluable-agent.md): capabilities, hard
+ * constraints and verifiable completion criteria. The system prompt is
+ * compiled from these — the user never writes it by hand. */
+export interface AgentDefinition {
+  capabilities?: AgentCapabilities
+  constraints?: string[]
+  completion?: string[]
+  prompt_override?: string
+}
+
 export interface Agent {
   id: string
   project_id?: string
@@ -27,6 +46,8 @@ export interface Agent {
   skills: string[]
   mcp_servers: string[]
   tools?: string[]
+  definition?: AgentDefinition
+  definition_version?: number
   sandbox_profile: string
   network_access?: boolean
   read_only?: boolean
@@ -35,6 +56,41 @@ export interface Agent {
   labels: Record<string, string>
   created_at: string
   updated_at: string
+}
+
+export interface AgentVersion {
+  agent_id: string
+  version: number
+  definition: AgentDefinition
+  description: string
+  compiled_prompt: string
+  prompt_source: string
+  generator_model?: string
+  author?: string
+  created_at: string
+}
+
+export interface BuiltinAgentSpec {
+  slug: string
+  name: string
+  description: string
+  definition: AgentDefinition
+  sandbox_profile: string
+  network_access?: boolean
+  read_only?: boolean
+  labels?: Record<string, string>
+}
+
+export interface AgentDraftQuestion { field: string; question: string }
+
+export interface AgentDraft {
+  name: string
+  description: string
+  capabilities: AgentCapabilities
+  constraints?: string[]
+  completion?: string[]
+  suggested: { model?: string; sandbox?: string; network?: boolean }
+  questions?: AgentDraftQuestion[]
 }
 
 export interface Task {
@@ -52,6 +108,7 @@ export interface Run {
   task_id: string
   project_id: string
   agent_id: string
+  agent_version?: number
   run_id: string
   status: string
   model: string
@@ -235,6 +292,16 @@ export const workspaceApi = {
     request<Agent>(`/v1/workspace/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAgent: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/agents/${id}`, { method: 'DELETE' }),
+  listAgentVersions: (id: string) =>
+    request<{ versions: AgentVersion[] }>(`/v1/workspace/agents/${id}/versions`),
+  listAgentRuns: (id: string) =>
+    request<{ runs: Run[] }>(`/v1/workspace/agents/${id}/runs`),
+  getAgentPrompt: (id: string) =>
+    request<{ agent_id: string; version: number; source: string; prompt: string }>(`/v1/workspace/agents/${id}/prompt`),
+  listBuiltinAgents: () =>
+    request<{ builtins: BuiltinAgentSpec[] }>('/v1/workspace/agents/builtins'),
+  draftAgent: (description: string) =>
+    request<AgentDraft>('/v1/workspace/agents/draft', { method: 'POST', body: JSON.stringify({ description }) }),
 
   // Tasks
   listTasks: (projectId: string) =>

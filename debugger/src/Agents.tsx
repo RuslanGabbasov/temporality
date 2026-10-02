@@ -12,22 +12,90 @@ import {
   Grid,
   Column,
   Stack,
-  Section,
   Heading,
   Toggle,
   NumberInput,
   Checkbox,
 } from '@carbon/react'
-import { Add, Edit, TrashCan, Copy, Star } from '@carbon/icons-react'
-import { workspaceApi, type Agent, type Provider, type Skill, type MCPServer, type MCPServerTools, type MCPToolInfo } from './workspaceApi'
+import { Add, Edit, TrashCan, Copy, Star, Renew, Activity } from '@carbon/icons-react'
+import {
+  workspaceApi,
+  type Agent,
+  type AgentCapabilities,
+  type AgentDefinition,
+  type AgentDraft,
+  type AgentVersion,
+  type BuiltinAgentSpec,
+  type Provider,
+  type Skill,
+  type MCPServer,
+  type MCPServerTools,
+  type MCPToolInfo,
+  type Run,
+} from './workspaceApi'
 import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
+
+const CAP_KEYS = ['read_files', 'modify_files', 'run_commands', 'network', 'skills', 'knowledge'] as const
+type CapKey = (typeof CAP_KEYS)[number]
+
+/** Where a form section's value came from (same visual language as skills). */
+type Prov = 'agent' | 'user' | 'todo'
+type SectionKey = 'identity' | 'capabilities' | 'constraints' | 'completion'
+
+function ProvBadge({ kind }: { kind: Prov }) {
+  const t = useT()
+  const label = kind === 'agent'
+    ? (t('skills.prov.agent') ?? 'from agent')
+    : kind === 'todo'
+      ? (t('skills.prov.todo') ?? 'needs clarification')
+      : (t('skills.prov.user') ?? 'verified')
+  return <span className={`prov-badge prov-${kind}`}>{label}</span>
+}
+
+/** Sections the builder asks questions about map onto form sections. */
+function sectionOfField(field: string): SectionKey {
+  const head = field.split('.')[0].split('[')[0].trim()
+  if (head === 'constraints') return 'constraints'
+  if (head === 'completion') return 'completion'
+  if (head === 'capabilities' || head === 'name' || head === 'description') return 'identity'
+  return 'capabilities'
+}
+
+const cleanList = (values?: string[]) =>
+  (values ?? []).map((v) => v.trim()).filter(Boolean)
+
+const listToText = (values?: string[]) => (values ?? []).join('\n')
+
+/** Capabilities actually set (undefined = allowed, matches server semantics). */
+function setCaps(caps?: AgentCapabilities): Partial<Record<CapKey, boolean>> {
+  const result: Partial<Record<CapKey, boolean>> = {}
+  for (const key of CAP_KEYS) {
+    const value = caps?.[key]
+    if (typeof value === 'boolean') result[key] = value
+  }
+  return result
+}
+
+function disabledCaps(caps?: AgentCapabilities): CapKey[] {
+  return CAP_KEYS.filter((key) => caps?.[key] === false)
+}
+
+function enabledCaps(caps?: AgentCapabilities): CapKey[] {
+  return CAP_KEYS.filter((key) => caps?.[key] === true)
+}
+
+function sameList(a?: string[], b?: string[]) {
+  const x = cleanList(a), y = cleanList(b)
+  return x.length === y.length && x.every((v, i) => v === y[i])
+}
 
 export default function Agents({ project, defaultAgentId, refreshProjects }: { project: string; defaultAgentId?: string; refreshProjects?: () => void }) {
   const t = useT()
   const [agents, setAgents] = useState<Agent[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
+  const [builtins, setBuiltins] = useState<BuiltinAgentSpec[]>([])
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([])
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
   const [mcpTools, setMcpTools] = useState<MCPServerTools[]>([])
@@ -36,9 +104,32 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Agent | null>(null)
-  const [formTab, setFormTab] = useState<'general' | 'params' | 'bindings' | 'tools'>('general')
+  const [formTab, setFormTab] = useState<'general' | 'capabilities' | 'rules' | 'params' | 'bindings' | 'tools' | 'prompt'>('general')
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [promptFor, setPromptFor] = useState<Record<string, { source: string; prompt: string; version: number }>>({})
   const [showTemplates, setShowTemplates] = useState(false)
+  const [fromWizard, setFromWizard] = useState(false)
+
+  // Wizard: natural language → agent-built definition draft.
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [wizardText, setWizardText] = useState('')
+  const [wizardBusy, setWizardBusy] = useState(false)
+  const [wizardError, setWizardError] = useState('')
+  const [draftQuestions, setDraftQuestions] = useState<{ field: string; question: string }[]>([])
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [provenance, setProvenance] = useState<Record<string, Prov>>({})
+
+  // Rebuild (§13): draft diff dialog for an existing agent.
+  const [regenDraft, setRegenDraft] = useState<AgentDraft | null>(null)
+  const [regenBusy, setRegenBusy] = useState(false)
+
+  // Evolution (§15): versions × runs grouped by definition version.
+  const [evolution, setEvolution] = useState<Agent | null>(null)
+  const [versions, setVersions] = useState<AgentVersion[]>([])
+  const [agentRuns, setAgentRuns] = useState<Run[]>([])
+
+  // Prompt tab preview (reflects the saved agent).
+  const [promptPreview, setPromptPreview] = useState<{ source: string; prompt: string } | null>(null)
 
   // Form state
   const [form, setForm] = useState<Partial<Agent>>({})
@@ -46,12 +137,13 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [agentsData, providersData, skillsData, mcpData, toolsData] = await Promise.all([
+      const [agentsData, providersData, skillsData, mcpData, toolsData, builtinsData] = await Promise.all([
         workspaceApi.listAllAgents(),
         workspaceApi.listProviders(),
         workspaceApi.listSkills(''),
         workspaceApi.listMCPServers(),
         workspaceApi.listMCPTools(),
+        workspaceApi.listBuiltinAgents(),
       ])
       setAgents(agentsData.agents ?? [])
       setProviders(providersData.providers ?? [])
@@ -59,63 +151,114 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       setMcpServers(mcpData.servers ?? [])
       setMcpTools(Object.values(toolsData.servers ?? {}))
       setBuiltinTools(toolsData.builtins ?? [])
+      setBuiltins(builtinsData.builtins ?? [])
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }, [])
 
   useEffect(() => { void load() }, [load])
 
-  const TEMPLATES = [
-  {
-    name: 'Coder',
-    description: 'General-purpose coding agent',
-    model: '',
-    system_prompt: 'You are a careful developer. Read code before modifying it. Run tests after changes. Write clean, minimal code.',
-    sandbox_profile: 'standard',
-    network_access: true,
-    max_turns: 30,
-  },
-  {
-    name: 'Reviewer',
-    description: 'Code review and analysis (read-only)',
-    model: '',
-    system_prompt: 'You are a code reviewer. Read the codebase, identify issues, and report findings. Do not modify files.',
-    sandbox_profile: 'restricted',
-    network_access: false,
-    read_only: true,
-    max_turns: 15,
-  },
-  {
-    name: 'Researcher',
-    description: 'Web research and documentation',
-    model: '',
-    system_prompt: 'You are a researcher. Search the web, read documentation, and compile findings into a clear report.',
-    sandbox_profile: 'standard',
-    network_access: true,
-    max_turns: 20,
-  },
-  {
-    name: 'DevOps',
-    description: 'Infrastructure and deployment tasks',
-    model: '',
-    system_prompt: 'You are a DevOps engineer. Work with Docker, CI/CD, infrastructure config. Always verify changes before applying.',
-    sandbox_profile: 'standard',
-    network_access: true,
-    max_turns: 25,
-  },
-]
+  const touch = (section: SectionKey) =>
+    setProvenance((prev) => (prev[section] === 'user' ? prev : { ...prev, [section]: 'user' }))
 
-const startCreate = () => {
+  const setDef = (part: Partial<AgentDefinition>) =>
+    setForm((prev) => ({ ...prev, definition: { ...prev.definition, ...part } }))
+
+  const setCap = (key: CapKey, value: boolean | undefined) =>
+    setForm((prev) => ({
+      ...prev,
+      definition: {
+        ...prev.definition,
+        capabilities: { ...prev.definition?.capabilities, [key]: value },
+      },
+    }))
+
+  // ── Create / edit flows ────────────────────────────────────────────────
+
+  const openWizard = () => {
+    setWizardText('')
+    setWizardError('')
+    setDraftQuestions([])
+    setAnswers({})
+    setWizardOpen(true)
+  }
+
+  const startManual = () => {
     setEditing(null)
     setFormTab('general')
-    setForm({ name: '', model: '', system_prompt: '', skills: [], mcp_servers: [], tools: [] })
+    setFromWizard(false)
+    setProvenance({})
+    setDraftQuestions([])
+    setPromptPreview(null)
+    setForm({ name: '', model: '', skills: [], mcp_servers: [], tools: [], definition: {} })
     setShowForm(true)
+    setWizardOpen(false)
+  }
+
+  const applyDraft = (draft: AgentDraft, questions: { field: string; question: string }[]) => {
+    const prov: Record<string, Prov> = {}
+    if (draft.name || draft.description) prov.identity = 'agent'
+    if (Object.keys(setCaps(draft.capabilities)).length > 0) prov.capabilities = 'agent'
+    if (cleanList(draft.constraints).length > 0) prov.constraints = 'agent'
+    if (cleanList(draft.completion).length > 0) prov.completion = 'agent'
+    for (const q of questions) {
+      const section = sectionOfField(q.field)
+      if (!prov[section]) prov[section] = 'todo'
+    }
+    setProvenance(prov)
+    setDraftQuestions(questions)
+    setAnswers({})
+    setPromptPreview(null)
+    setForm({
+      name: draft.name || '',
+      description: draft.description || '',
+      model: draft.suggested?.model || '',
+      definition: {
+        capabilities: setCaps(draft.capabilities),
+        constraints: cleanList(draft.constraints),
+        completion: cleanList(draft.completion),
+      },
+      sandbox_profile: draft.suggested?.sandbox || '',
+      network_access: draft.suggested?.network,
+      skills: [],
+      mcp_servers: [],
+      tools: [],
+    })
+    setFromWizard(true)
+    setFormTab('general')
+    setShowForm(true)
+    setWizardOpen(false)
+  }
+
+  const generate = async (extraAnswers?: Record<string, string>) => {
+    if (!wizardText.trim()) return
+    setWizardBusy(true); setWizardError('')
+    try {
+      let description = wizardText.trim()
+      const filled = Object.entries(extraAnswers ?? answers).filter(([, a]) => a.trim())
+      if (filled.length) {
+        description += '\n\nClarifications:\n' + filled.map(([i, a]) => {
+          const q = draftQuestions[Number(i)]?.question ?? ''
+          return `- ${q}\n  Answer: ${a.trim()}`
+        }).join('\n')
+      }
+      const draft = await workspaceApi.draftAgent(description)
+      applyDraft(draft, draft.questions ?? [])
+    } catch (f) {
+      setWizardError(message(f))
+    } finally {
+      setWizardBusy(false)
+    }
   }
 
   const startEdit = (agent: Agent) => {
     setEditing(agent)
     setFormTab('general')
-    setForm({ ...agent })
+    setFromWizard(false)
+    setProvenance({})
+    setDraftQuestions([])
+    setPromptPreview(null)
+    setForm({ ...agent, definition: agent.definition ? { ...agent.definition } : {} })
     setShowForm(true)
   }
 
@@ -123,12 +266,27 @@ const startCreate = () => {
     if (!form.name?.trim()) return
     setLoading(true); setError('')
     try {
+      const caps = setCaps(form.definition?.capabilities)
+      const constraints = cleanList(form.definition?.constraints)
+      const completion = cleanList(form.definition?.completion)
+      const override = (form.definition?.prompt_override ?? '').trim()
+      const hasDefinition = Object.keys(caps).length > 0 || constraints.length > 0 || completion.length > 0 || override !== ''
+      const definition = hasDefinition
+        ? {
+            ...(Object.keys(caps).length > 0 ? { capabilities: caps } : {}),
+            ...(constraints.length > 0 ? { constraints } : {}),
+            ...(completion.length > 0 ? { completion } : {}),
+            ...(override !== '' ? { prompt_override: override } : {}),
+          }
+        : undefined
+      const payload: Partial<Agent> & { prompt_source?: string } = { ...form, definition }
+      if (fromWizard && !editing) payload.prompt_source = 'ai'
       if (editing) {
-        await workspaceApi.updateAgent(editing.id, form)
+        await workspaceApi.updateAgent(editing.id, payload)
       } else {
-        await workspaceApi.createAgent(form as Agent & { name: string })
+        await workspaceApi.createAgent(payload as Agent & { name: string })
       }
-      setShowForm(false); setEditing(null)
+      setShowForm(false); setEditing(null); setFromWizard(false)
       void load()
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
@@ -147,7 +305,10 @@ const startCreate = () => {
   const duplicateAgent = (agent: Agent) => {
     setEditing(null)
     setFormTab('general')
-    setForm({ ...agent, id: undefined, name: agent.name + (t('agents.copy_suffix') ?? ' (copy)') })
+    setFromWizard(false)
+    setProvenance({})
+    setPromptPreview(null)
+    setForm({ ...agent, id: undefined, name: agent.name + (t('agents.copy_suffix') ?? ' (copy)'), definition: agent.definition ? { ...agent.definition } : {} })
     setShowForm(true)
   }
 
@@ -169,6 +330,145 @@ const startCreate = () => {
     finally { setLoading(false) }
   }
 
+  // ── Prompt preview / evolution ─────────────────────────────────────────
+
+  const loadPromptFor = async (agentId: string) => {
+    try {
+      const data = await workspaceApi.getAgentPrompt(agentId)
+      setPromptFor((prev) => ({ ...prev, [agentId]: { source: data.source, prompt: data.prompt, version: data.version } }))
+    } catch { /* preview is best-effort */ }
+  }
+
+  useEffect(() => {
+    if (formTab === 'prompt' && editing?.id && !promptPreview) {
+      void workspaceApi.getAgentPrompt(editing.id).then((data) => setPromptPreview({ source: data.source, prompt: data.prompt })).catch(() => setPromptPreview(null))
+    }
+  }, [formTab, editing, promptPreview])
+
+  const openEvolution = async (agent: Agent) => {
+    setEvolution(agent)
+    setVersions([])
+    setAgentRuns([])
+    try {
+      const [vData, rData] = await Promise.all([
+        workspaceApi.listAgentVersions(agent.id),
+        workspaceApi.listAgentRuns(agent.id),
+      ])
+      setVersions(vData.versions ?? [])
+      setAgentRuns(rData.runs ?? [])
+    } catch (f) { setError(message(f)) }
+  }
+
+  const runsByVersion = new Map<number, { total: number; completed: number; failed: number }>()
+  for (const run of agentRuns) {
+    const key = run.agent_version ?? 0
+    const entry = runsByVersion.get(key) ?? { total: 0, completed: 0, failed: 0 }
+    entry.total++
+    if (run.status === 'completed') entry.completed++
+    if (run.status === 'failed' || run.status === 'cancelled') entry.failed++
+    runsByVersion.set(key, entry)
+  }
+
+  // Rebuild (§13): regenerate from the current purpose, show the diff first.
+  const rebuild = async () => {
+    if (!form.description?.trim()) return
+    setRegenBusy(true); setError('')
+    try {
+      const draft = await workspaceApi.draftAgent(form.description.trim())
+      setRegenDraft(draft)
+    } catch (f) { setError(message(f)) }
+    finally { setRegenBusy(false) }
+  }
+
+  const builtinFor = (agent?: Partial<Agent>) =>
+    agent?.name ? builtins.find((b) => b.name === agent.name) : undefined
+
+  const applyBuiltin = (spec: BuiltinAgentSpec) => {
+    setForm((prev) => ({
+      ...prev,
+      description: spec.description,
+      definition: { ...spec.definition },
+      sandbox_profile: spec.sandbox_profile,
+      network_access: spec.network_access,
+      read_only: spec.read_only,
+    }))
+    setProvenance((prev) => ({ ...prev, identity: 'agent', capabilities: 'agent', constraints: 'agent', completion: 'agent' }))
+  }
+
+  const capLabel = (key: CapKey) => t(`agents.cap.${key}`) ?? key
+
+  const regenRows = regenDraft
+    ? [
+        { section: 'identity' as SectionKey, label: t('agents.name') ?? 'Name', current: form.name ?? '', proposed: regenDraft.name },
+        { section: 'identity' as SectionKey, label: t('agents.purpose') ?? 'Purpose', current: form.description ?? '', proposed: regenDraft.description },
+        {
+          section: 'capabilities' as SectionKey,
+          label: t('agents.capabilities') ?? 'Capabilities',
+          current: disabledCaps(form.definition?.capabilities).map(capLabel).join(', ') || (t('agents.all_caps') ?? 'all allowed'),
+          proposed: disabledCaps(regenDraft.capabilities).map(capLabel).join(', ') || (t('agents.all_caps') ?? 'all allowed'),
+        },
+        {
+          section: 'constraints' as SectionKey,
+          label: t('agents.constraints') ?? 'Constraints',
+          current: cleanList(form.definition?.constraints).join('\n'),
+          proposed: cleanList(regenDraft.constraints).join('\n'),
+        },
+        {
+          section: 'completion' as SectionKey,
+          label: t('agents.completion') ?? 'Completion',
+          current: cleanList(form.definition?.completion).join('\n'),
+          proposed: cleanList(regenDraft.completion).join('\n'),
+        },
+      ].filter((row) => row.current !== row.proposed)
+    : []
+
+  const acceptRegen = () => {
+    if (!regenDraft) return
+    setForm((prev) => ({
+      ...prev,
+      name: regenDraft.name || prev.name,
+      description: regenDraft.description || prev.description,
+      definition: {
+        ...prev.definition,
+        capabilities: setCaps(regenDraft.capabilities),
+        constraints: cleanList(regenDraft.constraints),
+        completion: cleanList(regenDraft.completion),
+      },
+      model: regenDraft.suggested?.model || prev.model,
+      sandbox_profile: regenDraft.suggested?.sandbox || prev.sandbox_profile,
+    }))
+    setProvenance((prev) => ({
+      ...prev,
+      identity: 'agent',
+      capabilities: 'agent',
+      constraints: 'agent',
+      completion: 'agent',
+    }))
+    setRegenDraft(null)
+  }
+
+  /** Human summary of what changed between two definition versions. */
+  const versionChanges = (prev?: AgentVersion, next?: AgentVersion): string[] => {
+    if (!prev || !next) return []
+    const changes: string[] = []
+    if (prev.description !== next.description) changes.push(t('agents.diff_purpose') ?? 'purpose')
+    for (const key of CAP_KEYS) {
+      const before = prev.definition?.capabilities?.[key]
+      const after = next.definition?.capabilities?.[key]
+      if (before !== after) changes.push(t('agents.diff_cap', { name: capLabel(key) }) ?? `capability: ${capLabel(key)}`)
+    }
+    if (!sameList(prev.definition?.constraints, next.definition?.constraints)) changes.push(t('agents.diff_constraints') ?? 'constraints')
+    if (!sameList(prev.definition?.completion, next.definition?.completion)) changes.push(t('agents.diff_completion') ?? 'completion checks')
+    if ((prev.definition?.prompt_override ?? '') !== (next.definition?.prompt_override ?? '')) changes.push(t('agents.diff_override') ?? 'manual prompt override')
+    return changes
+  }
+
+  const promptSourceLabel = (source: string) =>
+    source === 'override' ? (t('agents.source_override') ?? 'manual override')
+      : source === 'definition' ? (t('agents.source_definition') ?? 'compiled from definition')
+        : source === 'legacy' ? (t('agents.source_legacy') ?? 'manual prompt (legacy)')
+          : (t('agents.source_role') ?? 'base contract')
+
   return (
     <div style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
@@ -177,76 +477,140 @@ const startCreate = () => {
         <Heading>{t('agents.title') ?? 'Agents'}</Heading>
         <Stack orientation="horizontal" gap={2}>
           <Button kind="secondary" onClick={() => setShowTemplates(true)}>{t('agents.from_template') ?? 'From template'}</Button>
-          <Button renderIcon={Add} onClick={startCreate}>{t('agents.new_agent') ?? 'New Agent'}</Button>
+          <Button renderIcon={Add} onClick={openWizard}>{t('agents.new_agent') ?? 'New Agent'}</Button>
         </Stack>
       </div>
 
       <Grid>
-        {agents.map((a) => (
-          <Column key={a.id} sm={4} md={4} lg={4}>
-            <Tile style={{ marginBottom: '0.75rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <strong>{a.name}</strong>
-                  {a.id === defaultAgentId && <Tag type="green" size="sm" style={{ marginLeft: '0.5rem' }}>{t('agents.project_default') ?? 'project default'}</Tag>}
-                  {a.description && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{a.description}</p>}
-                  <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
-                    <Tag type="blue" size="sm">{a.model || (t('agents.no_model') ?? 'no model')}</Tag>
-                    {a.provider && <Tag type="cyan" size="sm">{a.provider}</Tag>}
-                    <Tag type="gray" size="sm">{a.sandbox_profile || (t('agents.default') ?? 'default')}</Tag>
-                    {a.project_id && <Tag type="warm-gray" size="sm">{a.project_id}</Tag>}
+        {agents.map((a) => {
+          const prompt = promptFor[a.id]
+          return (
+            <Column key={a.id} sm={4} md={4} lg={4}>
+              <Tile style={{ marginBottom: '0.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <strong>{a.name}</strong>
+                    {a.id === defaultAgentId && <Tag type="green" size="sm" style={{ marginLeft: '0.5rem' }}>{t('agents.project_default') ?? 'project default'}</Tag>}
+                    {a.labels?.builtin === 'true' && <Tag type="warm-gray" size="sm" style={{ marginLeft: '0.25rem' }}>{t('agents.builtin_tag') ?? 'builtin'}</Tag>}
+                    {!!a.definition_version && <Tag type="purple" size="sm" style={{ marginLeft: '0.25rem' }}>v{a.definition_version}</Tag>}
+                    {a.description && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{a.description}</p>}
+                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                      <Tag type="blue" size="sm">{a.model || (t('agents.no_model') ?? 'no model')}</Tag>
+                      {a.provider && <Tag type="cyan" size="sm">{a.provider}</Tag>}
+                      <Tag type="gray" size="sm">{a.sandbox_profile || (t('agents.default') ?? 'default')}</Tag>
+                      {disabledCaps(a.definition?.capabilities).length > 0 && (
+                        <Tag type="warm-gray" size="sm">{t('agents.restricted_caps', { count: String(disabledCaps(a.definition?.capabilities).length) }) ?? `${disabledCaps(a.definition?.capabilities).length} ✕`}</Tag>
+                      )}
+                      {a.project_id && <Tag type="warm-gray" size="sm">{a.project_id}</Tag>}
+                    </div>
                   </div>
+                  <Stack orientation="horizontal" gap={1}>
+                    {project && a.id !== defaultAgentId && (
+                      <Button size="sm" kind="ghost" hasIconOnly renderIcon={Star} iconDescription={t('agents.make_default') ?? 'Make default'} title={t('agents.make_default') ?? 'Make default'} onClick={() => void makeDefault(a)} />
+                    )}
+                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Activity} iconDescription={t('agents.evolution') ?? 'Evolution'} title={t('agents.evolution') ?? 'Evolution'} onClick={() => void openEvolution(a)} />
+                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} onClick={() => startEdit(a)} />
+                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription={t('action.duplicate') ?? 'Duplicate'} onClick={() => duplicateAgent(a)} />
+                    <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void deleteAgent(a)} />
+                  </Stack>
                 </div>
-                <Stack orientation="horizontal" gap={1}>
-                  {project && a.id !== defaultAgentId && (
-                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Star} iconDescription={t('agents.make_default') ?? 'Make default'} title={t('agents.make_default') ?? 'Make default'} onClick={() => void makeDefault(a)} />
-                  )}
-                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} onClick={() => startEdit(a)} />
-                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription={t('action.duplicate') ?? 'Duplicate'} onClick={() => duplicateAgent(a)} />
-                  <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void deleteAgent(a)} />
-                </Stack>
-              </div>
 
-              <Button size="sm" kind="ghost" onClick={() => setExpandedId(expandedId === a.id ? null : a.id)} style={{ marginTop: '0.5rem' }}>
-                {expandedId === a.id ? (t('agents.hide_details') ?? 'Hide details') : (t('agents.show_details') ?? 'Show details')}
-              </Button>
+                <Button size="sm" kind="ghost" onClick={() => { setExpandedId(expandedId === a.id ? null : a.id); if (expandedId !== a.id && !promptFor[a.id]) void loadPromptFor(a.id) }} style={{ marginTop: '0.5rem' }}>
+                  {expandedId === a.id ? (t('agents.hide_details') ?? 'Hide details') : (t('agents.show_details') ?? 'Show details')}
+                </Button>
 
-              {expandedId === a.id && (
-                <div style={{ marginTop: '0.75rem', fontSize: '0.75rem' }}>
-                  <dl>
-                    <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.system_prompt') ?? 'System prompt'}</dt>
-                    <dd style={{ marginBottom: '0.5rem' }}>{a.system_prompt || (t('agents.none') ?? '(none)')}</dd>
-                    <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.temperature') ?? 'Temperature'}</dt>
-                    <dd style={{ marginBottom: '0.5rem' }}>{a.temperature ?? (t('agents.default') ?? 'default')}</dd>
-                    <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.max_tokens') ?? 'Max tokens'}</dt>
-                    <dd style={{ marginBottom: '0.5rem' }}>{a.max_tokens ?? (t('agents.default') ?? 'default')}</dd>
-                    <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.max_turns') ?? 'Max turns'}</dt>
-                    <dd style={{ marginBottom: '0.5rem' }}>{a.max_turns ?? (t('agents.unlimited') ?? 'unlimited')}</dd>
-                    <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.skills') ?? 'Skills'}</dt>
-                    <dd style={{ marginBottom: '0.5rem' }}>{a.skills?.length ? a.skills.join(', ') : (t('agents.none') ?? '(none)')}</dd>
-                    <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.mcp_servers') ?? 'MCP servers'}</dt>
-                    <dd style={{ marginBottom: '0.5rem' }}>{a.mcp_servers?.length ? a.mcp_servers.join(', ') : (t('agents.none') ?? '(none)')}</dd>
-                    <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.tools') ?? 'Tools'}</dt>
-                    <dd style={{ marginBottom: '0.5rem' }}>{a.tools?.length ? (t('agents.tools_count', { count: String(a.tools.length) }) ?? `${a.tools.length} tools`) : (t('agents.tools_all') ?? 'all available')}</dd>
-                    <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.network') ?? 'Network'}</dt>
-                    <dd style={{ marginBottom: '0.5rem' }}>{a.network_access ? (t('agents.enabled') ?? 'enabled') : (t('agents.blocked') ?? 'blocked')}</dd>
-                    <dt style={{ color: 'var(--tm-text-3)' }}>{t('agents.read_only') ?? 'Read-only'}</dt>
-                    <dd>{a.read_only ? (t('agents.yes') ?? 'yes') : (t('agents.no') ?? 'no')}</dd>
-                  </dl>
-                </div>
-              )}
-            </Tile>
-          </Column>
-        ))}
+                {expandedId === a.id && (
+                  <div style={{ marginTop: '0.75rem', fontSize: '0.8rem' }}>
+                    {a.description && (
+                      <>
+                        <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.purpose') ?? 'Purpose'}</p>
+                        <p style={{ margin: '0 0 0.75rem' }}>{a.description}</p>
+                      </>
+                    )}
+                    <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.can') ?? 'Can'}</p>
+                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                      {enabledCaps(a.definition?.capabilities).map((key) => <Tag key={key} type="green" size="sm">{capLabel(key)}</Tag>)}
+                      {enabledCaps(a.definition?.capabilities).length === 0 && disabledCaps(a.definition?.capabilities).length === 0 && (
+                        <span style={{ color: 'var(--tm-text-3)' }}>{t('agents.all_caps') ?? 'All capabilities allowed'}</span>
+                      )}
+                    </div>
+                    {(disabledCaps(a.definition?.capabilities).length > 0 || cleanList(a.definition?.constraints).length > 0) && (
+                      <>
+                        <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.cannot') ?? 'Cannot'}</p>
+                        <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                          {disabledCaps(a.definition?.capabilities).map((key) => <Tag key={key} type="red" size="sm">{capLabel(key)}</Tag>)}
+                        </div>
+                        <ul style={{ margin: '0.25rem 0 0.75rem', paddingLeft: '1rem', color: 'var(--tm-text-2)' }}>
+                          {cleanList(a.definition?.constraints).map((c, i) => <li key={i}>{c}</li>)}
+                        </ul>
+                      </>
+                    )}
+                    {cleanList(a.definition?.completion).length > 0 && (
+                      <>
+                        <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.before_done') ?? 'Before declaring done'}</p>
+                        <ul style={{ margin: '0 0 0.75rem', paddingLeft: '1rem', color: 'var(--tm-text-2)' }}>
+                          {cleanList(a.definition?.completion).map((c, i) => <li key={i}>{c}</li>)}
+                        </ul>
+                      </>
+                    )}
+                    <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.system_prompt') ?? 'System prompt'}</p>
+                    {prompt ? (
+                      <>
+                        <Tag type="gray" size="sm" style={{ marginBottom: '0.25rem' }}>{promptSourceLabel(prompt.source)}</Tag>
+                        <pre style={{ background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.75rem', fontFamily: 'var(--tm-mono, monospace)', fontSize: '0.72rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '14rem', overflow: 'auto', margin: 0 }}>
+                          {prompt.prompt || (t('agents.source_role') ?? 'base contract')}
+                        </pre>
+                      </>
+                    ) : (
+                      <p style={{ color: 'var(--tm-text-3)' }}>{t('agents.none') ?? '(none)'}</p>
+                    )}
+                  </div>
+                )}
+              </Tile>
+            </Column>
+          )
+        })}
       </Grid>
+
+      {/* Wizard: describe the specialist in natural language */}
+      {wizardOpen && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '560px' }}>
+            <Heading>{t('agents.wizard_title') ?? 'Create agent'}</Heading>
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
+              {t('agents.wizard_hint') ?? 'Describe the specialist in plain words — the agent will turn it into a structured definition you can adjust afterwards.'}
+            </p>
+            <TextArea
+              id="agent-wizard-description"
+              hideLabel
+              labelText={t('agents.wizard_label') ?? 'Describe what this agent should do'}
+              rows={7}
+              value={wizardText}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setWizardText(e.target.value)}
+              placeholder={t('agents.wizard_placeholder') ?? 'Need an agent for backend development in C#. It can change code and run tests, but must not touch infrastructure…'}
+              autoFocus
+            />
+            {wizardError && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={wizardError} onClose={() => setWizardError('')} lowContrast style={{ marginTop: '0.5rem' }} />}
+            <div className="form-actions">
+              <Button kind="secondary" onClick={startManual}>{t('agents.manual') ?? 'Fill manually'}</Button>
+              <Button disabled={wizardBusy || !wizardText.trim()} onClick={() => void generate()}>
+                {wizardBusy ? (t('action.building') ?? 'Building…') : (draftQuestions.length ? (t('skills.send_answers') ?? 'Send answers') : (t('agents.build') ?? 'Build agent'))}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit/Create modal */}
       {showForm && (
         <div className="modal-overlay">
-          <div className="modal-panel tabbed" style={{ width: '680px', maxWidth: 'calc(100vw - 2rem)', maxHeight: '85vh', minHeight: '480px' }}>
-            <Heading>{editing ? (t('agents.edit_agent') ?? 'Edit Agent') : (t('agents.new_agent') ?? 'New Agent')}</Heading>
+          <div className="modal-panel tabbed" style={{ width: '760px', maxWidth: 'calc(100vw - 2rem)', maxHeight: '85vh', minHeight: '480px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+              <Heading>{editing ? (t('agents.edit_agent') ?? 'Edit Agent') : (t('agents.new_agent') ?? 'New Agent')}</Heading>
+              {editing?.definition_version ? <Tag type="purple" size="sm">{t('agents.def_version', { count: String(editing.definition_version) }) ?? `Definition v${editing.definition_version}`}</Tag> : null}
+            </div>
             <div className="skill-tabs modal-tabs" role="tablist">
-              {(['general', 'params', 'bindings', 'tools'] as const).map((key) => (
+              {(['general', 'capabilities', 'rules', 'params', 'bindings', 'tools', 'prompt'] as const).map((key) => (
                 <button
                   key={key}
                   role="tab"
@@ -261,14 +625,134 @@ const startCreate = () => {
             <div className="modal-scroll">
             {formTab === 'general' && (
               <Stack gap={3}>
-                <TextInput id="agent-name" labelText={t('agents.name') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="coder" autoFocus />
-                <TextInput id="agent-desc" labelText={t('agents.description') ?? 'Description'} value={form.description ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, description: e.target.value })} placeholder="A careful developer agent" />
-                <Select id="agent-provider" labelText={t('agents.provider') ?? 'Provider'} value={form.provider ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, provider: e.target.value })}>
-                  <SelectItem value="" text={t('agents.default_label') ?? 'Default'} />
-                  {providers.map((p) => <SelectItem key={p.id} value={p.id} text={p.name} />)}
-                </Select>
-                <TextInput id="agent-model" labelText={t('agents.model') ?? 'Model'} value={form.model ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, model: e.target.value })} placeholder="gpt-4o, claude-3-sonnet, etc." />
-                <TextArea id="agent-prompt" labelText={t('agents.system_prompt') ?? 'System prompt'} value={form.system_prompt ?? ''} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, system_prompt: e.target.value })} rows={10} placeholder="You are a careful developer..." />
+                <div className="manifest-section-head">
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <TextInput id="agent-name" labelText={t('agents.name') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { touch('identity'); setForm({ ...form, name: e.target.value }) }} placeholder="coder" autoFocus />
+                  </div>
+                  {provenance.identity && <ProvBadge kind={provenance.identity} />}
+                </div>
+                <div>
+                  <div className="manifest-section-head">
+                    <p className="cds--label" style={{ margin: 0 }}>{t('agents.purpose') ?? 'Purpose'}</p>
+                    {provenance.identity && <ProvBadge kind={provenance.identity} />}
+                  </div>
+                  <TextArea
+                    id="agent-desc"
+                    hideLabel
+                    labelText={t('agents.purpose') ?? 'Purpose'}
+                    value={form.description ?? ''}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { touch('identity'); setForm({ ...form, description: e.target.value }) }}
+                    rows={3}
+                    placeholder={t('agents.purpose_placeholder') ?? 'For which tasks do you need this agent? E.g. implements code changes, fixes bugs and verifies the result.'}
+                    style={{ marginTop: '0.25rem' }}
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                  <Select id="agent-provider" labelText={t('agents.provider') ?? 'Provider'} value={form.provider ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, provider: e.target.value })}>
+                    <SelectItem value="" text={t('agents.default_label') ?? 'Default'} />
+                    {providers.map((p) => <SelectItem key={p.id} value={p.id} text={p.name} />)}
+                  </Select>
+                  <TextInput id="agent-model" labelText={t('agents.model') ?? 'Model'} value={form.model ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, model: e.target.value })} placeholder="mimo-v2.6-pro…" />
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {editing && (
+                    <Button size="sm" kind="secondary" renderIcon={Renew} disabled={regenBusy || !form.description?.trim()} onClick={() => void rebuild()}>
+                      {regenBusy ? (t('action.building') ?? 'Building…') : (t('agents.regenerate') ?? 'Rebuild')}
+                    </Button>
+                  )}
+                  {editing && builtinFor(form) && (
+                    <Button size="sm" kind="ghost" onClick={() => applyBuiltin(builtinFor(form)!)}>{t('agents.restore_builtin') ?? 'Restore builtin definition'}</Button>
+                  )}
+                </div>
+                {draftQuestions.length > 0 && (
+                  <div className="wizard-questions">
+                    <div className="skill-subheading">{t('skills.agent_questions') ?? 'The agent asks for clarification'}</div>
+                    {draftQuestions.map((q, i) => (
+                      <div key={i} style={{ marginBottom: '0.5rem' }}>
+                        <p style={{ margin: '0 0 0.25rem', fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>{q.question}</p>
+                        <TextInput
+                          id={`agent-answer-${i}`}
+                          hideLabel
+                          labelText=""
+                          value={answers[String(i)] ?? ''}
+                          placeholder={t('skills.answer_placeholder') ?? 'Your answer'}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAnswers((prev) => ({ ...prev, [String(i)]: e.target.value }))}
+                        />
+                      </div>
+                    ))}
+                    <Button size="sm" kind="secondary" disabled={wizardBusy} onClick={() => void generate(answers)}>
+                      {t('agents.answer_and_rebuild') ?? 'Answer & rebuild'}
+                    </Button>
+                  </div>
+                )}
+              </Stack>
+            )}
+            {formTab === 'capabilities' && (
+              <Stack gap={4}>
+                <div className="manifest-section-head">
+                  <div>
+                    <p className="cds--label" style={{ margin: 0 }}>{t('agents.capabilities') ?? 'Capabilities'}</p>
+                    <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0.25rem 0 0' }}>
+                      {t('agents.cap_hint') ?? 'Disabled capabilities are enforced: the corresponding tools and access are removed at run time, not just discouraged.'}
+                    </p>
+                  </div>
+                  {provenance.capabilities && <ProvBadge kind={provenance.capabilities} />}
+                </div>
+                {CAP_KEYS.map((key) => (
+                  <Toggle
+                    key={key}
+                    id={`agent-cap-${key}`}
+                    labelText={capLabel(key)}
+                    toggled={form.definition?.capabilities?.[key] !== false}
+                    onToggle={(checked: boolean) => { touch('capabilities'); setCap(key, checked ? undefined : false) }}
+                  />
+                ))}
+              </Stack>
+            )}
+            {formTab === 'rules' && (
+              <Stack gap={4}>
+                <div>
+                  <div className="manifest-section-head">
+                    <div>
+                      <p className="cds--label" style={{ margin: 0 }}>{t('agents.constraints') ?? 'Constraints'}</p>
+                      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0.25rem 0 0' }}>
+                        {t('agents.constraints_hint') ?? 'What the agent must never do. One item per line.'}
+                      </p>
+                    </div>
+                    {provenance.constraints && <ProvBadge kind={provenance.constraints} />}
+                  </div>
+                  <TextArea
+                    id="agent-constraints"
+                    hideLabel
+                    labelText={t('agents.constraints') ?? 'Constraints'}
+                    rows={5}
+                    value={listToText(form.definition?.constraints)}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { touch('constraints'); setDef({ constraints: e.target.value.split('\n') }) }}
+                    placeholder={t('agents.constraints_placeholder') ?? 'Never modify infrastructure configuration.\nNever delete files.'}
+                    style={{ marginTop: '0.25rem' }}
+                  />
+                </div>
+                <div>
+                  <div className="manifest-section-head">
+                    <div>
+                      <p className="cds--label" style={{ margin: 0 }}>{t('agents.completion') ?? 'Completion checks'}</p>
+                      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0.25rem 0 0' }}>
+                        {t('agents.completion_hint') ?? 'What the agent must verify before declaring the work done. One item per line.'}
+                      </p>
+                    </div>
+                    {provenance.completion && <ProvBadge kind={provenance.completion} />}
+                  </div>
+                  <TextArea
+                    id="agent-completion"
+                    hideLabel
+                    labelText={t('agents.completion') ?? 'Completion checks'}
+                    rows={5}
+                    value={listToText(form.definition?.completion)}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { touch('completion'); setDef({ completion: e.target.value.split('\n') }) }}
+                    placeholder={t('agents.completion_placeholder') ?? 'Run the relevant tests.\nMake sure the build passes.'}
+                    style={{ marginTop: '0.25rem' }}
+                  />
+                </div>
               </Stack>
             )}
             {formTab === 'params' && (
@@ -344,10 +828,141 @@ const startCreate = () => {
                 onChange={(tools) => setForm({ ...form, tools })}
               />
             )}
+            {formTab === 'prompt' && (
+              <Stack gap={4}>
+                <div>
+                  <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.prompt_preview') ?? 'Compiled prompt'}</p>
+                  {editing ? (
+                    <>
+                      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>
+                        {t('agents.prompt_saved_hint') ?? 'Reflects the saved definition; save your changes to update it.'}
+                      </p>
+                      {promptPreview ? (
+                        <>
+                          <Tag type="gray" size="sm" style={{ marginBottom: '0.25rem' }}>{promptSourceLabel(promptPreview.source)}</Tag>
+                          <pre style={{ background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.5rem 0.75rem', fontFamily: 'var(--tm-mono, monospace)', fontSize: '0.72rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '16rem', overflow: 'auto', margin: 0 }}>
+                            {promptPreview.prompt || (t('agents.source_role') ?? 'base contract')}
+                          </pre>
+                        </>
+                      ) : (
+                        <p style={{ color: 'var(--tm-text-3)' }}>{t('action.loading') ?? 'Loading…'}</p>
+                      )}
+                    </>
+                  ) : (
+                    <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>
+                      {t('agents.prompt_unsaved_hint') ?? 'The prompt is compiled from the definition when the agent runs. Save the agent to preview it here.'}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.prompt_override') ?? 'Manual override'}</p>
+                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>
+                    {t('agents.prompt_override_hint') ?? 'Optional. Replaces the compiled prompt entirely — capabilities enforcement still applies.'}
+                  </p>
+                  <TextArea
+                    id="agent-prompt-override"
+                    hideLabel
+                    labelText={t('agents.prompt_override') ?? 'Manual override'}
+                    rows={8}
+                    value={form.definition?.prompt_override ?? ''}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDef({ prompt_override: e.target.value })}
+                    placeholder={t('agents.prompt_override_placeholder') ?? 'Leave empty to use the compiled prompt.'}
+                  />
+                </div>
+              </Stack>
+            )}
             </div>
             <div className="form-actions" style={{ marginTop: 0 }}>
-              <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null); setPromptPreview(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button onClick={() => void saveAgent()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rebuild diff (§13): user edits are never silently replaced */}
+      {regenDraft && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '640px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <Heading>{t('agents.regen_title') ?? 'Apply rebuilt definition?'}</Heading>
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
+              {t('agents.regen_hint') ?? 'The agent rebuilt the definition from the current purpose. Review the changes — fields you edited manually are marked.'}
+            </p>
+            <div className="modal-scroll">
+              {regenRows.length === 0 && <p style={{ color: 'var(--tm-text-3)' }}>{t('agents.regen_no_changes') ?? 'No changes against the current form.'}</p>}
+              {regenRows.map((row) => (
+                <div key={row.label} style={{ marginBottom: '0.75rem', borderBottom: '1px solid var(--tm-border)', paddingBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                    <strong>{row.label}</strong>
+                    {provenance[row.section] === 'user' && <Tag type="warm-gray" size="sm">{t('agents.regen_user_edit') ?? 'your edit will be replaced'}</Tag>}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.8rem' }}>
+                    <div>
+                      <p className="cds--label" style={{ fontSize: '0.65rem', margin: 0 }}>{t('agents.regen_current') ?? 'Current'}</p>
+                      <p style={{ margin: 0, whiteSpace: 'pre-wrap', color: 'var(--tm-text-2)' }}>{row.current || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="cds--label" style={{ fontSize: '0.65rem', margin: 0 }}>{t('agents.regen_proposed') ?? 'Proposed'}</p>
+                      <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{row.proposed || '—'}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="form-actions">
+              <Button kind="secondary" onClick={() => setRegenDraft(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button onClick={acceptRegen}>{t('agents.accept') ?? 'Accept'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Evolution (§15): definition versions × run outcomes */}
+      {evolution && (
+        <div className="modal-overlay">
+          <div className="modal-panel tabbed" style={{ width: '680px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <Heading>{(t('agents.evolution') ?? 'Evolution')} — {evolution.name}</Heading>
+            <div className="modal-scroll">
+              {versions.length === 0 && (
+                <p style={{ color: 'var(--tm-text-3)' }}>
+                  {t('agents.evolution_empty') ?? 'No definition versions yet. Versions appear when you edit the agent’s definition.'}
+                </p>
+              )}
+              {[...versions].sort((a, b) => b.version - a.version).map((v, idx) => {
+                const prev = [...versions].sort((a, b) => b.version - a.version)[idx + 1]
+                const stats = runsByVersion.get(v.version)
+                const changes = versionChanges(prev, v)
+                const isCurrent = v.version === evolution.definition_version
+                return (
+                  <div key={v.version} style={{ borderLeft: '2px solid var(--tm-border)', paddingLeft: '0.75rem', marginBottom: '1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <strong>v{v.version}</strong>
+                      {isCurrent && <Tag type="green" size="sm">{t('agents.version_current') ?? 'current'}</Tag>}
+                      <Tag type="gray" size="sm">{v.prompt_source}</Tag>
+                      {v.generator_model && <Tag type="blue" size="sm">{v.generator_model}</Tag>}
+                      <span style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>
+                        {new Date(v.created_at).toLocaleString()}{v.author ? ` · ${v.author}` : ''}
+                      </span>
+                    </div>
+                    {changes.length > 0 ? (
+                      <p style={{ margin: '0.25rem 0', fontSize: '0.8rem' }}>
+                        {t('agents.changed') ?? 'Changed'}: {changes.join(', ')}
+                      </p>
+                    ) : (
+                      <p style={{ margin: '0.25rem 0', fontSize: '0.8rem', color: 'var(--tm-text-3)' }}>
+                        {prev ? (t('agents.no_changes') ?? 'no semantic changes') : (t('agents.initial_version') ?? 'initial definition')}
+                      </p>
+                    )}
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>
+                      {t('agents.runs_total') ?? 'Runs'}: <strong>{stats?.total ?? 0}</strong>
+                      {stats && <> · {t('agents.runs_completed') ?? 'completed'}: {stats.completed} · {t('agents.runs_failed') ?? 'failed'}: {stats.failed}</>}
+                    </p>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="form-actions">
+              <Button kind="secondary" onClick={() => setEvolution(null)}>{t('action.close') ?? 'Close'}</Button>
             </div>
           </div>
         </div>
@@ -355,28 +970,42 @@ const startCreate = () => {
 
       {loading && <Loading withOverlay={false} />}
 
-      {/* Template selection modal */}
+      {/* Template selection modal: curated builtin definitions from the server */}
       {showTemplates && (
         <div className="modal-overlay">
           <div className="modal-panel">
             <Heading>{t('agents.choose_template') ?? 'Choose a template'}</Heading>
-            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', marginBottom: '1rem' }}>{t('agents.template_hint') ?? 'Start with a pre-configured agent and customize as needed.'}</p>
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', marginBottom: '1rem' }}>{t('agents.template_hint') ?? 'Start with a curated agent and customize as needed.'}</p>
             <Stack gap={2}>
-              {TEMPLATES.map((tpl) => (
-                <Tile key={tpl.name} style={{ cursor: 'pointer' }} onClick={() => {
+              {builtins.map((tpl) => (
+                <Tile key={tpl.slug} style={{ cursor: 'pointer' }} onClick={() => {
                   setEditing(null)
                   setFormTab('general')
-                  setForm({ name: tpl.name, model: tpl.model, system_prompt: tpl.system_prompt, skills: [], mcp_servers: [], tools: [], sandbox_profile: tpl.sandbox_profile, network_access: tpl.network_access, read_only: tpl.read_only, max_turns: tpl.max_turns })
+                  setFromWizard(false)
+                  setProvenance({})
+                  setPromptPreview(null)
+                  setForm({
+                    name: tpl.name,
+                    description: tpl.description,
+                    model: '',
+                    definition: { ...tpl.definition },
+                    sandbox_profile: tpl.sandbox_profile,
+                    network_access: tpl.network_access,
+                    read_only: tpl.read_only,
+                    skills: [],
+                    mcp_servers: [],
+                    tools: [],
+                  })
                   setShowForm(true)
                   setShowTemplates(false)
                 }}>
                   <strong>{tpl.name}</strong>
                   <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{tpl.description}</p>
-                  <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.25rem' }}>
+                  <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
                     <Tag type="gray" size="sm">{tpl.sandbox_profile}</Tag>
                     {tpl.network_access ? <Tag type="green" size="sm">{t('agents.network_label') ?? 'network'}</Tag> : <Tag type="red" size="sm">{t('agents.no_network') ?? 'no network'}</Tag>}
-                    {tpl.read_only && <Tag type="warm-gray" size="sm">{t('agents.read_only_tag') ?? 'read-only'}</Tag>}
-                    <Tag type="blue" size="sm">{t('agents.turns_count', { count: String(tpl.max_turns) })}</Tag>
+                    {disabledCaps(tpl.definition?.capabilities).map((key) => <Tag key={key} type="warm-gray" size="sm">{capLabel(key)} ✕</Tag>)}
+                    {cleanList(tpl.definition?.completion).length > 0 && <Tag type="blue" size="sm">{t('agents.before_done') ?? 'completion checks'}</Tag>}
                   </div>
                 </Tile>
               ))}
@@ -391,82 +1020,82 @@ const startCreate = () => {
   )
 }
 
-function ToolsPanel({
-  builtins,
-  servers,
-  selected,
-  onChange,
-}: {
-  builtins: MCPToolInfo[]
-  servers: MCPServerTools[]
-  allSelected: string[]
-  selected: string[]
-  onChange: (tools: string[]) => void
-}) {
-  const t = useT()
-  if (builtins.length === 0 && servers.length === 0) return null
-  // Empty selection = all tools allowed; show every checkbox checked.
-  const allMode = selected.length === 0
-  const total = builtins.length + servers.reduce((sum, s) => sum + s.tools.length, 0)
+  function ToolsPanel({
+    builtins: builtinDefs,
+    servers,
+    selected,
+    onChange,
+  }: {
+    builtins: MCPToolInfo[]
+    servers: MCPServerTools[]
+    allSelected: string[]
+    selected: string[]
+    onChange: (tools: string[]) => void
+  }) {
+    const t = useT()
+    if (builtinDefs.length === 0 && servers.length === 0) return null
+    // Empty selection = all tools allowed; show every checkbox checked.
+    const allMode = selected.length === 0
+    const total = builtinDefs.length + servers.reduce((sum, s) => sum + s.tools.length, 0)
 
-  const toggle = (name: string, checked: boolean) => {
-    if (allMode && checked) return // cannot check further when everything is on
-    let next = checked ? [...selected, name] : selected.filter((x) => x !== name)
-    if (next.length === total) next = [] // everything selected = allow all
-    onChange(next)
-  }
+    const toggle = (name: string, checked: boolean) => {
+      if (allMode && checked) return // cannot check further when everything is on
+      let next = checked ? [...selected, name] : selected.filter((x) => x !== name)
+      if (next.length === total) next = [] // everything selected = allow all
+      onChange(next)
+    }
 
-  const row = (tool: MCPToolInfo, key: string) => (
-    <div key={key} style={{ padding: '0.2rem 0', minWidth: 0, overflowWrap: 'anywhere' }}>
-      <Checkbox
-        id={`agent-tool-${key}`}
-        labelText={tool.name}
-        title={tool.description || tool.name}
-        checked={allMode || selected.includes(tool.model_name || tool.name)}
-        onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => toggle(tool.model_name || tool.name, checked)}
-      />
-      {tool.description && (
-        <div
-          style={{
-            color: 'var(--tm-text-3)',
-            fontSize: '0.7rem',
-            marginTop: '-0.15rem',
-            paddingLeft: '1.5rem',
-            maxWidth: '100%',
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-          }}
-          title={tool.description}
-        >
-          {tool.description}
-        </div>
-      )}
-    </div>
-  )
-
-  return (
-    <div>
-      <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.tools') ?? 'Tools'}</p>
-      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>
-        {allMode
-          ? (t('agents.tools_all_hint') ?? 'All tools are allowed. Uncheck one to restrict the agent.')
-          : (t('agents.tools_restricted_hint', { count: String(selected.length) }) ?? `${selected.length} tools allowed.`)}
-      </p>
-      <div style={{ maxHeight: '12rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
-        <p className="cds--label" style={{ fontSize: '0.7rem', margin: '0 0 0.25rem' }}>{t('agents.tools_builtin') ?? 'Built-in'}</p>
-        {builtins.map((tool) => row(tool, `b-${tool.name}`))}
-        {servers.map((server) => (
-          <div key={server.id}>
-            <p className="cds--label" style={{ fontSize: '0.7rem', margin: '0.5rem 0 0.25rem' }}>{server.name}</p>
-            {server.tools.length === 0 && (
-              <p style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', margin: 0 }}>{t('agents.tools_no_tools') ?? 'no tools discovered'}</p>
-            )}
-            {server.tools.map((tool) => row(tool, `s-${server.id}-${tool.name}`))}
+    const row = (tool: MCPToolInfo, key: string) => (
+      <div key={key} style={{ padding: '0.2rem 0', minWidth: 0, overflowWrap: 'anywhere' }}>
+        <Checkbox
+          id={`agent-tool-${key}`}
+          labelText={tool.name}
+          title={tool.description || tool.name}
+          checked={allMode || selected.includes(tool.model_name || tool.name)}
+          onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => toggle(tool.model_name || tool.name, checked)}
+        />
+        {tool.description && (
+          <div
+            style={{
+              color: 'var(--tm-text-3)',
+              fontSize: '0.7rem',
+              marginTop: '-0.15rem',
+              paddingLeft: '1.5rem',
+              maxWidth: '100%',
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}
+            title={tool.description}
+          >
+            {tool.description}
           </div>
-        ))}
+        )}
       </div>
-    </div>
-  )
-}
+    )
+
+    return (
+      <div>
+        <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('agents.tools') ?? 'Tools'}</p>
+        <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>
+          {allMode
+            ? (t('agents.tools_all_hint') ?? 'All tools are allowed. Uncheck one to restrict the agent.')
+            : (t('agents.tools_restricted_hint', { count: String(selected.length) }) ?? `${selected.length} tools allowed.`)}
+        </p>
+        <div style={{ maxHeight: '12rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
+          <p className="cds--label" style={{ fontSize: '0.7rem', margin: '0 0 0.25rem' }}>{t('agents.tools_builtin') ?? 'Built-in'}</p>
+          {builtinDefs.map((tool) => row(tool, `b-${tool.name}`))}
+          {servers.map((server) => (
+            <div key={server.id}>
+              <p className="cds--label" style={{ fontSize: '0.7rem', margin: '0.5rem 0 0.25rem' }}>{server.name}</p>
+              {server.tools.length === 0 && (
+                <p style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', margin: 0 }}>{t('agents.tools_no_tools') ?? 'no tools discovered'}</p>
+              )}
+              {server.tools.map((tool) => row(tool, `s-${server.id}-${tool.name}`))}
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
