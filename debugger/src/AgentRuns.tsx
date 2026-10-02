@@ -328,6 +328,9 @@ export default function AgentRuns({ project }: { project: string }) {
 
   const answer = (result?.result as Record<string, unknown> | undefined)?.answer
   const stages = (result?.result as Record<string, unknown> | undefined)?.stages
+  const rootEvent = timeline.find((event) => event.type === 'run.started')
+  const rawTitle = rootEvent?.data?.title
+  const runTitle = typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle.trim() : ''
   return (
     <div style={{ padding: '1rem' }}>
       {error && (
@@ -346,6 +349,8 @@ export default function AgentRuns({ project }: { project: string }) {
               {runs.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('runs.no_runs') ?? 'No runs for this project'}</Tile>}
               {runs.map((event) => {
                 const id = runID(event)
+                const rawTitle = event.data?.title
+                const title = typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle.trim() : ''
                 return (
                   <Tile
                     key={event.event_id}
@@ -353,10 +358,13 @@ export default function AgentRuns({ project }: { project: string }) {
                     className={`workspace-tile ${selected === id ? 'selected' : ''}`}
                     style={{ padding: '0.5rem 0.75rem', cursor: 'pointer' }}
                   >
-                    <div style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{id}</div>
+                    <div style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title || id}</div>
                     <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
                       {String(event.data?.role ?? 'agent')} · {shortTime(event.occurred_at)}
                     </div>
+                    {title && (
+                      <div style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{id}</div>
+                    )}
                   </Tile>
                 )
               })}
@@ -375,6 +383,13 @@ export default function AgentRuns({ project }: { project: string }) {
               </div>
             ) : (
               <Stack gap={3}>
+                <div>
+                  <Heading style={{ fontSize: '1.1rem' }}>{runTitle || selected}</Heading>
+                  {runTitle && (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', fontFamily: 'monospace', marginTop: '0.25rem', overflowWrap: 'anywhere' }}>{selected}</div>
+                  )}
+                </div>
+
                 {/* Answer */}
                 {typeof answer === 'string' && (
                   <Tile>
