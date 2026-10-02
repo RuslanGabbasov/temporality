@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown } from '@carbon/icons-react'
 import { API_BASE } from './api'
 import { useT } from './i18n'
 import { observationApi, type ObservationEvent } from './observationApi'
@@ -525,7 +526,8 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       <div className="run-picker">
         {runsOpen && <div className="run-picker-backdrop" onClick={() => setRunsOpen(false)} />}
         <button className={`run-picker-toggle ${hiddenRoots.size ? 'filtered' : ''}`} onClick={() => setRunsOpen((open) => !open)}>
-          {t('timeline.runs_abbr')} {view.roots.filter((root) => !hiddenRoots.has(root.id)).length}/{view.roots.length} {runsOpen ? '▴' : '▾'}
+          {t('timeline.runs_abbr')} {view.roots.filter((root) => !hiddenRoots.has(root.id)).length}/{view.roots.length}
+          <ChevronDown size={12} className="chevron-flip" data-open={runsOpen ? 'true' : 'false'} style={{ color: 'currentColor', flexShrink: 0 }} />
         </button>
         {runsOpen && <div className="run-picker-panel">
           <div className="run-picker-actions">
