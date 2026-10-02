@@ -29,6 +29,10 @@ type AgentCapabilities struct {
 	Network     *bool `json:"network,omitempty"`      // sandbox network access
 	Skills      *bool `json:"skills,omitempty"`       // skill injection for this run
 	Knowledge   *bool `json:"knowledge,omitempty"`    // prior knowledge hints
+	// Delegation lets the agent hand subtasks to other agents via the delegate
+	// tool (docs/agent-delegation.md). Inverted default: nil or false ⇒ denied,
+	// because delegation must be granted explicitly by a human.
+	Delegation *bool `json:"delegation,omitempty"`
 }
 
 // Cap returns the effective value of a capability: nil (unset) means allowed,
