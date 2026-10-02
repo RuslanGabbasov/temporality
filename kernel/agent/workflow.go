@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,7 +25,13 @@ const (
 	ActivityRunTool         = "kernel.run_tool"
 	ActivityKnowledgeHints  = "kernel.knowledge_hints"
 	ActivityKnowledgeLookup = "kernel.knowledge_lookup"
+	ActivityResolveAgent    = "kernel.resolve_agent"
 	ApprovalSignal          = "kernel.approval"
+
+	// MaxDelegationDepth bounds agent-to-agent delegation chains
+	// (docs/agent-delegation.md): depth 0 → 1 → 2 is allowed, a run at depth 2
+	// cannot delegate further and must do the work itself.
+	MaxDelegationDepth = 2
 )
 
 type RunInput struct {
@@ -70,6 +77,9 @@ type RunInput struct {
 	// the Evolution view (docs/evaluable-agent.md §14–§15).
 	AgentID      string `json:"agent_id,omitempty"`
 	AgentVersion int    `json:"agent_version,omitempty"`
+	// DelegationDepth counts delegation hops: 0 for a normal run, +1 per child
+	// (docs/agent-delegation.md). Runs at MaxDelegationDepth must not delegate.
+	DelegationDepth int `json:"delegation_depth,omitempty"`
 }
 
 // SkillRef is a skill resolved for a run: identity plus a budgeted digest for
@@ -202,6 +212,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 		}
 	}
+	delegations := 0
 	for turn := 1; turn <= input.MaxTurns; turn++ {
 		result.Turns = turn
 		frame := fmt.Sprintf("%s/turn/%02d", input.RunID, turn)
@@ -441,6 +452,79 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
 					return result, err
 				}
+			} else if call.Name == "delegate" {
+				// Delegation runs a durable child AgentRun with the child agent's own
+				// enforced configuration (docs/agent-delegation.md). The parent waits
+				// for the result and receives it as the tool outcome.
+				delegateAgentID, _ := call.Args["agent_id"].(string)
+				delegatePrompt, _ := call.Args["prompt"].(string)
+				delegateMaxTurns := 0
+				if v, ok := call.Args["max_turns"].(float64); ok {
+					delegateMaxTurns = int(v)
+				}
+				if strings.TrimSpace(delegateAgentID) == "" || strings.TrimSpace(delegatePrompt) == "" {
+					if err := startTool(); err != nil {
+						return result, err
+					}
+					if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "malformed_arguments", "effect": "none", "detail": "agent_id and prompt are required"}); err != nil {
+						return result, err
+					}
+					toolResult.Content = "Delegate call rejected before execution, no effect: agent_id and prompt are required. Re-issue the call with both arguments."
+				} else if input.DelegationDepth >= MaxDelegationDepth {
+					if err := startTool(); err != nil {
+						return result, err
+					}
+					if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "delegation_depth_exceeded", "effect": "none", "depth": input.DelegationDepth}); err != nil {
+						return result, err
+					}
+					toolResult.Content = "Delegation depth limit reached; delegating further is not allowed. Perform the remaining work yourself with your own tools."
+				} else {
+					if err := startTool(); err != nil {
+						return result, err
+					}
+					delegations++
+					childRunID := fmt.Sprintf("%s/delegate/%02d", input.RunID, delegations)
+					resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
+					var childInput RunInput
+					resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: delegateAgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: delegatePrompt, ActorID: input.ActorID, MaxTurns: delegateMaxTurns, DelegationDepth: input.DelegationDepth + 1}).Get(ctx, &childInput)
+					if resolveErr != nil {
+						if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "agent_resolution_failed", "effect": "none", "detail": boundedFailureDetail(resolveErr)}); err != nil {
+							return result, err
+						}
+						toolResult.Content = "Delegation rejected before execution, no effect: agent \"" + delegateAgentID + "\" could not be resolved (" + boundedFailureDetail(resolveErr) + "). Check the agent_id and re-issue, or do the work yourself."
+					} else {
+						if err := emit(activityCtx, state, "delegation.started", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "ordinal": delegations, "depth": input.DelegationDepth + 1}); err != nil {
+							return result, err
+						}
+						childInput.ParentRunID = input.RunID
+						childInput.ParentFrameID = state.frame
+						childInput.ParentEventID = state.previousEventID
+						childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: WorkflowID(input.SourceID, input.Project, childRunID)})
+						var child RunResult
+						childErr := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", childInput).Get(ctx, &child)
+						if childErr != nil {
+							if ctx.Err() != nil {
+								return result, childErr
+							}
+							if err := emit(activityCtx, state, "delegation.failed", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "error_type": "delegated_run_failed", "error": boundedFailureDetail(childErr)}); err != nil {
+								return result, err
+							}
+							if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "delegated_run_failed", "effect": "uncertain", "child_run_id": childRunID}); err != nil {
+								return result, err
+							}
+							toolResult.Content = "Delegated run " + childRunID + " failed; its effects may be uncertain. Verify the current state before retrying or continue the work yourself."
+						} else {
+							if err := emit(activityCtx, state, "delegation.completed", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "child_status": child.Status, "turns": child.Turns}); err != nil {
+								return result, err
+							}
+							answer, _ := BoundedNarrative(child.Answer)
+							toolResult.Content = "Delegated agent \"" + delegateAgentID + "\" (run " + childRunID + ") finished with status " + child.Status + " after " + strconv.Itoa(child.Turns) + " turns. Final answer:\n\n" + answer
+							if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000), "child_run_id": childRunID}); err != nil {
+								return result, err
+							}
+						}
+					}
+				}
 			} else {
 				if autoApproved {
 					description, _ := approvalOperation(operationID, call.Name, call.Args, input.Role == "reviewer" || input.Role == "qa")
@@ -589,6 +673,13 @@ func eventScope(sourceID, project, runID string) string {
 // EventScope returns a stable source/project/run namespace for event IDs and
 // workflow identities used by optional integrations.
 func EventScope(sourceID, project, runID string) string { return eventScope(sourceID, project, runID) }
+
+// WorkflowID returns the durable Temporal workflow identity for a run —
+// top-level and delegated alike (docs/agent-delegation.md §5).
+func WorkflowID(sourceID, project, runID string) string {
+	digest := sha256.Sum256([]byte(sourceID + "\x00" + project + "\x00" + runID))
+	return fmt.Sprintf("agent-run/%x", digest[:16])
+}
 
 func toolFailureMessage(name string, err error) string {
 	// Argument-validation failures are rejected before execution: no effect,
@@ -945,5 +1036,6 @@ func KernelTools() []llm.ToolDef {
 		{Name: "skill_executions", Description: "List recent executions of a skill (runs with this skill attached)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_memory", Description: "List knowledge recorded from a skill's executions (memory stays a separate temporal layer; it never modifies the skill)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_propose", Description: "Propose a new living skill from a natural-language description of a repeatable capability. The skill builder extracts the contract (procedure, capabilities, tools, runtime, constraints) referencing only tools that actually exist, and saves a 0.x draft pending human review in the Skills UI. If the skill already exists, the draft becomes its next version. Never hand-write skill files in the repo — the registry is the only source of truth", Parameters: map[string]any{"type": "object", "properties": map[string]any{"description": map[string]any{"type": "string", "description": "What the skill should do, when to use it, and any constraints — the same way you would describe it to a human"}}, "required": []string{"description"}}},
+		{Name: "delegate", Description: "Delegate a self-contained subtask to another agent and wait for its result. The delegated agent runs with its own model, system prompt and capabilities — you cannot grant it anything beyond what it already has. Give a complete, self-contained prompt: everything the agent needs to know must be in it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"agent_id": map[string]any{"type": "string", "description": "Agent to delegate to"}, "prompt": map[string]any{"type": "string", "description": "Self-contained subtask description"}, "max_turns": map[string]any{"type": "integer", "description": "Turn budget for the delegated run, 1–16 (default 8)"}}, "required": []string{"agent_id", "prompt"}}},
 	}
 }

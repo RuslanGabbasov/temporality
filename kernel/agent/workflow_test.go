@@ -631,3 +631,131 @@ func TestMCPCallEventsCarryServerAndResultRef(t *testing.T) {
 	require.Equal(t, 1, started)
 	require.Equal(t, 1, completed)
 }
+
+func TestAgentRunDelegatesToAnotherAgent(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	// The model mock serves both runs: the child is recognized by its resolved
+	// system prompt, the parent delegates once and then answers.
+	sawChildAnswer := false
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if len(request.Messages) == 0 {
+			t.Fatalf("unexpected model request: %#v", request)
+		}
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			return llm.Completion{Content: "child done"}, nil
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "delegate-1", Name: "delegate", Args: map[string]any{"agent_id": "repo-a-reviewer", "prompt": "review the diff"}}}}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "child done") {
+				sawChildAnswer = true
+			}
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	resolveCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		resolveCalls++
+		require.Equal(t, "repo-a", request.Project)
+		require.Equal(t, "repo-a-reviewer", request.AgentID)
+		require.Equal(t, "run-del/delegate/01", request.RunID)
+		require.Equal(t, 1, request.DelegationDepth)
+		require.Equal(t, "review the diff", request.Prompt)
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: "repo-a-reviewer", DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		t.Fatalf("delegate must not reach the tool activity")
+		return ToolResult{}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-del", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "delegate the review", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.Equal(t, 1, resolveCalls)
+	var parentResult RunResult
+	require.NoError(t, env.GetWorkflowResult(&parentResult))
+	require.Equal(t, "completed", parentResult.Status)
+	require.Equal(t, "parent done", parentResult.Answer)
+	var delegationStarted, delegationCompleted, childRunStarted *observation.Event
+	for index := range recorded {
+		event := recorded[index]
+		switch {
+		case event.Type == "delegation.started" && delegationStarted == nil:
+			delegationStarted = &recorded[index]
+		case event.Type == "delegation.completed" && delegationCompleted == nil:
+			delegationCompleted = &recorded[index]
+		case event.Type == "run.started" && event.Context.Run == "run-del/delegate/01":
+			childRunStarted = &recorded[index]
+		}
+	}
+	require.NotNil(t, delegationStarted, "delegation.started missing")
+	require.NotNil(t, delegationCompleted, "delegation.completed missing")
+	require.NotNil(t, childRunStarted, "child run.started missing")
+	require.Equal(t, "run-del/delegate/01", delegationStarted.Data["child_run_id"])
+	require.Equal(t, "repo-a-reviewer", delegationStarted.Data["agent_id"])
+	require.Equal(t, float64(1), delegationStarted.Data["ordinal"])
+	require.Equal(t, float64(1), delegationStarted.Data["depth"])
+	require.Equal(t, "completed", delegationCompleted.Data["child_status"])
+	// Causal chain: the child run chains to the delegation event that started it.
+	require.Equal(t, delegationStarted.EventID, childRunStarted.Context.ParentEventID)
+	require.Equal(t, delegationStarted.Context.Run, childRunStarted.Data["parent_run_id"])
+	require.True(t, sawChildAnswer, "parent must receive the child answer as the tool result")
+}
+
+func TestAgentRunDelegationDepthLimit(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	modelCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, _ ModelRequest) (llm.Completion, error) {
+		modelCalls++
+		if modelCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "delegate-1", Name: "delegate", Args: map[string]any{"agent_id": "repo-a-reviewer", "prompt": "review"}}}}, nil
+		}
+		return llm.Completion{Content: "did it myself"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(context.Context, ResolveAgentRequest) (RunInput, error) {
+		t.Fatalf("resolve must not be called at the depth limit")
+		return RunInput{}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-deep", Project: "repo-a", Prompt: "review", MaxTurns: 3, DelegationDepth: MaxDelegationDepth})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "completed", result.Status)
+	require.Equal(t, "did it myself", result.Answer)
+
+	var depthBlocked *observation.Event
+	for index := range recorded {
+		if recorded[index].Type == "tool.failed" && recorded[index].Data["error_type"] == "delegation_depth_exceeded" {
+			depthBlocked = &recorded[index]
+			break
+		}
+	}
+	require.NotNil(t, depthBlocked, "delegation at the depth limit must fail the tool call")
+	require.Equal(t, "none", depthBlocked.Data["effect"])
+	for _, event := range recorded {
+		require.NotEqual(t, "delegation.started", event.Type, "no child run may start at the depth limit")
+	}
+}

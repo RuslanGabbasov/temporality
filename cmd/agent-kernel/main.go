@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -159,6 +158,7 @@ func main() {
 	temporalWorker.RegisterActivityWithOptions(activities.RunTool, activity.RegisterOptions{Name: agent.ActivityRunTool})
 	temporalWorker.RegisterActivityWithOptions(activities.KnowledgeHints, activity.RegisterOptions{Name: agent.ActivityKnowledgeHints})
 	temporalWorker.RegisterActivityWithOptions(activities.KnowledgeLookup, activity.RegisterOptions{Name: agent.ActivityKnowledgeLookup})
+	temporalWorker.RegisterActivityWithOptions(activities.ResolveAgent, activity.RegisterOptions{Name: agent.ActivityResolveAgent})
 	registerExampleWorkflow(temporalWorker)
 	workerDone := make(chan error, 1)
 	go func() { workerDone <- temporalWorker.Run(worker.InterruptCh()) }()
@@ -691,6 +691,37 @@ func main() {
 		}
 		source, prompt := agentPromptPreview(a)
 		writeJSON(w, 200, map[string]any{"agent_id": a.ID, "version": a.DefinitionVersion, "source": source, "prompt": prompt})
+	})
+	// Delegation target resolution (docs/agent-delegation.md §4): returns the
+	// enforced run configuration for launching this agent inside another run.
+	// Writer role: the response is everything needed to start a run.
+	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/run-config", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if project == "" {
+			writeError(w, 400, errors.New("project query parameter is required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleWriter, project) {
+			return
+		}
+		a, err := ws.GetAgent(r.Context(), r.PathValue("agentID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		// Agents are global or project-scoped; delegation must respect scope.
+		if a.ProjectID != "" && a.ProjectID != project {
+			writeError(w, 404, errors.New("agent not found"))
+			return
+		}
+		input := agent.RunInput{}
+		applyAgentConfig(r.Context(), ws, &a, &input)
+		applyProjectModel(r.Context(), ws, project, &input)
+		writeJSON(w, 200, input)
 	})
 	// Curated builtin definitions (docs/evaluable-agent.md §16): source for the
 	// create-agent templates and the “restore builtin” action.
@@ -2088,8 +2119,7 @@ func querySourceID(r *http.Request, fallback string) string {
 }
 
 func workflowIDFor(sourceID, project, runID string) string {
-	digest := sha256.Sum256([]byte(sourceID + "\x00" + project + "\x00" + runID))
-	return fmt.Sprintf("agent-run/%x", digest[:16])
+	return agent.WorkflowID(sourceID, project, runID)
 }
 
 // temporalLiveness reports whether the run's workflow is still executing.
@@ -2319,6 +2349,12 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 		if !caps.Cap(caps.Knowledge) {
 			input.SkipKnowledge = true
 		}
+	}
+	// Delegation is an explicitly granted capability (docs/agent-delegation.md):
+	// nil or false denies the delegate tool, and agents without a structured
+	// definition never get it by default.
+	if a.Definition == nil || a.Definition.Capabilities.Delegation == nil || !*a.Definition.Capabilities.Delegation {
+		input.DenyTools = append(input.DenyTools, "delegate")
 	}
 	if a.ReadOnly != nil && *a.ReadOnly {
 		input.ReadOnly = true

@@ -139,6 +139,57 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 	return nil
 }
 
+// ResolveAgentRequest asks the workspace for the enforced run configuration of
+// a delegation target (docs/agent-delegation.md §4).
+type ResolveAgentRequest struct {
+	Project         string `json:"project"`
+	AgentID         string `json:"agent_id"`
+	RunID           string `json:"run_id"` // child run id assigned by the parent workflow
+	TaskID          string `json:"task_id,omitempty"`
+	Prompt          string `json:"prompt"`
+	ActorID         string `json:"actor_id,omitempty"`
+	MaxTurns        int    `json:"max_turns,omitempty"`
+	DelegationDepth int    `json:"delegation_depth,omitempty"`
+}
+
+// ResolveAgent builds the child RunInput for a delegated run: it fetches the
+// target agent's enforced configuration from the workspace API (the same code
+// path a manual run start uses), applies sandbox/tool preparation and denies
+// further delegation when the depth limit is reached.
+func (a *Activities) ResolveAgent(ctx context.Context, request ResolveAgentRequest) (RunInput, error) {
+	endpoint := fmt.Sprintf("%s/v1/workspace/agents/%s/run-config?project=%s", a.WorkspaceURL, url.PathEscape(request.AgentID), url.QueryEscape(request.Project))
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return RunInput{}, err
+	}
+	if status == http.StatusNotFound {
+		return RunInput{}, temporal.NewNonRetryableApplicationError(fmt.Sprintf("agent %q is not available in project %q", request.AgentID, request.Project), "AgentNotAvailable", nil)
+	}
+	if status != http.StatusOK {
+		return RunInput{}, temporal.NewNonRetryableApplicationError(fmt.Sprintf("workspace returned %d resolving agent %q", status, request.AgentID), "AgentResolutionFailed", nil)
+	}
+	var child RunInput
+	if err := json.Unmarshal([]byte(body), &child); err != nil {
+		return RunInput{}, temporal.NewNonRetryableApplicationError("agent run configuration is malformed: "+err.Error(), "AgentResolutionFailed", nil)
+	}
+	child.RunID = request.RunID
+	child.Project = request.Project
+	child.TaskID = request.TaskID
+	child.Prompt = request.Prompt
+	child.ActorID = request.ActorID
+	child.DelegationDepth = request.DelegationDepth
+	if request.MaxTurns > 0 {
+		child.MaxTurns = request.MaxTurns
+	}
+	if err := a.PrepareRun(&child); err != nil {
+		return RunInput{}, temporal.NewNonRetryableApplicationError("prepare delegated run: "+err.Error(), "AgentResolutionFailed", nil)
+	}
+	if child.DelegationDepth >= MaxDelegationDepth {
+		child.DenyTools = append(child.DenyTools, "delegate")
+	}
+	return child, nil
+}
+
 // MCPServerName identifies the MCP server behind mcp__* tools in the event
 // stream. An explicit KERNEL_MCP_SERVER_NAME wins; otherwise the basename of
 // KERNEL_MCP_COMMAND serves as a stable default. Empty when no MCP server is
