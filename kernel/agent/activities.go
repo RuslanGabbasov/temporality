@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -244,6 +245,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleSkillSearch(ctx, request)
 	case "skill_inspect", "skill_validate", "skill_history", "skill_executions", "skill_memory":
 		return a.handleSkillAction(ctx, request)
+	case "skill_propose":
+		return a.handleSkillPropose(ctx, request)
 	default:
 		if a.MCP != nil && a.MCP.HasTool(request.Name) {
 			if faultAfterEffect(request.RunID, request.Name, request.OperationID) {
@@ -515,6 +518,160 @@ func (a *Activities) handleSkillValidate(ctx context.Context, skillID string) (T
 		return ToolResult{Content: fmt.Sprintf("error: validate failed (HTTP %d): %s", status, truncate(response, 400))}, nil
 	}
 	return ToolResult{Content: compactJSON(response, 4000)}, nil
+}
+
+// handleSkillPropose turns a natural-language capability description into a
+// structured skill draft (via the skill builder) and saves it as a new skill,
+// or as a new version when the skill already exists. Per docs/living-skills.md
+// §26 skills change through proposals: the draft lands as version 0.x for
+// human review in the Skills UI, it is never silently promoted.
+func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	project := request.Project
+	if project == "" {
+		return ToolResult{Content: "error: project not set"}, nil
+	}
+	description, _ := request.Arguments["description"].(string)
+	if strings.TrimSpace(description) == "" {
+		return ToolResult{Content: "error: description is required"}, nil
+	}
+	draft, err := BuildSkillDraft(ctx, a.Model, description, a.ToolsSummary())
+	if err != nil {
+		return ToolResult{Content: "error: skill builder failed: " + err.Error()}, nil
+	}
+	var manifest struct {
+		ID      string `json:"id"`
+		Version string `json:"version"`
+	}
+	_ = json.Unmarshal(draft.Manifest, &manifest)
+	id := manifest.ID
+	if id == "" {
+		id = skillSlug(draft.Name)
+	}
+	if id == "" {
+		return ToolResult{Content: "error: could not derive a skill id from the draft"}, nil
+	}
+	// Version policy for proposals: new capabilities start as 0.x drafts; an
+	// existing skill gets its next patch as a proposal. The version is system
+	// policy, never the model's guess.
+	version := "0.1.0"
+	if current, status, err := a.workspaceDo(ctx, http.MethodGet, fmt.Sprintf("%s/v1/workspace/skills/%s", a.WorkspaceURL, id), nil); err == nil && status == 200 {
+		var existing struct {
+			Version string `json:"version"`
+		}
+		if json.Unmarshal([]byte(current), &existing) == nil && existing.Version != "" {
+			version = nextPatchVersion(existing.Version)
+		}
+	}
+	// Normalize the manifest so identity fields agree with the stored row.
+	manifestMap := map[string]any{}
+	if err := json.Unmarshal(draft.Manifest, &manifestMap); err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if _, ok := manifestMap["name"]; !ok {
+		manifestMap["name"] = draft.Name
+	}
+	if _, ok := manifestMap["description"]; !ok {
+		manifestMap["description"] = draft.Description
+	}
+	manifestMap["id"] = id
+	manifestMap["version"] = version
+	normalizedManifest, err := json.Marshal(manifestMap)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	payload := map[string]any{
+		"id":            id,
+		"project_id":    project,
+		"name":          draft.Name,
+		"description":   draft.Description,
+		"version":       version,
+		"markdown":      draft.Markdown,
+		"manifest_yaml": string(normalizedManifest),
+	}
+	body, status, err := a.workspaceDo(ctx, http.MethodPost, a.WorkspaceURL+"/v1/workspace/skills", payload)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	action := "created"
+	if status == 409 {
+		// Skill exists — propose the draft as its next version instead.
+		body, status, err = a.workspaceDo(ctx, http.MethodPut, a.WorkspaceURL+"/v1/workspace/skills/"+id, payload)
+		if err != nil {
+			return ToolResult{Content: "error: " + err.Error()}, nil
+		}
+		action = "new version proposed for existing skill"
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: save skill draft failed (HTTP %d): %s", status, truncate(body, 600))}, nil
+	}
+	response := map[string]any{
+		"skill_id":  id,
+		"name":      draft.Name,
+		"version":   version,
+		"state":     "draft",
+		"action":    action,
+		"next_step": "human review in the Skills UI before the skill is bound to agents",
+		"questions": draft.Questions,
+	}
+	encoded, _ := json.Marshal(response)
+	return ToolResult{Content: string(encoded)}, nil
+}
+
+// ToolsSummary renders builtin + MCP tools as a compact text list for the
+// skill builder prompt, so drafts reference real tool names. It is shared by
+// the UI wizard endpoint and the skill_propose agent tool.
+func (a *Activities) ToolsSummary() string {
+	var b strings.Builder
+	for _, def := range a.BuiltinToolDefs() {
+		if def.Description != "" {
+			fmt.Fprintf(&b, "- %s — %s\n", def.Name, def.Description)
+		} else {
+			fmt.Fprintf(&b, "- %s\n", def.Name)
+		}
+	}
+	for name, server := range a.MCP.ServerTools() {
+		fmt.Fprintf(&b, "MCP server %q: ", name)
+		tools := make([]string, 0, len(server.Tools))
+		for _, tool := range server.Tools {
+			tools = append(tools, tool.ModelName)
+		}
+		b.WriteString(strings.Join(tools, ", "))
+		b.WriteByte('\n')
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// skillSlug derives a kebab-case id from a human skill name.
+func skillSlug(name string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash && b.Len() > 0 {
+			b.WriteByte('-')
+			prevDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// nextPatchVersion bumps the patch segment of a semver-ish version string,
+// ignoring any prerelease/build suffix ("1.2.3-rc.1" -> "1.2.4"). When the
+// input cannot be parsed it falls back to a fresh 0.1.0 draft version.
+func nextPatchVersion(v string) string {
+	parts := strings.SplitN(strings.TrimSpace(v), "+", 2)
+	core := strings.SplitN(parts[0], "-", 2)[0]
+	segments := strings.Split(core, ".")
+	if len(segments) != 3 {
+		return "0.1.0"
+	}
+	patch, err := strconv.Atoi(segments[2])
+	if err != nil || patch < 0 {
+		return "0.1.0"
+	}
+	return fmt.Sprintf("%s.%s.%d", segments[0], segments[1], patch+1)
 }
 
 // truncate shortens s for inclusion in a compact tool error message.

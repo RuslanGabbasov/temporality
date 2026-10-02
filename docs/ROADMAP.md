@@ -45,13 +45,13 @@ Source spec: `docs/living-skills.md` (§43 MVP).
 - [x] **Skill registry** — project-scoped storage, immutable versions, CRUD API
 - [x] **Contract validation** — manifest schema, capabilities, tools, runtime requirements checked before use
 - [x] **Prompt injection** — compact skill digests in agent system prompt with token budget
-- [x] **Agent tools** — `skill_search`, `skill_inspect`, `skill_validate`, `skill_history`, `skill_executions`, `skill_memory`
+- [x] **Agent tools** — `skill_search`, `skill_inspect`, `skill_validate`, `skill_history`, `skill_executions`, `skill_memory`, `skill_propose` (draft via skill builder, saved as 0.x pending human review)
 - [x] **Execution linkage** — runs record skill versions used; executions listed per skill
 - [x] **Memory linkage** — `remember` accepts `skill_id`/`capability`; per-skill memory view
 - [x] **Skills UI** — tab with overview/contract/executions/memory/versions; skill selection on agent form
 - [ ] **CLI** — `temporality skill list/inspect/validate/history/executions/memory`
 
-Not in MVP: agent-driven skill mutation, evaluation engine, marketplace, policy engine (Phase 2).
+Not in MVP: agent-driven skill mutation beyond 0.x drafts (full evolution workflow), evaluation engine, marketplace, policy engine (Phase 2).
 
 ### Phase 2 (after MVP)
 

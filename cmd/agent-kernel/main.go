@@ -1496,7 +1496,7 @@ func main() {
 			writeError(w, 422, errors.New("description is required"))
 			return
 		}
-		draft, err := agent.BuildSkillDraft(r.Context(), activities.Model, req.Description, skillBuilderToolsSummary(activities))
+		draft, err := agent.BuildSkillDraft(r.Context(), activities.Model, req.Description, activities.ToolsSummary())
 		if err != nil {
 			writeError(w, 502, err)
 			return
@@ -2183,29 +2183,6 @@ func builtinToolInfo(a *agent.Activities) []mcpclient.ToolInfo {
 	return result
 }
 
-// skillBuilderToolsSummary renders builtin + MCP tools as a compact text list
-// for the skill builder prompt, so the draft references real tool names.
-func skillBuilderToolsSummary(a *agent.Activities) string {
-	var b strings.Builder
-	for _, tool := range builtinToolInfo(a) {
-		if tool.Description != "" {
-			fmt.Fprintf(&b, "- %s — %s\n", tool.Name, tool.Description)
-		} else {
-			fmt.Fprintf(&b, "- %s\n", tool.Name)
-		}
-	}
-	for name, server := range a.MCP.ServerTools() {
-		fmt.Fprintf(&b, "MCP server %q: ", name)
-		tools := make([]string, 0, len(server.Tools))
-		for _, tool := range server.Tools {
-			tools = append(tools, tool.ModelName)
-		}
-		b.WriteString(strings.Join(tools, ", "))
-		b.WriteByte('\n')
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
 // loadMCPServers applies every stored MCP server to the registry and starts a
 // periodic refresher so restarted servers and changed tool sets stay current.
 func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, registry *mcpclient.Registry) {
@@ -2263,6 +2240,9 @@ func (req skillRequest) parse() (skills.Manifest, []skills.Issue) {
 	}
 	if manifest.Name == "" {
 		manifest.Name = req.Name
+	}
+	if manifest.Description == "" {
+		manifest.Description = req.Description
 	}
 	if manifest.Version == "" {
 		manifest.Version = "1.0.0"

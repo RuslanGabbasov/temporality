@@ -178,6 +178,8 @@ func parseDraftCompletion(content string) (SkillDraft, error) {
 	}
 	setIf("id", parsed.ID)
 	setIf("version", parsed.Version)
+	setIf("name", parsed.Name)
+	setIf("description", parsed.Description)
 	if strings.TrimSpace(parsed.Evaluation.Suite) != "" {
 		manifest["evaluation"] = map[string]any{"suite": parsed.Evaluation.Suite}
 	}

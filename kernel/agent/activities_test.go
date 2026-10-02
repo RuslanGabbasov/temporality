@@ -90,6 +90,19 @@ func TestSkillSearchReportsHTTPErrorsAsToolErrors(t *testing.T) {
 	}
 }
 
+func TestSkillSlug(t *testing.T) {
+	for input, want := range map[string]string{
+		"Deploy Service":      "deploy-service",
+		"  Code Review & QA ": "code-review-qa",
+		"Ревью кода":          "",
+		"":                    "",
+	} {
+		if got := skillSlug(input); got != want {
+			t.Errorf("skillSlug(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestRunToolFaultByOperationIDExecutesEffectThenCrashes(t *testing.T) {
 	runner := &recordingSandbox{}
 	activities := &Activities{Sandbox: runner}
