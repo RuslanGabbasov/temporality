@@ -142,20 +142,13 @@ func BuildSkillDraft(ctx context.Context, model *llm.Client, description, toolsS
 	return draft, nil
 }
 
-// parseDraftCompletion tolerates fenced code blocks around the JSON payload.
+// parseDraftCompletion tolerates reasoning blocks, fenced code blocks and
+// stray prose around the JSON payload.
 func parseDraftCompletion(content string) (SkillDraft, error) {
-	payload := strings.TrimSpace(content)
-	if start := strings.Index(payload, "```"); start >= 0 {
-		if firstLine := strings.IndexByte(payload[start:], '\n'); firstLine > 0 {
-			rest := payload[start+firstLine+1:]
-			if end := strings.LastIndex(rest, "```"); end >= 0 {
-				payload = rest[:end]
-			}
-		}
-	}
+	payload, _ := extractJSONObject(content)
 	var parsed draftCompletion
 	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		return SkillDraft{}, fmt.Errorf("model returned invalid JSON: %w", err)
+		return SkillDraft{}, fmt.Errorf("model returned invalid JSON: %w (model output: %.200s)", err, strings.TrimSpace(content))
 	}
 
 	manifest := map[string]any{}

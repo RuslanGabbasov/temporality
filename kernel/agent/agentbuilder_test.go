@@ -69,6 +69,18 @@ func TestParseAgentDraftInvalidJSON(t *testing.T) {
 	}
 }
 
+// Reasoning models may inline <think>…</think> into content instead of the
+// dedicated reasoning field; the draft object must still be extracted.
+func TestParseAgentDraftReasoningWrapped(t *testing.T) {
+	draft, err := parseAgentDraft("<think>Нужен агент для backend-разработки…</think>\n{\"name\": \"Coder\", \"description\": \"Backend разработка.\"}")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if draft.Name != "Coder" {
+		t.Fatalf("name = %q", draft.Name)
+	}
+}
+
 func TestBuildAgentDraftRequiresDescription(t *testing.T) {
 	if _, err := BuildAgentDraft(nil, nil, "  ", "", false); err == nil || !strings.Contains(err.Error(), "description") {
 		t.Fatalf("blank description must be rejected, got %v", err)

@@ -132,21 +132,14 @@ func BuildAgentDraft(ctx context.Context, model *llm.Client, description, toolsS
 	return draft, nil
 }
 
-// parseAgentDraft tolerates fenced code blocks around the JSON payload and
-// keeps unknown/empty capability keys unset (unset = allowed).
+// parseAgentDraft tolerates reasoning blocks, fenced code blocks and stray
+// prose around the JSON payload, and keeps unknown/empty capability keys
+// unset (unset = allowed).
 func parseAgentDraft(content string) (AgentDraft, error) {
-	payload := strings.TrimSpace(content)
-	if start := strings.Index(payload, "```"); start >= 0 {
-		if firstLine := strings.IndexByte(payload[start:], '\n'); firstLine > 0 {
-			rest := payload[start+firstLine+1:]
-			if end := strings.LastIndex(rest, "```"); end >= 0 {
-				payload = rest[:end]
-			}
-		}
-	}
+	payload, _ := extractJSONObject(content)
 	var parsed agentDraftCompletion
 	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		return AgentDraft{}, fmt.Errorf("model returned invalid JSON: %w", err)
+		return AgentDraft{}, fmt.Errorf("model returned invalid JSON: %w (model output: %.200s)", err, strings.TrimSpace(content))
 	}
 
 	trimAll := func(values []string) []string {

@@ -64,6 +64,18 @@ func TestParseDraftCompletionFencedJSON(t *testing.T) {
 	}
 }
 
+// Reasoning models may inline <think>…</think> into content instead of the
+// dedicated reasoning field; the draft object must still be extracted.
+func TestParseDraftCompletionReasoningWrapped(t *testing.T) {
+	draft, err := parseDraftCompletion("<think>\nПользователю нужен навык деплоя…\n</think>\n{\"name\": \"Deploy\", \"markdown\": \"x\"}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Name != "Deploy" {
+		t.Fatalf("name = %q", draft.Name)
+	}
+}
+
 func TestParseDraftCompletionDropsEmptySections(t *testing.T) {
 	draft, err := parseDraftCompletion(`{"name": "Empty", "capabilities": [], "tools": [], "inputs": {}, "outputs": {}}`)
 	if err != nil {
@@ -78,7 +90,11 @@ func TestParseDraftCompletionDropsEmptySections(t *testing.T) {
 }
 
 func TestParseDraftCompletionInvalidJSON(t *testing.T) {
-	if _, err := parseDraftCompletion("not json at all"); err == nil {
+	_, err := parseDraftCompletion("<html><body>502 Bad Gateway</body></html>")
+	if err == nil {
 		t.Fatal("expected error for non-JSON content")
+	}
+	if !strings.Contains(err.Error(), "model output") || !strings.Contains(err.Error(), "502 Bad Gateway") {
+		t.Fatalf("error must include a snippet of the model output for diagnosis, got: %v", err)
 	}
 }
