@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -120,6 +121,22 @@ func main() {
 	if err = ws.Migrate(ctx, "migrations/000029_mcp_servers.up.sql"); err != nil {
 		log.Error("migrate workspace v29", "error", err)
 		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000030_agent_definition.up.sql"); err != nil {
+		log.Error("migrate workspace v30", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000031_run_agent_version.up.sql"); err != nil {
+		log.Error("migrate workspace v31", "error", err)
+		os.Exit(1)
+	}
+	// Backfill curated builtin agents for projects created before seeding
+	// existed (docs/evaluable-agent.md §16). Idempotent: existing ids are
+	// skipped by the seeder itself.
+	if projects, pErr := ws.ListProjects(ctx); pErr == nil {
+		for _, p := range projects {
+			seedBuiltinAgents(ctx, ws, p.ID)
+		}
 	}
 	activities, err := agent.NewActivities(events)
 	if err != nil {
@@ -453,6 +470,7 @@ func main() {
 			writeError(w, 409, err)
 			return
 		}
+		seedBuiltinAgents(r.Context(), ws, project.ID)
 		writeJSON(w, 201, project)
 	})
 	mux.HandleFunc("GET /v1/workspace/projects/{projectID}", func(w http.ResponseWriter, r *http.Request) {
@@ -549,10 +567,17 @@ func main() {
 			Skills: req.Skills, MCPServers: req.MCPServers, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
 			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels,
+			Definition: req.Definition,
+		}
+		if a.Definition != nil {
+			a.DefinitionVersion = 1
 		}
 		if err := ws.CreateAgent(r.Context(), a); err != nil {
 			writeError(w, 409, err)
 			return
+		}
+		if a.Definition != nil {
+			writeAgentVersion(r.Context(), ws, *a, requestSubject(r), req.PromptSource, req.GeneratorModel)
 		}
 		writeJSON(w, 201, a)
 	})
@@ -587,6 +612,20 @@ func main() {
 			Skills: req.Skills, MCPServers: req.MCPServers, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
 			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels,
+			Definition: req.Definition,
+		}
+		prev, prevErr := ws.GetAgent(r.Context(), a.ID)
+		if prevErr != nil {
+			if errors.Is(prevErr, workspace.ErrNotFound) {
+				writeError(w, 404, prevErr)
+				return
+			}
+			writeError(w, 500, prevErr)
+			return
+		}
+		a.DefinitionVersion = prev.DefinitionVersion
+		if agentSemanticsChanged(prev, a) {
+			a.DefinitionVersion++
 		}
 		if err := ws.UpdateAgent(r.Context(), a); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
@@ -595,6 +634,9 @@ func main() {
 			}
 			writeError(w, 500, err)
 			return
+		}
+		if a.Definition != nil && a.DefinitionVersion != prev.DefinitionVersion {
+			writeAgentVersion(r.Context(), ws, a, requestSubject(r), req.PromptSource, req.GeneratorModel)
 		}
 		writeJSON(w, 200, a)
 	})
@@ -611,6 +653,76 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/versions", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		versions, err := ws.ListAgentVersions(r.Context(), r.PathValue("agentID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"versions": versions})
+	})
+	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/runs", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		runs, err := ws.ListRunsByAgent(r.Context(), r.PathValue("agentID"), 200)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"runs": runs})
+	})
+	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/prompt", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		a, err := ws.GetAgent(r.Context(), r.PathValue("agentID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		source, prompt := agentPromptPreview(a)
+		writeJSON(w, 200, map[string]any{"agent_id": a.ID, "version": a.DefinitionVersion, "source": source, "prompt": prompt})
+	})
+	// Curated builtin definitions (docs/evaluable-agent.md §16): source for the
+	// create-agent templates and the “restore builtin” action.
+	mux.HandleFunc("GET /v1/workspace/agents/builtins", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		writeJSON(w, 200, map[string]any{"builtins": workspace.BuiltinAgents()})
+	})
+	// Agent creation wizard: natural language in, structured definition out.
+	// The user never writes a system prompt (docs/evaluable-agent.md §4).
+	mux.HandleFunc("POST /v1/workspace/agents/draft", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req struct {
+			Description string `json:"description"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Description) == "" {
+			writeError(w, 422, errors.New("description is required"))
+			return
+		}
+		draft, err := agent.BuildAgentDraft(r.Context(), activities.Model, req.Description, activities.ToolsSummary())
+		if err != nil {
+			writeError(w, 502, err)
+			return
+		}
+		writeJSON(w, 200, draft)
 	})
 	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/tasks", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
@@ -776,7 +888,7 @@ func main() {
 		}
 		wsRun := &workspace.Run{
 			ID: runID, TaskID: task.ID, ProjectID: task.ProjectID,
-			AgentID: agentID, RunID: runID, Status: "started", Model: input.Model,
+			AgentID: agentID, AgentVersion: input.AgentVersion, RunID: runID, Status: "started", Model: input.Model,
 		}
 		_ = ws.CreateRun(r.Context(), wsRun)
 		writeJSON(w, http.StatusAccepted, map[string]string{
@@ -1791,7 +1903,7 @@ func main() {
 			writeError(w, 409, wfErr)
 			return
 		}
-		wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: projectID, AgentID: effectiveAgentID, RunID: input.RunID, Status: "started", Model: input.Model}
+		wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: projectID, AgentID: effectiveAgentID, AgentVersion: input.AgentVersion, RunID: input.RunID, Status: "started", Model: input.Model}
 		_ = ws.CreateRun(r.Context(), wsRun)
 		writeJSON(w, 202, map[string]string{"trigger_id": matched.ID, "run_id": input.RunID, "workflow_id": run.GetID()})
 	})
@@ -1851,7 +1963,7 @@ func main() {
 					slog.Error("start trigger run", "trigger", t.ID, "error", wfErr)
 					continue
 				}
-				wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: t.ProjectID, AgentID: effectiveAgentID, RunID: input.RunID, Status: "started", Model: input.Model}
+				wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: t.ProjectID, AgentID: effectiveAgentID, AgentVersion: input.AgentVersion, RunID: input.RunID, Status: "started", Model: input.Model}
 				_ = ws.CreateRun(context.Background(), wsRun)
 				slog.Info("scheduled trigger fired", "trigger", t.ID, "name", t.Name, "run", input.RunID)
 			}
@@ -2093,7 +2205,86 @@ func resolveRunAgent(ctx context.Context, ws *workspace.Store, projectID, agentI
 	return agentID, &a, nil
 }
 
+// seedBuiltinAgents creates the curated agent set for a new project
+// (docs/evaluable-agent.md §16). Agent ids are global, so seeded agents get
+// project-scoped ids (<project>-<slug>). Seeding is best-effort: an existing
+// id or a transient failure skips that agent, never blocks project creation.
+func seedBuiltinAgents(ctx context.Context, ws *workspace.Store, projectID string) {
+	for _, spec := range workspace.BuiltinAgents() {
+		def := spec.Definition
+		a := &workspace.Agent{
+			ID: projectID + "-" + spec.Slug, ProjectID: projectID, Name: spec.Name,
+			Description: spec.Description, Definition: &def, DefinitionVersion: 1,
+			SandboxProfile: spec.SandboxProfile, NetworkAccess: spec.NetworkAccess,
+			ReadOnly: spec.ReadOnly, Labels: spec.Labels,
+		}
+		if err := ws.CreateAgent(ctx, a); err != nil {
+			continue
+		}
+		writeAgentVersion(ctx, ws, *a, "temporality", "builtin", "")
+	}
+}
+
+// requestSubject returns the authenticated token subject for version history.
+func requestSubject(r *http.Request) string {
+	if principal, ok := controlplane.FromContext(r.Context()); ok {
+		return principal.Subject
+	}
+	return ""
+}
+
+// agentSemanticsChanged reports whether the compiled prompt inputs changed:
+// the definition itself or the purpose text that feeds the identity section
+// (docs/plan-evaluable-agent.md §2 этап 3).
+func agentSemanticsChanged(prev, next workspace.Agent) bool {
+	if prev.Description != next.Description {
+		return true
+	}
+	prevDef, _ := json.Marshal(prev.Definition)
+	nextDef, _ := json.Marshal(next.Definition)
+	return !bytes.Equal(prevDef, nextDef)
+}
+
+// writeAgentVersion stores the immutable definition snapshot with the
+// effective prompt compiled by the same deterministic function runs use
+// (docs/plan-evaluable-agent.md, decision 2).
+func writeAgentVersion(ctx context.Context, ws *workspace.Store, a workspace.Agent, author, promptSource, generatorModel string) {
+	if promptSource == "" {
+		promptSource = "manual"
+	}
+	_ = ws.InsertAgentVersion(ctx, workspace.AgentVersion{
+		AgentID: a.ID, Version: a.DefinitionVersion, Definition: *a.Definition,
+		Description: a.Description,
+		CompiledPrompt: agent.EffectiveSystemPrompt(agent.AgentPromptInput{
+			Name: a.Name, Description: a.Description, Definition: *a.Definition, Sandbox: a.SandboxProfile,
+		}, "", a.SystemPrompt),
+		PromptSource: promptSource, GeneratorModel: generatorModel,
+		Author: author, CreatedAt: time.Now().UTC(),
+	})
+}
+
+// agentPromptPreview returns the effective system prompt shown in the UI:
+// override > compiled definition > stored manual prompt (legacy).
+func agentPromptPreview(a workspace.Agent) (source, prompt string) {
+	if a.Definition != nil {
+		if a.Definition.PromptOverride != "" {
+			return "override", a.Definition.PromptOverride
+		}
+		return "definition", agent.CompileAgentPrompt(agent.AgentPromptInput{
+			Name: a.Name, Description: a.Description, Definition: *a.Definition, Sandbox: a.SandboxProfile,
+		})
+	}
+	if a.SystemPrompt != "" {
+		return "legacy", a.SystemPrompt
+	}
+	return "role", ""
+}
+
 // applyAgentConfig copies the resolved agent's settings onto the run input.
+// Structured definitions compile the system prompt from semantic components
+// and enforce capabilities by removing the corresponding tools and access
+// (docs/evaluable-agent.md §6; plan §4.1 — enforcement is hard, never
+// prompt-only).
 func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Agent, input *agent.RunInput) {
 	if a == nil {
 		return
@@ -2107,7 +2298,34 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	if a.NetworkAccess != nil && *a.NetworkAccess {
 		input.NetworkAccess = true
 	}
-	resolveAgentSkills(ctx, ws, a, input)
+	input.AgentID = a.ID
+	input.AgentVersion = a.DefinitionVersion
+	useSkills := true
+	if a.Definition != nil {
+		input.SystemPrompt = agent.EffectiveSystemPrompt(agent.AgentPromptInput{
+			Name: a.Name, Description: a.Description, Definition: *a.Definition, Sandbox: a.SandboxProfile,
+		}, input.Role, a.SystemPrompt)
+		caps := a.Definition.Capabilities
+		if !caps.Cap(caps.ModifyFiles) {
+			input.ReadOnly = true
+		}
+		if !caps.Cap(caps.RunCommands) {
+			input.DenyTools = append(input.DenyTools, "run_command")
+		}
+		if !caps.Cap(caps.Network) {
+			input.NetworkAccess = false
+		}
+		useSkills = caps.Cap(caps.Skills)
+		if !caps.Cap(caps.Knowledge) {
+			input.SkipKnowledge = true
+		}
+	}
+	if a.ReadOnly != nil && *a.ReadOnly {
+		input.ReadOnly = true
+	}
+	if useSkills {
+		resolveAgentSkills(ctx, ws, a, input)
+	}
 	resolveAgentMCP(a, input)
 }
 

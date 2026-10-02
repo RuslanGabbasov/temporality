@@ -188,6 +188,12 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return ToolResult{}, temporal.NewNonRetryableApplicationError(
 			fmt.Sprintf("tool %q is not allowed for this agent", request.Name), "ToolNotAllowed", nil)
 	}
+	if allowedForAgent(request.DeniedTools, request.Name) {
+		// Capability enforcement: tools disabled by the agent definition are
+		// neither advertised nor executable, regardless of the allowlist.
+		return ToolResult{}, temporal.NewNonRetryableApplicationError(
+			fmt.Sprintf("tool %q is disabled for this agent", request.Name), "ToolNotAllowed", nil)
+	}
 	switch request.Name {
 	case "echo":
 		value, _ := request.Arguments["text"].(string)
@@ -218,7 +224,7 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 			if a.NetworkAccess {
 				net = "bridge"
 			}
-			if _, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.Role == "reviewer" || request.Role == "qa", Network: net}); err != nil {
+			if _, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.ReadOnly || request.Role == "reviewer" || request.Role == "qa", Network: net}); err != nil {
 				return ToolResult{}, err
 			}
 			return ToolResult{}, fmt.Errorf("injected worker crash after effect (operation %s)", request.OperationID)
@@ -227,7 +233,7 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		if a.NetworkAccess {
 			net = "bridge"
 		}
-		result, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.Role == "reviewer" || request.Role == "qa", Network: net})
+		result, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.ReadOnly || request.Role == "reviewer" || request.Role == "qa", Network: net})
 		if err != nil {
 			return ToolResult{}, err
 		}

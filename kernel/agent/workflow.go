@@ -54,7 +54,22 @@ type RunInput struct {
 	// ToolAllowlist restricts the tools offered to (and executed for) this
 	// run across kernel and MCP tools; empty allows everything configured.
 	ToolAllowlist []string `json:"tool_allowlist,omitempty"`
+	// DenyTools removes specific tools from the advertised and executable
+	// surface regardless of the allowlist — capability enforcement
+	// (docs/evaluable-agent.md, plan §4.1).
+	DenyTools     []string `json:"deny_tools,omitempty"`
 	NetworkAccess bool     `json:"network_access,omitempty"`
+	// ReadOnly mounts the workspace read-only in the command sandbox
+	// (modify_files capability off, or the agent's read_only flag).
+	ReadOnly bool `json:"read_only,omitempty"`
+	// SkipKnowledge disables prior-knowledge hints for this run
+	// (knowledge capability off).
+	SkipKnowledge bool `json:"skip_knowledge,omitempty"`
+	// AgentID/AgentVersion identify the structured agent definition the run
+	// was launched with; the version pins the exact definition snapshot for
+	// the Evolution view (docs/evaluable-agent.md §14–§15).
+	AgentID      string `json:"agent_id,omitempty"`
+	AgentVersion int    `json:"agent_version,omitempty"`
 }
 
 // SkillRef is a skill resolved for a run: identity plus a budgeted digest for
@@ -91,6 +106,11 @@ type ToolRequest struct {
 	// AllowedTools mirrors RunInput.ToolAllowlist so the activity also
 	// rejects calls to tools that were never advertised to the model.
 	AllowedTools []string `json:"allowed_tools,omitempty"`
+	// DeniedTools mirrors RunInput.DenyTools so the activity also rejects
+	// calls to tools removed by capability enforcement.
+	DeniedTools []string `json:"denied_tools,omitempty"`
+	// ReadOnly mounts the workspace read-only in the command sandbox.
+	ReadOnly bool `json:"read_only,omitempty"`
 }
 
 type ToolResult struct {
@@ -141,20 +161,29 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			_ = emit(cleanupCtx, state, "run.cancelled", nil)
 		}
 	}()
-	if err := emit(activityCtx, state, "run.started", map[string]any{"task_id": input.TaskID, "role": input.Role, "parent_run_id": input.ParentRunID}); err != nil {
+	started := map[string]any{"task_id": input.TaskID, "role": input.Role, "parent_run_id": input.ParentRunID}
+	if input.AgentID != "" {
+		started["agent_id"] = input.AgentID
+	}
+	if input.AgentVersion > 0 {
+		started["agent_version"] = input.AgentVersion
+	}
+	if err := emit(activityCtx, state, "run.started", started); err != nil {
 		return result, err
 	}
 	var priorHints []Hint
-	hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
-	if err := workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt}).Get(ctx, &priorHints); err != nil {
-		// Retrieval is best-effort, but the miss is still part of the trajectory.
-		if eventErr := emit(activityCtx, state, "memory.read.failed", map[string]any{"error_type": "activation_unavailable"}); eventErr != nil {
-			return result, eventErr
-		}
-		priorHints = nil
-	} else {
-		if err := emit(activityCtx, state, "memory.read", map[string]any{"hint_count": len(priorHints)}); err != nil {
-			return result, err
+	if !input.SkipKnowledge {
+		hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+		if err := workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt}).Get(ctx, &priorHints); err != nil {
+			// Retrieval is best-effort, but the miss is still part of the trajectory.
+			if eventErr := emit(activityCtx, state, "memory.read.failed", map[string]any{"error_type": "activation_unavailable"}); eventErr != nil {
+				return result, eventErr
+			}
+			priorHints = nil
+		} else {
+			if err := emit(activityCtx, state, "memory.read", map[string]any{"hint_count": len(priorHints)}); err != nil {
+				return result, err
+			}
 		}
 	}
 	systemPrompt := systemPromptForRole(input.Role)
@@ -358,7 +387,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					} else if err := startMCP(); err != nil {
 						return result, err
-					} else if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args, AllowedTools: input.ToolAllowlist}).Get(ctx, &toolResult); err != nil {
+					} else if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly}).Get(ctx, &toolResult); err != nil {
 						toolFailed = true
 						if eventErr := emit(activityCtx, state, "tool.failed", toolFailureData(operationID, argumentsHash, call.Name, err)); eventErr != nil {
 							return result, eventErr
@@ -426,7 +455,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := startMCP(); err != nil {
 					return result, err
 				}
-				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args, AllowedTools: input.ToolAllowlist}).Get(ctx, &toolResult); err != nil {
+				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly}).Get(ctx, &toolResult); err != nil {
 					toolFailed = true
 					if eventErr := emit(activityCtx, state, "tool.failed", toolFailureData(operationID, argumentsHash, call.Name, err)); eventErr != nil {
 						return result, eventErr
@@ -650,18 +679,26 @@ func compactJSON(v any, maxLen int) string {
 // run's tool allowlist when one is set.
 func advertisedTools(input *RunInput) []llm.ToolDef {
 	tools := append(KernelTools(), input.Tools...)
-	if len(input.ToolAllowlist) == 0 {
+	if len(input.ToolAllowlist) == 0 && len(input.DenyTools) == 0 {
 		return tools
 	}
 	allowed := make(map[string]bool, len(input.ToolAllowlist))
 	for _, name := range input.ToolAllowlist {
 		allowed[name] = true
 	}
+	denied := make(map[string]bool, len(input.DenyTools))
+	for _, name := range input.DenyTools {
+		denied[name] = true
+	}
 	var filtered []llm.ToolDef
 	for _, tool := range tools {
-		if allowed[tool.Name] {
-			filtered = append(filtered, tool)
+		if denied[tool.Name] {
+			continue
 		}
+		if len(input.ToolAllowlist) > 0 && !allowed[tool.Name] {
+			continue
+		}
+		filtered = append(filtered, tool)
 	}
 	return filtered
 }
