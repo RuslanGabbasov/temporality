@@ -485,10 +485,10 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         {agents.map((a) => {
           const prompt = promptFor[a.id]
           return (
-            <Column key={a.id} sm={4} md={4} lg={4}>
+            <Column key={a.id} sm={4} md={8} lg={8}>
               <Tile style={{ marginBottom: '0.75rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'flex-start' }}>
+                  <div style={{ minWidth: 0, flex: '1 1 260px' }}>
                     <strong>{a.name}</strong>
                     {a.id === defaultAgentId && <Tag type="green" size="sm" style={{ marginLeft: '0.5rem' }}>{t('agents.project_default') ?? 'project default'}</Tag>}
                     {a.labels?.builtin === 'true' && <Tag type="warm-gray" size="sm" style={{ marginLeft: '0.25rem' }}>{t('agents.builtin_tag') ?? 'builtin'}</Tag>}
@@ -504,7 +504,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                       {a.project_id && <Tag type="warm-gray" size="sm">{a.project_id}</Tag>}
                     </div>
                   </div>
-                  <Stack orientation="horizontal" gap={1}>
+                  <Stack orientation="horizontal" gap={1} style={{ flexShrink: 0, marginLeft: 'auto' }}>
                     {project && a.id !== defaultAgentId && (
                       <Button size="sm" kind="ghost" hasIconOnly renderIcon={Star} iconDescription={t('agents.make_default') ?? 'Make default'} title={t('agents.make_default') ?? 'Make default'} onClick={() => void makeDefault(a)} />
                     )}
