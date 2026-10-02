@@ -299,8 +299,8 @@ export default function Skills({ project }: { project: string }) {
 
       {skills.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 300px) 1fr', gap: '1rem', alignItems: 'start' }}>
-          {/* Skills list */}
-          <div style={{ position: 'sticky', top: '1rem' }}>
+          {/* Skills list — sticks below the fixed app header like Runs/Operations */}
+          <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
             {skills.map((skill) => (
               <Tile
                 key={skill.id}
