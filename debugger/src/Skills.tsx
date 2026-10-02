@@ -11,6 +11,7 @@ import {
   Heading,
 } from '@carbon/react'
 import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
+import GeneratingState from './GeneratingState'
 import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion } from './workspaceApi'
 import { useT } from './i18n'
 import Markdown from './Markdown'
@@ -467,6 +468,13 @@ export default function Skills({ project }: { project: string }) {
         <div className="modal-overlay">
           <div className="modal-panel" style={{ width: '560px' }}>
             <Heading>{t('skills.wizard_title') ?? 'Create skill'}</Heading>
+            {wizardBusy ? (
+              <GeneratingState
+                title={t('skills.generating_title') ?? 'Building skill draft…'}
+                hint={t('skills.generating_hint') ?? 'The builder agent turns your description into a structured draft. This usually takes less than a minute.'}
+              />
+            ) : (
+              <>
             <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
               {t('skills.wizard_hint') ?? 'The agent will turn your description into a structured skill draft — you can adjust everything afterwards.'}
             </p>
@@ -503,9 +511,11 @@ export default function Skills({ project }: { project: string }) {
               <Button kind="secondary" onClick={() => setWizardOpen(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button kind="secondary" onClick={startManual}>{t('skills.wizard_manual') ?? 'Fill manually'}</Button>
               <Button onClick={() => void generate()} disabled={wizardBusy || !wizardText.trim()}>
-                {wizardBusy ? (t('skills.wizard_generating') ?? 'Generating…') : (draftQuestions.length ? (t('skills.send_answers') ?? 'Send answers') : (t('skills.wizard_generate') ?? 'Generate skill'))}
+                {draftQuestions.length ? (t('skills.send_answers') ?? 'Send answers') : (t('skills.wizard_generate') ?? 'Generate skill')}
               </Button>
             </div>
+              </>
+            )}
           </div>
         </div>
       )}

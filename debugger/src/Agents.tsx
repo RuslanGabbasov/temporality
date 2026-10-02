@@ -18,6 +18,7 @@ import {
   Checkbox,
 } from '@carbon/react'
 import { Add, Edit, TrashCan, Copy, Star, Renew, Activity } from '@carbon/icons-react'
+import GeneratingState from './GeneratingState'
 import {
   workspaceApi,
   type Agent,
@@ -578,26 +579,35 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         <div className="modal-overlay">
           <div className="modal-panel" style={{ width: '560px' }}>
             <Heading>{t('agents.wizard_title') ?? 'Create agent'}</Heading>
-            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
-              {t('agents.wizard_hint') ?? 'Describe the specialist in plain words — the agent will turn it into a structured definition you can adjust afterwards.'}
-            </p>
-            <TextArea
-              id="agent-wizard-description"
-              hideLabel
-              labelText={t('agents.wizard_label') ?? 'Describe what this agent should do'}
-              rows={7}
-              value={wizardText}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setWizardText(e.target.value)}
-              placeholder={t('agents.wizard_placeholder') ?? 'Need an agent for backend development in C#. It can change code and run tests, but must not touch infrastructure…'}
-              autoFocus
-            />
-            {wizardError && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={wizardError} onClose={() => setWizardError('')} lowContrast style={{ marginTop: '0.5rem' }} />}
-            <div className="form-actions">
-              <Button kind="secondary" onClick={startManual}>{t('agents.manual') ?? 'Fill manually'}</Button>
-              <Button disabled={wizardBusy || !wizardText.trim()} onClick={() => void generate()}>
-                {wizardBusy ? (t('action.building') ?? 'Building…') : (draftQuestions.length ? (t('skills.send_answers') ?? 'Send answers') : (t('agents.build') ?? 'Build agent'))}
-              </Button>
-            </div>
+            {wizardBusy ? (
+              <GeneratingState
+                title={t('agents.generating_title') ?? 'Building agent definition…'}
+                hint={t('agents.generating_hint') ?? 'The builder agent analyses the description and your clarifications. This usually takes less than a minute.'}
+              />
+            ) : (
+              <>
+                <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
+                  {t('agents.wizard_hint') ?? 'Describe the specialist in plain words — the agent will turn it into a structured definition you can adjust afterwards.'}
+                </p>
+                <TextArea
+                  id="agent-wizard-description"
+                  hideLabel
+                  labelText={t('agents.wizard_label') ?? 'Describe what this agent should do'}
+                  rows={7}
+                  value={wizardText}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setWizardText(e.target.value)}
+                  placeholder={t('agents.wizard_placeholder') ?? 'Need an agent for backend development in C#. It can change code and run tests, but must not touch infrastructure…'}
+                  autoFocus
+                />
+                {wizardError && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={wizardError} onClose={() => setWizardError('')} lowContrast style={{ marginTop: '0.5rem' }} />}
+                <div className="form-actions">
+                  <Button kind="secondary" onClick={startManual}>{t('agents.manual') ?? 'Fill manually'}</Button>
+                  <Button disabled={wizardBusy || !wizardText.trim()} onClick={() => void generate()}>
+                    {draftQuestions.length ? (t('skills.send_answers') ?? 'Send answers') : (t('agents.build') ?? 'Build agent')}
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -610,6 +620,13 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
               <Heading>{editing ? (t('agents.edit_agent') ?? 'Edit Agent') : (t('agents.new_agent') ?? 'New Agent')}</Heading>
               {editing?.definition_version ? <Tag type="purple" size="sm">{t('agents.def_version', { count: String(editing.definition_version) }) ?? `Definition v${editing.definition_version}`}</Tag> : null}
             </div>
+            {(wizardBusy || regenBusy) ? (
+              <GeneratingState
+                title={t('agents.generating_title') ?? 'Building agent definition…'}
+                hint={t('agents.generating_hint') ?? 'The builder agent analyses the description and your clarifications. This usually takes less than a minute.'}
+              />
+            ) : (
+            <>
             <div className="skill-tabs modal-tabs" role="tablist">
               {(['general', 'capabilities', 'rules', 'params', 'bindings', 'tools', 'prompt'] as const).map((key) => (
                 <button
@@ -883,6 +900,8 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null); setPromptPreview(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button onClick={() => void saveAgent()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
             </div>
+            </>
+            )}
           </div>
         </div>
       )}
