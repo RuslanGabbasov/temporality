@@ -330,7 +330,18 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         allowed_users: proj.allowed_users,
       })
       refreshProjects?.()
-    } catch (f) { setError(message(f)) }
+    } catch (f) {
+      const msg = message(f)
+      if (/\bHTTP 404\b|not found/i.test(msg)) {
+        // Stale project in the URL: the project no longer exists.
+        setError(t('agents.project_missing', { project }) ?? `Project "${project}" was not found — it may have been deleted. The project list has been refreshed.`)
+        refreshProjects?.()
+      } else if (/\bHTTP 401\b|bearer token/i.test(msg)) {
+        setError(t('agents.token_invalid') ?? 'Your token was rejected. Please sign in again.')
+      } else {
+        setError(msg)
+      }
+    }
     finally { setLoading(false) }
   }
 

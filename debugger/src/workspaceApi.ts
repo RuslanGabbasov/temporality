@@ -254,6 +254,7 @@ export interface User {
   email: string
   role: string
   token?: string
+  has_token?: boolean // list responses: whether a token exists (value is never exposed)
   projects: string[]
   active: boolean
   created_at: string
@@ -394,6 +395,8 @@ export const workspaceApi = {
     request<User>('/v1/workspace/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (id: string, data: Partial<User>) =>
     request<User>(`/v1/workspace/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  regenerateUserToken: (id: string) =>
+    request<{ id: string; token: string }>(`/v1/workspace/users/${id}/token`, { method: 'POST' }),
   deleteUser: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/users/${id}`, { method: 'DELETE' }),
 }

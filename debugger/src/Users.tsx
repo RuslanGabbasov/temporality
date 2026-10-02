@@ -85,19 +85,22 @@ export default function Users() {
     finally { setLoading(false) }
   }
 
-  const doGenerateToken = (u: User) => {
-    const bytes = new Uint8Array(32)
-    crypto.getRandomValues(bytes)
-    const token = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
-    setGeneratedToken(token)
-    setTokenUser(u)
+  // Tokens are generated and stored server-side; the response returns the
+  // only copy the UI will ever see.
+  const doGenerateToken = async (u: User) => {
+    try {
+      const result = await workspaceApi.regenerateUserToken(u.id)
+      setGeneratedToken(result.token)
+      setTokenUser(u)
+      void load() // refresh has_token flags
+    } catch (f) { setError(message(f)) }
   }
 
   const generateToken = (u: User) => {
-    if (u.token) {
+    if (u.has_token) {
       setConfirmRegen(u)
     } else {
-      doGenerateToken(u)
+      void doGenerateToken(u)
     }
   }
 
