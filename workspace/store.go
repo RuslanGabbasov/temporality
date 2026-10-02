@@ -146,30 +146,33 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent) error {
 	mcp, _ := json.Marshal(a.MCPServers)
 	tools, _ := json.Marshal(a.Tools)
 	labels, _ := json.Marshal(a.Labels)
+	definition, _ := json.Marshal(a.Definition)
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO workspace_agent
 		 (id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools,
-		  sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+		  sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels,
+		  definition, definition_version, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
 		a.ID, nullString(a.ProjectID), a.Name, a.Description, a.Model, a.Provider,
 		a.SystemPrompt, skills, mcp, tools, a.SandboxProfile,
 		a.Temperature, a.MaxTokens, a.NetworkAccess, a.ReadOnly,
-		a.MaxTurns, a.ApprovalMode, labels, a.CreatedAt, a.UpdatedAt)
+		a.MaxTurns, a.ApprovalMode, labels, definition, a.DefinitionVersion, a.CreatedAt, a.UpdatedAt)
 	return err
 }
 
 func (s *Store) GetAgent(ctx context.Context, id string) (Agent, error) {
 	var a Agent
-	var skills, mcp, tools, labels []byte
+	var skills, mcp, tools, labels, definition []byte
 	var projectID *string
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools,
-		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels, created_at, updated_at
+		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels,
+		        definition, definition_version, created_at, updated_at
 		 FROM workspace_agent WHERE id = $1`, id).
 		Scan(&a.ID, &projectID, &a.Name, &a.Description, &a.Model, &a.Provider,
 			&a.SystemPrompt, &skills, &mcp, &tools, &a.SandboxProfile,
 			&a.Temperature, &a.MaxTokens, &a.NetworkAccess, &a.ReadOnly,
-			&a.MaxTurns, &a.ApprovalMode, &labels, &a.CreatedAt, &a.UpdatedAt)
+			&a.MaxTurns, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &a.CreatedAt, &a.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return a, ErrNotFound
 	}
@@ -181,13 +184,15 @@ func (s *Store) GetAgent(ctx context.Context, id string) (Agent, error) {
 	_ = json.Unmarshal(mcp, &a.MCPServers)
 	_ = json.Unmarshal(tools, &a.Tools)
 	_ = json.Unmarshal(labels, &a.Labels)
+	a.Definition = decodeAgentDefinition(definition)
 	return a, nil
 }
 
 func (s *Store) ListAllAgents(ctx context.Context) ([]Agent, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools,
-		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels, created_at, updated_at
+		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels,
+		        definition, definition_version, created_at, updated_at
 		 FROM workspace_agent ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -199,7 +204,8 @@ func (s *Store) ListAllAgents(ctx context.Context) ([]Agent, error) {
 func (s *Store) ListAgentsByProject(ctx context.Context, projectID string) ([]Agent, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools,
-		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels, created_at, updated_at
+		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels,
+		        definition, definition_version, created_at, updated_at
 		 FROM workspace_agent WHERE project_id = $1 ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
@@ -216,12 +222,12 @@ func scanAgents(rows interface {
 	var result []Agent
 	for rows.Next() {
 		var a Agent
-		var skills, mcp, tools, labels []byte
+		var skills, mcp, tools, labels, definition []byte
 		var projectID *string
 		if err := rows.Scan(&a.ID, &projectID, &a.Name, &a.Description, &a.Model, &a.Provider,
 			&a.SystemPrompt, &skills, &mcp, &tools, &a.SandboxProfile,
 			&a.Temperature, &a.MaxTokens, &a.NetworkAccess, &a.ReadOnly,
-			&a.MaxTurns, &a.ApprovalMode, &labels, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			&a.MaxTurns, &a.ApprovalMode, &labels, &definition, &a.DefinitionVersion, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		a.ProjectID = derefPtr(projectID)
@@ -229,9 +235,23 @@ func scanAgents(rows interface {
 		_ = json.Unmarshal(mcp, &a.MCPServers)
 		_ = json.Unmarshal(tools, &a.Tools)
 		_ = json.Unmarshal(labels, &a.Labels)
+		a.Definition = decodeAgentDefinition(definition)
 		result = append(result, a)
 	}
 	return result, rows.Err()
+}
+
+// decodeAgentDefinition keeps Definition nil for empty/absent JSON so legacy
+// agents (prompt-only, pre-definition) stay distinguishable.
+func decodeAgentDefinition(raw []byte) *AgentDefinition {
+	if len(raw) == 0 || string(raw) == "null" || string(raw) == "{}" {
+		return nil
+	}
+	var def AgentDefinition
+	if err := json.Unmarshal(raw, &def); err != nil {
+		return nil
+	}
+	return &def
 }
 
 func (s *Store) UpdateAgent(ctx context.Context, a Agent) error {
@@ -240,16 +260,18 @@ func (s *Store) UpdateAgent(ctx context.Context, a Agent) error {
 	mcp, _ := json.Marshal(a.MCPServers)
 	tools, _ := json.Marshal(a.Tools)
 	labels, _ := json.Marshal(a.Labels)
+	definition, _ := json.Marshal(a.Definition)
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_agent
 		 SET project_id=$2, name=$3, description=$4, model=$5, provider=$6, system_prompt=$7,
 		     skills=$8, mcp_servers=$9, tools=$10, sandbox_profile=$11, temperature=$12, max_tokens=$13,
-		     network_access=$14, read_only=$15, max_turns=$16, approval_mode=$17, labels=$18, updated_at=$19
+		     network_access=$14, read_only=$15, max_turns=$16, approval_mode=$17, labels=$18,
+		     definition=$19, definition_version=$20, updated_at=$21
 		 WHERE id=$1`,
 		a.ID, nullString(a.ProjectID), a.Name, a.Description, a.Model, a.Provider,
 		a.SystemPrompt, skills, mcp, tools, a.SandboxProfile,
 		a.Temperature, a.MaxTokens, a.NetworkAccess, a.ReadOnly,
-		a.MaxTurns, a.ApprovalMode, labels, a.UpdatedAt)
+		a.MaxTurns, a.ApprovalMode, labels, definition, a.DefinitionVersion, a.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -257,6 +279,43 @@ func (s *Store) UpdateAgent(ctx context.Context, a Agent) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// InsertAgentVersion writes an immutable definition snapshot. The compiled
+// prompt is recorded for reproducibility even though runs recompile it fresh
+// (docs/plan-evaluable-agent.md, decision 2).
+func (s *Store) InsertAgentVersion(ctx context.Context, v AgentVersion) error {
+	definition, _ := json.Marshal(v.Definition)
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO workspace_agent_version
+		 (agent_id, version, definition, description, compiled_prompt, prompt_source, generator_model, author, created_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		 ON CONFLICT (agent_id, version) DO NOTHING`,
+		v.AgentID, v.Version, definition, v.Description, v.CompiledPrompt, v.PromptSource, v.GeneratorModel, v.Author, v.CreatedAt)
+	return err
+}
+
+func (s *Store) ListAgentVersions(ctx context.Context, agentID string) ([]AgentVersion, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT agent_id, version, definition, description, compiled_prompt, prompt_source, generator_model, author, created_at
+		 FROM workspace_agent_version WHERE agent_id = $1 ORDER BY version DESC`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []AgentVersion
+	for rows.Next() {
+		var v AgentVersion
+		var definition []byte
+		if err := rows.Scan(&v.AgentID, &v.Version, &definition, &v.Description, &v.CompiledPrompt, &v.PromptSource, &v.GeneratorModel, &v.Author, &v.CreatedAt); err != nil {
+			return nil, err
+		}
+		if def := decodeAgentDefinition(definition); def != nil {
+			v.Definition = *def
+		}
+		result = append(result, v)
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) DeleteAgent(ctx context.Context, id string) error {
@@ -350,9 +409,9 @@ func (s *Store) CreateRun(ctx context.Context, r *Run) error {
 	r.CreatedAt = now
 	r.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_run (id, task_id, project_id, agent_id, run_id, status, model, answer, turns, error, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-		r.ID, r.TaskID, r.ProjectID, nullString(r.AgentID), r.RunID, r.Status, r.Model, r.Answer, r.Turns, r.Error, r.CreatedAt, r.UpdatedAt)
+		`INSERT INTO workspace_run (id, task_id, project_id, agent_id, agent_version, run_id, status, model, answer, turns, error, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		r.ID, r.TaskID, r.ProjectID, nullString(r.AgentID), r.AgentVersion, r.RunID, r.Status, r.Model, r.Answer, r.Turns, r.Error, r.CreatedAt, r.UpdatedAt)
 	return err
 }
 
@@ -360,9 +419,9 @@ func (s *Store) GetRun(ctx context.Context, id string) (Run, error) {
 	var r Run
 	var agentID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, task_id, project_id, agent_id, run_id, status, model, answer, turns, error, created_at, updated_at
+		`SELECT id, task_id, project_id, agent_id, agent_version, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run WHERE id = $1`, id).
-		Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt)
+		Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, ErrNotFound
 	}
@@ -388,7 +447,7 @@ func (s *Store) UpdateRunStatus(ctx context.Context, id, status, answer string, 
 
 func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, task_id, project_id, agent_id, run_id, status, model, answer, turns, error, created_at, updated_at
+		`SELECT id, task_id, project_id, agent_id, agent_version, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run WHERE task_id = $1 ORDER BY created_at DESC`, taskID)
 	if err != nil {
 		return nil, err
@@ -398,7 +457,7 @@ func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
 	for rows.Next() {
 		var r Run
 		var agentID *string
-		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		r.AgentID = derefPtr(agentID)
@@ -410,7 +469,7 @@ func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
 // ListRunsByProject returns all completed runs for a project.
 func (s *Store) ListRunsByProject(ctx context.Context, projectID string) ([]Run, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, task_id, project_id, agent_id, run_id, status, model, answer, turns, error, created_at, updated_at
+		`SELECT id, task_id, project_id, agent_id, agent_version, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run WHERE project_id = $1 AND status = 'completed' ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
@@ -420,10 +479,36 @@ func (s *Store) ListRunsByProject(ctx context.Context, projectID string) ([]Run,
 	for rows.Next() {
 		var r Run
 		var agentID *string
-		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		r.AgentID = derefPtr(agentID)
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// ListRunsByAgent returns recent runs launched with a specific agent across
+// projects, newest first — the data behind the agent Evolution view.
+func (s *Store) ListRunsByAgent(ctx context.Context, agentID string, limit int) ([]Run, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, task_id, project_id, agent_id, agent_version, run_id, status, model, answer, turns, error, created_at, updated_at
+		 FROM workspace_run WHERE agent_id = $1 ORDER BY created_at DESC LIMIT $2`, agentID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Run
+	for rows.Next() {
+		var r Run
+		var id *string
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &id, &r.AgentVersion, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		r.AgentID = derefPtr(id)
 		result = append(result, r)
 	}
 	return result, rows.Err()
