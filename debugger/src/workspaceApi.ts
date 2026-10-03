@@ -40,10 +40,19 @@ export interface Project {
   default_agent_id?: string
   default_model?: string
   archived?: boolean
-  allowed_users?: string[] // '*' = all, [] = admin only, ['user-1'] = specific users
+  allowed_users?: string[] // frozen legacy column — no longer used for visibility
   org_units?: string[] // org areas the project spans; empty = org-neutral
   created_at: string
   updated_at: string
+}
+
+/** Explicit project membership (docs/org-structure.md §16): a member sees
+ * the project even when their org chain does not intersect its units. */
+export interface ProjectMember {
+  user_id: string
+  role: string
+  created_at: string
+  created_by?: string
 }
 
 export interface AgentCapabilities {
@@ -326,6 +335,12 @@ export const workspaceApi = {
     request<Project>(`/v1/workspace/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProject: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/projects/${id}`, { method: 'DELETE' }),
+  listProjectMembers: (id: string) =>
+    request<{ members: ProjectMember[] }>(`/v1/workspace/projects/${id}/members`),
+  addProjectMember: (id: string, data: { user_id: string; role: string }) =>
+    request<{ added: boolean }>(`/v1/workspace/projects/${id}/members`, { method: 'POST', body: JSON.stringify(data) }),
+  removeProjectMember: (id: string, userID: string) =>
+    request<{ removed: boolean }>(`/v1/workspace/projects/${id}/members/${userID}`, { method: 'DELETE' }),
 
   // Agents
   listAllAgents: () => request<{ agents: Agent[] }>('/v1/workspace/agents'),

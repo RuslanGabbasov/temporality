@@ -1,7 +1,7 @@
 # План работ: Оргструктура и модель доступа
 
 Source spec: `docs/org-structure.md` (расширенная версия, 55 разделов / 8 фаз).
-Статус: **Фаза 1 завершена** (коммит `0e1ec70`). Остальное — по волнам ниже; порядок согласован с фазами спеки, но UI организации вынесен вперёд (волна A), потому что бэкенд фаз 1–2 уже существует и без UI неюзабелен.
+Статус: **Фаза 1 завершена** (коммит `0e1ec70`). **Волна A завершена** (UI организации и доступности, коммиты `fa49dde`, `42202ca`). **Волна B завершена** (явное членство в проектах + аудит доступа). Остальное — по волнам ниже; порядок согласован с фазами спеки, но UI организации вынесен вперёд (волна A), потому что бэкенд фаз 1–2 уже существует и без UI неюзабелен.
 
 Размеры задач: S / M / L — относительно одной волны работы.
 
@@ -34,35 +34,35 @@ Source spec: `docs/org-structure.md` (расширенная версия, 55 р
 | Фаза спеки | Содержание | Состояние | Волна |
 |---|---|---|---|
 | 1 Org Model | дерево, path, CRUD, привязки, visibility-тесты | ✅ готово | — |
-| 2 Project Model | project↔units, members, project roles, миграция | частично (units есть) | B |
+| 2 Project Model | project↔units, members, project roles, миграция | ✅ готово (units + members + аудит) | B |
 | 3 Authorization | visibility/use/manage/administer, проверки на операциях, execution identity | минимально | C |
 | 4 Triggers | scope триггеров, авторизация, запуск под identity, аудит | не начато | D |
 | 5 HITL | human_request, recipient resolution, каналы, timeout-политики | ядро есть | E |
 | 6 Policies | наследуемые политики выполнения | не начато | F |
-| 7 UI | Org Tree, доступность, membership, identity, политики | не начато | A (частично) + по фазам |
+| 7 UI | Org Tree, доступность, membership, identity, политики | Org Tree/доступность/membership готово | A + B (готово); identity/политики — по фазам |
 | 8 Migration & Cleanup | расхождение моделей, удаление legacy | переходное правило | G |
 
 ## 2. Волны работ
 
 ### Волна A. UI организации и доступности — M — фаза 7 (частично)
 
-- [ ] `Org.tsx`: дерево со сворачиванием; инспекция узла (ресурсы по видам, пользователи, проекты); создание/переименование; перемещение выбором родителя с подтверждением («меняет видимость»); удаление пустого узла через наш confirm-диалог.
-- [ ] `Layout.tsx`: раздел «Организация» (admin; остальным по ролям на узлах — после волны C).
-- [ ] Поле «Доступность» (селект узла, дефолт «Вся организация»; для admin — эффективная область «Development └── 14 дочерних») в формах Agents/Skills/Mcp/Providers.
-- [ ] Проект: мультивыбор узлов («Организационные области»), отдельно будущие «Участники»; legacy `allowed_users` скрыть.
-- [ ] Пользователь: выбор основного подразделения вместо списка проектов.
-- [ ] Карточки списков: бейдж узла / «глобально».
-- [ ] Мастер корня: если `org_unit` пуст — создание организации (онбординг/страница «Организация»).
-- [ ] `workspaceApi.ts`: `orgApi`; i18n ru/en; обе темы; `ListFilter`.
+- [x] `Org.tsx`: дерево со сворачиванием; инспекция узла (ресурсы по видам, пользователи, проекты); создание/переименование; перемещение выбором родителя с подтверждением («меняет видимость»); удаление пустого узла через наш confirm-диалог.
+- [x] `Layout.tsx`: раздел «Организация» (admin; остальным по ролям на узлах — после волны C).
+- [x] Поле «Доступность» (селект узла, дефолт «Вся организация»; для admin — эффективная область «Development └── 14 дочерних») в формах Agents/Skills/Mcp/Providers.
+- [x] Проект: мультивыбор узлов («Организационные области»); участники — в волне B; legacy `allowed_users` скрыт и заморожен на чтение.
+- [x] Пользователь: выбор основного подразделения вместо списка проектов.
+- [x] Карточки списков: бейдж узла / «глобально».
+- [x] Мастер корня: если `org_unit` пуст — создание организации (онбординг/страница «Организация»).
+- [x] `workspaceApi.ts`: `orgApi`; i18n ru/en; обе темы; `ListFilter`.
 
 ### Волна B. Project Model — M — фаза 2
 
-- [ ] `workspace_project_member (project_id, user_id, role, created_at, created_by, PK(project_id,user_id))` — миграция 000035.
-- [ ] Доступ к проекту = `org-unit access OR explicit membership` (заменяет AND-правило для legacy-части; `allowed_users` замораживается на чтение).
-- [ ] API: `GET/POST/DELETE /v1/projects/{id}/members`; `GET/PUT/DELETE /v1/projects/{id}/org-units/{unit_id}`; `DELETE /v1/org/resources/{kind}/{id}/binding` (алиас PUT с "").
-- [ ] Аудит-минимум: таблица `access_audit_log` + события `project.member_added/removed`, `resource.bound/unbound`, `org_unit.*` (§36).
-- [ ] Внешние пользователи MVP: explicit membership; `user_type` и `expires_at` — опционально здесь или в волне C.
-- [ ] UI: участники проекта в диалоге проекта.
+- [x] `workspace_project_member (project_id, user_id, role, created_at, created_by, PK(project_id,user_id))` — миграция 000035 (в ней же `access_audit_log`).
+- [x] Доступ к проекту = `org-unit access OR explicit membership` (заменяет переходное AND-правило; `allowed_users` заморожен на чтение и больше не учитывается; PUT без поля сохраняет колонку как есть).
+- [x] API: `GET/POST /v1/workspace/projects/{id}/members`, `DELETE /v1/workspace/projects/{id}/members/{userID}`; `DELETE /v1/org/resources/{kind}/{id}/binding` (алиас PUT с ""); `GET /v1/org/audit?limit=`. Отдельные `…/org-units/{unit_id}` эндпоинты не делались — replace-семантика через `PUT /v1/workspace/projects/{id}` с `org_units` покрывает сценарий.
+- [x] Аудит-минимум: события `project.member_added/removed`, `resource.bound/unbound`, `org_unit.created/updated/moved/deleted` (§36).
+- [x] UI: участники проекта в диалоге проекта (мультивыбор пользователей с ролью, синхронизация diff-ом при сохранении).
+- [ ] Внешние пользователи MVP: `user_type` и `expires_at` — опционально, отложено до потребности (сама модель explicit membership готова).
 
 ### Волна C. Authorization — L — фаза 3
 

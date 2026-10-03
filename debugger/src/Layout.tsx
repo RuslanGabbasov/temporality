@@ -65,8 +65,12 @@ interface Project {
   description: string
   default_agent_id?: string
   default_model?: string
-  allowed_users?: string[]
   org_units?: string[]
+}
+
+interface ProjectMember {
+  user_id: string
+  role: string
 }
 
 export default function Layout({ children, activePage }: LayoutProps) {
@@ -96,6 +100,12 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [allUsers, setAllUsers] = useState<{ id: string; name: string }[]>([])
   // Org units for the project dialog (unit tree, indented for the checklist).
   const [orgFlat, setOrgFlat] = useState<{ unit: OrgUnit; depth: number }[]>([])
+  // Explicit project members (docs/org-structure.md §16): loaded list vs the
+  // dialog draft — the diff is synced through the members API on save.
+  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([])
+  const [memberDraft, setMemberDraft] = useState<ProjectMember[]>([])
+  const [newMemberUser, setNewMemberUser] = useState('')
+  const [newMemberRole, setNewMemberRole] = useState('viewer')
 
   // Pending operations badge
   const [pendingOps, setPendingOps] = useState(0)
@@ -217,6 +227,27 @@ export default function Layout({ children, activePage }: LayoutProps) {
   }
 
   // Project CRUD
+  const loadProjectMembers = async (id: string) => {
+    try {
+      const resp = await fetch(`/kernel-api/v1/workspace/projects/${id}/members`, { headers: { ...authHeaders() } })
+      if (resp.ok) {
+        const data = await resp.json()
+        const members: ProjectMember[] = data.members ?? []
+        setProjectMembers(members)
+        setMemberDraft(members)
+        return
+      }
+    } catch { /* ignore */ }
+    setProjectMembers([])
+    setMemberDraft([])
+  }
+
+  const openEditProject = (p: Project) => {
+    setEditProject(p)
+    setShowProjectPanel(false)
+    void loadProjectMembers(p.id)
+  }
+
   const saveProject = async () => {
     const id = editProject?.id ?? newProjectName.trim().toLowerCase().replace(/\s+/g, '-')
     const body = {
@@ -225,13 +256,28 @@ export default function Layout({ children, activePage }: LayoutProps) {
       description: editProject ? editProject.description : newProjectDesc.trim(),
       default_agent_id: editProject?.default_agent_id ?? '',
       default_model: editProject?.default_model ?? '',
-      allowed_users: editProject?.allowed_users ?? ['*'],
       org_units: editProject ? (editProject.org_units ?? []) : newProjectOrgUnits,
     }
     const url = editProject ? `/kernel-api/v1/workspace/projects/${id}` : '/kernel-api/v1/workspace/projects'
     const method = editProject ? 'PUT' : 'POST'
     await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(body) })
+    // Sync explicit membership: diff the loaded list against the draft.
+    if (editProject) {
+      const before = new Map(projectMembers.map((m) => [m.user_id, m.role]))
+      const after = new Map(memberDraft.map((m) => [m.user_id, m.role]))
+      for (const [uid, role] of after) {
+        if (before.get(uid) !== role) {
+          await fetch(`/kernel-api/v1/workspace/projects/${id}/members`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ user_id: uid, role }) })
+        }
+      }
+      for (const uid of before.keys()) {
+        if (!after.has(uid)) {
+          await fetch(`/kernel-api/v1/workspace/projects/${id}/members/${uid}`, { method: 'DELETE', headers: { ...authHeaders() } })
+        }
+      }
+    }
     setEditProject(null); setNewProjectName(''); setNewProjectDesc(''); setNewProjectOrgUnits([])
+    setProjectMembers([]); setMemberDraft([]); setNewMemberUser(''); setNewMemberRole('viewer')
     void loadProjects()
   }
 
@@ -341,7 +387,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
                             )}
                           </div>
                           <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
-                            <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setEditProject(p); setShowProjectPanel(false) }} />
+                            <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={(e: React.MouseEvent) => { e.stopPropagation(); openEditProject(p) }} />
                             <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setConfirmDelete(p.id) }} />
                           </div>
                         </div>
@@ -564,45 +610,69 @@ export default function Layout({ children, activePage }: LayoutProps) {
                   placeholder={t('projects.default_model_placeholder') ?? 'Leave empty to use agent\'s model'}
                 />
                 <fieldset style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.75rem', marginTop: '0.5rem' }}>
-                  <legend style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)', padding: '0 0.25rem' }}>{t('projects.allowed_users') ?? 'Allowed users'}</legend>
+                  <legend style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)', padding: '0 0.25rem' }}>{t('projects.members') ?? 'Members'}</legend>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>
+                    {t('projects.members_hint') ?? 'Explicit members see the project even outside its org units.'}
+                  </p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem' }}>
-                      <input
-                        type="checkbox"
-                        checked={(editProject.allowed_users ?? ['*']).includes('*')}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setEditProject({ ...editProject, allowed_users: ['*'] })
-                          } else {
-                            setEditProject({ ...editProject, allowed_users: [] })
-                          }
-                        }}
-                      />
-                      {t('projects.all_users') ?? 'All users (public project)'}
-                    </label>
-                    {!(editProject.allowed_users ?? ['*']).includes('*') && allUsers.map((u) => (
-                      <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem', paddingLeft: '1rem' }}>
-                        <input
-                          type="checkbox"
-                          checked={(editProject.allowed_users ?? []).includes(u.id)}
-                          onChange={(e) => {
-                            const current = editProject.allowed_users ?? []
-                            if (e.target.checked) {
-                              setEditProject({ ...editProject, allowed_users: [...current, u.id] })
-                            } else {
-                              setEditProject({ ...editProject, allowed_users: current.filter((id: string) => id !== u.id) })
-                            }
-                          }}
-                        />
-                        {u.name}
-                      </label>
-                    ))}
+                    {memberDraft.length === 0 && (
+                      <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-3)', margin: 0 }}>
+                        {t('projects.members_none') ?? 'No explicit members — access comes from org units.'}
+                      </p>
+                    )}
+                    {memberDraft.map((m) => {
+                      const user = allUsers.find((u) => u.id === m.user_id)
+                      return (
+                        <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ flex: 1, fontSize: '0.875rem' }}>{user ? user.name : m.user_id}</span>
+                          <select
+                            aria-label={t('projects.member_role') ?? 'Role'}
+                            value={m.role}
+                            onChange={(e) => setMemberDraft(memberDraft.map((x) => x.user_id === m.user_id ? { ...x, role: e.target.value } : x))}
+                            style={{ background: 'var(--tm-bg)', color: 'var(--tm-text)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                          >
+                            <option value="viewer">{t('projects.role_viewer') ?? 'Viewer'}</option>
+                            <option value="writer">{t('projects.role_writer') ?? 'Writer'}</option>
+                            <option value="operator">{t('projects.role_operator') ?? 'Operator'}</option>
+                            <option value="admin">{t('projects.role_admin') ?? 'Admin'}</option>
+                          </select>
+                          <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => setMemberDraft(memberDraft.filter((x) => x.user_id !== m.user_id))} />
+                        </div>
+                      )
+                    })}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+                      <select
+                        aria-label={t('projects.members_user') ?? 'User'}
+                        value={newMemberUser}
+                        onChange={(e) => setNewMemberUser(e.target.value)}
+                        style={{ flex: 1, background: 'var(--tm-bg)', color: 'var(--tm-text)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                      >
+                        <option value="">{allUsers.length === 0 ? (t('projects.members_no_users') ?? 'No users') : (t('projects.members_pick_user') ?? 'Pick a user…')}</option>
+                        {allUsers.filter((u) => !memberDraft.some((m) => m.user_id === u.id)).map((u) => (
+                          <option key={u.id} value={u.id}>{u.name}</option>
+                        ))}
+                      </select>
+                      <select
+                        aria-label={t('projects.member_role') ?? 'Role'}
+                        value={newMemberRole}
+                        onChange={(e) => setNewMemberRole(e.target.value)}
+                        style={{ background: 'var(--tm-bg)', color: 'var(--tm-text)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                      >
+                        <option value="viewer">{t('projects.role_viewer') ?? 'Viewer'}</option>
+                        <option value="writer">{t('projects.role_writer') ?? 'Writer'}</option>
+                        <option value="operator">{t('projects.role_operator') ?? 'Operator'}</option>
+                        <option value="admin">{t('projects.role_admin') ?? 'Admin'}</option>
+                      </select>
+                      <Button size="sm" kind="ghost" disabled={!newMemberUser} onClick={() => { setMemberDraft([...memberDraft, { user_id: newMemberUser, role: newMemberRole }]); setNewMemberUser('') }}>
+                        {t('action.add') ?? 'Add'}
+                      </Button>
+                    </div>
                   </div>
                 </fieldset>
               </>
             )}
             <div className="form-actions">
-              <Button kind="secondary" onClick={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectDesc('') }}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button kind="secondary" onClick={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectDesc(''); setProjectMembers([]); setMemberDraft([]); setNewMemberUser('') }}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button onClick={() => void saveProject()}>{editProject ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
             </div>
           </div>
