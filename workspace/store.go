@@ -447,20 +447,43 @@ func (s *Store) CreateRun(ctx context.Context, r *Run) error {
 	now := time.Now().UTC()
 	r.CreatedAt = now
 	r.UpdatedAt = now
+	execContext, _ := json.Marshal(execContextOrEmpty(r.ExecContext))
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_run (id, task_id, project_id, agent_id, agent_version, run_id, status, model, answer, turns, error, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-		r.ID, r.TaskID, r.ProjectID, nullString(r.AgentID), r.AgentVersion, r.RunID, r.Status, r.Model, r.Answer, r.Turns, r.Error, r.CreatedAt, r.UpdatedAt)
+		`INSERT INTO workspace_run (id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		r.ID, r.TaskID, r.ProjectID, nullString(r.AgentID), r.AgentVersion, execContext, r.RunID, r.Status, r.Model, r.Answer, r.Turns, r.Error, r.CreatedAt, r.UpdatedAt)
 	return err
+}
+
+// execContextOrEmpty keeps nil maps out of the JSON column ({} not null).
+func execContextOrEmpty(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
+}
+
+// decodeExecContext unmarshals the exec_context column; corrupt rows decode
+// to nil rather than failing the whole list.
+func decodeExecContext(raw []byte) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil
+	}
+	return m
 }
 
 func (s *Store) GetRun(ctx context.Context, id string) (Run, error) {
 	var r Run
 	var agentID *string
+	var execContext []byte
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, task_id, project_id, agent_id, agent_version, run_id, status, model, answer, turns, error, created_at, updated_at
+		`SELECT id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run WHERE id = $1`, id).
-		Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt)
+		Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &execContext, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, ErrNotFound
 	}
@@ -468,6 +491,7 @@ func (s *Store) GetRun(ctx context.Context, id string) (Run, error) {
 		return r, err
 	}
 	r.AgentID = derefPtr(agentID)
+	r.ExecContext = decodeExecContext(execContext)
 	return r, nil
 }
 
@@ -486,7 +510,7 @@ func (s *Store) UpdateRunStatus(ctx context.Context, id, status, answer string, 
 
 func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, task_id, project_id, agent_id, agent_version, run_id, status, model, answer, turns, error, created_at, updated_at
+		`SELECT id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run WHERE task_id = $1 ORDER BY created_at DESC`, taskID)
 	if err != nil {
 		return nil, err
@@ -496,10 +520,12 @@ func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
 	for rows.Next() {
 		var r Run
 		var agentID *string
-		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		var execContext []byte
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &execContext, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		r.AgentID = derefPtr(agentID)
+		r.ExecContext = decodeExecContext(execContext)
 		result = append(result, r)
 	}
 	return result, rows.Err()
@@ -508,7 +534,7 @@ func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
 // ListRunsByProject returns all completed runs for a project.
 func (s *Store) ListRunsByProject(ctx context.Context, projectID string) ([]Run, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, task_id, project_id, agent_id, agent_version, run_id, status, model, answer, turns, error, created_at, updated_at
+		`SELECT id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run WHERE project_id = $1 AND status = 'completed' ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
@@ -518,10 +544,12 @@ func (s *Store) ListRunsByProject(ctx context.Context, projectID string) ([]Run,
 	for rows.Next() {
 		var r Run
 		var agentID *string
-		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		var execContext []byte
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &execContext, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		r.AgentID = derefPtr(agentID)
+		r.ExecContext = decodeExecContext(execContext)
 		result = append(result, r)
 	}
 	return result, rows.Err()
@@ -534,7 +562,7 @@ func (s *Store) ListRunsByAgent(ctx context.Context, agentID string, limit int) 
 		limit = 200
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, task_id, project_id, agent_id, agent_version, run_id, status, model, answer, turns, error, created_at, updated_at
+		`SELECT id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run WHERE agent_id = $1 ORDER BY created_at DESC LIMIT $2`, agentID, limit)
 	if err != nil {
 		return nil, err
@@ -544,10 +572,12 @@ func (s *Store) ListRunsByAgent(ctx context.Context, agentID string, limit int) 
 	for rows.Next() {
 		var r Run
 		var id *string
-		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &id, &r.AgentVersion, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		var execContext []byte
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &id, &r.AgentVersion, &execContext, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		r.AgentID = derefPtr(id)
+		r.ExecContext = decodeExecContext(execContext)
 		result = append(result, r)
 	}
 	return result, rows.Err()
@@ -773,6 +803,26 @@ func (s *Store) ListProjectsForUser(ctx context.Context, userID string, isAdmin 
 		result = append(result, p)
 	}
 	return result, nil
+}
+
+// VisibleProjectIDs answers the project ids a user may act on: "*" when the
+// set is unbounded (admins and org-unassigned users in transition mode), the
+// concrete id list otherwise (org intersection plus explicit membership). It
+// feeds the auth-gate token scopes, so run gates reject invisible projects
+// before the workflow starts.
+func (s *Store) VisibleProjectIDs(ctx context.Context, userID string, isAdmin bool, units []string) ([]string, error) {
+	if isAdmin || units == nil {
+		return []string{"*"}, nil
+	}
+	projects, err := s.ListProjectsForUser(ctx, userID, isAdmin, units)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(projects))
+	for _, p := range projects {
+		ids = append(ids, p.ID)
+	}
+	return ids, nil
 }
 
 // projectVisibleFor reports whether a project with the given org bindings is

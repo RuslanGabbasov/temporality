@@ -32,6 +32,12 @@ const (
 	AuditOrgUnitUpdated       = "org_unit.updated"
 	AuditOrgUnitMoved         = "org_unit.moved"
 	AuditOrgUnitDeleted       = "org_unit.deleted"
+	AuditRoleGranted          = "role.granted"
+	AuditRoleRevoked          = "role.revoked"
+	AuditUserOrgUnitChanged   = "user.org_unit_changed"
+	AuditExecIdentityCreated  = "execution_identity.created"
+	AuditExecIdentityUpdated  = "execution_identity.updated"
+	AuditExecIdentityDeleted  = "execution_identity.deleted"
 )
 
 // RecordAccessAudit appends one event. Nil details is stored as {}.

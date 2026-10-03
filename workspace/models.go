@@ -34,6 +34,35 @@ type ProjectMember struct {
 	CreatedBy string    `json:"created_by,omitempty"`
 }
 
+// OrgUnitRole is a role granted on an org unit (docs/org-structure.md §13):
+// it acts on the unit and its whole subtree, upgrading the grantee's
+// installation role inside that scope.
+type OrgUnitRole struct {
+	UserID    string    `json:"user_id"`
+	OrgUnitID string    `json:"org_unit_id"`
+	Role      string    `json:"role"`
+	GrantedBy string    `json:"granted_by,omitempty"`
+	GrantedAt time.Time `json:"granted_at"`
+}
+
+// ExecutionIdentity is the security context of automated runs
+// (docs/org-structure.md §20): which agents, MCP servers, providers,
+// projects and human request targets a trigger-driven run may touch. A
+// "*" entry means "anything visible in the identity's org scope".
+type ExecutionIdentity struct {
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description"`
+	OrgUnitID        string    `json:"org_unit_id,omitempty"`
+	AllowedAgents    []string  `json:"allowed_agents"`
+	AllowedMCP       []string  `json:"allowed_mcp"`
+	AllowedProviders []string  `json:"allowed_providers"`
+	AllowedProjects  []string  `json:"allowed_projects"`
+	HumanTargets     []string  `json:"human_targets"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
 // OrgUnitKind values for OrgUnit.Kind.
 const (
 	OrgKindOrganization = "organization"
@@ -185,15 +214,19 @@ type Run struct {
 	AgentID   string `json:"agent_id,omitempty"`
 	// AgentVersion pins the agent definition snapshot this run used
 	// (docs/evaluable-agent.md §15); 0 = legacy run without a definition.
-	AgentVersion int       `json:"agent_version,omitempty"`
-	RunID        string    `json:"run_id"`
-	Status       string    `json:"status"`
-	Model        string    `json:"model,omitempty"`
-	Answer       string    `json:"answer,omitempty"`
-	Turns        int       `json:"turns"`
-	Error        string    `json:"error,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	AgentVersion int `json:"agent_version,omitempty"`
+	// ExecContext is the authorization snapshot at start time
+	// (docs/org-structure.md §34-35): which agent, skills, MCP servers,
+	// model/project and identity the run was authorized to use, and by whom.
+	ExecContext map[string]any `json:"exec_context,omitempty"`
+	RunID       string         `json:"run_id"`
+	Status      string         `json:"status"`
+	Model       string         `json:"model,omitempty"`
+	Answer      string         `json:"answer,omitempty"`
+	Turns       int            `json:"turns"`
+	Error       string         `json:"error,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
 // Trigger is a configurable mechanism to launch agent runs.

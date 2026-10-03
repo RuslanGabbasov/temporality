@@ -275,3 +275,51 @@ func TestLoadFileSecrets(t *testing.T) {
 		t.Fatal("missing secret file must fail loudly")
 	}
 }
+
+func TestMaxRoleAt(t *testing.T) {
+	// Tree: root "org" (self path "org") → "dev" (self path "org.dev") →
+	// "platform" (self path "org.dev.platform"). Grants carry the granted
+	// unit's self path; resources pass their id and Path column (ancestors).
+	base := Principal{Subject: "u", Role: RoleReader}
+	granted := func(unitID, selfPath string, role Role) Principal {
+		p := base
+		p.OrgRoles = []OrgRoleGrant{{UnitID: unitID, Path: selfPath, Role: role}}
+		return p
+	}
+
+	cases := []struct {
+		name     string
+		p        Principal
+		unitID   string
+		unitPath string
+		want     Role
+	}{
+		{"no grants keeps installation role", base, "dev", "org", RoleReader},
+		{"grant on the resource unit applies", granted("dev", "org.dev", RoleWriter), "dev", "org", RoleWriter},
+		{"grant on an ancestor applies", granted("org", "org", RoleOperator), "platform", "org.dev", RoleOperator},
+		{"grant on the root applies to the whole tree", granted("org", "org", RoleAdmin), "dev", "org", RoleAdmin},
+		{"grant on a sibling is ignored", granted("qa", "org.qa", RoleAdmin), "dev", "org", RoleReader},
+		{"grant below the resource is ignored", granted("platform", "org.dev.platform", RoleAdmin), "dev", "org", RoleReader},
+		{"global resource answers installation role alone", granted("dev", "org.dev", RoleAdmin), "", "", RoleReader},
+		{"strongest applicable grant wins", func() Principal {
+			p := base
+			p.OrgRoles = []OrgRoleGrant{
+				{UnitID: "org", Path: "org", Role: RoleWriter},
+				{UnitID: "dev", Path: "org.dev", Role: RoleOperator},
+			}
+			return p
+		}(), "dev", "org", RoleOperator},
+		{"installation role above grant wins", func() Principal {
+			p := Principal{Subject: "u", Role: RoleAdmin}
+			p.OrgRoles = []OrgRoleGrant{{UnitID: "dev", Path: "org.dev", Role: RoleWriter}}
+			return p
+		}(), "dev", "org", RoleAdmin},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.p.MaxRoleAt(tc.unitID, tc.unitPath); got != tc.want {
+				t.Fatalf("MaxRoleAt(%q, %q) = %s, want %s", tc.unitID, tc.unitPath, got, tc.want)
+			}
+		})
+	}
+}

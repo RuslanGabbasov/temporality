@@ -164,7 +164,7 @@ func (s *Store) MoveOrgUnit(ctx context.Context, id, newParentID string) error {
 // no bound resources, no member users, no linked projects. The RESTRICT
 // foreign keys are the second line of defense.
 func (s *Store) DeleteOrgUnit(ctx context.Context, id string) error {
-	var children, agents, skills, mcp, providers, users, projects bool
+	var children, agents, skills, mcp, providers, users, projects, roles bool
 	err := s.pool.QueryRow(ctx,
 		`SELECT
 			EXISTS(SELECT 1 FROM org_unit WHERE parent_id = $1),
@@ -173,12 +173,13 @@ func (s *Store) DeleteOrgUnit(ctx context.Context, id string) error {
 			EXISTS(SELECT 1 FROM workspace_mcp_server WHERE org_unit_id = $1),
 			EXISTS(SELECT 1 FROM workspace_provider WHERE org_unit_id = $1),
 			EXISTS(SELECT 1 FROM workspace_user WHERE org_unit_id = $1),
-			EXISTS(SELECT 1 FROM workspace_project_org_unit WHERE org_unit_id = $1)`, id).
-		Scan(&children, &agents, &skills, &mcp, &providers, &users, &projects)
+			EXISTS(SELECT 1 FROM workspace_project_org_unit WHERE org_unit_id = $1),
+			EXISTS(SELECT 1 FROM org_unit_role WHERE org_unit_id = $1)`, id).
+		Scan(&children, &agents, &skills, &mcp, &providers, &users, &projects, &roles)
 	if err != nil {
 		return err
 	}
-	if children || agents || skills || mcp || providers || users || projects {
+	if children || agents || skills || mcp || providers || users || projects || roles {
 		return ErrUnitNotEmpty
 	}
 	tag, err := s.pool.Exec(ctx, `DELETE FROM org_unit WHERE id = $1`, id)
@@ -233,12 +234,13 @@ func (s *Store) SetResourceOrgUnit(ctx context.Context, kind, resourceID, unitID
 // UnitResources is the inspection payload of one org unit: everything bound
 // to or living in it.
 type UnitResources struct {
-	Agents     []NamedRef `json:"agents"`
-	Skills     []NamedRef `json:"skills"`
-	MCPServers []NamedRef `json:"mcp_servers"`
-	Providers  []NamedRef `json:"providers"`
-	Users      []NamedRef `json:"users"`
-	Projects   []NamedRef `json:"projects"`
+	Agents     []NamedRef        `json:"agents"`
+	Skills     []NamedRef        `json:"skills"`
+	MCPServers []NamedRef        `json:"mcp_servers"`
+	Providers  []NamedRef        `json:"providers"`
+	Users      []NamedRef        `json:"users"`
+	Projects   []NamedRef        `json:"projects"`
+	Roles      []OrgUnitRoleInfo `json:"roles"`
 }
 
 // NamedRef is an id/name pair for inspection lists.
@@ -253,6 +255,7 @@ func (s *Store) ListUnitResources(ctx context.Context, unitID string) (UnitResou
 	out := UnitResources{
 		Agents: []NamedRef{}, Skills: []NamedRef{}, MCPServers: []NamedRef{},
 		Providers: []NamedRef{}, Users: []NamedRef{}, Projects: []NamedRef{},
+		Roles: []OrgUnitRoleInfo{},
 	}
 	queries := []struct {
 		sql  string
@@ -284,6 +287,12 @@ func (s *Store) ListUnitResources(ctx context.Context, unitID string) (UnitResou
 			return out, err
 		}
 	}
+	// Role grants carry different columns than the NamedRef lists.
+	roles, err := s.ListOrgUnitRoles(ctx, unitID)
+	if err != nil {
+		return out, err
+	}
+	out.Roles = roles
 	return out, nil
 }
 
@@ -342,6 +351,86 @@ func (s *Store) allProjectOrgUnits(ctx context.Context) (map[string][]string, er
 		out[project] = append(out[project], unit)
 	}
 	return out, rows.Err()
+}
+
+// --- Org unit roles (docs/org-structure.md §13) ---
+
+// OrgUnitRoleInfo is a grant enriched with the grantee's name for UI lists.
+type OrgUnitRoleInfo struct {
+	OrgUnitRole
+	UserName string `json:"user_name"`
+}
+
+// ListOrgUnitRoles returns the role grants of one unit, newest grant first,
+// joined with user names for display.
+func (s *Store) ListOrgUnitRoles(ctx context.Context, unitID string) ([]OrgUnitRoleInfo, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT r.user_id, r.org_unit_id, r.role, r.granted_by, r.granted_at, COALESCE(u.name, '')
+		 FROM org_unit_role r LEFT JOIN workspace_user u ON u.id = r.user_id
+		 WHERE r.org_unit_id = $1 ORDER BY r.granted_at DESC, r.user_id`, unitID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []OrgUnitRoleInfo{}
+	for rows.Next() {
+		var info OrgUnitRoleInfo
+		if err := rows.Scan(&info.UserID, &info.OrgUnitID, &info.Role, &info.GrantedBy, &info.GrantedAt, &info.UserName); err != nil {
+			return nil, err
+		}
+		result = append(result, info)
+	}
+	return result, rows.Err()
+}
+
+// SetOrgUnitRole upserts a grant: an existing grant for the same user and
+// unit is replaced. Both the user and the unit must exist.
+func (s *Store) SetOrgUnitRole(ctx context.Context, unitID, userID, role, grantedBy string) error {
+	if _, err := s.GetOrgUnit(ctx, unitID); err != nil {
+		return err
+	}
+	if _, err := s.GetUser(ctx, userID); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO org_unit_role (user_id, org_unit_id, role, granted_by)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (user_id, org_unit_id) DO UPDATE SET role = EXCLUDED.role, granted_by = EXCLUDED.granted_by, granted_at = now()`,
+		userID, unitID, role, grantedBy)
+	return err
+}
+
+// RemoveOrgUnitRole drops a grant; missing grants answer ErrNotFound.
+func (s *Store) RemoveOrgUnitRole(ctx context.Context, unitID, userID string) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM org_unit_role WHERE org_unit_id = $1 AND user_id = $2`, unitID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListAllOrgUnitRoleGrants returns every grant in one query; the auth gate
+// reload turns them into per-principal upgrade scopes.
+func (s *Store) ListAllOrgUnitRoleGrants(ctx context.Context) ([]OrgUnitRole, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT user_id, org_unit_id, role, granted_by, granted_at FROM org_unit_role ORDER BY user_id, org_unit_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []OrgUnitRole{}
+	for rows.Next() {
+		var g OrgUnitRole
+		if err := rows.Scan(&g.UserID, &g.OrgUnitID, &g.Role, &g.GrantedBy, &g.GrantedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, g)
+	}
+	return result, rows.Err()
 }
 
 // --- Explicit project membership (docs/org-structure.md §16) ---
@@ -414,6 +503,13 @@ func (s *Store) allProjectMembers(ctx context.Context) (map[string]map[string]bo
 		out[project][user] = true
 	}
 	return out, rows.Err()
+}
+
+// ProjectVisible is the exported project-visibility check for callers outside
+// the package (kernel run authorization): org-unit intersection or explicit
+// membership.
+func ProjectVisible(boundUnits, units []string, isMember bool) bool {
+	return projectVisibleFor(boundUnits, units, isMember)
 }
 
 // OrgVisible reports whether a resource bound to boundUnit is visible to a

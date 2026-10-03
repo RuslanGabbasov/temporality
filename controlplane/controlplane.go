@@ -79,6 +79,37 @@ type Principal struct {
 	// org-bound resources. nil disables filtering: admins, unassigned users,
 	// and service tokens (the runtime must not depend on one person's rights).
 	VisibleUnits []string
+	// OrgRoles are roles granted on org units (docs/org-structure.md §13):
+	// each acts on its unit and subtree, upgrading the installation role
+	// inside that scope. Empty for static tokens.
+	OrgRoles []OrgRoleGrant
+}
+
+// OrgRoleGrant is one role granted on an org unit. Path is the unit's self
+// path (ancestor ids plus the unit id, dot-separated) so subtree checks
+// resolve without touching the tree.
+type OrgRoleGrant struct {
+	UnitID string
+	Path   string
+	Role   Role
+}
+
+// MaxRoleAt returns the effective role the principal holds at a resource
+// bound to unitID: the installation role, or the strongest grant whose unit
+// is the resource unit or one of its ancestors. unitPath is the bound unit's
+// ancestor path (its Path column). Global resources (empty unit) answer the
+// installation role alone — a subtree grant never leaks to globals.
+func (p Principal) MaxRoleAt(unitID, unitPath string) Role {
+	best := p.Role
+	for _, g := range p.OrgRoles {
+		if g.Role <= best || g.Path == "" {
+			continue
+		}
+		if g.UnitID == unitID || unitPath == g.Path || strings.HasPrefix(unitPath, g.Path+".") {
+			best = g.Role
+		}
+	}
+	return best
 }
 
 // AllowsProject reports whether the principal may touch the project. The
