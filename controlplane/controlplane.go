@@ -69,6 +69,9 @@ type Principal struct {
 	Subject  string
 	Role     Role
 	Projects []string // contains "*" when the token spans all projects
+	// UserID links the principal to its workspace_user record when the token
+	// belongs to a database user. Empty for static environment tokens.
+	UserID string
 }
 
 // AllowsProject reports whether the principal may touch the project. The

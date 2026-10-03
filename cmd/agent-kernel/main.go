@@ -131,6 +131,10 @@ func main() {
 		log.Error("migrate workspace v31", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000032_user_channels.up.sql"); err != nil {
+		log.Error("migrate workspace v32", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -159,6 +163,7 @@ func main() {
 	temporalWorker.RegisterActivityWithOptions(activities.KnowledgeLookup, activity.RegisterOptions{Name: agent.ActivityKnowledgeLookup})
 	temporalWorker.RegisterActivityWithOptions(activities.ResolveAgent, activity.RegisterOptions{Name: agent.ActivityResolveAgent})
 	temporalWorker.RegisterActivityWithOptions(activities.GenerateTitle, activity.RegisterOptions{Name: agent.ActivityGenerateTitle})
+	temporalWorker.RegisterActivityWithOptions(activities.NotifyChannel, activity.RegisterOptions{Name: agent.ActivityNotifyChannel})
 	registerExampleWorkflow(temporalWorker)
 	workerDone := make(chan error, 1)
 	go func() { workerDone <- temporalWorker.Run(worker.InterruptCh()) }()
@@ -213,7 +218,7 @@ func main() {
 			if len(u.Projects) > 0 {
 				projects = u.Projects
 			}
-			principals[u.Token] = controlplane.Principal{Subject: u.Name, Role: role, Projects: projects}
+			principals[u.Token] = controlplane.Principal{Subject: u.Name, Role: role, Projects: projects, UserID: u.ID}
 		}
 		gate.SetDBTokens(principals)
 		log.Info("loaded workspace user tokens", "count", len(principals))
@@ -233,7 +238,7 @@ func main() {
 			writeJSON(w, 200, map[string]any{"subject": "anonymous", "role": "admin", "projects": []string{"*"}, "auth_enabled": false})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"subject": principal.Subject, "role": principal.Role.String(), "projects": principal.Projects, "auth_enabled": true})
+		writeJSON(w, 200, map[string]any{"subject": principal.Subject, "role": principal.Role.String(), "projects": principal.Projects, "auth_enabled": true, "user_id": principal.UserID})
 	})
 	mux.HandleFunc("POST /v1/agent/runs", func(w http.ResponseWriter, r *http.Request) {
 		var input agent.RunInput
@@ -271,7 +276,17 @@ func main() {
 			}
 		}
 		if input.ActorID == "" {
-			input.ActorID = "human-requester"
+			// Route escalations back to the operator who started the run when the
+			// agent named no recipient: prefer the DB user behind the token.
+			actor := "human-requester"
+			if principal, ok := controlplane.FromContext(r.Context()); ok && principal.UserID != "" {
+				actor = principal.UserID
+			} else if token, _ := controlplane.BearerToken(r); token != "" {
+				if user, err := ws.GetUserByToken(r.Context(), token); err == nil {
+					actor = user.ID
+				}
+			}
+			input.ActorID = actor
 		}
 		workflowID := workflowIDFor(activities.SourceID, input.Project, input.RunID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
@@ -2089,6 +2104,23 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]any{"users": users})
 	})
+	mux.HandleFunc("GET /v1/workspace/users/{userID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		user, err := ws.GetUser(r.Context(), r.PathValue("userID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		user.HasToken = user.Token != ""
+		user.Token = "" // never expose bearer tokens on reads
+		writeJSON(w, 200, user)
+	})
 	mux.HandleFunc("POST /v1/workspace/users", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleAdmin) {
 			return
@@ -2110,7 +2142,11 @@ func main() {
 			token = generateToken()
 		}
 		active := req.Active != nil && *req.Active
-		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Token: token, Projects: req.Projects, Active: active}
+		if err := workspace.ValidateChannels(req.Channels); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Token: token, Projects: req.Projects, Active: active, Channels: req.Channels, PreferredChannel: req.PreferredChannel}
 		if err := ws.CreateUser(r.Context(), user); err != nil {
 			writeError(w, 500, err)
 			return
@@ -2128,7 +2164,18 @@ func main() {
 			return
 		}
 		active := req.Active != nil && *req.Active
-		user := workspace.User{ID: r.PathValue("userID"), Name: req.Name, Email: req.Email, Role: req.Role, Projects: req.Projects, Active: active}
+		// Channels are profile-level self-service state (see the dedicated
+		// /channels endpoint): an admin editing roles must not wipe them.
+		existing, err := ws.GetUser(r.Context(), r.PathValue("userID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		user := workspace.User{ID: r.PathValue("userID"), Name: req.Name, Email: req.Email, Role: req.Role, Projects: req.Projects, Active: active, Channels: existing.Channels, PreferredChannel: existing.PreferredChannel}
 		if err := ws.UpdateUser(r.Context(), user); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)
@@ -2138,6 +2185,62 @@ func main() {
 			return
 		}
 		refreshUserTokens()
+		writeJSON(w, 200, user)
+	})
+	// Self-service communication channels: a user manages their own delivery
+	// transports (docs/triggers-and-escalations.md §6). Admins may edit any
+	// user's channels; everyone else only their own record.
+	mux.HandleFunc("PUT /v1/workspace/users/{userID}/channels", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		principal, authenticated := controlplane.FromContext(r.Context())
+		userID := r.PathValue("userID")
+		if authenticated && principal.Role < controlplane.RoleAdmin && principal.UserID != userID && principal.Subject != userID {
+			writeError(w, 403, errors.New("channels can only be edited by their owner or an admin"))
+			return
+		}
+		var req struct {
+			Channels         []workspace.UserChannel `json:"channels"`
+			PreferredChannel string                  `json:"preferred_channel"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if err := workspace.ValidateChannels(req.Channels); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		preferred := strings.TrimSpace(req.PreferredChannel)
+		if preferred != "" && preferred != "web" {
+			found := false
+			for _, channel := range req.Channels {
+				if channel.Type == preferred && channel.Enabled {
+					found = true
+					break
+				}
+			}
+			if !found {
+				writeError(w, 422, errors.New("preferred channel must be web or an enabled configured channel"))
+				return
+			}
+		}
+		if err := ws.UpdateUserChannels(r.Context(), userID, req.Channels, preferred); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		user, err := ws.GetUser(r.Context(), userID)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		user.HasToken = user.Token != ""
+		user.Token = "" // never expose bearer tokens on reads
 		writeJSON(w, 200, user)
 	})
 	// Regenerate a user's bearer token server-side. The new token takes

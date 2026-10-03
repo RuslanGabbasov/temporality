@@ -113,6 +113,27 @@ TEMPORALITY_API_TOKEN=token2   # ядро → journal
 
 В UI токен вводится через Login в хедере (хранится в localStorage).
 
+## Каналы уведомлений
+
+Когда агент вызывает `ask_human`, ядро доставляет вопрос получателю по его
+предпочтительному каналу (см. `docs/triggers-and-escalations.md` §6-7). Каналы —
+часть профиля пользователя и настраиваются самостоятельно в меню пользователя →
+«Каналы уведомлений». Встроенный канал — почтовый ящик в приложении (Runs →
+вопросы); внешние транспорты включаются переменными ядра:
+
+```sh
+# .env
+KERNEL_MATRIX_HOMESERVER=https://matrix.org       # homeserver бота ядра
+KERNEL_MATRIX_ACCESS_TOKEN=syt_...                  # токен бота (состоит в комнатах пользователей)
+KERNEL_TELEGRAM_BOT_TOKEN=123456:ABC...             # токен бота для Bot API
+KERNEL_UI_URL=http://localhost:3000                 # для ссылок в уведомлениях
+```
+
+Адрес канала: для Matrix — ID комнаты (`!room:matrix.org`), для Telegram — chat
+ID. Доставка не блокирует выполнение: сбой транспорта фиксируется событием
+`notification.sent` со статусом `failed`, а вопрос остаётся доступным в UI.
+Ответ всегда происходит в приложении; внешние каналы — только доставка вопроса.
+
 ## Agent Kernel
 
 Durable Temporal workflow: model calls, approvals, `remember` proposals,

@@ -126,6 +126,13 @@ func TestAgentRunAskHumanDeliversResponseAndRecordsTrajectory(t *testing.T) {
 		return nil
 	}, activity.RegisterOptions{Name: ActivityRecordEvent})
 	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	notified := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request NotifyChannelRequest) (NotificationDelivery, error) {
+		notified++
+		require.Equal(t, "run-1", request.RunID)
+		require.Equal(t, "postgres", request.Options[0])
+		return NotificationDelivery{Recipient: "lead", Channel: "web", Status: "delivered"}, nil
+	}, activity.RegisterOptions{Name: ActivityNotifyChannel})
 	modelCalls := 0
 	var answerSeen string
 	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
@@ -156,12 +163,13 @@ func TestAgentRunAskHumanDeliversResponseAndRecordsTrajectory(t *testing.T) {
 	for _, event := range recorded {
 		types[event.Type] = true
 	}
-	for _, expected := range []string{"human.requested", "human.answered", "tool.completed", "run.completed"} {
+	for _, expected := range []string{"human.requested", "human.answered", "notification.sent", "tool.completed", "run.completed"} {
 		require.True(t, types[expected], "missing %s in recorded event stream", expected)
 	}
 	for _, forbidden := range []string{"approval.requested", "approval.granted"} {
 		require.False(t, types[forbidden], "ask_human must not emit approval events, found %s", forbidden)
 	}
+	require.Equal(t, 1, notified, "the question is delivered exactly once")
 }
 
 func TestAgentRunTimesOutAnUnansweredApproval(t *testing.T) {
