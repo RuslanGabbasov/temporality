@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -174,18 +176,56 @@ type Provider struct {
 	UpdatedAt time.Time         `json:"updated_at"`
 }
 
+// UserChannel is one delivery transport owned by the user profile
+// (docs/triggers-and-escalations.md §6). The agent never picks transports;
+// the kernel resolves the recipient and their preferred channel.
+type UserChannel struct {
+	Type    string `json:"type"`    // matrix, telegram
+	Address string `json:"address"` // matrix room id, telegram chat id
+	Enabled bool   `json:"enabled"`
+}
+
 // User is an operator who can log in and use the platform.
 type User struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email,omitempty"`
-	Role      string    `json:"role"`                // viewer, operator, admin
-	Token     string    `json:"token,omitempty"`     // bearer token; only set in create/regenerate responses, never in list
-	HasToken  bool      `json:"has_token,omitempty"` // list responses: whether a token exists (value is never exposed)
-	Projects  []string  `json:"projects,omitempty"`  // empty = all
-	Active    bool      `json:"active"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Email    string   `json:"email,omitempty"`
+	Role     string   `json:"role"`                // viewer, operator, admin
+	Token    string   `json:"token,omitempty"`     // bearer token; only set in create/regenerate responses, never in list
+	HasToken bool     `json:"has_token,omitempty"` // list responses: whether a token exists (value is never exposed)
+	Projects []string `json:"projects,omitempty"`  // empty = all
+	Active   bool     `json:"active"`
+	// Communication channels + preferred delivery. Preferred "" or "web"
+	// means the UI inbox; otherwise it must reference an enabled channel.
+	Channels         []UserChannel `json:"channels,omitempty"`
+	PreferredChannel string        `json:"preferred_channel,omitempty"`
+	CreatedAt        time.Time     `json:"created_at"`
+	UpdatedAt        time.Time     `json:"updated_at"`
+}
+
+// ValidChannelTypes lists the transports the kernel knows how to deliver to.
+var ValidChannelTypes = map[string]bool{
+	"matrix":   true,
+	"telegram": true,
+}
+
+// ValidateChannels normalizes a channel list: known types only, non-empty
+// addresses, at most one entry per type. It reports the first problem found.
+func ValidateChannels(channels []UserChannel) error {
+	seen := make(map[string]bool, len(channels))
+	for _, channel := range channels {
+		if !ValidChannelTypes[channel.Type] {
+			return fmt.Errorf("unknown channel type %q (supported: matrix, telegram)", channel.Type)
+		}
+		if strings.TrimSpace(channel.Address) == "" {
+			return fmt.Errorf("channel %q needs an address", channel.Type)
+		}
+		if seen[channel.Type] {
+			return fmt.Errorf("channel %q is configured twice", channel.Type)
+		}
+		seen[channel.Type] = true
+	}
+	return nil
 }
 
 // CreateProjectRequest is the payload for creating a project.
@@ -253,11 +293,13 @@ type CreateProviderRequest struct {
 
 // CreateUserRequest is the payload for creating a user.
 type CreateUserRequest struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Email    string   `json:"email,omitempty"`
-	Role     string   `json:"role"`
-	Token    string   `json:"token,omitempty"` // auto-generated if empty
-	Projects []string `json:"projects,omitempty"`
-	Active   *bool    `json:"active,omitempty"`
+	ID               string        `json:"id"`
+	Name             string        `json:"name"`
+	Email            string        `json:"email,omitempty"`
+	Role             string        `json:"role"`
+	Token            string        `json:"token,omitempty"` // auto-generated if empty
+	Projects         []string      `json:"projects,omitempty"`
+	Active           *bool         `json:"active,omitempty"`
+	Channels         []UserChannel `json:"channels,omitempty"`
+	PreferredChannel string        `json:"preferred_channel,omitempty"`
 }
