@@ -83,12 +83,22 @@ func (a *Activities) ToolDefs() []llm.ToolDef {
 	return a.ToolDefsFor(nil)
 }
 
+// runCommandTool is the sandbox execution surface. /workspace is the
+// project's persistent storage shared across agents, runs and sessions
+// (PrepareRun), so the description is the contract that tells models what
+// survives there and what does not.
+var runCommandTool = llm.ToolDef{
+	Name:        "run_command",
+	Description: "Run a command in an isolated sandbox container. The working directory is /workspace — persistent storage shared by all agents and runs of this project: files saved there survive across sessions and it may already contain files from earlier work, so treat them as shared and do not remove what you did not create. /tmp and /scratch are ephemeral and disappear between calls. Network access depends on agent configuration. Provide argv as an array.",
+	Parameters:  map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}},
+}
+
 // BuiltinToolDefs returns kernel tools plus run_command (when the sandbox is
 // configured) — the tool surface independent of any MCP server.
 func (a *Activities) BuiltinToolDefs() []llm.ToolDef {
 	defs := KernelTools()
 	if a.Sandbox != nil {
-		defs = append(defs, llm.ToolDef{Name: "run_command", Description: "Run a command in an isolated sandbox container. The working directory is /workspace which persists between calls — save ALL files there. /tmp and /scratch are ephemeral and disappear between calls. Network access depends on agent configuration. Provide argv as an array.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}}})
+		defs = append(defs, runCommandTool)
 	}
 	return defs
 }
@@ -98,7 +108,7 @@ func (a *Activities) BuiltinToolDefs() []llm.ToolDef {
 func (a *Activities) ToolDefsFor(servers []string) []llm.ToolDef {
 	defs := a.MCP.ToolDefsFor(servers)
 	if a.Sandbox != nil {
-		defs = append(defs, llm.ToolDef{Name: "run_command", Description: "Run a command in an isolated sandbox container. The working directory is /workspace which persists between calls — save ALL files there. /tmp and /scratch are ephemeral and disappear between calls. Network access depends on agent configuration. Provide argv as an array.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}}})
+		defs = append(defs, runCommandTool)
 	}
 	return defs
 }
