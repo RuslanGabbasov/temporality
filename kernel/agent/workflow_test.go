@@ -113,6 +113,57 @@ func TestAgentRunRecordsApprovalAndKnowledgeTrajectory(t *testing.T) {
 	}
 }
 
+func TestAgentRunAskHumanDeliversResponseAndRecordsTrajectory(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		if err := event.Validate(); err != nil {
+			return err
+		}
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	modelCalls := 0
+	var answerSeen string
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		modelCalls++
+		if modelCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "ask-1", Name: "ask_human", Args: map[string]any{"question": "Which database should I use?", "context": "Setting up the service", "options": []any{"postgres", "sqlite"}, "timeout_sec": 120}}}}, nil
+		}
+		// The tool result from turn 1 must carry the human's answer verbatim.
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "Human response:") {
+				answerSeen = message.Content
+			}
+		}
+		return llm.Completion{Content: "completed"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(ApprovalSignal, Approval{OperationID: "run-1/turn/01/ask-1", Approved: true, ActorID: "human-1", Response: "postgres"})
+	}, time.Second)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-1", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "set up the database", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "completed", result.Status)
+	require.Contains(t, answerSeen, "Human response: postgres")
+
+	types := make(map[string]bool)
+	for _, event := range recorded {
+		types[event.Type] = true
+	}
+	for _, expected := range []string{"human.requested", "human.answered", "tool.completed", "run.completed"} {
+		require.True(t, types[expected], "missing %s in recorded event stream", expected)
+	}
+	for _, forbidden := range []string{"approval.requested", "approval.granted"} {
+		require.False(t, types[forbidden], "ask_human must not emit approval events, found %s", forbidden)
+	}
+}
+
 func TestAgentRunTimesOutAnUnansweredApproval(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

@@ -136,6 +136,9 @@ type Approval struct {
 	Approved      bool   `json:"approved"`
 	ActorID       string `json:"actor_id"`
 	Reason        string `json:"reason,omitempty"`
+	// Response carries the human's answer for ask_human requests: a chosen
+	// option or free text. Empty for plain approvals.
+	Response string `json:"response,omitempty"`
 }
 
 func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
@@ -364,7 +367,61 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			var toolResult ToolResult
 			toolFailed := false
 			toolBlocked := false
-			if approvalRequired && !recentlyApproved {
+			if call.Name == "ask_human" {
+				// Escalation to a human (docs/triggers-and-escalations.md §5-13):
+				// a self-contained question with optional structured options. The
+				// run pauses on the approval signal channel; the answer rides the
+				// same Approval payload with Response set.
+				question, _ := call.Args["question"].(string)
+				humanContext, _ := call.Args["context"].(string)
+				options := stringList(call.Args["options"])
+				timeoutSeconds := input.ApprovalTimeoutSeconds
+				if requested, ok := numericArg(call.Args["timeout_sec"]); ok && requested > 0 {
+					timeoutSeconds = int(requested)
+				}
+				if timeoutSeconds > 86400 {
+					timeoutSeconds = 86400
+				}
+				description, _ := approvalOperation(operationID, call.Name, call.Args, false)
+				operation := description["operation"].(map[string]any)
+				argumentsHash = operation["arguments_hash"].(string)
+				if err := startTool(); err != nil {
+					return result, err
+				}
+				if err := emit(activityCtx, state, "human.requested", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "question": question, "context": humanContext, "options": options, "timeout_seconds": timeoutSeconds}); err != nil {
+					return result, err
+				}
+				approved, answer, timedOut, waitErr := awaitApproval(ctx, operationID, time.Duration(timeoutSeconds)*time.Second)
+				if waitErr != nil {
+					return result, waitErr
+				}
+				switch {
+				case timedOut:
+					if err := emit(activityCtx, state, "human.timed_out", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "timeout_seconds": timeoutSeconds}); err != nil {
+						return result, err
+					}
+					toolResult.Content = "No human response within the timeout. Act on the safest option that does not require the missing information, or report what blocked you."
+					toolBlocked = true
+				case approved:
+					response := approvalText(answer.Response)
+					if response == "" {
+						response = approvalText(answer.Reason)
+					}
+					if err := emit(activityCtx, state, "human.answered", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "actor": answer.ActorID, "response": response}); err != nil {
+						return result, err
+					}
+					toolResult.Content = "Human response: " + response
+				default:
+					if err := emit(activityCtx, state, "human.cancelled", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "actor": answer.ActorID, "reason": approvalText(answer.Reason)}); err != nil {
+						return result, err
+					}
+					toolResult.Content = "The human cancelled this question" + approvalSuffix(answer.Reason)
+					toolBlocked = true
+				}
+				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
+					return result, err
+				}
+			} else if approvalRequired && !recentlyApproved {
 				action, reason := call.Name, ""
 				if call.Name == "request_approval" {
 					action, _ = call.Args["action"].(string)
@@ -1036,6 +1093,7 @@ func KernelTools() []llm.ToolDef {
 		{Name: "echo", Description: "Return a short text value for debugging the harness tool path", Parameters: map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}, "required": []string{"text"}}},
 		{Name: "remember", Description: "Record a high-confidence durable conclusion with optional evidence refs. Verification and build outcomes are recorded automatically; use this only for conclusions you are confident in and can ground in evidence. If the conclusion came from applying a skill, include skill_id and capability", Parameters: map[string]any{"type": "object", "properties": map[string]any{"proposition": map[string]any{"type": "string"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "skill_id": map[string]any{"type": "string", "description": "Skill this knowledge came from, e.g. deploy-service"}, "capability": map[string]any{"type": "string", "description": "Specific capability of the skill, e.g. verify"}}, "required": []string{"proposition"}}},
 		{Name: "request_approval", Description: "Pause this run and request a human decision before a consequential action", Parameters: map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"}}, "required": []string{"action"}}},
+		{Name: "ask_human", Description: "Ask a human a question when you cannot proceed without additional context or a decision. The question must be self-contained: what task you are running, what you have established, what exactly is missing and which options exist. Prefer short structured options over open-ended questions. The run pauses until an answer arrives or the timeout expires.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"question": map[string]any{"type": "string", "description": "The exact question for the human, self-contained"}, "context": map[string]any{"type": "string", "description": "Brief human-facing background: what you are doing and what you already established"}, "options": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Short answer variants to choose from"}, "timeout_sec": map[string]any{"type": "integer", "description": "How long to wait for the answer"}}, "required": []string{"question"}}},
 		{Name: "list_triggers", Description: "List all configured triggers (schedules, webhooks, event listeners) for this project", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
 		{Name: "create_trigger", Description: "Create a new trigger to automatically launch agent runs. Types: schedule (cron-based), webhook (HTTP endpoint), event (reacts to journal events).", Parameters: map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}, "type": map[string]any{"type": "string", "enum": []string{"schedule", "webhook", "event"}}, "cron": map[string]any{"type": "string", "description": "Cron expression for schedule triggers, e.g. '0 9 * * 1-5'"}, "prompt": map[string]any{"type": "string", "description": "The prompt sent to the agent when the trigger fires"}, "path": map[string]any{"type": "string", "description": "URL path for webhook triggers"}, "event_type": map[string]any{"type": "string", "description": "Event type to react to for event triggers, e.g. 'tool.failed'"}, "agent_id": map[string]any{"type": "string", "description": "Agent to use (optional, uses default if empty)"}}, "required": []string{"name", "type", "prompt"}}},
 		{Name: "update_trigger", Description: "Update an existing trigger's configuration (enable/disable, change cron, update prompt, etc.)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}, "enabled": map[string]any{"type": "boolean"}, "cron": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},

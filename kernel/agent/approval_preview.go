@@ -23,6 +23,43 @@ func approvalText(value string) string {
 	return clean
 }
 
+// stringList extracts a JSON string array argument (options for ask_human).
+func stringList(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, item := range items {
+		if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+			out = append(out, strings.TrimSpace(s))
+		}
+	}
+	return out
+}
+
+// numericArg extracts a positive numeric argument regardless of whether the
+// model encoded it as a float or an int.
+func numericArg(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case int:
+		return float64(v), true
+	default:
+		return 0, false
+	}
+}
+
+// approvalSuffix renders an optional human reason as ": reason" for tool
+// result messages.
+func approvalSuffix(reason string) string {
+	if trimmed := strings.TrimSpace(reason); trimmed != "" {
+		return ": " + approvalText(trimmed)
+	}
+	return ""
+}
+
 // approvalOperation keeps the canonical argument identity separate from the
 // bounded display projection. The canonical JSON is hashed but never emitted.
 func approvalOperation(operationID, tool string, args map[string]any, readOnly bool) (map[string]any, map[string]any) {
