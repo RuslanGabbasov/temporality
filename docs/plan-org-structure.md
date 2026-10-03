@@ -1,7 +1,7 @@
 # План работ: Оргструктура и модель доступа
 
 Source spec: `docs/org-structure.md` (расширенная версия, 55 разделов / 8 фаз).
-Статус: **Фаза 1 завершена** (коммит `0e1ec70`). **Волна A завершена** (UI организации и доступности, коммиты `fa49dde`, `42202ca`). **Волна B завершена** (явное членство в проектах + аудит доступа). Остальное — по волнам ниже; порядок согласован с фазами спеки, но UI организации вынесен вперёд (волна A), потому что бэкенд фаз 1–2 уже существует и без UI неюзабелен.
+Статус: **Фаза 1 завершена** (коммит `0e1ec70`). **Волна A завершена** (UI организации и доступности, коммиты `fa49dde`, `42202ca`). **Волна B завершена** (явное членство в проектах + аудит доступа). **Волна C завершена** (роли на узлах, авторизация ранов, execution identity, snapshot контекста). Остальное — по волнам ниже; порядок согласован с фазами спеки, но UI организации вынесен вперёд (волна A), потому что бэкенд фаз 1–2 уже существует и без UI неюзабелен.
 
 Размеры задач: S / M / L — относительно одной волны работы.
 
@@ -35,7 +35,7 @@ Source spec: `docs/org-structure.md` (расширенная версия, 55 р
 |---|---|---|---|
 | 1 Org Model | дерево, path, CRUD, привязки, visibility-тесты | ✅ готово | — |
 | 2 Project Model | project↔units, members, project roles, миграция | ✅ готово (units + members + аудит) | B |
-| 3 Authorization | visibility/use/manage/administer, проверки на операциях, execution identity | минимально | C |
+| 3 Authorization | visibility/use/manage/administer, проверки на операциях, execution identity | ✅ готово (provider credentials отложены до secret store) | C |
 | 4 Triggers | scope триггеров, авторизация, запуск под identity, аудит | не начато | D |
 | 5 HITL | human_request, recipient resolution, каналы, timeout-политики | ядро есть | E |
 | 6 Policies | наследуемые политики выполнения | не начато | F |
@@ -66,12 +66,15 @@ Source spec: `docs/org-structure.md` (расширенная версия, 55 р
 
 ### Волна C. Authorization — L — фаза 3
 
-- [ ] Уровни права: `visibility / use / manage / administer` (§10) — модель в controlplane, а не только фильтры списков.
-- [ ] Проверки на операциях (§22): `POST /runs` (агент, проект, скиллы, MCP, провайдер), привязка MCP/скилла к агенту, использование провайдера, EXECUTE/BIND/UNBIND.
-- [ ] Роли на узлах: `org_unit_role (user_id, org_unit_id, role, granted_by, granted_at)`; эффективная роль = максимум (установка ∪ путь узла); API `PUT/DELETE /v1/org/units/{id}/roles/{userID}`; аудит `role.granted/revoked`.
-- [ ] Execution Identity — сущность для автоматических запусков (§20): доступные агенты/MCP/провайдеры/проекты/human-получатели; CRUD + аудит; правило: Run триггера не наследует права создателя.
-- [ ] Snapshot execution context (§34–35): в Run фиксируются agent_id/skill_ids/mcp_ids/provider_id/project_id/execution_identity_id/policy context (сейчас только версия агента); изменение оргструктуры не убивает живой Run, критические действия перепроверяют права.
-- [ ] Provider credentials (§23): секреты не возвращаются ресурсными API; использование — только в execution context.
+- [x] Модель эффективной роли в controlplane: `Principal.OrgRoles` (гранты с self-path узла) + `MaxRoleAt(unitID, unitPath)` — максимум из роли установки, membership-роли и грантов на сам узел и его предков; глобальные ресурсы — только роль установки. Unit-тесты на дерево (грант на предка/сам узел/сиблинга/потомка/глобальный ресурс).
+- [x] Роли на узлах: миграция 000036 `org_unit_role`; стор `ListOrgUnitRoles/SetOrgUnitRole/RemoveOrgUnitRole/ListAllOrgUnitRoleGrants`; API `GET/PUT/DELETE /v1/org/units/{id}/roles/{userID}` (мутации — admin, ParseRole-валидация); аудит `role.granted/revoked`; `refreshUserTokens` подхватывает гранты без рестарта; роли в инспекции узла (join имён); узел с грантами не удаляется.
+- [x] Project scope из орг-модели: `VisibleProjectIDs` — для назначенных в узел не-админов токен получает конкретный список проектов (org-пересечение ∪ membership) вместо legacy `user.projects`; admin и непривязанные — `*` (переходный режим). `refreshUserTokens` вызывается после мутаций проектов/участников/грантов.
+- [x] Проверки на операциях (§22): `authorizeRunUse` в `POST /v1/agent/runs` и `POST /v1/workspace/tasks/{id}/runs` (гейт ослаблен до reader, авторизация — 403 с точной причиной): видимость проекта (org ∪ membership) + эффективная роль ≥ writer; агент — OrgVisible + writer на его узле; скиллы/MCP рана — OrgVisible; «висячие» ссылки пропускаются молча, как в рантайме. PUT агента проверяет OrgVisible скиллов/MCP (иначе 403).
+- [x] Snapshot execution context (§34–35): миграция 000037 `workspace_run.exec_context`; заполняется при старте рана (tasks/trigger/schedule): agent_id/agent_version/skill_ids/mcp_ids/model/project_id/actor/execution_identity_id/authorized_by{user_id, role(эффективная), org_unit_id}; изменение оргструктуры не затрагивает живые раны; читается всеми рановыми запросами.
+- [x] Execution Identity — сущность для автоматических запусков (§20): миграция 000038; CRUD `GET/POST/PUT/DELETE /v1/workspace/execution-identities` + аудит `execution_identity.created/updated/deleted`; отсутствующие allowed-списки дефолтятся к `["*"]` (не «ничего»); wiring в триггеры — волна D, UI — фаза 7.
+- [x] Аудит `user.org_unit_changed` (from/to) при смене узла пользователя.
+- [ ] Provider credentials (§23) — отложено: `api_key_ref` — ссылка на env/secret, не значение; ужесточение после появления реального хранилища секретов. CRUD ресурсов остаётся на installation-role, org-гранты пока дают запуск ранов.
+- [ ] UI ролей на узлах и execution identities — фаза 7 (спека §42, §47).
 
 ### Волна D. Triggers — M — фаза 4
 
