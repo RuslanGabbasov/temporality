@@ -25,7 +25,7 @@ function message(error: unknown) { return error instanceof Error ? error.message
 
 type ServerForm = Partial<MCPServer> & { envText?: string; headersText?: string }
 
-export default function Mcp({ project }: { project: string }) {
+export default function Mcp() {
   const t = useT()
   const [servers, setServers] = useState<MCPServer[]>([])
   const [loading, setLoading] = useState(false)
@@ -43,11 +43,11 @@ export default function Mcp({ project }: { project: string }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await workspaceApi.listMCPServers(project || undefined)
+      const data = await workspaceApi.listMCPServers()
       setServers(data.servers ?? [])
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
-  }, [project])
+  }, [])
 
   useEffect(() => { void load() }, [load])
 
@@ -77,7 +77,6 @@ export default function Mcp({ project }: { project: string }) {
     const args = form.args ?? []
     return {
       id: form.id,
-      project_id: project,
       name: form.name ?? '',
       type: form.type ?? 'stdio',
       url: form.url ?? '',
@@ -108,7 +107,7 @@ export default function Mcp({ project }: { project: string }) {
       if (editing) {
         await workspaceApi.updateMCPServer(editing.id, toPayload())
       } else {
-        await workspaceApi.createMCPServer(toPayload() as Partial<MCPServer> & { name: string; project_id: string })
+        await workspaceApi.createMCPServer(toPayload())
       }
       setShowForm(false); setEditing(null)
       void load()

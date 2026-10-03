@@ -143,8 +143,8 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       const [agentsData, providersData, skillsData, mcpData, toolsData, builtinsData] = await Promise.all([
         workspaceApi.listAllAgents(),
         workspaceApi.listProviders(),
-        workspaceApi.listSkills(project),
-        workspaceApi.listMCPServers(project || undefined),
+        workspaceApi.listSkills(),
+        workspaceApi.listMCPServers(),
         workspaceApi.listMCPTools(),
         workspaceApi.listBuiltinAgents(),
       ])
@@ -376,21 +376,21 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [filter, setFilter] = useState('')
   const filteredAgents = visibleAgents.filter((a) => matchesFilter(filter, a.name, a.id, a.description))
 
-  // Bindings are scoped to the current project (the runtime resolves skills
-  // per project too). Ids assigned earlier from another project stay listed
-  // with a marker so they can be reviewed and removed.
-  const otherProject = t('agents.from_other_project') ?? 'from another project'
+  // Skills and MCP servers come from the global registry. Ids bound earlier
+  // that no longer exist stay listed with a marker so they can be reviewed
+  // and unbound.
+  const missing = t('agents.binding_missing') ?? 'not found'
   const skillOptions = [
     ...availableSkills.map((s) => ({ id: s.id, label: s.name })),
     ...(form.skills ?? [])
       .filter((id) => !availableSkills.some((s) => s.id === id))
-      .map((id) => ({ id, label: `${id} — ${otherProject}` })),
+      .map((id) => ({ id, label: `${id} — ${missing}` })),
   ]
   const mcpOptions = [
     ...mcpServers.map((s) => ({ id: s.id, label: s.name })),
     ...(form.mcp_servers ?? [])
       .filter((id) => !mcpServers.some((s) => s.id === id))
-      .map((id) => ({ id, label: `${id} — ${otherProject}` })),
+      .map((id) => ({ id, label: `${id} — ${missing}` })),
   ]
 
   // Auto-select the first visible agent once the list is loaded.

@@ -63,7 +63,7 @@ function sectionOfField(field: string): string {
   return head || '*'
 }
 
-export default function Skills({ project }: { project: string }) {
+export default function Skills() {
   const t = useT()
   const [skills, setSkills] = useState<Skill[]>([])
   const [selected, setSelected] = useState<Skill | null>(null)
@@ -89,15 +89,14 @@ export default function Skills({ project }: { project: string }) {
   const [filter, setFilter] = useState('')
 
   const load = useCallback(async () => {
-    if (!project.trim()) return
     setLoading(true)
     try {
-      const data = await workspaceApi.listSkills(project)
+      const data = await workspaceApi.listSkills()
       setSkills(data.skills ?? [])
       setSelected((current) => current && data.skills?.some((s) => s.id === current.id) ? data.skills.find((s) => s.id === current.id)! : (data.skills?.[0] ?? null))
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
-  }, [project])
+  }, [])
 
   useEffect(() => { void load() }, [load])
 
@@ -250,7 +249,7 @@ export default function Skills({ project }: { project: string }) {
       } else {
         const created = await workspaceApi.createSkill({
           id: form.id.trim() || form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
-          project_id: project, name: form.name, description: form.description, version: form.version,
+          name: form.name, description: form.description, version: form.version,
           markdown: form.markdown, manifest_yaml: manifestYaml(),
         })
         setShowForm(false); setEditing(null)

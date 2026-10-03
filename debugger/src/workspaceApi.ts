@@ -134,7 +134,6 @@ export interface Trigger {
 
 export interface Skill {
   id: string
-  project_id: string
   name: string
   description: string
   version: string
@@ -204,7 +203,6 @@ export interface SkillInput {
 
 export interface MCPServer {
   id: string
-  project_id: string
   name: string
   type: 'stdio' | 'sse' | 'http'
   url?: string
@@ -357,11 +355,11 @@ export const workspaceApi = {
   deleteTrigger: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/triggers/${id}`, { method: 'DELETE' }),
 
-  // Skills
-  listSkills: (projectId: string) =>
-    request<{ skills: Skill[]; count: number }>(`/v1/workspace/skills?project=${encodeURIComponent(projectId)}`),
+  // Skills (workspace-global registry)
+  listSkills: () =>
+    request<{ skills: Skill[]; count: number }>('/v1/workspace/skills'),
   getSkill: (id: string) => request<Skill>(`/v1/workspace/skills/${id}`),
-  createSkill: (data: { id: string; project_id: string; name: string; description: string; version: string; markdown: string; manifest_yaml: string }) =>
+  createSkill: (data: { id: string; name: string; description: string; version: string; markdown: string; manifest_yaml: string }) =>
     request<Skill>('/v1/workspace/skills', { method: 'POST', body: JSON.stringify(data) }),
   updateSkill: (id: string, data: SkillInput) =>
     request<Skill>(`/v1/workspace/skills/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -378,14 +376,11 @@ export const workspaceApi = {
   listSkillMemory: (id: string) =>
     request<{ memory: SkillMemoryItem[] }>(`/v1/workspace/skills/${id}/memory`),
 
-  // MCP servers
-  listMCPServers: (projectId?: string) =>
-    request<{ servers: MCPServer[]; count: number }>(
-      projectId
-        ? `/v1/workspace/mcp-servers?project=${encodeURIComponent(projectId)}`
-        : '/v1/workspace/mcp-servers'),
+  // MCP servers (workspace-global registry)
+  listMCPServers: () =>
+    request<{ servers: MCPServer[]; count: number }>('/v1/workspace/mcp-servers'),
   getMCPServer: (id: string) => request<MCPServer>(`/v1/workspace/mcp-servers/${id}`),
-  createMCPServer: (data: Partial<MCPServer> & { name: string; project_id: string }) =>
+  createMCPServer: (data: Partial<MCPServer> & { name: string }) =>
     request<MCPServer>('/v1/workspace/mcp-servers', { method: 'POST', body: JSON.stringify(data) }),
   updateMCPServer: (id: string, data: Partial<MCPServer>) =>
     request<MCPServer>(`/v1/workspace/mcp-servers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

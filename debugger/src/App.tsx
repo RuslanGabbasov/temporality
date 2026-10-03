@@ -73,9 +73,9 @@ export default function App() {
           case 'agent-config':
             return <Agents project={project} defaultAgentId={projectDefaultAgent} refreshProjects={refreshProjects} />
           case 'skills':
-            return <Skills project={project} />
+            return <Skills />
           case 'mcp':
-            return <Mcp project={project} />
+            return <Mcp />
           case 'providers':
             return <Providers />
           case 'users':
