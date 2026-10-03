@@ -344,6 +344,78 @@ func (s *Store) allProjectOrgUnits(ctx context.Context) (map[string][]string, er
 	return out, rows.Err()
 }
 
+// --- Explicit project membership (docs/org-structure.md §16) ---
+
+// ListProjectMembers returns the explicit members of a project.
+func (s *Store) ListProjectMembers(ctx context.Context, projectID string) ([]ProjectMember, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT user_id, role, created_at, created_by FROM workspace_project_member WHERE project_id = $1 ORDER BY user_id`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []ProjectMember{}
+	for rows.Next() {
+		var m ProjectMember
+		if err := rows.Scan(&m.UserID, &m.Role, &m.CreatedAt, &m.CreatedBy); err != nil {
+			return nil, err
+		}
+		result = append(result, m)
+	}
+	return result, rows.Err()
+}
+
+// AddProjectMember upserts a membership row: an existing member's role is
+// updated in place. Both project and user must exist.
+func (s *Store) AddProjectMember(ctx context.Context, projectID, userID, role, createdBy string) error {
+	if _, err := s.GetProject(ctx, projectID); err != nil {
+		return err
+	}
+	if _, err := s.GetUser(ctx, userID); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO workspace_project_member (project_id, user_id, role, created_by)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
+		projectID, userID, role, createdBy)
+	return err
+}
+
+// RemoveProjectMember drops a membership row.
+func (s *Store) RemoveProjectMember(ctx context.Context, projectID, userID string) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM workspace_project_member WHERE project_id = $1 AND user_id = $2`, projectID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// allProjectMembers loads the project→member-set map in one query.
+func (s *Store) allProjectMembers(ctx context.Context) (map[string]map[string]bool, error) {
+	rows, err := s.pool.Query(ctx, `SELECT project_id, user_id FROM workspace_project_member`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]map[string]bool{}
+	for rows.Next() {
+		var project, user string
+		if err := rows.Scan(&project, &user); err != nil {
+			return nil, err
+		}
+		if out[project] == nil {
+			out[project] = map[string]bool{}
+		}
+		out[project][user] = true
+	}
+	return out, rows.Err()
+}
+
 // OrgVisible reports whether a resource bound to boundUnit is visible to a
 // viewer whose ancestor chain is units. Empty boundUnit means org-neutral.
 // Nil units means unfiltered access.

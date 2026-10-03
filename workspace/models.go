@@ -24,6 +24,16 @@ type Project struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+// ProjectMember is one explicit membership row (docs/org-structure.md §16):
+// the user sees the project even when their org chain does not intersect the
+// project's units. The role scopes what the member may do inside the project.
+type ProjectMember struct {
+	UserID    string    `json:"user_id"`
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"created_at"`
+	CreatedBy string    `json:"created_by,omitempty"`
+}
+
 // OrgUnitKind values for OrgUnit.Kind.
 const (
 	OrgKindOrganization = "organization"

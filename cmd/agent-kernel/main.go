@@ -143,6 +143,10 @@ func main() {
 		log.Error("migrate workspace v34", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000035_project_member.up.sql"); err != nil {
+		log.Error("migrate workspace v35", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -532,6 +536,9 @@ func main() {
 			writeError(w, 409, err)
 			return
 		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditOrgUnitCreated, "org_unit", unit.ID, map[string]any{"name": unit.Name, "parent_id": unit.ParentID}); err != nil {
+			log.Warn("audit org unit create", "error", err)
+		}
 		refreshUserTokens()
 		writeJSON(w, 201, unit)
 	})
@@ -560,6 +567,9 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditOrgUnitUpdated, "org_unit", unit.ID, map[string]any{"name": unit.Name, "kind": unit.Kind}); err != nil {
+			log.Warn("audit org unit update", "error", err)
+		}
 		// Optional re-parenting: parent_id present and different triggers a move.
 		if req.ParentID != "" {
 			current, err := ws.GetOrgUnit(r.Context(), unit.ID)
@@ -575,6 +585,9 @@ func main() {
 					}
 					writeError(w, 500, err)
 					return
+				}
+				if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditOrgUnitMoved, "org_unit", unit.ID, map[string]any{"parent_id": req.ParentID}); err != nil {
+					log.Warn("audit org unit move", "error", err)
 				}
 			}
 		}
@@ -601,6 +614,9 @@ func main() {
 			}
 			writeError(w, 500, err)
 			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditOrgUnitDeleted, "org_unit", r.PathValue("unitID"), nil); err != nil {
+			log.Warn("audit org unit delete", "error", err)
 		}
 		refreshUserTokens()
 		writeJSON(w, 200, map[string]bool{"deleted": true})
@@ -635,7 +651,45 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
+		action := workspace.AuditResourceBound
+		if req.OrgUnitID == "" {
+			action = workspace.AuditResourceUnbound
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), action, "resource", r.PathValue("resourceID"), map[string]any{"kind": r.PathValue("kind"), "org_unit_id": req.OrgUnitID}); err != nil {
+			log.Warn("audit resource binding", "error", err)
+		}
 		writeJSON(w, 200, map[string]string{"kind": r.PathValue("kind"), "resource_id": r.PathValue("resourceID"), "org_unit_id": req.OrgUnitID})
+	})
+	mux.HandleFunc("DELETE /v1/org/resources/{kind}/{resourceID}/binding", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		if err := ws.SetResourceOrgUnit(r.Context(), r.PathValue("kind"), r.PathValue("resourceID"), ""); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 400, err)
+			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditResourceUnbound, "resource", r.PathValue("resourceID"), map[string]any{"kind": r.PathValue("kind")}); err != nil {
+			log.Warn("audit resource unbinding", "error", err)
+		}
+		writeJSON(w, 200, map[string]bool{"unbound": true})
+	})
+	// Access audit (docs/org-structure.md §36): the recent access-change
+	// journal, admins only.
+	mux.HandleFunc("GET /v1/org/audit", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		events, err := ws.ListAccessAudit(r.Context(), limit)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"events": events})
 	})
 
 	// Workspace CRUD endpoints
@@ -717,7 +771,15 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
-		project := workspace.Project{ID: r.PathValue("projectID"), Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel, AllowedUsers: req.AllowedUsers}
+		// The legacy allowed_users column is frozen: an absent field keeps the
+		// stored value (visibility no longer reads it — docs/org-structure.md §16).
+		allowedUsers := req.AllowedUsers
+		if allowedUsers == nil {
+			if current, err := ws.GetProject(r.Context(), r.PathValue("projectID")); err == nil {
+				allowedUsers = current.AllowedUsers
+			}
+		}
+		project := workspace.Project{ID: r.PathValue("projectID"), Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel, AllowedUsers: allowedUsers}
 		if err := ws.UpdateProject(r.Context(), project); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)
@@ -750,6 +812,75 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+	// Explicit project membership (docs/org-structure.md §16): a member sees
+	// the project even outside its org units. Mutations land in the access
+	// audit log.
+	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/members", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		members, err := ws.ListProjectMembers(r.Context(), r.PathValue("projectID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"members": members})
+	})
+	mux.HandleFunc("POST /v1/workspace/projects/{projectID}/members", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req struct {
+			UserID string `json:"user_id"`
+			Role   string `json:"role"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.UserID) == "" {
+			writeError(w, 422, errors.New("user_id is required"))
+			return
+		}
+		if req.Role == "" {
+			req.Role = "writer"
+		}
+		if _, err := controlplane.ParseRole(req.Role); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		actor := requestUserID(r)
+		if err := ws.AddProjectMember(r.Context(), r.PathValue("projectID"), req.UserID, req.Role, actor); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), actor, workspace.AuditProjectMemberAdded, "project", r.PathValue("projectID"), map[string]any{"user_id": req.UserID, "role": req.Role}); err != nil {
+			log.Warn("audit project member add", "error", err)
+		}
+		writeJSON(w, 201, map[string]bool{"added": true})
+	})
+	mux.HandleFunc("DELETE /v1/workspace/projects/{projectID}/members/{userID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		if err := ws.RemoveProjectMember(r.Context(), r.PathValue("projectID"), r.PathValue("userID")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		actor := requestUserID(r)
+		if err := ws.RecordAccessAudit(r.Context(), actor, workspace.AuditProjectMemberRemoved, "project", r.PathValue("projectID"), map[string]any{"user_id": r.PathValue("userID")}); err != nil {
+			log.Warn("audit project member remove", "error", err)
+		}
+		writeJSON(w, 200, map[string]bool{"removed": true})
 	})
 	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/agents", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
@@ -2710,6 +2841,18 @@ func cleanupSeededBuiltinAgents(ctx context.Context, log *slog.Logger, ws *works
 // requestSubject returns the authenticated token subject for version history.
 func requestSubject(r *http.Request) string {
 	if principal, ok := controlplane.FromContext(r.Context()); ok {
+		return principal.Subject
+	}
+	return ""
+}
+
+// requestUserID resolves the audit actor: the workspace user id when the
+// token belongs to one, otherwise the principal subject.
+func requestUserID(r *http.Request) string {
+	if principal, ok := controlplane.FromContext(r.Context()); ok {
+		if principal.UserID != "" {
+			return principal.UserID
+		}
 		return principal.Subject
 	}
 	return ""

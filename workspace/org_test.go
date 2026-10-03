@@ -97,3 +97,30 @@ func TestOrgAllowsAny(t *testing.T) {
 		})
 	}
 }
+
+func TestProjectVisibleFor(t *testing.T) {
+	// docs/org-structure.md §15-16: access = org-unit access OR explicit
+	// membership. Nil units is the transition mode (admins, unassigned
+	// viewers) where the org check is skipped entirely.
+	chain := []string{"acme", "acme.dev"}
+	cases := []struct {
+		name     string
+		bound    []string
+		units    []string
+		isMember bool
+		visible  bool
+	}{
+		{"nil units disables filtering", []string{"otherco"}, nil, false, true},
+		{"org-neutral project", nil, chain, false, true},
+		{"org overlap", []string{"acme"}, chain, false, true},
+		{"membership rescues foreign project", []string{"otherco"}, chain, true, true},
+		{"no org overlap, not a member", []string{"otherco"}, chain, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := projectVisibleFor(tc.bound, tc.units, tc.isMember); got != tc.visible {
+				t.Errorf("projectVisibleFor(%v, %v, member=%v) = %v, want %v", tc.bound, tc.units, tc.isMember, got, tc.visible)
+			}
+		})
+	}
+}

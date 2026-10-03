@@ -739,13 +739,10 @@ func (s *Store) ListAllProjects(ctx context.Context) ([]Project, error) {
 	return result, nil
 }
 
-// ListProjectsForUser returns projects visible to a specific user.
-// A project is visible when BOTH models agree (docs/org-structure.md §4,
-// gradual migration — the org check is neutral until units are assigned):
-//   - org model: the project has no org bindings (org-neutral) or one of its
-//     bound units is in the viewer's ancestor chain (nil units = unassigned
-//     viewer or admin, check skipped);
-//   - legacy allowed_users: "*", contains the user id, or the viewer is admin.
+// ListProjectsForUser returns projects visible to a specific user
+// (docs/org-structure.md §15-16): org-unit access OR explicit membership.
+// The legacy allowed_users column is frozen on read — it is no longer
+// consulted and will be dropped by a later cleanup migration.
 func (s *Store) ListProjectsForUser(ctx context.Context, userID string, isAdmin bool, units []string) ([]Project, error) {
 	allProjects, err := s.ListAllProjects(ctx)
 	if err != nil {
@@ -761,18 +758,32 @@ func (s *Store) ListProjectsForUser(ctx context.Context, userID string, isAdmin 
 			return nil, err
 		}
 	}
+	var members map[string]map[string]bool
+	if userID != "" {
+		members, err = s.allProjectMembers(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	var result []Project
 	for _, p := range allProjects {
-		if !isUserAllowed(p.AllowedUsers, userID) {
-			continue
-		}
-		// units == nil: unassigned viewer, the org check is neutral.
-		if units != nil && !orgAllowsAny(orgLinks[p.ID], units) {
+		if !projectVisibleFor(orgLinks[p.ID], units, members[p.ID] != nil && members[p.ID][userID]) {
 			continue
 		}
 		result = append(result, p)
 	}
 	return result, nil
+}
+
+// projectVisibleFor reports whether a project with the given org bindings is
+// visible to a viewer with the given ancestor chain and membership state
+// (docs/org-structure.md §15-16). Nil units disables the org check (admins,
+// unassigned viewers — transition mode).
+func projectVisibleFor(boundUnits, units []string, isMember bool) bool {
+	if units == nil {
+		return true
+	}
+	return orgAllowsAny(boundUnits, units) || isMember
 }
 
 // orgAllowsAny reports whether any of the project's bound units is in the
@@ -786,20 +797,6 @@ func orgAllowsAny(boundUnits, units []string) bool {
 			if bound == u {
 				return true
 			}
-		}
-	}
-	return false
-}
-
-// isUserAllowed checks if a user is in the allowed_users list.
-// "*" means all users are allowed.
-func isUserAllowed(allowedUsers []string, userID string) bool {
-	if len(allowedUsers) == 0 {
-		return false // empty = admin only
-	}
-	for _, u := range allowedUsers {
-		if u == "*" || u == userID {
-			return true
 		}
 	}
 	return false
