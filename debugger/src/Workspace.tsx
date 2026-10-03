@@ -14,6 +14,7 @@ import { Add, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent } from './workspaceApi'
 import Markdown from './Markdown'
 import DelegationTree from './DelegationTree'
+import ListFilter, { matchesFilter } from './ListFilter'
 import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -176,6 +177,10 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   useEffect(scrollToBottom, [activeConv?.messages])
 
   const agentName = (id: string) => allAgents.find((a) => a.id === id)?.name ?? (t('chat.default_agent') ?? 'Default')
+
+  // Client-side filter for the conversation list sidebar.
+  const [convFilter, setConvFilter] = useState('')
+  const visibleConversations = conversations.filter((conv) => matchesFilter(convFilter, conv.title, conv.agentId ? agentName(conv.agentId) : ''))
 
   const createConversation = () => {
     const conv: Conversation = {
@@ -485,12 +490,18 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       <div className="workspace-sidebar">
         <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--tm-border)' }}>
           <Button renderIcon={Add} size="sm" onClick={() => { setNewChatAgentId(defaultAgentId ?? allAgents.find((a) => !a.project_id || a.project_id === project)?.id ?? ''); setShowNewChat(true) }} style={{ width: '100%' }}>{t('new.chat') ?? 'New chat'}</Button>
+          <div style={{ marginTop: '0.5rem' }}>
+            <ListFilter value={convFilter} onChange={setConvFilter} placeholder={t('common.filter_chats') ?? 'Filter chats…'} />
+          </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
           {conversations.length === 0 && (
             <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', padding: '1rem', textAlign: 'center' }}>No conversations yet</p>
           )}
-          {conversations.map((conv) => (
+          {conversations.length > 0 && visibleConversations.length === 0 && (
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', padding: '1rem', textAlign: 'center' }}>{t('common.no_matches') ?? 'Nothing matches the filter'}</p>
+          )}
+          {visibleConversations.map((conv) => (
             <div
               key={conv.id}
               onClick={() => setActiveConvId(conv.id)}

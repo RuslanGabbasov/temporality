@@ -28,6 +28,7 @@ import {
   type Whoami,
 } from './kernelApi'
 import { useT } from './i18n'
+import ListFilter, { matchesFilter } from './ListFilter'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -80,6 +81,8 @@ export default function Operations({ project }: { project: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [receipt, setReceipt] = useState<ReconcileReceipt | null>(null)
+  const [filter, setFilter] = useState('')
+  const visibleOps = ops.filter((op) => matchesFilter(filter, op.tool, op.server, op.operation_id))
 
   const load = useCallback(async (target = project, silent = false) => {
     if (!target.trim()) return
@@ -174,12 +177,15 @@ export default function Operations({ project }: { project: string }) {
         {/* Operation list */}
         <Column sm={4} md={4} lg={5}>
           <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', marginBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Heading style={{ fontSize: '1rem' }}>{t('operations.title') ?? 'Operations'}</Heading>
-                {ops.length > 0 && <Tag type="red" size="sm">{ops.length}</Tag>}
+            <div style={{ padding: '0.5rem 0', marginBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Heading style={{ fontSize: '1rem' }}>{t('operations.title') ?? 'Operations'}</Heading>
+                  {ops.length > 0 && <Tag type="red" size="sm">{visibleOps.length}</Tag>}
+                </div>
+                <button onClick={() => void load()} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
               </div>
-              <button onClick={() => void load()} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
+              <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_operations') ?? 'Filter operations…'} />
             </div>
             <Stack gap={1}>
               {ops.length === 0 && (
@@ -197,7 +203,7 @@ export default function Operations({ project }: { project: string }) {
                   <Button size="sm" kind="ghost" onClick={() => setSelectedSet(new Set())}>{t('operations.batch_clear') ?? 'Clear'}</Button>
                 </div>
               )}
-              {ops.map((op) => {
+              {visibleOps.map((op) => {
                 const info = toolInfo(op.tool, op.server)
                 const turn = turnOf(op.operation_id)
                 const isChecked = selectedSet.has(op.operation_id)

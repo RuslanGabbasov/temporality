@@ -19,6 +19,7 @@ import {
 } from '@carbon/react'
 import { Add, Edit, TrashCan, Copy, Star, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
+import ListFilter, { matchesFilter } from './ListFilter'
 import {
   workspaceApi,
   type Agent,
@@ -371,6 +372,10 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // to the current project; global agents (no project) are always visible.
   const visibleAgents = agents.filter((a) => !a.project_id || a.project_id === project)
 
+  // Client-side filter over the visible set (name/id).
+  const [filter, setFilter] = useState('')
+  const filteredAgents = visibleAgents.filter((a) => matchesFilter(filter, a.name, a.id, a.description))
+
   // Bindings are scoped to the current project (the runtime resolves skills
   // per project too). Ids assigned earlier from another project stay listed
   // with a marker so they can be reviewed and removed.
@@ -546,12 +551,15 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         {/* Agent list */}
         <Column sm={4} md={3} lg={4}>
           <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', marginBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
-              <Heading style={{ fontSize: '1rem' }}>{t('agents.count', { count: String(visibleAgents.length) }) ?? `Agents (${visibleAgents.length})`}</Heading>
+            <div style={{ padding: '0.5rem 0 0', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                <Heading style={{ fontSize: '1rem' }}>{t('agents.count', { count: String(filteredAgents.length) }) ?? `Agents (${filteredAgents.length})`}</Heading>
+              </div>
+              <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_agents') ?? 'Filter agents…'} />
             </div>
             <Stack gap={1}>
-              {visibleAgents.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('agents.none_created') ?? 'No agents yet'}</Tile>}
-              {visibleAgents.map((a) => (
+              {filteredAgents.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('agents.none_created') ?? 'No agents yet'}</Tile>}
+              {filteredAgents.map((a) => (
                 <Tile
                   key={a.id}
                   onClick={() => setSelectedId(a.id)}

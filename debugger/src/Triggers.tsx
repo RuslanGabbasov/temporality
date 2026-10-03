@@ -18,6 +18,7 @@ import {
 import { Add, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Trigger, type Agent } from './workspaceApi'
 import { useT } from './i18n'
+import ListFilter, { matchesFilter } from './ListFilter'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -36,6 +37,9 @@ export default function Triggers({ project }: { project: string }) {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Trigger | null>(null)
   const [form, setForm] = useState<Partial<Trigger> & { config: any }>({ type: 'schedule', name: '', enabled: true, config: {} })
+  const [filter, setFilter] = useState('')
+
+  const visibleTriggers = triggers.filter((tr) => matchesFilter(filter, tr.name, tr.type, tr.id))
 
   const load = useCallback(async () => {
     if (!project.trim()) return
@@ -112,9 +116,12 @@ export default function Triggers({ project }: { project: string }) {
     <div style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
         <Heading>{t('triggers.title') ?? 'Triggers'}</Heading>
         <Button renderIcon={Add} onClick={() => startCreate('schedule')}>{t('triggers.new_trigger') ?? 'New Trigger'}</Button>
+      </div>
+      <div style={{ position: 'sticky', top: '3rem', background: 'var(--tm-bg)', zIndex: 1, paddingBottom: '0.5rem', marginBottom: '0.5rem', maxWidth: '420px' }}>
+        <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_triggers') ?? 'Filter triggers…'} />
       </div>
 
       {triggers.length === 0 && !loading && (
@@ -125,7 +132,7 @@ export default function Triggers({ project }: { project: string }) {
       )}
 
       <Grid>
-        {triggers.map((trigger) => {
+        {visibleTriggers.map((trigger) => {
           const info = TYPE_INFO[trigger.type] ?? TYPE_INFO.schedule
           const cfg = typeof trigger.config === 'string' ? JSON.parse(trigger.config) : trigger.config
           return (

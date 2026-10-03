@@ -19,6 +19,7 @@ import {
 import { Add, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type MCPServer, type MCPToolInfo } from './workspaceApi'
 import { useT } from './i18n'
+import ListFilter, { matchesFilter } from './ListFilter'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -35,6 +36,9 @@ export default function Mcp({ project }: { project: string }) {
   const [discovered, setDiscovered] = useState<MCPToolInfo[]>([])
   const [discovering, setDiscovering] = useState(false)
   const [discoverError, setDiscoverError] = useState('')
+  const [filter, setFilter] = useState('')
+
+  const visibleServers = servers.filter((s) => matchesFilter(filter, s.name, s.id, s.command, s.url))
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -155,9 +159,12 @@ export default function Mcp({ project }: { project: string }) {
     <div style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
         <Heading>{t('mcp.title') ?? 'MCP Servers'}</Heading>
         <Button renderIcon={Add} onClick={startCreate}>{t('mcp.new_server') ?? 'New Server'}</Button>
+      </div>
+      <div style={{ position: 'sticky', top: '3rem', background: 'var(--tm-bg)', zIndex: 1, paddingBottom: '0.5rem', marginBottom: '0.5rem', maxWidth: '420px' }}>
+        <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_mcp') ?? 'Filter servers…'} />
       </div>
 
       {servers.length === 0 && !loading && (
@@ -168,7 +175,7 @@ export default function Mcp({ project }: { project: string }) {
       )}
 
       <Grid>
-        {servers.map((s) => (
+        {visibleServers.map((s) => (
           <Column key={s.id} sm={4} md={4} lg={4}>
             <Tile style={{ marginBottom: '0.75rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>

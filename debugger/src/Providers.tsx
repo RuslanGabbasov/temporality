@@ -14,6 +14,7 @@ import {
 import { Add, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Provider } from './workspaceApi'
 import { useT } from './i18n'
+import ListFilter, { matchesFilter } from './ListFilter'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -25,6 +26,9 @@ export default function Providers() {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Provider | null>(null)
   const [form, setForm] = useState<Partial<Provider>>({})
+  const [filter, setFilter] = useState('')
+
+  const visibleProviders = providers.filter((p) => matchesFilter(filter, p.name, p.base_url, p.id, ...(p.models ?? [])))
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -78,13 +82,16 @@ export default function Providers() {
     <div style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
         <Heading>{t('providers.title') ?? 'Model Providers'}</Heading>
         <Button renderIcon={Add} onClick={startCreate}>{t('providers.new_provider') ?? 'New Provider'}</Button>
       </div>
+      <div style={{ position: 'sticky', top: '3rem', background: 'var(--tm-bg)', zIndex: 1, paddingBottom: '0.5rem', marginBottom: '0.5rem', maxWidth: '420px' }}>
+        <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_providers') ?? 'Filter providers…'} />
+      </div>
 
       <Grid>
-        {providers.map((p) => (
+        {visibleProviders.map((p) => (
           <Column key={p.id} sm={4} md={4} lg={4}>
             <Tile style={{ marginBottom: '0.75rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>

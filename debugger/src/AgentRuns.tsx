@@ -17,6 +17,7 @@ import {
   Heading,
 } from '@carbon/react'
 import { Time, Play, ChevronDown, ChevronRight } from '@carbon/icons-react'
+import ListFilter, { matchesFilter } from './ListFilter'
 
 const KERNEL_API = '/kernel-api'
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -217,6 +218,8 @@ export default function AgentRuns({ project }: { project: string }) {
   const [reason, setReason] = useState('Reviewed in Agent Runs UI')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [filter, setFilter] = useState('')
+  const visibleRuns = runs.filter((event) => matchesFilter(filter, runID(event), String(event.data?.title ?? '')))
   const pending = useMemo(() => pendingApprovals(timeline), [timeline])
   // model.text_delta/model.reasoning carry each turn's response text. They are
   // joined into their model.completed row instead of polluting the trace with
@@ -341,13 +344,16 @@ export default function AgentRuns({ project }: { project: string }) {
         {/* Run list */}
         <Column sm={4} md={3} lg={4} style={{ minWidth: 0 }}>
           <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', marginBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
-              <Heading style={{ fontSize: '1rem' }}>{t('runs.count', { count: String(runs.length) })}</Heading>
-              <button onClick={() => { setSelected(''); setTimeline([]); void loadRuns(true) }} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
+            <div style={{ padding: '0.5rem 0 0', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                <Heading style={{ fontSize: '1rem' }}>{t('runs.count', { count: String(visibleRuns.length) })}</Heading>
+                <button onClick={() => { setSelected(''); setTimeline([]); void loadRuns(true) }} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
+              </div>
+              <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_runs') ?? 'Filter runs…'} />
             </div>
             <Stack gap={1}>
               {runs.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('runs.no_runs') ?? 'No runs for this project'}</Tile>}
-              {runs.map((event) => {
+              {visibleRuns.map((event) => {
                 const id = runID(event)
                 const rawTitle = event.data?.title
                 const title = typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle.trim() : ''

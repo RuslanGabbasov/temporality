@@ -16,6 +16,7 @@ import {
 import { Add, Edit, TrashCan, Key } from '@carbon/icons-react'
 import { workspaceApi, type User } from './workspaceApi'
 import { useT } from './i18n'
+import ListFilter, { matchesFilter } from './ListFilter'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -30,6 +31,9 @@ export default function Users() {
   const [generatedToken, setGeneratedToken] = useState<string | null>(null)
   const [tokenUser, setTokenUser] = useState<User | null>(null)
   const [confirmRegen, setConfirmRegen] = useState<User | null>(null)
+  const [filter, setFilter] = useState('')
+
+  const visibleUsers = users.filter((u) => matchesFilter(filter, u.name, u.email, u.role, u.id))
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -118,13 +122,16 @@ export default function Users() {
     <div style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
         <Heading>{t('users.title') ?? 'Users'}</Heading>
         <Button renderIcon={Add} onClick={startCreate}>{t('new.user') ?? 'New User'}</Button>
       </div>
+      <div style={{ position: 'sticky', top: '3rem', background: 'var(--tm-bg)', zIndex: 1, paddingBottom: '0.5rem', marginBottom: '0.5rem', maxWidth: '420px' }}>
+        <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_users') ?? 'Filter users…'} />
+      </div>
 
       <Grid>
-        {users.map((u) => (
+        {visibleUsers.map((u) => (
           <Column key={u.id} sm={4} md={4} lg={4}>
             <Tile style={{ marginBottom: '0.75rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>

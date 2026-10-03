@@ -14,6 +14,7 @@ import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
 import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion } from './workspaceApi'
 import { useT } from './i18n'
+import ListFilter, { matchesFilter } from './ListFilter'
 import Markdown from './Markdown'
 import SkillManifestEditor, { manifestToYaml, type SkillManifest, type ManifestSuggestions, type SectionProvenance } from './SkillManifestEditor'
 
@@ -85,6 +86,7 @@ export default function Skills({ project }: { project: string }) {
   const [draftQuestions, setDraftQuestions] = useState<SkillDraftQuestion[]>([])
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [provenance, setProvenance] = useState<Record<string, SectionProvenance>>({})
+  const [filter, setFilter] = useState('')
 
   const load = useCallback(async () => {
     if (!project.trim()) return
@@ -98,6 +100,8 @@ export default function Skills({ project }: { project: string }) {
   }, [project])
 
   useEffect(() => { void load() }, [load])
+
+  const visibleSkills = skills.filter((s) => matchesFilter(filter, s.name, s.id, s.description))
 
   // Autosuggest values for the manifest editor: tools from builtins + MCP,
   // capabilities collected from existing skills, mcp from server names.
@@ -304,7 +308,10 @@ export default function Skills({ project }: { project: string }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 300px) 1fr', gap: '1rem', alignItems: 'start' }}>
           {/* Skills list — sticks below the fixed app header like Runs/Operations */}
           <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
-            {skills.map((skill) => (
+            <div style={{ position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1, paddingBottom: '0.25rem' }}>
+              <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_skills') ?? 'Filter skills…'} />
+            </div>
+            {visibleSkills.map((skill) => (
               <Tile
                 key={skill.id}
                 style={{
