@@ -72,9 +72,11 @@ const cleanList = (values?: string[]) =>
 const listToText = (values?: string[]) => (values ?? []).join('\n')
 
 /** Capabilities actually set (undefined = allowed, matches server semantics). */
-function setCaps(caps?: AgentCapabilities): Partial<Record<CapKey, boolean>> {
-  const result: Partial<Record<CapKey, boolean>> = {}
-  for (const key of CAP_KEYS) {
+function setCaps(caps?: AgentCapabilities): AgentCapabilities {
+  const result: AgentCapabilities = {}
+  // Delegation is serialized with the rest: the backend default is denied,
+  // so dropping it here would silently revoke a granted toggle on save.
+  for (const key of [...CAP_KEYS, 'delegation'] as const) {
     const value = caps?.[key]
     if (typeof value === 'boolean') result[key] = value
   }
@@ -469,6 +471,14 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
 
   const capLabel = (key: CapKey) => t(`agents.cap.${key}`) ?? key
 
+  // Capabilities diff for the regen proposal: disabled caps plus delegation
+  // (opt-in, so it is only listed when granted).
+  const capSummary = (caps?: AgentCapabilities) => {
+    const parts = disabledCaps(caps).map(capLabel)
+    if (caps?.delegation === true) parts.push(t('agents.cap.delegation') ?? 'Delegate to other agents')
+    return parts.join(', ') || (t('agents.all_caps') ?? 'all allowed')
+  }
+
   const regenRows = regenDraft
     ? [
         { section: 'identity' as SectionKey, label: t('agents.name') ?? 'Name', current: form.name ?? '', proposed: regenDraft.name },
@@ -476,8 +486,8 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         {
           section: 'capabilities' as SectionKey,
           label: t('agents.capabilities') ?? 'Capabilities',
-          current: disabledCaps(form.definition?.capabilities).map(capLabel).join(', ') || (t('agents.all_caps') ?? 'all allowed'),
-          proposed: disabledCaps(regenDraft.capabilities).map(capLabel).join(', ') || (t('agents.all_caps') ?? 'all allowed'),
+          current: capSummary(form.definition?.capabilities),
+          proposed: capSummary(regenDraft.capabilities),
         },
         {
           section: 'constraints' as SectionKey,
