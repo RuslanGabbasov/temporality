@@ -385,6 +385,7 @@ Temporality поставляется с кураторскими шаблона�
 
 * Coder
 * Reviewer
+* QA
 * Researcher
 * DevOps
 

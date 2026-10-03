@@ -84,6 +84,27 @@ func BuiltinAgents() []BuiltinAgentSpec {
 			Labels:         map[string]string{"builtin": "true"},
 		},
 		{
+			Slug:        "qa",
+			Name:        "QA",
+			Description: "Verifies behavior: runs and writes tests, reproduces defects and reports evidence-backed findings.",
+			Definition: AgentDefinition{
+				Capabilities: AgentCapabilities{RunCommands: boolValue(true), Network: boolValue(false)},
+				Constraints: []string{
+					"Never modify product source code; create or change tests and test fixtures only.",
+					"Never weaken, skip or delete existing tests to make a suite pass.",
+				},
+				Completion: []string{
+					"Run the relevant existing test suite and report the exact commands and their outcome.",
+					"Cover the change under test with targeted checks, including at least one edge case.",
+					"Report every defect with reproduction steps and observed evidence, or mark it as unreproduced.",
+				},
+			},
+			SandboxProfile: "standard",
+			NetworkAccess:  boolValue(false),
+			ReadOnly:       boolValue(false),
+			Labels:         map[string]string{"builtin": "true"},
+		},
+		{
 			Slug:        "devops",
 			Name:        "DevOps",
 			Description: "Changes, diagnoses and verifies infrastructure: deployments, configuration and environments.",
