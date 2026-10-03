@@ -11,9 +11,10 @@ import (
 
 // Skill is a Living Skill: a versioned capability (SKILL.md + skill.yaml
 // manifest). Manifest is stored as parsed JSON; versions are immutable.
+// Skills are workspace-global: agents bind them across every project; where
+// a skill ran is recorded per execution in SkillExecution.ProjectID.
 type Skill struct {
 	ID          string          `json:"id"`
-	ProjectID   string          `json:"project_id"`
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Version     string          `json:"version"`
@@ -51,9 +52,9 @@ func (s *Store) CreateSkill(ctx context.Context, sk *Skill) error {
 	sk.CreatedAt = now
 	sk.UpdatedAt = now
 	if _, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_skill (id, project_id, name, description, version, markdown, manifest, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		sk.ID, sk.ProjectID, sk.Name, sk.Description, sk.Version, sk.Markdown, manifestOrNull(sk.Manifest), sk.CreatedAt, sk.UpdatedAt); err != nil {
+		`INSERT INTO workspace_skill (id, name, description, version, markdown, manifest, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		sk.ID, sk.Name, sk.Description, sk.Version, sk.Markdown, manifestOrNull(sk.Manifest), sk.CreatedAt, sk.UpdatedAt); err != nil {
 		return err
 	}
 	_, err := s.pool.Exec(ctx,
@@ -67,8 +68,8 @@ func (s *Store) GetSkill(ctx context.Context, id string) (Skill, error) {
 	var sk Skill
 	var manifest []byte
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, project_id, name, description, version, markdown, manifest, created_at, updated_at FROM workspace_skill WHERE id = $1`, id).
-		Scan(&sk.ID, &sk.ProjectID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &sk.CreatedAt, &sk.UpdatedAt)
+		`SELECT id, name, description, version, markdown, manifest, created_at, updated_at FROM workspace_skill WHERE id = $1`, id).
+		Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &sk.CreatedAt, &sk.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sk, ErrNotFound
 	}
@@ -76,21 +77,10 @@ func (s *Store) GetSkill(ctx context.Context, id string) (Skill, error) {
 	return sk, err
 }
 
-func (s *Store) ListSkills(ctx context.Context, projectID string) ([]Skill, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, name, description, version, markdown, manifest, created_at, updated_at
-		 FROM workspace_skill WHERE project_id = $1 ORDER BY created_at`, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanSkills(rows)
-}
-
 func (s *Store) ListAllSkills(ctx context.Context) ([]Skill, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, name, description, version, markdown, manifest, created_at, updated_at
-		 FROM workspace_skill ORDER BY created_at`)
+		`SELECT id, name, description, version, markdown, manifest, created_at, updated_at
+			 FROM workspace_skill ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +93,7 @@ func scanSkills(rows pgx.Rows) ([]Skill, error) {
 	for rows.Next() {
 		var sk Skill
 		var manifest []byte
-		if err := rows.Scan(&sk.ID, &sk.ProjectID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &sk.CreatedAt, &sk.UpdatedAt); err != nil {
+		if err := rows.Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &sk.CreatedAt, &sk.UpdatedAt); err != nil {
 			return nil, err
 		}
 		sk.Manifest = rawMessage(manifest)

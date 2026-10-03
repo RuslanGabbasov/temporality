@@ -483,11 +483,8 @@ func (a *Activities) workspaceDo(ctx context.Context, method, url string, body a
 // change only through proposals and approval, never from a run
 // (docs/living-skills.md §26).
 func (a *Activities) handleSkillSearch(ctx context.Context, request ToolRequest) (ToolResult, error) {
-	project := request.Project
-	if project == "" {
-		return ToolResult{Content: "error: project not set"}, nil
-	}
-	url := fmt.Sprintf("%s/v1/workspace/skills?project=%s", a.WorkspaceURL, urlQueryEscape(project))
+	// Skills are workspace-global: the registry is shared across projects.
+	url := fmt.Sprintf("%s/v1/workspace/skills", a.WorkspaceURL)
 	body, status, err := a.workspaceDo(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
@@ -593,10 +590,6 @@ func (a *Activities) handleSkillValidate(ctx context.Context, skillID string) (T
 // §26 skills change through proposals: the draft lands as version 0.x for
 // human review in the Skills UI, it is never silently promoted.
 func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest) (ToolResult, error) {
-	project := request.Project
-	if project == "" {
-		return ToolResult{Content: "error: project not set"}, nil
-	}
 	description, _ := request.Arguments["description"].(string)
 	if strings.TrimSpace(description) == "" {
 		return ToolResult{Content: "error: description is required"}, nil
@@ -648,7 +641,6 @@ func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest
 	}
 	payload := map[string]any{
 		"id":            id,
-		"project_id":    project,
 		"name":          draft.Name,
 		"description":   draft.Description,
 		"version":       version,

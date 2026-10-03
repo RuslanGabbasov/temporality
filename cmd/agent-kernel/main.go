@@ -135,6 +135,10 @@ func main() {
 		log.Error("migrate workspace v32", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000033_skills_mcp_global.up.sql"); err != nil {
+		log.Error("migrate workspace v33", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -1539,18 +1543,10 @@ func main() {
 		writeJSON(w, 200, map[string]bool{"deleted": true})
 	})
 
-	// Skills (Living Skills registry — docs/living-skills.md)
+	// Skills (Living Skills registry — docs/living-skills.md). Skills are
+	// workspace-global: one registry shared by every project.
 	mux.HandleFunc("GET /v1/workspace/skills", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
-			return
-		}
-		if project := r.URL.Query().Get("project"); project != "" {
-			list, err := ws.ListSkills(r.Context(), project)
-			if err != nil {
-				writeError(w, 500, err)
-				return
-			}
-			writeJSON(w, 200, map[string]any{"skills": list, "count": len(list)})
 			return
 		}
 		list, err := ws.ListAllSkills(r.Context())
@@ -1576,14 +1572,6 @@ func main() {
 		}
 		if skill.ID == "" {
 			writeError(w, 422, errors.New("id is required"))
-			return
-		}
-		if skill.ProjectID == "" {
-			writeError(w, 422, errors.New("project_id is required"))
-			return
-		}
-		if _, err := ws.GetProject(r.Context(), skill.ProjectID); err != nil {
-			writeError(w, 422, errors.New("project not found"))
 			return
 		}
 		if err := ws.CreateSkill(r.Context(), &skill); err != nil {
@@ -1620,18 +1608,6 @@ func main() {
 		if err != nil {
 			writeError(w, 422, err)
 			return
-		}
-		current, err := ws.GetSkill(r.Context(), skill.ID)
-		if err != nil {
-			if errors.Is(err, workspace.ErrNotFound) {
-				writeError(w, 404, err)
-				return
-			}
-			writeError(w, 500, err)
-			return
-		}
-		if skill.ProjectID == "" {
-			skill.ProjectID = current.ProjectID
 		}
 		if err := ws.UpdateSkill(r.Context(), &skill); err != nil {
 			writeError(w, 500, err)
@@ -1729,7 +1705,7 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
-		memory, err := skillMemory(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), skill.ProjectID, skill.ID)
+		memory, err := skillMemory(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), skill.ID)
 		if err != nil {
 			writeError(w, 502, err)
 			return
@@ -1737,18 +1713,9 @@ func main() {
 		writeJSON(w, 200, map[string]any{"memory": memory})
 	})
 
-	// MCP servers (project-scoped registry; stdio / sse / http)
+	// MCP servers (workspace-global registry; stdio / sse / http)
 	mux.HandleFunc("GET /v1/workspace/mcp-servers", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
-			return
-		}
-		if project := r.URL.Query().Get("project"); project != "" {
-			list, err := ws.ListMCPServers(r.Context(), project)
-			if err != nil {
-				writeError(w, 500, err)
-				return
-			}
-			writeJSON(w, 200, map[string]any{"servers": list, "count": len(list)})
 			return
 		}
 		list, err := ws.ListAllMCPServers(r.Context())
@@ -1773,14 +1740,6 @@ func main() {
 		}
 		if req.ID == "" {
 			req.ID = slugify(req.Name)
-		}
-		if req.ProjectID == "" {
-			writeError(w, 422, errors.New("project_id is required"))
-			return
-		}
-		if _, err := ws.GetProject(r.Context(), req.ProjectID); err != nil {
-			writeError(w, 422, errors.New("project not found"))
-			return
 		}
 		server := req.toServer("")
 		cfg := mcpConfig(server)
@@ -1834,7 +1793,6 @@ func main() {
 			return
 		}
 		server := req.toServer(current.ID)
-		server.ProjectID = current.ProjectID
 		cfg := mcpConfig(server)
 		if err := cfg.Validate(); err != nil {
 			writeError(w, 422, err)
@@ -2387,21 +2345,10 @@ func resolveAgentSkills(ctx context.Context, ws *workspace.Store, a *workspace.A
 	if a == nil || len(a.Skills) == 0 {
 		return
 	}
-	// Skills are project artifacts (docs/living-skills.md): resolve them
-	// against the project the run happens in — the agent stays
-	// cross-functional. The agent's own project only matters for legacy
-	// project-scoped agents without run context.
-	project := ""
-	if input != nil {
-		project = input.Project
-	}
-	if project == "" {
-		project = a.ProjectID
-	}
-	if project == "" {
-		return
-	}
-	all, _ := ws.ListSkills(ctx, project)
+	// Skills are workspace-global (docs/living-skills.md): resolve them from
+	// the shared registry; the run's project only lands in the execution
+	// provenance record, never in skill resolution.
+	all, _ := ws.ListAllSkills(ctx)
 	byID := make(map[string]workspace.Skill, len(all))
 	for _, s := range all {
 		byID[s.ID] = s
@@ -2658,7 +2605,6 @@ func mcpConfig(m workspace.MCPServer) mcpclient.ServerConfig {
 // mcpServerRequest is the API payload for creating/updating MCP servers.
 type mcpServerRequest struct {
 	ID            string            `json:"id"`
-	ProjectID     string            `json:"project_id"`
 	Name          string            `json:"name"`
 	Type          string            `json:"type"`
 	URL           string            `json:"url"`
@@ -2681,7 +2627,7 @@ func (req mcpServerRequest) toServer(id string) workspace.MCPServer {
 		enabled = *req.Enabled
 	}
 	return workspace.MCPServer{
-		ID: serverID, ProjectID: req.ProjectID, Name: req.Name, Type: strings.ToLower(strings.TrimSpace(req.Type)),
+		ID: serverID, Name: req.Name, Type: strings.ToLower(strings.TrimSpace(req.Type)),
 		URL: strings.TrimSpace(req.URL), Command: strings.TrimSpace(req.Command),
 		Args: req.Args, Env: req.Env, Headers: req.Headers,
 		AllowedTools: req.AllowedTools, ApprovalTools: req.ApprovalTools,
@@ -2735,7 +2681,6 @@ func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, 
 // YAML text (skill.yaml) and is stored parsed.
 type skillRequest struct {
 	ID           string `json:"id"`
-	ProjectID    string `json:"project_id"`
 	Name         string `json:"name"`
 	Description  string `json:"description"`
 	Version      string `json:"version"`
@@ -2790,15 +2735,16 @@ func (req skillRequest) toSkill(skillID string) (workspace.Skill, error) {
 		version = manifest.Version
 	}
 	return workspace.Skill{
-		ID: id, ProjectID: req.ProjectID, Name: name, Description: req.Description,
+		ID: id, Name: name, Description: req.Description,
 		Version: version, Markdown: req.Markdown, Manifest: skills.MarshalJSONForStorage(manifest),
 	}, nil
 }
 
 // skillMemory returns knowledge linked to a skill: knowledge.proposed events
 // carrying data.skill_id, enriched with current state from the knowledge
-// projection.
-func skillMemory(ctx context.Context, observationURL, apiToken, project, skillID string) ([]map[string]any, error) {
+// projection. Skills are workspace-global, so events are scanned without a
+// project filter and states are fetched for every project the skill ran in.
+func skillMemory(ctx context.Context, observationURL, apiToken, skillID string) ([]map[string]any, error) {
 	query := func(path string) ([]byte, error) {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, observationURL+path, nil)
 		if err != nil {
@@ -2821,9 +2767,17 @@ func skillMemory(ctx context.Context, observationURL, apiToken, project, skillID
 		}
 		return body, nil
 	}
-	// Current states from the knowledge projection.
+	// Current states from the knowledge projection, per project the matched
+	// events belong to (the endpoint requires a project).
 	states := map[string]string{}
-	if body, err := query("/v1/observations/knowledge?project=" + url.QueryEscape(project)); err == nil {
+	fetchStates := func(project string) {
+		if project == "" {
+			return
+		}
+		body, err := query("/v1/observations/knowledge?project=" + url.QueryEscape(project))
+		if err != nil {
+			return
+		}
 		var projection struct {
 			Knowledge []struct {
 				ID    string `json:"id"`
@@ -2836,10 +2790,11 @@ func skillMemory(ctx context.Context, observationURL, apiToken, project, skillID
 			}
 		}
 	}
+	stateProjects := map[string]bool{}
 	var result []map[string]any
 	cursor := ""
 	for {
-		path := "/v1/observations/events?project=" + url.QueryEscape(project) + "&type=knowledge.proposed&limit=500"
+		path := "/v1/observations/events?type=knowledge.proposed&limit=500"
 		if cursor != "" {
 			path += "&cursor=" + url.QueryEscape(cursor)
 		}
@@ -2852,7 +2807,8 @@ func skillMemory(ctx context.Context, observationURL, apiToken, project, skillID
 				EventID    string `json:"event_id"`
 				OccurredAt string `json:"occurred_at"`
 				Context    struct {
-					Run string `json:"run"`
+					Run     string `json:"run"`
+					Project string `json:"project"`
 				} `json:"context"`
 				Data map[string]any `json:"data"`
 			} `json:"events"`
@@ -2865,12 +2821,17 @@ func skillMemory(ctx context.Context, observationURL, apiToken, project, skillID
 			if id, _ := event.Data["skill_id"].(string); id != skillID {
 				continue
 			}
+			if !stateProjects[event.Context.Project] {
+				stateProjects[event.Context.Project] = true
+				fetchStates(event.Context.Project)
+			}
 			knowledgeID, _ := event.Data["knowledge_id"].(string)
 			item := map[string]any{
 				"knowledge_id": knowledgeID,
 				"proposition":  event.Data["proposition"],
 				"capability":   event.Data["capability"],
 				"run_id":       event.Context.Run,
+				"project":      event.Context.Project,
 				"event_id":     event.EventID,
 				"occurred_at":  event.OccurredAt,
 			}

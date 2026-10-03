@@ -9,13 +9,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// MCPServer is a project-scoped MCP server connection. Type selects the
+// MCPServer is a workspace-global MCP server connection. Type selects the
 // transport: stdio (command + args + env), sse or http (url + headers).
 // AllowedTools/ApprovalTools store original tool names from the server;
 // empty AllowedTools exposes every tool the server advertises.
 type MCPServer struct {
 	ID            string            `json:"id"`
-	ProjectID     string            `json:"project_id"`
 	Name          string            `json:"name"`
 	Type          string            `json:"type"` // stdio | sse | http
 	URL           string            `json:"url,omitempty"`
@@ -52,9 +51,9 @@ func (s *Store) CreateMCPServer(ctx context.Context, m *MCPServer) error {
 	m.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO workspace_mcp_server
-		 (id, project_id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-		m.ID, m.ProjectID, m.Name, m.Type, m.URL, m.Command,
+			(id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		m.ID, m.Name, m.Type, m.URL, m.Command,
 		marshalStrings(m.Args), marshalStrings(m.Env), marshalMap(m.Headers),
 		marshalStrings(m.AllowedTools), marshalStrings(m.ApprovalTools),
 		m.Enabled, m.CreatedAt, m.UpdatedAt)
@@ -65,9 +64,9 @@ func (s *Store) GetMCPServer(ctx context.Context, id string) (MCPServer, error) 
 	var m MCPServer
 	var args, env, headers, allowed, approval []byte
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, project_id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, created_at, updated_at
+		`SELECT id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, created_at, updated_at
 		 FROM workspace_mcp_server WHERE id = $1`, id).
-		Scan(&m.ID, &m.ProjectID, &m.Name, &m.Type, &m.URL, &m.Command, &args, &env, &headers, &allowed, &approval, &m.Enabled, &m.CreatedAt, &m.UpdatedAt)
+		Scan(&m.ID, &m.Name, &m.Type, &m.URL, &m.Command, &args, &env, &headers, &allowed, &approval, &m.Enabled, &m.CreatedAt, &m.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return m, ErrNotFound
 	}
@@ -77,20 +76,9 @@ func (s *Store) GetMCPServer(ctx context.Context, id string) (MCPServer, error) 
 	return scanMCPServer(m, args, env, headers, allowed, approval), nil
 }
 
-func (s *Store) ListMCPServers(ctx context.Context, projectID string) ([]MCPServer, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, created_at, updated_at
-		 FROM workspace_mcp_server WHERE project_id = $1 ORDER BY created_at`, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanMCPServers(rows)
-}
-
 func (s *Store) ListAllMCPServers(ctx context.Context) ([]MCPServer, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, created_at, updated_at
+		`SELECT id, name, type, url, command, args, env, headers, allowed_tools, approval_tools, enabled, created_at, updated_at
 		 FROM workspace_mcp_server ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -135,7 +123,7 @@ func scanMCPServers(rows pgx.Rows) ([]MCPServer, error) {
 	for rows.Next() {
 		var m MCPServer
 		var args, env, headers, allowed, approval []byte
-		if err := rows.Scan(&m.ID, &m.ProjectID, &m.Name, &m.Type, &m.URL, &m.Command, &args, &env, &headers, &allowed, &approval, &m.Enabled, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &m.Type, &m.URL, &m.Command, &args, &env, &headers, &allowed, &approval, &m.Enabled, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, scanMCPServer(m, args, env, headers, allowed, approval))
