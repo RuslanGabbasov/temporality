@@ -484,7 +484,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       {/* Left panel: conversations */}
       <div className="workspace-sidebar">
         <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--tm-border)' }}>
-          <Button renderIcon={Add} size="sm" onClick={() => { setNewChatAgentId(defaultAgentId ?? allAgents[0]?.id ?? ''); setShowNewChat(true) }} style={{ width: '100%' }}>{t('new.chat') ?? 'New chat'}</Button>
+          <Button renderIcon={Add} size="sm" onClick={() => { setNewChatAgentId(defaultAgentId ?? allAgents.find((a) => !a.project_id || a.project_id === project)?.id ?? ''); setShowNewChat(true) }} style={{ width: '100%' }}>{t('new.chat') ?? 'New chat'}</Button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
           {conversations.length === 0 && (
@@ -629,7 +629,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
             <div style={{ textAlign: 'center' }}>
               <Heading>{t('chat.title') ?? 'Temporality Agent'}</Heading>
               <p style={{ marginTop: '0.5rem' }}>{t('chat.select_conversation') ?? 'Select a conversation or start a new one.'}</p>
-              <Button renderIcon={Add} onClick={() => { setNewChatAgentId(defaultAgentId ?? allAgents[0]?.id ?? ''); setShowNewChat(true) }} style={{ marginTop: '1rem' }}>{t('new.chat') ?? 'New chat'}</Button>
+              <Button renderIcon={Add} onClick={() => { setNewChatAgentId(defaultAgentId ?? allAgents.find((a) => !a.project_id || a.project_id === project)?.id ?? ''); setShowNewChat(true) }} style={{ marginTop: '1rem' }}>{t('new.chat') ?? 'New chat'}</Button>
             </div>
           </div>
         )}
@@ -649,7 +649,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
               {defaultAgentId && (
                 <SelectItem value="" text={`${t('chat.project_default') ?? 'Project default'} (${allAgents.find((a) => a.id === defaultAgentId)?.name ?? defaultAgentId})`} />
               )}
-              {allAgents.filter((a) => a.id !== defaultAgentId).map((a) => <SelectItem key={a.id} value={a.id} text={`${a.name}${a.model ? ` (${a.model})` : ''}`} />)}
+              {allAgents.filter((a) => a.id !== defaultAgentId && (!a.project_id || a.project_id === project)).map((a) => <SelectItem key={a.id} value={a.id} text={`${a.name}${a.model ? ` (${a.model})` : ''}`} />)}
             </Select>
             {!defaultAgentId && (
               <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.5rem 0 0' }}>{t('chat.no_default_hint') ?? 'This project has no default agent yet — set one on the Agents page.'}</p>

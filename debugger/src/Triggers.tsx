@@ -187,7 +187,7 @@ export default function Triggers({ project }: { project: string }) {
             <TextInput id="trigger-name" labelText={t('triggers.name') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="Daily report" />
             <Select id="trigger-agent" labelText={t('triggers.agent') ?? 'Agent'} value={form.agent_id ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, agent_id: e.target.value })}>
               <SelectItem value="" text={t('triggers.default_agent') ?? 'Default agent'} />
-              {agents.map((a) => <SelectItem key={a.id} value={a.id} text={a.name} />)}
+              {agents.filter((a) => !a.project_id || a.project_id === project).map((a) => <SelectItem key={a.id} value={a.id} text={a.name} />)}
             </Select>
 
             {/* Schedule config */}

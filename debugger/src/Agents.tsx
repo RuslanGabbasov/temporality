@@ -364,10 +364,16 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
 
   const selected = agents.find((a) => a.id === selectedId) ?? null
 
-  // Auto-select the first agent once the list is loaded.
+  // Every project gets its own copy of the builtin agents on creation, so a
+  // global list shows one duplicate per extra project. The panel is scoped
+  // to the current project; global agents (no project) are always visible.
+  const visibleAgents = agents.filter((a) => !a.project_id || a.project_id === project)
+
+  // Auto-select the first visible agent once the list is loaded.
   useEffect(() => {
-    if (!selectedId && agents.length > 0) setSelectedId(agents[0].id)
-  }, [agents, selectedId])
+    if (!selectedId && visibleAgents.length > 0) setSelectedId(visibleAgents[0].id)
+    if (selectedId && !visibleAgents.some((a) => a.id === selectedId) && visibleAgents.length > 0) setSelectedId(visibleAgents[0].id)
+  }, [visibleAgents, selectedId])
 
   // Overview needs the compiled prompt; evolution needs versions × runs.
   useEffect(() => {
@@ -522,11 +528,11 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         <Column sm={4} md={3} lg={4}>
           <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', marginBottom: '0.5rem', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
-              <Heading style={{ fontSize: '1rem' }}>{t('agents.count', { count: String(agents.length) }) ?? `Agents (${agents.length})`}</Heading>
+              <Heading style={{ fontSize: '1rem' }}>{t('agents.count', { count: String(visibleAgents.length) }) ?? `Agents (${visibleAgents.length})`}</Heading>
             </div>
             <Stack gap={1}>
-              {agents.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('agents.none_created') ?? 'No agents yet'}</Tile>}
-              {agents.map((a) => (
+              {visibleAgents.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('agents.none_created') ?? 'No agents yet'}</Tile>}
+              {visibleAgents.map((a) => (
                 <Tile
                   key={a.id}
                   onClick={() => setSelectedId(a.id)}
