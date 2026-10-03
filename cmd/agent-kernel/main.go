@@ -139,6 +139,10 @@ func main() {
 		log.Error("migrate workspace v33", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000034_org_structure.up.sql"); err != nil {
+		log.Error("migrate workspace v34", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -198,8 +202,9 @@ func main() {
 		}
 	}
 	// refreshUserTokens reloads workspace-user tokens from the database into
-	// the gate. Called at startup and after every user mutation, so created,
-	// edited, deactivated, deleted and regenerated tokens apply immediately.
+	// the gate. Called at startup and after every user or org mutation, so
+	// created, edited, deactivated, deleted and regenerated tokens apply
+	// immediately — and org chains stay in sync with tree moves.
 	refreshUserTokens := func() {
 		reloadCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -207,6 +212,16 @@ func main() {
 		if err != nil {
 			log.Error("load workspace user tokens", "error", err)
 			return
+		}
+		// One query for the whole tree; user chains resolve from the paths.
+		units, err := ws.ListOrgUnits(reloadCtx)
+		if err != nil {
+			log.Error("load org units for user tokens", "error", err)
+			return
+		}
+		unitByID := make(map[string]workspace.OrgUnit, len(units))
+		for _, u := range units {
+			unitByID[u.ID] = u
 		}
 		principals := make(map[string]controlplane.Principal, len(users))
 		for _, u := range users {
@@ -222,7 +237,18 @@ func main() {
 			if len(u.Projects) > 0 {
 				projects = u.Projects
 			}
-			principals[u.Token] = controlplane.Principal{Subject: u.Name, Role: role, Projects: projects, UserID: u.ID}
+			var visible []string
+			if u.OrgUnitID != "" {
+				if unit, ok := unitByID[u.OrgUnitID]; ok {
+					visible = unit.Ancestors()
+				} else {
+					log.Error("skip org visibility for user: unknown unit", "user", u.Name, "unit", u.OrgUnitID)
+				}
+			}
+			principals[u.Token] = controlplane.Principal{
+				Subject: u.Name, Role: role, Projects: projects, UserID: u.ID,
+				OrgUnitID: u.OrgUnitID, VisibleUnits: visible,
+			}
 		}
 		gate.SetDBTokens(principals)
 		log.Info("loaded workspace user tokens", "count", len(principals))
@@ -242,7 +268,7 @@ func main() {
 			writeJSON(w, 200, map[string]any{"subject": "anonymous", "role": "admin", "projects": []string{"*"}, "auth_enabled": false})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"subject": principal.Subject, "role": principal.Role.String(), "projects": principal.Projects, "auth_enabled": true, "user_id": principal.UserID})
+		writeJSON(w, 200, map[string]any{"subject": principal.Subject, "role": principal.Role.String(), "projects": principal.Projects, "auth_enabled": true, "user_id": principal.UserID, "org_unit_id": principal.OrgUnitID})
 	})
 	mux.HandleFunc("POST /v1/agent/runs", func(w http.ResponseWriter, r *http.Request) {
 		var input agent.RunInput
@@ -458,6 +484,160 @@ func main() {
 		}
 		writeJSON(w, 201, map[string]any{"event_id": event.EventID, "operation_id": request.OperationID, "effect": request.Effect, "recorded": true})
 	})
+	// visibleUnits returns the org chain a principal sees resources in; nil
+	// means unfiltered — admins, service tokens and users not yet assigned to
+	// an org unit (docs/org-structure.md §4 gradual migration).
+	visibleUnits := func(r *http.Request) []string {
+		principal, ok := controlplane.FromContext(r.Context())
+		if !ok || principal.Role >= controlplane.RoleAdmin {
+			return nil
+		}
+		return principal.VisibleUnits
+	}
+
+	// Org structure CRUD (docs/org-structure.md §5). The tree itself is
+	// admin-only to mutate: moving nodes reshapes visibility for everyone.
+	mux.HandleFunc("GET /v1/org/units", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		units, err := ws.ListOrgUnits(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"units": units})
+	})
+	mux.HandleFunc("POST /v1/org/units", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		var req workspace.CreateOrgUnitRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Name) == "" {
+			writeError(w, 422, errors.New("name is required"))
+			return
+		}
+		if req.Kind == "" {
+			req.Kind = workspace.OrgKindDepartment
+		}
+		if req.ID == "" {
+			req.ID = slugify(req.Name)
+		}
+		unit := &workspace.OrgUnit{ID: req.ID, ParentID: req.ParentID, Kind: req.Kind, Name: req.Name}
+		if err := ws.CreateOrgUnit(r.Context(), unit); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		refreshUserTokens()
+		writeJSON(w, 201, unit)
+	})
+	mux.HandleFunc("PUT /v1/org/units/{unitID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		var req workspace.CreateOrgUnitRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Name) == "" {
+			writeError(w, 422, errors.New("name is required"))
+			return
+		}
+		if req.Kind == "" {
+			req.Kind = workspace.OrgKindDepartment
+		}
+		unit := workspace.OrgUnit{ID: r.PathValue("unitID"), Kind: req.Kind, Name: req.Name}
+		if err := ws.UpdateOrgUnit(r.Context(), unit); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		// Optional re-parenting: parent_id present and different triggers a move.
+		if req.ParentID != "" {
+			current, err := ws.GetOrgUnit(r.Context(), unit.ID)
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			if current.ParentID != req.ParentID {
+				if err := ws.MoveOrgUnit(r.Context(), unit.ID, req.ParentID); err != nil {
+					if errors.Is(err, workspace.ErrCycle) {
+						writeError(w, 409, err)
+						return
+					}
+					writeError(w, 500, err)
+					return
+				}
+			}
+		}
+		updated, err := ws.GetOrgUnit(r.Context(), unit.ID)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		refreshUserTokens()
+		writeJSON(w, 200, updated)
+	})
+	mux.HandleFunc("DELETE /v1/org/units/{unitID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		if err := ws.DeleteOrgUnit(r.Context(), r.PathValue("unitID")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			if errors.Is(err, workspace.ErrUnitNotEmpty) {
+				writeError(w, 409, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		refreshUserTokens()
+		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+	mux.HandleFunc("GET /v1/org/units/{unitID}/resources", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		resources, err := ws.ListUnitResources(r.Context(), r.PathValue("unitID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, resources)
+	})
+	mux.HandleFunc("PUT /v1/org/resources/{kind}/{resourceID}/binding", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		var req struct {
+			OrgUnitID string `json:"org_unit_id"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if err := ws.SetResourceOrgUnit(r.Context(), r.PathValue("kind"), r.PathValue("resourceID"), req.OrgUnitID); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 400, err)
+			return
+		}
+		writeJSON(w, 200, map[string]string{"kind": r.PathValue("kind"), "resource_id": r.PathValue("resourceID"), "org_unit_id": req.OrgUnitID})
+	})
+
 	// Workspace CRUD endpoints
 	mux.HandleFunc("GET /v1/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
@@ -466,6 +646,7 @@ func main() {
 		// Get user from token for project filtering
 		var userID string
 		var isAdmin bool
+		units := visibleUnits(r)
 		if principal, ok := controlplane.FromContext(r.Context()); ok {
 			isAdmin = principal.Role >= controlplane.RoleAdmin
 			// Try to find user by token to get their ID
@@ -476,7 +657,7 @@ func main() {
 				}
 			}
 		}
-		projects, err := ws.ListProjectsForUser(r.Context(), userID, isAdmin)
+		projects, err := ws.ListProjectsForUser(r.Context(), userID, isAdmin, units)
 		if err != nil {
 			writeError(w, 500, err)
 			return
@@ -499,10 +680,16 @@ func main() {
 		if req.ID == "" {
 			req.ID = slugify(req.Name)
 		}
-		project := &workspace.Project{ID: req.ID, Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel, AllowedUsers: req.AllowedUsers}
+		project := &workspace.Project{ID: req.ID, Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel, AllowedUsers: req.AllowedUsers, OrgUnitIDs: req.OrgUnits}
 		if err := ws.CreateProject(r.Context(), project); err != nil {
 			writeError(w, 409, err)
 			return
+		}
+		if len(req.OrgUnits) > 0 {
+			if err := ws.SetProjectOrgUnits(r.Context(), project.ID, req.OrgUnits); err != nil {
+				writeError(w, 400, err)
+				return
+			}
 		}
 		writeJSON(w, 201, project)
 	})
@@ -539,6 +726,15 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		// Org links follow the payload when present; an absent field keeps the
+		// current bindings so plain name/description edits never reset scope.
+		if req.OrgUnits != nil {
+			if err := ws.SetProjectOrgUnits(r.Context(), project.ID, req.OrgUnits); err != nil {
+				writeError(w, 400, err)
+				return
+			}
+			project.OrgUnitIDs = req.OrgUnits
+		}
 		writeJSON(w, 200, project)
 	})
 	mux.HandleFunc("DELETE /v1/workspace/projects/{projectID}", func(w http.ResponseWriter, r *http.Request) {
@@ -570,7 +766,7 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		agents, err := ws.ListAllAgents(r.Context())
+		agents, err := ws.ListAgentsVisible(r.Context(), visibleUnits(r))
 		if err != nil {
 			writeError(w, 500, err)
 			return
@@ -600,7 +796,7 @@ func main() {
 			Skills: req.Skills, MCPServers: req.MCPServers, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
 			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels,
-			Definition: req.Definition,
+			Definition: req.Definition, OrgUnitID: req.OrgUnitID,
 		}
 		if a.Definition != nil {
 			a.DefinitionVersion = 1
@@ -627,6 +823,10 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		if !workspace.OrgVisible(a.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
 		writeJSON(w, 200, a)
 	})
 	mux.HandleFunc("PUT /v1/workspace/agents/{agentID}", func(w http.ResponseWriter, r *http.Request) {
@@ -645,7 +845,7 @@ func main() {
 			Skills: req.Skills, MCPServers: req.MCPServers, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
 			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels,
-			Definition: req.Definition,
+			Definition: req.Definition, OrgUnitID: req.OrgUnitID,
 		}
 		prev, prevErr := ws.GetAgent(r.Context(), a.ID)
 		if prevErr != nil {
@@ -657,6 +857,11 @@ func main() {
 			return
 		}
 		a.DefinitionVersion = prev.DefinitionVersion
+		// Editing configuration must not silently re-scope an agent: bindings
+		// change only through the admin binding endpoint.
+		if a.OrgUnitID == "" {
+			a.OrgUnitID = prev.OrgUnitID
+		}
 		if agentSemanticsChanged(prev, a) {
 			a.DefinitionVersion++
 		}
@@ -1379,7 +1584,7 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		providers, err := ws.ListProviders(r.Context())
+		providers, err := ws.ListProvidersVisible(r.Context(), visibleUnits(r))
 		if err != nil {
 			writeError(w, 500, err)
 			return
@@ -1402,7 +1607,7 @@ func main() {
 		if req.ID == "" {
 			req.ID = "prov-" + shortID()
 		}
-		provider := &workspace.Provider{ID: req.ID, Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels}
+		provider := &workspace.Provider{ID: req.ID, Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels, OrgUnitID: req.OrgUnitID}
 		if err := ws.CreateProvider(r.Context(), provider); err != nil {
 			writeError(w, 500, err)
 			return
@@ -1422,6 +1627,10 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		if !workspace.OrgVisible(provider.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
 		writeJSON(w, 200, provider)
 	})
 	mux.HandleFunc("PUT /v1/workspace/providers/{providerID}", func(w http.ResponseWriter, r *http.Request) {
@@ -1434,6 +1643,11 @@ func main() {
 			return
 		}
 		provider := workspace.Provider{ID: r.PathValue("providerID"), Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels}
+		// Editing config must not silently re-scope a provider: bindings change
+		// only through the admin binding endpoint.
+		if prev, err := ws.GetProvider(r.Context(), provider.ID); err == nil {
+			provider.OrgUnitID = prev.OrgUnitID
+		}
 		if err := ws.UpdateProvider(r.Context(), provider); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)
@@ -1549,7 +1763,7 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		list, err := ws.ListAllSkills(r.Context())
+		list, err := ws.ListSkillsVisible(r.Context(), visibleUnits(r))
 		if err != nil {
 			writeError(w, 500, err)
 			return
@@ -1593,6 +1807,10 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		if !workspace.OrgVisible(skill.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
 		writeJSON(w, 200, skill)
 	})
 	mux.HandleFunc("PUT /v1/workspace/skills/{skillID}", func(w http.ResponseWriter, r *http.Request) {
@@ -1608,6 +1826,13 @@ func main() {
 		if err != nil {
 			writeError(w, 422, err)
 			return
+		}
+		// Editing content must not silently re-scope a skill: bindings change
+		// only through the admin binding endpoint.
+		if skill.OrgUnitID == "" {
+			if prev, err := ws.GetSkill(r.Context(), skill.ID); err == nil {
+				skill.OrgUnitID = prev.OrgUnitID
+			}
 		}
 		if err := ws.UpdateSkill(r.Context(), &skill); err != nil {
 			writeError(w, 500, err)
@@ -1718,7 +1943,7 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		list, err := ws.ListAllMCPServers(r.Context())
+		list, err := ws.ListMCPServersVisible(r.Context(), visibleUnits(r))
 		if err != nil {
 			writeError(w, 500, err)
 			return
@@ -1772,6 +1997,10 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		if !workspace.OrgVisible(server.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
 		writeJSON(w, 200, server)
 	})
 	mux.HandleFunc("PUT /v1/workspace/mcp-servers/{serverID}", func(w http.ResponseWriter, r *http.Request) {
@@ -1793,6 +2022,11 @@ func main() {
 			return
 		}
 		server := req.toServer(current.ID)
+		// Editing config must not silently re-scope a server: bindings change
+		// only through the admin binding endpoint.
+		if server.OrgUnitID == "" {
+			server.OrgUnitID = current.OrgUnitID
+		}
 		cfg := mcpConfig(server)
 		if err := cfg.Validate(); err != nil {
 			writeError(w, 422, err)
@@ -2104,7 +2338,11 @@ func main() {
 			writeError(w, 422, err)
 			return
 		}
-		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Token: token, Projects: req.Projects, Active: active, Channels: req.Channels, PreferredChannel: req.PreferredChannel}
+		orgUnitID := ""
+		if req.OrgUnitID != nil {
+			orgUnitID = *req.OrgUnitID
+		}
+		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Token: token, Projects: req.Projects, OrgUnitID: orgUnitID, Active: active, Channels: req.Channels, PreferredChannel: req.PreferredChannel}
 		if err := ws.CreateUser(r.Context(), user); err != nil {
 			writeError(w, 500, err)
 			return
@@ -2133,7 +2371,13 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
-		user := workspace.User{ID: r.PathValue("userID"), Name: req.Name, Email: req.Email, Role: req.Role, Projects: req.Projects, Active: active, Channels: existing.Channels, PreferredChannel: existing.PreferredChannel}
+		// nil org_unit_id keeps the assignment: plain role/name edits must not
+		// silently relax a user's scope back to "sees everything".
+		orgUnitID := existing.OrgUnitID
+		if req.OrgUnitID != nil {
+			orgUnitID = *req.OrgUnitID
+		}
+		user := workspace.User{ID: r.PathValue("userID"), Name: req.Name, Email: req.Email, Role: req.Role, Projects: req.Projects, OrgUnitID: orgUnitID, Active: active, Channels: existing.Channels, PreferredChannel: existing.PreferredChannel}
 		if err := ws.UpdateUser(r.Context(), user); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)
@@ -2615,6 +2859,7 @@ type mcpServerRequest struct {
 	AllowedTools  []string          `json:"allowed_tools"`
 	ApprovalTools []string          `json:"approval_tools"`
 	Enabled       *bool             `json:"enabled"`
+	OrgUnitID     string            `json:"org_unit_id"` // only set on create; updates keep the stored binding
 }
 
 func (req mcpServerRequest) toServer(id string) workspace.MCPServer {
@@ -2631,7 +2876,7 @@ func (req mcpServerRequest) toServer(id string) workspace.MCPServer {
 		URL: strings.TrimSpace(req.URL), Command: strings.TrimSpace(req.Command),
 		Args: req.Args, Env: req.Env, Headers: req.Headers,
 		AllowedTools: req.AllowedTools, ApprovalTools: req.ApprovalTools,
-		Enabled: enabled,
+		Enabled: enabled, OrgUnitID: req.OrgUnitID,
 	}
 }
 
@@ -2686,6 +2931,7 @@ type skillRequest struct {
 	Version      string `json:"version"`
 	Markdown     string `json:"markdown"`
 	ManifestYAML string `json:"manifest_yaml"`
+	OrgUnitID    string `json:"org_unit_id"` // only set on create; updates keep the stored binding
 }
 
 // parse decodes the manifest, falling back to legacy inference from SKILL.md
@@ -2737,6 +2983,7 @@ func (req skillRequest) toSkill(skillID string) (workspace.Skill, error) {
 	return workspace.Skill{
 		ID: id, Name: name, Description: req.Description,
 		Version: version, Markdown: req.Markdown, Manifest: skills.MarshalJSONForStorage(manifest),
+		OrgUnitID: req.OrgUnitID,
 	}, nil
 }
 

@@ -20,8 +20,10 @@ type Skill struct {
 	Version     string          `json:"version"`
 	Markdown    string          `json:"markdown"`
 	Manifest    json.RawMessage `json:"manifest"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
+	OrgUnitID string    `json:"org_unit_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // SkillVersion is an immutable snapshot of a skill's content.
@@ -52,9 +54,9 @@ func (s *Store) CreateSkill(ctx context.Context, sk *Skill) error {
 	sk.CreatedAt = now
 	sk.UpdatedAt = now
 	if _, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_skill (id, name, description, version, markdown, manifest, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		sk.ID, sk.Name, sk.Description, sk.Version, sk.Markdown, manifestOrNull(sk.Manifest), sk.CreatedAt, sk.UpdatedAt); err != nil {
+		`INSERT INTO workspace_skill (id, name, description, version, markdown, manifest, org_unit_id, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		sk.ID, sk.Name, sk.Description, sk.Version, sk.Markdown, manifestOrNull(sk.Manifest), nullString(sk.OrgUnitID), sk.CreatedAt, sk.UpdatedAt); err != nil {
 		return err
 	}
 	_, err := s.pool.Exec(ctx,
@@ -67,20 +69,42 @@ func (s *Store) CreateSkill(ctx context.Context, sk *Skill) error {
 func (s *Store) GetSkill(ctx context.Context, id string) (Skill, error) {
 	var sk Skill
 	var manifest []byte
+	var orgUnitID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, description, version, markdown, manifest, created_at, updated_at FROM workspace_skill WHERE id = $1`, id).
-		Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &sk.CreatedAt, &sk.UpdatedAt)
+		`SELECT id, name, description, version, markdown, manifest, org_unit_id, created_at, updated_at FROM workspace_skill WHERE id = $1`, id).
+		Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &orgUnitID, &sk.CreatedAt, &sk.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sk, ErrNotFound
 	}
+	if err != nil {
+		return sk, err
+	}
+	sk.OrgUnitID = derefPtr(orgUnitID)
 	sk.Manifest = rawMessage(manifest)
-	return sk, err
+	return sk, nil
 }
 
 func (s *Store) ListAllSkills(ctx context.Context) ([]Skill, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, description, version, markdown, manifest, created_at, updated_at
+		`SELECT id, name, description, version, markdown, manifest, org_unit_id, created_at, updated_at
 			 FROM workspace_skill ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSkills(rows)
+}
+
+// ListSkillsVisible returns skills visible to a viewer whose org chain is
+// units: org-neutral skills plus those bound inside the chain. nil units
+// disables filtering (admin and service tokens).
+func (s *Store) ListSkillsVisible(ctx context.Context, units []string) ([]Skill, error) {
+	if units == nil {
+		return s.ListAllSkills(ctx)
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, name, description, version, markdown, manifest, org_unit_id, created_at, updated_at
+			 FROM workspace_skill WHERE org_unit_id IS NULL OR org_unit_id = ANY($1) ORDER BY created_at`, units)
 	if err != nil {
 		return nil, err
 	}
@@ -93,9 +117,11 @@ func scanSkills(rows pgx.Rows) ([]Skill, error) {
 	for rows.Next() {
 		var sk Skill
 		var manifest []byte
-		if err := rows.Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &sk.CreatedAt, &sk.UpdatedAt); err != nil {
+		var orgUnitID *string
+		if err := rows.Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &orgUnitID, &sk.CreatedAt, &sk.UpdatedAt); err != nil {
 			return nil, err
 		}
+		sk.OrgUnitID = derefPtr(orgUnitID)
 		sk.Manifest = rawMessage(manifest)
 		result = append(result, sk)
 	}
@@ -109,8 +135,8 @@ func scanSkills(rows pgx.Rows) ([]Skill, error) {
 func (s *Store) UpdateSkill(ctx context.Context, sk *Skill) error {
 	sk.UpdatedAt = time.Now().UTC()
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_skill SET name = $2, description = $3, version = $4, markdown = $5, manifest = $6, updated_at = $7 WHERE id = $1`,
-		sk.ID, sk.Name, sk.Description, sk.Version, sk.Markdown, manifestOrNull(sk.Manifest), sk.UpdatedAt)
+		`UPDATE workspace_skill SET name = $2, description = $3, version = $4, markdown = $5, manifest = $6, org_unit_id = $7, updated_at = $8 WHERE id = $1`,
+		sk.ID, sk.Name, sk.Description, sk.Version, sk.Markdown, manifestOrNull(sk.Manifest), nullString(sk.OrgUnitID), sk.UpdatedAt)
 	if err != nil {
 		return err
 	}

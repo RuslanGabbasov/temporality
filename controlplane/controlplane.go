@@ -72,6 +72,13 @@ type Principal struct {
 	// UserID links the principal to its workspace_user record when the token
 	// belongs to a database user. Empty for static environment tokens.
 	UserID string
+	// OrgUnitID is the user's org unit (docs/org-structure.md §3.3); empty for
+	// unassigned users and service tokens.
+	OrgUnitID string
+	// VisibleUnits is the user's ancestor chain (self included) used to filter
+	// org-bound resources. nil disables filtering: admins, unassigned users,
+	// and service tokens (the runtime must not depend on one person's rights).
+	VisibleUnits []string
 }
 
 // AllowsProject reports whether the principal may touch the project. The

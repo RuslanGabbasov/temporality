@@ -9,15 +9,69 @@ import (
 
 // Project groups tasks and runs. Agents are top-level and reusable across projects.
 type Project struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description"`
-	DefaultAgentID string    `json:"default_agent_id,omitempty"`
-	DefaultModel   string    `json:"default_model,omitempty"`
-	Archived       bool      `json:"archived,omitempty"`
-	AllowedUsers   []string  `json:"allowed_users,omitempty"` // "*" = all, empty = admin only, ["user-1"] = specific users
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	DefaultAgentID string   `json:"default_agent_id,omitempty"`
+	DefaultModel   string   `json:"default_model,omitempty"`
+	Archived       bool     `json:"archived,omitempty"`
+	AllowedUsers   []string `json:"allowed_users,omitempty"` // "*" = all, empty = admin only, ["user-1"] = specific users
+	// Org bindings (docs/org-structure.md §3.4): a project spans several org
+	// units; it is visible where the project's units intersect the viewer's
+	// ancestor chain. Empty = org-neutral, visible everywhere (transition).
+	OrgUnitIDs []string  `json:"org_units,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// OrgUnitKind values for OrgUnit.Kind.
+const (
+	OrgKindOrganization = "organization"
+	OrgKindDepartment   = "department"
+	OrgKindTeam         = "team"
+)
+
+// ValidOrgKinds lists the allowed org unit kinds.
+var ValidOrgKinds = map[string]bool{
+	OrgKindOrganization: true,
+	OrgKindDepartment:   true,
+	OrgKindTeam:         true,
+}
+
+// OrgUnit is one node of the org-structure tree (docs/org-structure.md §3.1).\n// ParentID empty marks a root (one per company). Path is the materialized
+// ancestor-id path ("root.dept" for a team under dept); the unit itself is NOT
+// part of its own path. Resources bound to a unit are visible to the unit and
+// its whole subtree.
+type OrgUnit struct {
+	ID        string    `json:"id"`
+	ParentID  string    `json:"parent_id,omitempty"`
+	Kind      string    `json:"kind"`
+	Name      string    `json:"name"`
+	Path      string    `json:"path,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// SelfPath returns the unit's own materialized path prefix: the path its
+// descendants carry. For a root it is just the id.
+func (u OrgUnit) SelfPath() string { return joinPath(u.Path, u.ID) }
+
+// Ancestors returns the unit's ancestor chain including itself, oldest first.
+// For a root it is [root].
+func (u OrgUnit) Ancestors() []string {
+	chain := make([]string, 0, 4)
+	if u.Path != "" {
+		chain = append(chain, strings.Split(u.Path, ".")...)
+	}
+	return append(chain, u.ID)
+}
+
+// joinPath appends id to an ancestor path.
+func joinPath(path, id string) string {
+	if path == "" {
+		return id
+	}
+	return path + "." + id
 }
 
 // AgentCapabilities is the user-facing toggle set from the agent form
@@ -95,9 +149,11 @@ type Agent struct {
 	MaxTurns     *int    `json:"max_turns,omitempty"`
 	ApprovalMode *string `json:"approval_mode,omitempty"` // auto, prompt, manual
 	// Metadata
-	Labels    map[string]string `json:"labels,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
+	Labels map[string]string `json:"labels,omitempty"`
+	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
+	OrgUnitID string    `json:"org_unit_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Task is scoped to a project and optionally bound to an agent.
@@ -172,8 +228,10 @@ type Provider struct {
 	APIKeyRef string            `json:"api_key_ref,omitempty"` // env var name or secret ref
 	Models    []string          `json:"models,omitempty"`      // model IDs discovered or listed
 	Labels    map[string]string `json:"labels,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
+	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
+	OrgUnitID string    `json:"org_unit_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // UserChannel is one delivery transport owned by the user profile
@@ -194,7 +252,10 @@ type User struct {
 	Token    string   `json:"token,omitempty"`     // bearer token; only set in create/regenerate responses, never in list
 	HasToken bool     `json:"has_token,omitempty"` // list responses: whether a token exists (value is never exposed)
 	Projects []string `json:"projects,omitempty"`  // empty = all
-	Active   bool     `json:"active"`
+	// Org position (docs/org-structure.md §3.3): the single unit the user
+	// belongs to; empty = unassigned, sees everything (transition semantics).
+	OrgUnitID string `json:"org_unit_id,omitempty"`
+	Active    bool   `json:"active"`
 	// Communication channels + preferred delivery. Preferred "" or "web"
 	// means the UI inbox; otherwise it must reference an enabled channel.
 	Channels         []UserChannel `json:"channels,omitempty"`
@@ -236,6 +297,15 @@ type CreateProjectRequest struct {
 	DefaultAgentID string   `json:"default_agent_id"`
 	DefaultModel   string   `json:"default_model"`
 	AllowedUsers   []string `json:"allowed_users,omitempty"` // "*" = all, empty = admin only
+	OrgUnits       []string `json:"org_units,omitempty"`     // org unit ids the project spans
+}
+
+// CreateOrgUnitRequest is the payload for creating or updating an org unit.
+type CreateOrgUnitRequest struct {
+	ID       string `json:"id"`
+	ParentID string `json:"parent_id,omitempty"` // empty = new root
+	Kind     string `json:"kind"`                // organization | department | team
+	Name     string `json:"name"`
 }
 
 // CreateAgentRequest is the payload for creating an agent.
@@ -258,6 +328,7 @@ type CreateAgentRequest struct {
 	MaxTurns       *int              `json:"max_turns,omitempty"`
 	ApprovalMode   *string           `json:"approval_mode,omitempty"`
 	Labels         map[string]string `json:"labels,omitempty"`
+	OrgUnitID      string            `json:"org_unit_id,omitempty"`
 	// Structured definition (docs/evaluable-agent.md). PromptSource marks the
 	// origin of the definition for version history: manual | ai | builtin;
 	// GeneratorModel records the model behind AI drafts.
@@ -289,6 +360,7 @@ type CreateProviderRequest struct {
 	APIKeyRef string            `json:"api_key_ref,omitempty"`
 	Models    []string          `json:"models,omitempty"`
 	Labels    map[string]string `json:"labels,omitempty"`
+	OrgUnitID string            `json:"org_unit_id,omitempty"`
 }
 
 // CreateUserRequest is the payload for creating a user.
@@ -299,6 +371,7 @@ type CreateUserRequest struct {
 	Role             string        `json:"role"`
 	Token            string        `json:"token,omitempty"` // auto-generated if empty
 	Projects         []string      `json:"projects,omitempty"`
+	OrgUnitID        *string       `json:"org_unit_id,omitempty"` // nil on update = keep; "" = unassign
 	Active           *bool         `json:"active,omitempty"`
 	Channels         []UserChannel `json:"channels,omitempty"`
 	PreferredChannel string        `json:"preferred_channel,omitempty"`
