@@ -129,14 +129,11 @@ func main() {
 		log.Error("migrate workspace v31", "error", err)
 		os.Exit(1)
 	}
-	// Curated builtin agents are cross-functional and global
-	// (docs/evaluable-agent.md §16): project context comes from knowledge,
-	// skills and MCP servers of the project the run happens in, not from a
-	// binding on the agent. Idempotent: existing ids are skipped by the
-	// seeder itself. Cleanup removes per-project copies from the earlier
-	// project-bound seeding model.
-	seedBuiltinAgents(ctx, ws)
-	cleanupProjectBuiltinAgents(ctx, log, ws)
+	// Curated builtin agents are templates, not auto-created agents
+	// (docs/evaluable-agent.md §16): the user creates them deliberately from
+	// the template gallery. Cleanup removes agents left by the earlier
+	// auto-seeding model, so no builtin is forced on an existing workspace.
+	cleanupSeededBuiltinAgents(ctx, log, ws)
 	activities, err := agent.NewActivities(events)
 	if err != nil {
 		log.Error("configure activities", "error", err)
@@ -738,8 +735,9 @@ func main() {
 		applyProjectModel(r.Context(), ws, project, &input)
 		writeJSON(w, 200, input)
 	})
-	// Curated builtin definitions (docs/evaluable-agent.md §16): source for the
-	// create-agent templates and the “restore builtin” action.
+	// Curated builtin templates (docs/evaluable-agent.md §16): source for the
+	// create-agent gallery and the “restore builtin” action. Templates are
+	// never auto-created as agents.
 	mux.HandleFunc("GET /v1/workspace/agents/builtins", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -2281,77 +2279,50 @@ func resolveRunAgent(ctx context.Context, ws *workspace.Store, projectID, agentI
 	return agentID, &a, nil
 }
 
-// seedBuiltinAgents ensures the curated agent set exists
-// (docs/evaluable-agent.md §16). Agents are cross-functional: ids are global
-// slugs and carry no project binding — project context (knowledge, skills,
-// MCP) is attached per run by the project the run happens in. Seeding is
-// best-effort: an existing id or a transient failure skips that agent.
-func seedBuiltinAgents(ctx context.Context, ws *workspace.Store) {
-	for _, spec := range workspace.BuiltinAgents() {
-		def := spec.Definition
-		a := &workspace.Agent{
-			ID: spec.Slug, Name: spec.Name,
-			Description: spec.Description, Definition: &def, DefinitionVersion: 1,
-			SandboxProfile: spec.SandboxProfile, NetworkAccess: spec.NetworkAccess,
-			ReadOnly: spec.ReadOnly, Labels: spec.Labels,
-		}
-		if err := ws.CreateAgent(ctx, a); err != nil {
-			continue
-		}
-		writeAgentVersion(ctx, ws, *a, "temporality", "builtin", "")
-	}
-}
-
-// cleanupProjectBuiltinAgents removes per-project copies of the builtin
-// agents left from the earlier project-bound seeding model. Agents are
-// cross-functional now, and the copies only duplicated the global set in
-// every project list. Project defaults pointing at a copy are repointed to
-// the matching global agent (or cleared) before deletion. Best-effort.
-func cleanupProjectBuiltinAgents(ctx context.Context, log *slog.Logger, ws *workspace.Store) {
+// cleanupSeededBuiltinAgents removes agents created by the earlier
+// auto-seeding model (per-project copies first, then global seeds) — both
+// carry the builtin provenance label. Builtins ship as templates now; users
+// create them explicitly, so anything still labelled builtin is a leftover.
+// Project defaults pointing at a removed agent are cleared first. Best-effort.
+func cleanupSeededBuiltinAgents(ctx context.Context, log *slog.Logger, ws *workspace.Store) {
 	agents, err := ws.ListAllAgents(ctx)
 	if err != nil {
-		log.Error("cleanup project builtin agents", "error", err)
+		log.Error("cleanup seeded builtin agents", "error", err)
 		return
 	}
-	global := map[string]bool{}
-	var copies []workspace.Agent
+	var seeded []workspace.Agent
 	for _, a := range agents {
-		if a.Labels["builtin"] != "true" {
-			continue
+		if a.Labels["builtin"] == "true" {
+			seeded = append(seeded, a)
 		}
-		if a.ProjectID == "" {
-			global[a.ID] = true
-			continue
-		}
-		copies = append(copies, a)
 	}
-	if len(copies) == 0 {
+	if len(seeded) == 0 {
 		return
+	}
+	removed := map[string]bool{}
+	for _, a := range seeded {
+		removed[a.ID] = true
 	}
 	projects, err := ws.ListProjects(ctx)
 	if err != nil {
-		log.Error("cleanup project builtin agents", "error", err)
+		log.Error("cleanup seeded builtin agents", "error", err)
 		return
 	}
 	for _, p := range projects {
-		if p.DefaultAgentID == "" || !strings.HasPrefix(p.DefaultAgentID, p.ID+"-") {
+		if p.DefaultAgentID == "" || !removed[p.DefaultAgentID] {
 			continue
 		}
-		slug := strings.TrimPrefix(p.DefaultAgentID, p.ID+"-")
 		p.DefaultAgentID = ""
-		if global[slug] {
-			p.DefaultAgentID = slug
-		}
 		if err := ws.UpdateProject(ctx, p); err != nil {
-			log.Error("repoint project default agent", "project", p.ID, "error", err)
+			log.Error("clear project default agent", "project", p.ID, "error", err)
 		}
 	}
-	for _, c := range copies {
-		if err := ws.DeleteAgent(ctx, c.ID); err != nil {
-			log.Error("delete project builtin agent", "agent", c.ID, "error", err)
+	for _, a := range seeded {
+		if err := ws.DeleteAgent(ctx, a.ID); err != nil {
+			log.Error("delete seeded builtin agent", "agent", a.ID, "error", err)
 		}
 	}
-	log.Info("removed project-bound builtin agent copies", "count", len(copies))
+	log.Info("removed auto-seeded builtin agents", "count", len(seeded))
 }
 
 // requestSubject returns the authenticated token subject for version history.

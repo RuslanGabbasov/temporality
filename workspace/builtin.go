@@ -1,28 +1,29 @@
 package workspace
 
-// Builtin agent definitions shipped with Temporality
-// (docs/evaluable-agent.md §16). They are fully configured by the product but
-// remain ordinary editable agents: builtin only marks provenance.
+// Curated builtin agent templates shipped with Temporality
+// (docs/evaluable-agent.md §16). They are NOT auto-created anywhere: the
+// user picks one from the template gallery and gets an ordinary editable
+// agent — the template only sets the initial values.
 //
 // Definitions follow the generator rules (§7, §12, §17): responsibility, not
 // style; hard prohibitions, not advice; objectively verifiable completion
 // criteria; no step-by-step procedures.
 
-// BuiltinAgentSpec describes one curated agent for project seeding.
+// BuiltinAgentSpec describes one curated agent template.
 type BuiltinAgentSpec struct {
-	Slug           string            `json:"slug"`                     // stable suffix for the project-scoped id
+	Slug           string            `json:"slug"`                     // stable template id
 	Name           string            `json:"name"`                     // display name
 	Description    string            `json:"description"`              // purpose
 	Definition     AgentDefinition   `json:"definition"`               // structured definition
 	SandboxProfile string            `json:"sandbox_profile"`          // restricted | standard | privileged
 	NetworkAccess  *bool             `json:"network_access,omitempty"` // nil = environment default
 	ReadOnly       *bool             `json:"read_only,omitempty"`      // nil = writable
-	Labels         map[string]string `json:"labels,omitempty"`         // builtin provenance marker
+	Labels         map[string]string `json:"labels,omitempty"`         // reserved; created agents carry no label
 }
 
 func boolValue(v bool) *bool { return &v }
 
-// BuiltinAgents returns the curated agent set seeded into every new project.
+// BuiltinAgents returns the curated agent templates offered in the gallery.
 func BuiltinAgents() []BuiltinAgentSpec {
 	return []BuiltinAgentSpec{
 		{
