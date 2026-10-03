@@ -147,6 +147,18 @@ func main() {
 		log.Error("migrate workspace v35", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000036_org_unit_roles.up.sql"); err != nil {
+		log.Error("migrate workspace v36", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000037_run_exec_context.up.sql"); err != nil {
+		log.Error("migrate workspace v37", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000038_execution_identity.up.sql"); err != nil {
+		log.Error("migrate workspace v38", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -208,9 +220,10 @@ func main() {
 	// refreshUserTokens reloads workspace-user tokens from the database into
 	// the gate. Called at startup and after every user or org mutation, so
 	// created, edited, deactivated, deleted and regenerated tokens apply
-	// immediately — and org chains stay in sync with tree moves.
+	// immediately — and org chains stay in sync with tree moves and role
+	// grants.
 	refreshUserTokens := func() {
-		reloadCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		reloadCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		users, err := ws.ListUsersWithTokens(reloadCtx)
 		if err != nil {
@@ -227,6 +240,28 @@ func main() {
 		for _, u := range units {
 			unitByID[u.ID] = u
 		}
+		// Org role grants (docs/org-structure.md §13): one query, grouped per
+		// user; each grant acts on its unit and subtree.
+		grants, err := ws.ListAllOrgUnitRoleGrants(reloadCtx)
+		if err != nil {
+			log.Error("load org unit role grants", "error", err)
+			return
+		}
+		grantByUser := map[string][]controlplane.OrgRoleGrant{}
+		for _, g := range grants {
+			role, rErr := controlplane.ParseRole(g.Role)
+			if rErr != nil {
+				log.Error("skip org unit role grant: unknown role", "user", g.UserID, "role", g.Role)
+				continue
+			}
+			path := ""
+			if unit, ok := unitByID[g.OrgUnitID]; ok {
+				path = unit.SelfPath()
+			}
+			grantByUser[g.UserID] = append(grantByUser[g.UserID], controlplane.OrgRoleGrant{
+				UnitID: g.OrgUnitID, Path: path, Role: role,
+			})
+		}
 		principals := make(map[string]controlplane.Principal, len(users))
 		for _, u := range users {
 			if u.Token == "" || !u.Active {
@@ -237,10 +272,6 @@ func main() {
 				log.Error("skip workspace user token: unknown role", "user", u.Name, "role", u.Role)
 				continue
 			}
-			projects := []string{"*"}
-			if len(u.Projects) > 0 {
-				projects = u.Projects
-			}
 			var visible []string
 			if u.OrgUnitID != "" {
 				if unit, ok := unitByID[u.OrgUnitID]; ok {
@@ -249,9 +280,22 @@ func main() {
 					log.Error("skip org visibility for user: unknown unit", "user", u.Name, "unit", u.OrgUnitID)
 				}
 			}
+			// Project scope follows the org model (docs/org-structure.md §15):
+			// admins and org-unassigned users keep the transition "*"; assigned
+			// users get the concrete id list — org intersection plus explicit
+			// membership. The legacy user.projects column is no longer consulted.
+			projects := []string{"*"}
+			if role < controlplane.RoleAdmin && u.OrgUnitID != "" && visible != nil {
+				if ids, pErr := ws.VisibleProjectIDs(reloadCtx, u.ID, false, visible); pErr != nil {
+					log.Error("resolve visible projects for user", "user", u.Name, "error", pErr)
+				} else {
+					projects = ids
+				}
+			}
 			principals[u.Token] = controlplane.Principal{
 				Subject: u.Name, Role: role, Projects: projects, UserID: u.ID,
 				OrgUnitID: u.OrgUnitID, VisibleUnits: visible,
+				OrgRoles: grantByUser[u.ID],
 			}
 		}
 		gate.SetDBTokens(principals)
@@ -284,7 +328,23 @@ func main() {
 			writeError(w, 422, errors.New("run_id, project and prompt are required"))
 			return
 		}
-		if !gate.Allow(w, r, controlplane.RoleWriter, input.Project) {
+		// Reader passes the flat gate; operation-level authorization
+		// (docs/org-structure.md §22) decides below whether this caller may
+		// actually start runs in the project with these resources.
+		if !gate.Allow(w, r, controlplane.RoleReader, input.Project) {
+			return
+		}
+		resolvedAgentID, resolvedAgent, aErr := resolveRunAgent(r.Context(), ws, input.Project, input.AgentID)
+		if aErr != nil {
+			if errors.Is(aErr, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("agent not found"))
+				return
+			}
+			writeError(w, 500, aErr)
+			return
+		}
+		if _, err := authorizeRunUse(r.Context(), ws, r, &input, resolvedAgentID, resolvedAgent); err != nil {
+			writeError(w, 403, err)
 			return
 		}
 		if err := activities.PrepareRun(&input); err != nil {
@@ -632,6 +692,72 @@ func main() {
 		}
 		writeJSON(w, 200, resources)
 	})
+	// Org unit role grants (docs/org-structure.md §13): a grant upgrades the
+	// grantee's effective role on the unit and its whole subtree. Mutations are
+	// admin-only and land in the access audit log.
+	mux.HandleFunc("GET /v1/org/units/{unitID}/roles", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		roles, err := ws.ListOrgUnitRoles(r.Context(), r.PathValue("unitID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"roles": roles})
+	})
+	mux.HandleFunc("PUT /v1/org/units/{unitID}/roles/{userID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		var req struct {
+			Role string `json:"role"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		role, err := controlplane.ParseRole(req.Role)
+		if err != nil || role == controlplane.RoleNone {
+			writeError(w, 422, errors.New("role must be one of reader, writer, operator, admin"))
+			return
+		}
+		actor := requestUserID(r)
+		unitID, userID := r.PathValue("unitID"), r.PathValue("userID")
+		if err := ws.SetOrgUnitRole(r.Context(), unitID, userID, role.String(), actor); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), actor, workspace.AuditRoleGranted, "org_unit", unitID, map[string]any{"user_id": userID, "role": role.String()}); err != nil {
+			log.Warn("audit role grant", "error", err)
+		}
+		refreshUserTokens()
+		writeJSON(w, 200, map[string]string{"user_id": userID, "org_unit_id": unitID, "role": role.String()})
+	})
+	mux.HandleFunc("DELETE /v1/org/units/{unitID}/roles/{userID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		unitID, userID := r.PathValue("unitID"), r.PathValue("userID")
+		if err := ws.RemoveOrgUnitRole(r.Context(), unitID, userID); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		actor := requestUserID(r)
+		if err := ws.RecordAccessAudit(r.Context(), actor, workspace.AuditRoleRevoked, "org_unit", unitID, map[string]any{"user_id": userID}); err != nil {
+			log.Warn("audit role revoke", "error", err)
+		}
+		refreshUserTokens()
+		writeJSON(w, 200, map[string]bool{"removed": true})
+	})
 	mux.HandleFunc("PUT /v1/org/resources/{kind}/{resourceID}/binding", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleAdmin) {
 			return
@@ -744,6 +870,8 @@ func main() {
 				writeError(w, 400, err)
 				return
 			}
+			// New org links change who sees the project — refresh token scopes.
+			refreshUserTokens()
 		}
 		writeJSON(w, 201, project)
 	})
@@ -796,6 +924,8 @@ func main() {
 				return
 			}
 			project.OrgUnitIDs = req.OrgUnits
+			// Re-linked units change who sees the project — refresh token scopes.
+			refreshUserTokens()
 		}
 		writeJSON(w, 200, project)
 	})
@@ -811,6 +941,8 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		// The deleted project leaves token scopes — refresh.
+		refreshUserTokens()
 		writeJSON(w, 200, map[string]bool{"deleted": true})
 	})
 	// Explicit project membership (docs/org-structure.md §16): a member sees
@@ -862,6 +994,8 @@ func main() {
 		if err := ws.RecordAccessAudit(r.Context(), actor, workspace.AuditProjectMemberAdded, "project", r.PathValue("projectID"), map[string]any{"user_id": req.UserID, "role": req.Role}); err != nil {
 			log.Warn("audit project member add", "error", err)
 		}
+		// Membership feeds token project scopes — refresh.
+		refreshUserTokens()
 		writeJSON(w, 201, map[string]bool{"added": true})
 	})
 	mux.HandleFunc("DELETE /v1/workspace/projects/{projectID}/members/{userID}", func(w http.ResponseWriter, r *http.Request) {
@@ -880,6 +1014,8 @@ func main() {
 		if err := ws.RecordAccessAudit(r.Context(), actor, workspace.AuditProjectMemberRemoved, "project", r.PathValue("projectID"), map[string]any{"user_id": r.PathValue("userID")}); err != nil {
 			log.Warn("audit project member remove", "error", err)
 		}
+		// Membership feeds token project scopes — refresh.
+		refreshUserTokens()
 		writeJSON(w, 200, map[string]bool{"removed": true})
 	})
 	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/agents", func(w http.ResponseWriter, r *http.Request) {
@@ -992,6 +1128,40 @@ func main() {
 		// only through the admin binding endpoint, so the payload value is
 		// ignored entirely and the previous binding is preserved.
 		a.OrgUnitID = prev.OrgUnitID
+		// Referenced resources must be org-visible to the caller: an editor
+		// must not smuggle another department's skills or MCP servers into an
+		// agent they can write (docs/org-structure.md §8). Dangling references
+		// pass silently — run-time resolution degrades the same way.
+		if units := visibleUnits(r); units != nil {
+			for _, skillID := range a.Skills {
+				skill, sErr := ws.GetSkill(r.Context(), skillID)
+				if errors.Is(sErr, workspace.ErrNotFound) {
+					continue
+				}
+				if sErr != nil {
+					writeError(w, 500, sErr)
+					return
+				}
+				if !workspace.OrgVisible(skill.OrgUnitID, units) {
+					writeError(w, 403, fmt.Errorf("skill %q is not available in your org scope", skillID))
+					return
+				}
+			}
+			for _, serverID := range a.MCPServers {
+				server, sErr := ws.GetMCPServer(r.Context(), serverID)
+				if errors.Is(sErr, workspace.ErrNotFound) {
+					continue
+				}
+				if sErr != nil {
+					writeError(w, 500, sErr)
+					return
+				}
+				if !workspace.OrgVisible(server.OrgUnitID, units) {
+					writeError(w, 403, fmt.Errorf("MCP server %q is not available in your org scope", serverID))
+					return
+				}
+			}
+		}
 		if agentSemanticsChanged(prev, a) {
 			a.DefinitionVersion++
 		}
@@ -1224,9 +1394,6 @@ func main() {
 	})
 	mux.HandleFunc("POST /v1/workspace/tasks/{taskID}/runs", func(w http.ResponseWriter, r *http.Request) {
 		// Start a run for a workspace task, using the assigned agent's config.
-		if !gate.Allow(w, r, controlplane.RoleWriter) {
-			return
-		}
 		task, err := ws.GetTask(r.Context(), r.PathValue("taskID"))
 		if err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
@@ -1234,6 +1401,12 @@ func main() {
 				return
 			}
 			writeError(w, 500, err)
+			return
+		}
+		// Reader passes the flat gate (scoped to the task's project);
+		// operation-level authorization (docs/org-structure.md §22) decides
+		// below whether this caller may actually start runs with these resources.
+		if !gate.Allow(w, r, controlplane.RoleReader, task.ProjectID) {
 			return
 		}
 		var req workspace.StartRunRequest
@@ -1264,6 +1437,16 @@ func main() {
 		if req.Model != "" {
 			input.Model = req.Model
 		}
+		// Operation-level authorization (docs/org-structure.md §22): project
+		// visibility and effective writer role, org visibility of the agent and
+		// its resources. Runs after applyAgentConfig so the check sees the fully
+		// resolved skill and MCP lists; the returned effective role lands in the
+		// execution context snapshot.
+		effectiveRole, err := authorizeRunUse(r.Context(), ws, r, &input, agentID, agentCfg)
+		if err != nil {
+			writeError(w, 403, err)
+			return
+		}
 		if err := activities.PrepareRun(&input); err != nil {
 			writeError(w, 422, err)
 			return
@@ -1279,7 +1462,16 @@ func main() {
 				return
 			}
 		}
+		// Route escalations back to the operator who started the run: prefer
+		// the DB user behind the token.
 		input.ActorID = "human-requester"
+		if principal, ok := controlplane.FromContext(r.Context()); ok && principal.UserID != "" {
+			input.ActorID = principal.UserID
+		} else if token, _ := controlplane.BearerToken(r); token != "" {
+			if user, uErr := ws.GetUserByToken(r.Context(), token); uErr == nil {
+				input.ActorID = user.ID
+			}
+		}
 		workflowID := workflowIDFor(activities.SourceID, task.ProjectID, runID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
 		run, wfErr := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
@@ -1290,6 +1482,7 @@ func main() {
 		wsRun := &workspace.Run{
 			ID: runID, TaskID: task.ID, ProjectID: task.ProjectID,
 			AgentID: agentID, AgentVersion: input.AgentVersion, RunID: runID, Status: "started", Model: input.Model,
+			ExecContext: runExecContext(r.Context(), &input, agentID, effectiveRole),
 		}
 		_ = ws.CreateRun(r.Context(), wsRun)
 		writeJSON(w, http.StatusAccepted, map[string]string{
@@ -2345,7 +2538,7 @@ func main() {
 			writeError(w, 409, wfErr)
 			return
 		}
-		wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: projectID, AgentID: effectiveAgentID, AgentVersion: input.AgentVersion, RunID: input.RunID, Status: "started", Model: input.Model}
+		wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: projectID, AgentID: effectiveAgentID, AgentVersion: input.AgentVersion, RunID: input.RunID, Status: "started", Model: input.Model, ExecContext: runExecContext(r.Context(), &input, effectiveAgentID, controlplane.RoleNone)}
 		_ = ws.CreateRun(r.Context(), wsRun)
 		writeJSON(w, 202, map[string]string{"trigger_id": matched.ID, "run_id": input.RunID, "workflow_id": run.GetID()})
 	})
@@ -2405,12 +2598,102 @@ func main() {
 					slog.Error("start trigger run", "trigger", t.ID, "error", wfErr)
 					continue
 				}
-				wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: t.ProjectID, AgentID: effectiveAgentID, AgentVersion: input.AgentVersion, RunID: input.RunID, Status: "started", Model: input.Model}
+				wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: t.ProjectID, AgentID: effectiveAgentID, AgentVersion: input.AgentVersion, RunID: input.RunID, Status: "started", Model: input.Model, ExecContext: runExecContext(context.Background(), &input, effectiveAgentID, controlplane.RoleNone)}
 				_ = ws.CreateRun(context.Background(), wsRun)
 				slog.Info("scheduled trigger fired", "trigger", t.ID, "name", t.Name, "run", input.RunID)
 			}
 		}
 	}()
+
+	// Execution identities (docs/org-structure.md §20): the security context
+	// for automated runs. Storage and admin CRUD only for now — trigger wiring
+	// arrives with the triggers wave.
+	mux.HandleFunc("GET /v1/workspace/execution-identities", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		identities, err := ws.ListExecutionIdentities(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"identities": identities})
+	})
+	mux.HandleFunc("POST /v1/workspace/execution-identities", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		var e workspace.ExecutionIdentity
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&e); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(e.Name) == "" {
+			writeError(w, 422, errors.New("name is required"))
+			return
+		}
+		if e.ID == "" {
+			e.ID = "exec-" + shortID()
+		}
+		if err := ws.CreateExecutionIdentity(r.Context(), &e); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 409, err)
+			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditExecIdentityCreated, "execution_identity", e.ID, map[string]any{"name": e.Name, "org_unit_id": e.OrgUnitID}); err != nil {
+			log.Warn("audit execution identity create", "error", err)
+		}
+		writeJSON(w, 201, e)
+	})
+	mux.HandleFunc("PUT /v1/workspace/execution-identities/{identityID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		var e workspace.ExecutionIdentity
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&e); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		e.ID = r.PathValue("identityID")
+		if err := ws.UpdateExecutionIdentity(r.Context(), e); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditExecIdentityUpdated, "execution_identity", e.ID, map[string]any{"name": e.Name, "org_unit_id": e.OrgUnitID}); err != nil {
+			log.Warn("audit execution identity update", "error", err)
+		}
+		// Answer with the stored row: the store defaults absent allowed-lists.
+		stored, gErr := ws.GetExecutionIdentity(r.Context(), e.ID)
+		if gErr != nil {
+			writeJSON(w, 200, e)
+			return
+		}
+		writeJSON(w, 200, stored)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/execution-identities/{identityID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		if err := ws.DeleteExecutionIdentity(r.Context(), r.PathValue("identityID")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditExecIdentityDeleted, "execution_identity", r.PathValue("identityID"), nil); err != nil {
+			log.Warn("audit execution identity delete", "error", err)
+		}
+		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
 
 	// Users
 	mux.HandleFunc("GET /v1/workspace/users", func(w http.ResponseWriter, r *http.Request) {
@@ -2513,6 +2796,12 @@ func main() {
 			}
 			writeError(w, 500, err)
 			return
+		}
+		// A scope change reshapes what the user sees — audit it (§36).
+		if orgUnitID != existing.OrgUnitID {
+			if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditUserOrgUnitChanged, "user", user.ID, map[string]any{"from": existing.OrgUnitID, "to": orgUnitID}); err != nil {
+				log.Warn("audit user org unit change", "error", err)
+			}
 		}
 		refreshUserTokens()
 		writeJSON(w, 200, user)
@@ -2790,6 +3079,137 @@ func resolveRunAgent(ctx context.Context, ws *workspace.Store, projectID, agentI
 		return "", nil, err
 	}
 	return agentID, &a, nil
+}
+
+// authorizeRunUse enforces operation-level authorization (docs/org-structure.md
+// §22): the project must be visible to the caller (org intersection or
+// explicit membership) with an effective role of at least writer, and the
+// resolved agent plus every skill and MCP server the run touches must be
+// org-visible. Admins and service tokens (VisibleUnits == nil) skip the check
+// — the runtime must not depend on one person's rights — and the flat token
+// gate has already run before this. The 403 answers name the exact reason.
+// It returns the effective role the run was authorized under so the execution
+// context snapshot can record it (§35).
+func authorizeRunUse(ctx context.Context, ws *workspace.Store, r *http.Request, input *agent.RunInput, agentID string, agentCfg *workspace.Agent) (controlplane.Role, error) {
+	principal, ok := controlplane.FromContext(r.Context())
+	if !ok || principal.Role >= controlplane.RoleAdmin || principal.VisibleUnits == nil {
+		return controlplane.RoleAdmin, nil
+	}
+	// Project: org visibility or explicit membership (§15-16).
+	links, err := ws.ProjectOrgUnits(ctx, input.Project)
+	if err != nil {
+		return controlplane.RoleNone, err
+	}
+	memberRole := controlplane.RoleNone
+	members, err := ws.ListProjectMembers(ctx, input.Project)
+	if err != nil {
+		return controlplane.RoleNone, err
+	}
+	for _, m := range members {
+		if m.UserID != principal.UserID {
+			continue
+		}
+		if role, pErr := controlplane.ParseRole(m.Role); pErr == nil && role > memberRole {
+			memberRole = role
+		}
+	}
+	if !workspace.ProjectVisible(links, principal.VisibleUnits, memberRole > controlplane.RoleNone) {
+		return controlplane.RoleNone, fmt.Errorf("token %q has no access to project %q", principal.Subject, input.Project)
+	}
+	// Effective role at the project (§13): installation role, membership role,
+	// and org grants on the project's units or their ancestors — the maximum
+	// wins. Starting runs needs writer.
+	effective := principal.Role
+	if memberRole > effective {
+		effective = memberRole
+	}
+	for _, unitID := range links {
+		unit, unitErr := ws.GetOrgUnit(ctx, unitID)
+		if unitErr != nil {
+			continue // a broken link must not crash the gate
+		}
+		if at := principal.MaxRoleAt(unit.ID, unit.Path); at > effective {
+			effective = at
+		}
+	}
+	if effective < controlplane.RoleWriter {
+		return controlplane.RoleNone, fmt.Errorf("effective role %s is not enough to start runs in project %q (writer required)", effective, input.Project)
+	}
+	// Agent: org visibility plus an effective writer role at its binding.
+	if agentCfg != nil && agentCfg.OrgUnitID != "" {
+		if !workspace.OrgVisible(agentCfg.OrgUnitID, principal.VisibleUnits) {
+			return controlplane.RoleNone, fmt.Errorf("agent %q is not available in your org scope", agentCfg.ID)
+		}
+		if unit, unitErr := ws.GetOrgUnit(ctx, agentCfg.OrgUnitID); unitErr == nil {
+			if at := principal.MaxRoleAt(unit.ID, unit.Path); at < controlplane.RoleWriter {
+				return controlplane.RoleNone, fmt.Errorf("effective role %s is not enough to run agent %q (writer required)", at, agentCfg.ID)
+			}
+		}
+	}
+	// Skills and MCP servers referenced by the run must be org-visible.
+	// Unknown references degrade silently here exactly as resolveAgentSkills
+	// and the MCP registry treat them at run time.
+	for _, skillID := range input.Skills {
+		skill, sErr := ws.GetSkill(ctx, skillID.ID)
+		if sErr != nil {
+			if errors.Is(sErr, workspace.ErrNotFound) {
+				continue
+			}
+			return controlplane.RoleNone, sErr
+		}
+		if !workspace.OrgVisible(skill.OrgUnitID, principal.VisibleUnits) {
+			return controlplane.RoleNone, fmt.Errorf("skill %q is not available in your org scope", skillID.ID)
+		}
+	}
+	for _, serverID := range input.MCPServers {
+		server, sErr := ws.GetMCPServer(ctx, serverID)
+		if sErr != nil {
+			if errors.Is(sErr, workspace.ErrNotFound) {
+				continue
+			}
+			return controlplane.RoleNone, sErr
+		}
+		if !workspace.OrgVisible(server.OrgUnitID, principal.VisibleUnits) {
+			return controlplane.RoleNone, fmt.Errorf("MCP server %q is not available in your org scope", serverID)
+		}
+	}
+	return effective, nil
+}
+
+// runExecContext snapshots the authorization state at run start
+// (docs/org-structure.md §34-35): which agent and resources the run touches
+// and who authorized it under which effective role. Ids only — the snapshot
+// must survive later org-structure changes without resurrecting whole
+// resource copies. authorizedAs is the effective role authorizeRunUse
+// returned; RoleNone falls back to the flat principal role.
+func runExecContext(ctx context.Context, input *agent.RunInput, agentID string, authorizedAs controlplane.Role) map[string]any {
+	skillIDs := make([]string, 0, len(input.Skills))
+	for _, s := range input.Skills {
+		skillIDs = append(skillIDs, s.ID)
+	}
+	mcpIDs := input.MCPServers
+	if mcpIDs == nil {
+		mcpIDs = []string{}
+	}
+	authorizedBy := map[string]any{"user_id": input.ActorID, "role": "", "org_unit_id": ""}
+	if principal, ok := controlplane.FromContext(ctx); ok {
+		who := principal.UserID
+		if who == "" {
+			who = principal.Subject
+		}
+		role := authorizedAs
+		if role == controlplane.RoleNone {
+			role = principal.Role
+		}
+		authorizedBy = map[string]any{"user_id": who, "role": role.String(), "org_unit_id": principal.OrgUnitID}
+	}
+	return map[string]any{
+		"agent_id": agentID, "agent_version": input.AgentVersion,
+		"skill_ids": skillIDs, "mcp_ids": mcpIDs,
+		"model": input.Model, "project_id": input.Project,
+		"actor": input.ActorID, "execution_identity_id": "",
+		"authorized_by": authorizedBy,
+	}
 }
 
 // cleanupSeededBuiltinAgents removes agents created by the earlier
