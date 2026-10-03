@@ -1,109 +1,133 @@
 # План работ: Оргструктура и модель доступа
 
-Source spec: `docs/org-structure.md`.
-Статус: не начато. Порядок этапов соответствует фазам спеки; ценность идёт с этапа 3 (фильтрация работает ещё до UI — через API).
+Source spec: `docs/org-structure.md` (расширенная версия, 55 разделов / 8 фаз).
+Статус: **Фаза 1 завершена** (коммит `0e1ec70`). Остальное — по волнам ниже; порядок согласован с фазами спеки, но UI организации вынесен вперёд (волна A), потому что бэкенд фаз 1–2 уже существует и без UI неюзабелен.
 
 Размеры задач: S / M / L — относительно одной волны работы.
 
-## 0. Текущее состояние (baseline)
+## 0. Текущее состояние (baseline после 0e1ec70)
 
-- Права: `controlplane.Principal{Subject, Role, Projects, UserID}`. Статические токены из env (`token:subject:role:projects`) + токены DB-пользователей (`refreshUserTokens` → `gate.SetDBTokens`, `cmd/agent-kernel/main.go`).
-- `workspace_user.projects JSONB` — список проектов пользователя (`[]` = все); `workspace_project.allowed_users JSONB` — `"*"` / `[]` / `[user-id]` (миграции 000021/000027).
-- Агенты, навыки, MCP-серверы, провайдеры — глобальные (000033 снял проектность навыков/MCP; `ListAgentsByProject` уже включает `project_id IS NULL` как «глобально»). Триггеры — `workspace_trigger.project_id`.
-- Списки `/v1/workspace/*` фильтруются только по проекту (`AllowsProject`); по пользователям фильтруется только список проектов (`allowed_users`).
-- UI: `debugger/src/{Layout,Agents,Skills,Mcp,Providers,Users,Workspace}.tsx`; конвенции — табовые диалоги, i18n (`i18n.tsx` ru/en), темы light/dark, `ListFilter` для длинных списков.
-- Миграции: цепочка исполняется на каждом старте ядра, все миграции обязаны быть идемпотентными (`IF NOT EXISTS` / additive).
+Готово (Фаза 1 спеки + часть Фазы 2):
 
-## 1. Целевая модель
+- миграция 000034: `org_unit` (дерево, materialized path), `org_unit_id` на agent/skill/mcp-server/provider/user, `workspace_project_org_unit` (со стороны проекта — CASCADE, со стороны узла — RESTRICT за проверкой «пустого узла»);
+- стор `workspace/org.go`: CRUD дерева, move с пересчётом путей поддерева, запрет циклов, удаление только пустых узлов, привязка ресурсов, инспекция узла;
+- `Principal.VisibleUnits` (цепочка предков) + фильтрация списков и одиночных GET: агенты, навыки, MCP, провайдеры, проекты; admin и kernel-internal токены — без фильтра;
+- переходное правило проектов: `org-видимость AND legacy allowed_users`;
+- API: `/v1/org/units` CRUD (мутации — admin), `/v1/org/units/{id}/resources`, `PUT /v1/org/resources/{kind}/{id}/binding`;
+- обычные PUT ресурсов не сбрасывают привязку (сменить скоуп может только admin через binding); whoami отдаёт `org_unit_id`.
 
-Кратко (полностью — в спеке):
+Уже существовало в системе до оргструктуры (релевантно фазам 4–5):
 
-- `org_unit` — дерево с материализованным `path` (`a.b.c`), один корень на инсталляцию, глубина 7–8.
-- Все распределяемые ресурсы получают nullable `org_unit_id`: `NULL` = вся инсталляция, значение = узел + поддерево.
-- `workspace_user.org_unit_id` — пользователь в ровно одном узле; эффективная видимость = узел + предки.
-- Проекты — many-to-many `workspace_project_org_unit`; видны при пересечении поддеревьев узлов проекта с узлом+предками пользователя.
-- Роли: установка → узел (поддерево) → проект. Существующие 4 роли сохраняются.
+- каналы пользователей + preferred channel (`workspace_user.channels`, `PUT /users/{id}/channels`), notify-адаптеры; web-канал — inbox в UI;
+- `ask_human` / `request_approval`: приостановка Run (`waiting`), структурированные опции, timeout, события траектории (`human.requested` и т.д.), возобновление Run;
+- триггеры `workspace_trigger` (project-scoped: schedule/webhook/event), инструменты агента `create/update/delete_trigger`;
+- Run фиксирует версию агента (миграция 000031).
 
-## 2. Этапы работ
+Известные пробелы против расширенной спеки:
 
-### Этап 1. Модель данных — S — фаза 1
+- видимость ≠ право использования: `POST /v1/agent/runs` проверяет роль+проект, но не доступ к агенту/скиллам/MCP/провайдеру (§22);
+- нет `workspace_project_member` (explicit membership, §16), нет ролей на узлах (§13), нет execution identity (§20), нет аудита (§36), у триггеров нет `org_unit_id` (§18);
+- получатель `ask_human` — конкретный `user:xxx`, нет резолюции role/org_unit/project_owner (§26).
 
-- [ ] `migrations/000034_org_structure.up.sql` + `.down.sql` (идемпотентно):
-  - `org_unit (id TEXT PK, parent_id TEXT NULL REFERENCES org_unit(id), kind TEXT, name TEXT, path TEXT NOT NULL DEFAULT '', created_at, updated_at)`; `kind ∈ {organization, department, team}` (CHECK, как урок `workspace_trigger_type_check` — значение по умолчанию валидно);
-  - `workspace_project_org_unit (project_id, org_unit_id, PK(project_id, org_unit_id), ON DELETE CASCADE)`;
-  - `ADD COLUMN IF NOT EXISTS org_unit_id TEXT NULL REFERENCES org_unit(id)` на `workspace_agent`, `workspace_skill`, `workspace_mcp_server`, `workspace_provider`, `workspace_user`.
-- [ ] `workspace/models.go`: `OrgUnit{ID,ParentID,Kind,Name,Path,CreatedAt,UpdatedAt}`; `org_unit_id` у Agent/Skill/MCPServer/Provider/User (+ `Project.OrgUnitIDs []string` — чтение через join).
-- [ ] Регистрация миграции в `cmd/agent-kernel/main.go` (по образцу 000027–000033).
+## 1. Карта фаз спеки → волны плана
 
-### Этап 2. Стор дерева и видимости — M — фаза 1
+| Фаза спеки | Содержание | Состояние | Волна |
+|---|---|---|---|
+| 1 Org Model | дерево, path, CRUD, привязки, visibility-тесты | ✅ готово | — |
+| 2 Project Model | project↔units, members, project roles, миграция | частично (units есть) | B |
+| 3 Authorization | visibility/use/manage/administer, проверки на операциях, execution identity | минимально | C |
+| 4 Triggers | scope триггеров, авторизация, запуск под identity, аудит | не начато | D |
+| 5 HITL | human_request, recipient resolution, каналы, timeout-политики | ядро есть | E |
+| 6 Policies | наследуемые политики выполнения | не начато | F |
+| 7 UI | Org Tree, доступность, membership, identity, политики | не начато | A (частично) + по фазам |
+| 8 Migration & Cleanup | расхождение моделей, удаление legacy | переходное правило | G |
 
-- [ ] `workspace/org.go`:
-  - `CreateOrgUnit` (path = parent.path ∘ parent.id; корень — пустой path), `ListOrgUnits` (одним запросом, дерево собирается в Go), `UpdateOrgUnit` (name/kind), `MoveOrgUnit` (запрет цикла; пересчёт path поддерева в одной транзакции), `DeleteOrgUnit` (только пустой: нет детей/ресурсов/пользователей/проектов);
-  - `SetResourceOrgUnit(kind, id, unit)` / чтение привязки; `ListUnitResources(unitID)` — ресурсы узла по всем видам;
-  - `SetProjectOrgUnits(projectID, units)` (replace), `ListProjectOrgUnits`;
-  - фильтрующие списки: `ListAgentsVisible(units)`, `ListSkillsVisible`, `ListMCPServersVisible`, `ListProvidersVisible`, `ListProjectsVisible(units)` — условие `org_unit_id IS NULL OR org_unit_id = ANY($units)`, для проектов — join с `workspace_project_org_unit` + пересечение поддеревьев.
-- [ ] Чистая логика path (построение/пересчёт при move, циклы) — отдельными функциями без БД.
-- [ ] Go-тесты: path-логика; NULL-семантика видимости (NULL ресурс виден всем; привязанный — только узлу и потомкам). SQL-часть — сквозная проверка на живом стенде (этап 3/приёмка).
+## 2. Волны работ
 
-### Этап 3. Principal, API и фильтрация — M — фаза 2
+### Волна A. UI организации и доступности — M — фаза 7 (частично)
 
-- [ ] `controlplane`: `Principal.OrgUnitID` + `VisibleUnits []string` (self + предки, вычисляются при загрузке токена). `refreshUserTokens` заполняет; static/env и `kernel-internal` токены — `VisibleUnits = nil` ⇒ без фильтра (рантайм не зависит от прав пользователя, спека §5).
-- [ ] Роуты `cmd/agent-kernel/main.go`:
-  - `GET /v1/org/units` — любой аутентифицированный (дерево нужно формам);
-  - `POST/PUT/DELETE /v1/org/units[/{id}]` — admin; move через `parent_id` в PUT;
-  - `GET /v1/org/units/{id}/resources`; `PUT /v1/org/resources/{kind}/{id}/binding` — admin;
-  - create/update агентов/навыков/MCP/провайдеров принимают `org_unit_id`; проектов — `org_units []string`; пользователей — `org_unit_id`.
-- [ ] Фильтрация списков `/v1/workspace/{agents,skills,mcp-servers,providers,projects}` по `VisibleUnits` принципала; admin — без фильтра.
-- [ ] Переходное правило видимости проектов: `org_visible AND legacy_allowed_users` (оба критерия должны пропустить; admin bypass). Пока структура не настроена, оба критерия нейтральны — сегодняшнее поведение не меняется.
-- [ ] Инвалидация: изменения пользователей/привязок/дерева → пересборка принципалов (`refreshUserTokens` уже вызывается после мутаций пользователей; добавить вызов после мутаций дерева/привязок).
+- [ ] `Org.tsx`: дерево со сворачиванием; инспекция узла (ресурсы по видам, пользователи, проекты); создание/переименование; перемещение выбором родителя с подтверждением («меняет видимость»); удаление пустого узла через наш confirm-диалог.
+- [ ] `Layout.tsx`: раздел «Организация» (admin; остальным по ролям на узлах — после волны C).
+- [ ] Поле «Доступность» (селект узла, дефолт «Вся организация»; для admin — эффективная область «Development └── 14 дочерних») в формах Agents/Skills/Mcp/Providers.
+- [ ] Проект: мультивыбор узлов («Организационные области»), отдельно будущие «Участники»; legacy `allowed_users` скрыть.
+- [ ] Пользователь: выбор основного подразделения вместо списка проектов.
+- [ ] Карточки списков: бейдж узла / «глобально».
+- [ ] Мастер корня: если `org_unit` пуст — создание организации (онбординг/страница «Организация»).
+- [ ] `workspaceApi.ts`: `orgApi`; i18n ru/en; обе темы; `ListFilter`.
 
-### Этап 4. Роли на узлах — S — фаза 2
+### Волна B. Project Model — M — фаза 2
 
-- [ ] `org_unit_role (user_id, org_unit_id, role, granted_by, granted_at, PK(user_id, org_unit_id))` — журнал назначений встроен в таблицу (открытый вопрос §8 — минимальный аудит: кто выдал).
-- [ ] Эффективная роль = максимум роли установки и ролей на пути узла пользователя; учитывается при сборке принципала. API: `PUT/DELETE /v1/org/units/{id}/roles/{userID}` (admin).
-- [ ] UI ролей — в инспекции узла (этап 5).
+- [ ] `workspace_project_member (project_id, user_id, role, created_at, created_by, PK(project_id,user_id))` — миграция 000035.
+- [ ] Доступ к проекту = `org-unit access OR explicit membership` (заменяет AND-правило для legacy-части; `allowed_users` замораживается на чтение).
+- [ ] API: `GET/POST/DELETE /v1/projects/{id}/members`; `GET/PUT/DELETE /v1/projects/{id}/org-units/{unit_id}`; `DELETE /v1/org/resources/{kind}/{id}/binding` (алиас PUT с "").
+- [ ] Аудит-минимум: таблица `access_audit_log` + события `project.member_added/removed`, `resource.bound/unbound`, `org_unit.*` (§36).
+- [ ] Внешние пользователи MVP: explicit membership; `user_type` и `expires_at` — опционально здесь или в волне C.
+- [ ] UI: участники проекта в диалоге проекта.
 
-### Этап 5. UI: раздел «Организация» — M — фаза 3
+### Волна C. Authorization — L — фаза 3
 
-- [ ] `Org.tsx`: дерево со сворачиванием, инспекция узла (ресурсы по видам, пользователи, проекты, роли), создание/переименование/перемещение (выбор родителя селектом + подтверждение — «меняет видимость»), удаление пустого узла с нашим confirm-диалогом (не браузерным).
-- [ ] `Layout.tsx`: раздел «Организация» (виден admin; остальным — только если назначены роли на узлах — решить по месту).
-- [ ] `workspaceApi.ts`: `orgApi` (units CRUD, resources, binding, roles).
-- [ ] i18n ru/en, обе темы, `ListFilter` для длинных списков ресурсов.
+- [ ] Уровни права: `visibility / use / manage / administer` (§10) — модель в controlplane, а не только фильтры списков.
+- [ ] Проверки на операциях (§22): `POST /runs` (агент, проект, скиллы, MCP, провайдер), привязка MCP/скилла к агенту, использование провайдера, EXECUTE/BIND/UNBIND.
+- [ ] Роли на узлах: `org_unit_role (user_id, org_unit_id, role, granted_by, granted_at)`; эффективная роль = максимум (установка ∪ путь узла); API `PUT/DELETE /v1/org/units/{id}/roles/{userID}`; аудит `role.granted/revoked`.
+- [ ] Execution Identity — сущность для автоматических запусков (§20): доступные агенты/MCP/провайдеры/проекты/human-получатели; CRUD + аудит; правило: Run триггера не наследует права создателя.
+- [ ] Snapshot execution context (§34–35): в Run фиксируются agent_id/skill_ids/mcp_ids/provider_id/project_id/execution_identity_id/policy context (сейчас только версия агента); изменение оргструктуры не убивает живой Run, критические действия перепроверяют права.
+- [ ] Provider credentials (§23): секреты не возвращаются ресурсными API; использование — только в execution context.
 
-### Этап 6. UI: доступность в формах — M — фаза 3
+### Волна D. Triggers — M — фаза 4
 
-- [ ] Поле «Доступность» (селект узла, дефолт «Вся организация») в формах: `Agents.tsx`, `Skills.tsx`, `Mcp.tsx`, `Providers.tsx`.
-- [ ] Проект: мультивыбор узлов (вместо чекбоксов `allowed_users`; легаси-поле скрывается).
-- [ ] Пользователь: выбор узла вместо списка проектов (`Users.tsx`).
-- [ ] Карточки списков: бейдж узла/«глобально» у ресурсов.
+- [ ] `org_unit_id` у триггеров (или `org_unit_trigger` при.departments-сценариях) + видимость в списках.
+- [ ] Авторизация создания триггера (§21): право на агента, identity, проект.
+- [ ] Запуск Run под execution identity; повторная проверка критических разрешений при каждом запуске.
+- [ ] Аудит `trigger.created/updated/deleted`.
+- [ ] UI триггера (§46): источник → событие → агент → область → identity → human-правила, без YAML.
 
-### Этап 7. Онбординг структуры и очистка — S — фаза 4
+### Волна E. HITL — M — фаза 5
 
-- [ ] Если `org_unit` пуст: мастер создания корня (название организации) — в онбординге/на странице «Организация».
-- [ ] Заморозка `allowed_users` и `workspace_user.projects`: чтение переключено на org-модель (переходное правило этапа 3 удаляется), колонки удаляются отдельной миграцией только после проверки на стенде.
-- [ ] Документация: `runbook.md` / `docs/architecture.md` — новая модель доступа.
+- [ ] `human_request` как отдельная сущность (§28: статусы pending/delivered/waiting/answered/expired/cancelled) — поверх существующих событий траектории; UI-список запросов.
+- [ ] Recipient resolution (§26): `project_owner / role / org_unit / specific_user`; проверка права обращения (§30).
+- [ ] Адаптеры Matrix/Telegram + fallback по preferred channel.
+- [ ] Timeout-политики (§33): fail/retry/fallback/escalate/cancel — в модели выполнения, не в транспорте.
+- [ ] Аудит HITL (§37).
 
-## 3. Тестирование и приёмка
+### Волна F. Policies — M/L — фаза 6
 
-- Юнит: path-логика (построение, move, циклы, пересчёт поддерева); NULL-семантика видимости; эффективная роль; переходное правило.
-- API: CRUD дерева (цикл в move → 400/409; удаление непустого → 409); фильтрация списков (токен пользователя узла A не видит ресурс узла B; admin видит всё; `kernel-internal` без фильтра).
-- Frontend: tsc + vitest (формы шлют `org_unit_id`/`org_units`; локали полные).
-- E2E/live: два департамента → навык в одном невидим из другого; проект двух узлов виден обоим; перемещение узла меняет видимость ресурсов; пользователь без узла видит как сегодня.
-- Чек-лист спеки: §3 (наследование сверху вниз, кросс-узловые проекты), §4 (постепенность, ничего не ломается без настройки структуры), §5 (API-контракт, рантайм без фильтра), §6 (UI-требования).
+- [ ] Сущность Policy, привязка к узлам, наследование сверху вниз.
+- [ ] Минимум: разрешённые модели/MCP, бюджет/токены, timeout, network/sandbox, human approval.
+- [ ] UI политик + визуализация эффективного доступа.
+
+### Волна G. Migration & Cleanup — S — фаза 8
+
+- [ ] Отчёт расхождения old/new модели на стенде (этап 4 спеки §48).
+- [ ] Отключение чтения `allowed_users` / `workspace_user.projects`; удаление колонок отдельной миграцией.
+- [ ] Документация модели доступа (runbook/architecture).
+
+## 3. Тестирование и приёмка (по §51 спеки)
+
+- Иерархия: ресурс A виден A/B/C; ресурс C виден только C.
+- Глобальный ресурс (`NULL`) виден всем.
+- Кросс-функциональный проект: пользователи всех связанных узлов видят; несвязанные — нет.
+- Explicit membership: доступ вне орг-области после добавления.
+- Роли: installation admin / org-unit admin / project writer / project reader / обычный пользователь.
+- Trigger: разрешённый триггер создаётся; с недоступным агентом — нет; права создателя не наследуются; identity имеет собственные права.
+- Run: недоступные агент/MCP/провайдер отклоняются на POST /runs и внутри выполнения.
+- HITL: полный цикл ask_human → delivery → waiting → answer → resume.
+- Изменение узла пользователя: новый Run по новым правам; живой Run не исчезает; критическое действие перепроверяется.
 
 ## 4. Принятые решения
 
-1. **Переходная видимость = org AND legacy.** Проект виден, только если пропускают обе модели (org-модель нейтральна, пока не настроена). Единственный способ сохранить текущие ограничения без миграционного «большого взрыва»; отключается на этапе 7.
-2. **Пересчёт `path` — в приложении**, одной транзакцией `MoveOrgUnit`, а не PL/pgSQL-триггером: логика тестируется юнит-тестами, в БД нет скрытой магии. Требование спеки «пересчёт при перемещении» выполняется, носитель другой.
-3. **Привязку ресурса к узлу и структуру дерева меняет только admin** — это меняет видимость для всех участников; writer по-прежнему создаёт ресурсы (с наследуемой доступностью «вся организация» по умолчанию).
-4. **`org_unit_trigger` отложен.** Текущие триггеры проектные; отдельной потребности в узловых нет. Вернуться, если появятся сценарии «департаментный триггер».
-5. **Роли на узлах — минимум**: одна таблица с `granted_by` (аудит), эффективная роль = максимум. Без гибких «роль на ресурс» — это Phase 2 продукта.
-6. **`VisibleUnits = nil` у служебных токенов** (env, `kernel-internal`) — фильтрация только для пользовательских токенов; ядро не зависит от прав конкретного человека.
+1. **Переходная видимость = org AND legacy** (до волны B): обе модели должны пропустить; без настройки структуры поведение не меняется. В волне B заменяется на `org OR explicit membership`, legacy замораживается.
+2. **Пересчёт `path` — в приложении**, одной транзакцией `MoveOrgUnit`, без PL/pgSQL-триггеров.
+3. **Мутации дерева и привязок — только admin** (изменение видимости для всех); writer создаёт ресурсы с доступностью «вся организация».
+4. **`VisibleUnits = nil` у служебных токенов** — рантайм не зависит от прав пользователя; privileged API не используется для обхода авторизаций пользовательского API (§41).
+5. **Только аддитивная модель** (§7): без deny/override/исключений поддеревьев — зафиксировано как ограничение первой версии.
+6. **Видимость ≠ полномочия** (§10): фильтрация списков — это visibility; use/manage/administer появляются в волне C на уровне операций.
+7. **Trigger ≠ пользователь** (§19): автоматические Run — под execution identity с собственными правами.
+8. **Org Unit у пользователя один** (primary, §11–12): таблица дополнительных memberships — будущее расширение без переделки модели.
 
-## 5. Не-цели (этой волны)
+## 5. Не-цели (первой версии, §54 спеки)
 
-- Drag-n-drop перемещения узлов (перемещение селектом родителя с подтверждением).
-- Импорт оргструктуры из HR/SCIM (спека §8 — будущая работа).
-- Полноценный аудит-лог всех действий (только журнал выдачи ролей).
-- ltree вместо path (спека уже отвергла).
-- Ограничение видимости внутри узла «наверх» (пользователь видит ресурсы предков by design).
+- Deny rules, сложные ACL, произвольные permission sets.
+- Матричная оргструктура (несколько узлов пользователя).
+- HR sync / SCIM / федерация организаций.
+- Выбор получателя LLM-ом, workflow согласований.
+- ltree вместо materialized path.
