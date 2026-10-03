@@ -566,7 +566,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                       </details>
                     )}
 
-                    {msg.content && msg.role === 'assistant' && msg.status && msg.status !== 'running' ? (
+                    {msg.content && msg.role === 'assistant' ? (
                       <Markdown content={msg.content} />
                     ) : msg.content ? (
                       <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
