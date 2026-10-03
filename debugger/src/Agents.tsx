@@ -142,8 +142,8 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       const [agentsData, providersData, skillsData, mcpData, toolsData, builtinsData] = await Promise.all([
         workspaceApi.listAllAgents(),
         workspaceApi.listProviders(),
-        workspaceApi.listSkills(''),
-        workspaceApi.listMCPServers(),
+        workspaceApi.listSkills(project),
+        workspaceApi.listMCPServers(project || undefined),
         workspaceApi.listMCPTools(),
         workspaceApi.listBuiltinAgents(),
       ])
@@ -156,7 +156,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       setBuiltins(builtinsData.builtins ?? [])
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
-  }, [])
+  }, [project])
 
   useEffect(() => { void load() }, [load])
 
@@ -192,7 +192,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     setProvenance({})
     setDraftQuestions([])
     setPromptPreview(null)
-    setForm({ name: '', model: '', skills: [], mcp_servers: [], tools: [], definition: {} })
+    setForm({ name: '', model: '', project_id: project, skills: [], mcp_servers: [], tools: [], definition: {} })
     setShowForm(true)
     setWizardOpen(false)
   }
@@ -222,6 +222,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       },
       sandbox_profile: draft.suggested?.sandbox || '',
       network_access: draft.suggested?.network,
+      project_id: project,
       skills: [],
       mcp_servers: [],
       tools: [],
@@ -312,7 +313,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     setFromWizard(false)
     setProvenance({})
     setPromptPreview(null)
-    setForm({ ...agent, id: undefined, name: agent.name + (t('agents.copy_suffix') ?? ' (copy)'), definition: agent.definition ? { ...agent.definition } : {} })
+    // The copy lands in the current project: duplication starts from a
+    // project-scoped list, so the duplicate should stay next to its source.
+    setForm({ ...agent, id: undefined, project_id: agent.project_id || project, name: agent.name + (t('agents.copy_suffix') ?? ' (copy)'), definition: agent.definition ? { ...agent.definition } : {} })
     setShowForm(true)
   }
 
@@ -368,6 +371,23 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // global list shows one duplicate per extra project. The panel is scoped
   // to the current project; global agents (no project) are always visible.
   const visibleAgents = agents.filter((a) => !a.project_id || a.project_id === project)
+
+  // Bindings are scoped to the current project (the runtime resolves skills
+  // per project too). Ids assigned earlier from another project stay listed
+  // with a marker so they can be reviewed and removed.
+  const otherProject = t('agents.from_other_project') ?? 'from another project'
+  const skillOptions = [
+    ...availableSkills.map((s) => ({ id: s.id, label: s.name })),
+    ...(form.skills ?? [])
+      .filter((id) => !availableSkills.some((s) => s.id === id))
+      .map((id) => ({ id, label: `${id} — ${otherProject}` })),
+  ]
+  const mcpOptions = [
+    ...mcpServers.map((s) => ({ id: s.id, label: s.name })),
+    ...(form.mcp_servers ?? [])
+      .filter((id) => !mcpServers.some((s) => s.id === id))
+      .map((id) => ({ id, label: `${id} — ${otherProject}` })),
+  ]
 
   // Auto-select the first visible agent once the list is loaded.
   useEffect(() => {
@@ -919,16 +939,16 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             )}
             {formTab === 'bindings' && (
               <Stack gap={4}>
-                {availableSkills.length > 0 && (
+                {skillOptions.length > 0 && (
                   <div>
                     <p className="cds--label" style={{ marginBottom: '0.5rem' }}>{t('agents.skills') ?? 'Skills'}</p>
                     <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>{t('agents.skills_hint') ?? 'Selected skills are injected into the system prompt at run time.'}</p>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 1rem', maxHeight: '14rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
-                      {availableSkills.map((s) => (
+                      {skillOptions.map((s) => (
                         <Checkbox
                           key={s.id}
                           id={`agent-skill-${s.id}`}
-                          labelText={s.name}
+                          labelText={s.label}
                           title={s.id}
                           checked={form.skills?.includes(s.id) ?? false}
                           onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) =>
@@ -938,16 +958,16 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     </div>
                   </div>
                 )}
-                {mcpServers.length > 0 && (
+                {mcpOptions.length > 0 && (
                   <div>
                     <p className="cds--label" style={{ marginBottom: '0.5rem' }}>{t('agents.mcp_servers') ?? 'MCP servers'}</p>
                     <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>{t('agents.mcp_hint') ?? 'Selected servers add their tools to this agent. Bind servers on the MCP tab.'}</p>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 1rem', maxHeight: '10rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
-                      {mcpServers.map((s) => (
+                      {mcpOptions.map((s) => (
                         <Checkbox
                           key={s.id}
                           id={`agent-mcp-${s.id}`}
-                          labelText={s.name}
+                          labelText={s.label}
                           title={s.id}
                           checked={form.mcp_servers?.includes(s.id) ?? false}
                           onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) =>
@@ -957,7 +977,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     </div>
                   </div>
                 )}
-                {availableSkills.length === 0 && mcpServers.length === 0 && (
+                {skillOptions.length === 0 && mcpOptions.length === 0 && (
                   <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('agents.no_bindings') ?? 'No skills or MCP servers configured in this project yet.'}</p>
                 )}
               </Stack>
@@ -1086,6 +1106,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     sandbox_profile: tpl.sandbox_profile,
                     network_access: tpl.network_access,
                     read_only: tpl.read_only,
+                    project_id: project,
                     skills: [],
                     mcp_servers: [],
                     tools: [],
