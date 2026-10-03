@@ -857,11 +857,10 @@ func main() {
 			return
 		}
 		a.DefinitionVersion = prev.DefinitionVersion
-		// Editing configuration must not silently re-scope an agent: bindings
-		// change only through the admin binding endpoint.
-		if a.OrgUnitID == "" {
-			a.OrgUnitID = prev.OrgUnitID
-		}
+		// Editing configuration must not re-scope an agent: bindings change
+		// only through the admin binding endpoint, so the payload value is
+		// ignored entirely and the previous binding is preserved.
+		a.OrgUnitID = prev.OrgUnitID
 		if agentSemanticsChanged(prev, a) {
 			a.DefinitionVersion++
 		}
@@ -1827,12 +1826,11 @@ func main() {
 			writeError(w, 422, err)
 			return
 		}
-		// Editing content must not silently re-scope a skill: bindings change
-		// only through the admin binding endpoint.
-		if skill.OrgUnitID == "" {
-			if prev, err := ws.GetSkill(r.Context(), skill.ID); err == nil {
-				skill.OrgUnitID = prev.OrgUnitID
-			}
+		// Editing content must not re-scope a skill: bindings change only
+		// through the admin binding endpoint, so the payload value is ignored
+		// entirely and the previous binding is preserved.
+		if prev, err := ws.GetSkill(r.Context(), skill.ID); err == nil {
+			skill.OrgUnitID = prev.OrgUnitID
 		}
 		if err := ws.UpdateSkill(r.Context(), &skill); err != nil {
 			writeError(w, 500, err)
@@ -2022,11 +2020,10 @@ func main() {
 			return
 		}
 		server := req.toServer(current.ID)
-		// Editing config must not silently re-scope a server: bindings change
-		// only through the admin binding endpoint.
-		if server.OrgUnitID == "" {
-			server.OrgUnitID = current.OrgUnitID
-		}
+		// Editing config must not re-scope a server: bindings change only
+		// through the admin binding endpoint, so the payload value is ignored
+		// entirely and the previous binding is preserved.
+		server.OrgUnitID = current.OrgUnitID
 		cfg := mcpConfig(server)
 		if err := cfg.Validate(); err != nil {
 			writeError(w, 422, err)
