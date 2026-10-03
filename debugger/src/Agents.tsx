@@ -192,7 +192,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     setProvenance({})
     setDraftQuestions([])
     setPromptPreview(null)
-    setForm({ name: '', model: '', project_id: project, skills: [], mcp_servers: [], tools: [], definition: {} })
+    setForm({ name: '', model: '', skills: [], mcp_servers: [], tools: [], definition: {} })
     setShowForm(true)
     setWizardOpen(false)
   }
@@ -222,7 +222,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       },
       sandbox_profile: draft.suggested?.sandbox || '',
       network_access: draft.suggested?.network,
-      project_id: project,
       skills: [],
       mcp_servers: [],
       tools: [],
@@ -313,9 +312,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     setFromWizard(false)
     setProvenance({})
     setPromptPreview(null)
-    // The copy lands in the current project: duplication starts from a
-    // project-scoped list, so the duplicate should stay next to its source.
-    setForm({ ...agent, id: undefined, project_id: agent.project_id || project, name: agent.name + (t('agents.copy_suffix') ?? ' (copy)'), definition: agent.definition ? { ...agent.definition } : {} })
+    // Agents are cross-functional (docs/evaluable-agent.md): no project
+    // binding on copies either — project context is attached per run.
+    setForm({ ...agent, id: undefined, name: agent.name + (t('agents.copy_suffix') ?? ' (copy)'), definition: agent.definition ? { ...agent.definition } : {} })
     setShowForm(true)
   }
 
@@ -1106,7 +1105,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     sandbox_profile: tpl.sandbox_profile,
                     network_access: tpl.network_access,
                     read_only: tpl.read_only,
-                    project_id: project,
                     skills: [],
                     mcp_servers: [],
                     tools: [],

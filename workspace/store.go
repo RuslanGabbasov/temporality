@@ -202,11 +202,13 @@ func (s *Store) ListAllAgents(ctx context.Context) ([]Agent, error) {
 }
 
 func (s *Store) ListAgentsByProject(ctx context.Context, projectID string) ([]Agent, error) {
+	// Agents are cross-functional (docs/evaluable-agent.md §16): globals are
+	// usable in every project, project-bound ones only in their project.
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools,
 		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels,
 		        definition, definition_version, created_at, updated_at
-		 FROM workspace_agent WHERE project_id = $1 ORDER BY created_at`, projectID)
+		 FROM workspace_agent WHERE project_id = $1 OR project_id IS NULL ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
 	}
