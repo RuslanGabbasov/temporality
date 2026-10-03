@@ -110,7 +110,14 @@ services:
       # really executes, then the worker dies before the terminal event lands.
       KERNEL_FAULT_AFTER_EFFECT: ${KERNEL_FAULT_AFTER_EFFECT:-}
       KERNEL_SANDBOX_ROOT: ${TEMPORALITY_SANDBOX_ROOT:-}
-      KERNEL_SANDBOX_IMAGE: ${KERNEL_SANDBOX_IMAGE:-}
+      KERNEL_SANDBOX_IMAGE: ${KERNEL_SANDBOX_IMAGE:-${TEMPORALITY_SANDBOX_IMAGE:-}}
+      # Outbound notification channels (docs/triggers-and-escalations.md §7):
+      # transports the kernel uses to deliver ask_human questions to users.
+      KERNEL_MATRIX_HOMESERVER: ${KERNEL_MATRIX_HOMESERVER:-}
+      KERNEL_MATRIX_ACCESS_TOKEN: ${KERNEL_MATRIX_ACCESS_TOKEN:-}
+      KERNEL_TELEGRAM_BOT_TOKEN: ${KERNEL_TELEGRAM_BOT_TOKEN:-}
+      # Base URL of the debugger UI, used for links inside notifications.
+      KERNEL_UI_URL: ${KERNEL_UI_URL:-}
     ports:
       - "8090:8090"
     volumes:
