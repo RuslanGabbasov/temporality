@@ -124,14 +124,10 @@ func BuildSkillDraft(ctx context.Context, model *llm.Client, description, toolsS
 	if strings.TrimSpace(toolsSummary) != "" {
 		user += "\n\nAvailable tools and MCP servers in this workspace:\n" + toolsSummary
 	}
-	completion, err := model.Complete(ctx, []llm.Message{
+	draft, err := completeParsed(ctx, model, []llm.Message{
 		{Role: "system", Content: draftPrompt(final)},
 		{Role: "user", Content: user},
-	}, nil)
-	if err != nil {
-		return SkillDraft{}, fmt.Errorf("model call failed: %w", err)
-	}
-	draft, err := parseDraftCompletion(completion.Content)
+	}, parseDraftCompletion)
 	if err != nil {
 		return SkillDraft{}, err
 	}

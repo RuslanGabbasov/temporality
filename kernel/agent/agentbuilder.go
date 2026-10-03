@@ -114,14 +114,10 @@ func BuildAgentDraft(ctx context.Context, model *llm.Client, description, toolsS
 	if strings.TrimSpace(toolsSummary) != "" {
 		user += "\n\nTools available to agents in this workspace:\n" + toolsSummary
 	}
-	completion, err := model.Complete(ctx, []llm.Message{
+	draft, err := completeParsed(ctx, model, []llm.Message{
 		{Role: "system", Content: agentDraftPrompt(final)},
 		{Role: "user", Content: user},
-	}, nil)
-	if err != nil {
-		return AgentDraft{}, fmt.Errorf("model call failed: %w", err)
-	}
-	draft, err := parseAgentDraft(completion.Content)
+	}, parseAgentDraft)
 	if err != nil {
 		return AgentDraft{}, err
 	}

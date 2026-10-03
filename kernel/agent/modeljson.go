@@ -5,9 +5,43 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+
+	"github.com/temporality-project/temporality/kernel/llm"
 )
+
+// jsonRepairInstruction is the corrective user turn appended when the model
+// answered in prose instead of JSON: showing the failed reply back reliably
+// restores the format on the second attempt.
+const jsonRepairInstruction = `Your previous reply was not the requested JSON object. Respond again with the single JSON object matching the schema — JSON only, no prose, no markdown fences.`
+
+// completeParsed runs one model call and parses the reply as JSON. It asks
+// for JSON mode up front and falls back to one corrective retry when parsing
+// still fails: small models occasionally answer conversationally despite
+// instructions (and some providers ignore response_format altogether).
+func completeParsed[T any](ctx context.Context, model *llm.Client, messages []llm.Message, parse func(string) (T, error)) (T, error) {
+	var zero T
+	completion, err := model.Complete(ctx, messages, nil, llm.JSONMode())
+	if err != nil {
+		return zero, fmt.Errorf("model call failed: %w", err)
+	}
+	parsed, parseErr := parse(completion.Content)
+	if parseErr == nil {
+		return parsed, nil
+	}
+	retry := append(append(make([]llm.Message, 0, len(messages)+2), messages...),
+		llm.Message{Role: "assistant", Content: completion.Content},
+		llm.Message{Role: "user", Content: jsonRepairInstruction},
+	)
+	completion, err = model.Complete(ctx, retry, nil, llm.JSONMode())
+	if err != nil {
+		return zero, fmt.Errorf("model call failed: %w", err)
+	}
+	return parse(completion.Content)
+}
 
 // extractJSONObject returns the most likely JSON object payload in content:
 // leading/trailing prose, markdown fences and reasoning blocks are dropped.

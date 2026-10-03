@@ -155,3 +155,67 @@ func TestCompleteFailsFastOnAuthError(t *testing.T) {
 		t.Errorf("provider calls = %d, want 1 (no retries on 401)", calls)
 	}
 }
+
+func TestJSONModeSendsResponseFormat(t *testing.T) {
+	var lastRequest map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		lastRequest = body
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(okResponse))
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	if _, err := client.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+		t.Fatalf("plain Complete: %v", err)
+	}
+	if _, present := lastRequest["response_format"]; present {
+		t.Errorf("response_format sent without JSONMode: %v", lastRequest["response_format"])
+	}
+
+	if _, err := client.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, JSONMode()); err != nil {
+		t.Fatalf("Complete with JSONMode: %v", err)
+	}
+	format, _ := lastRequest["response_format"].(map[string]any)
+	if format["type"] != "json_object" {
+		t.Errorf("response_format = %v, want json_object", lastRequest["response_format"])
+	}
+}
+
+func TestJSONModeFallsBackOnRejection(t *testing.T) {
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		requests = append(requests, body)
+		if _, rejected := body["response_format"]; rejected {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error":{"message":"response_format is not supported"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(okResponse))
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	completion, err := client.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, JSONMode())
+	if err != nil {
+		t.Fatalf("Complete after rejection: %v", err)
+	}
+	if completion.Content != "ok" {
+		t.Errorf("content = %q, want ok", completion.Content)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("provider calls = %d, want 2 (rejected with format, retried plain)", len(requests))
+	}
+	if _, still := requests[1]["response_format"]; still {
+		t.Errorf("retry still carries response_format: %v", requests[1]["response_format"])
+	}
+}

@@ -1,8 +1,15 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/temporality-project/temporality/kernel/llm"
 )
 
 func TestExtractJSONObject(t *testing.T) {
@@ -50,5 +57,61 @@ func TestExtractJSONObject(t *testing.T) {
 				t.Fatalf("payload = %q, want %q", payload, tc.want)
 			}
 		})
+	}
+}
+
+func TestCompleteParsedRetriesOnProse(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		if requests == 1 {
+			// The flaky small-model failure mode: conversational prose.
+			fmt.Fprintf(w, `{"choices":[{"message":{"content":"Waiting for the human answer was the whole point. Done."},"finish_reason":"stop"}]}`)
+			return
+		}
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":"{\"name\": \"Deploy\"}"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	model := llm.New(llm.Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	type payload struct {
+		Name string `json:"name"`
+	}
+	parsed, err := completeParsed(context.Background(), model, []llm.Message{{Role: "user", Content: "build"}}, func(content string) (payload, error) {
+		var p payload
+		body, ok := extractJSONObject(content)
+		if !ok {
+			return payload{}, fmt.Errorf("model returned no JSON object")
+		}
+		if err := json.Unmarshal([]byte(body), &p); err != nil {
+			return payload{}, fmt.Errorf("model returned invalid JSON: %w", err)
+		}
+		return p, nil
+	})
+	if err != nil {
+		t.Fatalf("completeParsed: %v", err)
+	}
+	if parsed.Name != "Deploy" {
+		t.Fatalf("name = %q, want Deploy", parsed.Name)
+	}
+	if requests != 2 {
+		t.Errorf("model calls = %d, want 2 (prose first, JSON on retry)", requests)
+	}
+}
+
+func TestCompleteParsedFailsAfterRetry(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":"still not json"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	model := llm.New(llm.Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	_, err := completeParsed(context.Background(), model, []llm.Message{{Role: "user", Content: "build"}}, func(content string) (struct{}, error) {
+		return struct{}{}, fmt.Errorf("model returned invalid JSON")
+	})
+	if err == nil {
+		t.Fatal("expected error when both attempts return prose")
 	}
 }

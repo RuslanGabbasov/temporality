@@ -187,6 +187,20 @@ type chatRequest struct {
 	MaxTokens         int            `json:"max_tokens"`
 	Reasoning         map[string]any `json:"reasoning,omitempty"`
 	Stream            bool           `json:"stream,omitempty"`
+	// ResponseFormat asks OpenAI-compatible providers for structured output
+	// (json_object). Only set by explicit option: free-form chat turns must
+	// keep plain text.
+	ResponseFormat map[string]any `json:"response_format,omitempty"`
+}
+
+// Option tunes a single completion call.
+type Option func(*chatRequest)
+
+// JSONMode asks the provider to answer with a JSON object only. Providers
+// without structured-output support are handled gracefully: a rejection of
+// the field falls back to a plain call instead of failing the wizard.
+func JSONMode() Option {
+	return func(req *chatRequest) { req.ResponseFormat = map[string]any{"type": "json_object"} }
 }
 
 type chatResponse struct {
@@ -272,7 +286,7 @@ func toRequestMessages(messages []Message) []requestMessage {
 // failures (429/5xx/network) with bounded backoff; the returned completion
 // carries observability fields (provider, latency, payload references,
 // attempt count).
-func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolDef) (Completion, error) {
+func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolDef, options ...Option) (Completion, error) {
 	req := chatRequest{
 		Model:       c.cfg.Model,
 		Messages:    toRequestMessages(messages),
@@ -289,6 +303,9 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 	}
 	for _, tool := range tools {
 		req.Tools = append(req.Tools, chatTool{Type: "function", Function: tool})
+	}
+	for _, option := range options {
+		option(&req)
 	}
 	payload, err := json.Marshal(req)
 	if err != nil {
@@ -313,6 +330,20 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 			return completion, nil
 		}
 		lastErr = err
+		// Providers without structured-output support reject response_format
+		// as a bad request. Drop the field and retry once as plain chat: a
+		// missing JSON mode degrades extraction robustness, not availability.
+		if req.ResponseFormat != nil {
+			var statusErr *statusError
+			if errors.As(err, &statusErr) && (statusErr.code == http.StatusBadRequest || statusErr.code == http.StatusUnprocessableEntity) {
+				req.ResponseFormat = nil
+				payload, err = json.Marshal(req)
+				if err != nil {
+					return Completion{}, err
+				}
+				continue
+			}
+		}
 		if ctx.Err() != nil || !transient(err) {
 			return Completion{}, err
 		}
