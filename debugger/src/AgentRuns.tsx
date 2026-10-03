@@ -24,8 +24,8 @@ function message(error: unknown) { return error instanceof Error ? error.message
 function json(value: unknown) { return JSON.stringify(value, null, 2) }
 function runID(event: ObservationEvent) { return event.context?.run ?? '' }
 function pendingApprovals(events: ObservationEvent[]) {
-  const ended = new Set(events.filter((event) => ['approval.granted', 'approval.rejected', 'approval.timed_out'].includes(event.type)).map((event) => event.data?.operation_id))
-  return events.filter((event) => event.type === 'approval.requested' && !ended.has(event.data?.operation_id))
+  const ended = new Set(events.filter((event) => ['approval.granted', 'approval.rejected', 'approval.timed_out', 'human.answered', 'human.cancelled', 'human.timed_out'].includes(event.type)).map((event) => event.data?.operation_id))
+  return events.filter((event) => (event.type === 'approval.requested' || event.type === 'human.requested') && !ended.has(event.data?.operation_id))
 }
 
 function shortTime(iso: string) {
@@ -120,6 +120,18 @@ function eventSummary(event: ObservationEvent, t: (key: string, vars?: Record<st
       return { icon: '📋', label: t('runs.event.summary'), detail: String(d.kind ?? ''), color: 'var(--tm-teal)' }
     case 'approval.rejected':
       return { icon: '✗', label: t('runs.event.rejected'), detail: String(d.reason ?? ''), color: '#f7768e' }
+    case 'human.requested':
+      return { icon: '❓', label: t('runs.event.human_requested') ?? 'Question to human', detail: String(d.question ?? ''), color: '#e6b85c' }
+    case 'human.answered':
+      return { icon: '✓', label: t('runs.event.human_answered') ?? 'Answered', detail: String(d.response ?? ''), color: '#9ece6a' }
+    case 'human.timed_out':
+      return { icon: '⏱', label: t('runs.event.human_timed_out') ?? 'No answer (timeout)', detail: '', color: '#f7768e' }
+    case 'human.cancelled':
+      return { icon: '✗', label: t('runs.event.human_cancelled') ?? 'Question cancelled', detail: String(d.reason ?? ''), color: '#f7768e' }
+    case 'trigger.received':
+      return { icon: '⚡', label: t('runs.event.trigger_received') ?? 'Trigger received', detail: String(d.trigger_name ?? d.source ?? ''), color: '#7aa2f7' }
+    case 'trigger.accepted':
+      return { icon: '⚡', label: t('runs.event.trigger_accepted') ?? 'Trigger accepted', detail: String(d.trigger_name ?? ''), color: '#7aa2f7' }
     case 'delegation.started':
       return { icon: '↗', label: t('runs.event.delegation'), detail: `→ ${d.child_run_id ?? '?'}`, color: '#7aa2f7' }
     default:
@@ -312,18 +324,18 @@ export default function AgentRuns({ project }: { project: string }) {
     return () => window.clearInterval(timer)
   }, [selected, loadRun])
 
-  async function decide(event: ObservationEvent, approved: boolean) {
+  async function decide(event: ObservationEvent, approved: boolean, response = '') {
     const operationID = String(event.data?.operation_id ?? '')
     setBusy(true); setError('')
     try {
       const root = timeline.find((item) => item.type === 'run.started' && runID(item) === selected)
       const operation = event.data?.operation as Record<string, unknown> | undefined
       const approvalQuery = new URLSearchParams({ project: project.trim(), source_id: root?.source.id ?? '' })
-      const response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(selected)}/approval?${approvalQuery}`, {
+      const response2 = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(selected)}/approval?${approvalQuery}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ operation_id: operationID, arguments_hash: operation?.arguments_hash ?? '', approved, actor_id: 'human-ui', reason: reason.trim() }),
+        body: JSON.stringify({ operation_id: operationID, arguments_hash: operation?.arguments_hash ?? String(event.data?.arguments_hash ?? ''), approved, actor_id: 'human-ui', reason: reason.trim(), response: response.trim() }),
       })
-      if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
+      if (!response2.ok) throw new Error(`${response2.status} ${await response2.text()}`)
       await loadRun(selected, true)
     } catch (failure) { setError(message(failure)) }
     finally { setBusy(false) }
@@ -429,33 +441,60 @@ export default function AgentRuns({ project }: { project: string }) {
                   </Tile>
                 )}
 
-                {/* Pending approvals */}
+                {/* Pending approvals and human questions */}
                 {pending.map((event) => {
                   const details = event.data?.details as Record<string, unknown> | undefined
                   const operation = event.data?.operation as Record<string, unknown> | undefined
                   const operationArgs = operation?.arguments as Record<string, unknown> | undefined
                   const command = operationArgs?.command
                   const risk = event.data?.risk as Record<string, unknown> | undefined
+                  const isHuman = event.type === 'human.requested'
+                  const options = Array.isArray(event.data?.options) ? (event.data?.options as unknown[]).map((o) => String(o)) : []
                   return (
-                    <Tile key={event.event_id} style={{ borderLeft: '3px solid #e6b85c' }}>
-                      <Heading style={{ fontSize: '0.875rem' }}>⚠ {t('runs.approval_required') ?? 'Approval Required'}</Heading>
-                      <p style={{ fontSize: '0.875rem', margin: '0.5rem 0' }}>{String(operation?.summary ?? event.data?.reason ?? event.data?.action ?? t('runs.approval_requested') ?? 'Agent requested approval')}</p>
-                      {details && (
+                    <Tile key={event.event_id} style={{ borderLeft: `3px solid ${isHuman ? 'var(--tm-amber)' : '#e6b85c'}` }}>
+                      <Heading style={{ fontSize: '0.875rem' }}>{isHuman ? `❓ ${t('runs.human_question') ?? 'Agent asks'}` : `⚠ ${t('runs.approval_required') ?? 'Approval Required'}`}</Heading>
+                      {isHuman ? (
                         <>
-                          <Tag type="warm-gray" size="sm">{String(details.tool)}</Tag>
-                          <Tag type="gray" size="sm">{t('runs.risk', { level: String(risk?.level ?? 'unknown') })}</Tag>
-                          <pre style={{ background: 'var(--tm-raised)', color: 'var(--tm-text)', padding: '0.5rem', fontSize: '0.75rem', marginTop: '0.5rem', borderRadius: '4px', maxWidth: '100%', overflowX: 'auto' }}>
-                            {Array.isArray(command) ? command.join(' ') : json(operation?.arguments ?? details)}
-                          </pre>
+                          <p style={{ fontSize: '0.9rem', margin: '0.5rem 0' }}>{String(event.data?.question ?? '')}</p>
+                          {Boolean(event.data?.context) && (
+                            <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', margin: '0 0 0.5rem', whiteSpace: 'pre-wrap' }}>{String(event.data?.context)}</p>
+                          )}
+                          {options.length > 0 && (
+                            <Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                              {options.map((option) => (
+                                <Button key={option} size="sm" onClick={() => void decide(event, true, option)} disabled={busy}>{option}</Button>
+                              ))}
+                            </Stack>
+                          )}
+                          <div style={{ marginTop: '0.75rem' }}>
+                            <TextInput id="human-answer" labelText={t('runs.answer_label') ?? 'Your answer'} value={reason} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)} placeholder={t('runs.answer_placeholder') ?? 'Type a free-form answer…'} />
+                          </div>
+                          <Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem' }}>
+                            <Button onClick={() => void decide(event, true)} disabled={busy}>{t('runs.send_answer') ?? 'Send'}</Button>
+                            <Button kind="secondary" onClick={() => void decide(event, false)} disabled={busy}>{t('runs.cancel_question') ?? 'Cancel question'}</Button>
+                          </Stack>
+                        </>
+                      ) : (
+                        <>
+                          <p style={{ fontSize: '0.875rem', margin: '0.5rem 0' }}>{String(operation?.summary ?? event.data?.reason ?? event.data?.action ?? t('runs.approval_requested') ?? 'Agent requested approval')}</p>
+                          {details && (
+                            <>
+                              <Tag type="warm-gray" size="sm">{String(details.tool)}</Tag>
+                              <Tag type="gray" size="sm">{t('runs.risk', { level: String(risk?.level ?? 'unknown') })}</Tag>
+                              <pre style={{ background: 'var(--tm-raised)', color: 'var(--tm-text)', padding: '0.5rem', fontSize: '0.75rem', marginTop: '0.5rem', borderRadius: '4px', maxWidth: '100%', overflowX: 'auto' }}>
+                                {Array.isArray(command) ? command.join(' ') : json(operation?.arguments ?? details)}
+                              </pre>
+                            </>
+                          )}
+                          <div style={{ marginTop: '0.75rem' }}>
+                            <TextInput id="decision-note" labelText={t('runs.decision_note') ?? 'Decision note'} value={reason} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)} />
+                          </div>
+                          <Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem' }}>
+                            <Button onClick={() => void decide(event, true)} disabled={busy}>{t('runs.approve') ?? 'Approve'}</Button>
+                            <Button kind="secondary" onClick={() => void decide(event, false)} disabled={busy}>{t('runs.reject') ?? 'Reject'}</Button>
+                          </Stack>
                         </>
                       )}
-                      <div style={{ marginTop: '0.75rem' }}>
-                        <TextInput id="decision-note" labelText={t('runs.decision_note') ?? 'Decision note'} value={reason} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)} />
-                      </div>
-                      <Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem' }}>
-                        <Button onClick={() => void decide(event, true)} disabled={busy}>{t('runs.approve') ?? 'Approve'}</Button>
-                        <Button kind="secondary" onClick={() => void decide(event, false)} disabled={busy}>{t('runs.reject') ?? 'Reject'}</Button>
-                      </Stack>
                     </Tile>
                   )
                 })}
