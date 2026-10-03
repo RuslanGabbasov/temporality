@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 
 	"github.com/temporality-project/temporality/controlplane"
@@ -27,6 +28,7 @@ import (
 	"github.com/temporality-project/temporality/kernel/outbox"
 	"github.com/temporality-project/temporality/kernel/priming"
 	"github.com/temporality-project/temporality/kernel/quota"
+	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/skills"
 	"github.com/temporality-project/temporality/workspace"
 	"go.temporal.io/api/enums/v1"
@@ -1887,7 +1889,10 @@ func main() {
 	})
 
 	// Webhook triggers: POST /v1/workspace/webhook/{projectID}/{path}
-	// Matches webhook triggers by projectID and config.path.
+	// Matches webhook triggers by projectID and config.path. The incoming
+	// request is normalized into a trigger event (docs/triggers-and-escalations.md §1):
+	// id/type/source/actor/payload. Delivery is idempotent by event id — the
+	// same source event never creates a second run (§4).
 	mux.HandleFunc("POST /v1/workspace/webhook/{projectID}/{path...}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleWriter) {
 			return
@@ -1915,21 +1920,49 @@ func main() {
 		}
 		var cfg workspace.WebhookConfig
 		_ = json.Unmarshal(matched.Config, &cfg)
-		// Build prompt from template + request body
+		// Normalize the incoming request into the trigger event envelope.
+		raw, _ := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 		var body map[string]any
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body)
+		_ = json.Unmarshal(raw, &body)
+		eventID := firstNonEmpty(r.Header.Get("X-Event-ID"), r.Header.Get("X-Delivery-ID"), bodyString(body, "event_id"), bodyString(body, "id"))
+		if eventID == "" {
+			// No provider event id: derive one from the payload so retries of the
+			// same delivery still deduplicate; timestamped ids stay unique per call.
+			digest := sha256.Sum256(raw)
+			eventID = "sha256:" + hex.EncodeToString(digest[:])[:16]
+		}
+		event := map[string]any{
+			"id":        eventID,
+			"type":      "webhook",
+			"source":    "webhook:" + matched.Name,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"actor":     firstNonEmpty(r.Header.Get("X-Actor-ID"), bodyString(body, "actor")),
+			"payload":   body,
+		}
+		// Build prompt from template + normalized event context (§3): the
+		// agent never depends on the raw webhook format.
 		prompt := cfg.PromptTemplate
 		for k, v := range body {
 			prompt = strings.ReplaceAll(prompt, "{{body."+k+"}}", fmt.Sprintf("%v", v))
 		}
-		// Create task and start run
-		taskID := "trigger-" + matched.ID + "-" + time.Now().UTC().Format("20060102-150405")
+		if encoded, err := json.MarshalIndent(event, "", "  "); err == nil {
+			prompt = prompt + "\n\n--- Trigger event ---\n" + string(encoded)
+		}
+		// Idempotent run identity: deterministic for a (trigger, event) pair.
+		key := sha256.Sum256([]byte(matched.ID + "\x00" + eventID))
+		taskID := "trigger-" + matched.ID + "-" + hex.EncodeToString(key[:])[:12]
+		// Duplicate delivery (§4): the deterministic task id already exists —
+		// report the existing run instead of touching the workflow again.
+		if _, err := ws.GetTask(r.Context(), taskID); err == nil {
+			writeJSON(w, 200, map[string]any{"trigger_id": matched.ID, "run_id": taskID, "duplicate": true})
+			return
+		}
 		task := &workspace.Task{ID: taskID, ProjectID: projectID, AgentID: matched.AgentID, Title: "Webhook: " + matched.Name, Prompt: prompt}
 		if err := ws.CreateTask(r.Context(), task); err != nil {
 			writeError(w, 500, err)
 			return
 		}
-		input := agent.RunInput{RunID: taskID + "-" + time.Now().UTC().Format("150405"), Project: projectID, TaskID: taskID, Prompt: prompt}
+		input := agent.RunInput{RunID: taskID, Project: projectID, TaskID: taskID, Prompt: prompt}
 		effectiveAgentID, triggerAgent, aErr := resolveRunAgent(r.Context(), ws, projectID, matched.AgentID)
 		if aErr != nil {
 			writeError(w, 500, aErr)
@@ -1942,10 +1975,38 @@ func main() {
 			return
 		}
 		input.ActorID = "webhook-" + matched.ID
+		// Trigger observability (§16): received → accepted in the run's event
+		// scope so the trajectory shows the origin of the run. Event ids live
+		// in a dedicated trigger/ namespace: the workflow owns /event/NNNNNN.
+		scope := agent.EventScope(activities.SourceID, projectID, input.RunID)
+		triggerEventData := map[string]any{"trigger_id": matched.ID, "trigger_name": matched.Name, "event_id": eventID, "source": "webhook"}
+		for _, entry := range []struct {
+			kind string
+			id   string
+		}{
+			{"trigger.received", "trigger/" + scope + "/000000"},
+			{"trigger.accepted", "trigger/" + scope + "/000001"},
+		} {
+			item := observation.Event{
+				Schema: observation.Schema, EventID: entry.id, OccurredAt: time.Now().UTC(),
+				Source:  observation.Source{ID: activities.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
+				Context: observation.Context{Project: projectID, Run: input.RunID, Task: taskID, Actor: observation.Actor{ID: input.ActorID, Type: "trigger"}},
+				Type:    entry.kind, Data: triggerEventData,
+			}
+			if err := events.Enqueue(r.Context(), item); err != nil {
+				slog.Error("emit trigger event", "trigger", matched.ID, "error", err)
+			}
+		}
 		workflowID := workflowIDFor(activities.SourceID, projectID, input.RunID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
 		run, wfErr := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
 		if wfErr != nil {
+			// Duplicate delivery of the same source event: the workflow already
+			// exists — report the existing run instead of erroring (§4).
+			if strings.Contains(wfErr.Error(), "already running") || strings.Contains(wfErr.Error(), "WorkflowExecutionAlreadyStarted") || isWorkflowExistsError(wfErr) {
+				writeJSON(w, 200, map[string]any{"trigger_id": matched.ID, "run_id": input.RunID, "workflow_id": workflowID, "duplicate": true})
+				return
+			}
 			writeError(w, 409, wfErr)
 			return
 		}
@@ -2156,6 +2217,36 @@ func querySourceID(r *http.Request, fallback string) string {
 
 func workflowIDFor(sourceID, project, runID string) string {
 	return agent.WorkflowID(sourceID, project, runID)
+}
+
+// firstNonEmpty returns the first non-blank value (webhook event ids / actors
+// can arrive in headers or in the payload).
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+// bodyString reads a top-level string field from a decoded webhook payload.
+func bodyString(body map[string]any, key string) string {
+	value, _ := body[key].(string)
+	return strings.TrimSpace(value)
+}
+
+// isWorkflowExistsError reports whether ExecuteWorkflow failed because the
+// workflow id is already running or already completed (duplicate delivery).
+func isWorkflowExistsError(err error) bool {
+	var exists interface{ Error() string }
+	if errors.As(err, &exists) {
+		msg := exists.Error()
+		return strings.Contains(msg, "workflow execution already started") ||
+			strings.Contains(msg, "WorkflowExecutionAlreadyStartedFailure") ||
+			strings.Contains(msg, "already exists")
+	}
+	return false
 }
 
 // temporalLiveness reports whether the run's workflow is still executing.
