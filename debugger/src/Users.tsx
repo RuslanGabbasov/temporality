@@ -17,6 +17,7 @@ import { Add, Edit, TrashCan, Key } from '@carbon/icons-react'
 import { workspaceApi, type User } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
+import { ChannelBadges } from './ChannelsDialog'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -143,6 +144,7 @@ export default function Users() {
                     <Tag type={u.active ? 'green' : 'red'} size="sm">{u.active ? (t('users.active') ?? 'active') : (t('users.inactive') ?? 'inactive')}</Tag>
                     {u.projects?.length ? u.projects.map((p) => <Tag key={p} type="gray" size="sm">{p}</Tag>) : <Tag type="gray" size="sm">{t('users.all_projects') ?? 'all projects'}</Tag>}
                   </div>
+                  <ChannelBadges user={u} />
                 </div>
                 <Stack orientation="horizontal" gap={1}>
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Key} iconDescription={t('users.generate_token') ?? 'Generate Token'} onClick={() => generateToken(u)} />

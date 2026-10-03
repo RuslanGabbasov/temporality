@@ -20,6 +20,7 @@ import Onboarding from './Onboarding'
 import { useI18n, type Locale } from './i18n'
 import { useTheme } from './theme'
 import { whoami, type Whoami } from './kernelApi'
+import ChannelsDialog from './ChannelsDialog'
 
 const KERNEL_API = '/kernel-api'
 
@@ -77,6 +78,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [identity, setIdentity] = useState<Whoami | null>(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showConfigMenu, setShowConfigMenu] = useState(false)
+  const [showChannels, setShowChannels] = useState(false)
   const { locale, setLocale, t } = useI18n()
   const { theme, setTheme, resolved } = useTheme()
   const [token, setToken] = useState(authToken() ?? '')
@@ -104,31 +106,27 @@ export default function Layout({ children, activePage }: LayoutProps) {
         }
       } catch { /* ignore */ }
       try {
-        // Count unresolved approval requests in this project
-        const resp = await fetch(`/api/v1/observations/events?project=${encodeURIComponent(project)}&type=approval.requested&limit=50`, { headers: { ...authHeaders() } })
-        if (resp.ok) {
-          const data = await resp.json()
-          const requested: string[] = []
-          for (const ev of (data.events ?? []) as { data?: { operation_id?: string } }[]) {
-            if (ev.data?.operation_id) requested.push(ev.data.operation_id)
-          }
-          if (requested.length > 0) {
-            // Check which ones have been resolved
-            const resp2 = await fetch(`/api/v1/observations/events?project=${encodeURIComponent(project)}&type=approval.granted&limit=50`, { headers: { ...authHeaders() } })
-            const resp3 = await fetch(`/api/v1/observations/events?project=${encodeURIComponent(project)}&type=approval.rejected&limit=50`, { headers: { ...authHeaders() } })
-            const resolved = new Set<string>()
-            for (const r of [resp2, resp3]) {
-              if (r.ok) {
-                const d = await r.json()
-                for (const ev of (d.events ?? []) as { data?: { operation_id?: string } }[]) {
-                  if (ev.data?.operation_id) resolved.add(ev.data.operation_id)
-                }
-              }
+        // Count unresolved approval requests and open questions in this project
+        const collect = async (type: string): Promise<string[]> => {
+          const ids: string[] = []
+          const resp = await fetch(`/api/v1/observations/events?project=${encodeURIComponent(project)}&type=${type}&limit=50`, { headers: { ...authHeaders() } })
+          if (resp.ok) {
+            const data = await resp.json()
+            for (const ev of (data.events ?? []) as { data?: { operation_id?: string } }[]) {
+              if (ev.data?.operation_id) ids.push(ev.data.operation_id)
             }
-            setPendingApprovals(requested.filter((id) => !resolved.has(id)).length)
-          } else {
-            setPendingApprovals(0)
           }
+          return ids
+        }
+        const requested = [...(await collect('approval.requested')), ...(await collect('human.requested'))]
+        if (requested.length > 0) {
+          const ended = new Set<string>()
+          for (const type of ['approval.granted', 'approval.rejected', 'human.answered', 'human.cancelled', 'human.timed_out']) {
+            for (const id of await collect(type)) ended.add(id)
+          }
+          setPendingApprovals(requested.filter((id) => !ended.has(id)).length)
+        } else {
+          setPendingApprovals(0)
         }
       } catch { /* ignore */ }
     }
@@ -382,6 +380,16 @@ export default function Layout({ children, activePage }: LayoutProps) {
                       <span style={{ width: '0.75rem', textAlign: 'center', fontSize: '0.7rem' }}>{theme === opt ? '✓' : ''}</span>{opt === 'light' ? (t('settings.light') ?? 'Light') : opt === 'dark' ? (t('settings.dark') ?? 'Dark') : (t('settings.system') ?? 'System')}
                     </div>
                   ))}
+                  {identity?.user_id && (
+                    <div
+                      onClick={() => { setShowChannels(true); setShowUserMenu(false) }}
+                      style={{ padding: '0.4rem 0.5rem 0.4rem 1.2rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-text-2)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <span style={{ width: '0.75rem', textAlign: 'center', fontSize: '0.7rem' }} />{t('channels.menu') ?? 'Notification channels'}
+                    </div>
+                  )}
                   <div
                     onClick={() => { loggedIn ? doLogout() : setShowLogin(true); setShowUserMenu(false) }}
                     style={{ padding: '0.4rem 0.5rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-danger)', marginTop: '0.5rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.5rem' }}
@@ -429,6 +437,11 @@ export default function Layout({ children, activePage }: LayoutProps) {
           </div>
         )}
       </Header>
+
+      {/* Notification channels (self-service profile) */}
+      {showChannels && identity?.user_id && (
+        <ChannelsDialog userId={identity.user_id} onClose={() => setShowChannels(false)} />
+      )}
 
       {/* Login modal */}
       {showLogin && (

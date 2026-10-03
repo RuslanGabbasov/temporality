@@ -132,6 +132,8 @@ function eventSummary(event: ObservationEvent, t: (key: string, vars?: Record<st
       return { icon: '⚡', label: t('runs.event.trigger_received') ?? 'Trigger received', detail: String(d.trigger_name ?? d.source ?? ''), color: '#7aa2f7' }
     case 'trigger.accepted':
       return { icon: '⚡', label: t('runs.event.trigger_accepted') ?? 'Trigger accepted', detail: String(d.trigger_name ?? ''), color: '#7aa2f7' }
+    case 'notification.sent':
+      return { icon: '🔔', label: t('runs.event.notification_sent') ?? 'Notified', detail: `${d.channel ?? 'web'} · ${d.status ?? ''}${d.recipient ? ' · ' + d.recipient : ''}`, color: '#bb9af7' }
     case 'delegation.started':
       return { icon: '↗', label: t('runs.event.delegation'), detail: `→ ${d.child_run_id ?? '?'}`, color: '#7aa2f7' }
     default:

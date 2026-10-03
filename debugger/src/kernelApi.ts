@@ -21,6 +21,7 @@ export interface Whoami {
   role: string
   projects: string[]
   auth_enabled: boolean
+  user_id?: string // workspace_user id when the token belongs to a DB user
 }
 
 export type ReconcileEffect = 'none' | 'occurred' | 'unknown'

@@ -248,6 +248,12 @@ export interface Provider {
   updated_at: string
 }
 
+export interface UserChannel {
+  type: 'matrix' | 'telegram'
+  address: string
+  enabled: boolean
+}
+
 export interface User {
   id: string
   name: string
@@ -257,6 +263,8 @@ export interface User {
   has_token?: boolean // list responses: whether a token exists (value is never exposed)
   projects: string[]
   active: boolean
+  channels?: UserChannel[]
+  preferred_channel?: string // '' / 'web', or an enabled channel type
   created_at: string
   updated_at: string
 }
@@ -397,6 +405,8 @@ export const workspaceApi = {
     request<User>(`/v1/workspace/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   regenerateUserToken: (id: string) =>
     request<{ id: string; token: string }>(`/v1/workspace/users/${id}/token`, { method: 'POST' }),
+  updateUserChannels: (id: string, data: { channels: UserChannel[]; preferred_channel: string }) =>
+    request<User>(`/v1/workspace/users/${id}/channels`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteUser: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/users/${id}`, { method: 'DELETE' }),
 }

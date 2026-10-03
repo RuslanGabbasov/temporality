@@ -168,6 +168,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'runs.event.human_cancelled': 'Question cancelled',
     'runs.event.trigger_received': 'Trigger received',
     'runs.event.trigger_accepted': 'Trigger accepted',
+    'runs.event.notification_sent': 'Notified',
     'runs.event.started': 'started',
     'runs.event.completed': 'completed',
 
@@ -507,6 +508,28 @@ const translations: Record<Locale, Record<string, string>> = {
     'users.delete_confirm': 'Delete user "{{name}}"?',
     'users.no_users': 'No users',
     'users.no_users_hint': 'Create your first user to get started.',
+
+    // Channels (user communication transports)
+    'channels.menu': 'Notification channels',
+    'channels.title': 'Notification channels',
+    'channels.description': 'Where agents should reach you when they ask a question. The in-app inbox always works.',
+    'channels.add': 'Add channel',
+    'channels.type': 'Type',
+    'channels.address': 'Address',
+    'channels.address_matrix': 'Matrix room ID the kernel bot has joined',
+    'channels.address_telegram': 'Telegram chat ID the bot can message',
+    'channels.enabled': 'Enabled',
+    'channels.disabled': 'disabled',
+    'channels.remove': 'Remove',
+    'channels.preferred': 'Preferred channel',
+    'channels.preferred_hint': 'Where agent questions are delivered first; other channels are fallback.',
+    'channels.web': 'In-app inbox',
+    'channels.empty': 'No channels yet. Add Matrix or Telegram to receive agent questions outside the app.',
+    'channels.error_address': 'Every channel needs an address.',
+    'channels.error_preferred': 'The preferred channel must be the in-app inbox or an enabled channel with an address.',
+    'common.loading': 'Loading…',
+    'common.error': 'Error',
+    'common.saving': 'Saving…',
 
     // Triggers
     'triggers.title': 'Triggers',
@@ -926,6 +949,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'runs.event.human_cancelled': 'Вопрос отменён',
     'runs.event.trigger_received': 'Триггер получен',
     'runs.event.trigger_accepted': 'Триггер принят',
+    'runs.event.notification_sent': 'Уведомление',
     'runs.event.started': 'начато',
     'runs.event.completed': 'завершено',
 
@@ -1265,6 +1289,28 @@ const translations: Record<Locale, Record<string, string>> = {
     'users.delete_confirm': 'Удалить пользователя «{{name}}»?',
     'users.no_users': 'Нет пользователей',
     'users.no_users_hint': 'Создайте первого пользователя для начала работы.',
+
+    // Channels (user communication transports)
+    'channels.menu': 'Каналы уведомлений',
+    'channels.title': 'Каналы уведомлений',
+    'channels.description': 'Куда доставлять вопросы агентов. Встроенный почтовый ячик в приложении работает всегда.',
+    'channels.add': 'Добавить канал',
+    'channels.type': 'Тип',
+    'channels.address': 'Адрес',
+    'channels.address_matrix': 'ID комнаты Matrix, в которую приглашён бот ядра',
+    'channels.address_telegram': 'ID чата Telegram, куда бот может писать',
+    'channels.enabled': 'Включён',
+    'channels.disabled': 'выключен',
+    'channels.remove': 'Удалить',
+    'channels.preferred': 'Предпочтительный канал',
+    'channels.preferred_hint': 'Куда доставляются вопросы агентов в первую очередь; остальные каналы — запасные.',
+    'channels.web': 'Почтовый яцик в приложении',
+    'channels.empty': 'Каналов пока нет. Добавьте Matrix или Telegram, чтобы получать вопросы агентов вне приложения.',
+    'channels.error_address': 'У каждого канала должен быть адрес.',
+    'channels.error_preferred': 'Предпочтительным может быть только встроенный почтовый яцик или включённый канал с адресом.',
+    'common.loading': 'Загрузка…',
+    'common.error': 'Ошибка',
+    'common.saving': 'Сохранение…',
 
     // Triggers
     'triggers.title': 'Триггеры',
