@@ -36,6 +36,7 @@ import {
   type Run,
 } from './workspaceApi'
 import { useT } from './i18n'
+import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -95,6 +96,7 @@ function sameList(a?: string[], b?: string[]) {
 
 export default function Agents({ project, defaultAgentId, refreshProjects }: { project: string; defaultAgentId?: string; refreshProjects?: () => void }) {
   const t = useT()
+  const org = useOrgUnits()
   const [agents, setAgents] = useState<Agent[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
   const [builtins, setBuiltins] = useState<BuiltinAgentSpec[]>([])
@@ -288,6 +290,11 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       if (fromWizard && !editing) payload.prompt_source = 'ai'
       if (editing) {
         await workspaceApi.updateAgent(editing.id, payload)
+        // PUT payloads ignore org bindings: re-scoping goes through the admin
+        // binding endpoint (docs/org-structure.md §39).
+        if (org.isAdmin && (form.org_unit_id ?? '') !== (editing.org_unit_id ?? '')) {
+          await workspaceApi.setResourceBinding('agent', editing.id, form.org_unit_id ?? '')
+        }
       } else {
         await workspaceApi.createAgent(payload as Agent & { name: string })
       }
@@ -568,6 +575,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <span style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{a.name}</span>
+                    <OrgBadge orgUnitID={a.org_unit_id} org={org} />
                     {a.id === defaultAgentId && <Tag type="green" size="sm">{t('agents.default') ?? 'default'}</Tag>}
                   </div>
                   <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.15rem' }}>
@@ -596,6 +604,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <Heading style={{ fontSize: '1.1rem' }}>{selected.name}</Heading>
+                    <OrgBadge orgUnitID={selected.org_unit_id} org={org} />
                     {selected.id === defaultAgentId && <Tag type="green" size="sm">{t('agents.project_default') ?? 'project default'}</Tag>}
                     {selected.labels?.builtin === 'true' && <Tag type="warm-gray" size="sm">{t('agents.builtin_tag') ?? 'builtin'}</Tag>}
                     {!!selected.definition_version && <Tag type="purple" size="sm">v{selected.definition_version}</Tag>}
@@ -946,6 +955,20 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             )}
             {formTab === 'bindings' && (
               <Stack gap={4}>
+                {org.units.length > 0 && (
+                  <div>
+                    <OrgUnitSelect
+                      id="agent-org"
+                      value={form.org_unit_id ?? ''}
+                      onChange={(orgUnitID) => setForm({ ...form, org_unit_id: orgUnitID })}
+                      org={org}
+                      disabled={!!editing && !org.isAdmin}
+                    />
+                    {!!editing && !org.isAdmin && (
+                      <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>{t('org.binding_admin_only') ?? 'Only an administrator can change the availability of an existing resource.'}</p>
+                    )}
+                  </div>
+                )}
                 {skillOptions.length > 0 && (
                   <div>
                     <p className="cds--label" style={{ marginBottom: '0.5rem' }}>{t('agents.skills') ?? 'Skills'}</p>

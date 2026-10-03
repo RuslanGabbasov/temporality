@@ -22,6 +22,7 @@ export interface Whoami {
   projects: string[]
   auth_enabled: boolean
   user_id?: string // workspace_user id when the token belongs to a DB user
+  org_unit_id?: string // caller's primary unit (docs/org-structure.md §11)
 }
 
 export type ReconcileEffect = 'none' | 'occurred' | 'unknown'

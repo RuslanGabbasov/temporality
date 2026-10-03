@@ -13,6 +13,7 @@ import Users from './Users'
 import Triggers from './Triggers'
 import Skills from './Skills'
 import Mcp from './Mcp'
+import Org from './Org'
 
 const Routes = {
   experience: /^\/experience(\/|$)/,
@@ -26,9 +27,10 @@ const Routes = {
   providers: /^\/providers(\/|$)/,
   users: /^\/users(\/|$)/,
   triggers: /^\/triggers(\/|$)/,
+  org: /^\/org(\/|$)/,
 } as const
 
-type Page = 'experience' | 'agents' | 'operations' | 'observability' | 'workspace' | 'agent-config' | 'skills' | 'mcp' | 'providers' | 'users' | 'triggers'
+type Page = 'experience' | 'agents' | 'operations' | 'observability' | 'workspace' | 'agent-config' | 'skills' | 'mcp' | 'providers' | 'users' | 'triggers' | 'org'
 
 function pageFor(pathname: string): Page {
   if (Routes.agents.test(pathname)) return 'agents'
@@ -42,6 +44,7 @@ function pageFor(pathname: string): Page {
   if (Routes.providers.test(pathname)) return 'providers'
   if (Routes.users.test(pathname)) return 'users'
   if (Routes.triggers.test(pathname)) return 'triggers'
+  if (Routes.org.test(pathname)) return 'org'
   return 'workspace'
 }
 
@@ -83,6 +86,8 @@ export default function App() {
             return <Users />
           case 'triggers':
             return <Triggers project={project} />
+          case 'org':
+            return <Org />
           default:
             return <ExperienceTimeline project={project} />
         }

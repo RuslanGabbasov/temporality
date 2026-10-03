@@ -1100,6 +1100,101 @@ button.header-nav-link {
   line-height: 1;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// Org structure tree
+// ═══════════════════════════════════════════════════════════════
+
+.org-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--tm-radius-sm);
+  cursor: pointer;
+  transition: background var(--tm-duration-fast);
+}
+
+.org-tree-row:hover {
+  background: var(--tm-raised);
+}
+
+.org-tree-row.selected {
+  background: var(--tm-elevated);
+  box-shadow: inset 2px 0 0 var(--tm-teal);
+}
+
+.org-tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  flex-shrink: 0;
+  color: var(--tm-text-3);
+}
+
+.org-tree-toggle:hover {
+  color: var(--tm-text);
+}
+
+.org-tree-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tm-text-3);
+  flex-shrink: 0;
+}
+
+.org-tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.org-tree-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  opacity: 0;
+  transition: opacity var(--tm-duration-fast);
+}
+
+.org-tree-row:hover .org-tree-actions,
+.org-tree-row.selected .org-tree-actions {
+  opacity: 1;
+}
+
+.org-inspector {
+  border: 1px solid var(--tm-border);
+  border-radius: var(--tm-radius-md);
+  padding: 1rem;
+  background: var(--tm-surface);
+}
+
+.org-section-title {
+  font-size: var(--tm-text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--tm-text-3);
+  margin-bottom: 0.35rem;
+}
+
+.org-section-count {
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--tm-raised);
+  color: var(--tm-text-2);
+  font-size: 0.6rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
 .header-hamburger {
   display: none;
   align-items: center;

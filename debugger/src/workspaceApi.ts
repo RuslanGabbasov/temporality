@@ -2,6 +2,37 @@ import { authHeaders } from './api'
 
 const KERNEL_API = '/kernel-api'
 
+// Org structure (docs/org-structure.md): units form a tree; a resource with
+// an empty org_unit_id is global, otherwise it is visible to the unit and
+// its subtree.
+export type OrgUnitKind = 'organization' | 'department' | 'team'
+
+export interface OrgUnit {
+  id: string
+  parent_id?: string
+  kind: OrgUnitKind | string
+  name: string
+  path?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface NamedRef {
+  id: string
+  name: string
+}
+
+export interface UnitResources {
+  agents: NamedRef[]
+  skills: NamedRef[]
+  mcp_servers: NamedRef[]
+  providers: NamedRef[]
+  users: NamedRef[]
+  projects: NamedRef[]
+}
+
+export type OrgResourceKind = 'agent' | 'skill' | 'mcp-server' | 'provider'
+
 export interface Project {
   id: string
   name: string
@@ -10,6 +41,7 @@ export interface Project {
   default_model?: string
   archived?: boolean
   allowed_users?: string[] // '*' = all, [] = admin only, ['user-1'] = specific users
+  org_units?: string[] // org areas the project spans; empty = org-neutral
   created_at: string
   updated_at: string
 }
@@ -49,6 +81,7 @@ export interface Agent {
   tools?: string[]
   definition?: AgentDefinition
   definition_version?: number
+  org_unit_id?: string
   sandbox_profile: string
   network_access?: boolean
   read_only?: boolean
@@ -139,6 +172,7 @@ export interface Skill {
   version: string
   markdown: string
   manifest: Record<string, unknown>
+  org_unit_id?: string
   created_at: string
   updated_at: string
 }
@@ -199,6 +233,7 @@ export interface SkillInput {
   version: string
   markdown: string
   manifest_yaml: string
+  org_unit_id?: string // honored on create; updates keep the stored binding
 }
 
 export interface MCPServer {
@@ -213,6 +248,7 @@ export interface MCPServer {
   allowed_tools: string[]
   approval_tools: string[]
   enabled: boolean
+  org_unit_id?: string
   created_at: string
   updated_at: string
 }
@@ -242,6 +278,7 @@ export interface Provider {
   api_key_ref: string
   models: string[]
   labels: Record<string, string>
+  org_unit_id?: string
   created_at: string
   updated_at: string
 }
@@ -260,6 +297,7 @@ export interface User {
   token?: string
   has_token?: boolean // list responses: whether a token exists (value is never exposed)
   projects: string[]
+  org_unit_id?: string // primary unit; empty = unassigned (sees everything, transition)
   active: boolean
   channels?: UserChannel[]
   preferred_channel?: string // '' / 'web', or an enabled channel type
@@ -282,9 +320,9 @@ export const workspaceApi = {
   // Projects
   listProjects: () => request<{ projects: Project[] }>('/v1/workspace/projects'),
   getProject: (id: string) => request<Project>(`/v1/workspace/projects/${id}`),
-  createProject: (data: { id?: string; name: string; description?: string; allowed_users?: string[] }) =>
+  createProject: (data: { id?: string; name: string; description?: string; allowed_users?: string[]; org_units?: string[] }) =>
     request<Project>('/v1/workspace/projects', { method: 'POST', body: JSON.stringify(data) }),
-  updateProject: (id: string, data: { name: string; description?: string; default_agent_id?: string; default_model?: string; allowed_users?: string[] }) =>
+  updateProject: (id: string, data: { name: string; description?: string; default_agent_id?: string; default_model?: string; allowed_users?: string[]; org_units?: string[] }) =>
     request<Project>(`/v1/workspace/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProject: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/projects/${id}`, { method: 'DELETE' }),
@@ -338,7 +376,7 @@ export const workspaceApi = {
   // Providers
   listProviders: () => request<{ providers: Provider[] }>('/v1/workspace/providers'),
   getProvider: (id: string) => request<Provider>(`/v1/workspace/providers/${id}`),
-  createProvider: (data: { id?: string; name: string; base_url: string; api_key_ref?: string; models?: string[] }) =>
+  createProvider: (data: { id?: string; name: string; base_url: string; api_key_ref?: string; models?: string[]; org_unit_id?: string }) =>
     request<Provider>('/v1/workspace/providers', { method: 'POST', body: JSON.stringify(data) }),
   updateProvider: (id: string, data: Partial<Provider>) =>
     request<Provider>(`/v1/workspace/providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -359,7 +397,7 @@ export const workspaceApi = {
   listSkills: () =>
     request<{ skills: Skill[]; count: number }>('/v1/workspace/skills'),
   getSkill: (id: string) => request<Skill>(`/v1/workspace/skills/${id}`),
-  createSkill: (data: { id: string; name: string; description: string; version: string; markdown: string; manifest_yaml: string }) =>
+  createSkill: (data: { id: string; name: string; description: string; version: string; markdown: string; manifest_yaml: string; org_unit_id?: string }) =>
     request<Skill>('/v1/workspace/skills', { method: 'POST', body: JSON.stringify(data) }),
   updateSkill: (id: string, data: SkillInput) =>
     request<Skill>(`/v1/workspace/skills/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -394,7 +432,7 @@ export const workspaceApi = {
   // Users
   listUsers: () => request<{ users: User[] }>('/v1/workspace/users'),
   getUser: (id: string) => request<User>(`/v1/workspace/users/${id}`),
-  createUser: (data: { id?: string; name: string; email?: string; role: string; projects?: string[] }) =>
+  createUser: (data: { id?: string; name: string; email?: string; role: string; projects?: string[]; org_unit_id?: string }) =>
     request<User>('/v1/workspace/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (id: string, data: Partial<User>) =>
     request<User>(`/v1/workspace/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -404,4 +442,16 @@ export const workspaceApi = {
     request<User>(`/v1/workspace/users/${id}/channels`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteUser: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/users/${id}`, { method: 'DELETE' }),
+
+  // Org structure (docs/org-structure.md §38-39)
+  listOrgUnits: () => request<{ units: OrgUnit[] }>('/v1/org/units'),
+  createOrgUnit: (data: { kind: string; name: string; parent_id?: string }) =>
+    request<OrgUnit>('/v1/org/units', { method: 'POST', body: JSON.stringify(data) }),
+  updateOrgUnit: (id: string, data: { name: string; kind?: string; parent_id?: string }) =>
+    request<OrgUnit>(`/v1/org/units/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteOrgUnit: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/org/units/${id}`, { method: 'DELETE' }),
+  unitResources: (id: string) => request<UnitResources>(`/v1/org/units/${id}/resources`),
+  setResourceBinding: (kind: OrgResourceKind, id: string, orgUnitID: string) =>
+    request<{ kind: string; resource_id: string; org_unit_id: string }>(`/v1/org/resources/${kind}/${id}/binding`, { method: 'PUT', body: JSON.stringify({ org_unit_id: orgUnitID }) }),
 }

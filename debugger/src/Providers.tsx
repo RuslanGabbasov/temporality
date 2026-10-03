@@ -15,11 +15,13 @@ import { Add, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Provider } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
+import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
 export default function Providers() {
   const t = useT()
+  const org = useOrgUnits()
   const [providers, setProviders] = useState<Provider[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -59,6 +61,11 @@ export default function Providers() {
     try {
       if (editing) {
         await workspaceApi.updateProvider(editing.id, form)
+        // PUT payloads ignore org bindings: re-scoping goes through the admin
+        // binding endpoint (docs/org-structure.md §39).
+        if (org.isAdmin && (form.org_unit_id ?? '') !== (editing.org_unit_id ?? '')) {
+          await workspaceApi.setResourceBinding('provider', editing.id, form.org_unit_id ?? '')
+        }
       } else {
         await workspaceApi.createProvider(form as Provider & { name: string; base_url: string })
       }
@@ -96,7 +103,10 @@ export default function Providers() {
             <Tile style={{ marginBottom: '0.75rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <strong>{p.name}</strong>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
+                    <strong>{p.name}</strong>
+                    <OrgBadge orgUnitID={p.org_unit_id} org={org} />
+                  </div>
                   <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem', wordBreak: 'break-all' }}>{p.base_url}</p>
                   {p.api_key_ref && <Tag type="gray" size="sm" style={{ marginTop: '0.25rem' }}>key: {'••••••••'}</Tag>}
                   {p.models?.length ? (
@@ -124,6 +134,20 @@ export default function Providers() {
               <TextInput id="prov-url" labelText={t('providers.url_label') ?? 'Base URL'} value={form.base_url ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, base_url: e.target.value })} placeholder="https://api.z-ai.com/v1" />
               <TextInput id="prov-key" labelText={t('providers.key_label') ?? 'API Key / Env Var'} value={form.api_key_ref ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key_ref: e.target.value })} placeholder="Z_AI_API_KEY or actual key" helperText={t('providers.key_helper') ?? 'Env var name (e.g. Z_AI_API_KEY) or the actual key'} />
               <TextInput id="prov-models" labelText={t('providers.models_label') ?? 'Models (comma-separated)'} value={form.models?.join(', ') ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, models: e.target.value.split(',').map((m) => m.trim()).filter(Boolean) })} placeholder="z-ai-turbo, z-ai-pro" />
+              {org.units.length > 0 && (
+                <>
+                  <OrgUnitSelect
+                    id="prov-org"
+                    value={form.org_unit_id ?? ''}
+                    onChange={(orgUnitID) => setForm({ ...form, org_unit_id: orgUnitID })}
+                    org={org}
+                    disabled={!!editing && !org.isAdmin}
+                  />
+                  {!!editing && !org.isAdmin && (
+                    <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', margin: 0 }}>{t('org.binding_admin_only') ?? 'Only an administrator can change the availability of an existing resource.'}</p>
+                  )}
+                </>
+              )}
               <div className="form-actions">
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
                 <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>

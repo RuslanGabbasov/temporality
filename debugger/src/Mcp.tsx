@@ -20,6 +20,7 @@ import { Add, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type MCPServer, type MCPToolInfo } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
+import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -27,6 +28,7 @@ type ServerForm = Partial<MCPServer> & { envText?: string; headersText?: string 
 
 export default function Mcp() {
   const t = useT()
+  const org = useOrgUnits()
   const [servers, setServers] = useState<MCPServer[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -87,6 +89,7 @@ export default function Mcp() {
       allowed_tools: form.allowed_tools ?? [],
       approval_tools: form.approval_tools ?? [],
       enabled: form.enabled ?? true,
+      org_unit_id: form.org_unit_id,
     }
   }
 
@@ -106,6 +109,11 @@ export default function Mcp() {
     try {
       if (editing) {
         await workspaceApi.updateMCPServer(editing.id, toPayload())
+        // PUT payloads ignore org bindings: re-scoping goes through the admin
+        // binding endpoint (docs/org-structure.md §39).
+        if (org.isAdmin && (form.org_unit_id ?? '') !== (editing.org_unit_id ?? '')) {
+          await workspaceApi.setResourceBinding('mcp-server', editing.id, form.org_unit_id ?? '')
+        }
       } else {
         await workspaceApi.createMCPServer(toPayload())
       }
@@ -179,7 +187,10 @@ export default function Mcp() {
             <Tile style={{ marginBottom: '0.75rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <strong>{s.name}</strong>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
+                    <strong>{s.name}</strong>
+                    <OrgBadge orgUnitID={s.org_unit_id} org={org} />
+                  </div>
                   <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem', wordBreak: 'break-all' }}>
                     {s.type === 'stdio' ? (s.command + (s.args?.length ? ' ' + s.args.join(' ') : '')) : s.url}
                   </p>
@@ -293,6 +304,21 @@ export default function Mcp() {
               )}
 
               <Toggle id="mcp-enabled" labelText={t('mcp.enabled') ?? 'Enabled'} toggled={form.enabled ?? true} onToggle={(checked: boolean) => setForm({ ...form, enabled: checked })} />
+
+              {org.units.length > 0 && (
+                <>
+                  <OrgUnitSelect
+                    id="mcp-org"
+                    value={form.org_unit_id ?? ''}
+                    onChange={(orgUnitID) => setForm({ ...form, org_unit_id: orgUnitID })}
+                    org={org}
+                    disabled={!!editing && !org.isAdmin}
+                  />
+                  {!!editing && !org.isAdmin && (
+                    <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', margin: 0 }}>{t('org.binding_admin_only') ?? 'Only an administrator can change the availability of an existing resource.'}</p>
+                  )}
+                </>
+              )}
 
               <div className="form-actions">
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>

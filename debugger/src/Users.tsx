@@ -18,11 +18,13 @@ import { workspaceApi, type User } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import { ChannelBadges } from './ChannelsDialog'
+import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
 export default function Users() {
   const t = useT()
+  const org = useOrgUnits()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -49,7 +51,7 @@ export default function Users() {
 
   const startCreate = () => {
     setEditing(null)
-    setForm({ name: '', email: '', role: 'viewer', projects: [], active: true })
+    setForm({ name: '', email: '', role: 'viewer', projects: [], active: true, org_unit_id: '' })
     setShowForm(true)
   }
 
@@ -137,7 +139,10 @@ export default function Users() {
             <Tile style={{ marginBottom: '0.75rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <strong>{u.name}</strong>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
+                    <strong>{u.name}</strong>
+                    {u.org_unit_id ? <OrgBadge orgUnitID={u.org_unit_id} org={org} /> : (org.units.length > 0 && <Tag type="gray" size="sm">{t('org.unassigned_badge') ?? 'no unit'}</Tag>)}
+                  </div>
                   {u.email && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{u.email}</p>}
                   <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                     <Tag type={ROLE_COLORS[u.role] || 'gray'} size="sm">{u.role}</Tag>
@@ -169,6 +174,16 @@ export default function Users() {
                 <SelectItem value="operator" text={t('users.role_operator') ?? 'Operator (run + reconcile)'} />
                 <SelectItem value="admin" text={t('users.role_admin') ?? 'Admin (full access)'} />
               </Select>
+              {org.units.length > 0 && (
+                <OrgUnitSelect
+                  id="user-org"
+                  label={t('users.org_unit') ?? 'Primary unit'}
+                  value={form.org_unit_id ?? ''}
+                  onChange={(orgUnitID) => setForm({ ...form, org_unit_id: orgUnitID })}
+                  org={org}
+                  allowUnassigned
+                />
+              )}
               <div className="form-actions">
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
                 <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>

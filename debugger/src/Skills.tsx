@@ -15,6 +15,7 @@ import GeneratingState from './GeneratingState'
 import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
+import { useOrgUnits, OrgUnitSelect, OrgBadge, type OrgUnitsState } from './orgUnits'
 import Markdown from './Markdown'
 import SkillManifestEditor, { manifestToYaml, type SkillManifest, type ManifestSuggestions, type SectionProvenance } from './SkillManifestEditor'
 
@@ -55,6 +56,7 @@ interface SkillFormState {
   version: string
   markdown: string
   manifest: SkillManifest
+  org_unit_id?: string
 }
 
 /** Sections the agent asks questions about map onto editor sections. */
@@ -65,6 +67,7 @@ function sectionOfField(field: string): string {
 
 export default function Skills() {
   const t = useT()
+  const org = useOrgUnits()
   const [skills, setSkills] = useState<Skill[]>([])
   const [selected, setSelected] = useState<Skill | null>(null)
   const [tab, setTab] = useState<SkillTab>('main')
@@ -180,6 +183,7 @@ export default function Skills() {
       version: '1.0.0',
       markdown: draft.markdown || STARTER_MARKDOWN,
       manifest,
+      org_unit_id: '',
     })
     setEditing(null)
     setShowForm(true)
@@ -214,7 +218,7 @@ export default function Skills() {
     setValidation(null)
     setDraftQuestions([])
     setProvenance({})
-    setForm({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest: STARTER_MANIFEST })
+    setForm({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest: STARTER_MANIFEST, org_unit_id: '' })
     setShowForm(true)
   }
 
@@ -244,6 +248,11 @@ export default function Skills() {
           name: form.name, description: form.description, version: form.version,
           markdown: form.markdown, manifest_yaml: manifestYaml(),
         })
+        // PUT payloads ignore org bindings: re-scoping goes through the admin
+        // binding endpoint (docs/org-structure.md §39).
+        if (org.isAdmin && (form.org_unit_id ?? '') !== (editing.org_unit_id ?? '')) {
+          await workspaceApi.setResourceBinding('skill', editing.id, form.org_unit_id ?? '')
+        }
         setShowForm(false); setEditing(null)
         void openSkill(updated)
       } else {
@@ -251,6 +260,7 @@ export default function Skills() {
           id: form.id.trim() || form.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''),
           name: form.name, description: form.description, version: form.version,
           markdown: form.markdown, manifest_yaml: manifestYaml(),
+          org_unit_id: form.org_unit_id || undefined,
         })
         setShowForm(false); setEditing(null)
         void openSkill(created)
@@ -321,7 +331,10 @@ export default function Skills() {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
                   <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{skill.name}</strong>
-                  <Tag size="sm">{skill.version}</Tag>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
+                    <OrgBadge orgUnitID={skill.org_unit_id} org={org} />
+                    <Tag size="sm">{skill.version}</Tag>
+                  </span>
                 </div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{skill.id}</div>
               </Tile>
@@ -336,6 +349,7 @@ export default function Skills() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <strong style={{ fontSize: '1.1rem' }}>{selected.name}</strong>
                     <Tag size="sm">{selected.version}</Tag>
+                    <OrgBadge orgUnitID={selected.org_unit_id} org={org} />
                     <code style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{selected.id}</code>
                   </div>
                   {selected.description && <p style={{ color: 'var(--tm-text-2)', marginTop: '0.5rem' }}>{selected.description}</p>}
@@ -348,7 +362,7 @@ export default function Skills() {
                     setProvenance({})
                     let manifest: SkillManifest = {}
                     try { manifest = JSON.parse(JSON.stringify(selected.manifest ?? {})) as SkillManifest } catch { manifest = {} }
-                    setForm({ id: selected.id, name: selected.name, description: selected.description, version: selected.version, markdown: selected.markdown, manifest })
+                    setForm({ id: selected.id, name: selected.name, description: selected.description, version: selected.version, markdown: selected.markdown, manifest, org_unit_id: selected.org_unit_id ?? '' })
                     setShowForm(true)
                   }} />
                   <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
@@ -536,6 +550,7 @@ export default function Skills() {
               form={form}
               setForm={setForm}
               editing={editing}
+              org={org}
               provenance={provenance}
               onTouch={touchSection}
               suggestions={{ ...suggestions, capabilities: capabilitySuggestions }}
@@ -562,12 +577,13 @@ type SkillFormTab = 'general' | 'instructions' | 'contract' | 'runtime'
 
 /** Shared CRUD fields: used by the create/edit modal (and available for inline editing). */
 function SkillFormFields({
-  form, setForm, editing, provenance, onTouch, suggestions, validation, onValidate, onSave, onCancel,
+  form, setForm, editing, org, provenance, onTouch, suggestions, validation, onValidate, onSave, onCancel,
   questions, answers, setAnswers, onSendAnswers, saving,
 }: {
   form: SkillFormState
   setForm: React.Dispatch<React.SetStateAction<SkillFormState>>
   editing: Skill | null
+  org?: OrgUnitsState
   provenance?: Record<string, SectionProvenance>
   onTouch: (section: string) => void
   suggestions?: ManifestSuggestions
@@ -637,6 +653,20 @@ function SkillFormFields({
             <TextInput id="skill-name" labelText={t('skills.name') ?? 'Name'} value={form.name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { onTouch('name'); setForm({ ...form, name: e.target.value }) }} placeholder="Deploy service" />
             <TextInput id="skill-description" labelText={t('skills.description') ?? 'Description'} value={form.description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { onTouch('description'); setForm({ ...form, description: e.target.value }) }} />
             <TextInput id="skill-version" labelText={t('skills.version') ?? 'Version'} value={form.version} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, version: e.target.value })} helperText={editing ? (t('skills.version_helper') ?? 'Increase the version to record a new immutable version') : '1.0.0'} />
+            {org && org.units.length > 0 && (
+              <>
+                <OrgUnitSelect
+                  id="skill-org"
+                  value={form.org_unit_id ?? ''}
+                  onChange={(orgUnitID) => setForm({ ...form, org_unit_id: orgUnitID })}
+                  org={org}
+                  disabled={!!editing && !org.isAdmin}
+                />
+                {!!editing && !org.isAdmin && (
+                  <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', margin: 0 }}>{t('org.binding_admin_only') ?? 'Only an administrator can change the availability of an existing resource.'}</p>
+                )}
+              </>
+            )}
           </>
         )}
         {tab === 'instructions' && (

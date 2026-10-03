@@ -21,6 +21,8 @@ import { useI18n, type Locale } from './i18n'
 import { useTheme } from './theme'
 import { whoami, type Whoami } from './kernelApi'
 import ChannelsDialog from './ChannelsDialog'
+import { workspaceApi, type OrgUnit } from './workspaceApi'
+import { flattenUnits } from './orgUnits'
 
 const KERNEL_API = '/kernel-api'
 
@@ -54,6 +56,7 @@ const CONFIG_ITEMS = [
   { path: '/mcp', label: 'nav.mcp' },
   { path: '/providers', label: 'nav.providers' },
   { path: '/users', label: 'nav.users' },
+  { path: '/org', label: 'nav.org', adminOnly: true },
 ]
 
 interface Project {
@@ -63,6 +66,7 @@ interface Project {
   default_agent_id?: string
   default_model?: string
   allowed_users?: string[]
+  org_units?: string[]
 }
 
 export default function Layout({ children, activePage }: LayoutProps) {
@@ -88,7 +92,10 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [editProject, setEditProject] = useState<Project | null>(null)
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectDesc, setNewProjectDesc] = useState('')
+  const [newProjectOrgUnits, setNewProjectOrgUnits] = useState<string[]>([])
   const [allUsers, setAllUsers] = useState<{ id: string; name: string }[]>([])
+  // Org units for the project dialog (unit tree, indented for the checklist).
+  const [orgFlat, setOrgFlat] = useState<{ unit: OrgUnit; depth: number }[]>([])
 
   // Pending operations badge
   const [pendingOps, setPendingOps] = useState(0)
@@ -173,6 +180,14 @@ export default function Layout({ children, activePage }: LayoutProps) {
     void loadUsers()
   }, [])
 
+  useEffect(() => {
+    // Older kernels may not expose org endpoints — the dialog degrades to a
+    // hidden org section.
+    void workspaceApi.listOrgUnits()
+      .then((data) => setOrgFlat(flattenUnits(data.units ?? [])))
+      .catch(() => {})
+  }, [])
+
   const navigate = (path: string) => {
     window.history.pushState(null, '', path)
     window.dispatchEvent(new PopStateEvent('popstate'))
@@ -211,11 +226,12 @@ export default function Layout({ children, activePage }: LayoutProps) {
       default_agent_id: editProject?.default_agent_id ?? '',
       default_model: editProject?.default_model ?? '',
       allowed_users: editProject?.allowed_users ?? ['*'],
+      org_units: editProject ? (editProject.org_units ?? []) : newProjectOrgUnits,
     }
     const url = editProject ? `/kernel-api/v1/workspace/projects/${id}` : '/kernel-api/v1/workspace/projects'
     const method = editProject ? 'PUT' : 'POST'
     await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(body) })
-    setEditProject(null); setNewProjectName(''); setNewProjectDesc('')
+    setEditProject(null); setNewProjectName(''); setNewProjectDesc(''); setNewProjectOrgUnits([])
     void loadProjects()
   }
 
@@ -261,7 +277,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
             </button>
             {showConfigMenu && (
               <div className="header-config-menu">
-                {CONFIG_ITEMS.map(({ path, label }) => (
+                {CONFIG_ITEMS.filter((i) => !i.adminOnly || identity?.role === 'admin').map(({ path, label }) => (
                   <a
                     key={path}
                     href={path}
@@ -332,7 +348,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
                       )
                     })}
                     <div
-                      onClick={() => { setNewProjectName(''); setNewProjectDesc(''); setShowProjectPanel(false); setShowNewProject(true) }}
+                      onClick={() => { setNewProjectName(''); setNewProjectDesc(''); setNewProjectOrgUnits([]); setShowProjectPanel(false); setShowNewProject(true) }}
                       style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.5rem', cursor: 'pointer', color: 'var(--tm-teal)', borderRadius: '4px' }}
                     >
                       <Add size={20} /> {t('new.project')}
@@ -424,7 +440,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
               </a>
             ))}
             <div className="header-mobile-divider" />
-            {CONFIG_ITEMS.map(({ path, label }) => (
+            {CONFIG_ITEMS.filter((i) => !i.adminOnly || identity?.role === 'admin').map(({ path, label }) => (
               <a
                 key={path}
                 href={path}
@@ -502,6 +518,33 @@ export default function Layout({ children, activePage }: LayoutProps) {
               }}
               placeholder={t('projects.description_placeholder') ?? 'What this project is about'}
             />
+            {orgFlat.length > 0 && (
+              <fieldset style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.75rem', marginTop: '0.5rem' }}>
+                <legend style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)', padding: '0 0.25rem' }}>{t('projects.org_units') ?? 'Organizational areas'}</legend>
+                <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>
+                  {t('projects.org_units_hint') ?? 'The project is visible to users of these units and their sub-units.'}
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', maxHeight: '180px', overflowY: 'auto' }}>
+                  {orgFlat.map(({ unit, depth }) => {
+                    const checked = editProject ? (editProject.org_units ?? []).includes(unit.id) : newProjectOrgUnits.includes(unit.id)
+                    const toggle = (on: boolean) => {
+                      if (editProject) {
+                        const current = editProject.org_units ?? []
+                        setEditProject({ ...editProject, org_units: on ? [...current, unit.id] : current.filter((x: string) => x !== unit.id) })
+                      } else {
+                        setNewProjectOrgUnits((prev) => on ? [...prev, unit.id] : prev.filter((x: string) => x !== unit.id))
+                      }
+                    }
+                    return (
+                      <label key={unit.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.8rem', paddingLeft: `${depth}rem` }}>
+                        <input type="checkbox" checked={checked} onChange={(e) => toggle(e.target.checked)} />
+                        {unit.name}
+                      </label>
+                    )
+                  })}
+                </div>
+              </fieldset>
+            )}
             {editProject && (
               <>
                 <Select
