@@ -1395,7 +1395,9 @@ func main() {
 			return
 		}
 		var req workspace.CreateTaskRequest
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		// The chat stores the whole conversation transcript in the task prompt,
+		// so the body grows with every turn — same 1MB ceiling as POST /v1/agent/runs.
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 			writeError(w, 400, err)
 			return
 		}
@@ -1448,7 +1450,9 @@ func main() {
 			Prompt string `json:"prompt"`
 			Title  string `json:"title"`
 		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		// Follow-up chat turns PATCH the full accumulated transcript into the
+		// prompt; 64KB broke long conversations (docs: chat transcript in prompt).
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 			writeError(w, 400, err)
 			return
 		}

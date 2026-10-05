@@ -465,8 +465,10 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         // Store taskId on the conversation
         setConversations((prev) => prev.map((c) => c.id === activeConv.id ? { ...c, taskId } : c))
       } else {
-        // Update the existing task's prompt with the full conversation
-        await workspaceApi.updateTask(taskId, { prompt: fullPrompt, title: content.slice(0, 80) })
+        // Update the existing task's prompt with the full conversation. The
+        // title is intentionally omitted: it was set from the first message
+        // and the store keeps the stored one when the field is empty.
+        await workspaceApi.updateTask(taskId, { prompt: fullPrompt })
       }
 
       const result = await workspaceApi.startRun(taskId, { agent_id: activeConv.agentId || undefined })
