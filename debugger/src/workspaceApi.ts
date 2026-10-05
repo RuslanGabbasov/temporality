@@ -317,6 +317,34 @@ export interface UserChannel {
   enabled: boolean
 }
 
+// Human-in-the-loop request (docs/org-structure.md §28): a question an agent
+// paused on, delivered to a resolved recipient. The inbox lists open rows;
+// answers ride the existing approval endpoint.
+export type HumanRequestStatus = 'pending' | 'delivered' | 'answered' | 'expired' | 'cancelled' | 'rejected'
+
+export interface HumanRequest {
+  id: string // operation id — stable across redeliveries
+  run_id: string
+  project_id: string
+  agent_id?: string
+  recipient: string // logical recipient as requested (§26)
+  resolved_user?: string // concrete user after resolution
+  question: string
+  context?: string
+  options?: string[]
+  status: HumanRequestStatus | string
+  channel?: string
+  response?: string
+  answered_by?: string
+  timeout_seconds: number
+  timeout_policy?: string
+  execution_identity_id?: string
+  created_at: string
+  delivered_at?: string
+  answered_at?: string
+  expires_at?: string
+}
+
 export interface User {
   id: string
   name: string
@@ -480,6 +508,17 @@ export const workspaceApi = {
     request<User>(`/v1/workspace/users/${id}/channels`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteUser: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/users/${id}`, { method: 'DELETE' }),
+
+  // Human-in-the-loop requests (docs/org-structure.md §28, §37)
+  listHumanRequests: (params?: { project?: string; status?: string; user?: string; onlyOpen?: boolean }) => {
+    const query = new URLSearchParams()
+    if (params?.project) query.set('project', params.project)
+    if (params?.status) query.set('status', params.status)
+    if (params?.user) query.set('user', params.user)
+    if (params?.onlyOpen) query.set('open', '1')
+    const suffix = query.size > 0 ? `?${query.toString()}` : ''
+    return request<{ requests: HumanRequest[] }>(`/v1/workspace/human-requests${suffix}`)
+  },
 
   // Org structure (docs/org-structure.md §38-39)
   listOrgUnits: () => request<{ units: OrgUnit[] }>('/v1/org/units'),

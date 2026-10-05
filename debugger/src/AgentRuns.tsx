@@ -228,6 +228,10 @@ export default function AgentRuns({ project }: { project: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('')
+  // Runs with an open human question (human_request entity, §28) — marks the
+  // asking run in the list so the inbox is navigable. Older kernels without
+  // the endpoint simply show no markers.
+  const [questionRuns, setQuestionRuns] = useState<Set<string>>(new Set())
   const pending = useMemo(() => pendingApprovals(timeline), [timeline])
   // A run row stays visible when it matches the filter or one of its delegated
   // children does, so searching for a child keeps its parent chain.
@@ -287,6 +291,12 @@ export default function AgentRuns({ project }: { project: string }) {
       for (const event of completedPage.events) statuses.set(runID(event), 'completed')
       const allRows = buildRunRows(startedPage.events, statuses)
       setRows(allRows)
+      // Open human questions mark the asking runs (best-effort — the badge
+      // in the header falls back to events when the endpoint is missing).
+      try {
+        const open = await workspaceApi.listHumanRequests({ project: project.trim(), onlyOpen: true })
+        setQuestionRuns(new Set((open.requests ?? []).map((request) => request.run_id)))
+      } catch { setQuestionRuns(new Set()) }
       const rootRuns = allRows.filter((row) => row.depth === 0)
       // Only auto-select on initial load when nothing is selected
       const currentSelected = selectedRef.current
@@ -376,6 +386,11 @@ export default function AgentRuns({ project }: { project: string }) {
       })
       if (!response2.ok) throw new Error(`${response2.status} ${await response2.text()}`)
       await loadRun(selected, true)
+      // The answered question no longer marks the run — refresh the open set.
+      try {
+        const open = await workspaceApi.listHumanRequests({ project: project.trim(), onlyOpen: true })
+        setQuestionRuns(new Set((open.requests ?? []).map((request) => request.run_id)))
+      } catch { /* best-effort */ }
     } catch (failure) { setError(message(failure)) }
     finally { setBusy(false) }
   }
@@ -431,6 +446,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     {row.status === 'completed' && <Tag type="green" size="sm">{t('chat.delegation.completed')}</Tag>}
                     {row.status === 'failed' && <Tag type="red" size="sm">{t('chat.delegation.failed')}</Tag>}
                     {row.status === 'running' && <Tag type="blue" size="sm">{t('chat.delegation.running')}</Tag>}
+                    {questionRuns.has(row.id) && <Tag type="warm-gray" size="sm" title={t('runs.asks_human') ?? 'This run is waiting for a human answer'}>❓ {t('runs.asks_human') ?? 'asks you'}</Tag>}
                   </div>
                   {(row.title || agentName) && (
                     <div style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.id}</div>

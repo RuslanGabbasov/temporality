@@ -37,7 +37,7 @@ Source spec: `docs/org-structure.md` (расширенная версия, 55 р
 | 2 Project Model | project↔units, members, project roles, миграция | ✅ готово (units + members + аудит) | B |
 | 3 Authorization | visibility/use/manage/administer, проверки на операциях, execution identity | ✅ готово (provider credentials отложены до secret store) | C |
 | 4 Triggers | scope триггеров, авторизация, запуск под identity, аудит | не начато | D |
-| 5 HITL | human_request, recipient resolution, каналы, timeout-политики | ядро есть | E |
+| 5 HITL | human_request, recipient resolution, каналы, timeout-политики | ✅ готово (сущность + резолюция + политики + аудит + UI-инбокс) | E |
 | 6 Policies | наследуемые политики выполнения | не начато | F |
 | 7 UI | Org Tree, доступность, membership, identity, политики | Org Tree/доступность/membership готово | A + B (готово); identity/политики — по фазам |
 | 8 Migration & Cleanup | расхождение моделей, удаление legacy | переходное правило | G |
@@ -86,11 +86,11 @@ Source spec: `docs/org-structure.md` (расширенная версия, 55 р
 
 ### Волна E. HITL — M — фаза 5
 
-- [ ] `human_request` как отдельная сущность (§28: статусы pending/delivered/waiting/answered/expired/cancelled) — поверх существующих событий траектории; UI-список запросов.
-- [ ] Recipient resolution (§26): `project_owner / role / org_unit / specific_user`; проверка права обращения (§30).
-- [ ] Адаптеры Matrix/Telegram + fallback по preferred channel.
-- [ ] Timeout-политики (§33): fail/retry/fallback/escalate/cancel — в модели выполнения, не в транспорте.
-- [ ] Аудит HITL (§37).
+- [x] `human_request` как отдельная сущность (§28) — миграция 000040, стор `workspace/humanrequest.go`; статусы pending/delivered/answered/expired/cancelled/rejected (waiting слит в delivered); список — `GET /v1/workspace/human-requests` c lazy-экспирацией, UI-инбокс: бейдж в Layout + метка «спрашивает вас» на запусках в Runs (события — fallback для старых ядер).
+- [x] Recipient resolution (§26): `user:` / имя / `role:` / `org:` / `project_owner` (первый активный admin — owner-колонки у проекта нет) / пусто → actor; проверка права обращения (§30) — fail-closed по `human_targets` execution identity (пустой список/`*` = все), отказ → событие `human.rejected` без паузы.
+- [x] Адаптеры Matrix/Telegram + fallback по preferred channel — уже были в `kernel/agent/notify.go`; волна E добавила туда резолюцию получателя и запись сущности.
+- [x] Timeout-политики (§33): fail/retry/fallback/escalate/cancel — в модели выполнения (workflow), не в транспорте; retry/escalate — ровно один доп. раунд (escalate → `project_owner`); cancel останавливает run без `run.completed`.
+- [x] Аудит HITL (§37): `access_audit_log` (`human_request.created/delivered/answered/cancelled/expired/rejected`) на всех путях — activity, approval-endpoint, lazy sweep.
 
 ### Волна F. Policies — M/L — фаза 6
 

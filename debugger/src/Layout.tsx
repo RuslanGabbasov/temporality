@@ -123,7 +123,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
         }
       } catch { /* ignore */ }
       try {
-        // Count unresolved approval requests and open questions in this project
+        // Count unresolved approval requests and open questions in this project.
         const collect = async (type: string): Promise<string[]> => {
           const ids: string[] = []
           const resp = await fetch(`/api/v1/observations/events?project=${encodeURIComponent(project)}&type=${type}&limit=50`, { headers: { ...authHeaders() } })
@@ -135,16 +135,34 @@ export default function Layout({ children, activePage }: LayoutProps) {
           }
           return ids
         }
-        const requested = [...(await collect('approval.requested')), ...(await collect('human.requested'))]
-        if (requested.length > 0) {
+        // Open agent questions come from the human_request entity (§28) — the
+        // list endpoint lazily expires stale rows. Older kernels without the
+        // endpoint fall back to trajectory events.
+        let openQuestions = 0
+        try {
+          const data = await workspaceApi.listHumanRequests({ project, onlyOpen: true })
+          openQuestions = (data.requests ?? []).length
+        } catch {
+          const asked = await collect('human.requested')
+          if (asked.length > 0) {
+            const answered = new Set<string>()
+            for (const type of ['human.answered', 'human.cancelled', 'human.timed_out']) {
+              for (const id of await collect(type)) answered.add(id)
+            }
+            openQuestions = asked.filter((id) => !answered.has(id)).length
+          }
+        }
+        // Tool approvals are not human_request rows — they still live in events.
+        let openApprovals = 0
+        const requestedApproval = await collect('approval.requested')
+        if (requestedApproval.length > 0) {
           const ended = new Set<string>()
-          for (const type of ['approval.granted', 'approval.rejected', 'human.answered', 'human.cancelled', 'human.timed_out']) {
+          for (const type of ['approval.granted', 'approval.rejected', 'approval.timed_out']) {
             for (const id of await collect(type)) ended.add(id)
           }
-          setPendingApprovals(requested.filter((id) => !ended.has(id)).length)
-        } else {
-          setPendingApprovals(0)
+          openApprovals = requestedApproval.filter((id) => !ended.has(id)).length
         }
+        setPendingApprovals(openQuestions + openApprovals)
       } catch { /* ignore */ }
     }
     void poll()
