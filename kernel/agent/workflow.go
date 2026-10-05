@@ -19,15 +19,16 @@ import (
 )
 
 const (
-	TaskQueue               = "temporality-agent-kernel"
-	ActivityRecordEvent     = "kernel.record_event"
-	ActivityCallModel       = "kernel.call_model"
-	ActivityRunTool         = "kernel.run_tool"
-	ActivityKnowledgeHints  = "kernel.knowledge_hints"
-	ActivityKnowledgeLookup = "kernel.knowledge_lookup"
-	ActivityResolveAgent    = "kernel.resolve_agent"
-	ActivityGenerateTitle   = "kernel.generate_run_title"
-	ApprovalSignal          = "kernel.approval"
+	TaskQueue                = "temporality-agent-kernel"
+	ActivityRecordEvent      = "kernel.record_event"
+	ActivityCallModel        = "kernel.call_model"
+	ActivityRunTool          = "kernel.run_tool"
+	ActivityKnowledgeHints   = "kernel.knowledge_hints"
+	ActivityKnowledgeLookup  = "kernel.knowledge_lookup"
+	ActivityResolveAgent     = "kernel.resolve_agent"
+	ActivityGenerateTitle    = "kernel.generate_run_title"
+	ActivityExtractKnowledge = "kernel.extract_knowledge"
+	ApprovalSignal           = "kernel.approval"
 
 	// MaxDelegationDepth bounds agent-to-agent delegation chains
 	// (docs/agent-delegation.md): depth 0 → 1 → 2 is allowed, a run at depth 2
@@ -304,6 +305,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
 				return result, err
 			}
+			runKnowledgeExtraction(ctx, activityCtx, state, input)
 			return result, nil
 		}
 		messages = append(messages, llm.Message{Role: "assistant", Content: completion.Content, ToolCalls: completion.ToolCalls})
@@ -734,6 +736,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			return result, err
 		}
 	}
+	runKnowledgeExtraction(ctx, activityCtx, state, input)
 	return result, nil
 }
 
@@ -1079,6 +1082,88 @@ func emitExecutionObservation(ctx workflow.Context, state *eventState, proposal 
 		return emitKnowledgeEvent(ctx, state, "knowledge.used", data, evidence)
 	}
 	return nil
+}
+
+// runKnowledgeExtraction replays the finished run through the knowledge
+// extractor (docs/knowledge-extraction.md): one model call over the compact
+// trajectory produces 0..N candidates that are emitted as knowledge.proposed
+// with evidence, or strengthen already-projected nodes. Extraction is strictly
+// best-effort — any failure is recorded as knowledge.extraction.failed and the
+// run's own result stays untouched.
+func runKnowledgeExtraction(ctx workflow.Context, activityCtx workflow.Context, state *eventState, input RunInput) {
+	if input.SkipKnowledge {
+		return
+	}
+	extractionID := extractionIdentity(input.RunID)
+	if err := emit(activityCtx, state, extractionStartedEvent, map[string]any{"extraction_id": extractionID, "extractor_version": ExtractorVersion}); err != nil {
+		return
+	}
+	extractCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 3 * time.Minute, ScheduleToCloseTimeout: 4 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+	var extraction KnowledgeExtractResult
+	if err := workflow.ExecuteActivity(extractCtx, ActivityExtractKnowledge, KnowledgeExtractRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Prompt: input.Prompt, ExtractionID: extractionID, Model: input.Model}).Get(ctx, &extraction); err != nil {
+		_ = emit(activityCtx, state, extractionFailedEvent, map[string]any{"extraction_id": extractionID, "extractor_version": ExtractorVersion, "error": boundedFailureDetail(err)})
+		return
+	}
+	if extraction.Skipped {
+		_ = emit(activityCtx, state, extractionCompletedEvent, map[string]any{"extraction_id": extractionID, "extractor_version": ExtractorVersion, "skipped": "already_extracted"})
+		return
+	}
+	lookupCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 2}})
+	proposed, strengthened := 0, 0
+	for _, candidate := range extraction.Candidates {
+		if emitExtractedKnowledge(ctx, activityCtx, lookupCtx, state, input, extractionID, candidate) {
+			if candidate.Existing {
+				strengthened++
+			} else {
+				proposed++
+			}
+		}
+	}
+	_ = emit(activityCtx, state, extractionCompletedEvent, map[string]any{
+		"extraction_id":      extractionID,
+		"extractor_version":  ExtractorVersion,
+		"candidates_count":   len(extraction.Candidates),
+		"proposed":           proposed,
+		"strengthened":       strengthened,
+		"duplicates_skipped": extraction.Duplicates,
+		"invalid_skipped":    extraction.Invalid,
+		"duration_ms":        extraction.DurationMs,
+		"model":              extraction.Model,
+	})
+}
+
+// emitExtractedKnowledge records one candidate. New ids are proposed with
+// their evidence; ids that already exist are strengthened — a fresh lookup
+// decides between confirming a proposal and recording reuse of confirmed
+// knowledge, mirroring the execution-observation semantics. Terminal states
+// emit nothing: the runtime events already carry the fact.
+func emitExtractedKnowledge(ctx workflow.Context, activityCtx workflow.Context, lookupCtx workflow.Context, state *eventState, input RunInput, extractionID string, candidate KnowledgeCandidate) bool {
+	evidence := make([]observation.Evidence, 0, len(candidate.Evidence))
+	for _, ref := range candidate.Evidence {
+		evidence = append(evidence, observation.Evidence{Ref: ref, Type: "event"})
+	}
+	if !candidate.Existing {
+		data := map[string]any{"knowledge_id": candidate.KnowledgeID, "proposition": candidate.Proposition, "kind": candidate.Kind, "producer": "knowledge-extractor", "extractor_version": ExtractorVersion, "extraction_id": extractionID}
+		if candidate.Confidence > 0 {
+			data["confidence"] = candidate.Confidence
+		}
+		return emitKnowledgeEvent(activityCtx, state, "knowledge.proposed", data, evidence) == nil
+	}
+	var lookup KnowledgeLookupResult
+	if err := workflow.ExecuteActivity(lookupCtx, ActivityKnowledgeLookup, KnowledgeLookupQuery{Project: input.Project, KnowledgeID: candidate.KnowledgeID}).Get(ctx, &lookup); err != nil {
+		// Without an authoritative lookup the kernel cannot know the node's
+		// current state; strengthening blindly could break its lifecycle.
+		return false
+	}
+	switch lookup.State {
+	case "proposed", "challenged":
+		data := map[string]any{"knowledge_id": candidate.KnowledgeID, "rule": ExtractionReverificationRule, "extractor_version": ExtractorVersion, "extraction_id": extractionID}
+		return emitKnowledgeEvent(activityCtx, state, "knowledge.confirmed", data, evidence) == nil
+	case "confirmed":
+		data := map[string]any{"knowledge_id": candidate.KnowledgeID, "rule": ExtractionReuseRule, "extractor_version": ExtractorVersion, "extraction_id": extractionID}
+		return emitKnowledgeEvent(activityCtx, state, "knowledge.used", data, evidence) == nil
+	}
+	return false
 }
 
 func emitKnowledgeEvent(ctx workflow.Context, state *eventState, eventType string, data map[string]any, evidence []observation.Evidence) error {
