@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -11,9 +12,42 @@ import (
 
 // Execution identities (docs/org-structure.md §20): the security context of
 // automated runs. A trigger's run never inherits its creator's rights — it
-// runs under an identity that names the agents, MCP servers, providers,
-// projects and human request targets it may touch. Wiring identities into
-// trigger runs is wave D; this file only provides the storage.
+// runs under an execution identity that names the agents, MCP servers,
+// providers, projects and human request targets it may touch.
+
+// allowsAny reports whether value is permitted by an allowed-list: "*"
+// (or an empty list, after normalization) allows anything.
+func allowsAny(list []string, value string) bool {
+	for _, v := range list {
+		if v == "*" || v == value {
+			return true
+		}
+	}
+	return false
+}
+
+// IdentityAllows reports whether an execution identity permits a run that
+// uses agentID in projectID with the given MCP servers and model provider
+// (docs/org-structure.md §20-21). An empty dimension is skipped — it is not
+// known yet at trigger-save time. Every dimension is re-checked at each
+// automated run start, so revoking a list entry stops future fires.
+func IdentityAllows(id ExecutionIdentity, agentID, projectID string, mcpServers []string, provider string) error {
+	if agentID != "" && !allowsAny(id.AllowedAgents, agentID) {
+		return fmt.Errorf("execution identity %q does not allow agent %q", id.ID, agentID)
+	}
+	if projectID != "" && !allowsAny(id.AllowedProjects, projectID) {
+		return fmt.Errorf("execution identity %q does not allow project %q", id.ID, projectID)
+	}
+	for _, server := range mcpServers {
+		if !allowsAny(id.AllowedMCP, server) {
+			return fmt.Errorf("execution identity %q does not allow MCP server %q", id.ID, server)
+		}
+	}
+	if provider != "" && !allowsAny(id.AllowedProviders, provider) {
+		return fmt.Errorf("execution identity %q does not allow provider %q", id.ID, provider)
+	}
+	return nil
+}
 
 func unmarshalStringList(raw []byte) []string {
 	var v []string

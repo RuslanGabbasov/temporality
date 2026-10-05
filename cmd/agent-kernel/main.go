@@ -159,6 +159,10 @@ func main() {
 		log.Error("migrate workspace v38", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000039_trigger_org_identity.up.sql"); err != nil {
+		log.Error("migrate workspace v39", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -1998,7 +2002,9 @@ func main() {
 		writeJSON(w, 200, map[string]any{"deleted": true})
 	})
 
-	// Triggers
+	// Triggers (docs/org-structure.md §18, §21): org-scoped, optionally bound
+	// to an execution identity whose allowed-lists are re-checked at every
+	// automated run start.
 	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/triggers", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -2007,6 +2013,15 @@ func main() {
 		if err != nil {
 			writeError(w, 500, err)
 			return
+		}
+		if units := visibleUnits(r); units != nil {
+			visible := make([]workspace.Trigger, 0, len(triggers))
+			for _, t := range triggers {
+				if workspace.OrgVisible(t.OrgUnitID, units) {
+					visible = append(visible, t)
+				}
+			}
+			triggers = visible
 		}
 		writeJSON(w, 200, map[string]any{"triggers": triggers})
 	})
@@ -2026,9 +2041,37 @@ func main() {
 			writeError(w, 422, errors.New("type and project_id are required"))
 			return
 		}
+		if req.OrgUnitID != "" {
+			if _, err := ws.GetOrgUnit(r.Context(), req.OrgUnitID); err != nil {
+				status := 500
+				if errors.Is(err, workspace.ErrNotFound) {
+					status = 404
+				}
+				writeError(w, status, err)
+				return
+			}
+		}
+		if req.ExecutionIdentityID != "" {
+			if _, err := ws.GetExecutionIdentity(r.Context(), req.ExecutionIdentityID); err != nil {
+				status := 500
+				if errors.Is(err, workspace.ErrNotFound) {
+					status = 404
+				}
+				writeError(w, status, err)
+				return
+			}
+		}
+		// Save-time authorization (§21): unit, project, agent, identity.
+		if err := authorizeTriggerUse(r.Context(), ws, r, &req); err != nil {
+			writeError(w, 403, err)
+			return
+		}
 		if err := ws.CreateTrigger(r.Context(), &req); err != nil {
 			writeError(w, 409, err)
 			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTriggerCreated, "trigger", req.ID, map[string]any{"name": req.Name, "project_id": req.ProjectID, "org_unit_id": req.OrgUnitID, "execution_identity_id": req.ExecutionIdentityID}); err != nil {
+			log.Warn("audit trigger create", "error", err)
 		}
 		writeJSON(w, 201, req)
 	})
@@ -2045,19 +2088,19 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		if !workspace.OrgVisible(trigger.OrgUnitID, visibleUnits(r)) {
+			// Hidden triggers read as absent — existence is not leaked.
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
 		writeJSON(w, 200, trigger)
 	})
 	mux.HandleFunc("PUT /v1/workspace/triggers/{triggerID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleWriter) {
 			return
 		}
-		var req workspace.Trigger
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
-			writeError(w, 400, err)
-			return
-		}
-		req.ID = r.PathValue("triggerID")
-		if err := ws.UpdateTrigger(r.Context(), req); err != nil {
+		existing, err := ws.GetTrigger(r.Context(), r.PathValue("triggerID"))
+		if err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)
 				return
@@ -2065,10 +2108,94 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
-		writeJSON(w, 200, req)
+		if !workspace.OrgVisible(existing.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		// Partial update: only the keys present in the payload change the
+		// trigger — a toggle that sends {enabled} must not wipe name, agent or
+		// identity. org_unit_id is ignored here: re-scoping goes through the
+		// admin binding endpoint like every other resource.
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		hasString := func(key string) (string, bool) {
+			raw, ok := body[key]
+			if !ok {
+				return "", false
+			}
+			var s string
+			if json.Unmarshal(raw, &s) != nil {
+				return "", false
+			}
+			return s, true
+		}
+		if v, ok := hasString("name"); ok && v != "" {
+			existing.Name = v
+		}
+		if v, ok := hasString("agent_id"); ok {
+			existing.AgentID = v
+		}
+		if v, ok := hasString("type"); ok && v != "" {
+			existing.Type = v
+		}
+		if v, ok := hasString("execution_identity_id"); ok {
+			if v != "" {
+				if _, err := ws.GetExecutionIdentity(r.Context(), v); err != nil {
+					status := 500
+					if errors.Is(err, workspace.ErrNotFound) {
+						status = 404
+					}
+					writeError(w, status, err)
+					return
+				}
+			}
+			existing.ExecutionIdentityID = v
+		}
+		if raw, ok := body["enabled"]; ok {
+			_ = json.Unmarshal(raw, &existing.Enabled)
+		}
+		if raw, ok := body["config"]; ok && string(raw) != "null" {
+			var cfg json.RawMessage
+			if json.Unmarshal(raw, &cfg) == nil && len(cfg) > 0 {
+				existing.Config = cfg
+			}
+		}
+		// Re-authorize the merged trigger (§21): agent/identity may have changed.
+		if err := authorizeTriggerUse(r.Context(), ws, r, &existing); err != nil {
+			writeError(w, 403, err)
+			return
+		}
+		if err := ws.UpdateTrigger(r.Context(), existing); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTriggerUpdated, "trigger", existing.ID, map[string]any{"name": existing.Name, "agent_id": existing.AgentID, "execution_identity_id": existing.ExecutionIdentityID, "enabled": existing.Enabled}); err != nil {
+			log.Warn("audit trigger update", "error", err)
+		}
+		writeJSON(w, 200, existing)
 	})
 	mux.HandleFunc("DELETE /v1/workspace/triggers/{triggerID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		trigger, err := ws.GetTrigger(r.Context(), r.PathValue("triggerID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(trigger.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
 			return
 		}
 		if err := ws.DeleteTrigger(r.Context(), r.PathValue("triggerID")); err != nil {
@@ -2078,6 +2205,9 @@ func main() {
 			}
 			writeError(w, 500, err)
 			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTriggerDeleted, "trigger", trigger.ID, map[string]any{"name": trigger.Name, "project_id": trigger.ProjectID}); err != nil {
+			log.Warn("audit trigger delete", "error", err)
 		}
 		writeJSON(w, 200, map[string]bool{"deleted": true})
 	})
@@ -2487,11 +2617,6 @@ func main() {
 			writeJSON(w, 200, map[string]any{"trigger_id": matched.ID, "run_id": taskID, "duplicate": true})
 			return
 		}
-		task := &workspace.Task{ID: taskID, ProjectID: projectID, AgentID: matched.AgentID, Title: "Webhook: " + matched.Name, Prompt: prompt}
-		if err := ws.CreateTask(r.Context(), task); err != nil {
-			writeError(w, 500, err)
-			return
-		}
 		input := agent.RunInput{RunID: taskID, Project: projectID, TaskID: taskID, Prompt: prompt}
 		effectiveAgentID, triggerAgent, aErr := resolveRunAgent(r.Context(), ws, projectID, matched.AgentID)
 		if aErr != nil {
@@ -2505,28 +2630,41 @@ func main() {
 			return
 		}
 		input.ActorID = "webhook-" + matched.ID
-		// Trigger observability (§16): received → accepted in the run's event
-		// scope so the trajectory shows the origin of the run. Event ids live
-		// in a dedicated trigger/ namespace: the workflow owns /event/NNNNNN.
+		// Trigger observability (§16): received → accepted/rejected in the run's
+		// event scope so the trajectory shows the origin of the run. Event ids
+		// live in a dedicated trigger/ namespace: the workflow owns /event/NNNNNN.
 		scope := agent.EventScope(activities.SourceID, projectID, input.RunID)
 		triggerEventData := map[string]any{"trigger_id": matched.ID, "trigger_name": matched.Name, "event_id": eventID, "source": "webhook"}
-		for _, entry := range []struct {
-			kind string
-			id   string
-		}{
-			{"trigger.received", "trigger/" + scope + "/000000"},
-			{"trigger.accepted", "trigger/" + scope + "/000001"},
-		} {
+		emitTriggerEvent := func(kind, eventIDSuffix string, data map[string]any) {
 			item := observation.Event{
-				Schema: observation.Schema, EventID: entry.id, OccurredAt: time.Now().UTC(),
+				Schema: observation.Schema, EventID: "trigger/" + scope + "/" + eventIDSuffix, OccurredAt: time.Now().UTC(),
 				Source:  observation.Source{ID: activities.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
 				Context: observation.Context{Project: projectID, Run: input.RunID, Task: taskID, Actor: observation.Actor{ID: input.ActorID, Type: "trigger"}},
-				Type:    entry.kind, Data: triggerEventData,
+				Type:    kind, Data: data,
 			}
 			if err := events.Enqueue(r.Context(), item); err != nil {
 				slog.Error("emit trigger event", "trigger", matched.ID, "error", err)
 			}
 		}
+		emitTriggerEvent("trigger.received", "000000", triggerEventData)
+		// Fire-time re-authorization (§21): the execution identity still permits
+		// this exact run. A failed check is a rejection, not a silent drop.
+		identityID, authErr := authorizeTriggerRun(r.Context(), ws, matched, effectiveAgentID, triggerAgent, &input)
+		if authErr != nil {
+			rejection := map[string]any{"trigger_id": matched.ID, "trigger_name": matched.Name, "event_id": eventID, "source": "webhook", "reason": authErr.Error()}
+			emitTriggerEvent("trigger.rejected", "000001", rejection)
+			writeError(w, 403, authErr)
+			return
+		}
+		// Task creation comes after authorization: a rejected delivery leaves no
+		// orphan task, so a corrected retry is not misreported as a duplicate.
+		task := &workspace.Task{ID: taskID, ProjectID: projectID, AgentID: matched.AgentID, Title: "Webhook: " + matched.Name, Prompt: prompt}
+		if err := ws.CreateTask(r.Context(), task); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		triggerEventData["execution_identity_id"] = identityID
+		emitTriggerEvent("trigger.accepted", "000001", triggerEventData)
 		workflowID := workflowIDFor(activities.SourceID, projectID, input.RunID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
 		run, wfErr := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
@@ -2541,6 +2679,7 @@ func main() {
 			return
 		}
 		wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: projectID, AgentID: effectiveAgentID, AgentVersion: input.AgentVersion, RunID: input.RunID, Status: "started", Model: input.Model, ExecContext: runExecContext(r.Context(), &input, effectiveAgentID, controlplane.RoleNone)}
+		wsRun.ExecContext["execution_identity_id"] = identityID
 		_ = ws.CreateRun(r.Context(), wsRun)
 		writeJSON(w, 202, map[string]string{"trigger_id": matched.ID, "run_id": input.RunID, "workflow_id": run.GetID()})
 	})
@@ -2574,13 +2713,9 @@ func main() {
 					continue
 				}
 				lastRun[t.ID] = now
-				// Create task and start run
+				// Task id is timestamped, so every fire is unique; the task itself is
+				// created only after fire-time authorization succeeds.
 				taskID := "trigger-" + t.ID + "-" + now.Format("20060102-150405")
-				task := &workspace.Task{ID: taskID, ProjectID: t.ProjectID, AgentID: t.AgentID, Title: "Scheduled: " + t.Name, Prompt: cfg.Prompt}
-				if err := ws.CreateTask(context.Background(), task); err != nil {
-					slog.Error("create trigger task", "trigger", t.ID, "error", err)
-					continue
-				}
 				input := agent.RunInput{RunID: taskID + "-" + now.Format("150405"), Project: t.ProjectID, TaskID: taskID, Prompt: cfg.Prompt}
 				effectiveAgentID, triggerAgent, aErr := resolveRunAgent(context.Background(), ws, t.ProjectID, t.AgentID)
 				if aErr != nil {
@@ -2594,6 +2729,19 @@ func main() {
 					continue
 				}
 				input.ActorID = "schedule-" + t.ID
+				// Fire-time re-authorization (§21): the identity's allowed-lists are
+				// re-checked on every scheduled fire; a revoked permission stops
+				// future runs instead of silently failing mid-workflow.
+				identityID, authErr := authorizeTriggerRun(context.Background(), ws, &t, effectiveAgentID, triggerAgent, &input)
+				if authErr != nil {
+					slog.Warn("scheduled trigger rejected", "trigger", t.ID, "name", t.Name, "error", authErr)
+					continue
+				}
+				task := &workspace.Task{ID: taskID, ProjectID: t.ProjectID, AgentID: t.AgentID, Title: "Scheduled: " + t.Name, Prompt: cfg.Prompt}
+				if err := ws.CreateTask(context.Background(), task); err != nil {
+					slog.Error("create trigger task", "trigger", t.ID, "error", err)
+					continue
+				}
 				workflowID := workflowIDFor(activities.SourceID, t.ProjectID, input.RunID)
 				options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
 				if _, wfErr := temporalClient.ExecuteWorkflow(context.Background(), options, "AgentRun", input); wfErr != nil {
@@ -2601,6 +2749,7 @@ func main() {
 					continue
 				}
 				wsRun := &workspace.Run{ID: input.RunID, TaskID: taskID, ProjectID: t.ProjectID, AgentID: effectiveAgentID, AgentVersion: input.AgentVersion, RunID: input.RunID, Status: "started", Model: input.Model, ExecContext: runExecContext(context.Background(), &input, effectiveAgentID, controlplane.RoleNone)}
+				wsRun.ExecContext["execution_identity_id"] = identityID
 				_ = ws.CreateRun(context.Background(), wsRun)
 				slog.Info("scheduled trigger fired", "trigger", t.ID, "name", t.Name, "run", input.RunID)
 			}
@@ -3098,41 +3247,9 @@ func authorizeRunUse(ctx context.Context, ws *workspace.Store, r *http.Request, 
 		return controlplane.RoleAdmin, nil
 	}
 	// Project: org visibility or explicit membership (§15-16).
-	links, err := ws.ProjectOrgUnits(ctx, input.Project)
+	effective, err := projectAccessRole(ctx, ws, &principal, input.Project)
 	if err != nil {
 		return controlplane.RoleNone, err
-	}
-	memberRole := controlplane.RoleNone
-	members, err := ws.ListProjectMembers(ctx, input.Project)
-	if err != nil {
-		return controlplane.RoleNone, err
-	}
-	for _, m := range members {
-		if m.UserID != principal.UserID {
-			continue
-		}
-		if role, pErr := controlplane.ParseRole(m.Role); pErr == nil && role > memberRole {
-			memberRole = role
-		}
-	}
-	if !workspace.ProjectVisible(links, principal.VisibleUnits, memberRole > controlplane.RoleNone) {
-		return controlplane.RoleNone, fmt.Errorf("token %q has no access to project %q", principal.Subject, input.Project)
-	}
-	// Effective role at the project (§13): installation role, membership role,
-	// and org grants on the project's units or their ancestors — the maximum
-	// wins. Starting runs needs writer.
-	effective := principal.Role
-	if memberRole > effective {
-		effective = memberRole
-	}
-	for _, unitID := range links {
-		unit, unitErr := ws.GetOrgUnit(ctx, unitID)
-		if unitErr != nil {
-			continue // a broken link must not crash the gate
-		}
-		if at := principal.MaxRoleAt(unit.ID, unit.Path); at > effective {
-			effective = at
-		}
 	}
 	if effective < controlplane.RoleWriter {
 		return controlplane.RoleNone, fmt.Errorf("effective role %s is not enough to start runs in project %q (writer required)", effective, input.Project)
@@ -3176,6 +3293,147 @@ func authorizeRunUse(ctx context.Context, ws *workspace.Store, r *http.Request, 
 		}
 	}
 	return effective, nil
+}
+
+// projectAccessRole resolves the caller's effective role at a project
+// (§13, §15-16): installation role, explicit membership role and org grants on
+// the project's units or their ancestors — the maximum wins. It fails when
+// the project is not visible at all.
+func projectAccessRole(ctx context.Context, ws *workspace.Store, principal *controlplane.Principal, projectID string) (controlplane.Role, error) {
+	links, err := ws.ProjectOrgUnits(ctx, projectID)
+	if err != nil {
+		return controlplane.RoleNone, err
+	}
+	memberRole := controlplane.RoleNone
+	members, err := ws.ListProjectMembers(ctx, projectID)
+	if err != nil {
+		return controlplane.RoleNone, err
+	}
+	for _, m := range members {
+		if m.UserID != principal.UserID {
+			continue
+		}
+		if role, pErr := controlplane.ParseRole(m.Role); pErr == nil && role > memberRole {
+			memberRole = role
+		}
+	}
+	if !workspace.ProjectVisible(links, principal.VisibleUnits, memberRole > controlplane.RoleNone) {
+		return controlplane.RoleNone, fmt.Errorf("token %q has no access to project %q", principal.Subject, projectID)
+	}
+	effective := principal.Role
+	if memberRole > effective {
+		effective = memberRole
+	}
+	for _, unitID := range links {
+		unit, unitErr := ws.GetOrgUnit(ctx, unitID)
+		if unitErr != nil {
+			continue // a broken link must not crash the gate
+		}
+		if at := principal.MaxRoleAt(unit.ID, unit.Path); at > effective {
+			effective = at
+		}
+	}
+	return effective, nil
+}
+
+// authorizeTriggerUse enforces trigger-save authorization (docs/org-structure.md
+// §21): the caller needs writer at the trigger's org unit, access to the
+// project, the right to use the agent and the right to choose the execution
+// identity — which itself must permit the agent and the project. Admins and
+// service tokens skip the checks, exactly as authorizeRunUse does.
+func authorizeTriggerUse(ctx context.Context, ws *workspace.Store, r *http.Request, t *workspace.Trigger) error {
+	principal, ok := controlplane.FromContext(r.Context())
+	if !ok || principal.Role >= controlplane.RoleAdmin || principal.VisibleUnits == nil {
+		return nil
+	}
+	if t.OrgUnitID != "" {
+		unit, err := ws.GetOrgUnit(ctx, t.OrgUnitID)
+		if err != nil {
+			return fmt.Errorf("org unit %q not found", t.OrgUnitID)
+		}
+		if at := principal.MaxRoleAt(unit.ID, unit.Path); at < controlplane.RoleWriter {
+			return fmt.Errorf("effective role %s is not enough to manage triggers in unit %q (writer required)", at, unit.Name)
+		}
+	}
+	effective, err := projectAccessRole(ctx, ws, &principal, t.ProjectID)
+	if err != nil {
+		return err
+	}
+	if effective < controlplane.RoleWriter {
+		return fmt.Errorf("effective role %s is not enough to manage triggers in project %q (writer required)", effective, t.ProjectID)
+	}
+	if t.AgentID != "" {
+		agent, err := ws.GetAgent(ctx, t.AgentID)
+		if err != nil {
+			return fmt.Errorf("agent %q not found", t.AgentID)
+		}
+		if !workspace.OrgVisible(agent.OrgUnitID, principal.VisibleUnits) {
+			return fmt.Errorf("agent %q is not available in your org scope", agent.ID)
+		}
+		if agent.OrgUnitID != "" {
+			if unit, unitErr := ws.GetOrgUnit(ctx, agent.OrgUnitID); unitErr == nil {
+				if at := principal.MaxRoleAt(unit.ID, unit.Path); at < controlplane.RoleWriter {
+					return fmt.Errorf("effective role %s is not enough to use agent %q (writer required)", at, agent.ID)
+				}
+			}
+		}
+	}
+	if t.ExecutionIdentityID != "" {
+		identity, err := ws.GetExecutionIdentity(ctx, t.ExecutionIdentityID)
+		if err != nil {
+			return fmt.Errorf("execution identity %q not found", t.ExecutionIdentityID)
+		}
+		if !workspace.OrgVisible(identity.OrgUnitID, principal.VisibleUnits) {
+			return fmt.Errorf("execution identity %q is not available in your org scope", identity.ID)
+		}
+		if err := workspace.IdentityAllows(identity, t.AgentID, t.ProjectID, nil, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// authorizeTriggerRun re-checks an automated run at every fire (§21): the
+// execution identity still exists, still permits the agent, project, MCP
+// servers and provider of this specific run, and the agent and MCP servers
+// are still visible in the identity's org scope. The returned identity id is
+// recorded in the run's execution context snapshot (§35).
+func authorizeTriggerRun(ctx context.Context, ws *workspace.Store, t *workspace.Trigger, agentID string, triggerAgent *workspace.Agent, input *agent.RunInput) (string, error) {
+	if t.ExecutionIdentityID == "" {
+		// Legacy trigger without an identity (pre-wave-D): keeps running as
+		// before — identities are opt-in per trigger.
+		return "", nil
+	}
+	identity, err := ws.GetExecutionIdentity(ctx, t.ExecutionIdentityID)
+	if err != nil {
+		return "", fmt.Errorf("execution identity %q no longer exists", t.ExecutionIdentityID)
+	}
+	provider := ""
+	if triggerAgent != nil {
+		provider = triggerAgent.Provider
+	}
+	if err := workspace.IdentityAllows(identity, agentID, t.ProjectID, input.MCPServers, provider); err != nil {
+		return "", err
+	}
+	// Org visibility re-check under the identity's scope: what the run touches
+	// must still be visible from the identity's unit.
+	chain, err := ws.UnitChain(ctx, identity.OrgUnitID)
+	if err != nil {
+		return "", err
+	}
+	if agentID != "" {
+		agent, aErr := ws.GetAgent(ctx, agentID)
+		if aErr == nil && !workspace.OrgVisible(agent.OrgUnitID, chain) {
+			return "", fmt.Errorf("agent %q is not visible in the org scope of execution identity %q", agentID, identity.ID)
+		}
+	}
+	for _, serverID := range input.MCPServers {
+		server, sErr := ws.GetMCPServer(ctx, serverID)
+		if sErr == nil && !workspace.OrgVisible(server.OrgUnitID, chain) {
+			return "", fmt.Errorf("MCP server %q is not visible in the org scope of execution identity %q", serverID, identity.ID)
+		}
+	}
+	return identity.ID, nil
 }
 
 // runExecContext snapshots the authorization state at run start
