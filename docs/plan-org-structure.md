@@ -78,11 +78,11 @@ Source spec: `docs/org-structure.md` (расширенная версия, 55 р
 
 ### Волна D. Triggers — M — фаза 4
 
-- [ ] `org_unit_id` у триггеров (или `org_unit_trigger` при.departments-сценариях) + видимость в списках.
-- [ ] Авторизация создания триггера (§21): право на агента, identity, проект.
-- [ ] Запуск Run под execution identity; повторная проверка критических разрешений при каждом запуске.
-- [ ] Аудит `trigger.created/updated/deleted`.
-- [ ] UI триггера (§46): источник → событие → агент → область → identity → human-правила, без YAML.
+- [x] `org_unit_id` у триггеров — миграция 000039 (+ `execution_identity_id`, FK RESTRICT, индекс); видимость в списках: скрытые триггеры отвечают 404 на GET/PUT/DELETE, list фильтруется по OrgVisible.
+- [x] Авторизация триггера (§21): `authorizeTriggerUse` при создании (право на unit/проект/агента/identity — 403/404 с точной причиной) + re-auth при PUT; `org_unit_id` в PUT игнорируется (перепривязка — админ-эндпоинт binding).
+- [x] Запуск Run под execution identity: `authorizeTriggerRun` при каждом fire (webhook и scheduler) — identity существует, IdentityAllows (агент/проект/MCP/провайдер), OrgVisible агента и MCP в UnitChain(identity.OrgUnitID); отказ — `trigger.rejected` + 403 без создания задачи/run; `exec_context.execution_identity_id` в снапшоте. Merge-семантика PUT: `{enabled}` не затирает name/agent_id/config/identity (баг UI-тоггла).
+- [x] Аудит `trigger.created/updated/deleted` (details: name/agent/enabled/identity/unit).
+- [x] UI триггера (§46): выбор unit (OrgUnitSelect, edit — только админ), выбор execution identity с подсказкой, бейджи unit/identity на карточках; policy/human-правила — волны E/F.
 
 ### Волна E. HITL — M — фаза 5
 
