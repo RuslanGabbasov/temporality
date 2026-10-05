@@ -92,6 +92,14 @@ function eventSummary(event: ObservationEvent, t: (key: string, vars?: Record<st
     }
     case 'knowledge.proposed':
       return { icon: '💡', label: t('runs.event.learned'), detail: String(d.proposition ?? '').slice(0, 60), color: '#73daca' }
+    case 'knowledge.extraction.started':
+      return { icon: '🧪', label: t('runs.event.extraction_started'), detail: String(d.extractor_version ?? ''), color: '#73daca' }
+    case 'knowledge.extraction.completed': {
+      const skipped = d.skipped ? ` · ${t('runs.extraction_skipped')}` : ''
+      return { icon: '🧪', label: t('runs.event.extraction_completed'), detail: t('runs.extraction_candidates', { count: String(d.candidates_count ?? 0) }) + skipped, color: '#73daca' }
+    }
+    case 'knowledge.extraction.failed':
+      return { icon: '⚠', label: t('runs.event.extraction_failed'), detail: String(d.error ?? '').slice(0, 80), color: '#e6b85c' }
     case 'knowledge.recalled':
       return { icon: '📚', label: t('runs.event.recalled'), detail: String(d.proposition ?? '').slice(0, 60), color: '#9d7cd8' }
     case 'hint.query':
