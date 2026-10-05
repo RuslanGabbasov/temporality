@@ -42,6 +42,46 @@ export function shortTime(iso: string) {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString()
 }
 
+/* Historical agent.summary events carry newline-collapsed answers: the
+ * journal's redaction pipeline used to join all whitespace into single
+ * spaces, flattening markdown to one line. The journal is append-only, so
+ * old events keep that shape forever. This heuristic conservatively
+ * re-inserts line breaks before block-level markdown tokens — but only for
+ * texts that have no line structure at all. */
+const HAS_BLOCK_STRUCTURE = /\| \||(?:^|\s)#{1,6} |(?:^|\s)(?:[-*+]|\d{1,3}[.)])\s\S|(?:^|\s)---+/
+
+/** Restore plausible markdown line structure in a newline-collapsed text.
+ * Texts that already contain newlines are returned unchanged. */
+export function restoreMarkdownLines(text: string): string {
+  if (!text || text.includes('\n')) return text
+  if (!HAS_BLOCK_STRUCTURE.test(text)) return text
+  let out = text
+    // Table row boundary: "| |" between rows (cells inside a row stay glued)
+    .replace(/\| \|/g, '|\n|')
+    // ATX headings: "## Отчёт" starts a new line
+    .replace(/\s(#{1,6})\s/g, '\n$1 ')
+    // Horizontal rule: a standalone run of 3+ dashes
+    .replace(/\s(---+)(?=\s|$)/g, '\n$1')
+    // List items: "- ", "* ", "+ ", "1. ", "1) " followed by content.
+    // The preceding character must be real prose — not a heading marker,
+    // which keeps "### 1. Title" in one piece.
+    .replace(/([^#\s])\s(?=(?:[-*+]|\d{1,3}[.)])\s\S)/g, '$1\n')
+  // A header row glued to preceding prose ("### 1. Что сделано | Шаг | …")
+  // would swallow the whole table: GFM needs the header row on its own line
+  // directly above the delimiter row. If the next line is a delimiter row,
+  // move any pipe-free prefix to its own line.
+  const lines = out.split('\n')
+  for (let i = 0; i < lines.length - 1; i++) {
+    const next = lines[i + 1].trim()
+    if (!/^\|(?:[-: ]*\|)+$/.test(next) || !next.includes('-')) continue
+    const at = lines[i].indexOf(' | ')
+    if (at > 0 && !lines[i].slice(0, at).includes('|')) {
+      lines[i] = `${lines[i].slice(0, at)}\n${lines[i].slice(at + 1)}`
+    }
+  }
+  return lines.join('\n')
+}
+
 /** Format an event into a human-readable summary line. */
 export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSummaryInfo {
   const d = event.data ?? {}

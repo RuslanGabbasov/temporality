@@ -4,7 +4,7 @@ import { observationApi, type ObservationEvent } from './observationApi'
 import { type Agent } from './workspaceApi'
 import Markdown from './Markdown'
 import { useT } from './i18n'
-import { eventSummary, shortTime, explainKernelError } from './eventSummary'
+import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines } from './eventSummary'
 
 export interface DelegationNodeInfo {
   childRunId: string
@@ -94,7 +94,9 @@ async function fetchChildPayload(project: string, childRunId: string, terminal?:
       .catch(() => ({ events: [] as ObservationEvent[], count: 0 }))
     summary = answerPage.events[0]?.data as Record<string, any> | undefined
   }
-  const answer = typeof summary?.answer === 'string' && summary.answer.trim() ? summary.answer : null
+  // Older journal events carry the answer newline-collapsed; restore the
+  // markdown structure for display (new events keep their line breaks).
+  const answer = typeof summary?.answer === 'string' && summary.answer.trim() ? restoreMarkdownLines(summary.answer) : null
   return {
     events,
     answer,

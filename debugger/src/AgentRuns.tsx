@@ -5,7 +5,7 @@ import { workspaceApi, type Agent } from './workspaceApi'
 import DelegationTree from './DelegationTree'
 import Markdown from './Markdown'
 import { useT } from './i18n'
-import { eventSummary, shortTime, explainKernelError } from './eventSummary'
+import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines } from './eventSummary'
 import {
   Button,
   TextInput,
@@ -182,7 +182,8 @@ function EventDetail({ event, t, project, response, reasoning }: { event: Observ
               {typeof d.answer === 'string' && (
                 <div style={{ marginBottom: '0.5rem' }}>
                   <div style={{ color: 'var(--tm-text-3)', marginBottom: '0.25rem' }}>answer:</div>
-                  <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--tm-text)', background: 'var(--tm-elevated)', padding: '0.5rem', borderRadius: '3px', maxHeight: '150px', overflowY: 'auto' }}>{d.answer.slice(0, 2000)}</div>
+                  {/* Older agent.summary events carry the answer newline-collapsed — restore its markdown structure */}
+                  <div style={{ color: 'var(--tm-text)', background: 'var(--tm-elevated)', padding: '0.5rem', borderRadius: '3px', maxHeight: '150px', overflowY: 'auto' }}><Markdown content={restoreMarkdownLines(d.answer.slice(0, 2000))} /></div>
                 </div>
               )}
               {/* Show other data */}
@@ -377,7 +378,15 @@ export default function AgentRuns({ project }: { project: string }) {
     finally { setBusy(false) }
   }
 
-  const answer = (result?.result as Record<string, unknown> | undefined)?.answer
+  // Prefer the run result (REST); evicted child runs have none — fall back
+  // to the agent.summary event, which survives in the journal. Older summary
+  // events are newline-collapsed, so restore the markdown structure.
+  const summaryAnswer = (() => {
+    const raw = timeline.find((e) => e.type === 'agent.summary')?.data
+    const value = (raw as Record<string, unknown> | undefined)?.answer
+    return typeof value === 'string' && value.trim() ? restoreMarkdownLines(value) : undefined
+  })()
+  const answer = ((result?.result as Record<string, unknown> | undefined)?.answer as string | undefined) ?? summaryAnswer
   const stages = (result?.result as Record<string, unknown> | undefined)?.stages
   const rootEvent = timeline.find((event) => event.type === 'run.started')
   const rawTitle = rootEvent?.data?.title
