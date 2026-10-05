@@ -32,9 +32,24 @@ events plus Temporal liveness on demand.
 
 - **Effect semantics on `tool.failed`** — `effect=none` marks pre-execution
   rejections (non-retryable argument validation: safe to re-issue),
-  `effect=uncertain` marks failures at or after the execution boundary. Legacy
+  `effect=uncertain` marks failures at or after the execution boundary, and
+  `effect=occurred` marks a failed call whose effects fully landed and are
+  settled by the journal (currently only delegation). Legacy
   events without the field but with `error_type=activity_failed` count as
   uncertain.
+- **Delegation classification** — the `delegate` tool is internal, so its
+  failures are classified precisely instead of defaulting to uncertain:
+  * `delegated_run_start_failed` — the child execution was rejected before it
+    began (duplicate workflow id, namespace shutdown): `effect=none`, nothing
+    ran.
+  * `delegated_run_failed` — the child started and failed. Right after the
+    failure the `kernel.summarize_child_run` activity replays the child's own
+    events from the journal: if every child operation is settled, the parent's
+    `tool.failed` carries `effect=occurred` (or `none` when the child performed
+    zero operations) with `child_ops_total`/`child_ops_unresolved` fields;
+    only genuinely unresolved child operations keep `effect=uncertain`. The
+    operations listing surfaces `child_run_id` and the summary so the UI can
+    point at the child trajectory instead of "check the external system".
 - **MCP idempotency keys** — every `mcpclient.Call` propagates the operation id
   via the protocol's `_meta` field; servers that support idempotent execution
   deduplicate retries. The test MCP server persists the key for `create_issue`,

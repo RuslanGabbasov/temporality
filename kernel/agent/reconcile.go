@@ -45,6 +45,14 @@ type UncertainOperation struct {
 	SourceID      string    `json:"source_id"`
 	State         string    `json:"state"`
 	Reason        string    `json:"reason"`
+	// Delegation context: when the failed tool is a delegate call, the terminal
+	// tool.failed event carries the child run identity and a journal-derived
+	// summary of the child's operations, so the UI can point the operator at
+	// the child trajectory instead of "check the external system".
+	ErrorType          string `json:"error_type,omitempty"`
+	ChildRunID         string `json:"child_run_id,omitempty"`
+	ChildOpsTotal      int    `json:"child_ops_total,omitempty"`
+	ChildOpsUnresolved int    `json:"child_ops_unresolved,omitempty"`
 }
 
 // WorkflowLiveness answers whether the run's workflow is still executing.
@@ -110,6 +118,14 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 			if terminal.Type == "tool.failed" && failedUncertain(terminal) {
 				operation.State = OperationStateUncertain
 				operation.Reason = "failed_uncertain"
+				operation.ErrorType = dataString(terminal.Data, "error_type")
+				operation.ChildRunID = dataString(terminal.Data, "child_run_id")
+				if total, ok := terminal.Data["child_ops_total"].(float64); ok {
+					operation.ChildOpsTotal = int(total)
+				}
+				if unresolved, ok := terminal.Data["child_ops_unresolved"].(float64); ok {
+					operation.ChildOpsUnresolved = int(unresolved)
+				}
 				uncertain = append(uncertain, operation)
 			}
 			continue
@@ -217,6 +233,66 @@ func failedUncertain(event observation.Event) bool {
 		return true
 	}
 	return dataString(event.Data, "error_type") == "activity_failed"
+}
+
+// ChildRunSummaryRequest asks for the operation summary of one delegated
+// child run after it reached a terminal state.
+type ChildRunSummaryRequest struct {
+	Project string `json:"project"`
+	RunID   string `json:"run_id"`
+}
+
+// ChildRunSummary describes a delegated child run's tool operations: how many
+// executed and how many the journal cannot settle.
+type ChildRunSummary struct {
+	Total      int `json:"total"`
+	Unresolved int `json:"unresolved"`
+}
+
+// SummarizeChildRun classifies a finished delegated run's operations from the
+// journal. Called by the parent workflow right after the child failed, so the
+// parent can report a precise effect instead of a generic "uncertain".
+func (a *Activities) SummarizeChildRun(ctx context.Context, request ChildRunSummaryRequest) (ChildRunSummary, error) {
+	if request.Project == "" || request.RunID == "" {
+		return ChildRunSummary{}, fmt.Errorf("project and run_id are required")
+	}
+	events, err := a.fetchRunEvents(ctx, request.Project, request.RunID)
+	if err != nil {
+		return ChildRunSummary{}, fmt.Errorf("load child run events: %w", err)
+	}
+	return classifyChildOperations(events), nil
+}
+
+// classifyChildOperations counts a run's tool operations and how many remain
+// unsettled, using the same rules as UncertainOperations: a tool.started with
+// no terminal event, or with a tool.failed that failedUncertain considers
+// unresolved. Pure so it can be unit-tested without the journal.
+func classifyChildOperations(events []observation.Event) ChildRunSummary {
+	terminals := map[string]observation.Event{}
+	for _, event := range events {
+		switch event.Type {
+		case "tool.completed", "tool.failed", "tool.blocked", "operation.reconciled":
+			terminals[eventKey(event)] = event
+		}
+	}
+	var summary ChildRunSummary
+	for _, event := range events {
+		if event.Type != "tool.started" {
+			continue
+		}
+		if _, ok := operationFromEvent(event); !ok {
+			continue
+		}
+		summary.Total++
+		if terminal, settled := terminals[eventKey(event)]; settled {
+			if terminal.Type == "tool.failed" && failedUncertain(terminal) {
+				summary.Unresolved++
+			}
+			continue
+		}
+		summary.Unresolved++
+	}
+	return summary
 }
 
 // RecordReconciliation writes the durable operation.reconciled event. It is

@@ -42,10 +42,15 @@ func journalStub(t *testing.T, events ...observation.Event) *httptest.Server {
 			}
 			var matching []observation.Event
 			eventType := r.URL.Query().Get("type")
+			run := r.URL.Query().Get("run")
 			for _, event := range events {
-				if event.Type == eventType {
-					matching = append(matching, event)
+				if eventType != "" && event.Type != eventType {
+					continue
 				}
+				if run != "" && event.Context.Run != run {
+					continue
+				}
+				matching = append(matching, event)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"events": matching, "count": len(matching)})
 		default:
@@ -156,4 +161,75 @@ func TestRecordReconciliationWritesDerivedEvent(t *testing.T) {
 		Project: "repo", RunID: "run-2", OperationID: "", Effect: "none", ActorID: "operator-1",
 	})
 	require.Error(t, err, "operation identity is required")
+}
+
+func TestClassifyChildOperations(t *testing.T) {
+	stamp := time.Now().UTC()
+	newEvent := func(eventType, operationID string) observation.Event {
+		event := toolEvent("repo", "run-child", operationID, eventType, stamp)
+		return event
+	}
+	// op-done: started + completed → settled.
+	// op-failed-uncertain: started + failed(effect=uncertain) → unresolved.
+	// op-crashed: started, no terminal → unresolved.
+	// op-blocked: started + blocked → settled.
+	// op-reconciled: started + failed(uncertain) + reconciled → settled by verdict.
+	events := []observation.Event{
+		newEvent("tool.started", "op-done"),
+		newEvent("tool.completed", "op-done"),
+		newEvent("tool.started", "op-failed-uncertain"),
+		newEvent("tool.failed", "op-failed-uncertain"),
+		newEvent("tool.started", "op-crashed"),
+		newEvent("tool.started", "op-blocked"),
+		newEvent("tool.blocked", "op-blocked"),
+		newEvent("tool.started", "op-reconciled"),
+		newEvent("tool.failed", "op-reconciled"),
+		newEvent("operation.reconciled", "op-reconciled"),
+	}
+	summary := classifyChildOperations(events)
+	require.Equal(t, ChildRunSummary{Total: 5, Unresolved: 2}, summary)
+	require.Equal(t, ChildRunSummary{}, classifyChildOperations(nil), "a child that failed before any tool call has no operations")
+}
+
+func TestSummarizeChildRun(t *testing.T) {
+	stamp := time.Now().UTC()
+	server := journalStub(t,
+		toolEvent("repo", "run-child", "op-1", "tool.started", stamp),
+		toolEvent("repo", "run-child", "op-1", "tool.completed", stamp),
+		toolEvent("repo", "run-child", "op-2", "tool.started", stamp),
+		toolEvent("repo", "other-run", "op-3", "tool.started", stamp),
+	)
+	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "writer"}
+
+	summary, err := activities.SummarizeChildRun(context.Background(), ChildRunSummaryRequest{Project: "repo", RunID: "run-child"})
+	require.NoError(t, err)
+	require.Equal(t, ChildRunSummary{Total: 2, Unresolved: 1}, summary, "op-2 has no terminal event; op-3 of other-run must not leak into the summary")
+
+	_, err = activities.SummarizeChildRun(context.Background(), ChildRunSummaryRequest{Project: "repo"})
+	require.Error(t, err, "run identity is required")
+}
+
+func TestUncertainOperationsCarryDelegationContext(t *testing.T) {
+	stamp := time.Now().UTC()
+	failed := toolEvent("repo", "run-parent", "op-delegate", "tool.failed", stamp)
+	failed.Data["error_type"] = "delegated_run_failed"
+	failed.Data["effect"] = "uncertain"
+	failed.Data["child_run_id"] = "run-parent/delegate/01"
+	failed.Data["child_ops_total"] = float64(3)
+	failed.Data["child_ops_unresolved"] = float64(1)
+	server := journalStub(t,
+		toolEvent("repo", "run-parent", "op-delegate", "tool.started", stamp),
+		failed,
+	)
+	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "operator"}
+
+	operations, err := activities.UncertainOperations(context.Background(), "repo", stubLiveness{})
+	require.NoError(t, err)
+	require.Len(t, operations, 1)
+	operation := operations[0]
+	require.Equal(t, "failed_uncertain", operation.Reason)
+	require.Equal(t, "delegated_run_failed", operation.ErrorType)
+	require.Equal(t, "run-parent/delegate/01", operation.ChildRunID)
+	require.Equal(t, 3, operation.ChildOpsTotal)
+	require.Equal(t, 1, operation.ChildOpsUnresolved)
 }

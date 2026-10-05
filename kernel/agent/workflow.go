@@ -19,16 +19,17 @@ import (
 )
 
 const (
-	TaskQueue                = "temporality-agent-kernel"
-	ActivityRecordEvent      = "kernel.record_event"
-	ActivityCallModel        = "kernel.call_model"
-	ActivityRunTool          = "kernel.run_tool"
-	ActivityKnowledgeHints   = "kernel.knowledge_hints"
-	ActivityKnowledgeLookup  = "kernel.knowledge_lookup"
-	ActivityResolveAgent     = "kernel.resolve_agent"
-	ActivityGenerateTitle    = "kernel.generate_run_title"
-	ActivityExtractKnowledge = "kernel.extract_knowledge"
-	ApprovalSignal           = "kernel.approval"
+	TaskQueue                 = "temporality-agent-kernel"
+	ActivityRecordEvent       = "kernel.record_event"
+	ActivityCallModel         = "kernel.call_model"
+	ActivityRunTool           = "kernel.run_tool"
+	ActivityKnowledgeHints    = "kernel.knowledge_hints"
+	ActivityKnowledgeLookup   = "kernel.knowledge_lookup"
+	ActivityResolveAgent      = "kernel.resolve_agent"
+	ActivityGenerateTitle     = "kernel.generate_run_title"
+	ActivityExtractKnowledge  = "kernel.extract_knowledge"
+	ActivitySummarizeChildRun = "kernel.summarize_child_run"
+	ApprovalSignal            = "kernel.approval"
 
 	// MaxDelegationDepth bounds agent-to-agent delegation chains
 	// (docs/agent-delegation.md): depth 0 → 1 → 2 is allowed, a run at depth 2
@@ -583,27 +584,80 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						childInput.ParentFrameID = state.frame
 						childInput.ParentEventID = state.previousEventID
 						childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: WorkflowID(input.SourceID, input.Project, childRunID)})
-						var child RunResult
-						childErr := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", childInput).Get(ctx, &child)
-						if childErr != nil {
+						childFuture := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", childInput)
+						// Awaiting the child execution separately splits failures into
+						// two honest classes: if the execution could not even be started,
+						// nothing ran and the effect is provably "none"; only a child
+						// that started and then failed can leave effects uncertain.
+						var childExec workflow.Execution
+						if startErr := childFuture.GetChildWorkflowExecution().Get(ctx, &childExec); startErr != nil {
 							if ctx.Err() != nil {
-								return result, childErr
+								return result, startErr
 							}
-							if err := emit(activityCtx, state, "delegation.failed", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "error_type": "delegated_run_failed", "error": boundedFailureDetail(childErr)}); err != nil {
+							if err := emit(activityCtx, state, "delegation.failed", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "error_type": "delegated_run_start_failed", "error": boundedFailureDetail(startErr)}); err != nil {
 								return result, err
 							}
-							if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "delegated_run_failed", "effect": "uncertain", "child_run_id": childRunID}); err != nil {
+							if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "delegated_run_start_failed", "effect": "none", "child_run_id": childRunID}); err != nil {
 								return result, err
 							}
-							toolResult.Content = "Delegated run " + childRunID + " failed; its effects may be uncertain. Verify the current state before retrying or continue the work yourself."
+							toolResult.Content = "Delegated run " + childRunID + " was rejected before execution, no effect (" + boundedFailureDetail(startErr) + "). The child agent never started, so nothing it could do has happened; it is safe to retry the delegation or do the work yourself."
 						} else {
-							if err := emit(activityCtx, state, "delegation.completed", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "child_status": child.Status, "turns": child.Turns}); err != nil {
-								return result, err
-							}
-							answer, _ := BoundedNarrative(child.Answer)
-							toolResult.Content = "Delegated agent \"" + delegateAgentID + "\" (run " + childRunID + ") finished with status " + child.Status + " after " + strconv.Itoa(child.Turns) + " turns. Final answer:\n\n" + answer
-							if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000), "child_run_id": childRunID}); err != nil {
-								return result, err
+							var child RunResult
+							childErr := childFuture.Get(ctx, &child)
+							if childErr != nil {
+								if ctx.Err() != nil {
+									return result, childErr
+								}
+								// The child is terminal now, so its whole event stream is
+								// already in the journal. Classifying it turns a generic
+								// "may have side effects" into a precise statement (docs/failure-reconciliation.md).
+								summaryCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
+								var summary ChildRunSummary
+								summaryErr := workflow.ExecuteActivity(summaryCtx, ActivitySummarizeChildRun, ChildRunSummaryRequest{Project: input.Project, RunID: childRunID}).Get(ctx, &summary)
+								if summaryErr != nil && ctx.Err() != nil {
+									return result, summaryErr
+								}
+								effect := "uncertain"
+								content := "Delegated run " + childRunID + " failed; its effects may be uncertain. Verify the current state before retrying or continue the work yourself."
+								if summaryErr != nil {
+									content = "Delegated run " + childRunID + " failed; its effects may be uncertain (child operations could not be summarized: " + boundedFailureDetail(summaryErr) + "). Verify the current state before retrying or continue the work yourself."
+								} else {
+									switch {
+									case summary.Unresolved > 0:
+										effect = "uncertain"
+										content = "Delegated run " + childRunID + " failed with " + strconv.Itoa(summary.Unresolved) + " of its " + strconv.Itoa(summary.Total) + " tool operation(s) unresolved. Inspect run " + childRunID + " before retrying or continue the work yourself."
+									case summary.Total > 0:
+										effect = "occurred"
+										content = "Delegated run " + childRunID + " failed after " + strconv.Itoa(summary.Total) + " fully recorded tool operation(s); every child effect is settled in the journal, nothing external is pending. Child run trajectory: " + childRunID + "."
+									default:
+										effect = "none"
+										content = "Delegated run " + childRunID + " failed before performing any tool operations; no effects. It is safe to retry the delegation or do the work yourself."
+									}
+								}
+								delegationFailed := map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "error_type": "delegated_run_failed", "error": boundedFailureDetail(childErr)}
+								toolFailed := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "delegated_run_failed", "effect": effect, "child_run_id": childRunID}
+								if summaryErr == nil {
+									delegationFailed["child_ops_total"] = summary.Total
+									delegationFailed["child_ops_unresolved"] = summary.Unresolved
+									toolFailed["child_ops_total"] = summary.Total
+									toolFailed["child_ops_unresolved"] = summary.Unresolved
+								}
+								if err := emit(activityCtx, state, "delegation.failed", delegationFailed); err != nil {
+									return result, err
+								}
+								if err := emit(activityCtx, state, "tool.failed", toolFailed); err != nil {
+									return result, err
+								}
+								toolResult.Content = content
+							} else {
+								if err := emit(activityCtx, state, "delegation.completed", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "child_status": child.Status, "turns": child.Turns}); err != nil {
+									return result, err
+								}
+								answer, _ := BoundedNarrative(child.Answer)
+								toolResult.Content = "Delegated agent \"" + delegateAgentID + "\" (run " + childRunID + ") finished with status " + child.Status + " after " + strconv.Itoa(child.Turns) + " turns. Final answer:\n\n" + answer
+								if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000), "child_run_id": childRunID}); err != nil {
+									return result, err
+								}
 							}
 						}
 					}

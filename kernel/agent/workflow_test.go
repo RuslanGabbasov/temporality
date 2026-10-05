@@ -864,6 +864,101 @@ func TestAgentRunDelegationDepthLimit(t *testing.T) {
 	}
 }
 
+func TestAgentRunDelegationChildFailureClassification(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	// The model mock serves both runs: the child is recognized by its resolved
+	// system prompt and fails on its first model call; the parent delegates
+	// twice (first child leaves an unresolved operation, second is fully
+	// settled) and then answers.
+	parentCalls := 0
+	sawUnresolved := false
+	sawSettled := false
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if len(request.Messages) == 0 {
+			t.Fatalf("unexpected model request: %#v", request)
+		}
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			return llm.Completion{}, fmt.Errorf("child model unavailable")
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "delegate-1", Name: "delegate", Args: map[string]any{"agent_id": "repo-a-reviewer", "prompt": "review the diff"}}}}, nil
+		}
+		if parentCalls == 2 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "delegate-2", Name: "delegate", Args: map[string]any{"agent_id": "repo-a-reviewer", "prompt": "review again"}}}}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "unresolved") {
+				sawUnresolved = true
+			}
+			if message.Role == "tool" && strings.Contains(message.Content, "fully recorded") {
+				sawSettled = true
+			}
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		require.Equal(t, "repo-a-reviewer", request.AgentID)
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	summarizeCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ChildRunSummaryRequest) (ChildRunSummary, error) {
+		summarizeCalls++
+		require.Equal(t, "repo-a", request.Project)
+		require.Contains(t, request.RunID, "/delegate/")
+		if summarizeCalls == 1 {
+			return ChildRunSummary{Total: 3, Unresolved: 1}, nil
+		}
+		return ChildRunSummary{Total: 2, Unresolved: 0}, nil
+	}, activity.RegisterOptions{Name: ActivitySummarizeChildRun})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-del-fail", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "delegate the review", MaxTurns: 6})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.Equal(t, 2, summarizeCalls)
+	var parentResult RunResult
+	require.NoError(t, env.GetWorkflowResult(&parentResult))
+	require.Equal(t, "completed", parentResult.Status)
+	require.Equal(t, "parent done", parentResult.Answer)
+	require.True(t, sawUnresolved, "the parent must see which child operations are unresolved")
+	require.True(t, sawSettled, "the parent must see when all child effects are settled")
+
+	var uncertain, occurred *observation.Event
+	delegationFailures := 0
+	for index := range recorded {
+		event := recorded[index]
+		switch {
+		case event.Type == "tool.failed" && event.Data["error_type"] == "delegated_run_failed" && event.Data["effect"] == "uncertain":
+			require.Nil(t, uncertain, "only the first delegation may be uncertain")
+			uncertain = &recorded[index]
+		case event.Type == "tool.failed" && event.Data["error_type"] == "delegated_run_failed" && event.Data["effect"] == "occurred":
+			require.Nil(t, occurred, "only the second delegation may be occurred")
+			occurred = &recorded[index]
+		case event.Type == "delegation.failed":
+			delegationFailures++
+		}
+	}
+	require.NotNil(t, uncertain, "first child failure with unresolved ops must stay uncertain")
+	require.NotNil(t, occurred, "second child failure with settled ops must be classified as occurred")
+	require.Equal(t, "run-del-fail/delegate/01", uncertain.Data["child_run_id"])
+	require.Equal(t, float64(3), uncertain.Data["child_ops_total"])
+	require.Equal(t, float64(1), uncertain.Data["child_ops_unresolved"])
+	require.Equal(t, "run-del-fail/delegate/02", occurred.Data["child_run_id"])
+	require.Equal(t, float64(2), occurred.Data["child_ops_total"])
+	require.Equal(t, float64(0), occurred.Data["child_ops_unresolved"])
+	require.Equal(t, 2, delegationFailures)
+}
+
 func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
