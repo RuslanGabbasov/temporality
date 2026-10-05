@@ -200,7 +200,7 @@ func (a *Activities) ResolveAgent(ctx context.Context, request ResolveAgentReque
 		return RunInput{}, temporal.NewNonRetryableApplicationError("prepare delegated run: "+err.Error(), "AgentResolutionFailed", nil)
 	}
 	if child.DelegationDepth >= MaxDelegationDepth {
-		child.DenyTools = append(child.DenyTools, "delegate")
+		child.DenyTools = append(child.DenyTools, "delegate", "plan")
 	}
 	return child, nil
 }

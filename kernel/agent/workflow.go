@@ -138,6 +138,16 @@ type pendingDuplicate struct {
 	operationID string
 }
 
+// planPendingTask is one running plan task (docs/agent-delegation.md, plans).
+// Same shape as pendingDelegation, kept separate: the plan executor owns its
+// own FIFO queue and does not interact with bare delegate calls of the turn.
+type planPendingTask struct {
+	taskID     string
+	agentID    string
+	childRunID string
+	future     workflow.ChildWorkflowFuture
+}
+
 type RunResult struct {
 	RunID  string `json:"run_id"`
 	Answer string `json:"answer"`
@@ -272,6 +282,10 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		}
 	}
 	delegations := 0
+	// planAnswers carries bounded answers of completed plan tasks across plans
+	// of the same run: a later plan (re-plan of the tail) can reference them via
+	// {{task-id.answer}} placeholders without re-running the work.
+	planAnswers := map[string]string{}
 	// Policy accounting (docs/org-structure.md §24): limits are resolved from
 	// the org position at run start; the workflow enforces them at turn
 	// boundaries and stops the run with a forced finale when one is exhausted.
@@ -540,6 +554,228 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			executed[callKey] = executedCall{operationID: operationID, pending: pending}
 			return "", true, nil
 		}
+		// executePlan validates, resolves and runs a whole plan DAG inside one
+		// tool call (docs/agent-delegation.md, plans). Rejections before the
+		// first child starts are inline failures with effect=none; after that a
+		// failed task skips only its transitive dependents while independent
+		// branches finish. Prior plan answers from the same run are available to
+		// task prompts as {{task-id.answer}} placeholders (re-plan support).
+		executePlan := func(call llm.ToolCall, operationID, argumentsHash string, startTool func() error) (string, error) {
+			if err := startTool(); err != nil {
+				return "", err
+			}
+			reject := func(detail string) (string, error) {
+				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "error_type": "plan_invalid", "effect": "none", "detail": detail}); err != nil {
+					return "", err
+				}
+				return "Plan rejected before execution, no effect: " + detail + ". Re-issue the plan with corrected arguments.", nil
+			}
+			spec, parseErr := planSpecFromArgs(call.Args)
+			if parseErr != "" {
+				return reject(parseErr)
+			}
+			if input.DelegationDepth >= MaxDelegationDepth {
+				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "error_type": "delegation_depth_exceeded", "effect": "none", "depth": input.DelegationDepth}); err != nil {
+					return "", err
+				}
+				return "Plan rejected before execution, no effect: the delegation depth limit is reached. Perform the remaining work yourself with your own tools.", nil
+			}
+			dag, validationErr := validatePlanSpec(spec, planAnswers)
+			if validationErr != "" {
+				return reject(validationErr)
+			}
+			agentIDs := map[string]string{}
+			taskIndex := map[string]int{}
+			for index := range spec.Tasks {
+				agentIDs[spec.Tasks[index].ID] = spec.Tasks[index].AgentID
+				taskIndex[spec.Tasks[index].ID] = index
+			}
+			// Resolve every task up front: an unknown agent rejects the whole plan
+			// before any child starts (effect=none) — no partial fan-out on a typo.
+			resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
+			resolved := map[string]RunInput{}
+			for index := range spec.Tasks {
+				task := spec.Tasks[index]
+				childRunID := fmt.Sprintf("%s/plan/%02d-%s", input.RunID, index+1, task.ID)
+				var childInput RunInput
+				resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: task.AgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: task.Prompt, ActorID: input.ActorID, MaxTurns: task.MaxTurns, DelegationDepth: input.DelegationDepth + 1}).Get(ctx, &childInput)
+				if resolveErr != nil {
+					if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "error_type": "agent_resolution_failed", "effect": "none", "detail": boundedFailureDetail(resolveErr)}); err != nil {
+						return "", err
+					}
+					return "Plan rejected before execution, no effect: agent \"" + task.AgentID + "\" for task \"" + task.ID + "\" could not be resolved (" + boundedFailureDetail(resolveErr) + "). Check the agent_id and re-issue the plan.", nil
+				}
+				resolved[task.ID] = childInput
+			}
+			tasksData := make([]map[string]any, 0, len(spec.Tasks))
+			for index := range spec.Tasks {
+				task := spec.Tasks[index]
+				deps := task.DependsOn
+				if deps == nil {
+					deps = []string{}
+				}
+				tasksData = append(tasksData, map[string]any{"id": task.ID, "agent_id": task.AgentID, "depends_on": deps})
+			}
+			if err := emit(activityCtx, state, "plan.started", map[string]any{"operation_id": operationID, "goal": spec.Goal, "tasks": tasksData}); err != nil {
+				return "", err
+			}
+			summarizeChild := func(runID string) *ChildRunSummary {
+				summaryCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
+				var summary ChildRunSummary
+				if err := workflow.ExecuteActivity(summaryCtx, ActivitySummarizeChildRun, ChildRunSummaryRequest{Project: input.Project, RunID: runID}).Get(ctx, &summary); err != nil {
+					return nil
+				}
+				return &summary
+			}
+			statuses := map[string]string{} // "" = pending, running, completed, failed, skipped
+			answers := map[string]string{}
+			outcomesByTask := map[string]planTaskOutcome{}
+			var inflightPlan []*planPendingTask
+			finished := 0
+			skipBranch := func(failedID string) error {
+				queue := append([]string{}, dag.Dependents[failedID]...)
+				for len(queue) > 0 {
+					id := queue[0]
+					queue = queue[1:]
+					if statuses[id] != "" {
+						continue
+					}
+					statuses[id] = planStatusSkipped
+					finished++
+					outcomesByTask[id] = planTaskOutcome{TaskID: id, AgentID: agentIDs[id], Status: planStatusSkipped, BlockedBy: failedID, SkipReason: "upstream_failed"}
+					if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": id, "agent_id": agentIDs[id], "reason": "upstream_failed", "blocked_by": failedID}); err != nil {
+						return err
+					}
+					queue = append(queue, dag.Dependents[id]...)
+				}
+				return nil
+			}
+			failTask := func(taskID, childRunID, errorType string, err error, summary *ChildRunSummary) error {
+				statuses[taskID] = planStatusFailed
+				outcomesByTask[taskID] = planTaskOutcome{TaskID: taskID, AgentID: agentIDs[taskID], ChildRunID: childRunID, Status: planStatusFailed, Error: boundedFailureDetail(err)}
+				data := map[string]any{"operation_id": operationID, "task_id": taskID, "child_run_id": childRunID, "agent_id": agentIDs[taskID], "error_type": errorType, "error": boundedFailureDetail(err), "effect": "uncertain"}
+				if summary != nil {
+					data["child_ops_total"] = summary.Total
+					data["child_ops_unresolved"] = summary.Unresolved
+					if summary.Unresolved == 0 && summary.Total > 0 {
+						data["effect"] = "occurred"
+					}
+					if summary.Total == 0 {
+						data["effect"] = "none"
+					}
+				}
+				if err := emit(activityCtx, state, "plan.task.failed", data); err != nil {
+					return err
+				}
+				return skipBranch(taskID)
+			}
+			for finished < len(spec.Tasks) {
+				// Run-time policy: stop launching new tasks past the limit; running
+				// children finish, pending ones are skipped honestly.
+				if input.TimeoutSeconds > 0 && workflow.Now(ctx).Sub(runStartedAt) >= time.Duration(input.TimeoutSeconds)*time.Second {
+					for index := range spec.Tasks {
+						id := spec.Tasks[index].ID
+						if statuses[id] != "" {
+							continue
+						}
+						statuses[id] = planStatusSkipped
+						outcomesByTask[id] = planTaskOutcome{TaskID: id, AgentID: agentIDs[id], Status: planStatusSkipped, SkipReason: "run_time_limit"}
+						if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": id, "agent_id": agentIDs[id], "reason": "run_time_limit"}); err != nil {
+							return "", err
+						}
+						finished++
+					}
+					if len(inflightPlan) == 0 {
+						break
+					}
+				}
+				// Launch every ready task in spec order while slots are free.
+				for index := range spec.Tasks {
+					task := spec.Tasks[index]
+					if statuses[task.ID] != "" || dag.DepsLeft[task.ID] > 0 {
+						continue
+					}
+					if len(inflightPlan) >= MaxDelegationWidth {
+						break
+					}
+					childRunID := fmt.Sprintf("%s/plan/%02d-%s", input.RunID, index+1, task.ID)
+					child := resolved[task.ID]
+					child.Prompt = planTaskPrompt(task, answers, planAnswers)
+					child.ParentRunID = input.RunID
+					child.ParentFrameID = state.frame
+					child.ParentEventID = state.previousEventID
+					taskDeps := task.DependsOn
+					if taskDeps == nil {
+						taskDeps = []string{}
+					}
+					if err := emit(activityCtx, state, "plan.task.started", map[string]any{"operation_id": operationID, "task_id": task.ID, "child_run_id": childRunID, "agent_id": task.AgentID, "depends_on": taskDeps}); err != nil {
+						return "", err
+					}
+					childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: WorkflowID(input.SourceID, input.Project, childRunID)})
+					future := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", child)
+					var childExec workflow.Execution
+					if startErr := future.GetChildWorkflowExecution().Get(ctx, &childExec); startErr != nil {
+						if ctx.Err() != nil {
+							return "", startErr
+						}
+						if err := failTask(task.ID, childRunID, "delegated_run_start_failed", startErr, nil); err != nil {
+							return "", err
+						}
+						finished++
+						continue
+					}
+					statuses[task.ID] = "running"
+					inflightPlan = append(inflightPlan, &planPendingTask{taskID: task.ID, agentID: task.AgentID, childRunID: childRunID, future: future})
+				}
+				if len(inflightPlan) == 0 {
+					break
+				}
+				p := inflightPlan[0]
+				inflightPlan = inflightPlan[1:]
+				var child RunResult
+				childErr := p.future.Get(ctx, &child)
+				if ctx.Err() != nil {
+					return "", ctx.Err()
+				}
+				finished++
+				if childErr != nil {
+					if err := failTask(p.taskID, p.childRunID, "delegated_run_failed", childErr, summarizeChild(p.childRunID)); err != nil {
+						return "", err
+					}
+				} else {
+					answer, _ := BoundedNarrative(child.Answer)
+					answers[p.taskID] = answer
+					planAnswers[p.taskID] = answer
+					statuses[p.taskID] = planStatusCompleted
+					outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusCompleted, ChildStatus: child.Status, Turns: child.Turns, Answer: answer}
+					if err := emit(activityCtx, state, "plan.task.completed", map[string]any{"operation_id": operationID, "task_id": p.taskID, "child_run_id": p.childRunID, "agent_id": p.agentID, "child_status": child.Status, "turns": child.Turns}); err != nil {
+						return "", err
+					}
+					for _, dependent := range dag.Dependents[p.taskID] {
+						dag.DepsLeft[dependent]--
+					}
+				}
+			}
+			// Assemble outcomes in spec order for a readable summary.
+			outcomes := make([]planTaskOutcome, 0, len(spec.Tasks))
+			for index := range spec.Tasks {
+				if outcome, ok := outcomesByTask[spec.Tasks[index].ID]; ok {
+					outcomes = append(outcomes, outcome)
+				}
+			}
+			statusData := map[string]any{}
+			for id, s := range statuses {
+				statusData[id] = s
+			}
+			if err := emit(activityCtx, state, "plan.completed", map[string]any{"operation_id": operationID, "goal": spec.Goal, "statuses": statusData}); err != nil {
+				return "", err
+			}
+			content := planSummary(spec, outcomes)
+			if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "output": compactJSON(content, 1000)}); err != nil {
+				return "", err
+			}
+			return content, nil
+		}
 		for _, call := range completion.ToolCalls {
 			operationID := fmt.Sprintf("%s/%s", frame, call.ID)
 			argumentsHash := operationArgumentsHash(call.Args)
@@ -802,6 +1038,14 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						} else {
 							toolResult.Content = content
 						}
+					} else if call.Name == "plan" {
+						// Approved plan: execute the DAG directly for the same reason as
+						// delegate — the tool activity does not know "plan".
+						content, planErr := executePlan(call, operationID, argumentsHash, startTool)
+						if planErr != nil {
+							return result, planErr
+						}
+						toolResult.Content = content
 					} else if err := startTool(); err != nil {
 						return result, err
 					} else if err := startMCP(); err != nil {
@@ -874,6 +1118,14 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				} else {
 					toolResult.Content = content
 				}
+			} else if call.Name == "plan" {
+				// A plan runs its whole DAG inside this call (docs/agent-delegation.md,
+				// plans); the summary text is the tool outcome.
+				content, planErr := executePlan(call, operationID, argumentsHash, startTool)
+				if planErr != nil {
+					return result, planErr
+				}
+				toolResult.Content = content
 			} else {
 				if autoApproved {
 					description, _ := approvalOperation(operationID, call.Name, call.Args, input.Role == "reviewer" || input.Role == "qa")
@@ -1558,5 +1810,28 @@ func KernelTools() []llm.ToolDef {
 		{Name: "skill_memory", Description: "List knowledge recorded from a skill's executions (memory stays a separate temporal layer; it never modifies the skill)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_propose", Description: "Propose a new living skill from a natural-language description of a repeatable capability. The skill builder extracts the contract (procedure, capabilities, tools, runtime, constraints) referencing only tools that actually exist, and saves a 0.x draft pending human review in the Skills UI. If the skill already exists, the draft becomes its next version. Never hand-write skill files in the repo — the registry is the only source of truth", Parameters: map[string]any{"type": "object", "properties": map[string]any{"description": map[string]any{"type": "string", "description": "What the skill should do, when to use it, and any constraints — the same way you would describe it to a human"}}, "required": []string{"description"}}},
 		{Name: "delegate", Description: "Delegate a self-contained subtask to another agent and wait for its result. The delegated agent runs with its own model, system prompt and capabilities — you cannot grant it anything beyond what it already has. Give a complete, self-contained prompt: everything the agent needs to know must be in it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"agent_id": map[string]any{"type": "string", "description": "Agent to delegate to"}, "prompt": map[string]any{"type": "string", "description": "Self-contained subtask description"}, "max_turns": map[string]any{"type": "integer", "description": "Turn budget for the delegated run, 1–16 (default 8)"}}, "required": []string{"agent_id", "prompt"}}},
+		{Name: "plan", Description: "Execute a plan of dependent subtasks as a DAG across agents, in one call. Each task names an agent and a self-contained prompt; depends_on lists task ids that must complete successfully first — their final answers are appended to the dependent task's prompt automatically, or place them inline with {{task-id.answer}} placeholders. Tasks without shared dependencies run in parallel. A failed task skips only its transitive dependents; independent branches still finish. Use this instead of several delegate calls whenever the work has ordering dependencies or can fan out.", Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"goal": map[string]any{"type": "string", "description": "Short human-readable goal of the plan"},
+				"tasks": map[string]any{
+					"type":        "array",
+					"description": "Plan tasks; ids must be unique, depends_on references task ids",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"id":         map[string]any{"type": "string", "description": "Task id, 1-64 chars [a-zA-Z0-9._-], referenced by depends_on"},
+							"agent_id":   map[string]any{"type": "string", "description": "Agent to run this task"},
+							"prompt":     map[string]any{"type": "string", "description": "Self-contained instruction; {{dep-id.answer}} inlines a dependency's result"},
+							"depends_on": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Task ids that must complete before this one"},
+							"max_turns":  map[string]any{"type": "integer", "description": "Turn budget for this task's run, 1–16 (default 8)"},
+						},
+						"required": []string{"id", "agent_id", "prompt"},
+					},
+					"required": []string{"tasks"},
+				},
+			},
+			"required": []string{"tasks"},
+		}},
 	}
 }

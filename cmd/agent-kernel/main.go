@@ -3939,7 +3939,7 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	// nil or false denies the delegate tool, and agents without a structured
 	// definition never get it by default.
 	if a.Definition == nil || a.Definition.Capabilities.Delegation == nil || !*a.Definition.Capabilities.Delegation {
-		input.DenyTools = append(input.DenyTools, "delegate")
+		input.DenyTools = append(input.DenyTools, "delegate", "plan")
 	}
 	if a.ReadOnly != nil && *a.ReadOnly {
 		input.ReadOnly = true
