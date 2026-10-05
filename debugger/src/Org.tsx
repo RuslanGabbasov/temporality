@@ -10,7 +10,7 @@ import {
   Heading,
 } from '@carbon/react'
 import { Add, Edit, TrashCan, ChevronRight, ChevronDown, Building, Enterprise } from '@carbon/icons-react'
-import { workspaceApi, type OrgUnit, type UnitResources, type OrgUnitKind } from './workspaceApi'
+import { workspaceApi, type OrgUnit, type UnitResources, type OrgUnitKind, type Policy } from './workspaceApi'
 import { useT } from './i18n'
 import { whoami } from './kernelApi'
 import ListFilter, { matchesFilter } from './ListFilter'
@@ -29,6 +29,63 @@ function kindLabel(t: (k: string, v?: Record<string, string>) => string, kind: s
 }
 
 type Node = { unit: OrgUnit; children: Node[] }
+
+// Policy dialog form: comma-separated lists and optional numbers are edited as
+// strings; empty means "no restriction" on save.
+type PolicyForm = {
+  name: string
+  org_unit_id: string
+  allowed_models: string
+  allowed_mcp: string
+  max_tokens: string
+  max_budget_usd: string
+  timeout_seconds: string
+  network_mode: string
+  sandbox_mode: string
+  approval_mode: string
+  enabled: boolean
+}
+
+const emptyPolicyForm = (): PolicyForm => ({
+  name: '', org_unit_id: '', allowed_models: '', allowed_mcp: '',
+  max_tokens: '', max_budget_usd: '', timeout_seconds: '',
+  network_mode: '', sandbox_mode: '', approval_mode: '', enabled: true,
+})
+
+const policyFormOf = (p: Policy): PolicyForm => ({
+  name: p.name,
+  org_unit_id: p.org_unit_id ?? '',
+  allowed_models: (p.allowed_models ?? []).join(', '),
+  allowed_mcp: (p.allowed_mcp ?? []).join(', '),
+  max_tokens: p.max_tokens != null ? String(p.max_tokens) : '',
+  max_budget_usd: p.max_budget_usd != null ? String(p.max_budget_usd) : '',
+  timeout_seconds: p.timeout_seconds != null ? String(p.timeout_seconds) : '',
+  network_mode: p.network_mode ?? '',
+  sandbox_mode: p.sandbox_mode ?? '',
+  approval_mode: p.approval_mode ?? '',
+  enabled: p.enabled,
+})
+
+const splitList = (raw: string): string[] =>
+  raw.split(',').map((x) => x.trim()).filter(Boolean)
+
+const optionalNumber = (raw: string): number | undefined => {
+  const n = Number(raw.trim())
+  return raw.trim() !== '' && Number.isFinite(n) && n > 0 ? n : undefined
+}
+
+function policySummaryTags(p: Policy, t: (k: string, v?: Record<string, string>) => string) {
+  const tags: { key: string; text: string }[] = []
+  if (p.allowed_models && p.allowed_models.length > 0) tags.push({ key: 'models', text: `${t('org.policy_models') ?? 'Models'}: ${p.allowed_models.length}` })
+  if (p.allowed_mcp && p.allowed_mcp.length > 0) tags.push({ key: 'mcp', text: `${t('org.policy_mcp') ?? 'MCP'}: ${p.allowed_mcp.length}` })
+  if (p.max_tokens != null) tags.push({ key: 'tokens', text: t('org.policy_tokens_tag', { count: String(p.max_tokens) }) ?? `≤ ${p.max_tokens} tokens` })
+  if (p.max_budget_usd != null) tags.push({ key: 'budget', text: t('org.policy_budget_tag', { amount: String(p.max_budget_usd) }) ?? `≤ $${p.max_budget_usd}` })
+  if (p.timeout_seconds != null) tags.push({ key: 'timeout', text: t('org.policy_timeout_tag', { count: String(p.timeout_seconds) }) ?? `≤ ${p.timeout_seconds}s` })
+  if (p.network_mode === 'deny') tags.push({ key: 'net', text: t('org.policy_network.deny') ?? 'network denied' })
+  if (p.sandbox_mode === 'read_only') tags.push({ key: 'ro', text: t('org.policy_sandbox.read_only') ?? 'read-only' })
+  if (p.approval_mode === 'tools') tags.push({ key: 'approval', text: t('org.policy_approval.tools') ?? 'approval required' })
+  return tags
+}
 
 function buildTree(units: OrgUnit[]): Node[] {
   const nodes = new Map<string, Node>(units.map((u) => [u.id, { unit: u, children: [] }]))
@@ -66,11 +123,22 @@ export default function Org() {
   // Delete confirm
   const [confirmDelete, setConfirmDelete] = useState<OrgUnit | null>(null)
 
+  // Policies (docs/org-structure.md §24)
+  const [policies, setPolicies] = useState<Policy[]>([])
+  const [policyFilter, setPolicyFilter] = useState('')
+  const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null)
+  const [policyDialogOpen, setPolicyDialogOpen] = useState(false)
+  const [policyForm, setPolicyForm] = useState<PolicyForm>(emptyPolicyForm())
+  const [deletingPolicy, setDeletingPolicy] = useState<Policy | null>(null)
+  const [effective, setEffective] = useState<{ policy: Policy; sources: Policy[] } | null>(null)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const data = await workspaceApi.listOrgUnits()
       setUnits(data.units ?? [])
+      const pl = await workspaceApi.listPolicies()
+      setPolicies(pl.policies ?? [])
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }, [])
@@ -80,10 +148,13 @@ export default function Org() {
     void whoami().then((w) => setIsAdmin(w.role === 'admin')).catch(() => setIsAdmin(false))
   }, [])
   useEffect(() => {
-    if (!selected) { setResources(null); return }
+    if (!selected) { setResources(null); setEffective(null); return }
     void workspaceApi.unitResources(selected)
       .then(setResources)
       .catch(() => setResources(null))
+    void workspaceApi.effectivePolicy(selected)
+      .then(setEffective)
+      .catch(() => setEffective(null))
   }, [selected, units])
 
   const roots = buildTree(units)
@@ -143,6 +214,66 @@ export default function Org() {
       if (selected === confirmDelete.id) setSelected(null)
       setConfirmDelete(null)
       void load()
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }
+
+  const openPolicyCreate = () => {
+    setEditingPolicy(null)
+    setPolicyForm({ ...emptyPolicyForm(), org_unit_id: selected ?? '' })
+    setPolicyDialogOpen(true)
+  }
+
+  const openPolicyEdit = (p: Policy) => {
+    setEditingPolicy(p)
+    setPolicyForm(policyFormOf(p))
+    setPolicyDialogOpen(true)
+  }
+
+  const savePolicy = async () => {
+    const name = policyForm.name.trim()
+    if (!name) return
+    const payload = {
+      name,
+      org_unit_id: policyForm.org_unit_id || '',
+      allowed_models: splitList(policyForm.allowed_models),
+      allowed_mcp: splitList(policyForm.allowed_mcp),
+      max_tokens: optionalNumber(policyForm.max_tokens) ?? null,
+      max_budget_usd: optionalNumber(policyForm.max_budget_usd) ?? null,
+      timeout_seconds: optionalNumber(policyForm.timeout_seconds) ?? null,
+      network_mode: policyForm.network_mode,
+      sandbox_mode: policyForm.sandbox_mode,
+      approval_mode: policyForm.approval_mode,
+      enabled: policyForm.enabled,
+    }
+    setLoading(true); setError('')
+    try {
+      if (editingPolicy) {
+        await workspaceApi.updatePolicy(editingPolicy.id, payload)
+      } else {
+        await workspaceApi.createPolicy(payload)
+      }
+      setEditingPolicy(null)
+      setPolicyDialogOpen(false)
+      setPolicyForm(emptyPolicyForm())
+      void load()
+      if (selected) {
+        void workspaceApi.effectivePolicy(selected).then(setEffective).catch(() => setEffective(null))
+      }
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }
+
+  const doDeletePolicy = async () => {
+    if (!deletingPolicy) return
+    setLoading(true); setError('')
+    try {
+      await workspaceApi.deletePolicy(deletingPolicy.id)
+      setDeletingPolicy(null)
+      void load()
+      if (selected) {
+        void workspaceApi.effectivePolicy(selected).then(setEffective).catch(() => setEffective(null))
+      }
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }
@@ -303,12 +434,96 @@ export default function Org() {
               ) : (
                 <Loading withOverlay={false} />
               )}
+              {effective && (
+                <div style={{ marginTop: '1rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.75rem' }}>
+                  <div className="org-section-title">{t('org.policy_effective_title') ?? 'Effective policy'}</div>
+                  <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0.25rem 0 0.5rem' }}>
+                    {t('org.policy_effective_hint') ?? 'What applies to runs at this unit: installation-wide rows plus everything inherited from ancestors, merged restrictively.'}
+                  </p>
+                  {effective.sources.length === 0 ? (
+                    <div style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>{t('org.policy_effective_none') ?? 'No policy restricts runs at this unit.'}</div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '0.5rem' }}>
+                        {policySummaryTags(effective.policy, t).map((tag) => (
+                          <Tag key={tag.key} type="purple" size="sm">{tag.text}</Tag>
+                        ))}
+                        {policySummaryTags(effective.policy, t).length === 0 && (
+                          <span style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>
+                            {t('org.policy_effective_none') ?? 'No policy restricts runs at this unit.'}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginBottom: '0.25rem' }}>{t('org.policy_sources') ?? 'Contributing policies'}:</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                        {effective.sources.map((s) => (
+                          <Tag key={s.id} type="gray" size="sm">{s.name}</Tag>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '1rem' }}>
                 {t('org.subtree_hint') ?? 'Everything bound to this unit is also visible in its sub-units.'}
               </p>
             </div>
           )}
         </div>
+      </div>
+
+      {/* Policies */}
+      <div style={{ marginTop: '1.25rem', border: '1px solid var(--tm-border)', borderRadius: '8px', padding: '1rem', background: 'var(--tm-elevated)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+          <Heading style={{ fontSize: '1rem' }}>{t('org.policies_title') ?? 'Policies'}</Heading>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <div style={{ width: '220px' }}>
+              <ListFilter value={policyFilter} onChange={setPolicyFilter} placeholder={t('common.filter') ?? 'Filter…'} />
+            </div>
+            {isAdmin && (
+              <Button size="sm" renderIcon={Add} onClick={openPolicyCreate}>{t('org.policy_create') ?? 'Create policy'}</Button>
+            )}
+          </div>
+        </div>
+        <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.75rem' }}>
+          {t('org.policies_hint') ?? 'Policies constrain runs for a unit and everything below it; multiple policies merge restrictively.'}
+        </p>
+        {policies.length === 0 ? (
+          <div style={{ color: 'var(--tm-text-3)', fontSize: '0.875rem', padding: '1rem 0.5rem', textAlign: 'center' }}>
+            <div>{t('org.policy_none') ?? 'No policies yet'}</div>
+            <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>{t('org.policy_none_hint') ?? 'Create a policy to constrain runs of a unit and its sub-units.'}</div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '0.5rem' }}>
+            {policies
+              .filter((p) => matchesFilter(policyFilter, p.name) || matchesFilter(policyFilter, p.org_unit_id ?? ''))
+              .map((p) => {
+                const unit = units.find((u) => u.id === p.org_unit_id)
+                return (
+                  <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', border: '1px solid var(--tm-border)', borderRadius: '8px', padding: '0.5rem 0.75rem' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: '0.875rem' }}>{p.name}</strong>
+                        {!p.enabled && <Tag type="red" size="sm">disabled</Tag>}
+                        {unit ? <Tag type="blue" size="sm">{unit.name}</Tag> : <Tag type="cyan" size="sm">{t('org.policy_scope_installation') ?? 'Whole installation'}</Tag>}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.35rem' }}>
+                        {policySummaryTags(p, t).map((tag) => (
+                          <Tag key={tag.key} type="gray" size="sm">{tag.text}</Tag>
+                        ))}
+                      </div>
+                    </div>
+                    {isAdmin && (
+                      <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
+                        <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} hasIconOnly onClick={() => openPolicyEdit(p)} />
+                        <Button size="sm" kind="ghost" renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} hasIconOnly onClick={() => setDeletingPolicy(p)} />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+          </div>
+        )}
       </div>
 
       {/* Create / rename dialog */}
@@ -390,6 +605,129 @@ export default function Org() {
             <div className="form-actions">
               <Button kind="secondary" onClick={() => setConfirmDelete(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button kind="danger" onClick={() => void doDelete()}>{t('action.delete') ?? 'Delete'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Policy create / edit dialog */}
+      {(editingPolicy || policyDialogOpen) && isAdmin && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '520px' }}>
+            <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>
+              {editingPolicy ? (t('org.policy_edit') ?? 'Edit policy') : (t('org.policy_create') ?? 'Create policy')}
+            </Heading>
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              <TextInput
+                id="policy-name"
+                labelText={t('org.name_label') ?? 'Name'}
+                value={policyForm.name}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, name: e.target.value })}
+                placeholder="Tier-1 production limits"
+                autoFocus
+              />
+              <Select
+                id="policy-scope"
+                labelText={t('org.policy_scope_label') ?? 'Applies to'}
+                value={policyForm.org_unit_id}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPolicyForm({ ...policyForm, org_unit_id: e.target.value })}
+              >
+                <SelectItem value="" text={t('org.policy_scope_installation') ?? 'Whole installation'} />
+                {flat.map(({ unit, depth }) => (
+                  <SelectItem key={unit.id} value={unit.id} text={`${'　'.repeat(depth)}${unit.name}`} />
+                ))}
+              </Select>
+              <TextInput
+                id="policy-models"
+                labelText={t('org.policy_models_label') ?? 'Allowed models'}
+                value={policyForm.allowed_models}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, allowed_models: e.target.value })}
+                placeholder={t('org.policy_models_placeholder') ?? 'model-a, model-b — empty = any'}
+              />
+              <TextInput
+                id="policy-mcp"
+                labelText={t('org.policy_mcp_label') ?? 'Allowed MCP servers'}
+                value={policyForm.allowed_mcp}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, allowed_mcp: e.target.value })}
+                placeholder={t('org.policy_mcp_placeholder') ?? 'server-a, server-b — empty = any'}
+              />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                <TextInput
+                  id="policy-tokens"
+                  labelText={t('org.policy_max_tokens_label') ?? 'Max tokens per run'}
+                  value={policyForm.max_tokens}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, max_tokens: e.target.value })}
+                  placeholder="200000"
+                />
+                <TextInput
+                  id="policy-budget"
+                  labelText={t('org.policy_budget_label') ?? 'Max cost, USD'}
+                  value={policyForm.max_budget_usd}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, max_budget_usd: e.target.value })}
+                  placeholder="5"
+                />
+                <TextInput
+                  id="policy-timeout"
+                  labelText={t('org.policy_timeout_label') ?? 'Max time, s'}
+                  value={policyForm.timeout_seconds}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPolicyForm({ ...policyForm, timeout_seconds: e.target.value })}
+                  placeholder="1800"
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                <Select
+                  id="policy-network"
+                  labelText={t('org.policy_network_label') ?? 'Network'}
+                  value={policyForm.network_mode}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPolicyForm({ ...policyForm, network_mode: e.target.value })}
+                >
+                  <SelectItem value="" text={t('org.policy_network.default') ?? 'not restricted'} />
+                  <SelectItem value="deny" text={t('org.policy_network.deny') ?? 'denied'} />
+                </Select>
+                <Select
+                  id="policy-sandbox"
+                  labelText={t('org.policy_sandbox_label') ?? 'Sandbox'}
+                  value={policyForm.sandbox_mode}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPolicyForm({ ...policyForm, sandbox_mode: e.target.value })}
+                >
+                  <SelectItem value="" text={t('org.policy_sandbox.default') ?? 'standard'} />
+                  <SelectItem value="read_only" text={t('org.policy_sandbox.read_only') ?? 'read-only'} />
+                </Select>
+                <Select
+                  id="policy-approval"
+                  labelText={t('org.policy_approval_label') ?? 'Consequential tools'}
+                  value={policyForm.approval_mode}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPolicyForm({ ...policyForm, approval_mode: e.target.value })}
+                >
+                  <SelectItem value="" text={t('org.policy_approval.default') ?? 'no approval'} />
+                  <SelectItem value="tools" text={t('org.policy_approval.tools') ?? 'require approval'} />
+                </Select>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--tm-text-1)' }}>
+                <input
+                  type="checkbox"
+                  checked={policyForm.enabled}
+                  onChange={(e) => setPolicyForm({ ...policyForm, enabled: e.target.checked })}
+                />
+                {t('org.policy_enabled_label') ?? 'Policy enabled'}
+              </label>
+              <div className="form-actions">
+                <Button kind="secondary" onClick={() => { setEditingPolicy(null); setPolicyDialogOpen(false); setPolicyForm(emptyPolicyForm()) }}>{t('action.cancel') ?? 'Cancel'}</Button>
+                <Button onClick={() => void savePolicy()} disabled={!policyForm.name.trim()}>{editingPolicy ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Policy delete confirm */}
+      {deletingPolicy && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '460px' }}>
+            <Heading>{t('org.policy_delete_confirm', { name: deletingPolicy.name }) ?? `Delete policy "${deletingPolicy.name}"?`}</Heading>
+            <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+              <Button kind="secondary" onClick={() => setDeletingPolicy(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button kind="danger" onClick={() => void doDeletePolicy()}>{t('action.delete') ?? 'Delete'}</Button>
             </div>
           </div>
         </div>

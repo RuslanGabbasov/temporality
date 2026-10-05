@@ -26,6 +26,7 @@ function shortTime(iso: string) {
 const STATUS_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'red'> = {
   completed: 'green', failed: 'red', running: 'blue', turn_limit: 'warm-gray', pending: 'gray',
   started: 'blue', cancelled: 'warm-gray',
+  time_limit: 'warm-gray', token_limit: 'warm-gray', budget_limit: 'warm-gray',
 }
 
 interface ChatMessage {
@@ -407,7 +408,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const fetchFinalAnswer = async (runId: string, convId: string) => {
     try {
       const run = await workspaceApi.getRun(runId)
-      if (run.status === 'completed' || run.status === 'failed' || run.status === 'turn_limit' || run.status === 'cancelled') {
+      if (run.status === 'completed' || run.status === 'failed' || run.status === 'turn_limit' || run.status === 'cancelled' || run.status === 'time_limit' || run.status === 'token_limit' || run.status === 'budget_limit') {
         const answer = run.answer || run.error || 'No answer received'
         updateMsg(convId, runId, { content: answer, status: run.status })
       }

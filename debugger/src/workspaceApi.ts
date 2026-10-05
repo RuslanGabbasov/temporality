@@ -22,6 +22,25 @@ export interface NamedRef {
   name: string
 }
 
+/** Policy (docs/org-structure.md §24): org-bound run constraints that inherit
+ * top-down and merge restrictively. Empty lists mean unrestricted. */
+export interface Policy {
+  id: string
+  org_unit_id?: string // empty = installation-wide
+  name: string
+  allowed_models?: string[] | null
+  allowed_mcp?: string[] | null
+  max_tokens?: number | null
+  max_budget_usd?: number | null
+  timeout_seconds?: number | null
+  network_mode?: string // '' | 'deny'
+  sandbox_mode?: string // '' | 'standard' | 'read_only'
+  approval_mode?: string // '' | 'auto' | 'tools'
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
 export interface UnitResources {
   agents: NamedRef[]
   skills: NamedRef[]
@@ -529,6 +548,17 @@ export const workspaceApi = {
   deleteOrgUnit: (id: string) =>
     request<{ deleted: boolean }>(`/v1/org/units/${id}`, { method: 'DELETE' }),
   unitResources: (id: string) => request<UnitResources>(`/v1/org/units/${id}/resources`),
+  effectivePolicy: (id: string) =>
+    request<{ policy: Policy; sources: Policy[] }>(`/v1/org/units/${id}/effective-policy`),
+
+  // Policies (org-structure.md §24)
+  listPolicies: () => request<{ policies: Policy[] }>('/v1/workspace/policies'),
+  createPolicy: (data: Partial<Policy> & { name: string }) =>
+    request<Policy>('/v1/workspace/policies', { method: 'POST', body: JSON.stringify(data) }),
+  updatePolicy: (id: string, data: Partial<Policy>) =>
+    request<Policy>(`/v1/workspace/policies/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePolicy: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/workspace/policies/${id}`, { method: 'DELETE' }),
   setResourceBinding: (kind: OrgResourceKind, id: string, orgUnitID: string) =>
     request<{ kind: string; resource_id: string; org_unit_id: string }>(`/v1/org/resources/${kind}/${id}/binding`, { method: 'PUT', body: JSON.stringify({ org_unit_id: orgUnitID }) }),
 }
