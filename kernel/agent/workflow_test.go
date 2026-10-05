@@ -980,6 +980,249 @@ func TestAgentRunDelegationChildFailureClassification(t *testing.T) {
 	require.Equal(t, 2, delegationFailures)
 }
 
+func TestAgentRunParallelDelegation(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	// The parent issues three delegate calls in one model response; the three
+	// children must all start before the parent awaits any of them.
+	sawAnswers := map[string]bool{}
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if len(request.Messages) == 0 {
+			t.Fatalf("unexpected model request: %#v", request)
+		}
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			return llm.Completion{Content: "child done: " + request.Messages[1].Content}, nil
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{
+				{ID: "delegate-1", Name: "delegate", Args: map[string]any{"agent_id": "repo-a-reviewer", "prompt": "part one"}},
+				{ID: "delegate-2", Name: "delegate", Args: map[string]any{"agent_id": "repo-a-reviewer", "prompt": "part two"}},
+				{ID: "delegate-3", Name: "delegate", Args: map[string]any{"agent_id": "repo-a-reviewer", "prompt": "part three"}},
+			}}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role != "tool" {
+				continue
+			}
+			for _, part := range []string{"part one", "part two", "part three"} {
+				if strings.Contains(message.Content, "child done: "+part) {
+					sawAnswers[part] = true
+				}
+			}
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	resolveCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		resolveCalls++
+		require.Equal(t, "repo-a", request.Project)
+		require.Equal(t, "repo-a-reviewer", request.AgentID)
+		require.Equal(t, 1, request.DelegationDepth)
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		t.Fatalf("delegate must not reach the tool activity")
+		return ToolResult{}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-par", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "split the work", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.Equal(t, 3, resolveCalls)
+	var parentResult RunResult
+	require.NoError(t, env.GetWorkflowResult(&parentResult))
+	require.Equal(t, "completed", parentResult.Status)
+	require.Equal(t, "parent done", parentResult.Answer)
+
+	var startedIdx, completedIdx []int
+	ordinals := map[float64]string{}
+	for index := range recorded {
+		switch recorded[index].Type {
+		case "delegation.started":
+			startedIdx = append(startedIdx, index)
+			ordinals[recorded[index].Data["ordinal"].(float64)] = recorded[index].Data["child_run_id"].(string)
+		case "delegation.completed":
+			completedIdx = append(completedIdx, index)
+		}
+	}
+	require.Len(t, startedIdx, 3, "three children must start")
+	require.Len(t, completedIdx, 3, "three children must be awaited")
+	require.Equal(t, "run-par/delegate/01", ordinals[1])
+	require.Equal(t, "run-par/delegate/02", ordinals[2])
+	require.Equal(t, "run-par/delegate/03", ordinals[3])
+	// Every child starts before the parent awaits the first one: that is the
+	// concurrency guarantee parallel delegation exists for.
+	for _, completed := range completedIdx {
+		require.Greater(t, completed, startedIdx[len(startedIdx)-1], "all delegation.started must precede every delegation.completed")
+	}
+	// The turn closes only after every child outcome landed. Children emit their
+	// own turn.completed into the same stream, so scope to the parent run.
+	parentTurnCompleted := -1
+	for index := range recorded {
+		if recorded[index].Type == "turn.completed" && recorded[index].Context.Run == "run-par" {
+			parentTurnCompleted = index
+			break
+		}
+	}
+	require.NotEqual(t, -1, parentTurnCompleted)
+	for _, index := range startedIdx {
+		require.Less(t, index, parentTurnCompleted)
+	}
+	for _, index := range completedIdx {
+		require.Less(t, index, parentTurnCompleted)
+	}
+	require.True(t, sawAnswers["part one"], "parent must receive child answer for part one")
+	require.True(t, sawAnswers["part two"], "parent must receive child answer for part two")
+	require.True(t, sawAnswers["part three"], "parent must receive child answer for part three")
+}
+
+func TestAgentRunDelegationWidthLimit(t *testing.T) {
+	if MaxDelegationWidth < 2 {
+		t.Fatal("width limit test needs MaxDelegationWidth >= 2")
+	}
+	const delegates = 10 // MaxDelegationWidth + 2
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	toolAnswers := 0
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			return llm.Completion{Content: "child done"}, nil
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			calls := make([]llm.ToolCall, 0, delegates)
+			for i := 1; i <= delegates; i++ {
+				calls = append(calls, llm.ToolCall{ID: fmt.Sprintf("delegate-%02d", i), Name: "delegate", Args: map[string]any{"agent_id": "repo-a-reviewer", "prompt": fmt.Sprintf("work item %02d", i)}})
+			}
+			return llm.Completion{ToolCalls: calls}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "child done") {
+				toolAnswers++
+			}
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		t.Fatalf("delegate must not reach the tool activity")
+		return ToolResult{}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-wide", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "fan out", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.Equal(t, delegates, toolAnswers, "every delegated result must reach the parent")
+
+	var startedIdx, completedIdx []int
+	for index := range recorded {
+		switch recorded[index].Type {
+		case "delegation.started":
+			startedIdx = append(startedIdx, index)
+		case "delegation.completed":
+			completedIdx = append(completedIdx, index)
+		}
+	}
+	require.Len(t, startedIdx, delegates)
+	require.Len(t, completedIdx, delegates)
+	// The first MaxDelegationWidth children start without waiting.
+	require.Less(t, startedIdx[MaxDelegationWidth-1], completedIdx[0], "the first width-limit children must start before any await")
+	// Launching beyond the width limit waits for a free slot: the 9th child
+	// starts only after the 1st was awaited, and the 10th after the 2nd.
+	require.Greater(t, startedIdx[MaxDelegationWidth], completedIdx[0])
+	require.Greater(t, startedIdx[MaxDelegationWidth+1], completedIdx[1])
+	// Every await frees exactly one slot: the completions stay FIFO.
+	require.Less(t, completedIdx[0], completedIdx[1])
+}
+
+func TestAgentRunDelegationWithApproval(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	sawChildAnswer := false
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			return llm.Completion{Content: "child done"}, nil
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "delegate-1", Name: "delegate", Args: map[string]any{"agent_id": "repo-a-reviewer", "prompt": "review the diff"}}}}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "child done") {
+				sawChildAnswer = true
+			}
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		require.Equal(t, "repo-a-reviewer", request.AgentID)
+		require.Equal(t, "run-approve-del/delegate/01", request.RunID)
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		t.Fatalf("delegate must not reach the tool activity")
+		return ToolResult{}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+	// The approval signal answers the delegate operation exactly as the UI does;
+	// before the parallel-delegation fix this path executed ActivityRunTool and
+	// failed with `tool "delegate" is not registered`.
+	args := map[string]any{"agent_id": "repo-a-reviewer", "prompt": "review the diff"}
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(ApprovalSignal, Approval{OperationID: "run-approve-del/turn/01/delegate-1", ArgumentsHash: operationArgumentsHash(args), Approved: true, ActorID: "lead", Reason: "go ahead"})
+	}, time.Second)
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-approve-del", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "delegate the review", MaxTurns: 4, RequireToolApproval: true, ApprovalTimeoutSeconds: 5})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var parentResult RunResult
+	require.NoError(t, env.GetWorkflowResult(&parentResult))
+	require.Equal(t, "completed", parentResult.Status)
+	require.Equal(t, "parent done", parentResult.Answer)
+	require.True(t, sawChildAnswer, "the approved delegation must run and its answer must reach the parent")
+
+	require.Less(t, indexEvent(recorded, "approval.requested"), indexEvent(recorded, "approval.granted"))
+	require.Less(t, indexEvent(recorded, "approval.granted"), indexEvent(recorded, "delegation.started"))
+	require.Less(t, indexEvent(recorded, "delegation.started"), indexEvent(recorded, "delegation.completed"))
+	completed := indexEvent(recorded, "tool.completed")
+	require.NotEqual(t, -1, completed, "the delegate call must complete as a tool outcome")
+	for _, event := range recorded {
+		require.NotEqual(t, "tool.blocked", event.Type, "the approved delegate call must not be blocked")
+	}
+}
+
 func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

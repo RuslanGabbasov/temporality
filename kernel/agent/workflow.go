@@ -35,6 +35,12 @@ const (
 	// (docs/agent-delegation.md): depth 0 → 1 → 2 is allowed, a run at depth 2
 	// cannot delegate further and must do the work itself.
 	MaxDelegationDepth = 2
+	// MaxDelegationWidth bounds how many delegated child runs of one parent
+	// turn may be in flight at once (docs/agent-delegation.md, parallel
+	// delegation). Additional delegate calls in the same response still run,
+	// but they wait for a free slot — launched in FIFO order, awaited in FIFO
+	// order, so the event stream stays deterministic for replay.
+	MaxDelegationWidth = 8
 )
 
 type RunInput struct {
@@ -108,6 +114,28 @@ type SkillRef struct {
 	Version string `json:"version"`
 	Name    string `json:"name"`
 	Digest  string `json:"digest,omitempty"`
+}
+
+// pendingDelegation is a delegated child run that has been started but not
+// yet awaited (docs/agent-delegation.md, parallel delegation). Launching is
+// cheap; the parent only blocks when it awaits, which lets sibling delegate
+// calls of one model response run concurrently.
+type pendingDelegation struct {
+	callID        string
+	operationID   string
+	argumentsHash string
+	childRunID    string
+	agentID       string
+	future        workflow.ChildWorkflowFuture
+	// duplicates are identical delegate calls in the same model response
+	// (degenerate model output): they share the child's result when it lands.
+	duplicates []pendingDuplicate
+}
+
+// pendingDuplicate is one duplicate tool-call ID answering a pendingDelegation.
+type pendingDuplicate struct {
+	callID      string
+	operationID string
 }
 
 type RunResult struct {
@@ -358,8 +386,160 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		type executedCall struct {
 			operationID string
 			result      ToolResult
+			pending     *pendingDelegation
 		}
 		executed := map[string]executedCall{}
+		// Parallel delegation (docs/agent-delegation.md): delegate calls of one
+		// response start their child runs immediately and are awaited later —
+		// at a width-limit slot or, at the latest, before the turn closes. FIFO
+		// awaiting keeps the event order deterministic for replay.
+		var inflight []*pendingDelegation
+		awaitDelegation := func(p *pendingDelegation) error {
+			var child RunResult
+			childErr := p.future.Get(ctx, &child)
+			content := ""
+			if childErr != nil {
+				if ctx.Err() != nil {
+					return childErr
+				}
+				// The child is terminal now, so its whole event stream is already in
+				// the journal. Classifying it turns a generic "may have side effects"
+				// into a precise statement (docs/failure-reconciliation.md).
+				summaryCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
+				var summary ChildRunSummary
+				summaryErr := workflow.ExecuteActivity(summaryCtx, ActivitySummarizeChildRun, ChildRunSummaryRequest{Project: input.Project, RunID: p.childRunID}).Get(ctx, &summary)
+				if summaryErr != nil && ctx.Err() != nil {
+					return summaryErr
+				}
+				effect := "uncertain"
+				content = "Delegated run " + p.childRunID + " failed; its effects may be uncertain. Verify the current state before retrying or continue the work yourself."
+				if summaryErr != nil {
+					content = "Delegated run " + p.childRunID + " failed; its effects may be uncertain (child operations could not be summarized: " + boundedFailureDetail(summaryErr) + "). Verify the current state before retrying or continue the work yourself."
+				} else {
+					switch {
+					case summary.Unresolved > 0:
+						effect = "uncertain"
+						content = "Delegated run " + p.childRunID + " failed with " + strconv.Itoa(summary.Unresolved) + " of its " + strconv.Itoa(summary.Total) + " tool operation(s) unresolved. Inspect run " + p.childRunID + " before retrying or continue the work yourself."
+					case summary.Total > 0:
+						effect = "occurred"
+						content = "Delegated run " + p.childRunID + " failed after " + strconv.Itoa(summary.Total) + " fully recorded tool operation(s); every child effect is settled in the journal, nothing external is pending. Child run trajectory: " + p.childRunID + "."
+					default:
+						effect = "none"
+						content = "Delegated run " + p.childRunID + " failed before performing any tool operations; no effects. It is safe to retry the delegation or do the work yourself."
+					}
+				}
+				delegationFailed := map[string]any{"operation_id": p.operationID, "child_run_id": p.childRunID, "agent_id": p.agentID, "error_type": "delegated_run_failed", "error": boundedFailureDetail(childErr)}
+				toolFailedData := map[string]any{"operation_id": p.operationID, "arguments_hash": p.argumentsHash, "tool": "delegate", "error_type": "delegated_run_failed", "effect": effect, "child_run_id": p.childRunID}
+				if summaryErr == nil {
+					delegationFailed["child_ops_total"] = summary.Total
+					delegationFailed["child_ops_unresolved"] = summary.Unresolved
+					toolFailedData["child_ops_total"] = summary.Total
+					toolFailedData["child_ops_unresolved"] = summary.Unresolved
+				}
+				if err := emit(activityCtx, state, "delegation.failed", delegationFailed); err != nil {
+					return err
+				}
+				if err := emit(activityCtx, state, "tool.failed", toolFailedData); err != nil {
+					return err
+				}
+			} else {
+				if err := emit(activityCtx, state, "delegation.completed", map[string]any{"operation_id": p.operationID, "child_run_id": p.childRunID, "agent_id": p.agentID, "child_status": child.Status, "turns": child.Turns}); err != nil {
+					return err
+				}
+				answer, _ := BoundedNarrative(child.Answer)
+				content = "Delegated agent \"" + p.agentID + "\" (run " + p.childRunID + ") finished with status " + child.Status + " after " + strconv.Itoa(child.Turns) + " turns. Final answer:\n\n" + answer
+				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": p.operationID, "arguments_hash": p.argumentsHash, "tool": "delegate", "output": compactJSON(content, 1000), "child_run_id": p.childRunID}); err != nil {
+					return err
+				}
+			}
+			messages = append(messages, llm.Message{Role: "tool", ToolCallID: p.callID, Content: content})
+			for _, duplicate := range p.duplicates {
+				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": duplicate.operationID, "arguments_hash": p.argumentsHash, "tool": "delegate", "duplicate_of": p.operationID}); err != nil {
+					return err
+				}
+				messages = append(messages, llm.Message{Role: "tool", ToolCallID: duplicate.callID, Content: content})
+			}
+			return nil
+		}
+		// launchDelegation resolves and starts one delegated child run without
+		// blocking on it. Failures that happen before the child starts are
+		// reported inline (returned as content, deferred=false); a started child
+		// is parked in inflight and deferred=true tells the caller to skip the
+		// per-call tail — the tool message lands when the child is awaited.
+		// startTool is the caller's idempotent tool.started emitter.
+		launchDelegation := func(call llm.ToolCall, callKey, operationID, argumentsHash string, startTool func() error) (string, bool, error) {
+			if err := startTool(); err != nil {
+				return "", false, err
+			}
+			delegateAgentID, _ := call.Args["agent_id"].(string)
+			delegatePrompt, _ := call.Args["prompt"].(string)
+			delegateMaxTurns := 0
+			if v, ok := call.Args["max_turns"].(float64); ok {
+				delegateMaxTurns = int(v)
+			}
+			if strings.TrimSpace(delegateAgentID) == "" || strings.TrimSpace(delegatePrompt) == "" {
+				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "delegate", "error_type": "malformed_arguments", "effect": "none", "detail": "agent_id and prompt are required"}); err != nil {
+					return "", false, err
+				}
+				return "Delegate call rejected before execution, no effect: agent_id and prompt are required. Re-issue the call with both arguments.", false, nil
+			}
+			if input.DelegationDepth >= MaxDelegationDepth {
+				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "delegate", "error_type": "delegation_depth_exceeded", "effect": "none", "depth": input.DelegationDepth}); err != nil {
+					return "", false, err
+				}
+				return "Delegation depth limit reached; delegating further is not allowed. Perform the remaining work yourself with your own tools.", false, nil
+			}
+			delegations++
+			childRunID := fmt.Sprintf("%s/delegate/%02d", input.RunID, delegations)
+			resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
+			var childInput RunInput
+			resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: delegateAgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: delegatePrompt, ActorID: input.ActorID, MaxTurns: delegateMaxTurns, DelegationDepth: input.DelegationDepth + 1}).Get(ctx, &childInput)
+			if resolveErr != nil {
+				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "delegate", "error_type": "agent_resolution_failed", "effect": "none", "detail": boundedFailureDetail(resolveErr)}); err != nil {
+					return "", false, err
+				}
+				return "Delegation rejected before execution, no effect: agent \"" + delegateAgentID + "\" could not be resolved (" + boundedFailureDetail(resolveErr) + "). Check the agent_id and re-issue, or do the work yourself.", false, nil
+			}
+			// Width gate: wait for a free slot BEFORE initiating the next child so at
+			// most MaxDelegationWidth children of this turn are actually in flight.
+			// The awaited child's completion events land first — a slot visibly opens
+			// before the next delegation starts.
+			if len(inflight) >= MaxDelegationWidth {
+				if err := awaitDelegation(inflight[0]); err != nil {
+					return "", false, err
+				}
+				inflight = inflight[1:]
+			}
+			if err := emit(activityCtx, state, "delegation.started", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "ordinal": delegations, "depth": input.DelegationDepth + 1}); err != nil {
+				return "", false, err
+			}
+			childInput.ParentRunID = input.RunID
+			childInput.ParentFrameID = state.frame
+			childInput.ParentEventID = state.previousEventID
+			childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: WorkflowID(input.SourceID, input.Project, childRunID)})
+			childFuture := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", childInput)
+			// Awaiting the child execution separately splits failures into
+			// two honest classes: if the execution could not even be started,
+			// nothing ran and the effect is provably "none"; only a child
+			// that started and then failed can leave effects uncertain.
+			var childExec workflow.Execution
+			if startErr := childFuture.GetChildWorkflowExecution().Get(ctx, &childExec); startErr != nil {
+				if ctx.Err() != nil {
+					return "", false, startErr
+				}
+				if err := emit(activityCtx, state, "delegation.failed", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "error_type": "delegated_run_start_failed", "error": boundedFailureDetail(startErr)}); err != nil {
+					return "", false, err
+				}
+				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "delegate", "error_type": "delegated_run_start_failed", "effect": "none", "child_run_id": childRunID}); err != nil {
+					return "", false, err
+				}
+				return "Delegated run " + childRunID + " was rejected before execution, no effect (" + boundedFailureDetail(startErr) + "). The child agent never started, so nothing it could do has happened; it is safe to retry the delegation or do the work yourself.", false, nil
+			}
+			pending := &pendingDelegation{callID: call.ID, operationID: operationID, argumentsHash: argumentsHash, childRunID: childRunID, agentID: delegateAgentID, future: childFuture}
+			inflight = append(inflight, pending)
+			executed[callKey] = executedCall{operationID: operationID, pending: pending}
+			return "", true, nil
+		}
 		for _, call := range completion.ToolCalls {
 			operationID := fmt.Sprintf("%s/%s", frame, call.ID)
 			argumentsHash := operationArgumentsHash(call.Args)
@@ -382,6 +562,13 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "tool_call_id": call.ID, "arguments": compactJSON(call.Args, 500), "duplicate_of": original.operationID}); err != nil {
 					return result, err
 				}
+				if original.pending != nil {
+					// The identical delegate call already launched its child run in
+					// this response: the duplicate shares that child's result when it
+					// lands instead of multiplying the delegation.
+					original.pending.duplicates = append(original.pending.duplicates, pendingDuplicate{callID: call.ID, operationID: operationID})
+					continue
+				}
 				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "duplicate_of": original.operationID}); err != nil {
 					return result, err
 				}
@@ -395,6 +582,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				(input.RequireToolApproval && !policySafeTool(call.Name))
 			autoApproved := call.Name == "run_command" && contains(input.AutoApproveTools, call.Name)
 			toolStarted := false
+			// deferred marks a delegate call whose child run is in flight: its
+			// tool message and executed entry are handled at await time.
+			deferred := false
 			// runCancelled stops the whole run after this turn — set by the
 			// cancel timeout policy of ask_human (§33).
 			runCancelled := false
@@ -599,6 +789,19 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						}
 						toolResult.Content = "Approval granted. Continue with the requested action, but perform it only through an available tool."
 						recentlyApproved = true
+					} else if call.Name == "delegate" {
+						// The approval covers the delegate call itself: launch the child
+						// run here — ActivityRunTool does not know "delegate" and would
+						// fail the call with "tool not registered".
+						content, deferredLaunch, launchErr := launchDelegation(call, callKey, operationID, argumentsHash, startTool)
+						if launchErr != nil {
+							return result, launchErr
+						}
+						if deferredLaunch {
+							deferred = true
+						} else {
+							toolResult.Content = content
+						}
 					} else if err := startTool(); err != nil {
 						return result, err
 					} else if err := startMCP(); err != nil {
@@ -659,129 +862,17 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 			} else if call.Name == "delegate" {
 				// Delegation runs a durable child AgentRun with the child agent's own
-				// enforced configuration (docs/agent-delegation.md). The parent waits
-				// for the result and receives it as the tool outcome.
-				delegateAgentID, _ := call.Args["agent_id"].(string)
-				delegatePrompt, _ := call.Args["prompt"].(string)
-				delegateMaxTurns := 0
-				if v, ok := call.Args["max_turns"].(float64); ok {
-					delegateMaxTurns = int(v)
+				// enforced configuration (docs/agent-delegation.md). The child starts
+				// without blocking the parent; the result arrives as the tool outcome
+				// when the child is awaited (see launchDelegation/awaitDelegation).
+				content, deferredLaunch, launchErr := launchDelegation(call, callKey, operationID, argumentsHash, startTool)
+				if launchErr != nil {
+					return result, launchErr
 				}
-				if strings.TrimSpace(delegateAgentID) == "" || strings.TrimSpace(delegatePrompt) == "" {
-					if err := startTool(); err != nil {
-						return result, err
-					}
-					if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "malformed_arguments", "effect": "none", "detail": "agent_id and prompt are required"}); err != nil {
-						return result, err
-					}
-					toolResult.Content = "Delegate call rejected before execution, no effect: agent_id and prompt are required. Re-issue the call with both arguments."
-				} else if input.DelegationDepth >= MaxDelegationDepth {
-					if err := startTool(); err != nil {
-						return result, err
-					}
-					if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "delegation_depth_exceeded", "effect": "none", "depth": input.DelegationDepth}); err != nil {
-						return result, err
-					}
-					toolResult.Content = "Delegation depth limit reached; delegating further is not allowed. Perform the remaining work yourself with your own tools."
+				if deferredLaunch {
+					deferred = true
 				} else {
-					if err := startTool(); err != nil {
-						return result, err
-					}
-					delegations++
-					childRunID := fmt.Sprintf("%s/delegate/%02d", input.RunID, delegations)
-					resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
-					var childInput RunInput
-					resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: delegateAgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: delegatePrompt, ActorID: input.ActorID, MaxTurns: delegateMaxTurns, DelegationDepth: input.DelegationDepth + 1}).Get(ctx, &childInput)
-					if resolveErr != nil {
-						if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "agent_resolution_failed", "effect": "none", "detail": boundedFailureDetail(resolveErr)}); err != nil {
-							return result, err
-						}
-						toolResult.Content = "Delegation rejected before execution, no effect: agent \"" + delegateAgentID + "\" could not be resolved (" + boundedFailureDetail(resolveErr) + "). Check the agent_id and re-issue, or do the work yourself."
-					} else {
-						if err := emit(activityCtx, state, "delegation.started", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "ordinal": delegations, "depth": input.DelegationDepth + 1}); err != nil {
-							return result, err
-						}
-						childInput.ParentRunID = input.RunID
-						childInput.ParentFrameID = state.frame
-						childInput.ParentEventID = state.previousEventID
-						childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: WorkflowID(input.SourceID, input.Project, childRunID)})
-						childFuture := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", childInput)
-						// Awaiting the child execution separately splits failures into
-						// two honest classes: if the execution could not even be started,
-						// nothing ran and the effect is provably "none"; only a child
-						// that started and then failed can leave effects uncertain.
-						var childExec workflow.Execution
-						if startErr := childFuture.GetChildWorkflowExecution().Get(ctx, &childExec); startErr != nil {
-							if ctx.Err() != nil {
-								return result, startErr
-							}
-							if err := emit(activityCtx, state, "delegation.failed", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "error_type": "delegated_run_start_failed", "error": boundedFailureDetail(startErr)}); err != nil {
-								return result, err
-							}
-							if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "delegated_run_start_failed", "effect": "none", "child_run_id": childRunID}); err != nil {
-								return result, err
-							}
-							toolResult.Content = "Delegated run " + childRunID + " was rejected before execution, no effect (" + boundedFailureDetail(startErr) + "). The child agent never started, so nothing it could do has happened; it is safe to retry the delegation or do the work yourself."
-						} else {
-							var child RunResult
-							childErr := childFuture.Get(ctx, &child)
-							if childErr != nil {
-								if ctx.Err() != nil {
-									return result, childErr
-								}
-								// The child is terminal now, so its whole event stream is
-								// already in the journal. Classifying it turns a generic
-								// "may have side effects" into a precise statement (docs/failure-reconciliation.md).
-								summaryCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
-								var summary ChildRunSummary
-								summaryErr := workflow.ExecuteActivity(summaryCtx, ActivitySummarizeChildRun, ChildRunSummaryRequest{Project: input.Project, RunID: childRunID}).Get(ctx, &summary)
-								if summaryErr != nil && ctx.Err() != nil {
-									return result, summaryErr
-								}
-								effect := "uncertain"
-								content := "Delegated run " + childRunID + " failed; its effects may be uncertain. Verify the current state before retrying or continue the work yourself."
-								if summaryErr != nil {
-									content = "Delegated run " + childRunID + " failed; its effects may be uncertain (child operations could not be summarized: " + boundedFailureDetail(summaryErr) + "). Verify the current state before retrying or continue the work yourself."
-								} else {
-									switch {
-									case summary.Unresolved > 0:
-										effect = "uncertain"
-										content = "Delegated run " + childRunID + " failed with " + strconv.Itoa(summary.Unresolved) + " of its " + strconv.Itoa(summary.Total) + " tool operation(s) unresolved. Inspect run " + childRunID + " before retrying or continue the work yourself."
-									case summary.Total > 0:
-										effect = "occurred"
-										content = "Delegated run " + childRunID + " failed after " + strconv.Itoa(summary.Total) + " fully recorded tool operation(s); every child effect is settled in the journal, nothing external is pending. Child run trajectory: " + childRunID + "."
-									default:
-										effect = "none"
-										content = "Delegated run " + childRunID + " failed before performing any tool operations; no effects. It is safe to retry the delegation or do the work yourself."
-									}
-								}
-								delegationFailed := map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "error_type": "delegated_run_failed", "error": boundedFailureDetail(childErr)}
-								toolFailed := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "error_type": "delegated_run_failed", "effect": effect, "child_run_id": childRunID}
-								if summaryErr == nil {
-									delegationFailed["child_ops_total"] = summary.Total
-									delegationFailed["child_ops_unresolved"] = summary.Unresolved
-									toolFailed["child_ops_total"] = summary.Total
-									toolFailed["child_ops_unresolved"] = summary.Unresolved
-								}
-								if err := emit(activityCtx, state, "delegation.failed", delegationFailed); err != nil {
-									return result, err
-								}
-								if err := emit(activityCtx, state, "tool.failed", toolFailed); err != nil {
-									return result, err
-								}
-								toolResult.Content = content
-							} else {
-								if err := emit(activityCtx, state, "delegation.completed", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "child_status": child.Status, "turns": child.Turns}); err != nil {
-									return result, err
-								}
-								answer, _ := BoundedNarrative(child.Answer)
-								toolResult.Content = "Delegated agent \"" + delegateAgentID + "\" (run " + childRunID + ") finished with status " + child.Status + " after " + strconv.Itoa(child.Turns) + " turns. Final answer:\n\n" + answer
-								if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000), "child_run_id": childRunID}); err != nil {
-									return result, err
-								}
-							}
-						}
-					}
+					toolResult.Content = content
 				}
 			} else {
 				if autoApproved {
@@ -825,31 +916,42 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					}
 				}
 			}
-			if isMCP && !toolBlocked {
-				eventType := "mcp.call.completed"
-				data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": mcpServerForTool(call.Name, input.MCPServer)}
-				if toolFailed {
-					eventType = "mcp.call.failed"
-					data["error_type"] = "activity_failed"
-					data["outcome"] = "uncertain"
-				} else {
-					// Result is content-addressed, never stored raw: the ref plus byte
-					// count let operators correlate the exact MCP payload without
-					// copying tool output into the event stream.
-					data["result_ref"] = resultContentRef(toolResult.Content)
-					data["result_bytes"] = len(toolResult.Content)
+			if !deferred {
+				// Deferred delegate calls skip the per-call tail: their tool message,
+				// executed entry and completion events land at await time instead.
+				if isMCP && !toolBlocked {
+					eventType := "mcp.call.completed"
+					data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "server": mcpServerForTool(call.Name, input.MCPServer)}
+					if toolFailed {
+						eventType = "mcp.call.failed"
+						data["error_type"] = "activity_failed"
+						data["outcome"] = "uncertain"
+					} else {
+						// Result is content-addressed, never stored raw: the ref plus byte
+						// count let operators correlate the exact MCP payload without
+						// copying tool output into the event stream.
+						data["result_ref"] = resultContentRef(toolResult.Content)
+						data["result_bytes"] = len(toolResult.Content)
+					}
+					if err := emit(activityCtx, state, eventType, data); err != nil {
+						return result, err
+					}
 				}
-				if err := emit(activityCtx, state, eventType, data); err != nil {
-					return result, err
+				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: toolResult.Content})
+				for _, evidence := range toolResult.Evidence {
+					if err := emit(activityCtx, state, "evidence.observed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool_call_id": call.ID, "ref": evidence.Ref, "type": evidence.Type}); err != nil {
+						return result, err
+					}
 				}
+				executed[callKey] = executedCall{operationID: operationID, result: toolResult}
 			}
-			messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: toolResult.Content})
-			for _, evidence := range toolResult.Evidence {
-				if err := emit(activityCtx, state, "evidence.observed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool_call_id": call.ID, "ref": evidence.Ref, "type": evidence.Type}); err != nil {
-					return result, err
-				}
+		}
+		// Parallel delegation: await every child still in flight before the turn
+		// closes so each delegate outcome lands in the turn that issued it.
+		for _, pending := range inflight {
+			if err := awaitDelegation(pending); err != nil {
+				return result, err
 			}
-			executed[callKey] = executedCall{operationID: operationID, result: toolResult}
 		}
 		if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "tool_calls": len(completion.ToolCalls)}); err != nil {
 			return result, err
