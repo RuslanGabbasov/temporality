@@ -5,7 +5,7 @@ import { workspaceApi, type Agent } from './workspaceApi'
 import DelegationTree from './DelegationTree'
 import Markdown from './Markdown'
 import { useT } from './i18n'
-import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines } from './eventSummary'
+import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString } from './eventSummary'
 import {
   Button,
   TextInput,
@@ -190,8 +190,10 @@ function EventDetail({ event, t, project, response, reasoning }: { event: Observ
               {fields.map(([k, v]) => (
                 <div key={k} style={{ marginBottom: '0.2rem' }}>
                   <span style={{ color: 'var(--tm-text-3)' }}>{k}: </span>
-                  <span style={{ color: 'var(--tm-text)' }}>
-                    {typeof v === 'object' ? JSON.stringify(v).slice(0, 200) : String(v).slice(0, 200)}
+                  <span style={{ color: 'var(--tm-text)', overflowWrap: 'anywhere' }}>
+                    {/* Tool outputs arrive JSON-encoded (MCP sometimes doubly
+                     * so) — unwrap the string layers for readability. */}
+                    {typeof v === 'object' ? JSON.stringify(v).slice(0, 200) : (k === 'output' ? unwrapJsonString(String(v)) : String(v)).slice(0, 200)}
                   </span>
                 </div>
               ))}

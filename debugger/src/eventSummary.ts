@@ -42,6 +42,27 @@ export function shortTime(iso: string) {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString()
 }
 
+/** MCP tool results arrive as JSON-encoded strings, sometimes doubly so
+ * (a JSON string wrapping a JSON string). Unwrap the string layers for
+ * display: `"{\"connected\":true}"` → `{"connected":true}`. Plain JSON
+ * objects and non-JSON text are returned unchanged. */
+export function unwrapJsonString(value: string): string {
+  let out = value
+  for (let depth = 0; depth < 3 && out.length > 1 && out.startsWith('"') && out.endsWith('"'); depth++) {
+    try {
+      const parsed: unknown = JSON.parse(out)
+      if (typeof parsed === 'string') {
+        out = parsed
+        continue
+      }
+      return JSON.stringify(parsed)
+    } catch {
+      break
+    }
+  }
+  return out
+}
+
 /* Historical agent.summary events carry newline-collapsed answers: the
  * journal's redaction pipeline used to join all whitespace into single
  * spaces, flattening markdown to one line. The journal is append-only, so
@@ -126,10 +147,16 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSumm
       return { icon: '🔧', label: String(d.tool ?? 'tool'), detail: preview || t('runs.event.started'), color: '#e0af68' }
     }
     case 'tool.completed': {
+      // tool.completed is only emitted when the call itself succeeded; only
+      // run_command reports an exit code, and a non-zero one means the command
+      // exited with an error. MCP and kernel tools (skill_*, mcp__*) carry no
+      // exit code — their failures land in tool.failed instead — so a missing
+      // exit code is a success, not an error.
+      const failed = d.exit_code !== undefined && d.exit_code !== 0
       const exit = d.exit_code !== undefined ? `exit ${d.exit_code}` : ''
       const ms = d.latency_ms ? `${(Number(d.latency_ms) / 1000).toFixed(1)}s` : ''
-      const output = typeof d.output === 'string' ? d.output.slice(0, 80).replace(/\n/g, ' ') : ''
-      return { icon: d.exit_code === 0 ? '✓' : '✗', label: String(d.tool ?? 'tool'), detail: [exit, ms, output].filter(Boolean).join(' · '), color: d.exit_code === 0 ? '#9ece6a' : '#f7768e' }
+      const output = typeof d.output === 'string' ? unwrapJsonString(d.output).slice(0, 80).replace(/\n/g, ' ') : ''
+      return { icon: failed ? '✗' : '✓', label: String(d.tool ?? 'tool'), detail: [exit, ms, output].filter(Boolean).join(' · '), color: failed ? '#f7768e' : '#9ece6a' }
     }
     case 'tool.failed': {
       // A failed delegate tool is the parent's view of a crashed child run —

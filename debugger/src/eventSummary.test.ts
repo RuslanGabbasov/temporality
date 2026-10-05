@@ -1,7 +1,56 @@
 import { describe, expect, it } from 'vitest'
-import { restoreMarkdownLines } from './eventSummary'
+import { eventSummary, restoreMarkdownLines, unwrapJsonString } from './eventSummary'
+import type { ObservationEvent } from './observationApi'
+
+const t = (key: string) => key
+const event = (type: string, data: Record<string, unknown>): ObservationEvent =>
+  ({ type, data } as unknown as ObservationEvent)
 
 const COLLAPSED_QA_REPORT = '## Отчёт QA-субагента: проверка lighthouse ### Статус: завершено --- ### 1. Что сделано | Шаг | Результат | Доказательство | |---|---|---| | Клонирование | OK | журнал | | Проверка | OK | отчёт |'
+
+describe('unwrapJsonString', () => {
+  it('unwraps a single JSON-string layer', () => {
+    expect(unwrapJsonString('"{\\"connected\\":true,\\"mapId\\":\\"2\\"}"')).toBe('{"connected":true,"mapId":"2"}')
+  })
+
+  it('unwraps doubly encoded MCP results', () => {
+    const once = JSON.stringify(JSON.stringify({ id: 'graphmap-qa-workflow', name: 'QA' }))
+    expect(unwrapJsonString(once)).toBe('{"id":"graphmap-qa-workflow","name":"QA"}')
+  })
+
+  it('leaves plain JSON and text untouched', () => {
+    expect(unwrapJsonString('{"connected":true}')).toBe('{"connected":true}')
+    expect(unwrapJsonString('plain output')).toBe('plain output')
+  })
+})
+
+describe('tool.completed summary', () => {
+  it('marks MCP and kernel tools without exit_code as successful', () => {
+    const info = eventSummary(event('tool.completed', { tool: 'mcp__graphmap__connect', output: JSON.stringify({ connected: true }) }), t)
+    expect(info.icon).toBe('✓')
+    expect(info.color).toBe('#9ece6a')
+    expect(info.detail).toContain('{"connected":true}')
+  })
+
+  it('marks skill tools without exit_code as successful', () => {
+    const info = eventSummary(event('tool.completed', { tool: 'skill_inspect', output: JSON.stringify(JSON.stringify({ id: 'x' })) }), t)
+    expect(info.icon).toBe('✓')
+    expect(info.detail).toContain('{"id":"x"}')
+  })
+
+  it('keeps a non-zero run_command exit code an error', () => {
+    const info = eventSummary(event('tool.completed', { tool: 'run_command', exit_code: 1, output: 'boom' }), t)
+    expect(info.icon).toBe('✗')
+    expect(info.color).toBe('#f7768e')
+    expect(info.detail).toContain('exit 1')
+  })
+
+  it('marks a zero run_command exit code as successful', () => {
+    const info = eventSummary(event('tool.completed', { tool: 'run_command', exit_code: 0, output: 'ok' }), t)
+    expect(info.icon).toBe('✓')
+    expect(info.detail).toContain('exit 0')
+  })
+})
 
 describe('restoreMarkdownLines', () => {
   it('keeps texts that already have line structure unchanged', () => {
