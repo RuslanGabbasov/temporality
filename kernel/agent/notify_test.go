@@ -43,15 +43,33 @@ func TestPickChannelHonorsPreferredEnabledAndConfigured(t *testing.T) {
 	require.Equal(t, "web", mode)
 }
 
-func TestNormalizeRecipientAcceptsUserPrefix(t *testing.T) {
-	require.Equal(t, "ruslan", normalizeRecipient("user:ruslan"))
-	require.Equal(t, "ruslan", normalizeRecipient(" ruslan "))
-	require.Equal(t, "", normalizeRecipient(""))
+// workspaceStub serves the user list plus the human-request upsert endpoint
+// the notification activity records through.
+func workspaceStub(t *testing.T, usersJSON string, seenUpsert *string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/workspace/users" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(usersJSON))
+		case r.URL.Path == "/v1/workspace/human-requests" && r.Method == http.MethodPost:
+			raw, _ := io.ReadAll(r.Body)
+			if seenUpsert != nil {
+				*seenUpsert = string(raw)
+			}
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
 }
 
 // TestNotifyChannelDeliversViaMatrix exercises the full resolution path: the
-// recipient's profile comes from the workspace API, the preferred matrix
-// channel carries the question, and the delivery is reported as delivered.
+// recipient resolves from the workspace user list, the preferred matrix
+// channel carries the question, the delivery is reported as delivered and the
+// human_request row is upserted with the resolved user.
 func TestNotifyChannelDeliversViaMatrix(t *testing.T) {
 	var seenPath, seenAuth, seenBody string
 	homeserver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,17 +84,13 @@ func TestNotifyChannelDeliversViaMatrix(t *testing.T) {
 	t.Setenv("KERNEL_MATRIX_HOMESERVER", homeserver.URL)
 	t.Setenv("KERNEL_MATRIX_ACCESS_TOKEN", "bot-token")
 
-	workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/v1/workspace/users/ruslan", r.URL.Path)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ruslan","channels":[{"type":"matrix","address":"!room:matrix.org","enabled":true}],"preferred_channel":"matrix"}`))
-	}))
-	defer workspace.Close()
+	var upsert string
+	workspace := workspaceStub(t, `{"users":[{"id":"ruslan","name":"Ruslan","active":true,"channels":[{"type":"matrix","address":"!room:matrix.org","enabled":true}],"preferred_channel":"matrix"}]}`, &upsert)
 
 	activities := &Activities{HTTP: homeserver.Client(), WorkspaceURL: workspace.URL, WorkspaceToken: "internal"}
 	delivery, err := activities.NotifyChannel(context.Background(), NotifyChannelRequest{
-		Recipient: "user:ruslan", Question: "Which database?",
-		Options: []string{"postgres", "sqlite"}, Project: "repo-a", RunID: "run-1",
+		Recipient: "user:ruslan", Question: "Which database?", OperationID: "run-1/turn/01/ask-1",
+		Options: []string{"postgres", "sqlite"}, Project: "repo-a", RunID: "run-1", TimeoutSeconds: 300,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "matrix", delivery.Channel)
@@ -90,41 +104,75 @@ func TestNotifyChannelDeliversViaMatrix(t *testing.T) {
 	require.Equal(t, "m.text", payload["msgtype"])
 	require.Contains(t, payload["body"], "Which database?")
 	require.Contains(t, payload["body"], "postgres / sqlite")
+
+	var row map[string]any
+	require.NoError(t, json.Unmarshal([]byte(upsert), &row))
+	require.Equal(t, "run-1/turn/01/ask-1", row["id"])
+	require.Equal(t, "ruslan", row["resolved_user"])
+	require.Equal(t, "delivered", row["status"])
+	require.Equal(t, "matrix", row["channel"])
 }
 
 // TestNotifyChannelFallsBackToWebWhenTransportNotConfigured keeps the loop
 // alive when the profile names a channel the kernel cannot send through.
 func TestNotifyChannelFallsBackToWebWhenTransportNotConfigured(t *testing.T) {
-	workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ruslan","channels":[{"type":"telegram","address":"12345","enabled":true}],"preferred_channel":"telegram"}`))
-	}))
-	defer workspace.Close()
+	workspace := workspaceStub(t, `{"users":[{"id":"ruslan","name":"Ruslan","active":true,"channels":[{"type":"telegram","address":"12345","enabled":true}],"preferred_channel":"telegram"}]}`, nil)
 
 	activities := &Activities{HTTP: workspace.Client(), WorkspaceURL: workspace.URL, WorkspaceToken: "internal"}
-	delivery, err := activities.NotifyChannel(context.Background(), NotifyChannelRequest{Recipient: "ruslan", Question: "Q?"})
+	delivery, err := activities.NotifyChannel(context.Background(), NotifyChannelRequest{Recipient: "ruslan", Question: "Q?", OperationID: "op-1", RunID: "run-1", Project: "p"})
 	require.NoError(t, err)
 	require.Equal(t, "web", delivery.Channel)
 	require.Equal(t, "delivered", delivery.Status)
 	require.Contains(t, delivery.Detail, "telegram unavailable")
 }
 
-// TestNotifyChannelSkipsUnknownRecipient reports a skip instead of failing
-// when the run actor is not a workspace user (e.g. webhook-* actors).
-func TestNotifyChannelSkipsUnknownRecipient(t *testing.T) {
-	workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/users") {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"users":[{"id":"someone-else","name":"Someone Else"}]}`))
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer workspace.Close()
+// TestNotifyChannelRejectsUnknownRecipient reports a rejection (§30 spirit:
+// no user, no delivery) when neither the recipient nor the actor resolves to
+// a workspace user — e.g. webhook-* actors without a named recipient.
+func TestNotifyChannelRejectsUnknownRecipient(t *testing.T) {
+	workspace := workspaceStub(t, `{"users":[{"id":"someone-else","name":"Someone Else","active":true}]}`, nil)
 
 	activities := &Activities{HTTP: workspace.Client(), WorkspaceURL: workspace.URL, WorkspaceToken: "internal"}
-	delivery, err := activities.NotifyChannel(context.Background(), NotifyChannelRequest{ActorID: "webhook-trigger-1", Question: "Q?"})
+	delivery, err := activities.NotifyChannel(context.Background(), NotifyChannelRequest{ActorID: "webhook-trigger-1", Question: "Q?", OperationID: "op-1", RunID: "run-1", Project: "p"})
 	require.NoError(t, err)
-	require.Equal(t, "web", delivery.Channel)
-	require.Equal(t, "skipped", delivery.Status)
+	require.Equal(t, "rejected", delivery.Status)
+	require.Contains(t, delivery.Detail, "could not be resolved")
+}
+
+// TestNotifyChannelRejectsUserOutsideIdentityTargets verifies the §30 gate:
+// an execution identity with human_targets only permits listed users.
+func TestNotifyChannelRejectsUserOutsideIdentityTargets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/workspace/users":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"users":[{"id":"ruslan","active":true},{"id":"eldar","active":true}]}`))
+		case r.URL.Path == "/v1/workspace/execution-identities":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"identities":[{"id":"ci-bot","human_targets":["eldar"]}]}`))
+		case r.URL.Path == "/v1/workspace/human-requests":
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+	// ruslan is a valid user but not in the identity's human_targets.
+	delivery, err := activities.NotifyChannel(context.Background(), NotifyChannelRequest{
+		Recipient: "ruslan", Question: "Q?", OperationID: "op-1", RunID: "run-1", Project: "p",
+		ExecutionIdentityID: "ci-bot",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "rejected", delivery.Status)
+	require.Contains(t, delivery.Detail, `may not address user "ruslan"`)
+
+	// eldar is listed: the delivery proceeds.
+	delivery, err = activities.NotifyChannel(context.Background(), NotifyChannelRequest{
+		Recipient: "eldar", Question: "Q?", OperationID: "op-2", RunID: "run-1", Project: "p",
+		ExecutionIdentityID: "ci-bot",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "delivered", delivery.Status)
 }

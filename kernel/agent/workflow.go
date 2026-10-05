@@ -83,6 +83,10 @@ type RunInput struct {
 	// DelegationDepth counts delegation hops: 0 for a normal run, +1 per child
 	// (docs/agent-delegation.md). Runs at MaxDelegationDepth must not delegate.
 	DelegationDepth int `json:"delegation_depth,omitempty"`
+	// ExecutionIdentityID names the security context of automated runs
+	// (docs/org-structure.md §20): trigger fires re-check its allowed lists and
+	// human_targets at every critical step. Empty for manual runs.
+	ExecutionIdentityID string `json:"execution_identity_id,omitempty"`
 }
 
 // SkillRef is a skill resolved for a run: identity plus a budgeted digest for
@@ -354,6 +358,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			approvalRequired := call.Name == "request_approval" || contains(input.ApprovalTools, call.Name)
 			autoApproved := call.Name == "run_command" && contains(input.AutoApproveTools, call.Name)
 			toolStarted := false
+			// runCancelled stops the whole run after this turn — set by the
+			// cancel timeout policy of ask_human (§33).
+			runCancelled := false
 			startTool := func() error {
 				if toolStarted {
 					return nil
@@ -371,10 +378,10 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			toolFailed := false
 			toolBlocked := false
 			if call.Name == "ask_human" {
-				// Escalation to a human (docs/triggers-and-escalations.md §5-13):
-				// a self-contained question with optional structured options. The
-				// run pauses on the approval signal channel; the answer rides the
-				// same Approval payload with Response set.
+				// Escalation to a human (docs/triggers-and-escalations.md §5-13,
+				// docs/org-structure.md §25-33): a self-contained question with
+				// optional structured options. The run pauses on the approval signal
+				// channel; the answer rides the same Approval payload with Response set.
 				question, _ := call.Args["question"].(string)
 				humanContext, _ := call.Args["context"].(string)
 				options := stringList(call.Args["options"])
@@ -386,39 +393,108 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if timeoutSeconds > 86400 {
 					timeoutSeconds = 86400
 				}
+				// Timeout policy (§33): what happens when nobody answers. The policy
+				// lives here, in the execution model — never in the transport.
+				timeoutPolicy, _ := call.Args["timeout_policy"].(string)
+				if !validTimeoutPolicy(timeoutPolicy) {
+					timeoutPolicy = "fallback"
+				}
 				description, _ := approvalOperation(operationID, call.Name, call.Args, false)
 				operation := description["operation"].(map[string]any)
 				argumentsHash = operation["arguments_hash"].(string)
 				if err := startTool(); err != nil {
 					return result, err
 				}
-				if err := emit(activityCtx, state, "human.requested", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "recipient": recipient, "question": question, "context": humanContext, "options": options, "timeout_seconds": timeoutSeconds}); err != nil {
+				if err := emit(activityCtx, state, "human.requested", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "recipient": recipient, "question": question, "context": humanContext, "options": options, "timeout_seconds": timeoutSeconds, "timeout_policy": timeoutPolicy}); err != nil {
 					return result, err
 				}
-				// Route the question to the recipient's preferred channel
-				// (§6-7): web inbox by default, Matrix/Telegram when the profile
-				// and kernel transport config allow it. Delivery problems are
-				// recorded, never fatal — the run keeps waiting for the answer.
+				// Route the question to the recipient's preferred channel (§6-7,
+				// §26-27): logical recipient → concrete user → channel. Delivery
+				// problems are recorded, never fatal — the run keeps waiting.
 				notifyCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 45 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 2}})
 				var delivery NotificationDelivery
-				if err := workflow.ExecuteActivity(notifyCtx, ActivityNotifyChannel, NotifyChannelRequest{Project: input.Project, RunID: input.RunID, OperationID: operationID, Recipient: recipient, ActorID: input.ActorID, Question: question, Context: humanContext, Options: options, TimeoutSeconds: timeoutSeconds}).Get(ctx, &delivery); err != nil {
+				notifyReq := NotifyChannelRequest{Project: input.Project, RunID: input.RunID, OperationID: operationID, Recipient: recipient, ActorID: input.ActorID, AgentID: input.AgentID, Question: question, Context: humanContext, Options: options, TimeoutSeconds: timeoutSeconds, TimeoutPolicy: timeoutPolicy, ExecutionIdentityID: input.ExecutionIdentityID}
+				if err := workflow.ExecuteActivity(notifyCtx, ActivityNotifyChannel, notifyReq).Get(ctx, &delivery); err != nil {
 					delivery = NotificationDelivery{Recipient: recipient, Channel: "web", Status: "failed", Detail: boundedFailureDetail(err)}
 				}
 				if err := emit(activityCtx, state, "notification.sent", map[string]any{"operation_id": operationID, "recipient": delivery.Recipient, "channel": delivery.Channel, "status": delivery.Status, "detail": delivery.Detail}); err != nil {
 					return result, err
 				}
-				approved, answer, timedOut, waitErr := awaitApproval(ctx, operationID, time.Duration(timeoutSeconds)*time.Second)
+				// §30: the execution identity may not address this user. The tool
+				// call fails without pausing — the agent must re-ask an allowed
+				// recipient (the delivery detail names the constraint).
+				if delivery.Status == "rejected" {
+					if err := emit(activityCtx, state, "human.rejected", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "recipient": recipient, "reason": delivery.Detail}); err != nil {
+						return result, err
+					}
+					toolResult.Content = "The question was rejected before delivery: " + delivery.Detail + ". Re-issue the ask with a recipient this run is allowed to address."
+					toolBlocked = true
+					if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
+						return result, err
+					}
+					messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: toolResult.Content})
+					executed[callKey] = executedCall{operationID: operationID, result: toolResult}
+					continue
+				}
+				// Waiting rounds: the initial wait plus one extra round for the
+				// retry/escalate policies (§33). Escalation re-targets the fallback
+				// recipient — project_owner — for its second round.
+				waitRounds := 1
+				if timeoutPolicy == "retry" || timeoutPolicy == "escalate" {
+					waitRounds = 2
+				}
+				approved, answer, timedOut, waitErr := false, Approval{}, true, error(nil)
+				for round := 0; round < waitRounds; round++ {
+					if round == 1 {
+						roundRecipient := recipient
+						if timeoutPolicy == "escalate" {
+							roundRecipient = "project_owner"
+						}
+						if err := emit(activityCtx, state, "human.reasked", map[string]any{"operation_id": operationID, "recipient": roundRecipient, "policy": timeoutPolicy, "round": round + 1}); err != nil {
+							return result, err
+						}
+						reask := notifyReq
+						reask.Recipient = roundRecipient
+						var redelivery NotificationDelivery
+						if err := workflow.ExecuteActivity(notifyCtx, ActivityNotifyChannel, reask).Get(ctx, &redelivery); err != nil {
+							redelivery = NotificationDelivery{Recipient: roundRecipient, Channel: "web", Status: "failed", Detail: boundedFailureDetail(err)}
+						}
+						if err := emit(activityCtx, state, "notification.sent", map[string]any{"operation_id": operationID, "recipient": redelivery.Recipient, "channel": redelivery.Channel, "status": redelivery.Status, "detail": redelivery.Detail, "round": round + 1}); err != nil {
+							return result, err
+						}
+					}
+					approved, answer, timedOut, waitErr = awaitApproval(ctx, operationID, time.Duration(timeoutSeconds)*time.Second)
+					if waitErr != nil || !timedOut {
+						break
+					}
+				}
 				if waitErr != nil {
 					return result, waitErr
 				}
+				// The run resumed (or the wait ended): close the entity row so the
+				// inbox stops listing it. Best-effort — the lazy sweep in the list
+				// endpoint catches anything this activity missed.
+				closeCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 15 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumAttempts: 2}})
 				switch {
 				case timedOut:
-					if err := emit(activityCtx, state, "human.timed_out", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "timeout_seconds": timeoutSeconds}); err != nil {
+					_ = workflow.ExecuteActivity(closeCtx, ActivityCloseHumanRequest, CloseHumanRequestInput{OperationID: operationID, Status: "expired"}).Get(ctx, nil)
+					if err := emit(activityCtx, state, "human.timed_out", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "timeout_seconds": timeoutSeconds, "timeout_policy": timeoutPolicy}); err != nil {
 						return result, err
 					}
-					toolResult.Content = "No human response within the timeout. Act on the safest option that does not require the missing information, or report what blocked you."
-					toolBlocked = true
+					switch timeoutPolicy {
+					case "fail":
+						toolResult.Content = "No human response within the timeout (policy: fail). The run cannot proceed without this answer."
+						toolFailed = true
+					case "cancel":
+						toolResult.Content = "No human response within the timeout (policy: cancel). The run is being cancelled."
+						toolBlocked = true
+						runCancelled = true
+					default: // fallback
+						toolResult.Content = "No human response within the timeout. Act on the safest option that does not require the missing information, or report what blocked you."
+						toolBlocked = true
+					}
 				case approved:
+					_ = workflow.ExecuteActivity(closeCtx, ActivityCloseHumanRequest, CloseHumanRequestInput{OperationID: operationID, Status: "answered", Response: approvalText(answer.Response), ActorID: answer.ActorID}).Get(ctx, nil)
 					response := approvalText(answer.Response)
 					if response == "" {
 						response = approvalText(answer.Reason)
@@ -428,11 +504,19 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					}
 					toolResult.Content = "Human response: " + response
 				default:
+					_ = workflow.ExecuteActivity(closeCtx, ActivityCloseHumanRequest, CloseHumanRequestInput{OperationID: operationID, Status: "cancelled", ActorID: answer.ActorID}).Get(ctx, nil)
 					if err := emit(activityCtx, state, "human.cancelled", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "actor": answer.ActorID, "reason": approvalText(answer.Reason)}); err != nil {
 						return result, err
 					}
 					toolResult.Content = "The human cancelled this question" + approvalSuffix(answer.Reason)
 					toolBlocked = true
+				}
+				if runCancelled {
+					// Policy cancel (§33): stop the run honestly instead of letting
+					// the model wander on without the missing answer.
+					result.Status = "cancelled"
+					result.Answer = toolResult.Content
+					return result, nil
 				}
 				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
 					return result, err
@@ -1246,7 +1330,7 @@ func KernelTools() []llm.ToolDef {
 		{Name: "echo", Description: "Return a short text value for debugging the harness tool path", Parameters: map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}, "required": []string{"text"}}},
 		{Name: "remember", Description: "Record a high-confidence durable conclusion with optional evidence refs. Verification and build outcomes are recorded automatically; use this only for conclusions you are confident in and can ground in evidence. If the conclusion came from applying a skill, include skill_id and capability", Parameters: map[string]any{"type": "object", "properties": map[string]any{"proposition": map[string]any{"type": "string"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "skill_id": map[string]any{"type": "string", "description": "Skill this knowledge came from, e.g. deploy-service"}, "capability": map[string]any{"type": "string", "description": "Specific capability of the skill, e.g. verify"}}, "required": []string{"proposition"}}},
 		{Name: "request_approval", Description: "Pause this run and request a human decision before a consequential action", Parameters: map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"}}, "required": []string{"action"}}},
-		{Name: "ask_human", Description: "Ask a human a question when you cannot proceed without additional context or a decision. The question must be self-contained: what task you are running, what you have established, what exactly is missing and which options exist. Prefer short structured options over open-ended questions. The run pauses until an answer arrives or the timeout expires.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"question": map[string]any{"type": "string", "description": "The exact question for the human, self-contained"}, "recipient": map[string]any{"type": "string", "description": "Workspace user to ask, e.g. user:ruslan. Defaults to the operator who started this run"}, "context": map[string]any{"type": "string", "description": "Brief human-facing background: what you are doing and what you already established"}, "options": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Short answer variants to choose from"}, "timeout_sec": map[string]any{"type": "integer", "description": "How long to wait for the answer"}}, "required": []string{"question"}}},
+		{Name: "ask_human", Description: "Ask a human a question when you cannot proceed without additional context or a decision. The question must be self-contained: what task you are running, what you have established, what exactly is missing and which options exist. Prefer short structured options over open-ended questions. The run pauses until an answer arrives or the timeout expires.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"question": map[string]any{"type": "string", "description": "The exact question for the human, self-contained"}, "recipient": map[string]any{"type": "string", "description": "Logical recipient: a workspace user id/name (user:ruslan), role:admin, org:<unit-id>, or project_owner. Defaults to the operator who started this run"}, "context": map[string]any{"type": "string", "description": "Brief human-facing background: what you are doing and what you already established"}, "options": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Short answer variants to choose from"}, "timeout_sec": map[string]any{"type": "integer", "description": "How long to wait for the answer"}, "timeout_policy": map[string]any{"type": "string", "enum": []string{"fallback", "fail", "retry", "escalate", "cancel"}, "description": "What happens on timeout: fallback (default) proceeds with the safest option, fail aborts the tool call, retry asks once more, escalate re-asks the project owner, cancel stops the run"}}, "required": []string{"question"}}},
 		{Name: "list_triggers", Description: "List all configured triggers (schedules, webhooks, event listeners) for this project", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
 		{Name: "create_trigger", Description: "Create a new trigger to automatically launch agent runs. Types: schedule (cron-based), webhook (HTTP endpoint), event (reacts to journal events).", Parameters: map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}, "type": map[string]any{"type": "string", "enum": []string{"schedule", "webhook", "event"}}, "cron": map[string]any{"type": "string", "description": "Cron expression for schedule triggers, e.g. '0 9 * * 1-5'"}, "prompt": map[string]any{"type": "string", "description": "The prompt sent to the agent when the trigger fires"}, "path": map[string]any{"type": "string", "description": "URL path for webhook triggers"}, "event_type": map[string]any{"type": "string", "description": "Event type to react to for event triggers, e.g. 'tool.failed'"}, "agent_id": map[string]any{"type": "string", "description": "Agent to use (optional, uses default if empty)"}}, "required": []string{"name", "type", "prompt"}}},
 		{Name: "update_trigger", Description: "Update an existing trigger's configuration (enable/disable, change cron, update prompt, etc.)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}, "enabled": map[string]any{"type": "boolean"}, "cron": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},

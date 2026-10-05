@@ -142,6 +142,14 @@ func TestAgentRunAskHumanDeliversResponseAndRecordsTrajectory(t *testing.T) {
 		require.Equal(t, "postgres", request.Options[0])
 		return NotificationDelivery{Recipient: "lead", Channel: "web", Status: "delivered"}, nil
 	}, activity.RegisterOptions{Name: ActivityNotifyChannel})
+	closed := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, input CloseHumanRequestInput) error {
+		closed++
+		require.Equal(t, "run-1/turn/01/ask-1", input.OperationID)
+		require.Equal(t, "answered", input.Status)
+		require.Equal(t, "postgres", input.Response)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityCloseHumanRequest})
 	modelCalls := 0
 	var answerSeen string
 	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
@@ -180,6 +188,7 @@ func TestAgentRunAskHumanDeliversResponseAndRecordsTrajectory(t *testing.T) {
 		require.False(t, types[forbidden], "ask_human must not emit approval events, found %s", forbidden)
 	}
 	require.Equal(t, 1, notified, "the question is delivered exactly once")
+	require.Equal(t, 1, closed, "the request row is closed exactly once")
 }
 
 func TestAgentRunTimesOutAnUnansweredApproval(t *testing.T) {

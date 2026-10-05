@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,12 +32,17 @@ type NotifyChannelRequest struct {
 	Project        string
 	RunID          string
 	OperationID    string
-	Recipient      string // workspace user id, optionally "user:<id>" prefixed
+	Recipient      string // logical recipient: user:id, role:x, org:unit, project_owner, or ''
 	ActorID        string // run actor, used when the agent named no recipient
+	AgentID        string
 	Question       string
 	Context        string
 	Options        []string
 	TimeoutSeconds int
+	TimeoutPolicy  string
+	// ExecutionIdentityID scopes whom this run may address (§30); empty for
+	// manual runs without an identity.
+	ExecutionIdentityID string
 }
 
 // NotificationDelivery is the outcome recorded on the notification.sent
@@ -67,21 +73,76 @@ func (a *Activities) NotifyChannel(ctx context.Context, request NotifyChannelReq
 	return a.deliverNotification(ctx, request), nil
 }
 
+// validTimeoutPolicy reports whether s is one of the §33 policies. The
+// empty string is valid (the workflow defaults it to fallback).
+func validTimeoutPolicy(s string) bool {
+	switch s {
+	case "", "fail", "retry", "fallback", "escalate", "cancel":
+		return true
+	}
+	return false
+}
+
+// ActivityCloseHumanRequest closes a human_request row when its wait ends
+// (docs/org-structure.md §28): answered, cancelled or expired. Called from
+// the workflow after awaitApproval resolves; the lazy sweep in the list
+// endpoint is the safety net.
+const ActivityCloseHumanRequest = "kernel.close_human_request"
+
+// CloseHumanRequestInput is the workflow-side input for the close activity.
+type CloseHumanRequestInput struct {
+	OperationID string
+	Status      string // answered | cancelled | expired
+	Response    string
+	ActorID     string
+}
+
+// CloseHumanRequest never fails the run: a storage problem leaves the row to
+// the lazy expiry sweep (expired) or keeps it delivered (answered rows keep
+// pointing at the resolved answer in events).
+func (a *Activities) CloseHumanRequest(ctx context.Context, input CloseHumanRequestInput) error {
+	endpoint := fmt.Sprintf("%s/v1/workspace/human-requests/%s/close", a.WorkspaceURL, url.PathEscape(input.OperationID))
+	body := map[string]any{"status": input.Status, "response": input.Response, "actor_id": input.ActorID}
+	_, _, err := a.workspaceDo(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		slog.Error("close human request", "operation", input.OperationID, "status", input.Status, "error", err)
+	}
+	return nil
+}
+
 func (a *Activities) deliverNotification(ctx context.Context, request NotifyChannelRequest) NotificationDelivery {
-	recipient := normalizeRecipient(request.Recipient)
-	if recipient == "" {
-		recipient = normalizeRecipient(request.ActorID)
-	}
-	if recipient == "" {
-		return NotificationDelivery{Channel: "web", Status: "skipped", Detail: "no recipient"}
-	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	delivery := a.resolveAndDeliver(ctx, request)
+	// Persist the request as a first-class entity (§28): pending → delivered
+	// (or rejected when §30 forbids the recipient). Delivery problems never
+	// fail the run — they are part of the recorded outcome.
+	a.recordHumanRequest(ctx, request, delivery)
+	return delivery
+}
+
+// resolveAndDeliver runs recipient resolution (§26) and channel delivery.
+func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChannelRequest) NotificationDelivery {
+	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
-	profile, ok := a.fetchRecipientProfile(ctx, recipient)
-	if !ok {
-		return NotificationDelivery{Recipient: recipient, Channel: "web", Status: "skipped", Detail: "recipient is not a workspace user"}
+	denied := func(reason string) NotificationDelivery {
+		return NotificationDelivery{Recipient: strings.TrimPrefix(request.Recipient, "user:"), Channel: "web", Status: "rejected", Detail: reason}
 	}
-	channel, mode := pickChannel(profile, channelConfigured)
+	users, ok := a.fetchWorkspaceUsers(ctx)
+	if !ok {
+		return denied("workspace user list unavailable")
+	}
+	target, found := ResolveRecipient(request.Recipient, request.ActorID, users)
+	if !found {
+		return denied("recipient could not be resolved to a workspace user")
+	}
+	// §30: an execution identity restricts whom the run may address. The
+	// check runs at ask time with the identity's current human_targets.
+	if request.ExecutionIdentityID != "" {
+		allowed, detail := a.identityAllowsHuman(ctx, request.ExecutionIdentityID, target.ID)
+		if !allowed {
+			return denied(detail)
+		}
+	}
+	channel, mode := pickChannel(recipientChannels{Channels: target.Channels, Preferred: target.Preferred}, channelConfigured)
 	if mode != "web" {
 		text := notificationText(request)
 		var err error
@@ -92,62 +153,168 @@ func (a *Activities) deliverNotification(ctx context.Context, request NotifyChan
 			err = a.sendTelegram(ctx, channel.Address, text)
 		}
 		if err != nil {
-			return NotificationDelivery{Recipient: recipient, Channel: channel.Type, Status: "failed", Detail: truncate(err.Error(), 300)}
+			return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "failed", Detail: truncate(err.Error(), 300)}
 		}
-		return NotificationDelivery{Recipient: recipient, Channel: channel.Type, Status: "delivered"}
+		return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "delivered"}
 	}
 	detail := "web inbox"
-	if profile.Preferred != "" && profile.Preferred != "web" {
-		detail = fmt.Sprintf("preferred channel %s unavailable, fell back to web inbox", profile.Preferred)
+	if target.Preferred != "" && target.Preferred != "web" {
+		detail = fmt.Sprintf("preferred channel %s unavailable, fell back to web inbox", target.Preferred)
 	}
-	return NotificationDelivery{Recipient: recipient, Channel: "web", Status: "delivered", Detail: detail}
+	return NotificationDelivery{Recipient: target.ID, Channel: "web", Status: "delivered", Detail: detail}
 }
 
-// normalizeRecipient accepts "user:<id>" spellings from tool arguments.
-func normalizeRecipient(raw string) string {
-	value := strings.TrimSpace(raw)
-	value = strings.TrimPrefix(value, "user:")
-	return strings.TrimSpace(value)
+// recordHumanRequest upserts the human_request row with the delivery
+// outcome. Best-effort: storage problems surface in logs but never break the
+// paused run — the entity tracks the question, not the delivery logistics.
+func (a *Activities) recordHumanRequest(ctx context.Context, request NotifyChannelRequest, delivery NotificationDelivery) {
+	var expiresAt any
+	if request.TimeoutSeconds > 0 {
+		expiresAt = time.Now().UTC().Add(time.Duration(request.TimeoutSeconds) * time.Second)
+	}
+	if request.Options == nil {
+		request.Options = []string{}
+	}
+	body := map[string]any{
+		"id":                    request.OperationID,
+		"run_id":                request.RunID,
+		"project_id":            request.Project,
+		"agent_id":              request.AgentID,
+		"recipient":             request.Recipient,
+		"resolved_user":         delivery.Recipient,
+		"question":              request.Question,
+		"context":               request.Context,
+		"options":               request.Options,
+		"status":                delivery.Status,
+		"channel":               delivery.Channel,
+		"timeout_seconds":       request.TimeoutSeconds,
+		"timeout_policy":        request.TimeoutPolicy,
+		"execution_identity_id": request.ExecutionIdentityID,
+		"expires_at":            expiresAt,
+	}
+	endpoint := fmt.Sprintf("%s/v1/workspace/human-requests", a.WorkspaceURL)
+	if _, _, err := a.workspaceDo(ctx, http.MethodPost, endpoint, body); err != nil {
+		slog.Error("record human request", "operation", request.OperationID, "error", err)
+	}
 }
 
-// fetchRecipientProfile resolves a user id (and, failing that, a user name)
-// through the kernel's own workspace API.
-func (a *Activities) fetchRecipientProfile(ctx context.Context, recipient string) (recipientChannels, bool) {
-	var profile recipientChannels
-	if recipient == "" {
-		return profile, false
-	}
-	endpoint := fmt.Sprintf("%s/v1/workspace/users/%s", a.WorkspaceURL, url.PathEscape(recipient))
+// WorkspaceUser is the resolution input: one user's identity, position and
+// communication channels.
+type WorkspaceUser struct {
+	ID        string             `json:"id"`
+	Name      string             `json:"name"`
+	Role      string             `json:"role"`
+	Active    bool               `json:"active"`
+	OrgUnitID string             `json:"org_unit_id"`
+	Channels  []recipientChannel `json:"channels"`
+	Preferred string             `json:"preferred_channel"`
+}
+
+// fetchWorkspaceUsers pulls the resolution input once per delivery.
+func (a *Activities) fetchWorkspaceUsers(ctx context.Context) ([]WorkspaceUser, bool) {
+	endpoint := fmt.Sprintf("%s/v1/workspace/users", a.WorkspaceURL)
 	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
-	if err == nil && status == http.StatusOK {
-		if json.Unmarshal([]byte(body), &profile) == nil {
-			return profile, true
-		}
-	}
-	// The actor of a chat run is the user's display name: fall back to a list
-	// lookup before giving up.
-	endpoint = fmt.Sprintf("%s/v1/workspace/users", a.WorkspaceURL)
-	body, status, err = a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
 	if err != nil || status != http.StatusOK {
-		return profile, false
+		return nil, false
 	}
 	var list struct {
-		Users []struct {
-			ID        string             `json:"id"`
-			Name      string             `json:"name"`
-			Channels  []recipientChannel `json:"channels"`
-			Preferred string             `json:"preferred_channel"`
-		} `json:"users"`
+		Users []WorkspaceUser `json:"users"`
 	}
 	if json.Unmarshal([]byte(body), &list) != nil {
-		return profile, false
+		return nil, false
 	}
-	for _, user := range list.Users {
-		if user.ID == recipient || user.Name == recipient {
-			return recipientChannels{Channels: user.Channels, Preferred: user.Preferred}, true
+	return list.Users, true
+}
+
+// identityAllowsHuman checks the identity's human_targets (§30): "*" or an
+// empty list allows anyone; otherwise the resolved user must be listed. Fails
+// closed when the policy source is unavailable.
+func (a *Activities) identityAllowsHuman(ctx context.Context, identityID, userID string) (bool, string) {
+	endpoint := fmt.Sprintf("%s/v1/workspace/execution-identities", a.WorkspaceURL)
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
+	if err != nil || status != http.StatusOK {
+		return false, fmt.Sprintf("execution identity %q could not be loaded", identityID)
+	}
+	var list struct {
+		Identities []struct {
+			ID           string   `json:"id"`
+			HumanTargets []string `json:"human_targets"`
+		} `json:"identities"`
+	}
+	if json.Unmarshal([]byte(body), &list) != nil {
+		return false, fmt.Sprintf("execution identity %q could not be parsed", identityID)
+	}
+	for _, identity := range list.Identities {
+		if identity.ID != identityID {
+			continue
 		}
+		if len(identity.HumanTargets) == 0 {
+			return true, ""
+		}
+		for _, allowed := range identity.HumanTargets {
+			if allowed == "*" || allowed == userID {
+				return true, ""
+			}
+		}
+		return false, fmt.Sprintf("execution identity %q may not address user %q", identityID, userID)
 	}
-	return profile, false
+	return false, fmt.Sprintf("execution identity %q no longer exists", identityID)
+}
+
+// ResolveRecipient maps a logical recipient (§26) to a concrete workspace
+// user: explicit user id/name, role:, org:, project_owner, or the run actor
+// as the default. Tie-breaking picks the first active match — deterministic
+// for a given users list.
+func ResolveRecipient(recipient, actor string, users []WorkspaceUser) (WorkspaceUser, bool) {
+	normalize := func(raw string) string {
+		value := strings.TrimSpace(raw)
+		value = strings.TrimPrefix(value, "user:")
+		return strings.TrimSpace(value)
+	}
+	byName := func(id string) (WorkspaceUser, bool) {
+		for _, u := range users {
+			if u.Active && (u.ID == id || u.Name == id) {
+				return u, true
+			}
+		}
+		return WorkspaceUser{}, false
+	}
+	switch {
+	case strings.HasPrefix(recipient, "role:"):
+		role := strings.TrimSpace(strings.TrimPrefix(recipient, "role:"))
+		for _, u := range users {
+			if u.Active && u.Role == role {
+				return u, true
+			}
+		}
+		return WorkspaceUser{}, false
+	case strings.HasPrefix(recipient, "org:"):
+		unit := strings.TrimSpace(strings.TrimPrefix(recipient, "org:"))
+		for _, u := range users {
+			if u.Active && u.OrgUnitID == unit {
+				return u, true
+			}
+		}
+		return WorkspaceUser{}, false
+	case recipient == "project_owner":
+		// Projects carry no owner field yet (docs/org-structure.md §14); the
+		// installation admin is the steward until explicit ownership lands.
+		for _, u := range users {
+			if u.Active && u.Role == "admin" {
+				return u, true
+			}
+		}
+		return WorkspaceUser{}, false
+	case normalize(recipient) != "":
+		return byName(normalize(recipient))
+	default:
+		if id := normalize(actor); id != "" {
+			if u, ok := byName(id); ok {
+				return u, true
+			}
+		}
+		return WorkspaceUser{}, false
+	}
 }
 
 // channelConfigured reports whether the kernel can send through a transport.
