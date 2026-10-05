@@ -14,6 +14,12 @@ export interface UncertainOperation {
   source_id: string
   state: string
   reason: string
+  // Delegation context (docs/failure-reconciliation.md): set when the failed
+  // tool is a delegate call, so the UI can point at the child trajectory.
+  error_type?: string
+  child_run_id?: string
+  child_ops_total?: number
+  child_ops_unresolved?: number
 }
 
 export interface Whoami {

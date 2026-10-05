@@ -270,11 +270,30 @@ export default function Operations({ project }: { project: string }) {
                     marginBottom: '0.75rem',
                   }}>
                     <div style={{ fontWeight: 600, color: '#e0af68', marginBottom: '0.25rem' }}>⚠ {t('operations.what_happened') ?? 'What happened'}</div>
-                    <p style={{ fontSize: '0.875rem', color: '#c0caf5' }}>{reasonText(selected.reason)}</p>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.5rem' }}>
-                      {t('operations.agent_notice') ?? 'The agent executed this tool but the system couldn\'t confirm whether the side effect actually happened.'}
-                      {' '}{t('operations.check_tell') ?? 'You need to check the external system and tell Temporality the outcome.'}
-                    </p>
+                    {selected.child_run_id ? (
+                      <>
+                        <p style={{ fontSize: '0.875rem', color: '#c0caf5' }}>
+                          {t('operations.delegated_notice', { run: selected.child_run_id })}
+                        </p>
+                        <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.5rem' }}>
+                          {t('operations.delegated_stats', { total: String(selected.child_ops_total ?? '?'), unresolved: String(selected.child_ops_unresolved ?? '?') })}{' '}
+                          <a
+                            href={`/agents?project=${encodeURIComponent(selected.project)}&run=${encodeURIComponent(selected.child_run_id)}`}
+                            style={{ color: 'var(--tm-teal)' }}
+                          >
+                            {t('operations.open_child_run') ?? 'Open child run'}
+                          </a>
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p style={{ fontSize: '0.875rem', color: '#c0caf5' }}>{reasonText(selected.reason)}</p>
+                        <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.5rem' }}>
+                          {t('operations.agent_notice') ?? 'The agent executed this tool but the system couldn\'t confirm whether the side effect actually happened.'}
+                          {' '}{t('operations.check_tell') ?? 'You need to check the external system and tell Temporality the outcome.'}
+                        </p>
+                      </>
+                    )}
                   </div>
                 </Tile>
 
