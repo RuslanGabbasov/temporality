@@ -307,29 +307,29 @@ function PlanDAG({ plan, planIndex, planCount, agents, t, onOpenRun }: {
                   key={status}
                   id={`${markerId}-${status}`}
                   viewBox="0 0 8 8"
-                  refX="7"
+                  refX="6.5"
                   refY="4"
-                  markerWidth="6"
-                  markerHeight="6"
+                  markerWidth="4.5"
+                  markerHeight="4.5"
                   orient="auto"
                 >
-                  <path d="M0,0 L8,4 L0,8 z" fill={EDGE_COLORS[status]} />
+                  <path d="M0,1 L7,4 L0,7 z" fill={EDGE_COLORS[status]} />
                 </marker>
               ))}
             </defs>
             {edges.map((edge) => {
-              const dx = Math.min(Math.max((edge.x2 - edge.x1) / 2, 14), 48)
-              const d = `M ${edge.x1 + 2} ${edge.y1} C ${edge.x1 + 2 + dx} ${edge.y1}, ${edge.x2 - 2 - dx} ${edge.y2}, ${edge.x2 - 2} ${edge.y2}`
+              const dx = Math.min(Math.max((edge.x2 - edge.x1) / 2, 12), 40)
+              const d = `M ${edge.x1 + 2} ${edge.y1} C ${edge.x1 + 2 + dx} ${edge.y1}, ${edge.x2 - 2 - dx} ${edge.y2}, ${edge.x2 - 3} ${edge.y2}`
               return (
                 <path
                   key={edge.key}
                   d={d}
                   fill="none"
                   stroke={EDGE_COLORS[edge.status]}
-                  strokeWidth={1.25}
+                  strokeWidth={1}
                   strokeDasharray={edge.status === 'skipped' ? '3 3' : undefined}
                   markerEnd={`url(#${markerId}-${edge.status})`}
-                  opacity={0.85}
+                  opacity={0.8}
                 />
               )
             })}
