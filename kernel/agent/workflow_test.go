@@ -1223,6 +1223,496 @@ func TestAgentRunDelegationWithApproval(t *testing.T) {
 	}
 }
 
+func TestAgentRunPlanExecutesDAG(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	// The model mock serves every run: children are recognized by their resolved
+	// system prompt and answer by marker; the parent issues one plan call and
+	// then reads the summary. DAG: a and b in parallel, mid after both, end last.
+	var childPrompts []string
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if len(request.Messages) == 0 {
+			t.Fatalf("unexpected model request: %#v", request)
+		}
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			prompt := request.Messages[1].Content
+			childPrompts = append(childPrompts, prompt)
+			switch {
+			case strings.Contains(prompt, "work a"):
+				return llm.Completion{Content: "A-DONE"}, nil
+			case strings.Contains(prompt, "work b"):
+				return llm.Completion{Content: "B-DONE"}, nil
+			case strings.Contains(prompt, "merge work"):
+				return llm.Completion{Content: "MID-DONE"}, nil
+			case strings.Contains(prompt, "final work"):
+				return llm.Completion{Content: "END-DONE"}, nil
+			}
+			t.Fatalf("unexpected child prompt: %s", prompt)
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
+				"goal": "ship the feature",
+				"tasks": []any{
+					map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "work a"},
+					map[string]any{"id": "b", "agent_id": "repo-a-coder", "prompt": "work b"},
+					map[string]any{"id": "mid", "agent_id": "repo-a-reviewer", "prompt": "merge work", "depends_on": []any{"a", "b"}},
+					map[string]any{"id": "end", "agent_id": "repo-a-qa", "prompt": "final work", "depends_on": []any{"mid"}},
+				},
+			}}}}, nil
+		}
+		sawSummary := false
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "MID-DONE") && strings.Contains(message.Content, "END-DONE") {
+				sawSummary = true
+			}
+		}
+		require.True(t, sawSummary, "the parent must receive the plan summary with every answer")
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	resolveRuns := map[string]bool{}
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		require.Equal(t, "repo-a", request.Project)
+		require.Equal(t, 1, request.DelegationDepth)
+		resolveRuns[request.RunID] = true
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: 4}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		t.Fatalf("plan must not reach the tool activity")
+		return ToolResult{}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-plan", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "run the plan", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var parentResult RunResult
+	require.NoError(t, env.GetWorkflowResult(&parentResult))
+	require.Equal(t, "completed", parentResult.Status)
+	require.Equal(t, "parent done", parentResult.Answer)
+
+	// Every task is resolved up front, before any child starts.
+	for _, id := range []string{"run-plan/plan/01-a", "run-plan/plan/02-b", "run-plan/plan/03-mid", "run-plan/plan/04-end"} {
+		require.True(t, resolveRuns[id], "task run %s must be resolved up front", id)
+	}
+	// Dependent prompts are composed from upstream answers.
+	var midPrompt, endPrompt string
+	for _, prompt := range childPrompts {
+		if strings.Contains(prompt, "merge work") {
+			midPrompt = prompt
+		}
+		if strings.Contains(prompt, "final work") {
+			endPrompt = prompt
+		}
+	}
+	require.Contains(t, midPrompt, "Upstream results")
+	require.Contains(t, midPrompt, "## a\nA-DONE")
+	require.Contains(t, midPrompt, "## b\nB-DONE")
+	require.Contains(t, endPrompt, "Upstream results")
+	require.Contains(t, endPrompt, "## mid\nMID-DONE")
+
+	planIdx := map[string]int{}
+	taskStarted := map[string]int{}
+	taskCompleted := map[string]int{}
+	childRunIDs := map[string]string{"a": "run-plan/plan/01-a", "b": "run-plan/plan/02-b", "mid": "run-plan/plan/03-mid", "end": "run-plan/plan/04-end"}
+	for index := range recorded {
+		event := recorded[index]
+		switch event.Type {
+		case "plan.started", "plan.completed":
+			if _, ok := planIdx[event.Type]; !ok {
+				planIdx[event.Type] = index
+			}
+		case "plan.task.started":
+			taskID := event.Data["task_id"].(string)
+			taskStarted[taskID] = index
+			require.Equal(t, childRunIDs[taskID], event.Data["child_run_id"])
+		case "plan.task.completed":
+			taskCompleted[event.Data["task_id"].(string)] = index
+		}
+	}
+	require.Contains(t, planIdx, "plan.started")
+	require.Contains(t, planIdx, "plan.completed")
+	require.Len(t, taskStarted, 4)
+	require.Len(t, taskCompleted, 4)
+	// Ordering: the DAG gates are respected.
+	require.Less(t, planIdx["plan.started"], taskStarted["a"])
+	require.Less(t, taskCompleted["a"], taskStarted["mid"])
+	require.Less(t, taskCompleted["b"], taskStarted["mid"])
+	require.Less(t, taskCompleted["mid"], taskStarted["end"])
+	require.Less(t, taskCompleted["end"], planIdx["plan.completed"])
+}
+
+func TestAgentRunPlanFailureSkipsDependents(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	// DAG: a completes, b fails on its first model call, mid depends on a+b and
+	// must be skipped, independent c still finishes.
+	sawSummary := false
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			prompt := request.Messages[1].Content
+			switch {
+			case strings.Contains(prompt, "sabotage"):
+				return llm.Completion{}, fmt.Errorf("child model unavailable")
+			case strings.Contains(prompt, "work a"):
+				return llm.Completion{Content: "A-DONE"}, nil
+			case strings.Contains(prompt, "work c"):
+				return llm.Completion{Content: "C-DONE"}, nil
+			}
+			t.Fatalf("unexpected child prompt: %s", prompt)
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
+				"goal": "resilient plan",
+				"tasks": []any{
+					map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "work a"},
+					map[string]any{"id": "b", "agent_id": "repo-a-coder", "prompt": "sabotage the build"},
+					map[string]any{"id": "mid", "agent_id": "repo-a-reviewer", "prompt": "merge work", "depends_on": []any{"a", "b"}},
+					map[string]any{"id": "c", "agent_id": "repo-a-qa", "prompt": "work c"},
+				},
+			}}}}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "A-DONE") && strings.Contains(message.Content, "skipped") && strings.Contains(message.Content, "C-DONE") {
+				sawSummary = true
+			}
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	resolveCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		resolveCalls++
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: 4}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ChildRunSummaryRequest) (ChildRunSummary, error) {
+		require.Contains(t, request.RunID, "/plan/")
+		return ChildRunSummary{Total: 0, Unresolved: 0}, nil
+	}, activity.RegisterOptions{Name: ActivitySummarizeChildRun})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-plan-fail", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "run the plan", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var parentResult RunResult
+	require.NoError(t, env.GetWorkflowResult(&parentResult))
+	require.Equal(t, "completed", parentResult.Status)
+	require.Equal(t, "parent done", parentResult.Answer)
+	require.Equal(t, 4, resolveCalls, "every task resolves up front, even the one that will be skipped")
+	require.True(t, sawSummary, "the summary must carry completed, failed and skipped outcomes")
+
+	var failed, skipped, planDone *observation.Event
+	childRuns := map[string]bool{}
+	for index := range recorded {
+		event := recorded[index]
+		switch {
+		case event.Type == "run.started" && strings.HasPrefix(event.Context.Run, "run-plan-fail/plan/"):
+			childRuns[event.Context.Run] = true
+		case event.Type == "plan.task.failed":
+			failed = &recorded[index]
+		case event.Type == "plan.task.skipped":
+			skipped = &recorded[index]
+		case event.Type == "plan.completed":
+			planDone = &recorded[index]
+		}
+	}
+	require.NotNil(t, failed, "the failed task must be recorded")
+	require.Equal(t, "b", failed.Data["task_id"])
+	require.Equal(t, "run-plan-fail/plan/02-b", failed.Data["child_run_id"])
+	require.Equal(t, "delegated_run_failed", failed.Data["error_type"])
+	require.Equal(t, "none", failed.Data["effect"], "a child with zero operations has no effect")
+	require.NotNil(t, skipped, "the dependent task must be skipped")
+	require.Equal(t, "mid", skipped.Data["task_id"])
+	require.Equal(t, "upstream_failed", skipped.Data["reason"])
+	require.Equal(t, "b", skipped.Data["blocked_by"])
+	require.NotNil(t, planDone)
+	statuses, ok := planDone.Data["statuses"].(map[string]any)
+	require.True(t, ok, "plan.completed must carry per-task statuses")
+	require.Equal(t, "completed", statuses["a"])
+	require.Equal(t, "failed", statuses["b"])
+	require.Equal(t, "skipped", statuses["mid"])
+	require.Equal(t, "completed", statuses["c"])
+	// The skipped task never runs.
+	require.False(t, childRuns["run-plan-fail/plan/03-mid"], "the skipped task must not start a child run")
+	require.True(t, childRuns["run-plan-fail/plan/01-a"])
+	require.True(t, childRuns["run-plan-fail/plan/02-b"])
+	require.True(t, childRuns["run-plan-fail/plan/04-c"])
+}
+
+func TestAgentRunPlanWidthLimit(t *testing.T) {
+	if MaxDelegationWidth < 2 {
+		t.Fatal("width limit test needs MaxDelegationWidth >= 2")
+	}
+	const tasks = 10 // MaxDelegationWidth + 2
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			return llm.Completion{Content: "child done"}, nil
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			planTasks := make([]any, 0, tasks)
+			for i := 1; i <= tasks; i++ {
+				planTasks = append(planTasks, map[string]any{"id": fmt.Sprintf("t%02d", i), "agent_id": "repo-a-coder", "prompt": fmt.Sprintf("work item %02d", i)})
+			}
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{"goal": "fan out", "tasks": planTasks}}}}, nil
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: 4}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-plan-wide", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "fan out", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var startedIdx, completedIdx []int
+	for index := range recorded {
+		switch recorded[index].Type {
+		case "plan.task.started":
+			startedIdx = append(startedIdx, index)
+		case "plan.task.completed":
+			completedIdx = append(completedIdx, index)
+		}
+	}
+	require.Len(t, startedIdx, tasks, "every task must start")
+	require.Len(t, completedIdx, tasks, "every task must complete")
+	// The first MaxDelegationWidth tasks start without waiting.
+	require.Less(t, startedIdx[MaxDelegationWidth-1], completedIdx[0])
+	// Launching beyond the width limit waits for a free slot.
+	require.Greater(t, startedIdx[MaxDelegationWidth], completedIdx[0])
+	// Awaits stay FIFO.
+	require.Less(t, completedIdx[0], completedIdx[1])
+}
+
+func TestAgentRunPlanValidationRejectsCycle(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	sawRejection := false
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
+				"tasks": []any{
+					map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "work a", "depends_on": []any{"b"}},
+					map[string]any{"id": "b", "agent_id": "repo-a-coder", "prompt": "work b", "depends_on": []any{"a"}},
+				},
+			}}}}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "Plan rejected before execution") && strings.Contains(message.Content, "cycle") {
+				sawRejection = true
+			}
+		}
+		return llm.Completion{Content: "did it myself"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(context.Context, ResolveAgentRequest) (RunInput, error) {
+		t.Fatalf("an invalid plan must not resolve any agent")
+		return RunInput{}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-plan-cycle", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "run the plan", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var parentResult RunResult
+	require.NoError(t, env.GetWorkflowResult(&parentResult))
+	require.Equal(t, "completed", parentResult.Status)
+	require.Equal(t, "did it myself", parentResult.Answer)
+	require.True(t, sawRejection, "the parent must see the rejection reason")
+
+	var rejected *observation.Event
+	for index := range recorded {
+		event := recorded[index]
+		require.NotEqual(t, "plan.started", event.Type, "an invalid plan must not start")
+		require.NotEqual(t, "plan.task.started", event.Type, "an invalid plan must not launch tasks")
+		if event.Type == "tool.failed" && event.Data["error_type"] == "plan_invalid" {
+			rejected = &recorded[index]
+		}
+	}
+	require.NotNil(t, rejected, "the cycle must be rejected as plan_invalid")
+	require.Equal(t, "none", rejected.Data["effect"])
+	require.Equal(t, "plan", rejected.Data["tool"])
+}
+
+func TestAgentRunPlanWithApproval(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	sawChildAnswer := false
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			return llm.Completion{Content: "child done"}, nil
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
+				"goal":  "approved work",
+				"tasks": []any{map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "work a"}},
+			}}}}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "child done") {
+				sawChildAnswer = true
+			}
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		require.Equal(t, "run-approve-plan/plan/01-a", request.RunID)
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: 4}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		t.Fatalf("plan must not reach the tool activity")
+		return ToolResult{}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+	args := map[string]any{
+		"goal":  "approved work",
+		"tasks": []any{map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "work a"}},
+	}
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(ApprovalSignal, Approval{OperationID: "run-approve-plan/turn/01/plan-1", ArgumentsHash: operationArgumentsHash(args), Approved: true, ActorID: "lead", Reason: "go ahead"})
+	}, time.Second)
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-approve-plan", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "run the plan", MaxTurns: 4, RequireToolApproval: true, ApprovalTimeoutSeconds: 5})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var parentResult RunResult
+	require.NoError(t, env.GetWorkflowResult(&parentResult))
+	require.Equal(t, "completed", parentResult.Status)
+	require.Equal(t, "parent done", parentResult.Answer)
+	require.True(t, sawChildAnswer, "the approved plan must run and its answers must reach the parent")
+
+	require.Less(t, indexEvent(recorded, "approval.requested"), indexEvent(recorded, "approval.granted"))
+	require.Less(t, indexEvent(recorded, "approval.granted"), indexEvent(recorded, "plan.started"))
+	require.Less(t, indexEvent(recorded, "plan.started"), indexEvent(recorded, "plan.completed"))
+	for _, event := range recorded {
+		require.NotEqual(t, "tool.blocked", event.Type, "the approved plan must not be blocked")
+	}
+}
+
+func TestAgentRunPlanTemplatesAndReplan(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	// Turn 1: plan one runs `first`. Turn 2: a re-plan references {{first.answer}}
+	// as a prior answer, and a dependency placeholder {{reuse.answer}} inline.
+	sawSummary := false
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			prompt := request.Messages[1].Content
+			switch {
+			case strings.Contains(prompt, "do the first step"):
+				return llm.Completion{Content: "FIRST-ANSWER"}, nil
+			case strings.Contains(prompt, "Summarize"):
+				require.Contains(t, prompt, "FIRST-ANSWER", "prior-plan placeholder must be interpolated")
+				return llm.Completion{Content: "REUSE-DONE"}, nil
+			case strings.Contains(prompt, "Act on"):
+				require.Contains(t, prompt, "REUSE-DONE", "dependency placeholder must be interpolated")
+				require.NotContains(t, prompt, "Upstream results", "explicit placeholders suppress the auto section")
+				return llm.Completion{Content: "JOINED-DONE"}, nil
+			}
+			t.Fatalf("unexpected child prompt: %s", prompt)
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
+				"tasks": []any{map[string]any{"id": "first", "agent_id": "repo-a-coder", "prompt": "do the first step"}},
+			}}}}, nil
+		}
+		if parentCalls == 2 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-2", Name: "plan", Args: map[string]any{
+				"tasks": []any{
+					map[string]any{"id": "reuse", "agent_id": "repo-a-coder", "prompt": "Summarize {{first.answer}} in one line"},
+					map[string]any{"id": "joined", "agent_id": "repo-a-reviewer", "prompt": "Act on {{reuse.answer}} now", "depends_on": []any{"reuse"}},
+				},
+			}}}}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "JOINED-DONE") {
+				sawSummary = true
+			}
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: 4}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-plan-tmpl", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "run the plans", MaxTurns: 6})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var parentResult RunResult
+	require.NoError(t, env.GetWorkflowResult(&parentResult))
+	require.Equal(t, "completed", parentResult.Status)
+	require.Equal(t, "parent done", parentResult.Answer)
+	require.True(t, sawSummary, "the second plan summary must reach the parent")
+	completedPlans := 0
+	for index := range recorded {
+		if recorded[index].Type == "plan.completed" {
+			completedPlans++
+		}
+	}
+	require.Equal(t, 2, completedPlans, "both plans must execute")
+}
+
 func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

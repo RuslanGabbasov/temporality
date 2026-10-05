@@ -1584,6 +1584,126 @@ button.header-nav-link {
   margin-bottom: 0.15rem;
 }
 
+// Plan DAG view — layered task graph of plan calls
+.chat-plan {
+  margin-top: 0.75rem;
+  border-top: 1px dashed var(--tm-border);
+  padding-top: 0.6rem;
+}
+
+.chat-plan-title {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tm-text-3);
+  margin-bottom: 0.35rem;
+}
+
+.chat-plan-graph {
+  margin-bottom: 0.5rem;
+}
+
+.chat-plan-goal {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--tm-text-2);
+  margin-bottom: 0.3rem;
+  overflow-wrap: anywhere;
+}
+
+.chat-plan-meta {
+  font-size: 0.68rem;
+  color: var(--tm-text-3);
+}
+
+.chat-plan-columns {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+}
+
+.chat-plan-column-group {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.chat-plan-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.chat-plan-arrow {
+  color: var(--tm-text-3);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.plan-task {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--tm-border);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  background: rgba(128, 145, 140, 0.05);
+  max-width: 16rem;
+}
+
+.plan-task-openable {
+  cursor: pointer;
+}
+
+.plan-task-openable:hover {
+  border-color: var(--tm-teal);
+}
+
+.plan-task-skipped {
+  opacity: 0.55;
+}
+
+.plan-task-running {
+  border-color: var(--tm-teal);
+}
+
+.plan-task-id {
+  font-weight: 600;
+  font-family: var(--tm-mono, monospace);
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+.plan-task-agent {
+  color: var(--tm-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.plan-task-meta {
+  font-size: 0.65rem;
+  color: var(--tm-text-3);
+  flex-shrink: 0;
+}
+
+// Task id chip on plan-task rows of the delegation tree
+.chat-delegation-task {
+  font-family: var(--tm-mono, monospace);
+  font-size: 0.68rem;
+  color: var(--tm-text-3);
+  background: rgba(128, 145, 140, 0.12);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  flex-shrink: 0;
+}
+
 // Human-readable failure cause block in run event details
 .run-failure-cause {
   margin: 0.25rem 0;

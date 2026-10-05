@@ -165,6 +165,10 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSumm
         const child = typeof d.child_run_id === 'string' ? d.child_run_id.split('/').pop() ?? '' : ''
         return { icon: '↗', label: t('runs.event.delegation_failed'), detail: child ? `→ ${child}` : '', color: '#f7768e' }
       }
+      // A rejected plan never started anything — surface the validation detail.
+      if (d.tool === 'plan' && (d.error_type === 'plan_invalid' || d.error_type === 'agent_resolution_failed' || d.error_type === 'delegation_depth_exceeded')) {
+        return { icon: '⎇', label: t('runs.event.plan'), detail: String(d.detail ?? d.error_type ?? '').slice(0, 80), color: '#f7768e' }
+      }
       const errDetail = d.error ? explainKernelError(String(d.error)).cause.slice(0, 60) : 'failed'
       const args = d.arguments
       let preview = ''
@@ -237,6 +241,31 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSumm
       const info = explainKernelError(String(d.error ?? ''))
       const suffix = info.timeout ? ` · ${t('errors.timeout_short')}` : ''
       return { icon: '↗', label: t('runs.event.delegation_failed'), detail: (info.cause.slice(0, 80) + suffix).trim(), color: '#f7768e' }
+    }
+    case 'plan.started': {
+      const tasks = Array.isArray(d.tasks) ? d.tasks.length : '?'
+      return { icon: '⎇', label: t('runs.event.plan_started'), detail: [String(d.goal ?? ''), `${tasks} ${t('runs.event.plan_tasks')}`].filter(Boolean).join(' · '), color: '#7aa2f7' }
+    }
+    case 'plan.task.started':
+      return { icon: '⎇', label: t('runs.event.plan_task_started'), detail: String(d.task_id ?? ''), color: '#7aa2f7' }
+    case 'plan.task.completed':
+      return { icon: '⎇', label: t('runs.event.plan_task_completed'), detail: [String(d.task_id ?? ''), d.turns != null ? `${d.turns} ${t('runs.turns')}` : ''].filter(Boolean).join(' · '), color: '#9ece6a' }
+    case 'plan.task.failed': {
+      const info = explainKernelError(String(d.error ?? ''))
+      return { icon: '⎇', label: t('runs.event.plan_task_failed'), detail: [String(d.task_id ?? ''), info.cause.slice(0, 60)].filter(Boolean).join(' · '), color: '#f7768e' }
+    }
+    case 'plan.task.skipped': {
+      const reason = d.reason === 'run_time_limit' ? t('chat.plan.run_time_limit') : t('chat.plan.upstream_failed')
+      return { icon: '⎇', label: t('runs.event.plan_task_skipped'), detail: [String(d.task_id ?? ''), reason, d.blocked_by ? `← ${d.blocked_by}` : ''].filter(Boolean).join(' · '), color: 'var(--tm-text-3)' }
+    }
+    case 'plan.completed': {
+      const statuses = (d.statuses ?? {}) as Record<string, unknown>
+      const counts = new Map<string, number>()
+      for (const value of Object.values(statuses)) counts.set(String(value), (counts.get(String(value)) ?? 0) + 1)
+      const detail = ['completed', 'failed', 'skipped']
+        .map((status) => counts.get(status) ? `${counts.get(status)} ${t(`chat.plan.status_${status}`)}` : '')
+        .filter(Boolean).join(' · ')
+      return { icon: '⎇', label: t('runs.event.plan_completed'), detail, color: '#9ece6a' }
     }
     default:
       return { icon: '•', label: event.type, detail: '', color: 'var(--tm-text-3)' }

@@ -3,6 +3,7 @@ import { API_BASE, authHeaders } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
 import { workspaceApi, type Agent } from './workspaceApi'
 import DelegationTree from './DelegationTree'
+import PlanGraph from './PlanGraph'
 import Markdown from './Markdown'
 import { useT } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString } from './eventSummary'
@@ -326,7 +327,10 @@ export default function AgentRuns({ project }: { project: string }) {
       const teamRun = root?.data?.workflow === 'LeadCoderReviewerQA'
       let allEvents = page.events
       if (teamRun) {
-        const childIDs = page.events.filter((event) => event.type === 'delegation.started').map((event) => String(event.data?.child_run_id ?? '')).filter(Boolean)
+        const childIDs = page.events
+          .filter((event) => event.type === 'delegation.started' || event.type === 'plan.task.started')
+          .map((event) => String(event.data?.child_run_id ?? ''))
+          .filter(Boolean)
         const childPages = await Promise.all(childIDs.map((child) => observationApi.events(project.trim(), undefined, undefined, undefined, { run: child, limit: 500 })))
         allEvents = [...page.events, ...childPages.flatMap((childPage) => childPage.events)].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
       }
@@ -569,6 +573,9 @@ export default function AgentRuns({ project }: { project: string }) {
 
                 {/* Delegation call tree — children runs with live status */}
                 <DelegationTree project={project.trim()} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
+
+                {/* Plan DAG view — task graph of plan calls with live statuses */}
+                <PlanGraph project={project.trim()} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
 
                 {/* Timeline — the main trace view */}
                 <Tile>

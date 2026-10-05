@@ -14,6 +14,7 @@ import { Add, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent } from './workspaceApi'
 import Markdown from './Markdown'
 import DelegationTree from './DelegationTree'
+import PlanGraph from './PlanGraph'
 import ListFilter, { matchesFilter } from './ListFilter'
 import { useT } from './i18n'
 
@@ -374,6 +375,62 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         updateMsg(convId, runId, { streamLines: [...lines] })
       } catch { /* ignore */ }
     })
+    // Plan events — DAG task progress of plan calls in the stream
+    es.addEventListener('plan.started', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const goal = typeof d.goal === 'string' && d.goal.trim() ? d.goal : t('chat.plan.untitled')
+        lines.push(t('chat.plan.stream_started', { goal }) ?? `Plan started: ${goal}`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('plan.task.started', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        lines.push(t('chat.plan.stream_task_started', { task: String(d.task_id ?? ''), name: delegationAgentName(d.agent_id) }) ?? `Plan · ${d.task_id}`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('plan.task.completed', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        lines.push(t('chat.plan.stream_task_completed', { task: String(d.task_id ?? ''), name: delegationAgentName(d.agent_id) }) ?? `Plan · ${d.task_id} · completed`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('plan.task.failed', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        lines.push(t('chat.plan.stream_task_failed', { task: String(d.task_id ?? ''), name: delegationAgentName(d.agent_id) }) ?? `Plan · ${d.task_id} · failed`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('plan.task.skipped', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        lines.push(t('chat.plan.stream_task_skipped', { task: String(d.task_id ?? '') }) ?? `Plan · ${d.task_id} · skipped`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('plan.completed', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const statuses = (d.statuses ?? {}) as Record<string, unknown>
+        const counts = new Map<string, number>()
+        for (const value of Object.values(statuses)) counts.set(String(value), (counts.get(String(value)) ?? 0) + 1)
+        const summary = ['completed', 'failed', 'skipped']
+          .map((status) => counts.get(status) ? `${counts.get(status)} ${t(`chat.plan.status_${status}`)}` : '')
+          .filter(Boolean).join(' · ')
+        lines.push(t('chat.plan.stream_completed', { summary }) ?? `Plan finished: ${summary}`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
 
     es.addEventListener('run.failed', (e) => {
       try {
@@ -576,7 +633,10 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     ) : null}
 
                     {msg.role === 'assistant' && msg.runId && msg.status && (
-                      <DelegationTree project={project} runId={msg.runId} agents={allAgents} live={msg.status === 'running'} />
+                      <>
+                        <DelegationTree project={project} runId={msg.runId} agents={allAgents} live={msg.status === 'running'} />
+                        <PlanGraph project={project} runId={msg.runId} agents={allAgents} live={msg.status === 'running'} />
+                      </>
                     )}
 
                     {msg.status === 'running' && msg.streamLines && msg.streamLines.length > 0 && (

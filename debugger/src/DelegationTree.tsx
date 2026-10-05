@@ -13,29 +13,35 @@ export interface DelegationNodeInfo {
   status: 'completed' | 'failed' | 'running'
   turns?: number
   error?: string
+  taskId?: string
 }
 
-/** Fold delegation.* events (emitted by the parent run) into node info. */
+/** Fold delegation.* and plan.task.* events (emitted by the parent run) into node info. Plan tasks key by their child run id; skipped tasks never ran and belong to the plan graph view. */
 export function foldDelegations(events: ObservationEvent[]): DelegationNodeInfo[] {
   const nodes = new Map<string, DelegationNodeInfo>()
   const order: string[] = []
   for (const event of events) {
-    if (event.type !== 'delegation.started' && event.type !== 'delegation.completed' && event.type !== 'delegation.failed') continue
+    const isDelegation = event.type === 'delegation.started' || event.type === 'delegation.completed' || event.type === 'delegation.failed'
+    const isPlanTask = event.type === 'plan.task.started' || event.type === 'plan.task.completed' || event.type === 'plan.task.failed'
+    if (!isDelegation && !isPlanTask) continue
     const d = (event.data ?? {}) as Record<string, any>
     const child = d.child_run_id ?? ''
     if (!child) continue
     if (!nodes.has(child)) {
-      nodes.set(child, { childRunId: child, agentId: d.agent_id ?? '', ordinal: d.ordinal ?? order.length + 1, status: 'running' })
+      nodes.set(child, { childRunId: child, agentId: d.agent_id ?? '', ordinal: order.length + 1, status: 'running' })
       order.push(child)
     }
     const node = nodes.get(child)!
     if (event.type === 'delegation.started') {
       node.agentId = d.agent_id ?? node.agentId
       node.ordinal = d.ordinal ?? node.ordinal
-    } else if (event.type === 'delegation.completed') {
+    } else if (event.type === 'plan.task.started') {
+      node.agentId = d.agent_id ?? node.agentId
+      if (typeof d.task_id === 'string') node.taskId = d.task_id
+    } else if (event.type === 'delegation.completed' || event.type === 'plan.task.completed') {
       node.status = 'completed'
       node.turns = d.turns ?? node.turns
-    } else if (event.type === 'delegation.failed') {
+    } else if (event.type === 'delegation.failed' || event.type === 'plan.task.failed') {
       node.status = 'failed'
       node.error = d.error ?? node.error
     }
@@ -43,9 +49,9 @@ export function foldDelegations(events: ObservationEvent[]): DelegationNodeInfo[
   return order.map((id) => nodes.get(id)!)
 }
 
-/** Fetch all delegation events for a run and fold them into node info. */
+/** Fetch all delegation and plan-task events for a run and fold them into node info. */
 export async function fetchDelegations(project: string, runId: string): Promise<DelegationNodeInfo[]> {
-  const types = ['delegation.started', 'delegation.completed', 'delegation.failed'] as const
+  const types = ['delegation.started', 'delegation.completed', 'delegation.failed', 'plan.task.started', 'plan.task.completed', 'plan.task.failed'] as const
   const pages = await Promise.all(types.map((type) =>
     observationApi.events(project, undefined, undefined, undefined, { run: runId, type, limit: 100 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 }))
   ))
@@ -179,6 +185,7 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
       >
         <span className="chat-delegation-arrow">{open ? '▾' : '▸'}</span>
+        {info.taskId && <span className="chat-delegation-task">{info.taskId}</span>}
         <span className="chat-delegation-agent">{agentTitle}</span>
         {statusTag}
         {typeof turns === 'number' && (
