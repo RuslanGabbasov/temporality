@@ -41,6 +41,12 @@ const (
 	AuditTriggerCreated       = "trigger.created"
 	AuditTriggerUpdated       = "trigger.updated"
 	AuditTriggerDeleted       = "trigger.deleted"
+	AuditHumanCreated         = "human_request.created"
+	AuditHumanDelivered       = "human_request.delivered"
+	AuditHumanAnswered        = "human_request.answered"
+	AuditHumanExpired         = "human_request.expired"
+	AuditHumanCancelled       = "human_request.cancelled"
+	AuditHumanRejected        = "human_request.rejected"
 )
 
 // RecordAccessAudit appends one event. Nil details is stored as {}.

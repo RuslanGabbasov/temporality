@@ -70,6 +70,57 @@ const (
 	OrgKindTeam         = "team"
 )
 
+// HumanRequest lifecycle statuses (docs/org-structure.md §28). The spec's
+// "waiting" merges into "delivered": once the notification is out, the
+// request is waiting for an answer — one state, not two.
+const (
+	HumanStatusPending   = "pending"
+	HumanStatusDelivered = "delivered"
+	HumanStatusAnswered  = "answered"
+	HumanStatusExpired   = "expired"
+	HumanStatusCancelled = "cancelled"
+	HumanStatusRejected  = "rejected" // §30: the identity may not address this user
+)
+
+// HumanRequest is one ask_human escalation as a queryable entity
+// (docs/org-structure.md §28, docs/triggers-and-escalations.md §10): the run
+// pauses, the question is routed to a resolved user, and the answer flows
+// back into the run. The id is the ask operation id, so the approval
+// endpoint closes the row atomically.
+type HumanRequest struct {
+	ID                  string     `json:"id"`
+	RunID               string     `json:"run_id"`
+	ProjectID           string     `json:"project_id"`
+	AgentID             string     `json:"agent_id,omitempty"`
+	Recipient           string     `json:"recipient,omitempty"`
+	ResolvedUser        string     `json:"resolved_user,omitempty"`
+	Question            string     `json:"question"`
+	Context             string     `json:"context,omitempty"`
+	Options             []string   `json:"options"`
+	Status              string     `json:"status"`
+	Channel             string     `json:"channel,omitempty"`
+	Response            string     `json:"response,omitempty"`
+	AnsweredBy          string     `json:"answered_by,omitempty"`
+	TimeoutSeconds      int        `json:"timeout_seconds,omitempty"`
+	TimeoutPolicy       string     `json:"timeout_policy,omitempty"`
+	ExecutionIdentityID string     `json:"execution_identity_id,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	DeliveredAt         *time.Time `json:"delivered_at,omitempty"`
+	AnsweredAt          *time.Time `json:"answered_at,omitempty"`
+	ExpiresAt           *time.Time `json:"expires_at,omitempty"`
+}
+
+// Valid timeout policies (docs/org-structure.md §33): what happens when a
+// human request times out. The policy lives in the execution model, never in
+// the transport adapter.
+var ValidHumanTimeoutPolicies = map[string]bool{
+	"fail":     true,
+	"retry":    true,
+	"fallback": true,
+	"escalate": true,
+	"cancel":   true,
+}
+
 // ValidOrgKinds lists the allowed org unit kinds.
 var ValidOrgKinds = map[string]bool{
 	OrgKindOrganization: true,
