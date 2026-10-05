@@ -163,6 +163,10 @@ func main() {
 		log.Error("migrate workspace v39", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000040_human_request.up.sql"); err != nil {
+		log.Error("migrate workspace v40", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -194,6 +198,7 @@ func main() {
 	temporalWorker.RegisterActivityWithOptions(activities.ExtractKnowledge, activity.RegisterOptions{Name: agent.ActivityExtractKnowledge})
 	temporalWorker.RegisterActivityWithOptions(activities.SummarizeChildRun, activity.RegisterOptions{Name: agent.ActivitySummarizeChildRun})
 	temporalWorker.RegisterActivityWithOptions(activities.NotifyChannel, activity.RegisterOptions{Name: agent.ActivityNotifyChannel})
+	temporalWorker.RegisterActivityWithOptions(activities.CloseHumanRequest, activity.RegisterOptions{Name: agent.ActivityCloseHumanRequest})
 	registerExampleWorkflow(temporalWorker)
 	workerDone := make(chan error, 1)
 	go func() { workerDone <- temporalWorker.Run(worker.InterruptCh()) }()
@@ -454,6 +459,42 @@ func main() {
 		if err := temporalClient.SignalWorkflow(r.Context(), workflowID, "", agent.ApprovalSignal, approval); err != nil {
 			writeError(w, 409, err)
 			return
+		}
+		// Close the human_request row when this approval answers one
+		// (docs/org-structure.md §28): answered for ask_human responses,
+		// cancelled when the human declined. Tool approvals carry operation
+		// ids that match no row — the update is a no-op then.
+		if approval.Response != "" || !approval.Approved {
+			closeStatus := "answered"
+			if !approval.Approved && approval.Response == "" {
+				closeStatus = "cancelled"
+			}
+			actor := approval.ActorID
+			if principal, ok := controlplane.FromContext(r.Context()); ok && principal.UserID != "" {
+				actor = principal.UserID
+			}
+			var closeErr error
+			response := approval.Response
+			if response == "" {
+				response = approval.Reason
+			}
+			if closeStatus == "answered" {
+				_, closeErr = ws.AnswerHumanRequest(r.Context(), approval.OperationID, response, actor)
+			} else {
+				closeErr = ws.CancelHumanRequest(r.Context(), approval.OperationID, actor)
+			}
+			switch {
+			case closeErr == nil:
+				auditAction := workspace.AuditHumanAnswered
+				if closeStatus == "cancelled" {
+					auditAction = workspace.AuditHumanCancelled
+				}
+				_ = ws.RecordAccessAudit(r.Context(), actor, auditAction, "human_request", approval.OperationID, map[string]any{"run_id": r.PathValue("runID")})
+			case errors.Is(closeErr, workspace.ErrNotFound):
+			// not a human request — plain tool approval
+			default:
+				log.Warn("close human request on approval", "operation", approval.OperationID, "error", closeErr)
+			}
 		}
 		writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
 	})
@@ -2663,6 +2704,7 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		input.ExecutionIdentityID = identityID
 		triggerEventData["execution_identity_id"] = identityID
 		emitTriggerEvent("trigger.accepted", "000001", triggerEventData)
 		workflowID := workflowIDFor(activities.SourceID, projectID, input.RunID)
@@ -2742,6 +2784,7 @@ func main() {
 					slog.Error("create trigger task", "trigger", t.ID, "error", err)
 					continue
 				}
+				input.ExecutionIdentityID = identityID
 				workflowID := workflowIDFor(activities.SourceID, t.ProjectID, input.RunID)
 				options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
 				if _, wfErr := temporalClient.ExecuteWorkflow(context.Background(), options, "AgentRun", input); wfErr != nil {
@@ -2844,6 +2887,118 @@ func main() {
 			log.Warn("audit execution identity delete", "error", err)
 		}
 		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+
+	// Human requests (docs/org-structure.md §28, §37). Created and closed by
+	// kernel activities through the internal token; the list is the UI inbox
+	// backed by a real entity, not by event-stream reconstruction.
+	mux.HandleFunc("GET /v1/workspace/human-requests", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		// Lazy expiry sweep (§33): rows whose wait ended without the close
+		// activity still landing (kernel restart, activity failure).
+		if expired, err := ws.ExpireHumanRequests(r.Context()); err != nil {
+			log.Warn("sweep human requests", "error", err)
+		} else if len(expired) > 0 {
+			for _, id := range expired {
+				_ = ws.RecordAccessAudit(r.Context(), "system", workspace.AuditHumanExpired, "human_request", id, nil)
+			}
+		}
+		requests, err := ws.ListHumanRequests(r.Context(), r.URL.Query().Get("project"), r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"requests": requests})
+	})
+	mux.HandleFunc("POST /v1/workspace/human-requests", func(w http.ResponseWriter, r *http.Request) {
+		// Upsert from the notification activity (internal token): creates the
+		// pending row and records resolution + delivery outcome in one call.
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		var req workspace.HumanRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if req.ID == "" || req.RunID == "" || req.ProjectID == "" || req.Question == "" {
+			writeError(w, 400, errors.New("id, run_id, project_id and question are required"))
+			return
+		}
+		if req.Status == "" {
+			req.Status = workspace.HumanStatusPending
+		}
+		if err := ws.CreateHumanRequest(r.Context(), &req); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if req.Status == workspace.HumanStatusDelivered {
+			if err := ws.DeliverHumanRequest(r.Context(), req.ID, req.ResolvedUser, req.Status, req.Channel, ""); err != nil && !errors.Is(err, workspace.ErrNotFound) {
+				log.Warn("mark human request delivered", "id", req.ID, "error", err)
+			}
+		}
+		action := workspace.AuditHumanCreated
+		if req.Status == workspace.HumanStatusDelivered {
+			action = workspace.AuditHumanDelivered
+		}
+		if req.Status == workspace.HumanStatusRejected {
+			action = workspace.AuditHumanRejected
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), action, "human_request", req.ID, map[string]any{"run_id": req.RunID, "project_id": req.ProjectID, "recipient": req.Recipient, "resolved_user": req.ResolvedUser, "channel": req.Channel}); err != nil {
+			log.Warn("audit human request create", "error", err)
+		}
+		writeJSON(w, 201, &req)
+	})
+	mux.HandleFunc("POST /v1/workspace/human-requests/{requestID}/close", func(w http.ResponseWriter, r *http.Request) {
+		// Close from the workflow activity after the wait resolved. The HTTP
+		// approval path (below) closes answered/cancelled rows directly.
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		var body struct {
+			Status   string `json:"status"`
+			Response string `json:"response"`
+			ActorID  string `json:"actor_id"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		id := r.PathValue("requestID")
+		var err error
+		switch body.Status {
+		case "answered":
+			_, err = ws.AnswerHumanRequest(r.Context(), id, body.Response, body.ActorID)
+			if err == nil {
+				err = ws.RecordAccessAudit(r.Context(), body.ActorID, workspace.AuditHumanAnswered, "human_request", id, map[string]any{"response": body.Response})
+			}
+		case "cancelled":
+			err = ws.CancelHumanRequest(r.Context(), id, body.ActorID)
+			if err == nil {
+				err = ws.RecordAccessAudit(r.Context(), body.ActorID, workspace.AuditHumanCancelled, "human_request", id, nil)
+			}
+		case "expired":
+			_, err = ws.ExpireHumanRequestByID(r.Context(), id)
+			if err == nil {
+				err = ws.RecordAccessAudit(r.Context(), "system", workspace.AuditHumanExpired, "human_request", id, nil)
+			}
+		default:
+			writeError(w, 422, errors.New("status must be answered, cancelled or expired"))
+			return
+		}
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				// Unknown id: a tool approval reusing the endpoint, not a human
+				// request — nothing to close.
+				writeJSON(w, 200, map[string]bool{"closed": false})
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"closed": true})
 	})
 
 	// Users
