@@ -38,7 +38,7 @@ Source spec: `docs/org-structure.md` (расширенная версия, 55 р
 | 3 Authorization | visibility/use/manage/administer, проверки на операциях, execution identity | ✅ готово (provider credentials отложены до secret store) | C |
 | 4 Triggers | scope триггеров, авторизация, запуск под identity, аудит | не начато | D |
 | 5 HITL | human_request, recipient resolution, каналы, timeout-политики | ✅ готово (сущность + резолюция + политики + аудит + UI-инбокс) | E |
-| 6 Policies | наследуемые политики выполнения | не начато | F |
+| 6 Policies | наследуемые политики выполнения | ✅ готово (сущность + рестриктивный merge + enforcement в workflow и kernel + UI) | F |
 | 7 UI | Org Tree, доступность, membership, identity, политики | Org Tree/доступность/membership готово | A + B (готово); identity/политики — по фазам |
 | 8 Migration & Cleanup | расхождение моделей, удаление legacy | переходное правило | G |
 
@@ -94,9 +94,9 @@ Source spec: `docs/org-structure.md` (расширенная версия, 55 р
 
 ### Волна F. Policies — M/L — фаза 6
 
-- [ ] Сущность Policy, привязка к узлам, наследование сверху вниз.
-- [ ] Минимум: разрешённые модели/MCP, бюджет/токены, timeout, network/sandbox, human approval.
-- [ ] UI политик + визуализация эффективного доступа.
+- [x] Сущность Policy (§24) — миграция 000041 (`org_policy`, JSONB-списки, CHECK на режимах, идемпотентна), стор `workspace/policy.go`: CRUD + `EffectivePolicy(unitIDs...)` — каждый юнит разворачивается в цепочку предков, глобальные строки всегда применяются, merge рестриктивный (allowlist'ы пересекаются, капы — min, deny/read_only/tools выигрывают, голый `*` не сужает).
+- [x] Минимум ограничений: allowed_models (403 на старте рана; пустая модель резолвится в дефолт `TEMPORALITY_MODEL_ID`), allowed_mcp (неразрешённые серверы выкидываются из рана), max_tokens/max_budget_usd (USD-бюджет деградирует в токен-кап без цены в `KERNEL_MODEL_PRICES`), timeout_seconds, network deny, sandbox read_only, approval tools. Enforcement: workflow (`policy.limit`, forced finale со статусами `time_limit`/`token_limit`/`budget_limit`, approval для не-безопасных тулов) + 4 точки применения в kernel (run-config с `actor_id` для делегированных, POST /runs, webhook, scheduler — срабатывание политики = rejection как §21). Аудит `policy.created/updated/deleted`.
+- [x] UI политик + визуализация эффективного доступа: секция Policies в Org (список с бейджем узла и тегами ограничений, create/edit/delete, фильтр), панель «Действующая политика» в инспекторе узла (merge + источники); i18n ru/en; новые статусы ранов в Workspace.
 
 ### Волна G. Migration & Cleanup — S — фаза 8
 
