@@ -87,6 +87,17 @@ type RunInput struct {
 	// (docs/org-structure.md §20): trigger fires re-check its allowed lists and
 	// human_targets at every critical step. Empty for manual runs.
 	ExecutionIdentityID string `json:"execution_identity_id,omitempty"`
+	// Policy-derived constraints (docs/org-structure.md §24): resolved from the
+	// org position at run start and enforced here, in the execution model.
+	RequireToolApproval bool    `json:"require_tool_approval,omitempty"` // consequential tools need approval
+	TokenBudget         int     `json:"token_budget,omitempty"`          // 0 = uncapped
+	MaxBudgetUSD        float64 `json:"max_budget_usd,omitempty"`        // 0 = uncapped
+	TimeoutSeconds      int     `json:"timeout_seconds,omitempty"`       // 0 = uncapped; checked at turn boundaries
+	// Model prices resolved once at run-config time so the workflow can score
+	// the budget without carrying the price table. Zero = no price configured;
+	// a USD budget then degrades to the token cap.
+	ModelPromptPricePer1k float64 `json:"model_prompt_price_per_1k,omitempty"`
+	ModelCompPricePer1k   float64 `json:"model_comp_price_per_1k,omitempty"`
 }
 
 // SkillRef is a skill resolved for a run: identity plus a budgeted digest for
@@ -233,8 +244,22 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		}
 	}
 	delegations := 0
+	// Policy accounting (docs/org-structure.md §24): limits are resolved from
+	// the org position at run start; the workflow enforces them at turn
+	// boundaries and stops the run with a forced finale when one is exhausted.
+	usedTokens := 0
+	usedCostUSD := 0.0
+	runStartedAt := workflow.Now(ctx)
+	forcedFinaleReason := "" // empty = turn budget; policy checks set their own
 	for turn := 1; turn <= input.MaxTurns; turn++ {
 		result.Turns = turn
+		if input.TimeoutSeconds > 0 && workflow.Now(ctx).Sub(runStartedAt) >= time.Duration(input.TimeoutSeconds)*time.Second {
+			forcedFinaleReason = policyStopTime
+			if err := emit(activityCtx, state, "policy.limit", policyLimitData("time_exhausted", turn, input, usedTokens, usedCostUSD)); err != nil {
+				return result, err
+			}
+			break
+		}
 		frame := fmt.Sprintf("%s/turn/%02d", input.RunID, turn)
 		if state.frame != "" {
 			state.parentFrame = state.frame
@@ -313,6 +338,17 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			runKnowledgeExtraction(ctx, activityCtx, state, input)
 			return result, nil
 		}
+		// Policy budgets are checked after a model call that still wants tools: a
+		// completion that already carries the final answer completes normally.
+		usedTokens += completion.Usage.TotalTokens
+		usedCostUSD += modelCallCostUSD(input, completion.Usage)
+		if reason := policyStopReason(input, usedTokens, usedCostUSD); reason != "" {
+			forcedFinaleReason = reason
+			if err := emit(activityCtx, state, "policy.limit", policyLimitData(strings.TrimPrefix(reason, "policy."), turn, input, usedTokens, usedCostUSD)); err != nil {
+				return result, err
+			}
+			break
+		}
 		messages = append(messages, llm.Message{Role: "assistant", Content: completion.Content, ToolCalls: completion.ToolCalls})
 		// Degenerate model responses emit the same call many times in one
 		// completion; live runs showed 10+ identical failing verifications per
@@ -355,7 +391,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			toolCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 4 * time.Minute, ScheduleToCloseTimeout: 5 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 			isMCP := strings.HasPrefix(call.Name, "mcp__")
 			recentlyApproved := false // set true after request_approval succeeds
-			approvalRequired := call.Name == "request_approval" || contains(input.ApprovalTools, call.Name)
+			approvalRequired := call.Name == "request_approval" || contains(input.ApprovalTools, call.Name) ||
+				(input.RequireToolApproval && !policySafeTool(call.Name))
 			autoApproved := call.Name == "run_command" && contains(input.AutoApproveTools, call.Name)
 			toolStarted := false
 			// runCancelled stops the whole run after this turn — set by the
@@ -818,12 +855,24 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			return result, err
 		}
 	}
-	result.Status = "turn_limit"
-	// Deterministic finale: the model spent every turn on tool calls. One more
-	// model call without tools must turn the accumulated conversation into a
-	// final answer, so a turn-limited run still produces a handoff instead of
-	// silence. The status stays honestly "turn_limit"; events record that the
-	// answer came from a forced finale.
+	// Deterministic finale: the model spent every turn on tool calls, or a policy
+	// limit (time/tokens/budget) stopped the loop. One more model call without
+	// tools must turn the accumulated conversation into a final answer, so a
+	// limited run still produces a handoff instead of silence. The status stays
+	// honest (turn_limit / time_limit / token_limit / budget_limit); events
+	// record that the answer came from a forced finale and why.
+	if forcedFinaleReason == "" {
+		forcedFinaleReason = "turn_limit"
+	}
+	finaleStatus := map[string]string{
+		policyStopTime:   "time_limit",
+		policyStopTokens: "token_limit",
+		policyStopBudget: "budget_limit",
+	}[forcedFinaleReason]
+	if finaleStatus == "" {
+		finaleStatus = "turn_limit"
+	}
+	result.Status = finaleStatus
 	finaleTurn := input.MaxTurns + 1
 	result.Turns = finaleTurn
 	if state.frame != "" {
@@ -831,11 +880,19 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	state.frame = fmt.Sprintf("%s/turn/%02d", input.RunID, finaleTurn)
 	frames = append(frames, state.frame)
-	if err := emit(activityCtx, state, "turn.started", map[string]any{"turn": finaleTurn, "forced_finale": true}); err != nil {
+	if err := emit(activityCtx, state, "turn.started", map[string]any{"turn": finaleTurn, "forced_finale": true, "reason": finaleStatus}); err != nil {
 		return result, err
 	}
-	finaleMessages := append(slices.Clone(messages), llm.Message{Role: "system", Content: "The turn budget is exhausted and no tools are available. Produce the final answer to the request now, based strictly on the conversation and tool results so far."})
-	if err := emit(activityCtx, state, "model.started", map[string]any{"turn": finaleTurn, "forced_finale": true, "model": input.Model}); err != nil {
+	finaleInstruction := map[string]string{
+		"time_limit":   "The run's time budget is exhausted and no tools are available. Produce the final answer to the request now, based strictly on the conversation and tool results so far.",
+		"token_limit":  "The run's token budget is exhausted and no tools are available. Produce the final answer to the request now, based strictly on the conversation and tool results so far.",
+		"budget_limit": "The run's cost budget is exhausted and no tools are available. Produce the final answer to the request now, based strictly on the conversation and tool results so far.",
+	}[finaleStatus]
+	if finaleInstruction == "" {
+		finaleInstruction = "The turn budget is exhausted and no tools are available. Produce the final answer to the request now, based strictly on the conversation and tool results so far."
+	}
+	finaleMessages := append(slices.Clone(messages), llm.Message{Role: "system", Content: finaleInstruction})
+	if err := emit(activityCtx, state, "model.started", map[string]any{"turn": finaleTurn, "forced_finale": true, "reason": finaleStatus, "model": input.Model}); err != nil {
 		return result, err
 	}
 	var finale llm.Completion
@@ -862,7 +919,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": finaleTurn, "forced_finale": true, "tool_calls": len(finale.ToolCalls)}); err != nil {
 		return result, err
 	}
-	runData := map[string]any{"status": "turn_limit", "turns": finaleTurn, "forced_finale": true}
+	runData := map[string]any{"status": finaleStatus, "turns": finaleTurn, "forced_finale": true, "reason": finaleStatus}
 	if result.Answer != "" {
 		runData["final_answer"] = true
 	}
@@ -1057,6 +1114,62 @@ func isReadOnlyTool(tool string) bool {
 		return readOnlyTools[prefix+bare]
 	}
 	return false
+}
+
+// Policy stop reasons (docs/org-structure.md §24): resolved from the org
+// position at run start and enforced at turn boundaries.
+const (
+	policyStopTime   = "policy.time_exhausted"
+	policyStopTokens = "policy.tokens_exhausted"
+	policyStopBudget = "policy.budget_exhausted"
+)
+
+// policyLimitData shapes the policy.limit event: what was exhausted, the
+// limits in force and what the run had consumed when it stopped.
+func policyLimitData(reason string, turn int, input RunInput, usedTokens int, usedCostUSD float64) map[string]any {
+	return map[string]any{
+		"reason": reason, "turn": turn,
+		"used_tokens": usedTokens, "token_budget": input.TokenBudget,
+		"used_cost_usd": usedCostUSD, "max_budget_usd": input.MaxBudgetUSD,
+		"timeout_seconds": input.TimeoutSeconds,
+	}
+}
+
+// policyStopReason reports the first exhausted budget after a model call.
+func policyStopReason(input RunInput, usedTokens int, usedCostUSD float64) string {
+	if input.TokenBudget > 0 && usedTokens >= input.TokenBudget {
+		return policyStopTokens
+	}
+	if input.MaxBudgetUSD > 0 && usedCostUSD >= input.MaxBudgetUSD {
+		return policyStopBudget
+	}
+	return ""
+}
+
+// modelCallCostUSD prices one model call with the run-config-resolved prices.
+// Zero prices mean no price is configured: the USD budget degrades to the
+// token cap and this returns 0.
+func modelCallCostUSD(input RunInput, usage llm.Usage) float64 {
+	return (float64(usage.PromptTokens)/1000)*input.ModelPromptPricePer1k +
+		(float64(usage.CompletionTokens)/1000)*input.ModelCompPricePer1k
+}
+
+// policySafeTools are exempt from policy-mandated tool approval
+// (approval_mode: tools): observation, knowledge-recording and escalation
+// tools the policy regime itself relies on. Consequential tools —
+// run_command, delegate, trigger writes, skill_propose, mcp__ tools — still
+// need a human decision. Read-only MCP tools are exempt via isReadOnlyTool.
+var policySafeTools = map[string]bool{
+	"echo": true, "remember": true, "request_approval": true, "ask_human": true,
+	"list_triggers": true,
+	"skill_search":  true, "skill_inspect": true, "skill_validate": true,
+	"skill_history": true, "skill_executions": true, "skill_memory": true,
+}
+
+// policySafeTool reports whether a tool may run without approval when the
+// effective policy demands approval for consequential tools.
+func policySafeTool(name string) bool {
+	return policySafeTools[name] || isReadOnlyTool(name)
 }
 
 func toolFailureData(operationID, argumentsHash, tool string, err error) map[string]any {
