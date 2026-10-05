@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Tag } from '@carbon/react'
 import { observationApi, type ObservationEvent } from './observationApi'
 import { type Agent } from './workspaceApi'
@@ -23,6 +23,17 @@ export interface PlanInfo {
   operationId: string
   goal: string
   tasks: PlanTaskInfo[]
+}
+
+// Edge color follows the source (dependency) status — the same palette the
+// trace rows use, so a green edge means "input ready", red means "this is
+// what blocks the branch".
+const EDGE_COLORS: Record<PlanTaskStatus, string> = {
+  completed: '#9ece6a',
+  failed: '#f7768e',
+  running: '#7aa2f7',
+  pending: '#565f89',
+  skipped: '#565f89',
 }
 
 /** Longest-path layering: a task's column is one past its deepest dependency. */
@@ -131,13 +142,20 @@ function depStatusIcon(status: PlanTaskStatus | undefined): { icon: string; colo
   switch (status) {
     case 'completed': return { icon: '✓', color: '#9ece6a' }
     case 'failed': return { icon: '✗', color: '#f7768e' }
-    case 'running': return { icon: '●', color: 'var(--tm-teal)' }
-    case 'skipped': return { icon: '–', color: 'var(--tm-text-3)' }
-    default: return { icon: '○', color: 'var(--tm-text-3)' }
+    case 'running': return { icon: '●', color: '#7aa2f7' }
+    case 'skipped': return { icon: '–', color: '#565f89' }
+    default: return { icon: '○', color: '#565f89' }
   }
 }
 
-function PlanTaskChip({ task, agents, t, onOpenRun, statuses }: { task: PlanTaskInfo; agents: Agent[]; t: ReturnType<typeof useT>; onOpenRun?: (runId: string) => void; statuses: Map<string, PlanTaskStatus> }) {
+function PlanTaskChip({ task, agents, t, onOpenRun, statuses, chipRef }: {
+  task: PlanTaskInfo
+  agents: Agent[]
+  t: ReturnType<typeof useT>
+  onOpenRun?: (runId: string) => void
+  statuses: Map<string, PlanTaskStatus>
+  chipRef?: (el: HTMLDivElement | null) => void
+}) {
   const agent = agents.find((a) => a.id === task.agentId)
   const agentTitle = agent?.name ?? task.agentId ?? t('chat.delegation.unknown_agent')
   const skipped = task.status === 'skipped'
@@ -164,6 +182,7 @@ function PlanTaskChip({ task, agents, t, onOpenRun, statuses }: { task: PlanTask
   }
   return (
     <div
+      ref={chipRef}
       className={`plan-task ${skipped ? 'plan-task-skipped' : ''} ${running ? 'plan-task-running' : ''} ${task.childRunId ? 'plan-task-openable' : ''}`}
       title={[reason, task.childRunId].filter(Boolean).join('\n')}
       role={task.childRunId ? 'button' : undefined}
@@ -196,10 +215,153 @@ function PlanTaskChip({ task, agents, t, onOpenRun, statuses }: { task: PlanTask
   )
 }
 
+/** One dependency edge in canvas coordinates (measured from the DOM). */
+interface PlanEdge {
+  key: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  status: PlanTaskStatus
+}
+
+/**
+ * One plan's DAG: layered task chips plus SVG dependency edges drawn between
+ * the chips. Edge geometry is measured from the DOM after layout and kept in
+ * sync via a ResizeObserver (live statuses resize chips; the canvas reflows).
+ */
+function PlanDAG({ plan, planIndex, planCount, agents, t, onOpenRun }: {
+  plan: PlanInfo
+  planIndex: number
+  planCount: number
+  agents: Agent[]
+  t: ReturnType<typeof useT>
+  onOpenRun?: (runId: string) => void
+}) {
+  const statuses = useMemo(() => new Map(plan.tasks.map((task) => [task.id, task.status])), [plan])
+  const columns = useMemo(() => {
+    const layers = taskLayers(plan.tasks)
+    const cols: PlanTaskInfo[][] = []
+    for (const task of plan.tasks) {
+      const layer = layers.get(task.id) ?? 0
+      while (cols.length <= layer) cols.push([])
+      cols[layer].push(task)
+    }
+    return cols
+  }, [plan])
+
+  const canvasRef = useRef<HTMLDivElement | null>(null)
+  const chipRefs = useRef(new Map<string, HTMLDivElement>())
+  const [edges, setEdges] = useState<PlanEdge[]>([])
+  const [size, setSize] = useState({ width: 0, height: 0 })
+  const markerId = useId()
+
+  const measure = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const cRect = canvas.getBoundingClientRect()
+    const next: PlanEdge[] = []
+    for (const task of plan.tasks) {
+      for (const dep of task.dependsOn) {
+        const from = chipRefs.current.get(dep)
+        const to = chipRefs.current.get(task.id)
+        if (!from || !to) continue
+        const f = from.getBoundingClientRect()
+        const o = to.getBoundingClientRect()
+        if (f.width === 0 || o.width === 0) continue
+        next.push({
+          key: `${dep}→${task.id}`,
+          x1: f.right - cRect.left,
+          y1: f.top + f.height / 2 - cRect.top,
+          x2: o.left - cRect.left,
+          y2: o.top + o.height / 2 - cRect.top,
+          status: statuses.get(dep) ?? 'pending',
+        })
+      }
+    }
+    setEdges(next)
+    setSize({ width: canvas.scrollWidth, height: canvas.scrollHeight })
+  }, [plan, statuses])
+
+  useEffect(() => {
+    measure()
+    const canvas = canvasRef.current
+    if (!canvas || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => measure())
+    observer.observe(canvas)
+    return () => observer.disconnect()
+  }, [measure])
+
+  return (
+    <div className="chat-plan-graph">
+      <div className="chat-plan-goal">
+        {plan.goal || t('chat.plan.untitled')}
+        {planCount > 1 && <span className="chat-plan-meta"> · #{planIndex + 1}</span>}
+      </div>
+      <div className="chat-plan-scroll">
+        <div className="chat-plan-canvas" ref={canvasRef}>
+          <svg className="plan-edges" width={size.width} height={size.height} aria-hidden="true">
+            <defs>
+              {(Object.keys(EDGE_COLORS) as PlanTaskStatus[]).map((status) => (
+                <marker
+                  key={status}
+                  id={`${markerId}-${status}`}
+                  viewBox="0 0 8 8"
+                  refX="7"
+                  refY="4"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
+                  <path d="M0,0 L8,4 L0,8 z" fill={EDGE_COLORS[status]} />
+                </marker>
+              ))}
+            </defs>
+            {edges.map((edge) => {
+              const dx = Math.min(Math.max((edge.x2 - edge.x1) / 2, 14), 48)
+              const d = `M ${edge.x1 + 2} ${edge.y1} C ${edge.x1 + 2 + dx} ${edge.y1}, ${edge.x2 - 2 - dx} ${edge.y2}, ${edge.x2 - 2} ${edge.y2}`
+              return (
+                <path
+                  key={edge.key}
+                  d={d}
+                  fill="none"
+                  stroke={EDGE_COLORS[edge.status]}
+                  strokeWidth={1.25}
+                  strokeDasharray={edge.status === 'skipped' ? '3 3' : undefined}
+                  markerEnd={`url(#${markerId}-${edge.status})`}
+                  opacity={0.85}
+                />
+              )
+            })}
+          </svg>
+          <div className="chat-plan-columns">
+            {columns.map((column, columnIndex) => (
+              <div key={columnIndex} className="chat-plan-column">
+                {column.map((task) => (
+                  <PlanTaskChip
+                    key={task.id}
+                    task={task}
+                    agents={agents}
+                    t={t}
+                    onOpenRun={onOpenRun}
+                    statuses={statuses}
+                    chipRef={(el) => { if (el) chipRefs.current.set(task.id, el); else chipRefs.current.delete(task.id) }}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /**
  * DAG view of the plans executed by a run: one graph per plan call, tasks
- * layered left→right (a task sits one column past its deepest dependency).
- * Renders nothing when the run never called plan.
+ * layered left→right (a task sits one column past its deepest dependency)
+ * with dependency edges colored by the upstream status. Renders nothing when
+ * the run never called plan.
  */
 export default function PlanGraph({ project, runId, agents, live = false, onOpenRun }: {
   project: string
@@ -226,36 +388,9 @@ export default function PlanGraph({ project, runId, agents, live = false, onOpen
   return (
     <div className="chat-plan">
       <div className="chat-plan-title">{t('chat.plan.title')}</div>
-      {plans.map((plan, index) => {
-        const layers = taskLayers(plan.tasks)
-        const statuses = new Map(plan.tasks.map((task) => [task.id, task.status]))
-        const columns: PlanTaskInfo[][] = []
-        for (const task of plan.tasks) {
-          const layer = layers.get(task.id) ?? 0
-          while (columns.length <= layer) columns.push([])
-          columns[layer].push(task)
-        }
-        return (
-          <div key={plan.operationId} className="chat-plan-graph">
-            <div className="chat-plan-goal">
-              {plan.goal || t('chat.plan.untitled')}
-              {plans.length > 1 && <span className="chat-plan-meta"> · #{index + 1}</span>}
-            </div>
-            <div className="chat-plan-columns">
-              {columns.map((column, columnIndex) => (
-                <div key={columnIndex} className="chat-plan-column-group">
-                  <div className="chat-plan-column">
-                    {column.map((task) => (
-                      <PlanTaskChip key={task.id} task={task} agents={agents} t={t} onOpenRun={onOpenRun} statuses={statuses} />
-                    ))}
-                  </div>
-                  {columnIndex < columns.length - 1 && <span className="chat-plan-arrow">→</span>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      })}
+      {plans.map((plan, index) => (
+        <PlanDAG key={plan.operationId} plan={plan} planIndex={index} planCount={plans.length} agents={agents} t={t} onOpenRun={onOpenRun} />
+      ))}
     </div>
   )
 }

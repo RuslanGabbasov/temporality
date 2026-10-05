@@ -1620,27 +1620,38 @@ button.header-nav-link {
 .chat-plan-columns {
   display: flex;
   align-items: flex-start;
-  gap: 0.3rem;
+  gap: 1.4rem;
+  flex-wrap: nowrap;
+  position: relative;
+}
+
+// Horizontal scrolling shell — wide DAGs scroll instead of squeezing columns
+.chat-plan-scroll {
   overflow-x: auto;
   padding-bottom: 0.2rem;
 }
 
-.chat-plan-column-group {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  flex-shrink: 0;
+// The positioned canvas edges are measured against; grows with the columns
+.chat-plan-canvas {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+}
+
+// SVG dependency edges overlay — never intercepts pointer events
+.plan-edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  overflow: visible;
 }
 
 .chat-plan-column {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-}
-
-.chat-plan-arrow {
-  color: var(--tm-text-3);
-  font-size: 0.8rem;
+  position: relative;
   flex-shrink: 0;
 }
 
