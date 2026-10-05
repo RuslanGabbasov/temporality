@@ -839,9 +839,10 @@ const (
 )
 
 // BoundedNarrative produces a bounded display representation of an
-// agent-authored narrative: credentials are redacted, whitespace is
-// collapsed and the text is truncated to narrativeMaxBytes. The second
-// return value reports whether truncation happened.
+// agent-authored narrative: credentials are redacted, inline whitespace
+// is collapsed (line structure is preserved — narratives are markdown)
+// and the text is truncated to narrativeMaxBytes. The second return
+// value reports whether truncation happened.
 func BoundedNarrative(value string) (string, bool) {
 	clean := redactProse(value)
 	if len(clean) > narrativeMaxBytes {

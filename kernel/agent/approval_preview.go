@@ -256,24 +256,31 @@ func sensitiveFlag(value string) bool {
 
 // redactProse removes credentials from free-form agent-authored text such
 // as narratives and failure details. Unlike redactApprovalText it handles
-// every credential marker in the text, not only the first one. Whitespace is
-// collapsed as a side effect.
+// every credential marker in the text, not only the first one. Inline
+// whitespace is collapsed as a side effect, but line structure is preserved:
+// agent narratives are markdown (headings, lists, tables) and must keep
+// their layout. The bearer/sensitive-flag lookahead carries across line
+// boundaries so credentials never survive a line split.
 func redactProse(value string) string {
-	fields := strings.Fields(value)
+	lines := strings.Split(value, "\n")
 	redactNext := false
-	for index, field := range fields {
-		if redactNext {
-			fields[index] = "[REDACTED]"
-			redactNext = false
-			continue
+	for lineIndex, line := range lines {
+		fields := strings.Fields(line)
+		for index, field := range fields {
+			if redactNext {
+				fields[index] = "[REDACTED]"
+				redactNext = false
+				continue
+			}
+			if strings.EqualFold(field, "bearer") || (sensitiveFlag(strings.ToLower(field)) && !strings.ContainsAny(field, "=:")) {
+				redactNext = true
+				continue
+			}
+			fields[index] = redactProseToken(field)
 		}
-		if strings.EqualFold(field, "bearer") || (sensitiveFlag(strings.ToLower(field)) && !strings.ContainsAny(field, "=:")) {
-			redactNext = true
-			continue
-		}
-		fields[index] = redactProseToken(field)
+		lines[lineIndex] = strings.Join(fields, " ")
 	}
-	return strings.Join(fields, " ")
+	return strings.Join(lines, "\n")
 }
 
 // redactProseToken redacts every credential marker inside a single

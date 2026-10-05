@@ -583,7 +583,19 @@ func TestSuccessfulVerificationCommandsRecordExecutionKnowledge(t *testing.T) {
 func TestBoundedNarrativeRedactsCollapsesAndTruncates(t *testing.T) {
 	clean, truncated := BoundedNarrative("line one\n\n   line two")
 	require.False(t, truncated)
-	require.Equal(t, "line one line two", clean)
+	require.Equal(t, "line one\n\nline two", clean)
+
+	// Markdown narratives must keep their layout: headings, lists, tables.
+	markdown := "## Report\n\n| Step | Result |\n|---|---|\n| Build | OK |\n\n- item one\n- item two"
+	structured, _ := BoundedNarrative(markdown)
+	require.Equal(t, markdown, structured)
+
+	// Credential lookahead must survive a line break: bearer on one line,
+	// the secret on the next.
+	redactedLines, _ := BoundedNarrative("token is Bearer\nabcdef123456 done")
+	require.NotContains(t, redactedLines, "abcdef123456")
+	require.Contains(t, redactedLines, "[REDACTED]")
+	require.Equal(t, "token is Bearer\n[REDACTED] done", redactedLines)
 
 	redacted, _ := BoundedNarrative("token is Bearer abcdef123456")
 	require.NotContains(t, redacted, "abcdef123456")
