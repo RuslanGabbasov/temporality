@@ -31,7 +31,7 @@ export interface UnitResources {
   projects: NamedRef[]
 }
 
-export type OrgResourceKind = 'agent' | 'skill' | 'mcp-server' | 'provider'
+export type OrgResourceKind = 'agent' | 'skill' | 'mcp-server' | 'provider' | 'trigger'
 
 export interface Project {
   id: string
@@ -170,6 +170,25 @@ export interface Trigger {
   type: 'schedule' | 'webhook' | 'event'
   enabled: boolean
   config: any
+  org_unit_id?: string
+  execution_identity_id?: string
+  created_at: string
+  updated_at: string
+}
+
+// Execution identity (docs/org-structure.md §20): the security context of
+// automated runs — which agents, MCP servers, providers, projects and human
+// request targets a trigger-driven run may touch.
+export interface ExecutionIdentity {
+  id: string
+  name: string
+  description: string
+  org_unit_id?: string
+  allowed_agents: string[]
+  allowed_mcp: string[]
+  allowed_providers: string[]
+  allowed_projects: string[]
+  human_targets: string[]
   created_at: string
   updated_at: string
 }
@@ -407,6 +426,10 @@ export const workspaceApi = {
     request<Trigger>(`/v1/workspace/triggers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteTrigger: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/triggers/${id}`, { method: 'DELETE' }),
+
+  // Execution identities (org-structure.md §20)
+  listExecutionIdentities: () =>
+    request<{ identities: ExecutionIdentity[] }>('/v1/workspace/execution-identities'),
 
   // Skills (workspace-global registry)
   listSkills: () =>

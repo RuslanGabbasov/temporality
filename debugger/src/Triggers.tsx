@@ -16,9 +16,10 @@ import {
   Heading,
 } from '@carbon/react'
 import { Add, Edit, TrashCan } from '@carbon/icons-react'
-import { workspaceApi, type Trigger, type Agent } from './workspaceApi'
+import { workspaceApi, type Trigger, type Agent, type ExecutionIdentity } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
+import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -30,8 +31,10 @@ const TYPE_INFO: Record<string, { icon: string; label: string; color: 'blue' | '
 
 export default function Triggers({ project }: { project: string }) {
   const t = useT()
+  const org = useOrgUnits()
   const [triggers, setTriggers] = useState<Trigger[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
+  const [identities, setIdentities] = useState<ExecutionIdentity[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -45,12 +48,14 @@ export default function Triggers({ project }: { project: string }) {
     if (!project.trim()) return
     setLoading(true)
     try {
-      const [tData, aData] = await Promise.all([
+      const [tData, aData, idData] = await Promise.all([
         workspaceApi.listTriggers(project),
         workspaceApi.listAllAgents(),
+        workspaceApi.listExecutionIdentities().catch(() => ({ identities: [] })),
       ])
       setTriggers(tData.triggers ?? [])
       setAgents(aData.agents ?? [])
+      setIdentities(idData.identities ?? [])
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }, [project])
@@ -64,7 +69,7 @@ export default function Triggers({ project }: { project: string }) {
       : type === 'webhook'
       ? { path: '', secret: '', prompt_template: '' }
       : { event_type: 'tool.failed', filter: {}, prompt: '' }
-    setForm({ type, name: '', enabled: true, config: defaultConfig, project_id: project })
+    setForm({ type, name: '', enabled: true, config: defaultConfig, project_id: project, org_unit_id: '', execution_identity_id: '' })
     setShowForm(true)
   }
 
@@ -81,6 +86,11 @@ export default function Triggers({ project }: { project: string }) {
       const payload = { ...form, project_id: project, config: JSON.stringify(form.config) }
       if (editing) {
         await workspaceApi.updateTrigger(editing.id, payload)
+        // PUT payloads ignore org bindings: re-scoping goes through the admin
+        // binding endpoint (docs/org-structure.md §39).
+        if (org.isAdmin && (form.org_unit_id ?? '') !== (editing.org_unit_id ?? '')) {
+          await workspaceApi.setResourceBinding('trigger', editing.id, form.org_unit_id ?? '')
+        }
       } else {
         await workspaceApi.createTrigger(payload)
       }
@@ -156,6 +166,14 @@ export default function Triggers({ project }: { project: string }) {
                         {t('triggers.agent_label') ?? 'agent:'} {agents.find((a) => a.id === trigger.agent_id)?.name ?? trigger.agent_id}
                       </div>
                     )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.3rem' }}>
+                      <OrgBadge orgUnitID={trigger.org_unit_id} org={org} />
+                      {trigger.execution_identity_id && (
+                        <Tag type="purple" size="sm" title={trigger.execution_identity_id}>
+                          {t('triggers.identity_label') ?? 'identity:'} {identities.find((i) => i.id === trigger.execution_identity_id)?.name ?? trigger.execution_identity_id}
+                        </Tag>
+                      )}
+                    </div>
                   </div>
                   <Stack orientation="horizontal" gap={1}>
                     <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(trigger)} />
@@ -195,6 +213,30 @@ export default function Triggers({ project }: { project: string }) {
             <Select id="trigger-agent" labelText={t('triggers.agent') ?? 'Agent'} value={form.agent_id ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, agent_id: e.target.value })}>
               <SelectItem value="" text={t('triggers.default_agent') ?? 'Default agent'} />
               {agents.filter((a) => !a.project_id || a.project_id === project).map((a) => <SelectItem key={a.id} value={a.id} text={a.name} />)}
+            </Select>
+
+            {/* Org visibility (org-structure.md §46): the unit the trigger
+                belongs to; re-scoping after creation is admin-only. */}
+            <OrgUnitSelect
+              id="trigger-org-unit"
+              org={org}
+              value={form.org_unit_id ?? ''}
+              onChange={(orgUnitID) => setForm({ ...form, org_unit_id: orgUnitID })}
+              disabled={!!editing && !org.isAdmin}
+            />
+
+            {/* Execution identity (org-structure.md §20): the security context
+                the fired run acts under. Empty = legacy behavior (no
+                identity-scoped re-checks at fire time). */}
+            <Select
+              id="trigger-identity"
+              labelText={t('triggers.execution_identity') ?? 'Execution identity'}
+              value={form.execution_identity_id ?? ''}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, execution_identity_id: e.target.value })}
+              helperText={t('triggers.identity_helper') ?? 'The permissions the fired run acts under: agents, MCP servers, providers and projects it may touch. Without an identity the run is not permission-scoped.'}
+            >
+              <SelectItem value="" text={t('triggers.no_identity') ?? 'Without identity (not recommended)'} />
+              {identities.map((i) => <SelectItem key={i.id} value={i.id} text={i.name} />)}
             </Select>
 
             {/* Schedule config */}

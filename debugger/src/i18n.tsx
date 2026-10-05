@@ -580,6 +580,10 @@ const translations: Record<Locale, Record<string, string>> = {
     'triggers.delete_confirm': 'Delete trigger "{{name}}"?',
     'triggers.agent_label': 'agent:',
     'triggers.cron_label': 'cron:',
+    'triggers.identity_label': 'identity:',
+    'triggers.execution_identity': 'Execution identity',
+    'triggers.no_identity': 'Without identity (not recommended)',
+    'triggers.identity_helper': 'The permissions the fired run acts under: agents, MCP servers, providers and projects it may touch. Without an identity the run is not permission-scoped.',
 
     // Projects
     'projects.title': 'Projects',
@@ -1424,6 +1428,10 @@ const translations: Record<Locale, Record<string, string>> = {
     'triggers.delete_confirm': 'Удалить триггер «{{name}}»?',
     'triggers.agent_label': 'агент:',
     'triggers.cron_label': 'cron:',
+    'triggers.identity_label': 'идентификатор:',
+    'triggers.execution_identity': 'Идентификатор исполнения',
+    'triggers.no_identity': 'Без идентификатора (не рекомендуется)',
+    'triggers.identity_helper': 'Права, с которыми работает запуск: агенты, MCP-серверы, провайдеры и проекты, которые он может затрагивать. Без идентификатора запуск не ограничен правами.',
 
     // Projects
     'projects.title': 'Проекты',
