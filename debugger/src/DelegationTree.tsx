@@ -4,7 +4,7 @@ import { observationApi, type ObservationEvent } from './observationApi'
 import { type Agent } from './workspaceApi'
 import Markdown from './Markdown'
 import { useT } from './i18n'
-import { eventSummary, shortTime } from './eventSummary'
+import { eventSummary, shortTime, explainKernelError } from './eventSummary'
 
 export interface DelegationNodeInfo {
   childRunId: string
@@ -221,7 +221,9 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
             <div className="chat-delegation-answer">{t('chat.delegation.no_answer')}</div>
           )}
           {status === 'failed' && (payload?.error || info.error) && (
-            <div className="chat-delegation-error">{payload?.error || info.error}</div>
+            <div className="chat-delegation-error" title={payload?.error || info.error}>
+              {explainKernelError(payload?.error || info.error || '').cause}
+            </div>
           )}
           {payload?.children.map((child) => (
             <DelegationNode key={child.childRunId} project={project} info={child} agents={agents} depth={depth + 1} onOpenRun={onOpenRun} />

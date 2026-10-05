@@ -113,6 +113,12 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Runs
     'runs.title': 'Runs',
+    'runs.event.model_failed': 'Model call failed',
+    'runs.event.open_child_run': 'Open child run',
+    'errors.cause': 'Cause',
+    'errors.raw_error': 'Full error text',
+    'errors.timeout_short': 'timeout',
+    'errors.model_timeout_hint': 'The model provider did not respond in time — the model call was aborted by a timeout.',
     'runs.select': 'Select a run',
     'runs.select_hint': 'Click a run on the left to see its trace.',
     'runs.no_runs': 'No runs for this project',
@@ -951,6 +957,12 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Runs
     'runs.title': 'Запуски',
+    'runs.event.model_failed': 'Вызов модели не удался',
+    'runs.event.open_child_run': 'Открыть дочерний запуск',
+    'errors.cause': 'Причина',
+    'errors.raw_error': 'Полный текст ошибки',
+    'errors.timeout_short': 'таймаут',
+    'errors.model_timeout_hint': 'Провайдер модели не ответил за отведённое время — вызов модели прерван по таймауту.',
     'runs.select': 'Выберите запуск',
     'runs.select_hint': 'Нажмите на запуск слева, чтобы увидеть трассировку.',
     'runs.no_runs': 'В проекте пока нет запусков',

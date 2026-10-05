@@ -5,7 +5,7 @@ import { workspaceApi, type Agent } from './workspaceApi'
 import DelegationTree from './DelegationTree'
 import Markdown from './Markdown'
 import { useT } from './i18n'
-import { eventSummary, shortTime } from './eventSummary'
+import { eventSummary, shortTime, explainKernelError } from './eventSummary'
 import {
   Button,
   TextInput,
@@ -95,9 +95,17 @@ function buildRunRows(started: ObservationEvent[], statuses: Map<string, RunStat
  * the run's model.text_delta/model.reasoning events) is shown as the primary
  * content; the observability payload is reduced to what the summary line
  * doesn't already say. */
-function EventDetail({ event, t, response, reasoning }: { event: ObservationEvent; t: (key: string, vars?: Record<string, string>) => string; response?: string; reasoning?: string }) {
+function EventDetail({ event, t, project, response, reasoning }: { event: ObservationEvent; t: (key: string, vars?: Record<string, string>) => string; project: string; response?: string; reasoning?: string }) {
   const [expanded, setExpanded] = useState(false)
   const d = event.data ?? {}
+
+  // Human-readable failure explanation: Temporal wraps the real cause into
+  // "child workflow execution error (…): activity error (…): cause" — peel it
+  // and show the cause, the activity chain and a child-run link when present.
+  const rawError = typeof d.error === 'string' && d.error.trim() ? d.error : null
+  const explained = rawError ? explainKernelError(rawError) : null
+  const childRunId = typeof d.child_run_id === 'string' && d.child_run_id ? d.child_run_id : null
+  const isFailure = event.type === 'run.failed' || event.type === 'model.failed' || event.type === 'tool.failed' || event.type === 'delegation.failed' || event.type === 'mcp.call.failed'
 
   // Show useful fields first, skip noise
   const skipFields = new Set(['caused_by', 'frame_id', 'parent_frame_id', 'sequence'])
@@ -106,6 +114,7 @@ function EventDetail({ event, t, response, reasoning }: { event: ObservationEven
     // token splits are plumbing nobody reads.
     for (const k of ['turn', 'total_tokens', 'latency_ms', 'tool_call_count', 'finish_reason', 'model', 'provider', 'prompt_tokens', 'completion_tokens', 'input_ref', 'output_ref', 'truncated', 'attempts']) skipFields.add(k)
   }
+  if (rawError && explained) skipFields.add('error') // shown in the explanation block
   const importantFields: [string, unknown][] = []
   const otherFields: [string, unknown][] = []
   for (const [k, v] of Object.entries(d)) {
@@ -121,6 +130,31 @@ function EventDetail({ event, t, response, reasoning }: { event: ObservationEven
 
   return (
     <div>
+      {/* Failure explanation — what a human actually needs to read */}
+      {isFailure && explained && (explained.chain.length > 0 || explained.timeout) && (
+        <div className="run-failure-cause">
+          <div className="run-failure-cause-title">{t('errors.cause')}</div>
+          <div className="run-failure-cause-text">{explained.cause}</div>
+          {explained.timeout && (
+            <div className="run-failure-cause-hint">{t('errors.model_timeout_hint')}</div>
+          )}
+          {explained.chain.length > 0 && (
+            <div className="run-failure-cause-chain">{explained.chain.join(' → ')}</div>
+          )}
+          {rawError && rawError !== explained.cause && (
+            <details className="run-failure-raw">
+              <summary>{t('errors.raw_error')}</summary>
+              <div>{rawError}</div>
+            </details>
+          )}
+        </div>
+      )}
+      {/* Child run link — delegate failures point at the crashed subagent run */}
+      {childRunId && (
+        <a className="run-failure-child-link" href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(childRunId)}`}>
+          ↗ {t('runs.event.open_child_run')} <span className="run-failure-child-id">{childRunId}</span>
+        </a>
+      )}
       {/* Model response for this turn — the thing the reader actually wants */}
       {response && (
         <div className="run-model-response">
@@ -539,7 +573,7 @@ export default function AgentRuns({ project }: { project: string }) {
                             <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{shortTime(event.occurred_at)}</span>
                           </div>
                           <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>
-                            <EventDetail event={event} t={t} response={turnKey ? trace.responseByKey.get(turnKey) : undefined} reasoning={turnKey ? trace.reasoningByKey.get(turnKey) : undefined} />
+                            <EventDetail event={event} t={t} project={project.trim()} response={turnKey ? trace.responseByKey.get(turnKey) : undefined} reasoning={turnKey ? trace.reasoningByKey.get(turnKey) : undefined} />
                           </div>
                         </div>
                       )

@@ -9,6 +9,34 @@ export interface EventSummaryInfo {
   color: string
 }
 
+export interface KernelErrorInfo {
+  /** Activity/workflow types of the peeled envelopes, outermost first
+   * (e.g. ['AgentRun', 'kernel.call_model']). */
+  chain: string[]
+  /** Deepest human-readable message — the actual cause. */
+  cause: string
+  /** The cause looks like a model/provider timeout. */
+  timeout: boolean
+}
+
+const TEMPORAL_ENVELOPE = /^(?:child workflow execution|activity) error \(type: ([A-Za-z0-9_.]+),[^)]*\): (.+)$/s
+
+/** Peel Temporal error envelopes ("child workflow execution error (type: X, …): …",
+ * "activity error (type: Y, …): …") so the UI can show the actual cause instead
+ * of workflow plumbing. */
+export function explainKernelError(raw: string): KernelErrorInfo {
+  let rest = (raw ?? '').trim()
+  const chain: string[] = []
+  for (;;) {
+    const match = TEMPORAL_ENVELOPE.exec(rest)
+    if (!match) break
+    chain.push(match[1])
+    rest = match[2].trim()
+  }
+  const timeout = /context deadline exceeded|Client\.Timeout|context cancellation/i.test(rest)
+  return { chain, cause: rest || (raw ?? '').trim(), timeout }
+}
+
 export function shortTime(iso: string) {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString()
@@ -23,7 +51,7 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSumm
     case 'run.completed':
       return { icon: '✓', label: t('runs.event.run_completed'), detail: `${d.turns ?? '?'} ${t('runs.turns')}`, color: '#9ece6a' }
     case 'run.failed':
-      return { icon: '✗', label: t('runs.event.run_failed'), detail: d.error ? String(d.error).slice(0, 80) : '', color: '#f7768e' }
+      return { icon: '✗', label: t('runs.event.run_failed'), detail: explainKernelError(String(d.error ?? '')).cause.slice(0, 80), color: '#f7768e' }
     case 'turn.started':
       return { icon: '→', label: t('runs.turn', { turn: String(d.turn ?? '?') }), detail: t('runs.event.started'), color: 'var(--tm-text-3)' }
     case 'turn.completed':
@@ -36,6 +64,11 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSumm
       const calls = d.tool_call_count ? `${d.tool_call_count} tools` : ''
       const parts = [tokens, latency, calls].filter(Boolean).join(' · ')
       return { icon: '🧠', label: t('runs.event.model_response'), detail: parts, color: '#bb9af7' }
+    }
+    case 'model.failed': {
+      const info = explainKernelError(String(d.error ?? ''))
+      const suffix = info.timeout ? ` · ${t('errors.timeout_short')}` : ''
+      return { icon: '🧠', label: t('runs.event.model_failed'), detail: (info.cause.slice(0, 60) + suffix).trim(), color: '#f7768e' }
     }
     case 'tool.started': {
       const args = d.arguments
@@ -59,7 +92,13 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSumm
       return { icon: d.exit_code === 0 ? '✓' : '✗', label: String(d.tool ?? 'tool'), detail: [exit, ms, output].filter(Boolean).join(' · '), color: d.exit_code === 0 ? '#9ece6a' : '#f7768e' }
     }
     case 'tool.failed': {
-      const errDetail = d.error ? String(d.error).slice(0, 60) : 'failed'
+      // A failed delegate tool is the parent's view of a crashed child run —
+      // say so instead of a bare tool name; the child link lives in the detail.
+      if (d.error_type === 'delegated_run_failed') {
+        const child = typeof d.child_run_id === 'string' ? d.child_run_id.split('/').pop() ?? '' : ''
+        return { icon: '↗', label: t('runs.event.delegation_failed'), detail: child ? `→ ${child}` : '', color: '#f7768e' }
+      }
+      const errDetail = d.error ? explainKernelError(String(d.error)).cause.slice(0, 60) : 'failed'
       const args = d.arguments
       let preview = ''
       if (typeof args === 'string') {
@@ -127,8 +166,11 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSumm
       return { icon: '↗', label: t('runs.event.delegation'), detail: `→ ${d.child_run_id ?? '?'}`, color: '#7aa2f7' }
     case 'delegation.completed':
       return { icon: '↗', label: t('runs.event.delegation_completed'), detail: d.turns != null ? `${d.turns} ${t('runs.turns')}` : '', color: '#9ece6a' }
-    case 'delegation.failed':
-      return { icon: '↗', label: t('runs.event.delegation_failed'), detail: String(d.error ?? '').slice(0, 80), color: '#f7768e' }
+    case 'delegation.failed': {
+      const info = explainKernelError(String(d.error ?? ''))
+      const suffix = info.timeout ? ` · ${t('errors.timeout_short')}` : ''
+      return { icon: '↗', label: t('runs.event.delegation_failed'), detail: (info.cause.slice(0, 80) + suffix).trim(), color: '#f7768e' }
+    }
     default:
       return { icon: '•', label: event.type, detail: '', color: 'var(--tm-text-3)' }
   }

@@ -1584,6 +1584,84 @@ button.header-nav-link {
   margin-bottom: 0.15rem;
 }
 
+// Human-readable failure cause block in run event details
+.run-failure-cause {
+  margin: 0.25rem 0;
+  padding: 0.4rem 0.5rem;
+  border-left: 3px solid var(--tm-danger);
+  background: var(--tm-surface);
+  border-radius: 0 4px 4px 0;
+}
+
+.run-failure-cause-title {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tm-text-3);
+  margin-bottom: 0.15rem;
+}
+
+.run-failure-cause-text {
+  font-size: 0.78rem;
+  color: var(--tm-text);
+  overflow-wrap: anywhere;
+}
+
+.run-failure-cause-hint {
+  font-size: 0.72rem;
+  color: var(--tm-amber);
+  margin-top: 0.2rem;
+}
+
+.run-failure-cause-chain {
+  font-size: 0.65rem;
+  color: var(--tm-muted);
+  font-family: monospace;
+  margin-top: 0.2rem;
+  overflow-wrap: anywhere;
+}
+
+.run-failure-raw {
+  margin-top: 0.25rem;
+}
+
+.run-failure-raw summary {
+  font-size: 0.65rem;
+  color: var(--tm-text-3);
+  cursor: pointer;
+}
+
+.run-failure-raw div {
+  font-size: 0.65rem;
+  color: var(--tm-muted);
+  font-family: monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 0.15rem;
+}
+
+.run-failure-child-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--tm-teal);
+  text-decoration: none;
+  margin: 0.15rem 0;
+}
+
+.run-failure-child-link:hover {
+  text-decoration: underline;
+}
+
+.run-failure-child-id {
+  font-family: monospace;
+  font-size: 0.62rem;
+  color: var(--tm-muted);
+  overflow-wrap: anywhere;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Workspace tiles
 // ═══════════════════════════════════════════════════════════════
