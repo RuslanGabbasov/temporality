@@ -645,29 +645,32 @@ func (s *Store) CreateTrigger(ctx context.Context, t *Trigger) error {
 		t.Config = json.RawMessage(`{}`)
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_trigger (id, project_id, agent_id, name, type, enabled, config, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		t.ID, t.ProjectID, nullString(t.AgentID), t.Name, t.Type, t.Enabled, t.Config, t.CreatedAt, t.UpdatedAt)
+		`INSERT INTO workspace_trigger (id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		t.ID, t.ProjectID, nullString(t.AgentID), t.Name, t.Type, t.Enabled, t.Config,
+		nullString(t.OrgUnitID), nullString(t.ExecutionIdentityID), t.CreatedAt, t.UpdatedAt)
 	return err
 }
 
 func (s *Store) GetTrigger(ctx context.Context, id string) (Trigger, error) {
 	var t Trigger
-	var agentID *string
+	var agentID, orgUnitID, identityID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, project_id, agent_id, name, type, enabled, config, created_at, updated_at
+		`SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, created_at, updated_at
 		 FROM workspace_trigger WHERE id = $1`, id).
-		Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &t.CreatedAt, &t.UpdatedAt)
+		Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &orgUnitID, &identityID, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return t, ErrNotFound
 	}
 	t.AgentID = derefPtr(agentID)
+	t.OrgUnitID = derefPtr(orgUnitID)
+	t.ExecutionIdentityID = derefPtr(identityID)
 	return t, err
 }
 
 func (s *Store) ListTriggers(ctx context.Context, projectID string) ([]Trigger, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, agent_id, name, type, enabled, config, created_at, updated_at
+		`SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, created_at, updated_at
 		 FROM workspace_trigger WHERE project_id = $1 ORDER BY created_at DESC`, projectID)
 	if err != nil {
 		return nil, err
@@ -676,11 +679,13 @@ func (s *Store) ListTriggers(ctx context.Context, projectID string) ([]Trigger, 
 	var result []Trigger
 	for rows.Next() {
 		var t Trigger
-		var agentID *string
-		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		var agentID, orgUnitID, identityID *string
+		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &orgUnitID, &identityID, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.AgentID = derefPtr(agentID)
+		t.OrgUnitID = derefPtr(orgUnitID)
+		t.ExecutionIdentityID = derefPtr(identityID)
 		result = append(result, t)
 	}
 	return result, rows.Err()
@@ -688,7 +693,7 @@ func (s *Store) ListTriggers(ctx context.Context, projectID string) ([]Trigger, 
 
 func (s *Store) ListAllTriggers(ctx context.Context) ([]Trigger, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, project_id, agent_id, name, type, enabled, config, created_at, updated_at
+		`SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, created_at, updated_at
 		 FROM workspace_trigger WHERE enabled = true ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -697,11 +702,13 @@ func (s *Store) ListAllTriggers(ctx context.Context) ([]Trigger, error) {
 	var result []Trigger
 	for rows.Next() {
 		var t Trigger
-		var agentID *string
-		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		var agentID, orgUnitID, identityID *string
+		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &orgUnitID, &identityID, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.AgentID = derefPtr(agentID)
+		t.OrgUnitID = derefPtr(orgUnitID)
+		t.ExecutionIdentityID = derefPtr(identityID)
 		result = append(result, t)
 	}
 	return result, rows.Err()
@@ -710,8 +717,8 @@ func (s *Store) ListAllTriggers(ctx context.Context) ([]Trigger, error) {
 func (s *Store) UpdateTrigger(ctx context.Context, t Trigger) error {
 	t.UpdatedAt = time.Now().UTC()
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_trigger SET name=$2, agent_id=$3, type=COALESCE(NULLIF($4,''),type), enabled=$5, config=COALESCE($6, config), updated_at=$7 WHERE id=$1`,
-		t.ID, t.Name, nullString(t.AgentID), t.Type, t.Enabled, nullRawMessage(t.Config), t.UpdatedAt)
+		`UPDATE workspace_trigger SET name=$2, agent_id=$3, type=COALESCE(NULLIF($4,''),type), enabled=$5, config=COALESCE($6, config), execution_identity_id=COALESCE($8, execution_identity_id), updated_at=$7 WHERE id=$1`,
+		t.ID, t.Name, nullString(t.AgentID), t.Type, t.Enabled, nullRawMessage(t.Config), t.UpdatedAt, nullString(t.ExecutionIdentityID))
 	if err != nil {
 		return err
 	}

@@ -164,7 +164,7 @@ func (s *Store) MoveOrgUnit(ctx context.Context, id, newParentID string) error {
 // no bound resources, no member users, no linked projects. The RESTRICT
 // foreign keys are the second line of defense.
 func (s *Store) DeleteOrgUnit(ctx context.Context, id string) error {
-	var children, agents, skills, mcp, providers, users, projects, roles bool
+	var children, agents, skills, mcp, providers, triggers, users, projects, roles bool
 	err := s.pool.QueryRow(ctx,
 		`SELECT
 			EXISTS(SELECT 1 FROM org_unit WHERE parent_id = $1),
@@ -172,14 +172,15 @@ func (s *Store) DeleteOrgUnit(ctx context.Context, id string) error {
 			EXISTS(SELECT 1 FROM workspace_skill WHERE org_unit_id = $1),
 			EXISTS(SELECT 1 FROM workspace_mcp_server WHERE org_unit_id = $1),
 			EXISTS(SELECT 1 FROM workspace_provider WHERE org_unit_id = $1),
+			EXISTS(SELECT 1 FROM workspace_trigger WHERE org_unit_id = $1),
 			EXISTS(SELECT 1 FROM workspace_user WHERE org_unit_id = $1),
 			EXISTS(SELECT 1 FROM workspace_project_org_unit WHERE org_unit_id = $1),
 			EXISTS(SELECT 1 FROM org_unit_role WHERE org_unit_id = $1)`, id).
-		Scan(&children, &agents, &skills, &mcp, &providers, &users, &projects, &roles)
+		Scan(&children, &agents, &skills, &mcp, &providers, &triggers, &users, &projects, &roles)
 	if err != nil {
 		return err
 	}
-	if children || agents || skills || mcp || providers || users || projects || roles {
+	if children || agents || skills || mcp || providers || triggers || users || projects || roles {
 		return ErrUnitNotEmpty
 	}
 	tag, err := s.pool.Exec(ctx, `DELETE FROM org_unit WHERE id = $1`, id)
@@ -198,6 +199,7 @@ const (
 	OrgResourceSkill     = "skill"
 	OrgResourceMCPServer = "mcp-server"
 	OrgResourceProvider  = "provider"
+	OrgResourceTrigger   = "trigger"
 )
 
 var orgResourceTables = map[string]string{
@@ -205,6 +207,7 @@ var orgResourceTables = map[string]string{
 	OrgResourceSkill:     "workspace_skill",
 	OrgResourceMCPServer: "workspace_mcp_server",
 	OrgResourceProvider:  "workspace_provider",
+	OrgResourceTrigger:   "workspace_trigger",
 }
 
 // SetResourceOrgUnit binds a resource to an org unit; unitID empty clears the
@@ -212,7 +215,7 @@ var orgResourceTables = map[string]string{
 func (s *Store) SetResourceOrgUnit(ctx context.Context, kind, resourceID, unitID string) error {
 	table, ok := orgResourceTables[kind]
 	if !ok {
-		return fmt.Errorf("unknown resource kind %q (supported: agent, skill, mcp-server, provider)", kind)
+		return fmt.Errorf("unknown resource kind %q (supported: agent, skill, mcp-server, provider, trigger)", kind)
 	}
 	if unitID != "" {
 		if _, err := s.GetOrgUnit(ctx, unitID); err != nil {
@@ -238,6 +241,7 @@ type UnitResources struct {
 	Skills     []NamedRef        `json:"skills"`
 	MCPServers []NamedRef        `json:"mcp_servers"`
 	Providers  []NamedRef        `json:"providers"`
+	Triggers   []NamedRef        `json:"triggers"`
 	Users      []NamedRef        `json:"users"`
 	Projects   []NamedRef        `json:"projects"`
 	Roles      []OrgUnitRoleInfo `json:"roles"`
@@ -254,7 +258,7 @@ type NamedRef struct {
 func (s *Store) ListUnitResources(ctx context.Context, unitID string) (UnitResources, error) {
 	out := UnitResources{
 		Agents: []NamedRef{}, Skills: []NamedRef{}, MCPServers: []NamedRef{},
-		Providers: []NamedRef{}, Users: []NamedRef{}, Projects: []NamedRef{},
+		Providers: []NamedRef{}, Triggers: []NamedRef{}, Users: []NamedRef{}, Projects: []NamedRef{},
 		Roles: []OrgUnitRoleInfo{},
 	}
 	queries := []struct {
@@ -265,6 +269,7 @@ func (s *Store) ListUnitResources(ctx context.Context, unitID string) (UnitResou
 		{`SELECT id, name FROM workspace_skill WHERE org_unit_id = $1 ORDER BY name`, &out.Skills},
 		{`SELECT id, name FROM workspace_mcp_server WHERE org_unit_id = $1 ORDER BY name`, &out.MCPServers},
 		{`SELECT id, name FROM workspace_provider WHERE org_unit_id = $1 ORDER BY name`, &out.Providers},
+		{`SELECT id, name FROM workspace_trigger WHERE org_unit_id = $1 ORDER BY name`, &out.Triggers},
 		{`SELECT id, name FROM workspace_user WHERE org_unit_id = $1 ORDER BY name`, &out.Users},
 		{`SELECT p.id, p.name FROM workspace_project p
 		   JOIN workspace_project_org_unit pu ON pu.project_id = p.id

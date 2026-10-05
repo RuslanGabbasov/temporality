@@ -38,6 +38,9 @@ const (
 	AuditExecIdentityCreated  = "execution_identity.created"
 	AuditExecIdentityUpdated  = "execution_identity.updated"
 	AuditExecIdentityDeleted  = "execution_identity.deleted"
+	AuditTriggerCreated       = "trigger.created"
+	AuditTriggerUpdated       = "trigger.updated"
+	AuditTriggerDeleted       = "trigger.deleted"
 )
 
 // RecordAccessAudit appends one event. Nil details is stored as {}.

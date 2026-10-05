@@ -238,8 +238,14 @@ type Trigger struct {
 	Type      string          `json:"type"` // schedule, webhook, event
 	Enabled   bool            `json:"enabled"`
 	Config    json.RawMessage `json:"config"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	// Org binding (docs/org-structure.md §18): empty = whole installation.
+	OrgUnitID string `json:"org_unit_id,omitempty"`
+	// Execution identity the automated runs execute under (§20-21): the run
+	// never inherits the creator's rights. Empty = legacy trigger behaviour
+	// (pre-wave-D triggers keep running as before).
+	ExecutionIdentityID string    `json:"execution_identity_id,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // ScheduleConfig is the config JSON for schedule triggers.
