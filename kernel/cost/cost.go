@@ -65,6 +65,12 @@ func (c Config) ModelCost(model string, promptTokens, completionTokens int) floa
 	return (float64(promptTokens)/1000)*price.PromptPer1k + (float64(completionTokens)/1000)*price.CompPer1k
 }
 
+// Price returns the configured price for a model and whether one exists.
+func (c Config) Price(model string) (Price, bool) {
+	price, ok := c.prices[model]
+	return price, ok
+}
+
 // Prices returns all configured prices.
 func (c Config) Prices() []Price {
 	result := make([]Price, 0, len(c.prices))

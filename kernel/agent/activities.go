@@ -168,6 +168,11 @@ type ResolveAgentRequest struct {
 // further delegation when the depth limit is reached.
 func (a *Activities) ResolveAgent(ctx context.Context, request ResolveAgentRequest) (RunInput, error) {
 	endpoint := fmt.Sprintf("%s/v1/workspace/agents/%s/run-config?project=%s", a.WorkspaceURL, url.PathEscape(request.AgentID), url.QueryEscape(request.Project))
+	if request.ActorID != "" {
+		// The delegated run inherits the org position of the delegating chain:
+		// the run-config endpoint resolves the actor's policies from it (§24).
+		endpoint += "&actor_id=" + url.QueryEscape(request.ActorID)
+	}
 	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return RunInput{}, err
@@ -176,7 +181,7 @@ func (a *Activities) ResolveAgent(ctx context.Context, request ResolveAgentReque
 		return RunInput{}, temporal.NewNonRetryableApplicationError(fmt.Sprintf("agent %q is not available in project %q", request.AgentID, request.Project), "AgentNotAvailable", nil)
 	}
 	if status != http.StatusOK {
-		return RunInput{}, temporal.NewNonRetryableApplicationError(fmt.Sprintf("workspace returned %d resolving agent %q", status, request.AgentID), "AgentResolutionFailed", nil)
+		return RunInput{}, temporal.NewNonRetryableApplicationError(fmt.Sprintf("workspace returned %d resolving agent %q: %s", status, request.AgentID, truncate(body, 400)), "AgentResolutionFailed", nil)
 	}
 	var child RunInput
 	if err := json.Unmarshal([]byte(body), &child); err != nil {

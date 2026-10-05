@@ -167,6 +167,10 @@ func main() {
 		log.Error("migrate workspace v40", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000041_org_policy.up.sql"); err != nil {
+		log.Error("migrate workspace v41", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -739,6 +743,25 @@ func main() {
 		}
 		writeJSON(w, 200, resources)
 	})
+	// Effective policy at a unit (docs/org-structure.md §24): installation-wide
+	// rows plus everything inherited from the unit's ancestors, merged
+	// restrictively. The response carries the contributing rows so the UI can
+	// show where each restriction comes from.
+	mux.HandleFunc("GET /v1/org/units/{unitID}/effective-policy", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		effective, sources, err := ws.EffectivePolicy(r.Context(), r.PathValue("unitID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"policy": effective, "sources": sources})
+	})
 	// Org unit role grants (docs/org-structure.md §13): a grant upgrades the
 	// grantee's effective role on the unit and its whole subtree. Mutations are
 	// admin-only and land in the access audit log.
@@ -1306,6 +1329,20 @@ func main() {
 		input := agent.RunInput{}
 		applyAgentConfig(r.Context(), ws, &a, &input)
 		applyProjectModel(r.Context(), ws, project, &input)
+		// The delegated run inherits the org position of the delegating chain:
+		// the parent's actor unit (actor_id is passed by ResolveAgent) plus the
+		// project's units. The trigger unit of ancestor runs does not propagate
+		// through delegation — recorded limitation of this wave (§24).
+		actorUnit := ""
+		if actorID := r.URL.Query().Get("actor_id"); actorID != "" {
+			if user, uErr := ws.GetUser(r.Context(), actorID); uErr == nil {
+				actorUnit = user.OrgUnitID
+			}
+		}
+		if pErr := applyRunPolicy(r.Context(), ws, costPrices, project, actorUnit, "", &input); pErr != nil {
+			writeError(w, 403, pErr)
+			return
+		}
 		writeJSON(w, 200, input)
 	})
 	// Curated builtin templates (docs/evaluable-agent.md §16): source for the
@@ -1483,6 +1520,21 @@ func main() {
 		applyProjectModel(r.Context(), ws, task.ProjectID, &input)
 		if req.Model != "" {
 			input.Model = req.Model
+		}
+		// Policy (docs/org-structure.md §24): resolved after the model override so
+		// the allowlist judges the model the run will actually use. Position = the
+		// acting user's unit plus the project's units.
+		actorUnit := ""
+		if principal, ok := controlplane.FromContext(r.Context()); ok {
+			actorUnit = principal.OrgUnitID
+		} else if token, _ := controlplane.BearerToken(r); token != "" {
+			if user, uErr := ws.GetUserByToken(r.Context(), token); uErr == nil {
+				actorUnit = user.OrgUnitID
+			}
+		}
+		if pErr := applyRunPolicy(r.Context(), ws, costPrices, task.ProjectID, actorUnit, "", &input); pErr != nil {
+			writeError(w, 403, pErr)
+			return
 		}
 		// Operation-level authorization (docs/org-structure.md §22): project
 		// visibility and effective writer role, org visibility of the agent and
@@ -2666,6 +2718,9 @@ func main() {
 		}
 		applyAgentConfig(r.Context(), ws, triggerAgent, &input)
 		applyProjectModel(r.Context(), ws, projectID, &input)
+		// Policy (§24) applies before fire-time authorization: a run the policy
+		// already forbids (model allowlist) is a rejection, not a silent drop.
+		policyErr := applyRunPolicy(r.Context(), ws, costPrices, projectID, "", matched.OrgUnitID, &input)
 		if err := activities.PrepareRun(&input); err != nil {
 			writeError(w, 422, err)
 			return
@@ -2691,6 +2746,9 @@ func main() {
 		// Fire-time re-authorization (§21): the execution identity still permits
 		// this exact run. A failed check is a rejection, not a silent drop.
 		identityID, authErr := authorizeTriggerRun(r.Context(), ws, matched, effectiveAgentID, triggerAgent, &input)
+		if authErr == nil {
+			authErr = policyErr
+		}
 		if authErr != nil {
 			rejection := map[string]any{"trigger_id": matched.ID, "trigger_name": matched.Name, "event_id": eventID, "source": "webhook", "reason": authErr.Error()}
 			emitTriggerEvent("trigger.rejected", "000001", rejection)
@@ -2766,6 +2824,8 @@ func main() {
 				}
 				applyAgentConfig(context.Background(), ws, triggerAgent, &input)
 				applyProjectModel(context.Background(), ws, t.ProjectID, &input)
+				// Policy (§24): a forbidden run never starts; the fire is logged.
+				policyErr := applyRunPolicy(context.Background(), ws, costPrices, t.ProjectID, "", t.OrgUnitID, &input)
 				if err := activities.PrepareRun(&input); err != nil {
 					slog.Error("prepare trigger run", "trigger", t.ID, "error", err)
 					continue
@@ -2775,6 +2835,9 @@ func main() {
 				// re-checked on every scheduled fire; a revoked permission stops
 				// future runs instead of silently failing mid-workflow.
 				identityID, authErr := authorizeTriggerRun(context.Background(), ws, &t, effectiveAgentID, triggerAgent, &input)
+				if authErr == nil {
+					authErr = policyErr
+				}
 				if authErr != nil {
 					slog.Warn("scheduled trigger rejected", "trigger", t.ID, "name", t.Name, "error", authErr)
 					continue
@@ -2885,6 +2948,94 @@ func main() {
 		}
 		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditExecIdentityDeleted, "execution_identity", r.PathValue("identityID"), nil); err != nil {
 			log.Warn("audit execution identity delete", "error", err)
+		}
+		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+
+	// Policies (docs/org-structure.md §24): org-bound constraints that inherit
+	// top-down and merge restrictively. Admin-managed; readers need the list for
+	// the Org UI and effective-policy inspection.
+	mux.HandleFunc("GET /v1/workspace/policies", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		policies, err := ws.ListPolicies(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"policies": policies})
+	})
+	mux.HandleFunc("POST /v1/workspace/policies", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		var p workspace.Policy
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&p); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		p.ID = ""
+		if err := workspace.ValidatePolicy(p); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		p.ID = "policy-" + shortID()
+		if err := ws.CreatePolicy(r.Context(), &p); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 409, err)
+			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditPolicyCreated, "policy", p.ID, map[string]any{"name": p.Name, "org_unit_id": p.OrgUnitID}); err != nil {
+			log.Warn("audit policy create", "error", err)
+		}
+		writeJSON(w, 201, p)
+	})
+	mux.HandleFunc("PUT /v1/workspace/policies/{policyID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		var p workspace.Policy
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&p); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		p.ID = r.PathValue("policyID")
+		if err := ws.UpdatePolicy(r.Context(), p); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditPolicyUpdated, "policy", p.ID, map[string]any{"name": p.Name, "org_unit_id": p.OrgUnitID}); err != nil {
+			log.Warn("audit policy update", "error", err)
+		}
+		stored, gErr := ws.GetPolicy(r.Context(), p.ID)
+		if gErr != nil {
+			writeJSON(w, 200, p)
+			return
+		}
+		writeJSON(w, 200, stored)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/policies/{policyID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		if err := ws.DeletePolicy(r.Context(), r.PathValue("policyID")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditPolicyDeleted, "policy", r.PathValue("policyID"), nil); err != nil {
+			log.Warn("audit policy delete", "error", err)
 		}
 		writeJSON(w, 200, map[string]bool{"deleted": true})
 	})
@@ -3808,6 +3959,69 @@ func applyProjectModel(ctx context.Context, ws *workspace.Store, projectID strin
 	if proj.DefaultModel != "" {
 		input.Model = proj.DefaultModel
 	}
+}
+
+// applyRunPolicy resolves the effective policy for a run's org position
+// (docs/org-structure.md §24) and enforces it on the run input: the project's
+// units, the acting user's unit (manual runs) and the trigger's unit
+// (automated runs) each expand to their ancestor chain and merge
+// restrictively. A model outside the allowlist rejects the run; disallowed
+// MCP servers drop out; deny/read_only/tools modes clamp the input; caps and
+// the model's prices land in the workflow-enforced budget fields.
+func applyRunPolicy(ctx context.Context, ws *workspace.Store, prices cost.Config, projectID, actorUnitID, triggerUnitID string, input *agent.RunInput) error {
+	units := []string{actorUnitID, triggerUnitID}
+	if projectID != "" {
+		links, err := ws.ProjectOrgUnits(ctx, projectID)
+		if err != nil {
+			return err
+		}
+		units = append(units, links...)
+	}
+	effective, _, err := ws.EffectivePolicy(ctx, units...)
+	if err != nil {
+		return err
+	}
+	// An empty model means the kernel default (TEMPORALITY_MODEL_ID): the policy
+	// must judge the model the run will actually use.
+	model := input.Model
+	if model == "" {
+		model = strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID"))
+	}
+	if effective.AllowedModels != nil && model != "" && !workspace.PolicyAllowsList(effective.AllowedModels, model) {
+		return fmt.Errorf("model %q is not allowed by policy in this org scope", model)
+	}
+	if effective.AllowedMCP != nil {
+		kept := make([]string, 0, len(input.MCPServers))
+		for _, serverID := range input.MCPServers {
+			if workspace.PolicyAllowsList(effective.AllowedMCP, serverID) {
+				kept = append(kept, serverID)
+			}
+		}
+		input.MCPServers = kept
+	}
+	if effective.NetworkMode == "deny" {
+		input.NetworkAccess = false
+	}
+	if effective.SandboxMode == "read_only" {
+		input.ReadOnly = true
+	}
+	if effective.ApprovalMode == "tools" {
+		input.RequireToolApproval = true
+	}
+	if effective.MaxTokens != nil {
+		input.TokenBudget = *effective.MaxTokens
+	}
+	if effective.MaxBudgetUSD != nil {
+		input.MaxBudgetUSD = *effective.MaxBudgetUSD
+		if price, ok := prices.Price(model); ok {
+			input.ModelPromptPricePer1k = price.PromptPer1k
+			input.ModelCompPricePer1k = price.CompPer1k
+		}
+	}
+	if effective.TimeoutSeconds != nil {
+		input.TimeoutSeconds = *effective.TimeoutSeconds
+	}
+	return nil
 }
 
 // mcpConfig converts a stored workspace.MCPServer into a registry config.
