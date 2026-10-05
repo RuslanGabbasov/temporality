@@ -572,8 +572,8 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                       <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                     ) : null}
 
-                    {msg.role === 'assistant' && msg.runId && msg.status && msg.status !== 'running' && (
-                      <DelegationTree project={project} runId={msg.runId} agents={allAgents} />
+                    {msg.role === 'assistant' && msg.runId && msg.status && (
+                      <DelegationTree project={project} runId={msg.runId} agents={allAgents} live={msg.status === 'running'} />
                     )}
 
                     {msg.status === 'running' && msg.streamLines && msg.streamLines.length > 0 && (

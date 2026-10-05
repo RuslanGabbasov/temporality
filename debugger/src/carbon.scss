@@ -1497,6 +1497,93 @@ button.header-nav-link {
   margin-top: 0.25rem;
 }
 
+// "Open run" link at the right edge of a delegation row
+.chat-delegation-open {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--tm-teal);
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.chat-delegation-open:hover {
+  background: rgba(128, 145, 140, 0.12);
+}
+
+// Compact activity feed of a delegated child run
+.chat-delegation-activity {
+  margin: 0.2rem 0;
+}
+
+.chat-delegation-activity-title {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tm-text-3);
+  margin-bottom: 0.2rem;
+}
+
+.chat-delegation-trace {
+  max-height: 240px;
+  overflow-y: auto;
+  border-left: 2px solid var(--tm-border);
+  padding-left: 0.4rem;
+}
+
+.chat-delegation-trace-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  padding: 0.12rem 0;
+  color: var(--tm-text-2);
+  min-width: 0;
+}
+
+.chat-delegation-trace-icon {
+  width: 1rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.chat-delegation-trace-label {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-delegation-trace-detail {
+  color: var(--tm-text-3);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-delegation-trace-time {
+  color: var(--tm-muted);
+  font-size: 0.62rem;
+  flex-shrink: 0;
+}
+
+.chat-delegation-answer-title {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tm-text-3);
+  margin-bottom: 0.15rem;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Workspace tiles
 // ═══════════════════════════════════════════════════════════════

@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { API_BASE, authHeaders } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
+import { workspaceApi, type Agent } from './workspaceApi'
+import DelegationTree from './DelegationTree'
 import Markdown from './Markdown'
 import { useT } from './i18n'
+import { eventSummary, shortTime } from './eventSummary'
 import {
   Button,
   TextInput,
@@ -28,125 +31,64 @@ function pendingApprovals(events: ObservationEvent[]) {
   return events.filter((event) => (event.type === 'approval.requested' || event.type === 'human.requested') && !ended.has(event.data?.operation_id))
 }
 
-function shortTime(iso: string) {
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString()
+type RunStatus = 'completed' | 'failed' | 'running'
+
+interface RunRow {
+  id: string
+  title: string
+  role: string
+  at: string
+  parent: string | null
+  depth: number
+  status: RunStatus
+  sourceId: string
+  workflow?: string
+  agentId?: string
 }
 
-/** Format an event into a human-readable summary line. */
-function eventSummary(event: ObservationEvent, t: (key: string, vars?: Record<string, string>) => string): { icon: string; label: string; detail: string; color: string } {
-  const d = event.data ?? {}
-  switch (event.type) {
-    case 'run.started':
-      return { icon: '▶', label: t('runs.event.run_started'), detail: d.model ? t('runs.model', { name: String(d.model) }) : '', color: 'var(--tm-teal)' }
-    case 'run.completed':
-      return { icon: '✓', label: t('runs.event.run_completed'), detail: `${d.turns ?? '?'} ${t('runs.turns')}`, color: '#9ece6a' }
-    case 'run.failed':
-      return { icon: '✗', label: t('runs.event.run_failed'), detail: d.error ? String(d.error).slice(0, 80) : '', color: '#f7768e' }
-    case 'turn.started':
-      return { icon: '→', label: t('runs.turn', { turn: String(d.turn ?? '?') }), detail: t('runs.event.started'), color: 'var(--tm-text-3)' }
-    case 'turn.completed':
-      return { icon: '←', label: t('runs.turn', { turn: String(d.turn ?? '?') }), detail: d.tool_calls ? t('runs.tool_calls_n', { count: String(d.tool_calls) }) : t('runs.event.completed'), color: 'var(--tm-text-3)' }
-    case 'model.started':
-      return { icon: '⏳', label: t('runs.event.model_call'), detail: String(d.model ?? t('runs.event.started')), color: 'var(--tm-text-3)' }
-    case 'model.completed': {
-      const tokens = d.total_tokens ? `${d.total_tokens} tok` : ''
-      const latency = d.latency_ms ? `${(Number(d.latency_ms) / 1000).toFixed(1)}s` : ''
-      const calls = d.tool_call_count ? `${d.tool_call_count} tools` : ''
-      const parts = [tokens, latency, calls].filter(Boolean).join(' · ')
-      return { icon: '🧠', label: t('runs.event.model_response'), detail: parts, color: '#bb9af7' }
-    }
-    case 'tool.started': {
-      const args = d.arguments
-      let preview = ''
-      if (typeof args === 'string') {
-        try {
-          const parsed = JSON.parse(args)
-          if (Array.isArray(parsed.command)) preview = parsed.command.join(' ')
-          else if (parsed.path) preview = parsed.path
-          else if (parsed.query) preview = String(parsed.query).slice(0, 60)
-          else if (parsed.proposition) preview = String(parsed.proposition).slice(0, 60)
-          else preview = args.slice(0, 60)
-        } catch { preview = String(args).slice(0, 60) }
-      }
-      return { icon: '🔧', label: String(d.tool ?? 'tool'), detail: preview || t('runs.event.started'), color: '#e0af68' }
-    }
-    case 'tool.completed': {
-      const exit = d.exit_code !== undefined ? `exit ${d.exit_code}` : ''
-      const ms = d.latency_ms ? `${(Number(d.latency_ms) / 1000).toFixed(1)}s` : ''
-      const output = typeof d.output === 'string' ? d.output.slice(0, 80).replace(/\n/g, ' ') : ''
-      return { icon: d.exit_code === 0 ? '✓' : '✗', label: String(d.tool ?? 'tool'), detail: [exit, ms, output].filter(Boolean).join(' · '), color: d.exit_code === 0 ? '#9ece6a' : '#f7768e' }
-    }
-    case 'tool.failed': {
-      const errDetail = d.error ? String(d.error).slice(0, 60) : 'failed'
-      const args = d.arguments
-      let preview = ''
-      if (typeof args === 'string') {
-        try {
-          const parsed = JSON.parse(args)
-          if (Array.isArray(parsed.command)) preview = parsed.command.join(' ')
-          else if (parsed.path) preview = parsed.path
-        } catch { /* ignore */ }
-      }
-      return { icon: '✗', label: String(d.tool ?? 'tool'), detail: preview ? `${preview} → ${errDetail}` : errDetail, color: '#f7768e' }
-    }
-    case 'knowledge.proposed':
-      return { icon: '💡', label: t('runs.event.learned'), detail: String(d.proposition ?? '').slice(0, 60), color: '#73daca' }
-    case 'knowledge.extraction.started':
-      return { icon: '🧪', label: t('runs.event.extraction_started'), detail: String(d.extractor_version ?? ''), color: '#73daca' }
-    case 'knowledge.extraction.completed': {
-      const skipped = d.skipped ? ` · ${t('runs.extraction_skipped')}` : ''
-      return { icon: '🧪', label: t('runs.event.extraction_completed'), detail: t('runs.extraction_candidates', { count: String(d.candidates_count ?? 0) }) + skipped, color: '#73daca' }
-    }
-    case 'knowledge.extraction.failed':
-      return { icon: '⚠', label: t('runs.event.extraction_failed'), detail: String(d.error ?? '').slice(0, 80), color: '#e6b85c' }
-    case 'knowledge.recalled':
-      return { icon: '📚', label: t('runs.event.recalled'), detail: String(d.proposition ?? '').slice(0, 60), color: '#9d7cd8' }
-    case 'hint.query':
-      return { icon: '🔍', label: t('runs.event.memory_lookup'), detail: t('runs.candidates', { count: String(d.candidate_count ?? 0) }), color: 'var(--tm-text-3)' }
-    case 'memory.read':
-      return { icon: '📖', label: t('runs.event.memory_read'), detail: t('runs.hints_loaded', { count: String(d.hint_count ?? 0) }), color: 'var(--tm-text-3)' }
-    case 'mcp.call.started':
-      return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: `→ ${d.server ?? ''}`, color: '#bb9af7' }
-    case 'mcp.call.completed':
-      return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: t('runs.event.completed'), color: '#9ece6a' }
-    case 'mcp.call.failed':
-      return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: String(d.error_type ?? 'failed'), color: '#f7768e' }
-    case 'approval.requested': {
-      const op = d.operation as Record<string, unknown> | undefined
-      return { icon: '⚠', label: t('runs.event.approval_needed'), detail: String(d.action ?? op?.tool ?? ''), color: '#e6b85c' }
-    }
-    case 'approval.granted':
-      return { icon: '✓', label: t('runs.event.approved'), detail: d.approver ? `by ${String(d.approver)}` : '', color: '#9ece6a' }
-    case 'approval.auto_granted': {
-      const op2 = d.operation as Record<string, unknown> | undefined
-      return { icon: '✓', label: t('runs.event.auto_approved'), detail: String(op2?.tool ?? d.policy_id ?? ''), color: '#9ece6a' }
-    }
-    case 'tool.blocked':
-      return { icon: '🚫', label: t('runs.event.blocked'), detail: String(d.reason ?? ''), color: '#f7768e' }
-    case 'agent.summary':
-      return { icon: '📋', label: t('runs.event.summary'), detail: String(d.kind ?? ''), color: 'var(--tm-teal)' }
-    case 'approval.rejected':
-      return { icon: '✗', label: t('runs.event.rejected'), detail: String(d.reason ?? ''), color: '#f7768e' }
-    case 'human.requested':
-      return { icon: '❓', label: t('runs.event.human_requested') ?? 'Question to human', detail: String(d.question ?? ''), color: '#e6b85c' }
-    case 'human.answered':
-      return { icon: '✓', label: t('runs.event.human_answered') ?? 'Answered', detail: String(d.response ?? ''), color: '#9ece6a' }
-    case 'human.timed_out':
-      return { icon: '⏱', label: t('runs.event.human_timed_out') ?? 'No answer (timeout)', detail: '', color: '#f7768e' }
-    case 'human.cancelled':
-      return { icon: '✗', label: t('runs.event.human_cancelled') ?? 'Question cancelled', detail: String(d.reason ?? ''), color: '#f7768e' }
-    case 'trigger.received':
-      return { icon: '⚡', label: t('runs.event.trigger_received') ?? 'Trigger received', detail: String(d.trigger_name ?? d.source ?? ''), color: '#7aa2f7' }
-    case 'trigger.accepted':
-      return { icon: '⚡', label: t('runs.event.trigger_accepted') ?? 'Trigger accepted', detail: String(d.trigger_name ?? ''), color: '#7aa2f7' }
-    case 'notification.sent':
-      return { icon: '🔔', label: t('runs.event.notification_sent') ?? 'Notified', detail: `${d.channel ?? 'web'} · ${d.status ?? ''}${d.recipient ? ' · ' + d.recipient : ''}`, color: '#bb9af7' }
-    case 'delegation.started':
-      return { icon: '↗', label: t('runs.event.delegation'), detail: `→ ${d.child_run_id ?? '?'}`, color: '#7aa2f7' }
-    default:
-      return { icon: '•', label: event.type, detail: '', color: 'var(--tm-text-3)' }
+/** Build the run call tree: roots are runs without a known parent, children
+ * (delegated runs carry parent_run_id) are nested under their parent. */
+function buildRunRows(started: ObservationEvent[], statuses: Map<string, RunStatus>): RunRow[] {
+  const byId = new Map<string, ObservationEvent>()
+  for (const event of started) {
+    const id = runID(event)
+    if (id) byId.set(id, event)
   }
+  const childrenOf = new Map<string, ObservationEvent[]>()
+  const roots: ObservationEvent[] = []
+  for (const event of started) {
+    const id = runID(event)
+    if (!id) continue
+    const parent = event.data?.parent_run_id ? String(event.data.parent_run_id) : ''
+    if (parent && parent !== id && byId.has(parent)) {
+      const list = childrenOf.get(parent) ?? []
+      list.push(event)
+      childrenOf.set(parent, list)
+    } else {
+      roots.push(event)
+    }
+  }
+  const rows: RunRow[] = []
+  const walk = (event: ObservationEvent, depth: number) => {
+    const id = runID(event)
+    const rawTitle = event.data?.title
+    rows.push({
+      id,
+      title: typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle.trim() : '',
+      role: String(event.data?.role ?? 'agent'),
+      at: event.occurred_at,
+      parent: depth === 0 ? null : String(event.data?.parent_run_id ?? ''),
+      depth,
+      status: statuses.get(id) ?? 'running',
+      sourceId: event.source.id,
+      workflow: typeof event.data?.workflow === 'string' ? event.data.workflow : undefined,
+      agentId: typeof event.data?.agent_id === 'string' && event.data.agent_id ? event.data.agent_id : undefined,
+    })
+    for (const child of childrenOf.get(id) ?? []) walk(child, depth + 1)
+  }
+  // Journal returns oldest-first; show newest runs first.
+  for (const root of roots.reverse()) walk(root, 0)
+  return rows
 }
 
 /** Expandable event detail. For model.completed rows the response text (from
@@ -232,8 +174,16 @@ function EventDetail({ event, t, response, reasoning }: { event: ObservationEven
 
 export default function AgentRuns({ project }: { project: string }) {
   const t = useT()
-  const [runs, setRuns] = useState<ObservationEvent[]>([])
-  const [selected, setSelected] = useState('')
+  const [rows, setRows] = useState<RunRow[]>([])
+  // Read the run from the URL up front (links from other panels point at
+  // /agents?project=…&run=…) — an initializer, not an effect, so the first
+  // loadRuns call sees it through its closure and skips auto-select.
+  const [selected, setSelected] = useState(() => new URLSearchParams(window.location.search).get('run') ?? '')
+  // loadRuns reads the current selection through a ref so its identity doesn't
+  // change (and re-trigger the list effect) every time the user picks a run.
+  const selectedRef = useRef(selected)
+  useEffect(() => { selectedRef.current = selected }, [selected])
+  const [agents, setAgents] = useState<Agent[]>([])
   const [timeline, setTimeline] = useState<ObservationEvent[]>([])
   const [trajectory, setTrajectory] = useState<any>(null)
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
@@ -241,8 +191,30 @@ export default function AgentRuns({ project }: { project: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('')
-  const visibleRuns = runs.filter((event) => matchesFilter(filter, runID(event), String(event.data?.title ?? '')))
   const pending = useMemo(() => pendingApprovals(timeline), [timeline])
+  // A run row stays visible when it matches the filter or one of its delegated
+  // children does, so searching for a child keeps its parent chain.
+  const visibleRuns = useMemo(() => {
+    const childrenOf = new Map<string, string[]>()
+    for (const row of rows) {
+      if (!row.parent) continue
+      const list = childrenOf.get(row.parent) ?? []
+      list.push(row.id)
+      childrenOf.set(row.parent, list)
+    }
+    const selfMatch = new Map<string, boolean>()
+    for (const row of rows) selfMatch.set(row.id, matchesFilter(filter, row.id, row.title))
+    const subtreeMatch = (id: string): boolean => {
+      const match = selfMatch.get(id) ?? false
+      if (match) return true
+      return (childrenOf.get(id) ?? []).some((child) => subtreeMatch(child))
+    }
+    return rows.filter((row) => subtreeMatch(row.id))
+  }, [rows, filter])
+  const selectedLive = useMemo(() =>
+    timeline.some((event) => event.type === 'run.started' && runID(event) === selected)
+      && !timeline.some((event) => (event.type === 'run.completed' || event.type === 'run.failed') && runID(event) === selected),
+    [timeline, selected])
   // model.text_delta/model.reasoning carry each turn's response text. They are
   // joined into their model.completed row instead of polluting the trace with
   // duplicate per-turn entries.
@@ -261,30 +233,40 @@ export default function AgentRuns({ project }: { project: string }) {
     return { visible, responseByKey, reasoningByKey }
   }, [timeline])
 
-  const loadRuns = useCallback(async (autoSelect = false) => {
+  const loadRuns = useCallback(async (autoSelect = false, silent = false) => {
     if (!project.trim()) return
-    if (!autoSelect) setBusy(true)
-    setError('')
+    if (!autoSelect && !silent) setBusy(true)
+    if (!silent) setError('')
     try {
-      const page = await observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.started', limit: 500 })
-      const rootRuns = page.events.filter((event) => !event.data?.parent_run_id)
-      setRuns(rootRuns.reverse())
+      const startedPage = await observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.started', limit: 500 })
+      // Terminal events give every list row (roots and delegated children
+      // alike) its status tag without opening each run.
+      const [completedPage, failedPage] = await Promise.all([
+        observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.completed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
+        observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.failed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
+      ])
+      const statuses = new Map<string, RunStatus>()
+      for (const event of failedPage.events) statuses.set(runID(event), 'failed')
+      for (const event of completedPage.events) statuses.set(runID(event), 'completed')
+      const allRows = buildRunRows(startedPage.events, statuses)
+      setRows(allRows)
+      const rootRuns = allRows.filter((row) => row.depth === 0)
       // Only auto-select on initial load when nothing is selected
-      if (autoSelect && !selected && rootRuns.length) {
-        for (const event of rootRuns) {
-          const id = runID(event)
-          if (!id) continue
-          const query = new URLSearchParams({ project: project.trim(), source_id: event.source.id })
-          let response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(id)}?${query}`, { headers: authHeaders() })
-          if (!response.ok && event.data?.workflow === 'LeadCoderReviewerQA') {
-            response = await fetch(`${KERNEL_API}/v1/agent/examples/lead-coder-reviewer-qa/runs/${encodeURIComponent(id)}?${query}`, { headers: authHeaders() })
+      const currentSelected = selectedRef.current
+      if (autoSelect && !currentSelected && rootRuns.length) {
+        let found = ''
+        for (const row of rootRuns) {
+          const query = new URLSearchParams({ project: project.trim(), source_id: row.sourceId })
+          let response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(row.id)}?${query}`, { headers: authHeaders() })
+          if (!response.ok && row.workflow === 'LeadCoderReviewerQA') {
+            response = await fetch(`${KERNEL_API}/v1/agent/examples/lead-coder-reviewer-qa/runs/${encodeURIComponent(row.id)}?${query}`, { headers: authHeaders() })
           }
-          if (response.ok) { setSelected(id); break }
+          if (response.ok) { found = row.id; break }
         }
-        if (!selected) setSelected(runID(rootRuns[0]) || '')
+        setSelected(found || rootRuns[0]?.id || '')
       }
-    } catch (failure) { setError(message(failure)) }
-    finally { if (!autoSelect) setBusy(false) }
+    } catch (failure) { if (!silent) setError(message(failure)) }
+    finally { if (!autoSelect && !silent) setBusy(false) }
   }, [project])
 
   const loadRun = useCallback(async (run: string, silent = false) => {
@@ -333,6 +315,16 @@ export default function AgentRuns({ project }: { project: string }) {
     const timer = window.setInterval(() => { void loadRun(selected, true) }, 10000)
     return () => window.clearInterval(timer)
   }, [selected, loadRun])
+  // Silent list refresh: keeps status tags and newly started runs (including
+  // delegated children) fresh without touching the current selection.
+  useEffect(() => {
+    const timer = window.setInterval(() => { void loadRuns(true, true) }, 15000)
+    return () => window.clearInterval(timer)
+  }, [loadRuns])
+  // Agents power the delegation tree node names; they rarely change.
+  useEffect(() => {
+    workspaceApi.listAllAgents().then((page) => setAgents(page.agents)).catch(() => { /* names fall back to ids */ })
+  }, [])
 
   async function decide(event: ObservationEvent, approved: boolean, response = '') {
     const operationID = String(event.data?.operation_id ?? '')
@@ -374,26 +366,31 @@ export default function AgentRuns({ project }: { project: string }) {
               <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_runs') ?? 'Filter runs…'} />
             </div>
             <Stack gap={1}>
-              {runs.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('runs.no_runs') ?? 'No runs for this project'}</Tile>}
-              {visibleRuns.map((event) => {
-                const id = runID(event)
-                const rawTitle = event.data?.title
-                const title = typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle.trim() : ''
+              {rows.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('runs.no_runs') ?? 'No runs for this project'}</Tile>}
+              {visibleRuns.map((row) => {
+                const agentName = row.agentId ? agents.find((a) => a.id === row.agentId)?.name : undefined
+                const label = row.title || agentName || (row.depth > 0 ? `#${row.id.split('/').pop() ?? ''}` : row.id)
                 return (
-                  <Tile
-                    key={event.event_id}
-                    onClick={() => setSelected(id)}
-                    className={`workspace-tile ${selected === id ? 'selected' : ''}`}
-                    style={{ padding: '0.5rem 0.75rem', cursor: 'pointer', minWidth: 0, overflow: 'hidden' }}
-                  >
-                    <div style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title || id}</div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
-                      {String(event.data?.role ?? 'agent')} · {shortTime(event.occurred_at)}
-                    </div>
-                    {title && (
-                      <div style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{id}</div>
-                    )}
-                  </Tile>
+                <Tile
+                  key={row.id}
+                  onClick={() => setSelected(row.id)}
+                  className={`workspace-tile ${selected === row.id ? 'selected' : ''}`}
+                  style={{ padding: '0.5rem 0.75rem', cursor: 'pointer', minWidth: 0, overflow: 'hidden', marginLeft: row.depth > 0 ? `${row.depth * 0.75}rem` : undefined }}
+                >
+                  <div style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {row.depth > 0 && <span style={{ color: 'var(--tm-text-3)', marginRight: '0.25rem' }}>↳</span>}
+                    {label}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.role || 'agent'} · {shortTime(row.at)}</span>
+                    {row.status === 'completed' && <Tag type="green" size="sm">{t('chat.delegation.completed')}</Tag>}
+                    {row.status === 'failed' && <Tag type="red" size="sm">{t('chat.delegation.failed')}</Tag>}
+                    {row.status === 'running' && <Tag type="blue" size="sm">{t('chat.delegation.running')}</Tag>}
+                  </div>
+                  {(row.title || agentName) && (
+                    <div style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.id}</div>
+                  )}
+                </Tile>
                 )
               })}
             </Stack>
@@ -508,6 +505,9 @@ export default function AgentRuns({ project }: { project: string }) {
                     </Tile>
                   )
                 })}
+
+                {/* Delegation call tree — children runs with live status */}
+                <DelegationTree project={project.trim()} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
 
                 {/* Timeline — the main trace view */}
                 <Tile>
