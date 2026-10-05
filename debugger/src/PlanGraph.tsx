@@ -126,12 +126,24 @@ export async function fetchPlans(project: string, runId: string): Promise<PlanIn
   return foldPlans(events)
 }
 
-function PlanTaskChip({ task, agents, t, onOpenRun }: { task: PlanTaskInfo; agents: Agent[]; t: ReturnType<typeof useT>; onOpenRun?: (runId: string) => void }) {
+/** Mini status glyph of a dependency, so a pending task shows how ready its inputs are. */
+function depStatusIcon(status: PlanTaskStatus | undefined): { icon: string; color: string } {
+  switch (status) {
+    case 'completed': return { icon: '✓', color: '#9ece6a' }
+    case 'failed': return { icon: '✗', color: '#f7768e' }
+    case 'running': return { icon: '●', color: 'var(--tm-teal)' }
+    case 'skipped': return { icon: '–', color: 'var(--tm-text-3)' }
+    default: return { icon: '○', color: 'var(--tm-text-3)' }
+  }
+}
+
+function PlanTaskChip({ task, agents, t, onOpenRun, statuses }: { task: PlanTaskInfo; agents: Agent[]; t: ReturnType<typeof useT>; onOpenRun?: (runId: string) => void; statuses: Map<string, PlanTaskStatus> }) {
   const agent = agents.find((a) => a.id === task.agentId)
   const agentTitle = agent?.name ?? task.agentId ?? t('chat.delegation.unknown_agent')
   const skipped = task.status === 'skipped'
   const failed = task.status === 'failed'
   const running = task.status === 'running'
+  const pending = task.status === 'pending'
   const tag = failed
     ? <Tag type="red" size="sm">{t('chat.delegation.failed')}</Tag>
     : task.status === 'completed'
@@ -159,11 +171,26 @@ function PlanTaskChip({ task, agents, t, onOpenRun }: { task: PlanTaskInfo; agen
       onClick={task.childRunId ? open : undefined}
       onKeyDown={task.childRunId ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e as unknown as React.MouseEvent) } } : undefined}
     >
-      <span className="plan-task-id">{task.id}</span>
-      <span className="plan-task-agent">{agentTitle}</span>
-      {tag}
-      {task.status === 'completed' && typeof task.turns === 'number' && (
-        <span className="plan-task-meta">{t('chat.delegation.turns', { count: String(task.turns) })}</span>
+      <div className="plan-task-main">
+        <span className="plan-task-id">{task.id}</span>
+        <span className="plan-task-agent">{agentTitle}</span>
+        {tag}
+        {task.status === 'completed' && typeof task.turns === 'number' && (
+          <span className="plan-task-meta">{t('chat.delegation.turns', { count: String(task.turns) })}</span>
+        )}
+      </div>
+      {(pending || skipped) && task.dependsOn.length > 0 && (
+        <div className="plan-task-waits">
+          <span className="plan-task-waits-label">{t('chat.plan.waits')}</span>
+          {task.dependsOn.map((dep) => {
+            const depStatus = depStatusIcon(statuses.get(dep))
+            return (
+              <span key={dep} className="plan-task-dep">
+                <span style={{ color: depStatus.color }}>{depStatus.icon}</span> {dep}
+              </span>
+            )
+          })}
+        </div>
       )}
     </div>
   )
@@ -201,6 +228,7 @@ export default function PlanGraph({ project, runId, agents, live = false, onOpen
       <div className="chat-plan-title">{t('chat.plan.title')}</div>
       {plans.map((plan, index) => {
         const layers = taskLayers(plan.tasks)
+        const statuses = new Map(plan.tasks.map((task) => [task.id, task.status]))
         const columns: PlanTaskInfo[][] = []
         for (const task of plan.tasks) {
           const layer = layers.get(task.id) ?? 0
@@ -218,7 +246,7 @@ export default function PlanGraph({ project, runId, agents, live = false, onOpen
                 <div key={columnIndex} className="chat-plan-column-group">
                   <div className="chat-plan-column">
                     {column.map((task) => (
-                      <PlanTaskChip key={task.id} task={task} agents={agents} t={t} onOpenRun={onOpenRun} />
+                      <PlanTaskChip key={task.id} task={task} agents={agents} t={t} onOpenRun={onOpenRun} statuses={statuses} />
                     ))}
                   </div>
                   {columnIndex < columns.length - 1 && <span className="chat-plan-arrow">→</span>}
