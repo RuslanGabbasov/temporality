@@ -72,3 +72,43 @@ func TestProjectKnowledgeRejectsConflictingReProposal(t *testing.T) {
 		t.Fatalf("conflicting re-proposal must be rejected, got: %v", err)
 	}
 }
+
+func TestExtractionMarkersValidateAndProjectAway(t *testing.T) {
+	base := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	marker := func(eventID, eventType string, at time.Time) Event {
+		return Event{
+			Schema: Schema, EventID: eventID, OccurredAt: at,
+			Source:  Source{ID: "kernel", Integration: "temporality-agent-kernel"},
+			Context: Context{Project: "repo-a", Run: "run-1", Actor: Actor{ID: "agent", Type: "agent"}},
+			Type:    eventType,
+			Data:    map[string]any{"extraction_id": "extraction-abc", "candidates_count": 1},
+		}
+	}
+	markers := []Event{
+		marker("m1", "knowledge.extraction.started", base),
+		marker("m2", "knowledge.extraction.completed", base.Add(time.Second)),
+		marker("m3", "knowledge.extraction.failed", base.Add(2*time.Second)),
+	}
+	for _, event := range markers {
+		if err := event.Validate(); err != nil {
+			t.Fatalf("%s must validate: %v", event.Type, err)
+		}
+	}
+	broken := marker("m4", "knowledge.extraction.started", base)
+	broken.Context.Project = ""
+	if err := broken.Validate(); err == nil {
+		t.Fatal("extraction markers without a project must be rejected")
+	}
+
+	// Markers carry no knowledge_id, so the projection must skip them instead
+	// of failing the whole knowledge stream.
+	events := append([]Event{}, markers...)
+	events = append(events, proposalEvent("e1", "ext/abc", "The build requires a pre-existing out directory.", base.Add(3*time.Second), nil))
+	knowledge, err := ProjectKnowledge(events)
+	if err != nil {
+		t.Fatalf("extraction markers must not break the projection: %v", err)
+	}
+	if len(knowledge) != 1 || knowledge[0].ID != "ext/abc" {
+		t.Fatalf("expected exactly the proposed knowledge, got %#v", knowledge)
+	}
+}

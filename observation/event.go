@@ -91,6 +91,11 @@ func (e Event) Validate() error {
 		if e.Type == "knowledge.disproved" && len(e.Evidence) == 0 {
 			return errors.New("knowledge.disproved requires evidence")
 		}
+	case "knowledge.extraction.started", "knowledge.extraction.completed", "knowledge.extraction.failed":
+		// Extraction markers are run observability, not knowledge lifecycle.
+		if strings.TrimSpace(e.Context.Project) == "" {
+			return errors.New("knowledge extraction events require context.project")
+		}
 	case "knowledge.linked":
 		if strings.TrimSpace(e.Context.Project) == "" || stringValue(e.Data, "knowledge_id") == "" || stringValue(e.Data, "target_id") == "" {
 			return errors.New("knowledge.linked requires context.project, data.knowledge_id, and data.target_id")

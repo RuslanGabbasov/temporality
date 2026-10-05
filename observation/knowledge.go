@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -109,6 +110,11 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			continue
 		}
 		if len(event.Type) < len("knowledge.") || event.Type[:len("knowledge.")] != "knowledge." {
+			continue
+		}
+		// Extraction markers are run observability (§24 of the extraction
+		// design): they carry no knowledge_id and are not lifecycle transitions.
+		if strings.HasPrefix(event.Type, "knowledge.extraction.") {
 			continue
 		}
 		id := stringValue(event.Data, "knowledge_id")
