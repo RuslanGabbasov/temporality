@@ -1623,6 +1623,7 @@ button.header-nav-link {
   gap: 2.6rem;
   flex-wrap: nowrap;
   position: relative;
+  z-index: 1;
 }
 
 // Horizontal scrolling shell — wide DAGs scroll instead of squeezing columns
@@ -1638,11 +1639,12 @@ button.header-nav-link {
   min-width: 100%;
 }
 
-// SVG dependency edges overlay — never intercepts pointer events
+// SVG dependency edges overlay — painted under the chips, never intercepts pointer events
 .plan-edges {
   position: absolute;
   left: 0;
   top: 0;
+  z-index: 0;
   pointer-events: none;
   overflow: visible;
 }
@@ -1664,7 +1666,8 @@ button.header-nav-link {
   border-radius: 6px;
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
-  background: rgba(128, 145, 140, 0.05);
+  // Opaque: long edges may cross later columns and must hide under the chip
+  background: var(--tm-surface);
   max-width: 16rem;
 }
 
