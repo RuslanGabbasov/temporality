@@ -164,6 +164,49 @@ func joinPath(path, id string) string {
 	return path + "." + id
 }
 
+// Policy is an inheritable execution constraint attached to an org unit
+// (docs/org-structure.md §24). A row with an empty OrgUnitID applies to the
+// whole installation; a row bound to a unit constrains the unit's subtree.
+// Every dimension is optional: zero values mean "no restriction". The
+// effective policy for a run merges restrictively along the ancestor chain.
+type Policy struct {
+	ID        string `json:"id"`
+	OrgUnitID string `json:"org_unit_id,omitempty"` // '' = installation-wide
+	Name      string `json:"name"`
+	// AllowedModels/AllowedMCP: empty = unrestricted, "*" = unrestricted;
+	// otherwise an exact-name allowlist.
+	AllowedModels []string `json:"allowed_models"`
+	AllowedMCP    []string `json:"allowed_mcp"`
+	// MaxTokens/MaxBudgetUSD/TimeoutSeconds cap a single run; NULL = uncapped.
+	MaxTokens      *int     `json:"max_tokens,omitempty"`
+	MaxBudgetUSD   *float64 `json:"max_budget_usd,omitempty"`
+	TimeoutSeconds *int     `json:"timeout_seconds,omitempty"`
+	// Modes: '' keeps the inherited/default behavior, the listed restrictive
+	// value wins during the merge.
+	NetworkMode  string    `json:"network_mode,omitempty"`  // 'deny' restricts
+	SandboxMode  string    `json:"sandbox_mode,omitempty"`  // 'read_only' restricts
+	ApprovalMode string    `json:"approval_mode,omitempty"` // 'tools' restricts
+	Enabled      bool      `json:"enabled"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// Restrictive merge helpers. PolicyAllowsList distinguishes nil (the
+// dimension was never restricted — everything passes) from an empty non-nil
+// list (allowlists intersected to nothing — nothing passes). The store
+// normalizes user input so an empty submitted list reads back as nil.
+func PolicyAllowsList(list []string, value string) bool {
+	if list == nil {
+		return true
+	}
+	for _, v := range list {
+		if v == "*" || v == value {
+			return true
+		}
+	}
+	return false
+}
+
 // AgentCapabilities is the user-facing toggle set from the agent form
 // (docs/evaluable-agent.md §3.2). Enforcement is hard: a disabled capability
 // removes the corresponding tools and environment access at run start — it is

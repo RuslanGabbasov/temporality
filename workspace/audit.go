@@ -47,6 +47,9 @@ const (
 	AuditHumanExpired         = "human_request.expired"
 	AuditHumanCancelled       = "human_request.cancelled"
 	AuditHumanRejected        = "human_request.rejected"
+	AuditPolicyCreated        = "policy.created"
+	AuditPolicyUpdated        = "policy.updated"
+	AuditPolicyDeleted        = "policy.deleted"
 )
 
 // RecordAccessAudit appends one event. Nil details is stored as {}.
