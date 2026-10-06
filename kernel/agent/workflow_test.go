@@ -1928,6 +1928,88 @@ func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 	require.Greater(t, indexEvent(recorded, "knowledge.extraction.completed"), indexEvent(recorded, "knowledge.proposed"))
 }
 
+func TestAgentRunChallengesContradictedAndAgedKnowledge(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
+		return llm.Completion{Content: "done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+
+	staleProposition := "The fetch command accepts a -limit flag, not --count."
+	newProposition := "The fetch command accepts a --count flag, not -limit."
+	newID := extractionKnowledgeID("repo-a", newProposition)
+	registerExtraction(env, KnowledgeExtractResult{
+		Candidates: []KnowledgeCandidate{
+			{KnowledgeID: newID, Kind: "observation", Proposition: newProposition, Evidence: []string{"run-ch/turn/01/call-1"}, Contradicts: "ext/stale"},
+		},
+		Aging: []AgingCandidate{
+			{KnowledgeID: "ext/aging", Proposition: "Old unused proposal.", AgeDays: 21},
+			{KnowledgeID: "ext/gone", Proposition: "Already retired.", AgeDays: 30},
+		},
+	}, nil)
+	env.RegisterActivityWithOptions(func(_ context.Context, query KnowledgeLookupQuery) (KnowledgeLookupResult, error) {
+		switch query.KnowledgeID {
+		case "ext/stale":
+			return KnowledgeLookupResult{Exists: true, State: "confirmed", Proposition: staleProposition}, nil
+		case "ext/aging":
+			return KnowledgeLookupResult{Exists: true, State: "proposed", Proposition: "Old unused proposal."}, nil
+		case "ext/gone":
+			return KnowledgeLookupResult{Exists: true, State: "invalidated", Proposition: "Already retired."}, nil
+		}
+		return KnowledgeLookupResult{}, nil
+	}, activity.RegisterOptions{Name: ActivityKnowledgeLookup})
+
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-ch", Project: "repo-a", Prompt: "run the fetch"})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var proposedEvent *observation.Event
+	challenged := map[string]*observation.Event{}
+	var completed *observation.Event
+	for index := range recorded {
+		event := &recorded[index]
+		switch event.Type {
+		case "knowledge.proposed":
+			if event.Data["producer"] == "knowledge-extractor" {
+				proposedEvent = event
+			}
+		case "knowledge.challenged":
+			challenged[event.Data["knowledge_id"].(string)] = event
+		case extractionCompletedEvent:
+			completed = event
+		}
+	}
+	require.NotNil(t, proposedEvent, "the corrected fact must be proposed")
+	require.Equal(t, newID, proposedEvent.Data["knowledge_id"])
+
+	require.Len(t, challenged, 2, "the stale and the aging item are challenged, the terminal one is skipped")
+	contradiction := challenged["ext/stale"]
+	require.NotNil(t, contradiction)
+	require.Equal(t, ExtractionContradictionRule, contradiction.Data["rule"])
+	require.Equal(t, newID, contradiction.Data["contradicted_by"])
+	require.Equal(t, staleProposition, contradiction.Data["proposition"], "the challenge must carry the target text, not a bare id")
+	require.Contains(t, contradiction.Data["reason"], newProposition)
+	require.Equal(t, "run-ch/turn/01/call-1", contradiction.Evidence[0].Ref)
+
+	aging := challenged["ext/aging"]
+	require.NotNil(t, aging)
+	require.Equal(t, AgingRule, aging.Data["rule"])
+	require.Equal(t, "Old unused proposal.", aging.Data["proposition"])
+	require.Contains(t, aging.Data["reason"], "21 days")
+
+	require.NotNil(t, completed)
+	require.EqualValues(t, 1, completed.Data["challenged"])
+	require.EqualValues(t, 1, completed.Data["aged"])
+}
+
 func TestAgentRunExtractionFailureDoesNotFailRun(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

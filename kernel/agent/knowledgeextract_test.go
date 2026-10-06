@@ -121,6 +121,68 @@ func TestValidateExtractionCandidatesCapsBatch(t *testing.T) {
 	require.Len(t, accepted, extractionMaxCandidates)
 }
 
+func TestValidateExtractionCandidatesContradicts(t *testing.T) {
+	known := map[string]bool{"r/event/000001": true}
+	// Near-duplicate wording: without contradicts this candidate is dropped as
+	// a restatement; with it, it is the replacement fact.
+	oldProposition := "The fetch command accepts a -limit flag, not --count."
+	newProposition := "The fetch command accepts a --count flag, not -limit."
+	oldID := "ext/old"
+	existing := []existingKnowledge{{ID: oldID, Proposition: oldProposition}}
+	states := map[string]string{oldID: "confirmed"}
+
+	raw := []extractionCandidate{
+		{Kind: "observation", Proposition: newProposition, Evidence: []string{"r/event/000001"}, Contradicts: oldID},
+		// Hallucinated ref — dropped, candidate survives as a plain proposal.
+		{Kind: "observation", Proposition: "The report command writes its output to out/report.txt today.", Evidence: []string{"r/event/000001"}, Contradicts: "ext/missing"},
+		// Terminal target — cleared, fact survives.
+		{Kind: "observation", Proposition: "The migration runner requires network access to succeed always.", Evidence: []string{"r/event/000001"}, Contradicts: "ext/dead"},
+		// Self-contradiction — cleared.
+		{Kind: "observation", Proposition: "The indexer skips vendored directories by default entirely.", Evidence: []string{"r/event/000001"}, Contradicts: extractionKnowledgeID("repo", "The indexer skips vendored directories by default entirely.")},
+	}
+	states["ext/dead"] = "invalidated"
+	accepted, duplicates, _ := validateExtractionCandidates(raw, known, existing, states, "repo")
+	require.Equal(t, 0, duplicates, "an explicit contradiction must bypass the similarity dedup")
+	require.Len(t, accepted, 4)
+	require.Equal(t, oldID, accepted[0].Contradicts)
+	require.Empty(t, accepted[1].Contradicts)
+	require.Empty(t, accepted[2].Contradicts)
+	require.Empty(t, accepted[3].Contradicts)
+}
+
+func TestAgingCandidatesSelectsStaleProposals(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-21 * 24 * time.Hour)
+	fresh := now.Add(-2 * 24 * time.Hour)
+	recentlyUsed := now.Add(-30 * 24 * time.Hour)
+	usedAt := now.Add(-1 * 24 * time.Hour)
+	knowledge := []observation.Knowledge{
+		{ID: "ext/stale", Proposition: "Old unconfirmed fact.", State: "proposed", CreatedAt: old},
+		{ID: "ext/fresh", Proposition: "Recent proposal.", State: "proposed", CreatedAt: fresh},
+		{ID: "ext/confirmed", Proposition: "Confirmed fact.", State: "confirmed", CreatedAt: old},
+		{ID: "ext/used", Proposition: "Used but unconfirmed.", State: "proposed", CreatedAt: recentlyUsed, LastUsedAt: &usedAt},
+		{ID: "ext/challenged", Proposition: "Already challenged.", State: "challenged", CreatedAt: old},
+	}
+	candidates := agingCandidates(knowledge, now)
+	require.Len(t, candidates, 1)
+	require.Equal(t, "ext/stale", candidates[0].KnowledgeID)
+	require.InDelta(t, 21.0, candidates[0].AgeDays, 0.1)
+}
+
+func TestAgingCandidatesCapsAndOrdersOldestFirst(t *testing.T) {
+	now := time.Now()
+	knowledge := make([]observation.Knowledge, 0, agingMaxPerPass+2)
+	for i := 0; i < agingMaxPerPass+2; i++ {
+		knowledge = append(knowledge, observation.Knowledge{
+			ID: fmt.Sprintf("ext/old-%02d", i), State: "proposed",
+			CreatedAt: now.Add(time.Duration(-20-i) * 24 * time.Hour),
+		})
+	}
+	candidates := agingCandidates(knowledge, now)
+	require.Len(t, candidates, agingMaxPerPass)
+	require.Equal(t, "ext/old-11", candidates[0].KnowledgeID, "oldest first")
+}
+
 func TestPropositionSimilarConservative(t *testing.T) {
 	require.True(t, propositionSimilar(
 		"The report command writes its output to out/report.txt.",
@@ -258,4 +320,17 @@ func TestRenderExtractionContextCitesEventIDs(t *testing.T) {
 	require.Contains(t, rendered, "report failed: out/ directory missing")
 	require.Contains(t, rendered, "Final answer:")
 	require.Contains(t, rendered, "The report command needs an existing out directory.")
+
+	existing := []existingKnowledge{{ID: "ext/known", Proposition: "The report command writes its output to out/report.txt."}}
+	rendered = renderExtractionContext(KnowledgeExtractRequest{Project: "repo", RunID: "run-ctx"}, trajectory, existing)
+	require.Contains(t, rendered, "- [ext/known] The report command writes its output to out/report.txt.")
+	require.Contains(t, rendered, "contradicts")
+}
+
+func TestParseExtractionCandidatesReadsContradicts(t *testing.T) {
+	payload := `{"candidates":[{"kind":"observation","proposition":"The fetch command accepts a --count flag, not -limit.","evidence":["r/event/000005"],"confidence":0.9,"contradicts":"ext/old"}]}`
+	parsed, err := parseExtractionCandidates(payload)
+	require.NoError(t, err)
+	require.Len(t, parsed.Candidates, 1)
+	require.Equal(t, "ext/old", parsed.Candidates[0].Contradicts)
 }

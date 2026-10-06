@@ -892,10 +892,13 @@ type HintRequest struct {
 }
 
 // KnowledgeLookupResult reports the current projected state of one knowledge
-// item. Exists is false when the item is unknown to the project.
+// item. Exists is false when the item is unknown to the project. Proposition
+// rides along so lifecycle events can carry the human-readable text instead
+// of a bare id.
 type KnowledgeLookupResult struct {
-	Exists bool
-	State  string
+	Exists      bool
+	State       string
+	Proposition string
 }
 
 // KnowledgeLookup fetches the current state of one knowledge item so the
@@ -923,7 +926,8 @@ func (a *Activities) KnowledgeLookup(ctx context.Context, request KnowledgeLooku
 	}
 	var reply struct {
 		Knowledge []struct {
-			State string `json:"state"`
+			State       string `json:"state"`
+			Proposition string `json:"proposition"`
 		} `json:"knowledge"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&reply); err != nil {
@@ -932,7 +936,7 @@ func (a *Activities) KnowledgeLookup(ctx context.Context, request KnowledgeLooku
 	if len(reply.Knowledge) == 0 {
 		return KnowledgeLookupResult{}, nil
 	}
-	return KnowledgeLookupResult{Exists: true, State: reply.Knowledge[0].State}, nil
+	return KnowledgeLookupResult{Exists: true, State: reply.Knowledge[0].State, Proposition: reply.Knowledge[0].Proposition}, nil
 }
 
 type KnowledgeLookupQuery struct {

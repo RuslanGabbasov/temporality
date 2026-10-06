@@ -2109,7 +2109,7 @@ func runKnowledgeExtraction(ctx workflow.Context, activityCtx workflow.Context, 
 		return
 	}
 	lookupCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 2}})
-	proposed, strengthened := 0, 0
+	proposed, strengthened, challenged := 0, 0, 0
 	for _, candidate := range extraction.Candidates {
 		if emitExtractedKnowledge(ctx, activityCtx, lookupCtx, state, input, extractionID, candidate) {
 			if candidate.Existing {
@@ -2118,6 +2118,15 @@ func runKnowledgeExtraction(ctx workflow.Context, activityCtx workflow.Context, 
 				proposed++
 			}
 		}
+		if candidate.Contradicts != "" && emitContradictionChallenge(ctx, activityCtx, lookupCtx, state, input, extractionID, candidate) {
+			challenged++
+		}
+	}
+	aged := 0
+	for _, item := range extraction.Aging {
+		if emitAgingChallenge(ctx, activityCtx, lookupCtx, state, input, extractionID, item) {
+			aged++
+		}
 	}
 	_ = emit(activityCtx, state, extractionCompletedEvent, map[string]any{
 		"extraction_id":      extractionID,
@@ -2125,6 +2134,8 @@ func runKnowledgeExtraction(ctx workflow.Context, activityCtx workflow.Context, 
 		"candidates_count":   len(extraction.Candidates),
 		"proposed":           proposed,
 		"strengthened":       strengthened,
+		"challenged":         challenged,
+		"aged":               aged,
 		"duplicates_skipped": extraction.Duplicates,
 		"invalid_skipped":    extraction.Invalid,
 		"duration_ms":        extraction.DurationMs,
@@ -2157,13 +2168,68 @@ func emitExtractedKnowledge(ctx workflow.Context, activityCtx workflow.Context, 
 	}
 	switch lookup.State {
 	case "proposed", "challenged":
-		data := map[string]any{"knowledge_id": candidate.KnowledgeID, "rule": ExtractionReverificationRule, "extractor_version": ExtractorVersion, "extraction_id": extractionID}
+		data := map[string]any{"knowledge_id": candidate.KnowledgeID, "proposition": candidate.Proposition, "rule": ExtractionReverificationRule, "extractor_version": ExtractorVersion, "extraction_id": extractionID}
 		return emitKnowledgeEvent(activityCtx, state, "knowledge.confirmed", data, evidence) == nil
 	case "confirmed":
-		data := map[string]any{"knowledge_id": candidate.KnowledgeID, "rule": ExtractionReuseRule, "extractor_version": ExtractorVersion, "extraction_id": extractionID}
+		data := map[string]any{"knowledge_id": candidate.KnowledgeID, "proposition": candidate.Proposition, "rule": ExtractionReuseRule, "extractor_version": ExtractorVersion, "extraction_id": extractionID}
 		return emitKnowledgeEvent(activityCtx, state, "knowledge.used", data, evidence) == nil
 	}
 	return false
+}
+
+// emitContradictionChallenge marks knowledge the run directly disproved
+// (docs/knowledge-evolution.md, scenario C). A fresh lookup guards the
+// transition — a terminal or unknown node is skipped instead of poisoning the
+// projection. The corrected fact itself was proposed by the caller separately;
+// the challenge keeps the stale item alive as "challenged" (offered with
+// caution) until a human or a later re-derivation settles it.
+func emitContradictionChallenge(ctx workflow.Context, activityCtx workflow.Context, lookupCtx workflow.Context, state *eventState, input RunInput, extractionID string, candidate KnowledgeCandidate) bool {
+	var lookup KnowledgeLookupResult
+	if err := workflow.ExecuteActivity(lookupCtx, ActivityKnowledgeLookup, KnowledgeLookupQuery{Project: input.Project, KnowledgeID: candidate.Contradicts}).Get(ctx, &lookup); err != nil {
+		return false
+	}
+	if !lookup.Exists || terminalKnowledgeState(lookup.State) {
+		return false
+	}
+	data := map[string]any{
+		"knowledge_id":      candidate.Contradicts,
+		"proposition":       lookup.Proposition,
+		"rule":              ExtractionContradictionRule,
+		"contradicted_by":   candidate.KnowledgeID,
+		"reason":            "contradicted by extraction: " + candidate.Proposition,
+		"extractor_version": ExtractorVersion,
+		"extraction_id":     extractionID,
+	}
+	evidence := make([]observation.Evidence, 0, len(candidate.Evidence))
+	for _, ref := range candidate.Evidence {
+		evidence = append(evidence, observation.Evidence{Ref: ref, Type: "event"})
+	}
+	return emitKnowledgeEvent(activityCtx, state, "knowledge.challenged", data, evidence) == nil
+}
+
+// emitAgingChallenge retires a stale proposal (rule aging.v1): knowledge that
+// stayed "proposed" past AgingThreshold without a single use. Only still-proposed
+// items are challenged — anything confirmed, already challenged or terminal
+// between the sweep and now must not be touched. Challenged items keep being
+// offered with caution and re-confirm on the next re-derivation, so aging is
+// reversible, not a death sentence.
+func emitAgingChallenge(ctx workflow.Context, activityCtx workflow.Context, lookupCtx workflow.Context, state *eventState, input RunInput, extractionID string, aging AgingCandidate) bool {
+	var lookup KnowledgeLookupResult
+	if err := workflow.ExecuteActivity(lookupCtx, ActivityKnowledgeLookup, KnowledgeLookupQuery{Project: input.Project, KnowledgeID: aging.KnowledgeID}).Get(ctx, &lookup); err != nil {
+		return false
+	}
+	if !lookup.Exists || lookup.State != "proposed" {
+		return false
+	}
+	data := map[string]any{
+		"knowledge_id":      aging.KnowledgeID,
+		"proposition":       lookup.Proposition,
+		"rule":              AgingRule,
+		"reason":            fmt.Sprintf("unconfirmed for %.0f days without any use", aging.AgeDays),
+		"extractor_version": ExtractorVersion,
+		"extraction_id":     extractionID,
+	}
+	return emitKnowledgeEvent(activityCtx, state, "knowledge.challenged", data, nil) == nil
 }
 
 func emitKnowledgeEvent(ctx workflow.Context, state *eventState, eventType string, data map[string]any, evidence []observation.Evidence) error {

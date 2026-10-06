@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -27,7 +28,7 @@ import (
 // ExtractorVersion identifies the extraction prompt and heuristics. Bumping it
 // changes extractionIdentity, so every run becomes eligible for re-extraction
 // under the new version (docs/knowledge-extraction.md §27).
-const ExtractorVersion = "knowledge-extractor.v1"
+const ExtractorVersion = "knowledge-extractor.v2"
 
 // Extraction observability events. They are markers on the run's trajectory,
 // not knowledge lifecycle transitions, so the projection skips them.
@@ -44,6 +45,24 @@ const ExtractionReverificationRule = "extraction-reverification.v1"
 // ExtractionReuseRule marks a knowledge.used event produced by an extraction
 // that re-derived already-confirmed knowledge.
 const ExtractionReuseRule = "extraction-reuse.v1"
+
+// ExtractionContradictionRule marks a knowledge.challenged event produced by an
+// extraction whose run directly disproved an existing knowledge item
+// (docs/knowledge-evolution.md, scenario C).
+const ExtractionContradictionRule = "extraction-contradiction.v1"
+
+// AgingRule marks a knowledge.challenged event produced by the aging sweep:
+// a proposal that stayed unconfirmed and unused past AgingThreshold.
+const AgingRule = "aging.v1"
+
+// AgingThreshold is how long a proposal may stay unconfirmed and unused before
+// the sweep marks it challenged (at risk). Any real use or a later
+// re-derivation confirms it again, so aging is reversible.
+const AgingThreshold = 14 * 24 * time.Hour
+
+// agingMaxPerPass bounds the aging sweep so one extraction pass cannot flood
+// the journal with challenge events.
+const agingMaxPerPass = 10
 
 const (
 	extractionMaxCandidates = 5
@@ -69,6 +88,8 @@ type KnowledgeExtractRequest struct {
 // KnowledgeCandidate is one validated knowledge proposal ready to be emitted.
 // Existing marks candidates whose knowledge_id is already projected: the
 // workflow strengthens the node (confirm/use) instead of re-proposing it.
+// Contradicts names an existing knowledge item this run disproved: the
+// workflow proposes the corrected fact and challenges the stale one.
 type KnowledgeCandidate struct {
 	KnowledgeID string
 	Kind        string // observation | claim
@@ -76,14 +97,23 @@ type KnowledgeCandidate struct {
 	Confidence  float64
 	Evidence    []string // real event ids from the analysed run
 	Existing    bool
+	Contradicts string // existing knowledge id disproved by this run, if any
+}
+
+// AgingCandidate is one stale proposal selected by the aging sweep.
+type AgingCandidate struct {
+	KnowledgeID string
+	Proposition string
+	AgeDays     float64
 }
 
 // KnowledgeExtractResult reports what the extractor produced.
 type KnowledgeExtractResult struct {
 	ExtractionID string
 	Candidates   []KnowledgeCandidate
-	Duplicates   int // dropped as restatements of existing knowledge
-	Invalid      int // dropped by validation (no real evidence, bad kind, ...)
+	Duplicates   int              // dropped as restatements of existing knowledge
+	Invalid      int              // dropped by validation (no real evidence, bad kind, ...)
+	Aging        []AgingCandidate // stale unconfirmed proposals to challenge
 	Model        string
 	DurationMs   int64
 	Skipped      bool // this run was already extracted with this version
@@ -140,7 +170,10 @@ func (a *Activities) ExtractKnowledge(ctx context.Context, request KnowledgeExtr
 	for _, event := range events {
 		knownEvents[event.EventID] = true
 	}
-	existing, states := a.extractionContext(ctx, request, trajectory)
+	// One knowledge load serves both the dedup/contradiction context and the
+	// aging sweep. Best-effort: without it extraction sees less context.
+	knowledge, _ := a.projectKnowledge(ctx, request.Project)
+	existing, states := extractionContext(request, trajectory, knowledge)
 	user := renderExtractionContext(request, trajectory, existing)
 	completion, err := completeParsed(ctx, a.Model, []llm.Message{
 		{Role: "system", Content: extractionSystemPrompt},
@@ -153,14 +186,15 @@ func (a *Activities) ExtractKnowledge(ctx context.Context, request KnowledgeExtr
 	result.Candidates = accepted
 	result.Duplicates = duplicates
 	result.Invalid = invalid
+	result.Aging = agingCandidates(knowledge, time.Now())
 	result.DurationMs = time.Since(started).Milliseconds()
 	return result, nil
 }
 
-// extractionContext assembles the dedup context: knowledge recorded during the
-// run itself plus relevant existing knowledge (§19-20). Retrieval is
-// best-effort — without it the extractor simply sees less context.
-func (a *Activities) extractionContext(ctx context.Context, request KnowledgeExtractRequest, trajectory Trajectory) ([]existingKnowledge, map[string]string) {
+// extractionContext assembles the dedup and contradiction context: knowledge
+// recorded during the run itself plus relevant existing knowledge (§19-20).
+// The project projection arrives pre-loaded by the caller.
+func extractionContext(request KnowledgeExtractRequest, trajectory Trajectory, knowledge []observation.Knowledge) ([]existingKnowledge, map[string]string) {
 	var existing []existingKnowledge
 	for _, item := range trajectory.Knowledge {
 		if item.Proposition != "" {
@@ -168,10 +202,10 @@ func (a *Activities) extractionContext(ctx context.Context, request KnowledgeExt
 		}
 	}
 	states := map[string]string{}
-	if knowledge, err := a.projectKnowledge(ctx, request.Project); err == nil {
-		for _, item := range knowledge {
-			states[item.ID] = item.State
-		}
+	for _, item := range knowledge {
+		states[item.ID] = item.State
+	}
+	if len(knowledge) > 0 {
 		query := strings.TrimSpace(request.Prompt + "\n" + trajectory.Summary.Answer)
 		for _, hint := range observation.FindHints(knowledge, observation.HintQuery{Text: query, Limit: 8}) {
 			existing = append(existing, existingKnowledge{ID: hint.KnowledgeID, Proposition: hint.Proposition})
@@ -267,7 +301,7 @@ You read one completed agent run and decide which durable facts are worth rememb
 
 Answer with a single JSON object and nothing else. No markdown fences, no commentary.
 Schema:
-{"candidates": [{"kind": "observation|claim", "proposition": "...", "evidence": ["event id from the trajectory"], "confidence": 0.0-1.0}]}
+{"candidates": [{"kind": "observation|claim", "proposition": "...", "evidence": ["event id from the trajectory"], "confidence": 0.0-1.0, "contradicts": "optional: existing knowledge id this run disproves"}]}
 
 What qualifies:
 - Facts that will help a future run in this project: how it is built, tested, deployed; non-obvious tool or CLI behavior; environment quirks; verified workarounds; documentation that turned out to be stale.
@@ -279,6 +313,7 @@ Rules:
 - Do not restate what successful verification and build commands already record automatically (for example "tests pass").
 - Do not record the run's reasoning process, only its outcomes.
 - Do not duplicate the existing knowledge listed in the context; a repeat adds nothing.
+- If the run directly disproves an item of the existing knowledge listed in the context, set contradicts to that item's id (shown in brackets) and state the corrected fact as the proposition.
 - One self-contained sentence per proposition, in the language of the run.
 - At most 5 candidates. An empty list is a valid answer: most runs teach nothing durable.`
 
@@ -321,13 +356,13 @@ func renderExtractionContext(request KnowledgeExtractRequest, trajectory Traject
 		b.WriteString("\nFinal answer:\n" + truncateRunes(answer, extractionAnswerLimit) + "\n")
 	}
 	if len(existing) > 0 {
-		b.WriteString("\nExisting knowledge (a duplicate adds nothing, do not restate):\n")
+		b.WriteString("\nExisting knowledge (ids in brackets; set contradicts when the run disproves an item, otherwise do not restate):\n")
 		limit := len(existing)
 		if limit > extractionMaxExisting {
 			limit = extractionMaxExisting
 		}
 		for _, item := range existing[:limit] {
-			b.WriteString("- " + truncateRunes(item.Proposition, 200) + "\n")
+			b.WriteString("- [" + item.ID + "] " + truncateRunes(item.Proposition, 200) + "\n")
 		}
 	}
 	b.WriteString("\nAnswer with the JSON object only.")
@@ -344,6 +379,7 @@ type extractionCandidate struct {
 	Proposition string   `json:"proposition"`
 	Evidence    []string `json:"evidence"`
 	Confidence  float64  `json:"confidence"`
+	Contradicts string   `json:"contradicts"`
 }
 
 // parseExtractionCandidates tolerates reasoning blocks, fences and prose
@@ -366,6 +402,10 @@ func parseExtractionCandidates(content string) (extractionCompletion, error) {
 // re-proposing it.
 func validateExtractionCandidates(raw []extractionCandidate, knownEvents map[string]bool, existing []existingKnowledge, states map[string]string, project string) (accepted []KnowledgeCandidate, duplicates, invalid int) {
 	seen := make(map[string]bool, len(raw))
+	existingIDs := make(map[string]bool, len(existing))
+	for _, item := range existing {
+		existingIDs[item.ID] = true
+	}
 	for _, item := range raw {
 		proposition := strings.Join(strings.Fields(strings.TrimSpace(item.Proposition)), " ")
 		runes := utf8.RuneCountInString(proposition)
@@ -394,8 +434,19 @@ func validateExtractionCandidates(raw []extractionCandidate, knownEvents map[str
 			continue
 		}
 		id := extractionKnowledgeID(project, proposition)
+		contradicts := strings.TrimSpace(item.Contradicts)
+		if contradicts != "" && (contradicts == id || !existingIDs[contradicts] || terminalKnowledgeState(states[contradicts])) {
+			// Self-contradiction, a hallucinated id, or a terminal node the
+			// projection would refuse to challenge: keep the fact, drop the ref.
+			contradicts = ""
+		}
 		duplicate := false
 		for _, item := range existing {
+			if contradicts == item.ID {
+				// An explicit contradiction carries the corrected fact — it is
+				// the replacement, not a restatement.
+				continue
+			}
 			if id == item.ID || propositionSimilar(proposition, item.Proposition) {
 				duplicate = true
 				break
@@ -424,9 +475,43 @@ func validateExtractionCandidates(raw []extractionCandidate, knownEvents map[str
 			Confidence:  confidence,
 			Evidence:    evidence,
 			Existing:    states[id] != "" && states[id] != "invalidated" && states[id] != "superseded" && states[id] != "corrected",
+			Contradicts: contradicts,
 		})
 	}
 	return accepted, duplicates, invalid
+}
+
+// terminalKnowledgeState reports whether a knowledge state admits no further
+// lifecycle transitions.
+func terminalKnowledgeState(state string) bool {
+	return state == "invalidated" || state == "superseded" || state == "corrected"
+}
+
+// agingCandidates selects stale proposals for the aging sweep (rule aging.v1):
+// knowledge still in "proposed" that has neither been confirmed nor used for
+// AgingThreshold. Hint offers do not reset the clock — an item that keeps being
+// offered but never used is exactly the noise the sweep retires. Oldest first.
+func agingCandidates(knowledge []observation.Knowledge, now time.Time) []AgingCandidate {
+	var candidates []AgingCandidate
+	for _, item := range knowledge {
+		if item.State != "proposed" {
+			continue
+		}
+		anchor := item.CreatedAt
+		if item.LastUsedAt != nil && item.LastUsedAt.After(anchor) {
+			anchor = *item.LastUsedAt
+		}
+		age := now.Sub(anchor)
+		if age < AgingThreshold {
+			continue
+		}
+		candidates = append(candidates, AgingCandidate{KnowledgeID: item.ID, Proposition: item.Proposition, AgeDays: age.Hours() / 24})
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].AgeDays > candidates[j].AgeDays })
+	if len(candidates) > agingMaxPerPass {
+		candidates = candidates[:agingMaxPerPass]
+	}
+	return candidates
 }
 
 // propositionSimilar reports whether two propositions are near-duplicates.
