@@ -212,6 +212,66 @@ func TestProjectKnowledgeRejectsOrphanedPromotion(t *testing.T) {
 	}
 }
 
+func TestProjectKnowledgeDefersManualInvalidationArrivingBeforeProposal(t *testing.T) {
+	base := time.Date(2026, 10, 6, 17, 0, 0, 0, time.UTC)
+	// Reproduces live data: the journal recorded promote and a manual
+	// invalidation on its own clock while the kernel proposal carried a later
+	// occurred_at and sorted after both. The projection must defer and apply
+	// them in stream order instead of failing the whole project listing.
+	events := []Event{
+		promotedEvent("e1", "smoke-k2", base, map[string]any{"scope_kind": "org_unit", "scope_id": "core"}),
+		{
+			Schema: Schema, EventID: "e2", OccurredAt: base.Add(2 * time.Minute),
+			Source:  Source{ID: "temporality-manual", Integration: "temporality", Version: "1"},
+			Context: Context{Project: "repo-a", Actor: Actor{ID: "operator", Type: "human"}},
+			Type:    "knowledge.invalidated",
+			Data:    map[string]any{"knowledge_id": "smoke-k2", "reason": "smoke test cleanup", "method": "manual"},
+		},
+		proposalEvent("e3", "smoke-k2", "smoke: org-unit knowledge stays inside its subtree", base.Add(5*time.Minute), nil),
+	}
+	knowledge, err := ProjectKnowledge(events)
+	if err != nil {
+		t.Fatalf("skewed manual invalidation must defer to the proposal: %v", err)
+	}
+	if len(knowledge) != 1 || knowledge[0].State != "invalidated" || knowledge[0].ScopeKind != "org_unit" {
+		t.Fatalf("deferred journal events must land on the proposed item, got %+v", knowledge)
+	}
+}
+
+func TestProjectKnowledgeRejectsOrphanedInvalidation(t *testing.T) {
+	base := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		{
+			Schema: Schema, EventID: "e1", OccurredAt: base,
+			Source:  Source{ID: "temporality-manual", Integration: "temporality", Version: "1"},
+			Context: Context{Project: "repo-a", Actor: Actor{ID: "operator", Type: "human"}},
+			Type:    "knowledge.invalidated",
+			Data:    map[string]any{"knowledge_id": "auto/ghost", "reason": "cleanup", "method": "manual"},
+		},
+	}
+	_, err := ProjectKnowledge(events)
+	if err == nil || !strings.Contains(err.Error(), "unknown knowledge") {
+		t.Fatalf("invalidation without a proposal must fail, got: %v", err)
+	}
+}
+
+func TestProjectKnowledgeDefersKernelUsageArrivingBeforeProposal(t *testing.T) {
+	base := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
+	// A backdated proposal can also sort after kernel-emitted usage from an
+	// earlier delivery batch; the usage still counts.
+	events := []Event{
+		transitionEvent("e1", "auto/abc", "knowledge.used", base),
+		proposalEvent("e2", "auto/abc", "The gatekeeper CLI requires the --out flag", base.Add(time.Minute), nil),
+	}
+	knowledge, err := ProjectKnowledge(events)
+	if err != nil {
+		t.Fatalf("skewed usage must defer to the proposal: %v", err)
+	}
+	if len(knowledge) != 1 || knowledge[0].ReuseCount != 1 || knowledge[0].State != "proposed" {
+		t.Fatalf("deferred usage must count, got %+v", knowledge)
+	}
+}
+
 func TestProjectKnowledgeStillRejectsProjectBoundaryCrossing(t *testing.T) {
 	base := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
 	events := []Event{

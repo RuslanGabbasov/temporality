@@ -67,13 +67,13 @@ type KnowledgeRelation struct {
 func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 	byID := make(map[string]*Knowledge)
 	hintKnowledge := make(map[string]string)
-	// Promotions are emitted by the journal while proposals come from kernels:
-	// clock skew between the two can sort a promotion before its proposal in a
-	// merged stream. Deferred promotions are applied as soon as the proposal
-	// lands (and still fail loudly at the end if it never does). Hint telemetry
-	// is journal-emitted too and defers the same way.
-	pendingPromoted := make(map[string][]Event)
-	pendingHints := make(map[string][]Event)
+	// The journal emits promotions, manual invalidations, and hint telemetry
+	// on its own clock while proposals come from kernels: skew between the two
+	// (or a backdated proposal) can sort a journal event before the proposal
+	// it targets in a merged stream. Any event referencing a not-yet-proposed
+	// knowledge defers until the proposal lands, replaying in stream order
+	// (and still failing loudly at the end if it never does).
+	pending := make(map[string][]Event)
 	applyPromoted := func(item *Knowledge, event Event) {
 		// Scope widening is not a lifecycle state change: it re-targets
 		// visibility while leaving the state machine untouched, so it is
@@ -118,12 +118,80 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 		}
 		appendKnowledgeTransition(item, event)
 	}
+	// applyTransition applies a non-proposal knowledge.* event to an existing
+	// item. Deferred events already sorted before the proposal in stream
+	// order, so the creation-order guard does not apply to them.
+	applyTransition := func(item *Knowledge, event Event, deferred bool) error {
+		switch event.Type {
+		case "hint.offered", "hint.used", "hint.ignored", "hint.outcome":
+			applyHint(item, event)
+			return nil
+		}
+		if event.Type == "knowledge.promoted" {
+			applyPromoted(item, event)
+			return nil
+		}
+		if event.Type == "knowledge.linked" {
+			targetID := stringValue(event.Data, "target_id")
+			target := byID[targetID]
+			if target == nil {
+				return fmt.Errorf("knowledge.linked event %s refers to unknown target %q", event.EventID, targetID)
+			}
+			if target.Project != "" && item.Project != "" && target.Project != item.Project {
+				return fmt.Errorf("knowledge relation %q crosses project boundary", event.EventID)
+			}
+			relation := KnowledgeRelation{Type: stringValue(event.Data, "relation"), TargetID: targetID, EventID: event.EventID}
+			item.Relationships = appendUniqueRelation(item.Relationships, relation)
+			item.UpdatedAt = event.OccurredAt
+			appendKnowledgeTransition(item, event)
+			return nil
+		}
+		if event.Context.Project != "" && item.Project != "" && event.Context.Project != item.Project && item.ScopeKind != "org_unit" && item.ScopeKind != "organization" {
+			// Knowledge may move between runs, but project boundaries are explicit.
+			// Widened-scope knowledge is the deliberate exception: once promoted,
+			// its lifecycle legitimately continues in other projects
+			// (docs/knowledge-evolution.md §5).
+			return fmt.Errorf("knowledge %q event crosses project boundary", item.ID)
+		}
+		if !deferred && event.OccurredAt.Before(item.CreatedAt) {
+			return fmt.Errorf("knowledge %q transition precedes creation", item.ID)
+		}
+		if event.Type != "knowledge.used" && !canTransitionKnowledge(item.State, event.Type) {
+			return fmt.Errorf("knowledge %q cannot transition from %s via %s", item.ID, item.State, event.Type)
+		}
+		item.UpdatedAt = event.OccurredAt
+		switch event.Type {
+		case "knowledge.used":
+			item.ReuseCount++
+			usedAt := event.OccurredAt
+			item.LastUsedAt = &usedAt
+		case "knowledge.confirmed":
+			item.State = "confirmed"
+		case "knowledge.challenged":
+			item.State = "challenged"
+		case "knowledge.corrected":
+			item.State = "corrected"
+			item.Replacement = stringValue(event.Data, "replacement_id")
+		case "knowledge.invalidated":
+			item.State = "invalidated"
+		case "knowledge.disproved":
+			item.State = "invalidated"
+		case "knowledge.superseded":
+			item.State = "superseded"
+			item.Replacement = stringValue(event.Data, "replacement_id")
+		default:
+			return fmt.Errorf("unsupported knowledge lifecycle event %q", event.Type)
+		}
+		item.Evidence = appendUniqueEvidence(item.Evidence, event.Evidence...)
+		appendKnowledgeTransition(item, event)
+		return nil
+	}
 	for _, event := range events {
 		if event.Type == "hint.offered" {
 			id := stringValue(event.Data, "knowledge_id")
 			item := byID[id]
 			if item == nil {
-				pendingHints[id] = append(pendingHints[id], event)
+				pending[id] = append(pending[id], event)
 				continue
 			}
 			applyHint(item, event)
@@ -137,7 +205,7 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			}
 			item := byID[id]
 			if item == nil {
-				pendingHints[id] = append(pendingHints[id], event)
+				pending[id] = append(pending[id], event)
 				continue
 			}
 			applyHint(item, event)
@@ -176,91 +244,27 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			item = &Knowledge{ID: id, Proposition: proposition, Kind: knowledgeKind(event.Data), Topics: stringList(event.Data["topics"]), Entities: stringList(event.Data["entities"]), State: "proposed", Project: event.Context.Project, ScopeKind: knowledgeScopeKind(event.Data), ScopeID: knowledgeScopeID(event.Data), CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt, CreatedBy: event.Context.Actor, Evidence: append([]Evidence(nil), event.Evidence...)}
 			byID[id] = item
 			appendKnowledgeTransition(item, event)
-			for _, hint := range pendingHints[id] {
-				applyHint(item, hint)
+			// Journal-emitted events that sorted before this proposal now replay
+			// in stream order on the freshly created item.
+			for _, deferred := range pending[id] {
+				if err := applyTransition(item, deferred, true); err != nil {
+					return nil, err
+				}
 			}
-			delete(pendingHints, id)
-			for _, promoted := range pendingPromoted[id] {
-				applyPromoted(item, promoted)
-			}
-			delete(pendingPromoted, id)
+			delete(pending, id)
 			continue
 		}
 		if item == nil {
-			if event.Type == "knowledge.promoted" {
-				pendingPromoted[id] = append(pendingPromoted[id], event)
-				continue
-			}
-			return nil, fmt.Errorf("knowledge event %s refers to unknown knowledge %q", event.EventID, id)
-		}
-		if event.Type == "knowledge.promoted" {
-			applyPromoted(item, event)
+			pending[id] = append(pending[id], event)
 			continue
 		}
-		if event.Type == "knowledge.linked" {
-			targetID := stringValue(event.Data, "target_id")
-			target := byID[targetID]
-			if target == nil {
-				return nil, fmt.Errorf("knowledge.linked event %s refers to unknown target %q", event.EventID, targetID)
-			}
-			if target.Project != "" && item.Project != "" && target.Project != item.Project {
-				return nil, fmt.Errorf("knowledge relation %q crosses project boundary", event.EventID)
-			}
-			relation := KnowledgeRelation{Type: stringValue(event.Data, "relation"), TargetID: targetID, EventID: event.EventID}
-			item.Relationships = appendUniqueRelation(item.Relationships, relation)
-			item.UpdatedAt = event.OccurredAt
-			appendKnowledgeTransition(item, event)
-			continue
+		if err := applyTransition(item, event, false); err != nil {
+			return nil, err
 		}
-		if event.Context.Project != "" && item.Project != "" && event.Context.Project != item.Project && item.ScopeKind != "org_unit" && item.ScopeKind != "organization" {
-			// Knowledge may move between runs, but project boundaries are explicit.
-			// Widened-scope knowledge is the deliberate exception: once promoted,
-			// its lifecycle legitimately continues in other projects
-			// (docs/knowledge-evolution.md §5).
-			return nil, fmt.Errorf("knowledge %q event crosses project boundary", id)
-		}
-		if event.OccurredAt.Before(item.CreatedAt) {
-			return nil, fmt.Errorf("knowledge %q transition precedes creation", id)
-		}
-		if event.Type != "knowledge.used" && !canTransitionKnowledge(item.State, event.Type) {
-			return nil, fmt.Errorf("knowledge %q cannot transition from %s via %s", id, item.State, event.Type)
-		}
-		item.UpdatedAt = event.OccurredAt
-		switch event.Type {
-		case "knowledge.used":
-			item.ReuseCount++
-			usedAt := event.OccurredAt
-			item.LastUsedAt = &usedAt
-		case "knowledge.confirmed":
-			item.State = "confirmed"
-		case "knowledge.challenged":
-			item.State = "challenged"
-		case "knowledge.corrected":
-			item.State = "corrected"
-			item.Replacement = stringValue(event.Data, "replacement_id")
-		case "knowledge.invalidated":
-			item.State = "invalidated"
-		case "knowledge.disproved":
-			item.State = "invalidated"
-		case "knowledge.superseded":
-			item.State = "superseded"
-			item.Replacement = stringValue(event.Data, "replacement_id")
-		default:
-			return nil, fmt.Errorf("unsupported knowledge lifecycle event %q", event.Type)
-		}
-		item.Evidence = appendUniqueEvidence(item.Evidence, event.Evidence...)
-		appendKnowledgeTransition(item, event)
 	}
-	if len(pendingPromoted) > 0 || len(pendingHints) > 0 {
-		ids := make(map[string]bool, len(pendingPromoted)+len(pendingHints))
-		for id := range pendingPromoted {
-			ids[id] = true
-		}
-		for id := range pendingHints {
-			ids[id] = true
-		}
-		unknown := make([]string, 0, len(ids))
-		for id := range ids {
+	if len(pending) > 0 {
+		unknown := make([]string, 0, len(pending))
+		for id := range pending {
 			unknown = append(unknown, id)
 		}
 		sort.Strings(unknown)
