@@ -203,6 +203,8 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSumm
       return { icon: '✎', label: t('runs.event.knowledge_corrected'), detail: String(d.knowledge_id ?? ''), color: '#e6b85c' }
     case 'knowledge.invalidated':
       return { icon: '✗', label: t('runs.event.knowledge_invalidated'), detail: String(d.reason ?? d.knowledge_id ?? '').slice(0, 80), color: '#f7768e' }
+    case 'knowledge.promoted':
+      return { icon: '⤴', label: t('runs.event.knowledge_promoted'), detail: `${String(d.knowledge_id ?? '')} → ${d.scope_kind === 'organization' ? (t('runs.event.scope_organization') ?? 'organization') : String(d.scope_id ?? '')}`, color: '#9d7cd8' }
     case 'knowledge.superseded':
       return { icon: '⇄', label: t('runs.event.knowledge_superseded'), detail: String(d.knowledge_id ?? ''), color: 'var(--tm-text-3)' }
     case 'knowledge.disproved':

@@ -13,6 +13,7 @@ import {
   Heading,
 } from '@carbon/react'
 import { useT } from './i18n'
+import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 function utcValue(local: string) { return local ? new Date(local).toISOString() : undefined }
@@ -26,6 +27,7 @@ type Tab = 'overview' | 'knowledge' | 'patterns'
 
 export default function Observability({ project }: { project: string }) {
   const t = useT()
+  const org = useOrgUnits()
   const initParams = new URLSearchParams(window.location.search)
   const [tab, setTab] = useState<Tab>((['overview', 'knowledge', 'patterns'].includes(initParams.get('tab') as Tab) ? initParams.get('tab') : 'overview') as Tab)
   const [asOf, setAsOf] = useState(initParams.get('as_of') ?? '')
@@ -41,6 +43,10 @@ export default function Observability({ project }: { project: string }) {
   const [chain, setChain] = useState<any>(null)
   const [actor, setActor] = useState('human')
   const [reason, setReason] = useState('')
+  const [promoteScope, setPromoteScope] = useState('')
+  const [promoteReason, setPromoteReason] = useState('')
+  const [promoteBusy, setPromoteBusy] = useState(false)
+  const [promoteError, setPromoteError] = useState('')
   const [query, setQuery] = useState('')
   const [tool, setTool] = useState('')
   const [toolResult, setToolResult] = useState('')
@@ -164,6 +170,24 @@ export default function Observability({ project }: { project: string }) {
       setReason('')
       await load()
     } catch (e) { setError(errorMessage(e)) }
+  }
+
+  // Scope promotion: widen visibility beyond this project.
+  async function promote() {
+    if (!selected || !promoteReason.trim()) return
+    setPromoteBusy(true); setPromoteError('')
+    try {
+      await observationApi.promote({
+        knowledge_id: selected.id, project,
+        actor: { id: actor || 'human', type: 'human' },
+        scope_kind: promoteScope ? 'org_unit' : 'organization',
+        scope_id: promoteScope || undefined,
+        reason: promoteReason.trim(),
+      })
+      setPromoteReason('')
+      await load()
+    } catch (e) { setPromoteError(errorMessage(e)) }
+    finally { setPromoteBusy(false) }
   }
 
   // Hints
@@ -319,6 +343,11 @@ export default function Observability({ project }: { project: string }) {
                   style={{ padding: '0.5rem', cursor: 'pointer' }}
                 >
                   <Tag type={STATE_COLORS[item.state] || 'gray'} size="sm">{item.at_risk ? 'at risk' : item.state}</Tag>
+                  {(item.scope_kind === 'organization' || item.scope_kind === 'org_unit') && (
+                    <Tag type="purple" size="sm" title={item.scope_id}>
+                      {item.scope_kind === 'organization' ? (t('knowledge.scope_organization') ?? 'organization') : (org.nameOf(item.scope_id))}
+                    </Tag>
+                  )}
                   <strong style={{ fontSize: '0.875rem', marginLeft: '0.35rem' }}>{item.proposition}</strong>
                   <br />
                   <small style={{ color: 'var(--tm-text-3)' }}>
@@ -339,6 +368,14 @@ export default function Observability({ project }: { project: string }) {
               <Stack gap={2}>
                 <Tile>
                   <Tag type={STATE_COLORS[selected.state] || 'gray'}>{selected.state}</Tag>
+                  {(selected.scope_kind === 'organization' || selected.scope_kind === 'org_unit') && (
+                    <Tag type="purple" size="sm" title={selected.scope_id}>
+                      {t('knowledge.scope_shared') ?? 'Shared'}: {selected.scope_kind === 'organization' ? (t('knowledge.scope_organization') ?? 'whole organization') : org.nameOf(selected.scope_id)}
+                    </Tag>
+                  )}
+                  {selected.project && selected.project !== project && (
+                    <Tag type="gray" size="sm" title={selected.project}>{t('knowledge.scope_origin') ?? 'from'} {selected.project}</Tag>
+                  )}
                   <p style={{ fontSize: '0.875rem', fontWeight: 600, marginTop: '0.5rem', lineHeight: 1.4 }}>{selected.proposition}</p>
                   <small style={{ color: 'var(--tm-text-3)' }}>ID: {selected.id}</small>
                   <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
@@ -424,6 +461,28 @@ export default function Observability({ project }: { project: string }) {
                       <TextInput id="actor" labelText={t('knowledge.actor') ?? 'Actor'} value={actor} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setActor(e.target.value)} size="sm" />
                       <TextArea id="reason" labelText={t('knowledge.reason') ?? 'Reason'} value={reason} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setReason(e.target.value)} rows={2} />
                       <Button kind="danger" size="sm" onClick={invalidate} disabled={!reason.trim()}>{t('knowledge.invalidate') ?? 'Invalidate'}</Button>
+                    </Stack>
+                  </Tile>
+                )}
+
+                {/* Scope promotion: widen visibility beyond this project */}
+                {selected.scope_kind !== 'organization' && selected.state !== 'invalidated' && selected.state !== 'corrected' && selected.state !== 'superseded' && (
+                  <Tile>
+                    <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('knowledge.promote_title') ?? 'Share knowledge'}</h5>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginBottom: '0.5rem' }}>{t('knowledge.promote_hint') ?? 'Knowledge is project-local by default. Promote it to share with other projects.'}</p>
+                    <Stack gap={2}>
+                      <OrgUnitSelect
+                        id="promote-scope"
+                        value={promoteScope}
+                        onChange={setPromoteScope}
+                        org={org}
+                        label={t('knowledge.promote_scope') ?? 'Share with'}
+                      />
+                      <TextArea id="promote-reason" labelText={t('knowledge.reason') ?? 'Reason'} value={promoteReason} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setPromoteReason(e.target.value)} rows={2} placeholder={t('knowledge.promote_reason_placeholder') ?? 'Why does this knowledge hold beyond this project?'} />
+                      {promoteError && <InlineNotification kind="error" title="Error" subtitle={promoteError} onClose={() => setPromoteError('')} lowContrast />}
+                      <Button size="sm" onClick={promote} disabled={promoteBusy || !promoteReason.trim()}>
+                        {promoteBusy ? (t('knowledge.promoting') ?? 'Sharing…') : (t('knowledge.promote') ?? 'Share')}
+                      </Button>
                     </Stack>
                   </Tile>
                 )}

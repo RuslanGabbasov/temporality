@@ -32,6 +32,12 @@ export interface KnowledgeItem {
   entities?: string[]
   state: string
   project?: string
+  /** Effective visibility: absent means "project" (the birth scope);
+   * org_unit/organization arrive only through explicit promotion. */
+  scope_kind?: 'project' | 'org_unit' | 'organization'
+  scope_id?: string
+  promoted_by?: ObservationActor
+  promoted_at?: string
   created_at: string
   updated_at: string
   created_by?: ObservationActor
@@ -88,6 +94,8 @@ export const observationApi = {
     '/v1/observations/knowledge', undefined, { project, as_of: asOf, known_at: knownAt }),
   invalidate: (body: { knowledge_id: string; project: string; actor: ObservationActor; reason: string; evidence?: ObservationEvidence[] }) =>
     post<ObservationEvent>('/v1/observations/knowledge/invalidate', body),
+  promote: (body: { knowledge_id: string; project: string; actor: ObservationActor; scope_kind: 'org_unit' | 'organization'; scope_id?: string; reason: string; evidence?: ObservationEvidence[] }) =>
+    post<ObservationEvent>('/v1/observations/knowledge/promote', body),
   hints: (body: { project: string; query?: string; tool?: string; tool_result?: string; entities?: string[]; topics?: string[]; limit?: number }) =>
     post<{ activation_id: string; matcher: string; context_block: unknown; hints: ObservationHint[]; count: number }>('/v1/observations/hints', body),
 }
