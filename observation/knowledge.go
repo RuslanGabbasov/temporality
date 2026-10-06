@@ -67,6 +67,24 @@ type KnowledgeRelation struct {
 func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 	byID := make(map[string]*Knowledge)
 	hintKnowledge := make(map[string]string)
+	// Promotions are emitted by the journal while proposals come from kernels:
+	// clock skew between the two can sort a promotion before its proposal in a
+	// merged stream. Deferred promotions are applied as soon as the proposal
+	// lands (and still fail loudly at the end if it never does).
+	pendingPromoted := make(map[string][]Event)
+	applyPromoted := func(item *Knowledge, event Event) {
+		// Scope widening is not a lifecycle state change: it re-targets
+		// visibility while leaving the state machine untouched, so it is
+		// handled before the transition guards (like knowledge.linked).
+		item.ScopeKind = knowledgeScopeKind(event.Data)
+		item.ScopeID = knowledgeScopeID(event.Data)
+		item.PromotedBy = event.Context.Actor
+		promotedAt := event.OccurredAt
+		item.PromotedAt = &promotedAt
+		item.UpdatedAt = event.OccurredAt
+		item.Evidence = appendUniqueEvidence(item.Evidence, event.Evidence...)
+		appendKnowledgeTransition(item, event)
+	}
 	for _, event := range events {
 		if event.Type == "hint.offered" {
 			hintID := stringValue(event.Data, "hint_id")
@@ -151,23 +169,21 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			item = &Knowledge{ID: id, Proposition: proposition, Kind: knowledgeKind(event.Data), Topics: stringList(event.Data["topics"]), Entities: stringList(event.Data["entities"]), State: "proposed", Project: event.Context.Project, ScopeKind: knowledgeScopeKind(event.Data), ScopeID: knowledgeScopeID(event.Data), CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt, CreatedBy: event.Context.Actor, Evidence: append([]Evidence(nil), event.Evidence...)}
 			byID[id] = item
 			appendKnowledgeTransition(item, event)
+			for _, promoted := range pendingPromoted[id] {
+				applyPromoted(item, promoted)
+			}
+			delete(pendingPromoted, id)
 			continue
 		}
 		if item == nil {
+			if event.Type == "knowledge.promoted" {
+				pendingPromoted[id] = append(pendingPromoted[id], event)
+				continue
+			}
 			return nil, fmt.Errorf("knowledge event %s refers to unknown knowledge %q", event.EventID, id)
 		}
 		if event.Type == "knowledge.promoted" {
-			// Scope widening is not a lifecycle state change: it re-targets
-			// visibility while leaving the state machine untouched, so it is
-			// handled before the transition guards (like knowledge.linked).
-			item.ScopeKind = knowledgeScopeKind(event.Data)
-			item.ScopeID = knowledgeScopeID(event.Data)
-			item.PromotedBy = event.Context.Actor
-			promotedAt := event.OccurredAt
-			item.PromotedAt = &promotedAt
-			item.UpdatedAt = event.OccurredAt
-			item.Evidence = appendUniqueEvidence(item.Evidence, event.Evidence...)
-			appendKnowledgeTransition(item, event)
+			applyPromoted(item, event)
 			continue
 		}
 		if event.Type == "knowledge.linked" {
@@ -223,6 +239,14 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 		}
 		item.Evidence = appendUniqueEvidence(item.Evidence, event.Evidence...)
 		appendKnowledgeTransition(item, event)
+	}
+	if len(pendingPromoted) > 0 {
+		ids := make([]string, 0, len(pendingPromoted))
+		for id := range pendingPromoted {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		return nil, fmt.Errorf("promotion events refer to unknown knowledge %v", ids)
 	}
 	result := make([]Knowledge, 0, len(byID))
 	for _, item := range byID {

@@ -131,6 +131,34 @@ func TestKnowledgeScopeDefaultsToProjectAndPromoteWidens(t *testing.T) {
 	}
 }
 
+func TestProjectKnowledgeDefersPromotionArrivingBeforeProposal(t *testing.T) {
+	base := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
+	// Clock skew: the journal-emitted promotion sorts before the kernel-emitted
+	// proposal in a merged stream. The projection must still apply it.
+	events := []Event{
+		promotedEvent("e1", "auto/abc", base, map[string]any{"scope_kind": "organization"}),
+		proposalEvent("e2", "auto/abc", "The gatekeeper CLI requires the --out flag", base.Add(time.Minute), nil),
+	}
+	knowledge, err := ProjectKnowledge(events)
+	if err != nil {
+		t.Fatalf("skewed promotion must defer to the proposal: %v", err)
+	}
+	if len(knowledge) != 1 || knowledge[0].ScopeKind != "organization" {
+		t.Fatalf("deferred promotion must widen the scope, got %+v", knowledge)
+	}
+}
+
+func TestProjectKnowledgeRejectsOrphanedPromotion(t *testing.T) {
+	base := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		promotedEvent("e1", "auto/ghost", base, map[string]any{"scope_kind": "organization"}),
+	}
+	_, err := ProjectKnowledge(events)
+	if err == nil || !strings.Contains(err.Error(), "unknown knowledge") {
+		t.Fatalf("promotion without a proposal must fail, got: %v", err)
+	}
+}
+
 func TestProjectKnowledgeStillRejectsProjectBoundaryCrossing(t *testing.T) {
 	base := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
 	events := []Event{
