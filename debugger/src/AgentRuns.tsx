@@ -233,6 +233,9 @@ export default function AgentRuns({ project }: { project: string }) {
   // asking run in the list so the inbox is navigable. Older kernels without
   // the endpoint simply show no markers.
   const [questionRuns, setQuestionRuns] = useState<Set<string>>(new Set())
+  // Historical knowledge events (recorded before propositions were embedded in
+  // events) carry bare knowledge ids — resolve them against the project list.
+  const [knowledgeById, setKnowledgeById] = useState<Map<string, string>>(new Map())
   const pending = useMemo(() => pendingApprovals(timeline), [timeline])
   // A run row stays visible when it matches the filter or one of its delegated
   // children does, so searching for a child keeps its parent chain.
@@ -376,6 +379,18 @@ export default function AgentRuns({ project }: { project: string }) {
   useEffect(() => {
     workspaceApi.listAllAgents().then((page) => setAgents(page.agents)).catch(() => { /* names fall back to ids */ })
   }, [])
+  // Knowledge propositions resolve historical knowledge.used/hint.* events.
+  useEffect(() => {
+    const projectID = project.trim()
+    if (!projectID) { setKnowledgeById(new Map()); return }
+    observationApi.knowledge(projectID)
+      .then((page) => {
+        const map = new Map<string, string>()
+        for (const item of page.knowledge ?? []) map.set(item.id, item.proposition)
+        setKnowledgeById(map)
+      })
+      .catch(() => { /* bare ids stay as the fallback */ })
+  }, [project])
 
   async function decide(event: ObservationEvent, approved: boolean, response = '') {
     const operationID = String(event.data?.operation_id ?? '')
@@ -582,7 +597,7 @@ export default function AgentRuns({ project }: { project: string }) {
                   <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{t('runs.trace') ?? 'Trace'} ({t('runs.events_count', { count: String(trace.visible.length) })})</Heading>
                   <Stack gap={0}>
                     {[...trace.visible].reverse().map((event) => {
-                      const info = eventSummary(event, t)
+                      const info = eventSummary(event, t, (id) => knowledgeById.get(id))
                       const turnKey = event.type === 'model.completed' ? `${runID(event)}:${event.data?.turn}` : undefined
                       return (
                         <div

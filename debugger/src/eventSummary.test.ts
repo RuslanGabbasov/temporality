@@ -81,6 +81,29 @@ describe('knowledge, hint and skill lifecycle summaries', () => {
     expect(outcome.detail).toBe('runs.event.hint_outcome_helpful')
   })
 
+  it('shows the embedded proposition instead of ids for hint.offered', () => {
+    const offered = eventSummary(event('hint.offered', { hint_id: 'h1', knowledge_id: 'ext/k1', proposition: 'Запускать тесты через CI, а не локально', matched_by: ['term:тесты'] }), t)
+    expect(offered.detail).toBe('Запускать тесты через CI, а не локально')
+  })
+
+  it('falls back to cleaned matched_by terms without a proposition', () => {
+    const offered = eventSummary(event('hint.offered', { hint_id: 'h1', knowledge_id: 'ext/k1', matched_by: ['term:не', 'term:узел'] }), t)
+    expect(offered.detail).toBe('runs.matched_by: не · узел')
+  })
+
+  it('shows the embedded proposition for knowledge.used', () => {
+    const used = eventSummary(event('knowledge.used', { hint_id: 'h1', knowledge_id: 'ext/k1', proposition: 'GraphMap слушает на 8099' }), t)
+    expect(used.detail).toBe('GraphMap слушает на 8099')
+  })
+
+  it('resolves historical knowledge ids through the resolver', () => {
+    const resolve = (id: string) => (id === 'ext/k1' ? 'Стандартный путь сборки — docker compose' : undefined)
+    const used = eventSummary(event('knowledge.used', { hint_id: 'h1', knowledge_id: 'ext/k1' }), t, resolve)
+    expect(used.detail).toBe('Стандартный путь сборки — docker compose')
+    const unknown = eventSummary(event('knowledge.used', { hint_id: 'h2', knowledge_id: 'ext/missing' }), t, resolve)
+    expect(unknown.detail).toBe('ext/missing')
+  })
+
   it('localizes skill lifecycle events with version and change summary', () => {
     const proposed = eventSummary(event('skill.proposed', { skill_id: 'deploy', skill_name: 'Deploy service', version: 2, origin: 'agent-proposal', change_summary: 'add fallback check' }), t)
     expect(proposed.label).toBe('runs.event.skill_proposed')

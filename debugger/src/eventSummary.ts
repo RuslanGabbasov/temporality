@@ -103,9 +103,25 @@ export function restoreMarkdownLines(text: string): string {
   return lines.join('\n')
 }
 
-/** Format an event into a human-readable summary line. */
-export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSummaryInfo {
+/** Strip matcher prefixes ("term:foo" → "foo") from matched_by markers. */
+function cleanMatchTerms(matched: unknown): string[] {
+  const list = Array.isArray(matched) ? matched : typeof matched === 'string' && matched ? [matched] : []
+  return list.map((m) => String(m).replace(/^(term|entity|topic):/, '')).filter(Boolean)
+}
+
+/** Format an event into a human-readable summary line. `propositionOf` resolves
+ * knowledge ids to their text for events recorded before propositions were
+ * embedded (historical runs still carry bare ids). */
+export function eventSummary(event: ObservationEvent, t: TranslateFn, propositionOf?: (knowledgeID: string) => string | undefined): EventSummaryInfo {
   const d = event.data ?? {}
+  // Prefer the proposition embedded in the event; fall back to resolving the
+  // knowledge id; bare ids are the last resort for unresolvable history.
+  const knowledgeText = () => {
+    const embedded = String(d.proposition ?? '')
+    if (embedded) return embedded
+    const id = String(d.knowledge_id ?? '')
+    return id ? (propositionOf?.(id) ?? id) : ''
+  }
   switch (event.type) {
     case 'run.started':
       return { icon: '▶', label: t('runs.event.run_started'), detail: d.model ? t('runs.model', { name: String(d.model) }) : '', color: 'var(--tm-teal)' }
@@ -194,7 +210,7 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSumm
     case 'knowledge.recalled':
       return { icon: '📚', label: t('runs.event.recalled'), detail: String(d.proposition ?? '').slice(0, 60), color: '#9d7cd8' }
     case 'knowledge.used':
-      return { icon: '📚', label: t('runs.event.knowledge_used'), detail: String(d.hint_id ?? d.knowledge_id ?? ''), color: '#9d7cd8' }
+      return { icon: '📚', label: t('runs.event.knowledge_used'), detail: knowledgeText().slice(0, 90), color: '#9d7cd8' }
     case 'knowledge.confirmed':
       return { icon: '✓', label: t('runs.event.knowledge_confirmed'), detail: String(d.knowledge_id ?? ''), color: '#73daca' }
     case 'knowledge.challenged':
@@ -211,12 +227,18 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSumm
       return { icon: '✗', label: t('runs.event.knowledge_disproved'), detail: String(d.reason ?? '').slice(0, 80), color: '#f7768e' }
     case 'knowledge.linked':
       return { icon: '🔗', label: t('runs.event.knowledge_linked'), detail: [String(d.relation ?? ''), `${d.knowledge_id ?? ''} → ${d.target_id ?? ''}`].filter(Boolean).join(' · '), color: 'var(--tm-text-3)' }
-    case 'hint.offered':
-      return { icon: '💡', label: t('runs.event.hint_offered'), detail: [String(d.matched_by ?? ''), String(d.state ?? '')].filter(Boolean).join(' · '), color: '#9d7cd8' }
+    case 'hint.offered': {
+      const proposition = String(d.proposition ?? '') || propositionOf?.(String(d.knowledge_id ?? '')) || ''
+      const terms = cleanMatchTerms(d.matched_by)
+      const detail = proposition
+        ? proposition.slice(0, 90)
+        : terms.length ? `${t('runs.matched_by')}: ${terms.join(' · ')}` : ''
+      return { icon: '💡', label: t('runs.event.hint_offered'), detail, color: '#9d7cd8' }
+    }
     case 'hint.used':
-      return { icon: '✓', label: t('runs.event.hint_used'), detail: String(d.knowledge_id ?? d.hint_id ?? ''), color: 'var(--tm-text-3)' }
+      return { icon: '✓', label: t('runs.event.hint_used'), detail: knowledgeText().slice(0, 90), color: 'var(--tm-text-3)' }
     case 'hint.ignored':
-      return { icon: '○', label: t('runs.event.hint_ignored'), detail: String(d.knowledge_id ?? ''), color: 'var(--tm-text-3)' }
+      return { icon: '○', label: t('runs.event.hint_ignored'), detail: knowledgeText().slice(0, 90), color: 'var(--tm-text-3)' }
     case 'hint.outcome': {
       const outcome = d.outcome === 'helpful' ? t('runs.event.hint_outcome_helpful') : d.outcome === 'harmful' ? t('runs.event.hint_outcome_harmful') : String(d.outcome ?? '')
       return { icon: '⌾', label: t('runs.event.hint_outcome'), detail: outcome, color: 'var(--tm-text-3)' }
