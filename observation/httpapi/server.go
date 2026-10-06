@@ -944,7 +944,9 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 			Schema: observation.Schema, EventID: offerID, OccurredAt: s.now().UTC(),
 			Source:  observation.Source{ID: "temporality-activation", Integration: "temporality", Version: "1"},
 			Context: context, Type: "hint.offered",
-			Data: map[string]any{"hint_id": offerID, "activation_id": activationID, "knowledge_id": hints[i].KnowledgeID, "state": hints[i].State, "matched_by": hints[i].MatchedBy},
+			// The proposition rides along so run timelines show what was actually
+			// suggested — raw hint/knowledge ids mean nothing to a human.
+			Data: map[string]any{"hint_id": offerID, "activation_id": activationID, "knowledge_id": hints[i].KnowledgeID, "state": hints[i].State, "matched_by": hints[i].MatchedBy, "proposition": hints[i].Proposition},
 		}
 		if err = appendObservationNow(r, s.store, s.now, offered); err != nil {
 			writeError(w, http.StatusInternalServerError, errors.New("could not record offered hint"))

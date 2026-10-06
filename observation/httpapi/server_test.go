@@ -169,6 +169,15 @@ func TestJournalFlowIngestListHintsInvalidate(t *testing.T) {
 	if count := body["count"].(float64); count != 1 {
 		t.Fatalf("hint.offered count = %v, want 1", count)
 	}
+	// The proposition must ride along so run timelines show what was suggested
+	// instead of bare hint/knowledge ids.
+	offers := body["events"].([]any)
+	if len(offers) != 1 {
+		t.Fatalf("hint.offered events = %d, want 1", len(offers))
+	}
+	if prop := offers[0].(map[string]any)["data"].(map[string]any)["proposition"].(string); prop != "gatekeeper v2 authenticates via .token-file" {
+		t.Fatalf("hint.offered proposition = %q", prop)
+	}
 
 	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse", nil)
 	if res.StatusCode != http.StatusOK {
