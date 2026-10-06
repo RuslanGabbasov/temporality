@@ -171,6 +171,10 @@ func main() {
 		log.Error("migrate workspace v41", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000042_skill_version_provenance.up.sql"); err != nil {
+		log.Error("migrate workspace v42", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
