@@ -284,14 +284,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	messages := []llm.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: input.Prompt}}
 	for _, hint := range priorHints {
 		messages = append(messages, llm.Message{Role: "system", Content: "Temporality context (prior knowledge, inspect provenance): " + hint.Proposition + " [" + hint.State + "] " + hint.Caution})
-		if hint.HintID != "" {
-			// The proposition rides along so run timelines show what knowledge was
-			// actually injected — ids alone mean nothing to a human reader.
-			if err := emit(activityCtx, state, "knowledge.used", map[string]any{"knowledge_id": hint.KnowledgeID, "hint_id": hint.HintID, "proposition": hint.Proposition}); err != nil {
-				return result, err
-			}
-		}
 	}
+	// Hint usage is NOT recorded here: injection is an offer, not a use. The
+	// honest used/ignored signal is derived from the run's own output after it
+	// finishes (see runKnowledgeExtraction) so reuse accounting and aging track
+	// actual influence, not retrieval luck.
 	delegations := 0
 	// Acceptance-gate verdict of this run (docs/agent-delegation.md): set when
 	// a reviewer task calls submit_review; the run finishes at the end of that
@@ -2107,6 +2104,20 @@ func runKnowledgeExtraction(ctx workflow.Context, activityCtx workflow.Context, 
 	if extraction.Skipped {
 		_ = emit(activityCtx, state, extractionCompletedEvent, map[string]any{"extraction_id": extractionID, "extractor_version": ExtractorVersion, "skipped": "already_extracted"})
 		return
+	}
+	// Hint feedback closes the retrieval loop: every hint offered to this run is
+	// classified as used or ignored from the run's own output, so reuse counts
+	// and aging reflect actual influence (docs/knowledge-evolution.md §2 Hint).
+	for _, hint := range extraction.HintFeedback {
+		eventType := "hint.ignored"
+		data := map[string]any{"hint_id": hint.HintID, "knowledge_id": hint.KnowledgeID, "proposition": hint.Proposition, "matcher": "hint-usage-lexical.v1"}
+		if hint.Used {
+			eventType = "hint.used"
+			data["matched_by"] = hint.MatchedBy
+		}
+		if err := emit(activityCtx, state, eventType, data); err != nil {
+			return
+		}
 	}
 	lookupCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 2}})
 	proposed, strengthened, challenged := 0, 0, 0

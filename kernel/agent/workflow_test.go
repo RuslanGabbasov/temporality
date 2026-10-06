@@ -1856,7 +1856,9 @@ func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 		recorded = append(recorded, event)
 		return nil
 	}, activity.RegisterOptions{Name: ActivityRecordEvent})
-	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) {
+		return []Hint{{KnowledgeID: "ext/hint", HintID: "hint-1", Proposition: "The fetch command accepts a -limit flag.", State: "confirmed"}}, nil
+	}, activity.RegisterOptions{Name: ActivityKnowledgeHints})
 	env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
 		return llm.Completion{Content: "the workspace builds and tests pass"}, nil
 	}, activity.RegisterOptions{Name: ActivityCallModel})
@@ -1869,6 +1871,10 @@ func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 		},
 		Duplicates: 1,
 		Invalid:    2,
+		HintFeedback: []HintFeedback{
+			{HintID: "hint-1", KnowledgeID: "ext/hint", Proposition: "The fetch command accepts a -limit flag.", Used: true, MatchedBy: []string{"term:fetch", "term:limit"}},
+			{HintID: "hint-2", KnowledgeID: "ext/other", Proposition: "The indexer skips vendored directories.", Used: false},
+		},
 	}, nil)
 	env.RegisterActivityWithOptions(func(_ context.Context, query KnowledgeLookupQuery) (KnowledgeLookupResult, error) {
 		require.Equal(t, existingID, query.KnowledgeID)
@@ -1882,7 +1888,8 @@ func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 	require.NoError(t, env.GetWorkflowResult(&result))
 	require.Equal(t, "completed", result.Status)
 
-	var proposed, confirmed, started, completed *observation.Event
+	var proposed, confirmed, started, completed, hintUsed, hintIgnored *observation.Event
+	knowledgeUsedWithHint := false
 	for index := range recorded {
 		event := &recorded[index]
 		switch event.Type {
@@ -1898,6 +1905,14 @@ func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 			if event.Data["extraction_id"] != nil {
 				confirmed = event
 			}
+		case "knowledge.used":
+			if event.Data["hint_id"] != nil {
+				knowledgeUsedWithHint = true
+			}
+		case "hint.used":
+			hintUsed = event
+		case "hint.ignored":
+			hintIgnored = event
 		}
 	}
 	require.NotNil(t, started, "knowledge.extraction.started missing")
@@ -1922,6 +1937,16 @@ func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 	require.EqualValues(t, 1, completed.Data["strengthened"])
 	require.EqualValues(t, 1, completed.Data["duplicates_skipped"])
 	require.EqualValues(t, 2, completed.Data["invalid_skipped"])
+
+	// Hint usage is classified from the run output, not recorded at injection time.
+	require.NotNil(t, hintUsed, "hint.used missing")
+	require.Equal(t, "hint-1", hintUsed.Data["hint_id"])
+	require.Equal(t, "ext/hint", hintUsed.Data["knowledge_id"])
+	require.Equal(t, []any{"term:fetch", "term:limit"}, hintUsed.Data["matched_by"])
+	require.NotNil(t, hintIgnored, "hint.ignored missing")
+	require.Equal(t, "hint-2", hintIgnored.Data["hint_id"])
+	require.Equal(t, "hint-usage-lexical.v1", hintIgnored.Data["matcher"])
+	require.False(t, knowledgeUsedWithHint, "injection-time knowledge.used with hint_id must not be emitted")
 
 	// Extraction runs after the run's own terminal events.
 	require.Greater(t, indexEvent(recorded, "knowledge.extraction.started"), indexEvent(recorded, "agent.summary"))

@@ -56,6 +56,49 @@ func TestParseExtractionCandidatesRejectsGarbage(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid JSON")
 }
 
+func TestHintUsageFeedbackClassifiesOfferedHints(t *testing.T) {
+	events := []observation.Event{
+		{Type: "hint.offered", Data: map[string]any{"hint_id": "h1", "knowledge_id": "ext/1", "proposition": "The fetch command accepts a -limit flag, not --count."}},
+		{Type: "hint.offered", Data: map[string]any{"hint_id": "h2", "knowledge_id": "ext/2", "proposition": "The indexer skips vendored directories entirely by default."}},
+		{Type: "hint.offered", Data: map[string]any{"hint_id": "h3", "knowledge_id": "ext/3", "proposition": "Deployments go through the gatekeeper service."}},
+		// Duplicate offer and unrelated events must not produce feedback twice.
+		{Type: "hint.offered", Data: map[string]any{"hint_id": "h1", "knowledge_id": "ext/1", "proposition": "The fetch command accepts a -limit flag, not --count."}},
+		{Type: "run.started", Data: map[string]any{}},
+	}
+	trajectory := Trajectory{
+		Summary: TrajectorySummary{Answer: "Used fetch with -limit to fetch the manifest; the count flag is not supported."},
+		Turns:   []Turn{{Tools: []ToolStep{{Tool: "bash", Arguments: "{\"command\":\"fetch -limit manifest\"}"}, {Tool: "bash", Arguments: "{\"command\":\"deploy --via gatekeeper\"}"}}}},
+	}
+	feedback := hintUsageFeedback(events, trajectory)
+	require.Len(t, feedback, 3)
+
+	// Two shared distinctive terms (fetch, limit) → used, terms reported.
+	require.True(t, feedback[0].Used)
+	require.Equal(t, "h1", feedback[0].HintID)
+	require.Contains(t, feedback[0].MatchedBy, "term:fetch")
+	require.Contains(t, feedback[0].MatchedBy, "term:-limit")
+
+	// No shared terms → ignored.
+	require.False(t, feedback[1].Used)
+	require.Empty(t, feedback[1].MatchedBy)
+
+	// A single long rare term (gatekeeper) → used on its own.
+	require.True(t, feedback[2].Used)
+	require.Equal(t, []string{"term:gatekeeper"}, feedback[2].MatchedBy)
+}
+
+func TestHintReflectedRequiresDistinctiveEvidence(t *testing.T) {
+	corpus := propositionTokens("fetch the manifest with limit")
+	// A single short shared term is noise, not use.
+	used, matched := hintReflected("The fetch tool retries on transient errors.", corpus)
+	require.False(t, used)
+	require.Empty(t, matched)
+	// Everything the proposition asserts appears in the run's work.
+	used, matched = hintReflected("The fetch command accepts a limit.", corpus)
+	require.True(t, used)
+	require.Len(t, matched, 2)
+}
+
 func TestValidateExtractionCandidatesContract(t *testing.T) {
 	known := map[string]bool{"r/event/000007": true, "r/event/000009": true}
 	existing := []existingKnowledge{{ID: "ext/known", Proposition: "The report command writes its output to out/report.txt."}}

@@ -107,6 +107,17 @@ type AgingCandidate struct {
 	AgeDays     float64
 }
 
+// HintFeedback reports whether a hint offered to this run was actually
+// reflected in the run's work (docs/knowledge-evolution.md §2 Hint: applied
+// context and influence must be determinable).
+type HintFeedback struct {
+	HintID      string
+	KnowledgeID string
+	Proposition string
+	Used        bool
+	MatchedBy   []string
+}
+
 // KnowledgeExtractResult reports what the extractor produced.
 type KnowledgeExtractResult struct {
 	ExtractionID string
@@ -114,6 +125,7 @@ type KnowledgeExtractResult struct {
 	Duplicates   int              // dropped as restatements of existing knowledge
 	Invalid      int              // dropped by validation (no real evidence, bad kind, ...)
 	Aging        []AgingCandidate // stale unconfirmed proposals to challenge
+	HintFeedback []HintFeedback   // offered hints classified as used/ignored by this run
 	Model        string
 	DurationMs   int64
 	Skipped      bool // this run was already extracted with this version
@@ -190,6 +202,7 @@ func (a *Activities) ExtractKnowledge(ctx context.Context, request KnowledgeExtr
 	result.Duplicates = duplicates
 	result.Invalid = invalid
 	result.Aging = agingCandidates(knowledge, time.Now())
+	result.HintFeedback = hintUsageFeedback(events, trajectory)
 	result.DurationMs = time.Since(started).Milliseconds()
 	return result, nil
 }
@@ -525,6 +538,79 @@ func agingCandidates(knowledge []observation.Knowledge, now time.Time) []AgingCa
 		candidates = candidates[:agingMaxPerPass]
 	}
 	return candidates
+}
+
+// hintUsageFeedback classifies every hint offered to this run as used or
+// ignored by matching each proposition's distinctive terms against what the
+// run actually produced (docs/knowledge-evolution.md §2 Hint: applied context
+// and influence must stay determinable). Deterministic and cheap, it grounds
+// reuse accounting in observed work instead of the bare fact of injection.
+func hintUsageFeedback(events []observation.Event, trajectory Trajectory) []HintFeedback {
+	var feedback []HintFeedback
+	seen := make(map[string]bool)
+	corpus := usageCorpusTokens(trajectory)
+	for _, event := range events {
+		if event.Type != "hint.offered" {
+			continue
+		}
+		hintID := stringField(event.Data, "hint_id")
+		knowledgeID := stringField(event.Data, "knowledge_id")
+		if hintID == "" || knowledgeID == "" || seen[hintID] {
+			continue
+		}
+		seen[hintID] = true
+		proposition := stringField(event.Data, "proposition")
+		used, matched := hintReflected(proposition, corpus)
+		feedback = append(feedback, HintFeedback{HintID: hintID, KnowledgeID: knowledgeID, Proposition: proposition, Used: used, MatchedBy: matched})
+	}
+	return feedback
+}
+
+// usageCorpusTokens gathers the token set of everything the run produced: the
+// final answer plus every tool invocation's name and arguments. Tool output is
+// deliberately excluded — echoes of retrieved documents would mark every
+// consulted hint as used.
+func usageCorpusTokens(trajectory Trajectory) map[string]bool {
+	var b strings.Builder
+	b.WriteString(trajectory.Summary.Answer)
+	for _, turn := range trajectory.Turns {
+		for _, step := range turn.Tools {
+			b.WriteString(" " + step.Tool + " " + step.Arguments)
+		}
+	}
+	return propositionTokens(b.String())
+}
+
+// hintReflected decides whether a hint's proposition is reflected in the run's
+// output tokens: two or more distinctive shared terms count as use, and a
+// single long rare term (≥8 runes, e.g. a unique service or CLI name) counts
+// alone. Matched terms come back prefixed like hint.offered's matched_by so the
+// UI renders both the same way.
+func hintReflected(proposition string, corpus map[string]bool) (bool, []string) {
+	tokens := propositionTokens(proposition)
+	matched := make([]string, 0, len(tokens))
+	for token := range tokens {
+		if corpus[token] {
+			matched = append(matched, token)
+		}
+	}
+	sort.Strings(matched)
+	if len(matched) > 8 {
+		matched = matched[:8]
+	}
+	used := len(matched) >= 2 || (len(matched) == 1 && len([]rune(matched[0])) >= 8)
+	if !used {
+		return false, nil
+	}
+	return true, prefixedTerms(matched)
+}
+
+func prefixedTerms(values []string) []string {
+	result := make([]string, len(values))
+	for i, value := range values {
+		result[i] = "term:" + value
+	}
+	return result
 }
 
 // propositionSimilar reports whether two propositions are near-duplicates.
