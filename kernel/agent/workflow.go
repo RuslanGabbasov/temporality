@@ -2166,6 +2166,11 @@ func emitExtractedKnowledge(ctx workflow.Context, activityCtx workflow.Context, 
 
 func emitKnowledgeEvent(ctx workflow.Context, state *eventState, eventType string, data map[string]any, evidence []observation.Evidence) error {
 	state.sequence++
+	// Kernel proposals are born project-scoped (docs/knowledge-evolution.md
+	// §5: locality first); wider scopes happen only via knowledge.promoted.
+	if eventType == "knowledge.proposed" && data["scope_kind"] == nil {
+		data["scope_kind"] = "project"
+	}
 	data["frame_id"] = state.frame
 	data["parent_frame_id"] = state.parentFrame
 	if state.run.ParentRunID != "" {
