@@ -148,6 +148,34 @@ func TestProjectKnowledgeDefersPromotionArrivingBeforeProposal(t *testing.T) {
 	}
 }
 
+func TestProjectKnowledgeDefersHintTelemetryArrivingBeforeProposal(t *testing.T) {
+	base := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
+	// The journal offers hints and records feedback with its own clock; a kernel
+	// proposal with a leading clock can sort after them. Telemetry must defer.
+	offers := 0
+	hintOffered := func(at time.Time, hintID string) Event {
+		return Event{
+			Schema: Schema, EventID: hintID, OccurredAt: at,
+			Source:  Source{ID: "temporality-activation", Integration: "temporality"},
+			Context: Context{Project: "repo-b", Actor: Actor{ID: "agent", Type: "agent"}},
+			Type:    "hint.offered",
+			Data:    map[string]any{"hint_id": hintID, "knowledge_id": "auto/abc"},
+		}
+	}
+	offers++
+	events := []Event{
+		hintOffered(base, "h1"),
+		proposalEvent("e2", "auto/abc", "The gatekeeper CLI requires the --out flag", base.Add(2*time.Minute), nil),
+	}
+	knowledge, err := ProjectKnowledge(events)
+	if err != nil {
+		t.Fatalf("skewed hint telemetry must defer to the proposal: %v", err)
+	}
+	if len(knowledge) != 1 || knowledge[0].HintOffers != offers {
+		t.Fatalf("deferred hint offer must be counted, got %+v", knowledge)
+	}
+}
+
 func TestProjectKnowledgeRejectsOrphanedPromotion(t *testing.T) {
 	base := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
 	events := []Event{

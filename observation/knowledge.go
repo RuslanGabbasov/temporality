@@ -70,8 +70,10 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 	// Promotions are emitted by the journal while proposals come from kernels:
 	// clock skew between the two can sort a promotion before its proposal in a
 	// merged stream. Deferred promotions are applied as soon as the proposal
-	// lands (and still fail loudly at the end if it never does).
+	// lands (and still fail loudly at the end if it never does). Hint telemetry
+	// is journal-emitted too and defers the same way.
 	pendingPromoted := make(map[string][]Event)
+	pendingHints := make(map[string][]Event)
 	applyPromoted := func(item *Knowledge, event Event) {
 		// Scope widening is not a lifecycle state change: it re-targets
 		// visibility while leaving the state machine untouched, so it is
@@ -94,16 +96,37 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			}
 		}
 	}
+	applyHint := func(item *Knowledge, event Event) {
+		item.UpdatedAt = event.OccurredAt
+		switch event.Type {
+		case "hint.offered":
+			item.HintOffers++
+		case "hint.used":
+			item.HintUses++
+			item.ReuseCount++
+			usedAt := event.OccurredAt
+			item.LastUsedAt = &usedAt
+		case "hint.ignored":
+			item.HintIgnores++
+		case "hint.outcome":
+			switch stringValue(event.Data, "outcome") {
+			case "helpful":
+				item.HelpfulOutcomes++
+			case "harmful":
+				item.HarmfulOutcomes++
+			}
+		}
+		appendKnowledgeTransition(item, event)
+	}
 	for _, event := range events {
 		if event.Type == "hint.offered" {
 			id := stringValue(event.Data, "knowledge_id")
 			item := byID[id]
 			if item == nil {
-				return nil, fmt.Errorf("hint event %s refers to unknown knowledge %q", event.EventID, id)
+				pendingHints[id] = append(pendingHints[id], event)
+				continue
 			}
-			item.HintOffers++
-			item.UpdatedAt = event.OccurredAt
-			appendKnowledgeTransition(item, event)
+			applyHint(item, event)
 			continue
 		}
 		if event.Type == "hint.used" || event.Type == "hint.ignored" || event.Type == "hint.outcome" {
@@ -114,26 +137,10 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			}
 			item := byID[id]
 			if item == nil {
-				return nil, fmt.Errorf("hint feedback event %s refers to unknown hint %q", event.EventID, hintID)
+				pendingHints[id] = append(pendingHints[id], event)
+				continue
 			}
-			item.UpdatedAt = event.OccurredAt
-			switch event.Type {
-			case "hint.used":
-				item.HintUses++
-				item.ReuseCount++
-				usedAt := event.OccurredAt
-				item.LastUsedAt = &usedAt
-			case "hint.ignored":
-				item.HintIgnores++
-			case "hint.outcome":
-				switch stringValue(event.Data, "outcome") {
-				case "helpful":
-					item.HelpfulOutcomes++
-				case "harmful":
-					item.HarmfulOutcomes++
-				}
-			}
-			appendKnowledgeTransition(item, event)
+			applyHint(item, event)
 			continue
 		}
 		if len(event.Type) < len("knowledge.") || event.Type[:len("knowledge.")] != "knowledge." {
@@ -169,6 +176,10 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			item = &Knowledge{ID: id, Proposition: proposition, Kind: knowledgeKind(event.Data), Topics: stringList(event.Data["topics"]), Entities: stringList(event.Data["entities"]), State: "proposed", Project: event.Context.Project, ScopeKind: knowledgeScopeKind(event.Data), ScopeID: knowledgeScopeID(event.Data), CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt, CreatedBy: event.Context.Actor, Evidence: append([]Evidence(nil), event.Evidence...)}
 			byID[id] = item
 			appendKnowledgeTransition(item, event)
+			for _, hint := range pendingHints[id] {
+				applyHint(item, hint)
+			}
+			delete(pendingHints, id)
 			for _, promoted := range pendingPromoted[id] {
 				applyPromoted(item, promoted)
 			}
@@ -240,13 +251,20 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 		item.Evidence = appendUniqueEvidence(item.Evidence, event.Evidence...)
 		appendKnowledgeTransition(item, event)
 	}
-	if len(pendingPromoted) > 0 {
-		ids := make([]string, 0, len(pendingPromoted))
+	if len(pendingPromoted) > 0 || len(pendingHints) > 0 {
+		ids := make(map[string]bool, len(pendingPromoted)+len(pendingHints))
 		for id := range pendingPromoted {
-			ids = append(ids, id)
+			ids[id] = true
 		}
-		sort.Strings(ids)
-		return nil, fmt.Errorf("promotion events refer to unknown knowledge %v", ids)
+		for id := range pendingHints {
+			ids[id] = true
+		}
+		unknown := make([]string, 0, len(ids))
+		for id := range ids {
+			unknown = append(unknown, id)
+		}
+		sort.Strings(unknown)
+		return nil, fmt.Errorf("knowledge events refer to unknown knowledge %v", unknown)
 	}
 	result := make([]Knowledge, 0, len(byID))
 	for _, item := range byID {
