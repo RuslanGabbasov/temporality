@@ -11,9 +11,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/mcpclient"
@@ -590,10 +590,11 @@ func (a *Activities) handleSkillValidate(ctx context.Context, skillID string) (T
 }
 
 // handleSkillPropose turns a natural-language capability description into a
-// structured skill draft (via the skill builder) and saves it as a new skill,
-// or as a new version when the skill already exists. Per docs/living-skills.md
-// §26 skills change through proposals: the draft lands as version 0.x for
-// human review in the Skills UI, it is never silently promoted.
+// structured skill draft (via the skill builder) and saves it as a proposal:
+// a draft version for human review, never the live revision. Per
+// docs/knowledge-evolution.md Wave A the proposal lands with full provenance
+// (origin, source run, evidence) and goes live only when a human applies it
+// in the Skills UI (skill.applied event).
 func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest) (ToolResult, error) {
 	description, _ := request.Arguments["description"].(string)
 	if strings.TrimSpace(description) == "" {
@@ -615,18 +616,18 @@ func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest
 	if id == "" {
 		return ToolResult{Content: "error: could not derive a skill id from the draft"}, nil
 	}
-	// Version policy for proposals: new capabilities start as 0.x drafts; an
-	// existing skill gets its next patch as a proposal. The version is system
-	// policy, never the model's guess.
-	version := "0.1.0"
-	if current, status, err := a.workspaceDo(ctx, http.MethodGet, fmt.Sprintf("%s/v1/workspace/skills/%s", a.WorkspaceURL, id), nil); err == nil && status == 200 {
-		var existing struct {
-			Version string `json:"version"`
-		}
-		if json.Unmarshal([]byte(current), &existing) == nil && existing.Version != "" {
-			version = nextPatchVersion(existing.Version)
-		}
+	// Provenance: the run and operation that produced this proposal. Version
+	// policy stays server-side — the workspace API picks the next free patch
+	// for existing skills and 0.x for new capabilities.
+	sourceRuns := []string{}
+	if request.RunID != "" {
+		sourceRuns = append(sourceRuns, request.RunID)
 	}
+	evidenceRefs := []string{}
+	if request.OperationID != "" {
+		evidenceRefs = append(evidenceRefs, request.OperationID)
+	}
+	changeSummary := "Agent proposal: " + truncate(draft.Description, 180)
 	// Normalize the manifest so identity fields agree with the stored row.
 	manifestMap := map[string]any{}
 	if err := json.Unmarshal(draft.Manifest, &manifestMap); err != nil {
@@ -639,46 +640,113 @@ func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest
 		manifestMap["description"] = draft.Description
 	}
 	manifestMap["id"] = id
-	manifestMap["version"] = version
+	delete(manifestMap, "version") // server picks the version, never the model
 	normalizedManifest, err := json.Marshal(manifestMap)
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
 	}
-	payload := map[string]any{
-		"id":            id,
-		"name":          draft.Name,
-		"description":   draft.Description,
-		"version":       version,
-		"markdown":      draft.Markdown,
-		"manifest_yaml": string(normalizedManifest),
+	exists := false
+	if current, status, err := a.workspaceDo(ctx, http.MethodGet, fmt.Sprintf("%s/v1/workspace/skills/%s", a.WorkspaceURL, id), nil); err == nil && status == 200 {
+		var existing struct {
+			Version string `json:"version"`
+		}
+		if json.Unmarshal([]byte(current), &existing) == nil && existing.Version != "" {
+			exists = true
+		}
 	}
-	body, status, err := a.workspaceDo(ctx, http.MethodPost, a.WorkspaceURL+"/v1/workspace/skills", payload)
-	if err != nil {
-		return ToolResult{Content: "error: " + err.Error()}, nil
-	}
-	action := "created"
-	if status == 409 {
-		// Skill exists — propose the draft as its next version instead.
-		body, status, err = a.workspaceDo(ctx, http.MethodPut, a.WorkspaceURL+"/v1/workspace/skills/"+id, payload)
+	var (
+		version string
+		action  string
+	)
+	if exists {
+		// Skill exists — propose the draft as its next version; the current
+		// revision keeps serving agents until a human applies the draft.
+		payload := map[string]any{
+			"markdown":       draft.Markdown,
+			"manifest_yaml":  string(normalizedManifest),
+			"origin":         "agent-proposal",
+			"source_runs":    sourceRuns,
+			"evidence_refs":  evidenceRefs,
+			"change_summary": changeSummary,
+		}
+		body, status, err := a.workspaceDo(ctx, http.MethodPost, fmt.Sprintf("%s/v1/workspace/skills/%s/versions", a.WorkspaceURL, id), payload)
 		if err != nil {
 			return ToolResult{Content: "error: " + err.Error()}, nil
 		}
-		action = "new version proposed for existing skill"
+		if status >= 400 {
+			return ToolResult{Content: fmt.Sprintf("error: propose skill version failed (HTTP %d): %s", status, truncate(body, 600))}, nil
+		}
+		var proposed struct {
+			Version string `json:"version"`
+		}
+		_ = json.Unmarshal([]byte(body), &proposed)
+		version = proposed.Version
+		action = "draft version proposed for existing skill"
+	} else {
+		payload := map[string]any{
+			"id":             id,
+			"name":           draft.Name,
+			"description":    draft.Description,
+			"version":        "0.1.0",
+			"markdown":       draft.Markdown,
+			"manifest_yaml":  string(normalizedManifest),
+			"draft":          true,
+			"origin":         "agent-proposal",
+			"source_runs":    sourceRuns,
+			"evidence_refs":  evidenceRefs,
+			"change_summary": changeSummary,
+		}
+		body, status, err := a.workspaceDo(ctx, http.MethodPost, a.WorkspaceURL+"/v1/workspace/skills", payload)
+		if err != nil {
+			return ToolResult{Content: "error: " + err.Error()}, nil
+		}
+		if status >= 400 {
+			return ToolResult{Content: fmt.Sprintf("error: save skill draft failed (HTTP %d): %s", status, truncate(body, 600))}, nil
+		}
+		version = "0.1.0"
+		action = "skill created as draft"
 	}
-	if status >= 400 {
-		return ToolResult{Content: fmt.Sprintf("error: save skill draft failed (HTTP %d): %s", status, truncate(body, 600))}, nil
-	}
+	a.emitSkillProposed(ctx, request, id, draft.Name, version, changeSummary, evidenceRefs)
 	response := map[string]any{
 		"skill_id":  id,
 		"name":      draft.Name,
 		"version":   version,
 		"state":     "draft",
 		"action":    action,
-		"next_step": "human review in the Skills UI before the skill is bound to agents",
+		"next_step": "a human must review and apply the draft in the Skills UI before the skill becomes available to agents",
 		"questions": draft.Questions,
 	}
 	encoded, _ := json.Marshal(response)
 	return ToolResult{Content: string(encoded)}, nil
+}
+
+// emitSkillProposed records the skill.proposed event in the journal via the
+// durable outbox. Best-effort: the draft row is already saved, so an outbox
+// miss must not fail the tool call.
+func (a *Activities) emitSkillProposed(ctx context.Context, request ToolRequest, skillID, skillName, version, changeSummary string, evidenceRefs []string) {
+	if a.Events == nil {
+		return
+	}
+	evidence := make([]observation.Evidence, 0, len(evidenceRefs))
+	for _, ref := range evidenceRefs {
+		evidence = append(evidence, observation.Evidence{Ref: ref})
+	}
+	event := observation.Event{
+		Schema:     observation.Schema,
+		EventID:    fmt.Sprintf("%s/skill-proposed/%s", request.RunID, version),
+		OccurredAt: time.Now().UTC(),
+		Source:     observation.Source{ID: a.SourceID, Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{
+			Project: request.Project, Run: request.RunID,
+			Actor: observation.Actor{ID: a.SourceID, Type: "agent"},
+		},
+		Type:     "skill.proposed",
+		Data:     map[string]any{"skill_id": skillID, "skill_name": skillName, "version": version, "origin": "agent-proposal", "change_summary": changeSummary, "source_runs": []string{request.RunID}},
+		Evidence: evidence,
+	}
+	if err := a.Events.Enqueue(ctx, event); err != nil {
+		return
+	}
 }
 
 // ToolsSummary renders builtin + MCP tools as a compact text list for the
@@ -719,23 +787,6 @@ func skillSlug(name string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
-}
-
-// nextPatchVersion bumps the patch segment of a semver-ish version string,
-// ignoring any prerelease/build suffix ("1.2.3-rc.1" -> "1.2.4"). When the
-// input cannot be parsed it falls back to a fresh 0.1.0 draft version.
-func nextPatchVersion(v string) string {
-	parts := strings.SplitN(strings.TrimSpace(v), "+", 2)
-	core := strings.SplitN(parts[0], "-", 2)[0]
-	segments := strings.Split(core, ".")
-	if len(segments) != 3 {
-		return "0.1.0"
-	}
-	patch, err := strconv.Atoi(segments[2])
-	if err != nil || patch < 0 {
-		return "0.1.0"
-	}
-	return fmt.Sprintf("%s.%s.%d", segments[0], segments[1], patch+1)
 }
 
 // truncate shortens s for inclusion in a compact tool error message.

@@ -2340,6 +2340,16 @@ func main() {
 			writeError(w, 422, errors.New("id is required"))
 			return
 		}
+		if req.Draft {
+			// Agent proposal for a brand-new capability: the skill appears in the
+			// UI as a draft and is never served to agents until a human applies it.
+			if err := ws.CreateSkillDraft(r.Context(), &skill, req.provenance(workspace.SkillOriginAgentProposal)); err != nil {
+				writeError(w, 409, err)
+				return
+			}
+			writeJSON(w, 201, skill)
+			return
+		}
 		if err := ws.CreateSkill(r.Context(), &skill); err != nil {
 			writeError(w, 409, err)
 			return
@@ -2440,6 +2450,59 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"versions": versions})
+	})
+	// Propose a new draft version for an existing skill without touching the
+	// current revision (docs/knowledge-evolution.md Wave A). Used by the
+	// skill_propose agent tool; the draft goes live only via the apply endpoint.
+	mux.HandleFunc("POST /v1/workspace/skills/{skillID}/versions", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req skillRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		skill, err := req.toSkill(r.PathValue("skillID"))
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		// The manifest's own version stays advisory: an empty request version
+		// picks the next free patch, an occupied one is a conflict.
+		version, err := ws.ProposeSkillVersion(r.Context(), skill.ID, req.Version, skill.Markdown, skill.Manifest, req.provenance(workspace.SkillOriginAgentProposal))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			if errors.Is(err, workspace.ErrConflict) {
+				writeError(w, 409, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 201, version)
+	})
+	// Apply a version: drafts become the current revision, applying an older
+	// active version is the rollback path (docs/living-skills.md §24).
+	mux.HandleFunc("POST /v1/workspace/skills/{skillID}/versions/{version}/apply", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		skillID, version := r.PathValue("skillID"), r.PathValue("version")
+		skill, applied, err := ws.ApplySkillVersion(r.Context(), skillID, version)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		emitSkillLifecycleEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "skill.applied", skillID, skill.Name, applied, actorFromRequest(r))
+		writeJSON(w, 200, skill)
 	})
 	mux.HandleFunc("POST /v1/workspace/skills/{skillID}/validate", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
@@ -3480,6 +3543,11 @@ func resolveAgentSkills(ctx context.Context, ws *workspace.Store, a *workspace.A
 		if !ok {
 			continue
 		}
+		// Drafts await human apply (docs/knowledge-evolution.md Wave A): agents
+		// never bind unreviewed content, the current revision keeps serving.
+		if s.VersionStatus == workspace.SkillVersionDraft {
+			continue
+		}
 		manifest, err := skills.ParseManifest(string(s.Manifest))
 		if err != nil {
 			// Stored manifests are parsed-JSON; YAML accepts JSON, so this only
@@ -4125,6 +4193,26 @@ type skillRequest struct {
 	Markdown     string `json:"markdown"`
 	ManifestYAML string `json:"manifest_yaml"`
 	OrgUnitID    string `json:"org_unit_id"` // only set on create; updates keep the stored binding
+	// Draft=true stores the first version as a draft awaiting human apply
+	// (docs/knowledge-evolution.md Wave A). Provenance fields record who
+	// authored the change and which runs produced it.
+	Draft         bool     `json:"draft"`
+	Origin        string   `json:"origin"`
+	SourceRuns    []string `json:"source_runs"`
+	EvidenceRefs  []string `json:"evidence_refs"`
+	KnowledgeIDs  []string `json:"knowledge_ids"`
+	ChangeSummary string   `json:"change_summary"`
+}
+
+func (req skillRequest) provenance(defaultOrigin string) workspace.SkillProvenance {
+	origin := req.Origin
+	if origin != workspace.SkillOriginAgentProposal && origin != workspace.SkillOriginHumanEdit && origin != workspace.SkillOriginInitial {
+		origin = defaultOrigin
+	}
+	return workspace.SkillProvenance{
+		Origin: origin, SourceRuns: req.SourceRuns, EvidenceRefs: req.EvidenceRefs,
+		KnowledgeIDs: req.KnowledgeIDs, ChangeSummary: req.ChangeSummary,
+	}
 }
 
 // parse decodes the manifest, falling back to legacy inference from SKILL.md
@@ -4288,6 +4376,66 @@ func skillMemory(ctx context.Context, observationURL, apiToken, skillID string) 
 		cursor = page.NextCursor
 	}
 	return result, nil
+}
+
+// actorFromRequest resolves the applying user for skill lifecycle events;
+// anonymous when the auth gate is disabled.
+func actorFromRequest(r *http.Request) observation.Actor {
+	if principal, ok := controlplane.FromContext(r.Context()); ok {
+		return observation.Actor{ID: principal.Subject, Type: "human"}
+	}
+	return observation.Actor{ID: "anonymous", Type: "human"}
+}
+
+// emitSkillLifecycleEvent records skill.proposed / skill.applied in the
+// journal so the evolution chain is observable (docs/knowledge-evolution.md
+// §12). Best-effort: a journal outage must not fail the workspace write —
+// the version rows remain the source of truth.
+func emitSkillLifecycleEvent(ctx context.Context, observationURL, token, eventType, skillID, skillName string, version workspace.SkillVersion, actor observation.Actor) {
+	if observationURL == "" {
+		return
+	}
+	digest := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%d", eventType, skillID, version.Version, time.Now().UnixNano())))
+	event := observation.Event{
+		Schema:     observation.Schema,
+		EventID:    fmt.Sprintf("skill/%s/%s", eventType, hex.EncodeToString(digest[:10])),
+		OccurredAt: time.Now().UTC(),
+		Source:     observation.Source{ID: "workspace", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{
+			Run:   firstNonEmpty(version.SourceRuns...),
+			Actor: actor,
+		},
+		Type: eventType,
+		Data: map[string]any{
+			"skill_id":       skillID,
+			"skill_name":     skillName,
+			"version":        version.Version,
+			"origin":         version.Origin,
+			"change_summary": version.ChangeSummary,
+			"source_runs":    version.SourceRuns,
+		},
+	}
+	if err := event.Validate(); err != nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{"events": []observation.Event{event}})
+	if err != nil {
+		return
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, observationURL+"/v1/observations/events", bytes.NewReader(payload))
+	if err != nil {
+		return
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, response.Body)
 }
 
 func env(name, fallback string) string {
