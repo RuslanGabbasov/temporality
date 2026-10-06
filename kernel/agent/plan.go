@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/temporality-project/temporality/kernel/llm"
 )
 
 // MaxPlanTasks bounds the size of one plan DAG: the executor holds per-task
@@ -11,20 +13,41 @@ import (
 // resource risk, not just a big graph.
 const MaxPlanTasks = 16
 
+// Rework rounds (docs/agent-delegation.md, acceptance gates): how many times
+// a reviewer may send a task back. The plan-level max_rework argument may set
+// 0..MaxPlanRework; when absent the default applies.
+const (
+	DefaultMaxRework = 2
+	MaxPlanRework    = 2
+)
+
 // PlanTask is one node of a plan DAG (docs/agent-delegation.md, plans): an
 // agent plus a self-contained instruction, gated on other tasks finishing.
+// ReviewOf marks an acceptance-gate task: its child run receives the
+// submit_review tool and its verdict may reopen rejected upstream tasks.
 type PlanTask struct {
 	ID        string   `json:"id"`
 	AgentID   string   `json:"agent_id"`
 	Prompt    string   `json:"prompt"`
 	DependsOn []string `json:"depends_on,omitempty"`
+	ReviewOf  []string `json:"review_of,omitempty"`
 	MaxTurns  int      `json:"max_turns,omitempty"`
 }
 
 // PlanSpec is the validated form of the `plan` tool arguments.
 type PlanSpec struct {
-	Goal  string     `json:"goal,omitempty"`
-	Tasks []PlanTask `json:"tasks"`
+	Goal      string     `json:"goal,omitempty"`
+	MaxRework int        `json:"max_rework,omitempty"` // 0 when absent; executor applies DefaultMaxRework
+	Tasks     []PlanTask `json:"tasks"`
+}
+
+// ReviewVerdict is the acceptance-gate verdict of a reviewer task
+// (docs/agent-delegation.md, acceptance gates): accept, or rework with
+// per-task feedback. Feedback keys are plan task ids.
+type ReviewVerdict struct {
+	Verdict  string            `json:"verdict"` // accept | rework
+	Feedback map[string]string `json:"feedback,omitempty"`
+	Summary  string            `json:"summary,omitempty"`
 }
 
 // planTaskIDPattern keeps child run ids readable and workflow-safe.
@@ -64,10 +87,16 @@ func planSpecFromArgs(args map[string]any) (PlanSpec, string) {
 		for _, dep := range stringList(fields["depends_on"]) {
 			task.DependsOn = append(task.DependsOn, dep)
 		}
+		for _, id := range stringList(fields["review_of"]) {
+			task.ReviewOf = append(task.ReviewOf, id)
+		}
 		if v, ok := numericArg(fields["max_turns"]); ok && v > 0 {
 			task.MaxTurns = int(v)
 		}
 		spec.Tasks = append(spec.Tasks, task)
+	}
+	if v, ok := numericArg(args["max_rework"]); ok {
+		spec.MaxRework = int(v)
 	}
 	return spec, ""
 }
@@ -111,6 +140,9 @@ func validatePlanSpec(spec PlanSpec, priorAnswers map[string]string) (*planDAG, 
 			return nil, fmt.Sprintf("task %q: max_turns must be between 1 and 16", task.ID)
 		}
 	}
+	if spec.MaxRework < 0 || spec.MaxRework > MaxPlanRework {
+		return nil, fmt.Sprintf("max_rework must be between 0 and %d", MaxPlanRework)
+	}
 	for index := range spec.Tasks {
 		task := &spec.Tasks[index]
 		seen := map[string]bool{}
@@ -128,6 +160,25 @@ func validatePlanSpec(spec PlanSpec, priorAnswers map[string]string) (*planDAG, 
 			dag.DependsOn[task.ID] = append(dag.DependsOn[task.ID], dep)
 			dag.Dependents[dep] = append(dag.Dependents[dep], task.ID)
 		}
+		// Acceptance gates: review_of ids must exist in this plan and are
+		// dependencies by definition — the reviewer consumes what it accepts.
+		// Auto-added deps keep spec order (review_of entries first).
+		for _, reviewed := range task.ReviewOf {
+			if reviewed == task.ID {
+				return nil, fmt.Sprintf("task %q cannot review itself", task.ID)
+			}
+			if !ids[reviewed] {
+				return nil, fmt.Sprintf("task %q reviews unknown task %q", task.ID, reviewed)
+			}
+			if !seen[reviewed] {
+				seen[reviewed] = true
+				dag.DependsOn[task.ID] = append(dag.DependsOn[task.ID], reviewed)
+				dag.Dependents[reviewed] = append(dag.Dependents[reviewed], task.ID)
+			}
+		}
+		// Keep the task struct in sync with the derived graph: the prompt
+		// builder and executor iterate task.DependsOn.
+		task.DependsOn = dag.DependsOn[task.ID]
 		dag.DepsLeft[task.ID] = len(dag.DependsOn[task.ID])
 	}
 	// Template references: a placeholder must resolve to a dependency of this
@@ -226,9 +277,10 @@ func planTaskPrompt(task PlanTask, upstream map[string]string, prior map[string]
 
 // planTaskStatus is the per-task terminal status inside a plan execution.
 const (
-	planStatusCompleted = "completed"
-	planStatusFailed    = "failed"
-	planStatusSkipped   = "skipped"
+	planStatusCompleted   = "completed"
+	planStatusFailed      = "failed"
+	planStatusSkipped     = "skipped"
+	planStatusInvalidated = "invalidated" // result discarded: upstream was sent back or died
 )
 
 // planTaskOutcome is one task's terminal record for the summary.
@@ -236,18 +288,32 @@ type planTaskOutcome struct {
 	TaskID      string
 	AgentID     string
 	ChildRunID  string
-	Status      string // completed | failed | skipped
+	Status      string // completed | failed | skipped | invalidated
 	ChildStatus string
 	Turns       int
+	Round       int // child runs launched for this task (1 = no rework)
+	Verdict     string
 	Answer      string
 	Error       string
 	BlockedBy   string
 	SkipReason  string
 }
 
+// planRejection is one reviewer rejection from the plan's rework history.
+type planRejection struct {
+	TaskID   string
+	By       string
+	Round    int
+	Feedback string
+}
+
+// rejectionFeedbackBound caps one feedback entry in the summary.
+const rejectionFeedbackBound = 240
+
 // planSummary renders the tool-result content the parent model reads: every
 // task with its status and, for completed tasks, a bounded final answer.
-func planSummary(spec PlanSpec, outcomes []planTaskOutcome) string {
+// Rework history makes the quality loop visible: who rejected what and why.
+func planSummary(spec PlanSpec, outcomes []planTaskOutcome, rejections []planRejection) string {
 	counts := map[string]int{}
 	for index := range outcomes {
 		counts[outcomes[index].Status]++
@@ -257,12 +323,18 @@ func planSummary(spec PlanSpec, outcomes []planTaskOutcome) string {
 	if goal == "" {
 		goal = "plan"
 	}
-	fmt.Fprintf(&b, "Plan %q finished: %d completed, %d failed, %d skipped.", goal, counts[planStatusCompleted], counts[planStatusFailed], counts[planStatusSkipped])
+	fmt.Fprintf(&b, "Plan %q finished: %d completed, %d failed, %d skipped, %d invalidated.", goal, counts[planStatusCompleted], counts[planStatusFailed], counts[planStatusSkipped], counts[planStatusInvalidated])
 	for index := range outcomes {
 		outcome := &outcomes[index]
 		switch outcome.Status {
 		case planStatusCompleted:
 			fmt.Fprintf(&b, "\n\n## %s (%s) — completed", outcome.TaskID, outcome.AgentID)
+			if outcome.Round > 1 {
+				fmt.Fprintf(&b, ", round %d", outcome.Round)
+			}
+			if outcome.Verdict != "" {
+				fmt.Fprintf(&b, ", verdict %s", outcome.Verdict)
+			}
 			if outcome.Turns > 0 {
 				fmt.Fprintf(&b, ", %d turns", outcome.Turns)
 			}
@@ -270,6 +342,8 @@ func planSummary(spec PlanSpec, outcomes []planTaskOutcome) string {
 			b.WriteString(outcome.Answer)
 		case planStatusFailed:
 			fmt.Fprintf(&b, "\n\n## %s (%s) — failed\n%s", outcome.TaskID, outcome.AgentID, outcome.Error)
+		case planStatusInvalidated:
+			fmt.Fprintf(&b, "\n\n## %s (%s) — invalidated (result discarded: %s)", outcome.TaskID, outcome.AgentID, outcome.SkipReason)
 		default:
 			reason := outcome.SkipReason
 			if reason == "" {
@@ -282,5 +356,56 @@ func planSummary(spec PlanSpec, outcomes []planTaskOutcome) string {
 			fmt.Fprintf(&b, "\n\n## %s — skipped (%s: %s)", outcome.TaskID, reason, blocked)
 		}
 	}
+	if len(rejections) > 0 {
+		b.WriteString("\n\nRework history\n")
+		for index := range rejections {
+			rejection := &rejections[index]
+			feedback := rejection.Feedback
+			if len(feedback) > rejectionFeedbackBound {
+				feedback = feedback[:rejectionFeedbackBound] + "…"
+			}
+			fmt.Fprintf(&b, "\n- %s rejected by %s (round %d): %s", rejection.TaskID, rejection.By, rejection.Round, feedback)
+		}
+	}
 	return b.String()
+}
+
+// stringMapField coerces a model-supplied object argument to map[string]string.
+func stringMapField(value any) map[string]string {
+	raw, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for key, item := range raw {
+		if text, ok := item.(string); ok {
+			out[key] = text
+		}
+	}
+	return out
+}
+
+// ReviewVerdictTool returns the tool definition injected into reviewer child
+// runs (docs/agent-delegation.md, acceptance gates). It is not part of
+// KernelTools: only plan reviewers see it.
+func ReviewVerdictTool() llm.ToolDef {
+	return llm.ToolDef{
+		Name:        "submit_review",
+		Description: "Submit the acceptance verdict for the plan tasks you reviewed. Call it exactly once when your review is done — the run finishes with this verdict.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"verdict":  map[string]any{"type": "string", "enum": []string{"accept", "rework"}, "description": "accept = the reviewed work is acceptable; rework = some reviewed tasks must be redone"},
+				"feedback": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "required for rework: task id -> concrete fix instructions; tasks you do not mention are accepted"},
+				"summary":  map[string]any{"type": "string", "description": "2-3 sentence overall review"},
+			},
+			"required": []string{"verdict"},
+		},
+	}
+}
+
+// reviewContractPrompt is appended to a reviewer task's prompt: the output
+// contract for the acceptance gate.
+func reviewContractPrompt(reviewOf []string) string {
+	return "\n\nAcceptance gate: you review the results of these plan tasks: " + strings.Join(reviewOf, ", ") + ". Assess whether each result meets the goal. When your review is done, call submit_review exactly once: verdict \"accept\", or verdict \"rework\" with a feedback object mapping each failing task id to concrete, actionable fix instructions (tasks you do not mention are accepted). Put the overall review in summary. The run ends when you submit the verdict."
 }

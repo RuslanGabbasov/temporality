@@ -1351,6 +1351,139 @@ func TestAgentRunPlanExecutesDAG(t *testing.T) {
 	require.Less(t, taskCompleted["end"], planIdx["plan.completed"])
 }
 
+func TestAgentRunPlanReworkLoop(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	// DAG: build -> gate(review_of build) -> ship. The gate rejects the first
+	// build result; the rework round fixes it and the gate accepts on rerun.
+	buildLaunches, gateLaunches := 0, 0
+	var buildPrompts, gatePrompts []string
+	var gateTools []string
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			prompt := request.Messages[1].Content
+			switch {
+			case strings.Contains(prompt, "build the feature"):
+				buildLaunches++
+				buildPrompts = append(buildPrompts, prompt)
+				if buildLaunches == 1 {
+					return llm.Completion{Content: "BUILD-V1"}, nil
+				}
+				return llm.Completion{Content: "BUILD-V2"}, nil
+			case strings.Contains(prompt, "review the build"):
+				gateLaunches++
+				gatePrompts = append(gatePrompts, prompt)
+				for _, tool := range request.Tools {
+					gateTools = append(gateTools, tool.Name)
+				}
+				if gateLaunches == 1 {
+					return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "verdict-1", Name: "submit_review", Args: map[string]any{"verdict": "rework", "feedback": map[string]any{"build": "deliver V2 instead"}, "summary": "v1 is not acceptable"}}}}, nil
+				}
+				return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "verdict-2", Name: "submit_review", Args: map[string]any{"verdict": "accept", "summary": "v2 passes the review"}}}}, nil
+			case strings.Contains(prompt, "ship the result"):
+				return llm.Completion{Content: "SHIP-DONE"}, nil
+			}
+			t.Fatalf("unexpected child prompt: %s", prompt)
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
+				"goal": "ship with a gate",
+				"tasks": []any{
+					map[string]any{"id": "build", "agent_id": "repo-a-coder", "prompt": "build the feature"},
+					map[string]any{"id": "gate", "agent_id": "repo-a-reviewer", "prompt": "review the build", "review_of": []any{"build"}},
+					map[string]any{"id": "ship", "agent_id": "repo-a-qa", "prompt": "ship the result", "depends_on": []any{"gate"}},
+				},
+			}}}}, nil
+		}
+		sawSummary := false
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "BUILD-V2") && strings.Contains(message.Content, "SHIP-DONE") && strings.Contains(message.Content, "Rework history") {
+				sawSummary = true
+			}
+		}
+		require.True(t, sawSummary, "the parent must receive the summary with the rework history")
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: 4}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		t.Fatalf("plan must not reach the tool activity")
+		return ToolResult{}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-rework", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "run the plan", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var parentResult RunResult
+	require.NoError(t, env.GetWorkflowResult(&parentResult))
+	require.Equal(t, "completed", parentResult.Status)
+
+	require.Equal(t, 2, buildLaunches, "build must run twice: initial + rework round")
+	require.Equal(t, 2, gateLaunches, "the gate must re-judge the fixed work")
+	// The rework prompt carries the reviewer feedback and the previous result.
+	require.Len(t, buildPrompts, 2)
+	require.Contains(t, buildPrompts[1], "Rework round 2")
+	require.Contains(t, buildPrompts[1], "deliver V2 instead")
+	require.Contains(t, buildPrompts[1], "BUILD-V1")
+	// The gate got the verdict contract and the injected tool on every run.
+	for _, prompt := range gatePrompts {
+		require.Contains(t, prompt, "Acceptance gate")
+	}
+	require.Contains(t, gateTools, "submit_review")
+
+	started := map[string]int{}
+	completed := 0
+	rejected, reopened, invalidated := 0, 0, 0
+	gateAcceptAt, shipStartedAt := -1, -1
+	for index := range recorded {
+		event := recorded[index]
+		switch event.Type {
+		case "plan.task.started":
+			started[event.Data["task_id"].(string)]++
+			if event.Data["task_id"] == "ship" {
+				shipStartedAt = index
+			}
+		case "plan.task.completed":
+			completed++
+			if event.Data["task_id"] == "gate" && event.Data["verdict"] == "accept" {
+				gateAcceptAt = index
+			}
+		case "plan.task.rejected":
+			rejected++
+			require.Equal(t, "build", event.Data["task_id"])
+			require.Equal(t, "gate", event.Data["rejected_by"])
+			require.Equal(t, "1", fmt.Sprint(event.Data["round"]))
+			require.Contains(t, event.Data["feedback"], "deliver V2 instead")
+		case "plan.task.reopened":
+			reopened++
+			require.Equal(t, "build", event.Data["task_id"])
+		case "plan.task.invalidated":
+			invalidated++
+		case "plan.task.failed":
+			t.Fatalf("no task may fail inside a bounded rework loop: %#v", event.Data)
+		}
+	}
+	require.Equal(t, 2, started["build"])
+	require.Equal(t, 2, started["gate"])
+	require.Equal(t, 1, started["ship"])
+	require.Equal(t, 5, completed) // build ×2, gate ×2 (rework + accept), ship
+	require.Equal(t, 1, rejected)
+	require.Equal(t, 1, reopened)
+	require.Equal(t, 1, invalidated) // the gate itself while build was reopened
+	require.Less(t, gateAcceptAt, shipStartedAt)
+}
+
 func TestAgentRunPlanFailureSkipsDependents(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
