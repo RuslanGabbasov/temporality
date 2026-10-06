@@ -212,9 +212,13 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
     case 'knowledge.used':
       return { icon: '📚', label: t('runs.event.knowledge_used'), detail: knowledgeText().slice(0, 90), color: '#9d7cd8' }
     case 'knowledge.confirmed':
-      return { icon: '✓', label: t('runs.event.knowledge_confirmed'), detail: String(d.knowledge_id ?? ''), color: '#73daca' }
-    case 'knowledge.challenged':
-      return { icon: '⚠', label: t('runs.event.knowledge_challenged'), detail: String(d.knowledge_id ?? ''), color: '#e6b85c' }
+      return { icon: '✓', label: t('runs.event.knowledge_confirmed'), detail: knowledgeText().slice(0, 90), color: '#73daca' }
+    case 'knowledge.challenged': {
+      // Challenged events carry the reason the item is doubted; it matters more
+      // than a bare id when no proposition/resolver text is available.
+      const text = String(d.proposition ?? '') || propositionOf?.(String(d.knowledge_id ?? '')) || String(d.reason ?? '')
+      return { icon: '⚠', label: t('runs.event.knowledge_challenged'), detail: text.slice(0, 90), color: '#e6b85c' }
+    }
     case 'knowledge.corrected':
       return { icon: '✎', label: t('runs.event.knowledge_corrected'), detail: String(d.knowledge_id ?? ''), color: '#e6b85c' }
     case 'knowledge.invalidated':

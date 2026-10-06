@@ -104,6 +104,15 @@ describe('knowledge, hint and skill lifecycle summaries', () => {
     expect(unknown.detail).toBe('ext/missing')
   })
 
+  it('shows the proposition on confirmed and challenged knowledge events', () => {
+    const confirmed = eventSummary(event('knowledge.confirmed', { knowledge_id: 'ext/k1', proposition: 'GraphMap слушает на 8099', rule: 'extraction-reverification.v1' }), t)
+    expect(confirmed.detail).toBe('GraphMap слушает на 8099')
+    const challenged = eventSummary(event('knowledge.challenged', { knowledge_id: 'ext/k2', proposition: 'Fetch принимает -limit, а не --count', rule: 'aging.v1', reason: 'unconfirmed for 21 days' }), t)
+    expect(challenged.detail).toBe('Fetch принимает -limit, а не --count')
+    const legacy = eventSummary(event('knowledge.challenged', { knowledge_id: 'ext/k3', reason: 'unconfirmed for 30 days' }), t)
+    expect(legacy.detail).toBe('unconfirmed for 30 days')
+  })
+
   it('localizes skill lifecycle events with version and change summary', () => {
     const proposed = eventSummary(event('skill.proposed', { skill_id: 'deploy', skill_name: 'Deploy service', version: 2, origin: 'agent-proposal', change_summary: 'add fallback check' }), t)
     expect(proposed.label).toBe('runs.event.skill_proposed')
