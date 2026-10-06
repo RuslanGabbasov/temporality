@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -684,5 +685,222 @@ func TestCompareRuns(t *testing.T) {
 	}
 	if r2["knowledge_used"].(float64) != 0 {
 		t.Fatalf("run2 knowledge_used = %v, want 0", r2["knowledge_used"])
+	}
+}
+
+func newScopedTestServer(t *testing.T, units map[string][]string, existingUnits map[string]bool) http.Handler {
+	t.Helper()
+	return New(memory.New(), slog.New(slog.NewTextHandler(io.Discard, nil)), nil,
+		WithProjectUnits(func(_ context.Context, project string) ([]string, error) {
+			return units[project], nil
+		}),
+		WithUnitExists(func(_ context.Context, unitID string) bool {
+			return existingUnits[unitID]
+		}),
+	)
+}
+
+func promoteRequest(knowledgeID, project, scopeKind, scopeID, reason string) map[string]any {
+	return map[string]any{
+		"knowledge_id": knowledgeID,
+		"project":      project,
+		"actor":        map[string]any{"id": "ruslan", "type": "human"},
+		"scope_kind":   scopeKind,
+		"scope_id":     scopeID,
+		"reason":       reason,
+	}
+}
+
+func TestKnowledgePromoteToOrganizationSharesAcrossProjects(t *testing.T) {
+	handler := newTestServer(t)
+
+	res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{
+		"events": []observation.Event{proposedEvent("alpha", "evt-1", "K1", "gatekeeper v2 authenticates via helm values auth.tokenFile")},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	// Before promotion the knowledge is project-local: invisible to beta.
+	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=beta", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("list beta status = %d", res.StatusCode)
+	}
+	if body["count"].(float64) != 0 {
+		t.Fatalf("beta count before promote = %v, want 0", body["count"])
+	}
+
+	res, body = doJSON(t, handler, "POST", "/v1/observations/knowledge/promote",
+		promoteRequest("K1", "alpha", "organization", "", "applies to every service in the installation"))
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("promote status = %d, body = %v", res.StatusCode, body)
+	}
+	if body["type"] != "knowledge.promoted" {
+		t.Fatalf("promote event type = %v", body["type"])
+	}
+	if body["data"].(map[string]any)["from_scope_kind"] != "project" {
+		t.Fatalf("from_scope_kind = %v, want project", body["data"].(map[string]any)["from_scope_kind"])
+	}
+
+	// The other project now sees the shared knowledge with its scope.
+	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=beta", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("list beta status = %d", res.StatusCode)
+	}
+	if body["count"].(float64) != 1 {
+		t.Fatalf("beta count after promote = %v, want 1", body["count"])
+	}
+	item := body["knowledge"].([]any)[0].(map[string]any)
+	if item["id"] != "K1" {
+		t.Fatalf("beta knowledge id = %v, want K1", item["id"])
+	}
+	if item["scope_kind"] != "organization" {
+		t.Fatalf("beta knowledge scope_kind = %v, want organization", item["scope_kind"])
+	}
+
+	// And hints for the other project surface the shared knowledge.
+	res, body = doJSON(t, handler, "POST", "/v1/observations/hints", map[string]any{
+		"project": "beta", "query": "how to configure gatekeeper helm auth",
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("hints status = %d, body = %v", res.StatusCode, body)
+	}
+	if body["count"].(float64) != 1 {
+		t.Fatalf("hints count = %v, want 1", body["count"])
+	}
+	hint := body["hints"].([]any)[0].(map[string]any)
+	if hint["knowledge_id"] != "K1" {
+		t.Fatalf("hint knowledge_id = %v, want K1", hint["knowledge_id"])
+	}
+}
+
+func TestKnowledgePromoteToOrgUnitVisibility(t *testing.T) {
+	// alpha and gamma share the dept-dev unit; beta lives under dept-b.
+	handler := newScopedTestServer(t,
+		map[string][]string{"alpha": {"dept-dev"}, "gamma": {"dept-dev"}, "beta": {"dept-b"}},
+		map[string]bool{"dept-dev": true, "dept-b": true})
+
+	res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{
+		"events": []observation.Event{proposedEvent("alpha", "evt-1", "K1", "temporality journal speaks observation schema v1")},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	res, body = doJSON(t, handler, "POST", "/v1/observations/knowledge/promote",
+		promoteRequest("K1", "alpha", "org_unit", "dept-dev", "shared across the platform department"))
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("promote status = %d, body = %v", res.StatusCode, body)
+	}
+
+	// Sibling project in the same unit sees it.
+	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=gamma", nil)
+	if res.StatusCode != http.StatusOK || body["count"].(float64) != 1 {
+		t.Fatalf("gamma visibility: status=%d count=%v", res.StatusCode, body["count"])
+	}
+	if item := body["knowledge"].([]any)[0].(map[string]any); item["scope_kind"] != "org_unit" || item["scope_id"] != "dept-dev" {
+		t.Fatalf("gamma scope = %v/%v, want org_unit/dept-dev", item["scope_kind"], item["scope_id"])
+	}
+
+	// Project outside the unit does not.
+	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=beta", nil)
+	if res.StatusCode != http.StatusOK || body["count"].(float64) != 0 {
+		t.Fatalf("beta visibility: status=%d count=%v, want 0", res.StatusCode, body["count"])
+	}
+
+	// Chain from a project that can see the knowledge includes the promotion.
+	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge/chain?project=gamma&knowledge_id=K1", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("chain gamma status = %d, body = %v", res.StatusCode, body)
+	}
+	foundPromoted := false
+	for _, raw := range body["chain"].([]any) {
+		entry := raw.(map[string]any)
+		if entry["type"] == "lifecycle" && entry["details"].(map[string]any)["event_type"] == "knowledge.promoted" {
+			foundPromoted = true
+		}
+	}
+	if !foundPromoted {
+		t.Fatalf("chain for K1 misses the promoted lifecycle entry: %v", body["chain"])
+	}
+
+	// Chain from a project that cannot see the knowledge is a 404, not a leak.
+	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge/chain?project=beta&knowledge_id=K1", nil)
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("chain beta status = %d, want 404", res.StatusCode)
+	}
+}
+
+func TestKnowledgePromoteValidation(t *testing.T) {
+	handler := newScopedTestServer(t,
+		map[string][]string{"alpha": {"dept-dev"}},
+		map[string]bool{"dept-dev": true})
+
+	res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{
+		"events": []observation.Event{
+			proposedEvent("alpha", "evt-1", "K1", "postgres partial index keeps scope filters fast"),
+			proposedEvent("alpha", "evt-2", "K2", "promote widens visibility only"),
+			proposedEvent("alpha", "evt-3", "K3", "retired knowledge stays retired"),
+		},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	for _, tc := range []struct {
+		name string
+		req  map[string]any
+		want int
+	}{
+		{"missing reason", map[string]any{
+			"knowledge_id": "K1", "project": "alpha", "actor": map[string]any{"id": "ruslan", "type": "human"}, "scope_kind": "organization",
+		}, http.StatusUnprocessableEntity},
+		{"invalid scope kind", promoteRequest("K1", "alpha", "project", "", "narrowing is not promote"), http.StatusUnprocessableEntity},
+		{"org unit without scope id", promoteRequest("K1", "alpha", "org_unit", "", "must name a unit"), http.StatusUnprocessableEntity},
+		{"organization with scope id", promoteRequest("K1", "alpha", "organization", "dept-dev", "organization is global"), http.StatusUnprocessableEntity},
+		{"unknown org unit", promoteRequest("K1", "alpha", "org_unit", "dept-nope", "unit must exist"), http.StatusUnprocessableEntity},
+		{"unknown knowledge", promoteRequest("nope", "alpha", "organization", "", "nothing to promote"), http.StatusNotFound},
+	} {
+		res, body = doJSON(t, handler, "POST", "/v1/observations/knowledge/promote", tc.req)
+		if res.StatusCode != tc.want {
+			t.Fatalf("%s: status = %d, want %d, body = %v", tc.name, res.StatusCode, tc.want, body)
+		}
+	}
+
+	// Same-scope promote conflicts.
+	res, _ = doJSON(t, handler, "POST", "/v1/observations/knowledge/promote",
+		promoteRequest("K1", "alpha", "org_unit", "dept-dev", "same scope twice"))
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("first promote status = %d", res.StatusCode)
+	}
+	res, body = doJSON(t, handler, "POST", "/v1/observations/knowledge/promote",
+		promoteRequest("K1", "alpha", "org_unit", "dept-dev", "same scope twice"))
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("repeat promote status = %d, want 409, body = %v", res.StatusCode, body)
+	}
+
+	// Organization is terminal: a second widening conflicts.
+	res, _ = doJSON(t, handler, "POST", "/v1/observations/knowledge/promote",
+		promoteRequest("K2", "alpha", "organization", "", "widen to everything"))
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("promote K2 status = %d", res.StatusCode)
+	}
+	res, body = doJSON(t, handler, "POST", "/v1/observations/knowledge/promote",
+		promoteRequest("K2", "alpha", "org_unit", "dept-dev", "cannot leave organization"))
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("promote after organization status = %d, want 409, body = %v", res.StatusCode, body)
+	}
+
+	// Retired knowledge cannot be promoted.
+	res, _ = doJSON(t, handler, "POST", "/v1/observations/knowledge/invalidate", map[string]any{
+		"knowledge_id": "K3", "project": "alpha", "actor": map[string]any{"id": "ruslan", "type": "human"}, "reason": "obsolete",
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("invalidate status = %d", res.StatusCode)
+	}
+	res, body = doJSON(t, handler, "POST", "/v1/observations/knowledge/promote",
+		promoteRequest("K3", "alpha", "organization", "", "retired stays local"))
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("promote retired status = %d, want 409, body = %v", res.StatusCode, body)
 	}
 }

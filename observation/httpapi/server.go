@@ -5,6 +5,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,13 +27,40 @@ type Server struct {
 	gate  *controlplane.Gate
 	log   *slog.Logger
 	now   func() time.Time
+	// projectUnits resolves a project to the org-unit chain its visibility
+	// covers (the project's own units plus all their ancestors). Shared
+	// org_unit-scoped knowledge is only offered to projects whose chain
+	// contains the knowledge's scope unit (docs/knowledge-evolution.md §5–6).
+	projectUnits func(ctx context.Context, project string) ([]string, error)
+	// unitExists validates org-unit IDs on scope promotion. Both hooks are
+	// optional: without them the journal serves project-local and
+	// organization-scoped knowledge, but org_unit targeting is unavailable.
+	unitExists func(ctx context.Context, unitID string) bool
+}
+
+// Option customizes the journal server.
+type Option func(*Server)
+
+// WithProjectUnits wires the project → org-unit-chain resolver used for
+// shared-knowledge visibility. The resolver must return the project's own
+// units and every ancestor; an error degrades to project-only visibility.
+func WithProjectUnits(fn func(ctx context.Context, project string) ([]string, error)) Option {
+	return func(s *Server) { s.projectUnits = fn }
+}
+
+// WithUnitExists wires org-unit existence validation for scope promotion.
+func WithUnitExists(fn func(ctx context.Context, unitID string) bool) Option {
+	return func(s *Server) { s.unitExists = fn }
 }
 
 // New serves the journal API. A nil gate disables authentication (local
 // development); team deployments pass a gate configured from
 // JOURNAL_AUTH_TOKENS.
-func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate) http.Handler {
+func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate, opts ...Option) http.Handler {
 	s := &Server{store: store, gate: gate, log: log, now: time.Now}
+	for _, opt := range opts {
+		opt(s)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("POST /v1/observations/events", s.appendObservations)
@@ -42,6 +71,7 @@ func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate) htt
 	mux.HandleFunc("GET /v1/observations/runs/state", s.runState)
 	mux.HandleFunc("GET /v1/observations/runs/compare", s.compareRuns)
 	mux.HandleFunc("POST /v1/observations/knowledge/invalidate", s.invalidateObservationKnowledge)
+	mux.HandleFunc("POST /v1/observations/knowledge/promote", s.promoteObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/hints", s.activateObservationHints)
 	return logRequests(log, s.gate.Authenticate(mux))
 }
@@ -183,21 +213,141 @@ type invalidateObservationRequest struct {
 }
 
 func (s *Server) projectKnowledge(r *http.Request, project string, asOf, knownAt *time.Time) ([]observation.Event, error) {
-	filter := observation.Filter{Project: project, Until: asOf, KnownAt: knownAt, Limit: 500}
+	return s.loadEvents(r.Context(), observation.Filter{Project: project, Until: asOf, KnownAt: knownAt, Limit: 500})
+}
+
+// loadEvents pages a single filter to exhaustion.
+func (s *Server) loadEvents(ctx context.Context, filter observation.Filter) ([]observation.Event, error) {
+	filter.Limit = 500
 	var result []observation.Event
 	cursor := ""
 	for {
-		page, err := s.store.ListObservationPage(r.Context(), filter, cursor)
+		page, err := s.store.ListObservationPage(ctx, filter, cursor)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, page.Events...)
 		if page.NextCursor == "" {
-			break
+			return result, nil
 		}
 		cursor = page.NextCursor
 	}
-	return result, nil
+}
+
+// visibleKnowledgeEvents loads everything the knowledge projection for a
+// project needs: the project's own event stream, plus shared knowledge —
+// events whose data carries an org_unit/organization scope (proposed directly
+// or via knowledge.promoted) together with the full cross-project lifecycle
+// of those knowledge items (docs/knowledge-evolution.md §5–6). Post-projection,
+// knowledgeVisibleTo still filters by effective scope.
+func (s *Server) visibleKnowledgeEvents(ctx context.Context, project string, asOf, knownAt *time.Time) ([]observation.Event, []string, error) {
+	projectEvents, err := s.loadEvents(ctx, observation.Filter{Project: project, Until: asOf, KnownAt: knownAt})
+	if err != nil {
+		return nil, nil, err
+	}
+	var chain []string
+	if s.projectUnits != nil {
+		chain, err = s.projectUnits(ctx, project)
+		if err != nil {
+			s.log.Warn("resolve project org units; shared org-unit knowledge hidden", "project", project, "error", err)
+			chain = nil
+		}
+	}
+	// Shared-scope markers: knowledge.proposed born shared plus every
+	// knowledge.promoted event (they restate the target scope in data).
+	globalShared, err := s.loadEvents(ctx, observation.Filter{ScopeKind: "organization", Until: asOf, KnownAt: knownAt})
+	if err != nil {
+		return nil, nil, err
+	}
+	merged := mergeObservationEvents(projectEvents, globalShared)
+	if len(chain) > 0 {
+		unitShared, err := s.loadEvents(ctx, observation.Filter{ScopeKind: "org_unit", ScopeIDs: chain, Until: asOf, KnownAt: knownAt})
+		if err != nil {
+			return nil, nil, err
+		}
+		merged = mergeObservationEvents(merged, unitShared)
+	}
+	// Pull the complete lifecycle (lifecycle + hint telemetry from any
+	// project) for knowledge discovered through the shared path, so state and
+	// reuse stats stay correct outside the origin project.
+	sharedIDs := make(map[string]bool)
+	for _, event := range merged {
+		if event.Type == "knowledge.proposed" || event.Type == "knowledge.promoted" {
+			if id := stringData(event.Data, "knowledge_id"); id != "" && event.Context.Project != project {
+				sharedIDs[id] = true
+			}
+		}
+	}
+	if len(sharedIDs) > 0 {
+		ids := make([]string, 0, len(sharedIDs))
+		for id := range sharedIDs {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		related, err := s.loadEvents(ctx, observation.Filter{KnowledgeIDs: ids, Until: asOf, KnownAt: knownAt})
+		if err != nil {
+			return nil, nil, err
+		}
+		merged = mergeObservationEvents(merged, related)
+	}
+	return merged, chain, nil
+}
+
+func mergeObservationEvents(groups ...[]observation.Event) []observation.Event {
+	var total int
+	for _, group := range groups {
+		total += len(group)
+	}
+	merged := make([]observation.Event, 0, total)
+	seen := make(map[string]bool, total)
+	for _, group := range groups {
+		for _, event := range group {
+			key := event.Source.ID + "\x00" + event.EventID
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			merged = append(merged, event)
+		}
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		if !merged[i].OccurredAt.Equal(merged[j].OccurredAt) {
+			return merged[i].OccurredAt.Before(merged[j].OccurredAt)
+		}
+		if !merged[i].ReceivedAt.Equal(merged[j].ReceivedAt) {
+			return merged[i].ReceivedAt.Before(merged[j].ReceivedAt)
+		}
+		if merged[i].Source.ID != merged[j].Source.ID {
+			return merged[i].Source.ID < merged[j].Source.ID
+		}
+		return merged[i].EventID < merged[j].EventID
+	})
+	return merged
+}
+
+// knowledgeVisibleTo decides whether a projected knowledge item is visible to
+// a project: its own items always are, organization scope is global, and an
+// org_unit scope requires the unit to be in the project's visibility chain.
+func knowledgeVisibleTo(item observation.Knowledge, project string, unitChain []string) bool {
+	if item.Project == project {
+		return true
+	}
+	switch item.ScopeKind {
+	case "organization":
+		return true
+	case "org_unit":
+		for _, unit := range unitChain {
+			if unit == item.ScopeID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func stringData(data map[string]any, key string) string {
+	value, _ := data[key].(string)
+	return value
 }
 
 func (s *Server) listObservationKnowledge(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +370,7 @@ func (s *Server) listObservationKnowledge(w http.ResponseWriter, r *http.Request
 			*target = &parsed
 		}
 	}
-	events, err := s.projectKnowledge(r, project, asOf, knownAt)
+	events, chain, err := s.visibleKnowledgeEvents(r.Context(), project, asOf, knownAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
 		return
@@ -230,6 +380,7 @@ func (s *Server) listObservationKnowledge(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
+	knowledge = filterKnowledgeVisible(knowledge, project, chain)
 	if knowledgeID := r.URL.Query().Get("knowledge_id"); knowledgeID != "" {
 		filtered := knowledge[:0]
 		for _, item := range knowledge {
@@ -273,12 +424,12 @@ func (s *Server) diffKnowledge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("from must be before to"))
 		return
 	}
-	eventsFrom, err := s.projectKnowledge(r, project, from, nil)
+	eventsFrom, chain, err := s.visibleKnowledgeEvents(r.Context(), project, from, nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not load knowledge at from"))
 		return
 	}
-	eventsTo, err := s.projectKnowledge(r, project, to, nil)
+	eventsTo, _, err := s.visibleKnowledgeEvents(r.Context(), project, to, nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not load knowledge at to"))
 		return
@@ -293,6 +444,8 @@ func (s *Server) diffKnowledge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
+	knowledgeFrom = filterKnowledgeVisible(knowledgeFrom, project, chain)
+	knowledgeTo = filterKnowledgeVisible(knowledgeTo, project, chain)
 	fromByID := make(map[string]*observation.Knowledge, len(knowledgeFrom))
 	for i := range knowledgeFrom {
 		fromByID[knowledgeFrom[i].ID] = &knowledgeFrom[i]
@@ -338,20 +491,30 @@ func (s *Server) knowledgeChain(w http.ResponseWriter, r *http.Request) {
 	if !s.gate.Allow(w, r, controlplane.RoleReader, project) {
 		return
 	}
-	filter := observation.Filter{Project: project, Limit: 500}
-	var allEvents []observation.Event
-	cursor := ""
-	for {
-		page, err := s.store.ListObservationPage(r.Context(), filter, cursor)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, errors.New("could not load events"))
-			return
-		}
-		allEvents = append(allEvents, page.Events...)
-		if page.NextCursor == "" {
+	// Shared knowledge chains cross projects: use the merged visible loader so
+	// promoted knowledge shows its full lifecycle regardless of origin project.
+	allEvents, chainUnits, err := s.visibleKnowledgeEvents(r.Context(), project, nil, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not load events"))
+		return
+	}
+	// The chain must not leak knowledge the project cannot see: verify the
+	// target projects into the visible set before walking its events.
+	knowledgeAll, err := observation.ProjectKnowledge(allEvents)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	visible := false
+	for _, item := range knowledgeAll {
+		if item.ID == knowledgeID && knowledgeVisibleTo(item, project, chainUnits) {
+			visible = true
 			break
 		}
-		cursor = page.NextCursor
+	}
+	if !visible {
+		writeError(w, http.StatusNotFound, observation.ErrKnowledgeNotFound)
+		return
 	}
 	var chain []ChainEntry
 	// Index hint_offered events by hint_id for linking.
@@ -382,9 +545,14 @@ func (s *Server) knowledgeChain(w http.ResponseWriter, r *http.Request) {
 			if kid, _ := ev.Data["knowledge_id"].(string); kid == knowledgeID {
 				chain = append(chain, ChainEntry{Type: "outcome", EventID: ev.EventID, At: ev.OccurredAt, Details: map[string]any{"outcome": ev.Data["outcome"], "hint_id": ev.Data["hint_id"]}})
 			}
-		case "knowledge.confirmed", "knowledge.invalidated", "knowledge.superseded", "knowledge.corrected":
+		case "knowledge.confirmed", "knowledge.invalidated", "knowledge.superseded", "knowledge.corrected", "knowledge.promoted":
 			if kid, _ := ev.Data["knowledge_id"].(string); kid == knowledgeID {
-				chain = append(chain, ChainEntry{Type: "lifecycle", EventID: ev.EventID, At: ev.OccurredAt, Details: map[string]any{"event_type": ev.Type, "reason": ev.Data["reason"]}})
+				details := map[string]any{"event_type": ev.Type, "reason": ev.Data["reason"]}
+				if ev.Type == "knowledge.promoted" {
+					details["scope_kind"] = ev.Data["scope_kind"]
+					details["scope_id"] = ev.Data["scope_id"]
+				}
+				chain = append(chain, ChainEntry{Type: "lifecycle", EventID: ev.EventID, At: ev.OccurredAt, Details: details})
 			}
 		}
 	}
@@ -537,7 +705,7 @@ func (s *Server) invalidateObservationKnowledge(w http.ResponseWriter, r *http.R
 	if !s.gate.Allow(w, r, controlplane.RoleOperator, input.Project) {
 		return
 	}
-	projectEvents, err := s.projectKnowledge(r, input.Project, nil, nil)
+	projectEvents, chain, err := s.visibleKnowledgeEvents(r.Context(), input.Project, nil, nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
 		return
@@ -547,6 +715,7 @@ func (s *Server) invalidateObservationKnowledge(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
+	knowledge = filterKnowledgeVisible(knowledge, input.Project, chain)
 	var target *observation.Knowledge
 	for i := range knowledge {
 		if knowledge[i].ID == input.KnowledgeID {
@@ -577,6 +746,129 @@ func (s *Server) invalidateObservationKnowledge(w http.ResponseWriter, r *http.R
 	event.ReceivedAt = s.now().UTC()
 	if _, err = s.store.AppendObservation(r.Context(), event); err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not record invalidation"))
+		return
+	}
+	writeJSON(w, http.StatusCreated, event)
+}
+
+type promoteObservationRequest struct {
+	KnowledgeID string                 `json:"knowledge_id"`
+	Project     string                 `json:"project"`
+	Run         string                 `json:"run,omitempty"`
+	Actor       observation.Actor      `json:"actor"`
+	ScopeKind   string                 `json:"scope_kind"`
+	ScopeID     string                 `json:"scope_id,omitempty"`
+	Reason      string                 `json:"reason"`
+	Evidence    []observation.Evidence `json:"evidence,omitempty"`
+}
+
+// filterKnowledgeVisible narrows a projected knowledge list to what the
+// project may see: own items, organization-scoped items, and org_unit-scoped
+// items whose unit is in the project's visibility chain.
+func filterKnowledgeVisible(knowledge []observation.Knowledge, project string, unitChain []string) []observation.Knowledge {
+	filtered := make([]observation.Knowledge, 0, len(knowledge))
+	for _, item := range knowledge {
+		if knowledgeVisibleTo(item, project, unitChain) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+// promoteObservationKnowledge records an explicit scope widening
+// (project → org_unit / organization) with provenance: the actor, the reason
+// and the previous scope all land in the emitted event
+// (docs/knowledge-evolution.md §5: generalization is a separate deliberate
+// act, never an automatic consequence of looking useful).
+func (s *Server) promoteObservationKnowledge(w http.ResponseWriter, r *http.Request) {
+	var input promoteObservationRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	input.KnowledgeID = strings.TrimSpace(input.KnowledgeID)
+	input.Project = strings.TrimSpace(input.Project)
+	input.ScopeKind = strings.TrimSpace(input.ScopeKind)
+	input.ScopeID = strings.TrimSpace(input.ScopeID)
+	input.Actor.ID = strings.TrimSpace(input.Actor.ID)
+	input.Reason = strings.TrimSpace(input.Reason)
+	if input.KnowledgeID == "" || input.Project == "" || input.Actor.ID == "" || input.Reason == "" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("knowledge_id, project, actor.id, scope_kind, and reason are required"))
+		return
+	}
+	if input.ScopeKind != "org_unit" && input.ScopeKind != "organization" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("scope_kind must be org_unit or organization"))
+		return
+	}
+	if input.ScopeKind == "org_unit" && input.ScopeID == "" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("scope_id is required for org_unit scope"))
+		return
+	}
+	if input.ScopeKind == "organization" && input.ScopeID != "" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("scope_id must be empty for organization scope"))
+		return
+	}
+	// Widening visibility affects other projects: match the invalidate gate.
+	if !s.gate.Allow(w, r, controlplane.RoleOperator, input.Project) {
+		return
+	}
+	if s.unitExists != nil && input.ScopeKind == "org_unit" && !s.unitExists(r.Context(), input.ScopeID) {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("scope_id refers to an unknown org unit"))
+		return
+	}
+	events, chain, err := s.visibleKnowledgeEvents(r.Context(), input.Project, nil, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
+		return
+	}
+	knowledge, err := observation.ProjectKnowledge(events)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	knowledge = filterKnowledgeVisible(knowledge, input.Project, chain)
+	var target *observation.Knowledge
+	for i := range knowledge {
+		if knowledge[i].ID == input.KnowledgeID {
+			target = &knowledge[i]
+			break
+		}
+	}
+	if target == nil {
+		writeError(w, http.StatusNotFound, observation.ErrKnowledgeNotFound)
+		return
+	}
+	if target.State == "corrected" || target.State == "superseded" || target.State == "invalidated" {
+		writeError(w, http.StatusConflict, errors.New("retired knowledge cannot be promoted"))
+		return
+	}
+	if target.ScopeKind == "organization" {
+		writeError(w, http.StatusConflict, errors.New("knowledge is already organization-scoped"))
+		return
+	}
+	if target.ScopeKind == input.ScopeKind && target.ScopeID == input.ScopeID {
+		writeError(w, http.StatusConflict, errors.New("knowledge already has the requested scope"))
+		return
+	}
+	event := observation.Event{
+		Schema: observation.Schema, EventID: newUUID(), OccurredAt: s.now().UTC(),
+		Source:  observation.Source{ID: "temporality-manual", Integration: "temporality", Version: "1"},
+		Context: observation.Context{Project: input.Project, Run: input.Run, Actor: input.Actor},
+		Type:    "knowledge.promoted",
+		Data: map[string]any{
+			"knowledge_id": input.KnowledgeID, "scope_kind": input.ScopeKind, "scope_id": input.ScopeID,
+			"from_scope_kind": target.ScopeKind, "from_scope_id": target.ScopeID,
+			"reason": input.Reason,
+		},
+		Evidence: input.Evidence,
+	}
+	if err = event.Validate(); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	event.ReceivedAt = s.now().UTC()
+	if _, err = s.store.AppendObservation(r.Context(), event); err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not record promotion"))
 		return
 	}
 	writeJSON(w, http.StatusCreated, event)
@@ -620,7 +912,7 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnprocessableEntity, errors.New("limit must be between 1 and 20"))
 		return
 	}
-	events, err := s.projectKnowledge(r, input.Project, nil, nil)
+	events, chain, err := s.visibleKnowledgeEvents(r.Context(), input.Project, nil, nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
 		return
@@ -630,6 +922,7 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnprocessableEntity, err)
 		return
 	}
+	knowledge = filterKnowledgeVisible(knowledge, input.Project, chain)
 	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit})
 	activationID := newUUID()
 	context := observation.Context{Project: input.Project, Run: input.Run, Task: input.Task, Actor: input.Actor}
