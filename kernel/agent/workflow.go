@@ -285,7 +285,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	for _, hint := range priorHints {
 		messages = append(messages, llm.Message{Role: "system", Content: "Temporality context (prior knowledge, inspect provenance): " + hint.Proposition + " [" + hint.State + "] " + hint.Caution})
 		if hint.HintID != "" {
-			if err := emit(activityCtx, state, "knowledge.used", map[string]any{"knowledge_id": hint.KnowledgeID, "hint_id": hint.HintID}); err != nil {
+			// The proposition rides along so run timelines show what knowledge was
+			// actually injected — ids alone mean nothing to a human reader.
+			if err := emit(activityCtx, state, "knowledge.used", map[string]any{"knowledge_id": hint.KnowledgeID, "hint_id": hint.HintID, "proposition": hint.Proposition}); err != nil {
 				return result, err
 			}
 		}
