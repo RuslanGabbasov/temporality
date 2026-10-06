@@ -78,6 +78,27 @@ func (e Event) Validate() error {
 		if stringValue(e.Data, "knowledge_id") == "" || stringValue(e.Data, "proposition") == "" {
 			return errors.New("knowledge.proposed requires data.knowledge_id and data.proposition")
 		}
+		if err := validateKnowledgeScope(e.Data); err != nil {
+			return err
+		}
+	case "knowledge.promoted":
+		if strings.TrimSpace(e.Context.Project) == "" {
+			return errors.New("knowledge events require context.project")
+		}
+		if stringValue(e.Data, "knowledge_id") == "" {
+			return errors.New("knowledge.promoted requires data.knowledge_id")
+		}
+		// Promotion only widens visibility: project-local knowledge stays the
+		// default birth scope and cannot be re-targeted by a promote event.
+		if stringValue(e.Data, "scope_kind") != "org_unit" && stringValue(e.Data, "scope_kind") != "organization" {
+			return errors.New("knowledge.promoted requires data.scope_kind to be org_unit or organization")
+		}
+		if err := validateKnowledgeScope(e.Data); err != nil {
+			return err
+		}
+		if stringValue(e.Data, "reason") == "" {
+			return errors.New("knowledge.promoted requires data.reason (provenance)")
+		}
 	case "knowledge.used", "knowledge.confirmed", "knowledge.challenged", "knowledge.corrected", "knowledge.invalidated", "knowledge.superseded", "knowledge.disproved":
 		if strings.TrimSpace(e.Context.Project) == "" {
 			return errors.New("knowledge events require context.project")
@@ -133,4 +154,31 @@ func (e Event) Validate() error {
 func stringValue(data map[string]any, key string) string {
 	value, _ := data[key].(string)
 	return strings.TrimSpace(value)
+}
+
+// validateKnowledgeScope checks the data-carried visibility scope shared by
+// knowledge.proposed and knowledge.promoted. Absent scope means "project",
+// which is the default birth scope (docs/knowledge-evolution.md §5: locality
+// first, generalization is a separate deliberate act).
+func validateKnowledgeScope(data map[string]any) error {
+	kind := stringValue(data, "scope_kind")
+	switch kind {
+	case "":
+		return nil
+	case "project":
+		if stringValue(data, "scope_id") != "" {
+			return errors.New("project-scoped knowledge must not carry data.scope_id")
+		}
+	case "org_unit":
+		if stringValue(data, "scope_id") == "" {
+			return errors.New("org_unit-scoped knowledge requires data.scope_id")
+		}
+	case "organization":
+		if stringValue(data, "scope_id") != "" {
+			return errors.New("organization-scoped knowledge must not carry data.scope_id")
+		}
+	default:
+		return fmt.Errorf("unsupported data.scope_kind %q", kind)
+	}
+	return nil
 }

@@ -33,6 +33,16 @@ type Filter struct {
 	Until    *time.Time
 	KnownAt  *time.Time
 	Limit    int
+	// ScopeKind restricts to events whose data.scope_kind matches exactly.
+	// Used to load shared (org_unit / organization) knowledge regardless of
+	// which project originated it.
+	ScopeKind string
+	// ScopeIDs restricts to events whose data.scope_id is one of the listed
+	// org units; meaningful together with ScopeKind="org_unit".
+	ScopeIDs []string
+	// KnowledgeIDs restricts to events whose data.knowledge_id is listed;
+	// used to pull the full lifecycle of shared knowledge across projects.
+	KnowledgeIDs []string
 }
 
 type Page struct {

@@ -26,11 +26,20 @@ type Knowledge struct {
 	// Kind distinguishes model-authored claims from kernel heuristic
 	// observations ("claim" vs "observation"). Events recorded before kinds
 	// existed project as claims, which is the original authorship model.
-	Kind            string                `json:"kind,omitempty"`
-	Topics          []string              `json:"topics,omitempty"`
-	Entities        []string              `json:"entities,omitempty"`
-	State           string                `json:"state"`
-	Project         string                `json:"project,omitempty"`
+	Kind     string   `json:"kind,omitempty"`
+	Topics   []string `json:"topics,omitempty"`
+	Entities []string `json:"entities,omitempty"`
+	State    string   `json:"state"`
+	Project  string   `json:"project,omitempty"`
+	// ScopeKind/ScopeID carry the effective visibility of the item
+	// (docs/knowledge-evolution.md §5). Empty ScopeKind means "project", the
+	// default birth scope; org_unit and organization are widened only through
+	// explicit knowledge.promoted events (or by being proposed that way).
+	ScopeKind string `json:"scope_kind,omitempty"`
+	ScopeID   string `json:"scope_id,omitempty"`
+	// PromotedBy/PromotedAt record the latest scope widening provenance.
+	PromotedBy      Actor                 `json:"promoted_by,omitempty"`
+	PromotedAt      *time.Time            `json:"promoted_at,omitempty"`
 	CreatedAt       time.Time             `json:"created_at"`
 	UpdatedAt       time.Time             `json:"updated_at"`
 	CreatedBy       Actor                 `json:"created_by,omitempty"`
@@ -139,13 +148,27 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			if proposition == "" {
 				return nil, fmt.Errorf("knowledge %q has an empty proposition", id)
 			}
-			item = &Knowledge{ID: id, Proposition: proposition, Kind: knowledgeKind(event.Data), Topics: stringList(event.Data["topics"]), Entities: stringList(event.Data["entities"]), State: "proposed", Project: event.Context.Project, CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt, CreatedBy: event.Context.Actor, Evidence: append([]Evidence(nil), event.Evidence...)}
+			item = &Knowledge{ID: id, Proposition: proposition, Kind: knowledgeKind(event.Data), Topics: stringList(event.Data["topics"]), Entities: stringList(event.Data["entities"]), State: "proposed", Project: event.Context.Project, ScopeKind: knowledgeScopeKind(event.Data), ScopeID: knowledgeScopeID(event.Data), CreatedAt: event.OccurredAt, UpdatedAt: event.OccurredAt, CreatedBy: event.Context.Actor, Evidence: append([]Evidence(nil), event.Evidence...)}
 			byID[id] = item
 			appendKnowledgeTransition(item, event)
 			continue
 		}
 		if item == nil {
 			return nil, fmt.Errorf("knowledge event %s refers to unknown knowledge %q", event.EventID, id)
+		}
+		if event.Type == "knowledge.promoted" {
+			// Scope widening is not a lifecycle state change: it re-targets
+			// visibility while leaving the state machine untouched, so it is
+			// handled before the transition guards (like knowledge.linked).
+			item.ScopeKind = knowledgeScopeKind(event.Data)
+			item.ScopeID = knowledgeScopeID(event.Data)
+			item.PromotedBy = event.Context.Actor
+			promotedAt := event.OccurredAt
+			item.PromotedAt = &promotedAt
+			item.UpdatedAt = event.OccurredAt
+			item.Evidence = appendUniqueEvidence(item.Evidence, event.Evidence...)
+			appendKnowledgeTransition(item, event)
+			continue
 		}
 		if event.Type == "knowledge.linked" {
 			targetID := stringValue(event.Data, "target_id")
@@ -162,8 +185,11 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			appendKnowledgeTransition(item, event)
 			continue
 		}
-		if event.Context.Project != "" && item.Project != "" && event.Context.Project != item.Project {
+		if event.Context.Project != "" && item.Project != "" && event.Context.Project != item.Project && item.ScopeKind != "org_unit" && item.ScopeKind != "organization" {
 			// Knowledge may move between runs, but project boundaries are explicit.
+			// Widened-scope knowledge is the deliberate exception: once promoted,
+			// its lifecycle legitimately continues in other projects
+			// (docs/knowledge-evolution.md §5).
 			return nil, fmt.Errorf("knowledge %q event crosses project boundary", id)
 		}
 		if event.OccurredAt.Before(item.CreatedAt) {
@@ -281,6 +307,19 @@ func knowledgeKind(data map[string]any) string {
 	return "claim"
 }
 
+// knowledgeScopeKind normalizes the effective scope of a knowledge item:
+// absent scope on proposed events means the default "project" birth scope.
+func knowledgeScopeKind(data map[string]any) string {
+	if kind := stringValue(data, "scope_kind"); kind != "" {
+		return kind
+	}
+	return "project"
+}
+
+func knowledgeScopeID(data map[string]any) string {
+	return stringValue(data, "scope_id")
+}
+
 func stringList(value any) []string {
 	switch values := value.(type) {
 	case []string:
@@ -319,6 +358,8 @@ func appendKnowledgeTransition(item *Knowledge, event Event) {
 		rule = "explicit-evidence-disproof.v1"
 	} else if event.Type == "knowledge.invalidated" && stringValue(event.Data, "method") == "manual" {
 		rule = "manual.v1"
+	} else if event.Type == "knowledge.promoted" {
+		rule = "scope-promotion.v1"
 	}
 	item.History = append(item.History, KnowledgeTransition{EventID: event.EventID, SourceID: event.Source.ID, Type: event.Type, State: item.State, Rule: rule, At: event.OccurredAt, Actor: event.Context.Actor, Evidence: append([]Evidence(nil), event.Evidence...), Reason: stringValue(event.Data, "reason")})
 }

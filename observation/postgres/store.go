@@ -125,9 +125,13 @@ func (s *Store) ListObservationPage(ctx context.Context, filter observation.Filt
 		AND ($8::timestamptz IS NULL OR occurred_at >= $8) AND ($9::timestamptz IS NULL OR occurred_at <= $9)
 		AND ($10::timestamptz IS NULL OR received_at <= $10)
 		AND ($11::timestamptz IS NULL OR (occurred_at,received_at,source_id,event_id) > ($11,$12,$13,$14))
+		AND ($16='' OR data->>'scope_kind'=$16)
+		AND (cardinality($17::text[]) = 0 OR data->>'scope_id' = ANY($17))
+		AND (cardinality($18::text[]) = 0 OR data->>'knowledge_id' = ANY($18))
 		ORDER BY occurred_at,received_at,source_id,event_id LIMIT $15`,
 		filter.Project, filter.SourceID, filter.EventID, filter.Run, filter.Task, filter.Actor, filter.Type,
-		filter.Since, filter.Until, filter.KnownAt, cursorOccurred, cursorReceived, cursorSource, cursorEvent, limit+1)
+		filter.Since, filter.Until, filter.KnownAt, cursorOccurred, cursorReceived, cursorSource, cursorEvent, limit+1,
+		filter.ScopeKind, textList(filter.ScopeIDs), textList(filter.KnowledgeIDs))
 	if err != nil {
 		return observation.Page{}, err
 	}
@@ -152,6 +156,16 @@ func (s *Store) ListObservationPage(ctx context.Context, filter observation.Filt
 }
 
 type observationScanner interface{ Scan(...any) error }
+
+// textList normalizes a filter list so pgx always binds an array literal:
+// cardinality of a bound empty array is 0, which makes the ANY/ID filters
+// pass-through, while a SQL NULL would leave the condition unevaluated.
+func textList(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	return values
+}
 
 func scanObservation(row observationScanner) (observation.Event, error) {
 	var event observation.Event

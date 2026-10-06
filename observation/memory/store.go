@@ -22,6 +22,20 @@ func New() *Store {
 
 func observationKey(sourceID, eventID string) string { return sourceID + "\x00" + eventID }
 
+func stringDataValue(data map[string]any, key string) string {
+	value, _ := data[key].(string)
+	return value
+}
+
+func containsStringValue(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Store) AppendObservation(_ context.Context, event observation.Event) (bool, error) {
 	if err := event.Validate(); err != nil {
 		return false, err
@@ -67,6 +81,9 @@ func (s *Store) listObservationsAll(filter observation.Filter) []observation.Eve
 			filter.Task != "" && event.Context.Task != filter.Task ||
 			filter.Actor != "" && event.Context.Actor.ID != filter.Actor ||
 			filter.Type != "" && event.Type != filter.Type ||
+			filter.ScopeKind != "" && stringDataValue(event.Data, "scope_kind") != filter.ScopeKind ||
+			len(filter.ScopeIDs) > 0 && !containsStringValue(filter.ScopeIDs, stringDataValue(event.Data, "scope_id")) ||
+			len(filter.KnowledgeIDs) > 0 && !containsStringValue(filter.KnowledgeIDs, stringDataValue(event.Data, "knowledge_id")) ||
 			filter.Since != nil && event.OccurredAt.Before(*filter.Since) ||
 			filter.Until != nil && event.OccurredAt.After(*filter.Until) ||
 			filter.KnownAt != nil && event.ReceivedAt.After(*filter.KnownAt) {
