@@ -246,23 +246,38 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSumm
       const tasks = Array.isArray(d.tasks) ? d.tasks.length : '?'
       return { icon: '⎇', label: t('runs.event.plan_started'), detail: [String(d.goal ?? ''), `${tasks} ${t('runs.event.plan_tasks')}`].filter(Boolean).join(' · '), color: '#7aa2f7' }
     }
-    case 'plan.task.started':
-      return { icon: '⎇', label: t('runs.event.plan_task_started'), detail: String(d.task_id ?? ''), color: '#7aa2f7' }
-    case 'plan.task.completed':
-      return { icon: '⎇', label: t('runs.event.plan_task_completed'), detail: [String(d.task_id ?? ''), d.turns != null ? `${d.turns} ${t('runs.turns')}` : ''].filter(Boolean).join(' · '), color: '#9ece6a' }
+    case 'plan.task.started': {
+      const round = Number(d.round ?? 1)
+      const parts = [String(d.task_id ?? ''), round > 1 ? `×${round}` : '', Array.isArray(d.review_of) && d.review_of.length ? `⌾ ${d.review_of.join(', ')}` : ''].filter(Boolean)
+      return { icon: '⎇', label: t('runs.event.plan_task_started'), detail: parts.join(' · '), color: '#7aa2f7' }
+    }
+    case 'plan.task.completed': {
+      const verdict = String(d.verdict ?? '')
+      const round = Number(d.round ?? 1)
+      const parts = [String(d.task_id ?? ''), round > 1 ? `×${round}` : '', verdict === 'accept' ? '✓' : verdict === 'rework' ? '↺' : '', d.turns != null ? `${d.turns} ${t('runs.turns')}` : ''].filter(Boolean)
+      return { icon: '⎇', label: t('runs.event.plan_task_completed'), detail: parts.join(' · '), color: '#9ece6a' }
+    }
     case 'plan.task.failed': {
       const info = explainKernelError(String(d.error ?? ''))
-      return { icon: '⎇', label: t('runs.event.plan_task_failed'), detail: [String(d.task_id ?? ''), info.cause.slice(0, 60)].filter(Boolean).join(' · '), color: '#f7768e' }
+      const round = Number(d.round ?? 0)
+      const parts = [String(d.task_id ?? ''), d.error_type === 'rework_exhausted' && round ? t('runs.event.rework_exhausted', { round: String(round) }) : '', info.cause.slice(0, 60)].filter(Boolean)
+      return { icon: '⎇', label: t('runs.event.plan_task_failed'), detail: parts.join(' · '), color: '#f7768e' }
     }
+    case 'plan.task.rejected':
+      return { icon: '↺', label: t('runs.event.plan_task_rejected'), detail: [String(d.task_id ?? ''), String(d.rejected_by ?? ''), String(d.feedback ?? '').slice(0, 80)].filter(Boolean).join(' · '), color: '#e6b85c' }
+    case 'plan.task.reopened':
+      return { icon: '↺', label: t('runs.event.plan_task_reopened'), detail: [String(d.task_id ?? ''), d.round != null ? `×${Number(d.round) + 1}` : ''].filter(Boolean).join(' · '), color: '#7aa2f7' }
+    case 'plan.task.invalidated':
+      return { icon: '⎇', label: t('runs.event.plan_task_invalidated'), detail: [String(d.task_id ?? ''), d.reason === 'upstream_rework_exhausted' ? t('chat.plan.upstream_rework_exhausted') : t('chat.plan.upstream_rework')].filter(Boolean).join(' · '), color: 'var(--tm-text-3)' }
     case 'plan.task.skipped': {
-      const reason = d.reason === 'run_time_limit' ? t('chat.plan.run_time_limit') : t('chat.plan.upstream_failed')
+      const reason = d.reason === 'run_time_limit' ? t('chat.plan.run_time_limit') : d.reason === 'execution_budget' ? t('chat.plan.execution_budget') : t('chat.plan.upstream_failed')
       return { icon: '⎇', label: t('runs.event.plan_task_skipped'), detail: [String(d.task_id ?? ''), reason, d.blocked_by ? `← ${d.blocked_by}` : ''].filter(Boolean).join(' · '), color: 'var(--tm-text-3)' }
     }
     case 'plan.completed': {
       const statuses = (d.statuses ?? {}) as Record<string, unknown>
       const counts = new Map<string, number>()
       for (const value of Object.values(statuses)) counts.set(String(value), (counts.get(String(value)) ?? 0) + 1)
-      const detail = ['completed', 'failed', 'skipped']
+      const detail = ['completed', 'failed', 'skipped', 'invalidated']
         .map((status) => counts.get(status) ? `${counts.get(status)} ${t(`chat.plan.status_${status}`)}` : '')
         .filter(Boolean).join(' · ')
       return { icon: '⎇', label: t('runs.event.plan_completed'), detail, color: '#9ece6a' }

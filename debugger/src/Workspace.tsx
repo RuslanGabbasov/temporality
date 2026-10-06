@@ -389,7 +389,10 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       try {
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
-        lines.push(t('chat.plan.stream_task_started', { task: String(d.task_id ?? ''), name: delegationAgentName(d.agent_id) }) ?? `Plan · ${d.task_id}`)
+        const round = Number(d.round ?? 1)
+        const roundSuffix = round > 1 ? ` ×${round}` : ''
+        const gate = Array.isArray(d.review_of) && d.review_of.length ? ` ⌾ ${d.review_of.join(', ')}` : ''
+        lines.push((t('chat.plan.stream_task_started', { task: String(d.task_id ?? '') + roundSuffix + gate, name: delegationAgentName(d.agent_id) })) ?? `Plan · ${d.task_id}`)
         updateMsg(convId, runId, { streamLines: [...lines] })
       } catch { /* ignore */ }
     })
@@ -397,7 +400,11 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       try {
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
-        lines.push(t('chat.plan.stream_task_completed', { task: String(d.task_id ?? ''), name: delegationAgentName(d.agent_id) }) ?? `Plan · ${d.task_id} · completed`)
+        const round = Number(d.round ?? 1)
+        const roundSuffix = round > 1 ? ` ×${round}` : ''
+        const verdict = String(d.verdict ?? '')
+        const verdictSuffix = verdict === 'accept' ? ' ✓' : verdict === 'rework' ? ' ↺' : ''
+        lines.push((t('chat.plan.stream_task_completed', { task: String(d.task_id ?? '') + roundSuffix + verdictSuffix, name: delegationAgentName(d.agent_id) })) ?? `Plan · ${d.task_id} · completed`)
         updateMsg(convId, runId, { streamLines: [...lines] })
       } catch { /* ignore */ }
     })
@@ -406,6 +413,31 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         lines.push(t('chat.plan.stream_task_failed', { task: String(d.task_id ?? ''), name: delegationAgentName(d.agent_id) }) ?? `Plan · ${d.task_id} · failed`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('plan.task.rejected', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        lines.push(t('chat.plan.stream_task_rejected', { task: String(d.task_id ?? ''), by: delegationAgentName(d.rejected_by), feedback: String(d.feedback ?? '') }) ?? `Plan · ${d.task_id} · rework`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('plan.task.reopened', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        const round = Number(d.round ?? 0)
+        lines.push(t('chat.plan.stream_task_reopened', { task: String(d.task_id ?? ''), round: String(round + 1) }) ?? `Plan · ${d.task_id} · reopened`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
+    es.addEventListener('plan.task.invalidated', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        lines.push(t('chat.plan.stream_task_invalidated', { task: String(d.task_id ?? '') }) ?? `Plan · ${d.task_id} · discarded`)
         updateMsg(convId, runId, { streamLines: [...lines] })
       } catch { /* ignore */ }
     })
@@ -424,7 +456,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const statuses = (d.statuses ?? {}) as Record<string, unknown>
         const counts = new Map<string, number>()
         for (const value of Object.values(statuses)) counts.set(String(value), (counts.get(String(value)) ?? 0) + 1)
-        const summary = ['completed', 'failed', 'skipped']
+        const summary = ['completed', 'failed', 'skipped', 'invalidated']
           .map((status) => counts.get(status) ? `${counts.get(status)} ${t(`chat.plan.status_${status}`)}` : '')
           .filter(Boolean).join(' · ')
         lines.push(t('chat.plan.stream_completed', { summary }) ?? `Plan finished: ${summary}`)

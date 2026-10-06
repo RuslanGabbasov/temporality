@@ -14,36 +14,52 @@ export interface DelegationNodeInfo {
   turns?: number
   error?: string
   taskId?: string
+  round?: number
+  verdict?: string
 }
 
-/** Fold delegation.* and plan.task.* events (emitted by the parent run) into node info. Plan tasks key by their child run id; skipped tasks never ran and belong to the plan graph view. */
+/** Fold delegation.* and plan.task.* events (emitted by the parent run) into node info. Plan tasks key by their child run id; rework events (rejected/reopened/invalidated) carry only a task id and resolve through it. */
 export function foldDelegations(events: ObservationEvent[]): DelegationNodeInfo[] {
   const nodes = new Map<string, DelegationNodeInfo>()
   const order: string[] = []
+  const taskToChild = new Map<string, string>()
   for (const event of events) {
     const isDelegation = event.type === 'delegation.started' || event.type === 'delegation.completed' || event.type === 'delegation.failed'
     const isPlanTask = event.type === 'plan.task.started' || event.type === 'plan.task.completed' || event.type === 'plan.task.failed'
-    if (!isDelegation && !isPlanTask) continue
+    const isPlanRework = event.type === 'plan.task.rejected' || event.type === 'plan.task.reopened' || event.type === 'plan.task.invalidated'
+    if (!isDelegation && !isPlanTask && !isPlanRework) continue
     const d = (event.data ?? {}) as Record<string, any>
-    const child = d.child_run_id ?? ''
+    const child = d.child_run_id ?? (typeof d.task_id === 'string' ? taskToChild.get(d.task_id) : undefined) ?? ''
     if (!child) continue
     if (!nodes.has(child)) {
       nodes.set(child, { childRunId: child, agentId: d.agent_id ?? '', ordinal: order.length + 1, status: 'running' })
       order.push(child)
     }
     const node = nodes.get(child)!
+    if (typeof d.task_id === 'string' && d.task_id) {
+      node.taskId = d.task_id
+      taskToChild.set(d.task_id, child)
+    }
     if (event.type === 'delegation.started') {
       node.agentId = d.agent_id ?? node.agentId
       node.ordinal = d.ordinal ?? node.ordinal
     } else if (event.type === 'plan.task.started') {
       node.agentId = d.agent_id ?? node.agentId
-      if (typeof d.task_id === 'string') node.taskId = d.task_id
+      // A rework round reuses the same child run id: the node goes live again.
+      node.status = 'running'
+      if (d.round != null) node.round = Number(d.round)
     } else if (event.type === 'delegation.completed' || event.type === 'plan.task.completed') {
       node.status = 'completed'
       node.turns = d.turns ?? node.turns
+      if (d.round != null) node.round = Number(d.round)
+      if (typeof d.verdict === 'string') node.verdict = d.verdict
     } else if (event.type === 'delegation.failed' || event.type === 'plan.task.failed') {
       node.status = 'failed'
       node.error = d.error ?? node.error
+    } else if (event.type === 'plan.task.reopened' || event.type === 'plan.task.invalidated') {
+      // The previous result was discarded; a fresh round follows when the branch
+      // stays alive.
+      node.status = 'running'
     }
   }
   return order.map((id) => nodes.get(id)!)
@@ -51,11 +67,14 @@ export function foldDelegations(events: ObservationEvent[]): DelegationNodeInfo[
 
 /** Fetch all delegation and plan-task events for a run and fold them into node info. */
 export async function fetchDelegations(project: string, runId: string): Promise<DelegationNodeInfo[]> {
-  const types = ['delegation.started', 'delegation.completed', 'delegation.failed', 'plan.task.started', 'plan.task.completed', 'plan.task.failed'] as const
+  const types = ['delegation.started', 'delegation.completed', 'delegation.failed', 'plan.task.started', 'plan.task.completed', 'plan.task.failed', 'plan.task.rejected', 'plan.task.reopened', 'plan.task.invalidated'] as const
   const pages = await Promise.all(types.map((type) =>
     observationApi.events(project, undefined, undefined, undefined, { run: runId, type, limit: 100 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 }))
   ))
-  return foldDelegations(pages.flatMap((p) => p.events))
+  // The typed queries are merged by type, not by time; rework rounds only fold
+  // correctly in chronological order.
+  const merged = pages.flatMap((p) => p.events).sort((a, b) => Date.parse(a.occurred_at) - Date.parse(b.occurred_at))
+  return foldDelegations(merged)
 }
 
 /**
@@ -188,6 +207,11 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
         {info.taskId && <span className="chat-delegation-task">{info.taskId}</span>}
         <span className="chat-delegation-agent">{agentTitle}</span>
         {statusTag}
+        {typeof info.round === 'number' && info.round > 1 && (
+          <span className="chat-delegation-meta">×{info.round}</span>
+        )}
+        {info.verdict === 'rework' && <span className="chat-delegation-meta" title={t('runs.event.plan_task_rejected')}>↺</span>}
+        {info.verdict === 'accept' && <span className="chat-delegation-meta" title={t('runs.event.plan_task_completed')}>✓</span>}
         {typeof turns === 'number' && (
           <span className="chat-delegation-meta">{t('chat.delegation.turns', { count: String(turns) })}</span>
         )}
