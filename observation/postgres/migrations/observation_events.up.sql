@@ -27,13 +27,13 @@ CREATE INDEX IF NOT EXISTS observation_events_type_time_idx
 -- Shared-knowledge lookups (docs/knowledge-evolution.md §5): scope filters run
 -- across all projects, and lifecycle queries follow data.knowledge_id.
 CREATE INDEX IF NOT EXISTS observation_events_scope_kind_idx
-    ON observation_events (data->>'scope_kind', occurred_at)
+    ON observation_events ((data->>'scope_kind'), occurred_at)
     WHERE data ? 'scope_kind';
 CREATE INDEX IF NOT EXISTS observation_events_scope_unit_idx
-    ON observation_events (data->>'scope_id', occurred_at)
+    ON observation_events ((data->>'scope_id'), occurred_at)
     WHERE data ? 'scope_id';
 CREATE INDEX IF NOT EXISTS observation_events_knowledge_id_idx
-    ON observation_events (data->>'knowledge_id', occurred_at)
+    ON observation_events ((data->>'knowledge_id'), occurred_at)
     WHERE data ? 'knowledge_id';
 
 CREATE OR REPLACE FUNCTION reject_observation_event_mutation() RETURNS trigger AS $$
