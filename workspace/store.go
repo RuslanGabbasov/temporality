@@ -14,6 +14,10 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+// ErrConflict reports a uniqueness collision (e.g. proposing a skill version
+// that already exists).
+var ErrConflict = errors.New("already exists")
+
 type Store struct {
 	pool *pgxpool.Pool
 }
