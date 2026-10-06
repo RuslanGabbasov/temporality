@@ -112,6 +112,29 @@ func TestValidateExtractionCandidatesMarksExisting(t *testing.T) {
 	require.False(t, accepted[0].Existing, "terminal-state ids must not be strengthened")
 }
 
+func TestValidateExtractionCandidatesStrengthensExactReDerivation(t *testing.T) {
+	proposition := "The fetch command accepts a -limit flag, not --count."
+	id := extractionKnowledgeID("repo", proposition)
+	known := map[string]bool{"r/event/000001": true}
+	states := map[string]string{id: "proposed"}
+	raw := []extractionCandidate{{Kind: "observation", Proposition: proposition, Evidence: []string{"r/event/000001"}}}
+
+	// Hint-surfaced project knowledge carries the same deterministic id: the
+	// exact restatement must strengthen the node, not count as a duplicate.
+	project := []existingKnowledge{{ID: id, Proposition: proposition}}
+	accepted, duplicates, _ := validateExtractionCandidates(raw, known, project, states, "repo")
+	require.Equal(t, 0, duplicates, "an exact re-derivation is not a duplicate")
+	require.Len(t, accepted, 1)
+	require.True(t, accepted[0].Existing, "re-derivation must strengthen the existing node")
+
+	// The same restatement recorded by this run (remember) is not independent
+	// re-derivation and must stay skipped.
+	fromRun := []existingKnowledge{{ID: id, Proposition: proposition, FromRun: true}}
+	accepted, duplicates, _ = validateExtractionCandidates(raw, known, fromRun, states, "repo")
+	require.Equal(t, 1, duplicates, "this-run restatement must be skipped")
+	require.Empty(t, accepted)
+}
+
 func TestValidateExtractionCandidatesCapsBatch(t *testing.T) {
 	raw := make([]extractionCandidate, 0, 8)
 	for i := 0; i < 8; i++ {

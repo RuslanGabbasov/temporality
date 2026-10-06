@@ -139,6 +139,9 @@ func extractionKnowledgeID(project, proposition string) string {
 type existingKnowledge struct {
 	ID          string
 	Proposition string
+	// FromRun marks knowledge the run itself recorded (remember tool): an
+	// extraction re-statement of it is not independent re-derivation.
+	FromRun bool
 }
 
 // ExtractKnowledge is the activity behind run.completed extraction: it loads
@@ -198,7 +201,7 @@ func extractionContext(request KnowledgeExtractRequest, trajectory Trajectory, k
 	var existing []existingKnowledge
 	for _, item := range trajectory.Knowledge {
 		if item.Proposition != "" {
-			existing = append(existing, existingKnowledge{ID: item.KnowledgeID, Proposition: item.Proposition})
+			existing = append(existing, existingKnowledge{ID: item.KnowledgeID, Proposition: item.Proposition, FromRun: true})
 		}
 	}
 	states := map[string]string{}
@@ -312,14 +315,15 @@ Rules:
 - Every candidate MUST cite real event ids from the trajectory as evidence. No evidence, no candidate.
 - Do not restate what successful verification and build commands already record automatically (for example "tests pass").
 - Do not record the run's reasoning process, only its outcomes.
-- Do not duplicate the existing knowledge listed in the context; a repeat adds nothing.
+- Do not restate items of the existing knowledge listed in the context unless this run independently re-verified them; a verified repeat is valuable — state it again as a candidate citing this run's evidence.
 - If the run directly disproves an item of the existing knowledge listed in the context, set contradicts to that item's id (shown in brackets) and state the corrected fact as the proposition.
 - One self-contained sentence per proposition, in the language of the run.
 - At most 5 candidates. An empty list is a valid answer: most runs teach nothing durable.`
 
 // renderExtractionContext builds the compact extraction context (§7): the
 // task, the tool trajectory with citable event ids, the final answer, and the
-// existing knowledge the model must not duplicate.
+// existing knowledge the model restates on re-verification or contradicts on
+// disproof.
 func renderExtractionContext(request KnowledgeExtractRequest, trajectory Trajectory, existing []existingKnowledge) string {
 	var b strings.Builder
 	b.WriteString("Project: " + request.Project + "\nRun: " + request.RunID + "\n\n")
@@ -356,7 +360,7 @@ func renderExtractionContext(request KnowledgeExtractRequest, trajectory Traject
 		b.WriteString("\nFinal answer:\n" + truncateRunes(answer, extractionAnswerLimit) + "\n")
 	}
 	if len(existing) > 0 {
-		b.WriteString("\nExisting knowledge (ids in brackets; set contradicts when the run disproves an item, otherwise do not restate):\n")
+		b.WriteString("\nExisting knowledge (ids in brackets; set contradicts when the run disproves an item, restate an item only when this run re-verified it):\n")
 		limit := len(existing)
 		if limit > extractionMaxExisting {
 			limit = extractionMaxExisting
@@ -398,8 +402,9 @@ func parseExtractionCandidates(content string) (extractionCompletion, error) {
 // events of this run — hallucinated refs are dropped, and a candidate left
 // without any valid evidence is dropped entirely. Near-duplicates of existing
 // knowledge are counted and skipped (§14); candidates whose id already exists
-// are marked Existing so the caller strengthens the node instead of
-// re-proposing it.
+// as prior project knowledge are marked Existing so the caller strengthens the
+// node instead of re-proposing it, while restatements recorded by this run
+// itself (remember) stay skipped — they are not independent re-derivation.
 func validateExtractionCandidates(raw []extractionCandidate, knownEvents map[string]bool, existing []existingKnowledge, states map[string]string, project string) (accepted []KnowledgeCandidate, duplicates, invalid int) {
 	seen := make(map[string]bool, len(raw))
 	existingIDs := make(map[string]bool, len(existing))
@@ -447,7 +452,15 @@ func validateExtractionCandidates(raw []extractionCandidate, knownEvents map[str
 				// the replacement, not a restatement.
 				continue
 			}
+			if id == item.ID && !item.FromRun {
+				// Exact re-derivation of prior project knowledge is not a
+				// duplicate: the Existing flag below routes it to strengthening
+				// so re-confirmation reinforces the node (§14).
+				continue
+			}
 			if id == item.ID || propositionSimilar(proposition, item.Proposition) {
+				// A this-run restatement (the run already recorded it via
+				// remember) or a near-duplicate: skipped, no second node.
 				duplicate = true
 				break
 			}
