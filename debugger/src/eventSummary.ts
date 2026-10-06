@@ -193,6 +193,36 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn): EventSumm
       return { icon: '⚠', label: t('runs.event.extraction_failed'), detail: String(d.error ?? '').slice(0, 80), color: '#e6b85c' }
     case 'knowledge.recalled':
       return { icon: '📚', label: t('runs.event.recalled'), detail: String(d.proposition ?? '').slice(0, 60), color: '#9d7cd8' }
+    case 'knowledge.used':
+      return { icon: '📚', label: t('runs.event.knowledge_used'), detail: String(d.hint_id ?? d.knowledge_id ?? ''), color: '#9d7cd8' }
+    case 'knowledge.confirmed':
+      return { icon: '✓', label: t('runs.event.knowledge_confirmed'), detail: String(d.knowledge_id ?? ''), color: '#73daca' }
+    case 'knowledge.challenged':
+      return { icon: '⚠', label: t('runs.event.knowledge_challenged'), detail: String(d.knowledge_id ?? ''), color: '#e6b85c' }
+    case 'knowledge.corrected':
+      return { icon: '✎', label: t('runs.event.knowledge_corrected'), detail: String(d.knowledge_id ?? ''), color: '#e6b85c' }
+    case 'knowledge.invalidated':
+      return { icon: '✗', label: t('runs.event.knowledge_invalidated'), detail: String(d.reason ?? d.knowledge_id ?? '').slice(0, 80), color: '#f7768e' }
+    case 'knowledge.superseded':
+      return { icon: '⇄', label: t('runs.event.knowledge_superseded'), detail: String(d.knowledge_id ?? ''), color: 'var(--tm-text-3)' }
+    case 'knowledge.disproved':
+      return { icon: '✗', label: t('runs.event.knowledge_disproved'), detail: String(d.reason ?? '').slice(0, 80), color: '#f7768e' }
+    case 'knowledge.linked':
+      return { icon: '🔗', label: t('runs.event.knowledge_linked'), detail: [String(d.relation ?? ''), `${d.knowledge_id ?? ''} → ${d.target_id ?? ''}`].filter(Boolean).join(' · '), color: 'var(--tm-text-3)' }
+    case 'hint.offered':
+      return { icon: '💡', label: t('runs.event.hint_offered'), detail: [String(d.matched_by ?? ''), String(d.state ?? '')].filter(Boolean).join(' · '), color: '#9d7cd8' }
+    case 'hint.used':
+      return { icon: '✓', label: t('runs.event.hint_used'), detail: String(d.knowledge_id ?? d.hint_id ?? ''), color: 'var(--tm-text-3)' }
+    case 'hint.ignored':
+      return { icon: '○', label: t('runs.event.hint_ignored'), detail: String(d.knowledge_id ?? ''), color: 'var(--tm-text-3)' }
+    case 'hint.outcome': {
+      const outcome = d.outcome === 'helpful' ? t('runs.event.hint_outcome_helpful') : d.outcome === 'harmful' ? t('runs.event.hint_outcome_harmful') : String(d.outcome ?? '')
+      return { icon: '⌾', label: t('runs.event.hint_outcome'), detail: outcome, color: 'var(--tm-text-3)' }
+    }
+    case 'skill.proposed':
+      return { icon: '🎯', label: t('runs.event.skill_proposed'), detail: [d.version ? `${d.skill_name ?? d.skill_id ?? ''} v${d.version}` : String(d.skill_name ?? d.skill_id ?? ''), String(d.change_summary ?? '').slice(0, 60)].filter(Boolean).join(' · '), color: '#7aa2f7' }
+    case 'skill.applied':
+      return { icon: '🎯', label: t('runs.event.skill_applied'), detail: [d.version ? `${d.skill_name ?? d.skill_id ?? ''} v${d.version}` : String(d.skill_name ?? d.skill_id ?? ''), String(d.change_summary ?? '').slice(0, 60)].filter(Boolean).join(' · '), color: '#9ece6a' }
     case 'hint.query':
       return { icon: '🔍', label: t('runs.event.memory_lookup'), detail: t('runs.candidates', { count: String(d.candidate_count ?? 0) }), color: 'var(--tm-text-3)' }
     case 'memory.read':

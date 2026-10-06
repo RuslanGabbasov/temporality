@@ -54,6 +54,44 @@ describe('tool.completed summary', () => {
   })
 })
 
+describe('knowledge, hint and skill lifecycle summaries', () => {
+  it('localizes knowledge lifecycle events', () => {
+    expect(eventSummary(event('knowledge.used', { knowledge_id: 'K1', hint_id: 'h1' }), t).label).toBe('runs.event.knowledge_used')
+    expect(eventSummary(event('knowledge.confirmed', { knowledge_id: 'K1' }), t).label).toBe('runs.event.knowledge_confirmed')
+    expect(eventSummary(event('knowledge.challenged', { knowledge_id: 'K1' }), t).label).toBe('runs.event.knowledge_challenged')
+    expect(eventSummary(event('knowledge.corrected', { knowledge_id: 'K1' }), t).label).toBe('runs.event.knowledge_corrected')
+    const invalidated = eventSummary(event('knowledge.invalidated', { knowledge_id: 'K1', reason: 'environment changed' }), t)
+    expect(invalidated.label).toBe('runs.event.knowledge_invalidated')
+    expect(invalidated.detail).toContain('environment changed')
+    expect(eventSummary(event('knowledge.superseded', { knowledge_id: 'K1' }), t).label).toBe('runs.event.knowledge_superseded')
+    expect(eventSummary(event('knowledge.disproved', { knowledge_id: 'K1', reason: 'wrong' }), t).label).toBe('runs.event.knowledge_disproved')
+    const linked = eventSummary(event('knowledge.linked', { knowledge_id: 'K1', target_id: 'K2', relation: 'related_to' }), t)
+    expect(linked.label).toBe('runs.event.knowledge_linked')
+    expect(linked.detail).toContain('K1 → K2')
+  })
+
+  it('localizes hint lifecycle events and outcome values', () => {
+    const offered = eventSummary(event('hint.offered', { hint_id: 'h1', knowledge_id: 'K1', state: 'confirmed', matched_by: 'lexical' }), t)
+    expect(offered.label).toBe('runs.event.hint_offered')
+    expect(offered.detail).toContain('lexical')
+    expect(eventSummary(event('hint.used', { hint_id: 'h1', knowledge_id: 'K1' }), t).label).toBe('runs.event.hint_used')
+    expect(eventSummary(event('hint.ignored', { hint_id: 'h1', knowledge_id: 'K1' }), t).label).toBe('runs.event.hint_ignored')
+    const outcome = eventSummary(event('hint.outcome', { hint_id: 'h1', knowledge_id: 'K1', outcome: 'helpful' }), t)
+    expect(outcome.label).toBe('runs.event.hint_outcome')
+    expect(outcome.detail).toBe('runs.event.hint_outcome_helpful')
+  })
+
+  it('localizes skill lifecycle events with version and change summary', () => {
+    const proposed = eventSummary(event('skill.proposed', { skill_id: 'deploy', skill_name: 'Deploy service', version: 2, origin: 'agent-proposal', change_summary: 'add fallback check' }), t)
+    expect(proposed.label).toBe('runs.event.skill_proposed')
+    expect(proposed.detail).toContain('Deploy service v2')
+    expect(proposed.detail).toContain('add fallback check')
+    const applied = eventSummary(event('skill.applied', { skill_id: 'deploy', skill_name: 'Deploy service', version: 2 }), t)
+    expect(applied.label).toBe('runs.event.skill_applied')
+    expect(applied.color).toBe('#9ece6a')
+  })
+})
+
 describe('plan rework folding', () => {
   const ts = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, n)).toISOString()
   const ev = (type: string, data: Record<string, unknown>, second = 0): ObservationEvent =>
