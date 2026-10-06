@@ -281,6 +281,18 @@ export default function Skills() {
     finally { setLoading(false) }
   }
 
+  // Applying is the explicit human approval that makes a draft (or an older
+  // version, as a rollback) the current revision — agents never see drafts.
+  const applyVersion = async (skill: Skill, version: string) => {
+    setLoading(true); setError('')
+    try {
+      const updated = await workspaceApi.applySkillVersion(skill.id, version)
+      void openSkill(updated)
+      void load()
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }
+
   const touchSection = (section: string) => {
     setProvenance((current) => {
       if (section === '*') {
@@ -333,6 +345,7 @@ export default function Skills() {
                   <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{skill.name}</strong>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
                     <OrgBadge orgUnitID={skill.org_unit_id} org={org} />
+                    {skill.version_status === 'draft' && <Tag size="sm" type="purple">{t('skills.draft') ?? 'draft'}</Tag>}
                     <Tag size="sm">{skill.version}</Tag>
                   </span>
                 </div>
@@ -349,6 +362,7 @@ export default function Skills() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <strong style={{ fontSize: '1.1rem' }}>{selected.name}</strong>
                     <Tag size="sm">{selected.version}</Tag>
+                    {selected.version_status === 'draft' && <Tag size="sm" type="purple">{t('skills.draft') ?? 'draft'}</Tag>}
                     <OrgBadge orgUnitID={selected.org_unit_id} org={org} />
                     <code style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{selected.id}</code>
                   </div>
@@ -449,18 +463,53 @@ export default function Skills() {
                     </div>
 
                     <div className="skill-evolution-timeline">
-                      {[...versions].reverse().map((version) => (
+                      {[...versions].reverse().map((version) => {
+                        const isDraft = version.status === 'draft'
+                        const isCurrent = version.version === selected.version
+                        return (
                         <div key={version.version} className="skill-version">
                           <button className="skill-version-head" onClick={() => setOpenVersion(openVersion === version.version ? null : version.version)}>
                             <span className="skill-version-dot" />
                             <Tag size="sm">{version.version}</Tag>
-                            {version.version === selected.version && <Tag size="sm" type="green">{t('skills.current') ?? 'current'}</Tag>}
+                            {isCurrent && <Tag size="sm" type="green">{t('skills.current') ?? 'current'}</Tag>}
+                            {isDraft && <Tag size="sm" type="purple">{t('skills.draft') ?? 'draft'}</Tag>}
+                            {!isDraft && version.origin === 'agent-proposal' && <Tag size="sm" type="blue">{t('skills.origin_agent') ?? 'agent proposal'}</Tag>}
                             <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>
-                              {t('skills.published') ?? 'published'} {new Date(version.created_at).toLocaleDateString()}
+                              {isDraft
+                                ? (t('skills.proposed') ?? 'proposed')
+                                : (t('skills.published') ?? 'published')} {new Date(version.created_at).toLocaleDateString()}
                             </span>
                           </button>
                           {openVersion === version.version && (
                             <div className="skill-version-body">
+                              {(version.change_summary || (version.source_runs?.length ?? 0) > 0) && (
+                                <div style={{ marginBottom: '0.5rem', fontSize: '0.8rem' }}>
+                                  {version.change_summary && (
+                                    <div style={{ color: 'var(--tm-text-2)' }}>
+                                      <span style={{ color: 'var(--tm-text-3)' }}>{t('skills.change_summary') ?? 'What changed'}: </span>
+                                      {version.change_summary}
+                                    </div>
+                                  )}
+                                  {(version.source_runs?.length ?? 0) > 0 && (
+                                    <div style={{ color: 'var(--tm-text-3)', marginTop: '0.15rem' }}>
+                                      {t('skills.source_runs') ?? 'Source runs'}: {version.source_runs!.join(', ')}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              {!isCurrent && (
+                                <div style={{ marginBottom: '0.75rem' }}>
+                                  {isDraft ? (
+                                    <Button size="sm" onClick={() => {
+                                      if (confirm(t('skills.apply_confirm', { version: version.version }) ?? `Apply draft ${version.version}? It becomes the current revision for all agents.`)) void applyVersion(selected, version.version)
+                                    }}>{t('skills.apply') ?? 'Apply'}</Button>
+                                  ) : (
+                                    <Button size="sm" kind="secondary" onClick={() => {
+                                      if (confirm(t('skills.rollback_confirm', { version: version.version }) ?? `Make version ${version.version} the current revision?`)) void applyVersion(selected, version.version)
+                                    }}>{t('skills.rollback') ?? 'Roll back to this version'}</Button>
+                                  )}
+                                </div>
+                              )}
                               <div className="skill-subheading" style={{ fontSize: '0.7rem' }}>SKILL.md</div>
                               <pre className="skill-manifest-preview">{version.markdown}</pre>
                               <div className="skill-subheading" style={{ fontSize: '0.7rem', marginTop: '0.5rem' }}>skill.yaml</div>
@@ -468,7 +517,8 @@ export default function Skills() {
                             </div>
                           )}
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 )}

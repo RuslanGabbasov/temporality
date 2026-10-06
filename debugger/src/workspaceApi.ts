@@ -220,6 +220,8 @@ export interface Skill {
   markdown: string
   manifest: Record<string, unknown>
   org_unit_id?: string
+  /** draft = the current version awaits human apply; never served to agents */
+  version_status?: string
   created_at: string
   updated_at: string
 }
@@ -229,6 +231,13 @@ export interface SkillVersion {
   version: string
   markdown: string
   manifest: Record<string, unknown>
+  origin?: string
+  source_runs?: string[]
+  evidence_refs?: string[]
+  knowledge_ids?: string[]
+  change_summary?: string
+  /** draft | active */
+  status?: string
   created_at: string
 }
 
@@ -490,6 +499,8 @@ export const workspaceApi = {
     request<{ status: string }>(`/v1/workspace/skills/${id}`, { method: 'DELETE' }),
   listSkillVersions: (id: string) =>
     request<{ versions: SkillVersion[] }>(`/v1/workspace/skills/${id}/versions`),
+  applySkillVersion: (id: string, version: string) =>
+    request<Skill>(`/v1/workspace/skills/${id}/versions/${version}/apply`, { method: 'POST' }),
   validateSkill: (id: string, data: { markdown: string; manifest_yaml: string }) =>
     request<SkillValidation>(`/v1/workspace/skills/${id}/validate`, { method: 'POST', body: JSON.stringify(data) }),
   draftSkill: (description: string, final?: boolean) =>
