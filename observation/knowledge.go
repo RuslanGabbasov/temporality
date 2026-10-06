@@ -395,12 +395,15 @@ func canTransitionKnowledge(state, eventType string) bool {
 }
 
 func appendKnowledgeTransition(item *Knowledge, event Event) {
-	rule := ""
-	if event.Type == "knowledge.disproved" {
+	// Prefer the rule the emitter recorded in the event data (extraction,
+	// aging, contradiction…); fall back to deriving it from the event shape
+	// for emitters that predate explicit rules.
+	rule := stringValue(event.Data, "rule")
+	if rule == "" && event.Type == "knowledge.disproved" {
 		rule = "explicit-evidence-disproof.v1"
-	} else if event.Type == "knowledge.invalidated" && stringValue(event.Data, "method") == "manual" {
+	} else if rule == "" && event.Type == "knowledge.invalidated" && stringValue(event.Data, "method") == "manual" {
 		rule = "manual.v1"
-	} else if event.Type == "knowledge.promoted" {
+	} else if rule == "" && event.Type == "knowledge.promoted" {
 		rule = "scope-promotion.v1"
 	}
 	item.History = append(item.History, KnowledgeTransition{EventID: event.EventID, SourceID: event.Source.ID, Type: event.Type, State: item.State, Rule: rule, At: event.OccurredAt, Actor: event.Context.Actor, Evidence: append([]Evidence(nil), event.Evidence...), Reason: stringValue(event.Data, "reason")})

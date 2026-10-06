@@ -27,6 +27,31 @@ func transitionEvent(eventID, knowledgeID, eventType string, at time.Time) Event
 	}
 }
 
+func TestKnowledgeHistoryCarriesEmitterRule(t *testing.T) {
+	base := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		proposalEvent("e1", "ext/abc", "The fetch command accepts a -limit flag, not --count.", base, nil),
+	}
+	challenged := transitionEvent("e2", "ext/abc", "knowledge.challenged", base.Add(time.Minute))
+	challenged.Data["rule"] = "aging.v1"
+	challenged.Data["reason"] = "unconfirmed for 21 days without any use"
+	events = append(events, challenged)
+	knowledge, err := ProjectKnowledge(events)
+	if err != nil {
+		t.Fatalf("projection failed: %v", err)
+	}
+	if len(knowledge) != 1 || knowledge[0].State != "challenged" {
+		t.Fatalf("expected one challenged node, got %+v", knowledge)
+	}
+	last := knowledge[0].History[len(knowledge[0].History)-1]
+	if last.Rule != "aging.v1" {
+		t.Fatalf("history rule = %q, want aging.v1", last.Rule)
+	}
+	if last.Reason != "unconfirmed for 21 days without any use" {
+		t.Fatalf("history reason = %q", last.Reason)
+	}
+}
+
 func TestProjectKnowledgeTreatsIdenticalReProposalAsIdempotent(t *testing.T) {
 	base := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
 	events := []Event{
