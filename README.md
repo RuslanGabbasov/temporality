@@ -22,7 +22,7 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 | Agent Kernel | `kernel/`, `cmd/agent-kernel` | durable agent harness на Temporal: model gateway, MCP, sandbox, approvals, delegation |
 | Workspace | `debugger/src/Workspace.tsx` | чат с агентом: SSE streaming, reasoning, conversations, branching |
 | Debugger | `debugger/` | UI для наблюдения и анализа опыта агента |
-| Control Plane | `controlplane/` | auth/RBAC, bearer-токены, project-scoping |
+| Control Plane | `controlplane/` | auth/RBAC, org-структура и доступы, bearer-токены, project-scoping |
 
 ### Страницы UI
 
@@ -34,8 +34,12 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 | `/operations` | Uncertain operations — batch reconcile, verdict buttons |
 | `/observability` | Knowledge — lifecycle, activation chains, patterns, projection |
 | `/experience` | Experience Timeline — memory lens, semantic zoom, forensics |
+| `/skills` | Living Skills — контракт, версии, выполнения, память, эволюция, skill builder |
+| `/mcp` | MCP-серверы — stdio / SSE / Streamable HTTP, привязка к агентам |
 | `/providers` | Model providers — OpenAI-compatible endpoints |
-| `/users` | Users — RBAC, tokens, project access |
+| `/users` | Users — RBAC, tokens, каналы уведомлений |
+| `/triggers` | Триггеры — cron, webhook, event listeners, execution identity |
+| `/org` | Организация — дерево оргструктуры, роли на узлах, политики, эффективный доступ |
 
 ## Запуск
 
@@ -137,8 +141,19 @@ ID. Доставка не блокирует выполнение: сбой тр
 ## Agent Kernel
 
 Durable Temporal workflow: model calls, approvals, `remember` proposals,
-auto-capture verification observations, at-least-once outbox, MCP stdio
-adapter, Docker command sandbox.
+auto-capture verification observations, at-least-once outbox, MCP
+(stdio / SSE / Streamable HTTP), Docker command sandbox.
+
+Делегирование: `delegate` — параллельные субагенты, `plan` — DAG-план
+между агентами с зависимостями и предикатами (`docs/agent-delegation.md`).
+
+Living skills: инструменты `skill_search` / `skill_inspect` /
+`skill_validate` / `skill_history` / `skill_executions` / `skill_memory` /
+`skill_propose` (`docs/living-skills.md`).
+
+Также: knowledge hints и extraction по траекториям, triggers
+(cron/webhook/listeners), human requests (`ask_human`) и org policies
+(ограничения моделей/MCP/токенов/сети/песочницы).
 
 ### Sandbox
 
@@ -148,8 +163,14 @@ read-only root, dropped capabilities, resource limits, bounded output.
 
 ### MCP
 
-`KERNEL_MCP_COMMAND`, `KERNEL_MCP_ARGS` (JSON array), `KERNEL_MCP_ALLOW`
-(tools list), `KERNEL_MCP_APPROVAL` (subset requiring human approval).
+Основной способ — реестр MCP-серверов в workspace (`/mcp`): транспорт
+stdio, SSE или Streamable HTTP, привязка серверов к агентам и панель
+инструментов в карточке агента (включая полученные из MCP тумблеры
+доступности).
+
+Переменные `KERNEL_MCP_COMMAND`, `KERNEL_MCP_ARGS` (JSON array),
+`KERNEL_MCP_ALLOW` (tools list), `KERNEL_MCP_APPROVAL` (subset requiring
+human approval) — legacy-вариант для запуска ядра без workspace.
 
 ### Failure reconciliation
 
@@ -193,15 +214,18 @@ Branching — форк из любой точки.
 
 Features:
 - SSE streaming: model.text_delta, model.reasoning, tool events
-- Markdown rendering для ответов
+- Markdown rendering для ответов (включая ответы субагентов)
 - Reasoning/thinking block (collapsible)
 - Conversation persistence (localStorage)
-- Agent templates (Coder, Reviewer, Researcher, DevOps)
+- Agent templates (Coder, Reviewer, Researcher, DevOps, QA)
 - Project settings (default agent, default model)
+- Дерево делегирования и план-DAG: прогресс субагентов прямо в чате
+- Автозаголовки запусков — краткое имя генерируется отдельным лёгким вызовом модели
 
 ## Control Plane
 
 - **Auth**: bearer-токены `token:subject:role:projects`
+- **Org structure**: дерево оргструктуры, наследуемая видимость ресурсов сверху вниз, роли на узлах, явное членство в проектах, execution identities, политики — `docs/org-structure.md`
 - **Quotas**: `KERNEL_RUN_QUOTAS="*:50,project:200"` — лимит запусков/день
 - **Secrets**: конвенция `<VAR>_FILE` — значение берётся из файла
 - **Providers**: OpenAI-compatible model endpoints, API key masking
