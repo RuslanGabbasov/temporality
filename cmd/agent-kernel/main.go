@@ -175,6 +175,10 @@ func main() {
 		log.Error("migrate workspace v42", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000043_drop_legacy_access_columns.up.sql"); err != nil {
+		log.Error("migrate workspace v43", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -934,7 +938,7 @@ func main() {
 		if req.ID == "" {
 			req.ID = slugify(req.Name)
 		}
-		project := &workspace.Project{ID: req.ID, Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel, AllowedUsers: req.AllowedUsers, OrgUnitIDs: req.OrgUnits}
+		project := &workspace.Project{ID: req.ID, Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel, OrgUnitIDs: req.OrgUnits}
 		if err := ws.CreateProject(r.Context(), project); err != nil {
 			writeError(w, 409, err)
 			return
@@ -973,15 +977,7 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
-		// The legacy allowed_users column is frozen: an absent field keeps the
-		// stored value (visibility no longer reads it — docs/org-structure.md §16).
-		allowedUsers := req.AllowedUsers
-		if allowedUsers == nil {
-			if current, err := ws.GetProject(r.Context(), r.PathValue("projectID")); err == nil {
-				allowedUsers = current.AllowedUsers
-			}
-		}
-		project := workspace.Project{ID: r.PathValue("projectID"), Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel, AllowedUsers: allowedUsers}
+		project := workspace.Project{ID: r.PathValue("projectID"), Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel}
 		if err := ws.UpdateProject(r.Context(), project); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)
@@ -3281,7 +3277,7 @@ func main() {
 		if req.OrgUnitID != nil {
 			orgUnitID = *req.OrgUnitID
 		}
-		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Token: token, Projects: req.Projects, OrgUnitID: orgUnitID, Active: active, Channels: req.Channels, PreferredChannel: req.PreferredChannel}
+		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Token: token, OrgUnitID: orgUnitID, Active: active, Channels: req.Channels, PreferredChannel: req.PreferredChannel}
 		if err := ws.CreateUser(r.Context(), user); err != nil {
 			writeError(w, 500, err)
 			return
@@ -3316,7 +3312,7 @@ func main() {
 		if req.OrgUnitID != nil {
 			orgUnitID = *req.OrgUnitID
 		}
-		user := workspace.User{ID: r.PathValue("userID"), Name: req.Name, Email: req.Email, Role: req.Role, Projects: req.Projects, OrgUnitID: orgUnitID, Active: active, Channels: existing.Channels, PreferredChannel: existing.PreferredChannel}
+		user := workspace.User{ID: r.PathValue("userID"), Name: req.Name, Email: req.Email, Role: req.Role, OrgUnitID: orgUnitID, Active: active, Channels: existing.Channels, PreferredChannel: existing.PreferredChannel}
 		if err := ws.UpdateUser(r.Context(), user); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)

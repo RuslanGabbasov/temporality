@@ -339,7 +339,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         description: proj.description,
         default_agent_id: agent.id,
         default_model: proj.default_model,
-        allowed_users: proj.allowed_users,
       })
       refreshProjects?.()
     } catch (f) {

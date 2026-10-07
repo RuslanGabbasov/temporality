@@ -50,6 +50,16 @@ export interface UnitResources {
   projects: NamedRef[]
 }
 
+/** Role grant on an org unit (docs/org-structure.md §13): upgrades the
+ * grantee's effective role on the unit and its whole subtree. */
+export interface OrgUnitRoleGrant {
+  user_id: string
+  org_unit_id: string
+  role: string // reader | writer | operator | admin
+  granted_by?: string
+  granted_at: string
+}
+
 export type OrgResourceKind = 'agent' | 'skill' | 'mcp-server' | 'provider' | 'trigger'
 
 export interface Project {
@@ -59,7 +69,6 @@ export interface Project {
   default_agent_id?: string
   default_model?: string
   archived?: boolean
-  allowed_users?: string[] // frozen legacy column — no longer used for visibility
   org_units?: string[] // org areas the project spans; empty = org-neutral
   created_at: string
   updated_at: string
@@ -380,7 +389,6 @@ export interface User {
   role: string
   token?: string
   has_token?: boolean // list responses: whether a token exists (value is never exposed)
-  projects: string[]
   org_unit_id?: string // primary unit; empty = unassigned (sees everything, transition)
   active: boolean
   channels?: UserChannel[]
@@ -404,9 +412,9 @@ export const workspaceApi = {
   // Projects
   listProjects: () => request<{ projects: Project[] }>('/v1/workspace/projects'),
   getProject: (id: string) => request<Project>(`/v1/workspace/projects/${id}`),
-  createProject: (data: { id?: string; name: string; description?: string; allowed_users?: string[]; org_units?: string[] }) =>
+  createProject: (data: { id?: string; name: string; description?: string; org_units?: string[] }) =>
     request<Project>('/v1/workspace/projects', { method: 'POST', body: JSON.stringify(data) }),
-  updateProject: (id: string, data: { name: string; description?: string; default_agent_id?: string; default_model?: string; allowed_users?: string[]; org_units?: string[] }) =>
+  updateProject: (id: string, data: { name: string; description?: string; default_agent_id?: string; default_model?: string; org_units?: string[] }) =>
     request<Project>(`/v1/workspace/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProject: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/projects/${id}`, { method: 'DELETE' }),
@@ -483,9 +491,16 @@ export const workspaceApi = {
   deleteTrigger: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/triggers/${id}`, { method: 'DELETE' }),
 
-  // Execution identities (org-structure.md §20)
+  // Execution identities (org-structure.md §20): CRUD is admin-gated; the
+  // store defaults absent allowed-lists to ["*"], so an empty list = any.
   listExecutionIdentities: () =>
     request<{ identities: ExecutionIdentity[] }>('/v1/workspace/execution-identities'),
+  createExecutionIdentity: (data: Partial<ExecutionIdentity> & { name: string }) =>
+    request<ExecutionIdentity>('/v1/workspace/execution-identities', { method: 'POST', body: JSON.stringify(data) }),
+  updateExecutionIdentity: (id: string, data: Partial<ExecutionIdentity> & { name: string }) =>
+    request<ExecutionIdentity>(`/v1/workspace/execution-identities/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteExecutionIdentity: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/workspace/execution-identities/${id}`, { method: 'DELETE' }),
 
   // Skills (workspace-global registry)
   listSkills: () =>
@@ -528,7 +543,7 @@ export const workspaceApi = {
   // Users
   listUsers: () => request<{ users: User[] }>('/v1/workspace/users'),
   getUser: (id: string) => request<User>(`/v1/workspace/users/${id}`),
-  createUser: (data: { id?: string; name: string; email?: string; role: string; projects?: string[]; org_unit_id?: string }) =>
+  createUser: (data: { id?: string; name: string; email?: string; role: string; org_unit_id?: string }) =>
     request<User>('/v1/workspace/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (id: string, data: Partial<User>) =>
     request<User>(`/v1/workspace/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -561,6 +576,14 @@ export const workspaceApi = {
   unitResources: (id: string) => request<UnitResources>(`/v1/org/units/${id}/resources`),
   effectivePolicy: (id: string) =>
     request<{ policy: Policy; sources: Policy[] }>(`/v1/org/units/${id}/effective-policy`),
+
+  // Unit role grants (org-structure.md §13): mutations are admin-gated server-side.
+  listUnitRoles: (unitId: string) =>
+    request<{ roles: OrgUnitRoleGrant[] }>(`/v1/org/units/${unitId}/roles`),
+  setUnitRole: (unitId: string, userId: string, role: string) =>
+    request<{ user_id: string; org_unit_id: string; role: string }>(`/v1/org/units/${unitId}/roles/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) }),
+  removeUnitRole: (unitId: string, userId: string) =>
+    request<{ removed: boolean }>(`/v1/org/units/${unitId}/roles/${userId}`, { method: 'DELETE' }),
 
   // Policies (org-structure.md §24)
   listPolicies: () => request<{ policies: Policy[] }>('/v1/workspace/policies'),

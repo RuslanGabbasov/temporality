@@ -51,7 +51,7 @@ export default function Users() {
 
   const startCreate = () => {
     setEditing(null)
-    setForm({ name: '', email: '', role: 'viewer', projects: [], active: true, org_unit_id: '' })
+    setForm({ name: '', email: '', role: 'viewer', active: true, org_unit_id: '' })
     setShowForm(true)
   }
 
@@ -147,7 +147,6 @@ export default function Users() {
                   <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                     <Tag type={ROLE_COLORS[u.role] || 'gray'} size="sm">{u.role}</Tag>
                     <Tag type={u.active ? 'green' : 'red'} size="sm">{u.active ? (t('users.active') ?? 'active') : (t('users.inactive') ?? 'inactive')}</Tag>
-                    {u.projects?.length ? u.projects.map((p) => <Tag key={p} type="gray" size="sm">{p}</Tag>) : <Tag type="gray" size="sm">{t('users.all_projects') ?? 'all projects'}</Tag>}
                   </div>
                   <ChannelBadges user={u} />
                 </div>

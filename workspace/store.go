@@ -51,25 +51,18 @@ func (s *Store) CreateProject(ctx context.Context, p *Project) error {
 	now := time.Now().UTC()
 	p.CreatedAt = now
 	p.UpdatedAt = now
-	// Default to all users if not specified
-	allowedUsers := p.AllowedUsers
-	if allowedUsers == nil {
-		allowedUsers = []string{"*"}
-	}
-	allowedUsersJSON, _ := json.Marshal(allowedUsers)
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_project (id, name, description, default_agent_id, default_model, allowed_users, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		p.ID, p.Name, p.Description, nullString(p.DefaultAgentID), p.DefaultModel, allowedUsersJSON, p.CreatedAt, p.UpdatedAt)
+		`INSERT INTO workspace_project (id, name, description, default_agent_id, default_model, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		p.ID, p.Name, p.Description, nullString(p.DefaultAgentID), p.DefaultModel, p.CreatedAt, p.UpdatedAt)
 	return err
 }
 
 func (s *Store) GetProject(ctx context.Context, id string) (Project, error) {
 	var p Project
 	var agentID *string
-	var allowedUsersJSON []byte
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, description, default_agent_id, default_model, archived, allowed_users, created_at, updated_at FROM workspace_project WHERE id = $1`, id).
-		Scan(&p.ID, &p.Name, &p.Description, &agentID, &p.DefaultModel, &p.Archived, &allowedUsersJSON, &p.CreatedAt, &p.UpdatedAt)
+		`SELECT id, name, description, default_agent_id, default_model, archived, created_at, updated_at FROM workspace_project WHERE id = $1`, id).
+		Scan(&p.ID, &p.Name, &p.Description, &agentID, &p.DefaultModel, &p.Archived, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -77,9 +70,6 @@ func (s *Store) GetProject(ctx context.Context, id string) (Project, error) {
 		return p, err
 	}
 	p.DefaultAgentID = derefPtr(agentID)
-	if len(allowedUsersJSON) > 0 {
-		_ = json.Unmarshal(allowedUsersJSON, &p.AllowedUsers)
-	}
 	if units, err := s.ProjectOrgUnits(ctx, id); err == nil {
 		p.OrgUnitIDs = units
 	}
@@ -87,7 +77,7 @@ func (s *Store) GetProject(ctx context.Context, id string) (Project, error) {
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, description, default_agent_id, default_model, archived, allowed_users, created_at, updated_at FROM workspace_project ORDER BY created_at DESC`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, description, default_agent_id, default_model, archived, created_at, updated_at FROM workspace_project ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -96,14 +86,10 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 	for rows.Next() {
 		var p Project
 		var agentID *string
-		var allowedUsersJSON []byte
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &agentID, &p.DefaultModel, &p.Archived, &allowedUsersJSON, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &agentID, &p.DefaultModel, &p.Archived, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.DefaultAgentID = derefPtr(agentID)
-		if len(allowedUsersJSON) > 0 {
-			_ = json.Unmarshal(allowedUsersJSON, &p.AllowedUsers)
-		}
 		result = append(result, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -121,14 +107,9 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 
 func (s *Store) UpdateProject(ctx context.Context, p Project) error {
 	p.UpdatedAt = time.Now().UTC()
-	allowedUsers := p.AllowedUsers
-	if allowedUsers == nil {
-		allowedUsers = []string{"*"}
-	}
-	allowedUsersJSON, _ := json.Marshal(allowedUsers)
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_project SET name = $2, description = $3, default_agent_id = $4, default_model = $5, allowed_users = $6, updated_at = $7 WHERE id = $1`,
-		p.ID, p.Name, p.Description, nullString(p.DefaultAgentID), p.DefaultModel, allowedUsersJSON, p.UpdatedAt)
+		`UPDATE workspace_project SET name = $2, description = $3, default_agent_id = $4, default_model = $5, updated_at = $6 WHERE id = $1`,
+		p.ID, p.Name, p.Description, nullString(p.DefaultAgentID), p.DefaultModel, p.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -782,8 +763,7 @@ func (s *Store) ListAllProjects(ctx context.Context) ([]Project, error) {
 
 // ListProjectsForUser returns projects visible to a specific user
 // (docs/org-structure.md §15-16): org-unit access OR explicit membership.
-// The legacy allowed_users column is frozen on read — it is no longer
-// consulted and will be dropped by a later cleanup migration.
+// The legacy allowed_users column was dropped by migration 000043.
 func (s *Store) ListProjectsForUser(ctx context.Context, userID string, isAdmin bool, units []string) ([]Project, error) {
 	allProjects, err := s.ListAllProjects(ctx)
 	if err != nil {
@@ -978,12 +958,11 @@ func (s *Store) CreateUser(ctx context.Context, u *User) error {
 	if !u.Active {
 		u.Active = true
 	}
-	projects, _ := json.Marshal(u.Projects)
 	channels, _ := json.Marshal(channelList(u.Channels))
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_user (id, name, email, role, token, projects, org_unit_id, active, channels, preferred_channel, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-		u.ID, u.Name, u.Email, u.Role, u.Token, projects, nullString(u.OrgUnitID), u.Active, channels, u.PreferredChannel, u.CreatedAt, u.UpdatedAt)
+		`INSERT INTO workspace_user (id, name, email, role, token, org_unit_id, active, channels, preferred_channel, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		u.ID, u.Name, u.Email, u.Role, u.Token, nullString(u.OrgUnitID), u.Active, channels, u.PreferredChannel, u.CreatedAt, u.UpdatedAt)
 	return err
 }
 
@@ -1003,12 +982,12 @@ func scanChannels(raw []byte) []UserChannel {
 
 func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
 	var u User
-	var projects, channels []byte
+	var channels []byte
 	var orgUnitID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, email, role, COALESCE(token, ''), projects, org_unit_id, active, channels, preferred_channel, created_at, updated_at
+		`SELECT id, name, email, role, COALESCE(token, ''), org_unit_id, active, channels, preferred_channel, created_at, updated_at
 		 FROM workspace_user WHERE id = $1`, id).
-		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &projects, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt)
+		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return u, ErrNotFound
 	}
@@ -1016,7 +995,6 @@ func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
 		return u, err
 	}
 	u.OrgUnitID = derefPtr(orgUnitID)
-	_ = json.Unmarshal(projects, &u.Projects)
 	u.Channels = scanChannels(channels)
 	return u, nil
 }
@@ -1024,7 +1002,7 @@ func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
 // ListUsers returns users for API responses: the token value is never
 // included, only HasToken reporting whether one exists.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, (token <> '') AS has_token, projects, org_unit_id, active, channels, preferred_channel, created_at, updated_at FROM workspace_user ORDER BY created_at`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, (token <> '') AS has_token, org_unit_id, active, channels, preferred_channel, created_at, updated_at FROM workspace_user ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -1032,13 +1010,12 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	var result []User
 	for rows.Next() {
 		var u User
-		var projects, channels []byte
+		var channels []byte
 		var orgUnitID *string
-		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.HasToken, &projects, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.HasToken, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		u.OrgUnitID = derefPtr(orgUnitID)
-		_ = json.Unmarshal(projects, &u.Projects)
 		u.Channels = scanChannels(channels)
 		result = append(result, u)
 	}
@@ -1049,7 +1026,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 // gate: it returns the raw bearer tokens. Its results must never be
 // serialized to API clients.
 func (s *Store) ListUsersWithTokens(ctx context.Context) ([]User, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, token, projects, org_unit_id, active, channels, preferred_channel, created_at, updated_at FROM workspace_user ORDER BY created_at`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, token, org_unit_id, active, channels, preferred_channel, created_at, updated_at FROM workspace_user ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -1057,13 +1034,12 @@ func (s *Store) ListUsersWithTokens(ctx context.Context) ([]User, error) {
 	var result []User
 	for rows.Next() {
 		var u User
-		var projects, channels []byte
+		var channels []byte
 		var orgUnitID *string
-		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &projects, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		u.OrgUnitID = derefPtr(orgUnitID)
-		_ = json.Unmarshal(projects, &u.Projects)
 		u.Channels = scanChannels(channels)
 		u.HasToken = u.Token != ""
 		result = append(result, u)
@@ -1085,11 +1061,10 @@ func (s *Store) UpdateUserToken(ctx context.Context, id, token string) error {
 
 func (s *Store) UpdateUser(ctx context.Context, u User) error {
 	u.UpdatedAt = time.Now().UTC()
-	projects, _ := json.Marshal(u.Projects)
 	channels, _ := json.Marshal(channelList(u.Channels))
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_user SET name=$2, email=$3, role=$4, projects=$5, org_unit_id=$6, active=$7, channels=$8, preferred_channel=$9, updated_at=$10 WHERE id=$1`,
-		u.ID, u.Name, u.Email, u.Role, projects, nullString(u.OrgUnitID), u.Active, channels, u.PreferredChannel, u.UpdatedAt)
+		`UPDATE workspace_user SET name=$2, email=$3, role=$4, org_unit_id=$5, active=$6, channels=$7, preferred_channel=$8, updated_at=$9 WHERE id=$1`,
+		u.ID, u.Name, u.Email, u.Role, nullString(u.OrgUnitID), u.Active, channels, u.PreferredChannel, u.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -1100,8 +1075,8 @@ func (s *Store) UpdateUser(ctx context.Context, u User) error {
 }
 
 // UpdateUserChannels replaces only the communication channels and the
-// preferred transport. Role, projects and tokens are intentionally out of
-// scope: this backs the self-service profile endpoint.
+// preferred transport. Role and tokens are intentionally out of scope:
+// this backs the self-service profile endpoint.
 func (s *Store) UpdateUserChannels(ctx context.Context, id string, channels []UserChannel, preferred string) error {
 	raw, _ := json.Marshal(channelList(channels))
 	tag, err := s.pool.Exec(ctx,
@@ -1159,12 +1134,12 @@ func derefPtr(p *string) string {
 // Returns ErrNotFound if no active user has that token.
 func (s *Store) GetUserByToken(ctx context.Context, token string) (User, error) {
 	var u User
-	var projects, channels []byte
+	var channels []byte
 	var orgUnitID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, email, role, '', projects, org_unit_id, active, channels, preferred_channel, created_at, updated_at
+		`SELECT id, name, email, role, '', org_unit_id, active, channels, preferred_channel, created_at, updated_at
 		 FROM workspace_user WHERE token = $1 AND active = true`, token).
-		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &projects, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt)
+		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return u, ErrNotFound
 	}
@@ -1172,7 +1147,6 @@ func (s *Store) GetUserByToken(ctx context.Context, token string) (User, error) 
 		return u, err
 	}
 	u.OrgUnitID = derefPtr(orgUnitID)
-	_ = json.Unmarshal(projects, &u.Projects)
 	u.Channels = scanChannels(channels)
 	return u, nil
 }

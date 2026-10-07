@@ -10,7 +10,7 @@ import {
   Heading,
 } from '@carbon/react'
 import { Add, Edit, TrashCan, ChevronRight, ChevronDown, Building, Enterprise } from '@carbon/icons-react'
-import { workspaceApi, type OrgUnit, type UnitResources, type OrgUnitKind, type Policy } from './workspaceApi'
+import { workspaceApi, type OrgUnit, type UnitResources, type OrgUnitKind, type Policy, type OrgUnitRoleGrant, type ExecutionIdentity, type User } from './workspaceApi'
 import { useT } from './i18n'
 import { whoami } from './kernelApi'
 import ListFilter, { matchesFilter } from './ListFilter'
@@ -87,6 +87,75 @@ function policySummaryTags(p: Policy, t: (k: string, v?: Record<string, string>)
   return tags
 }
 
+// Roles grantable on a unit (docs/org-structure.md §13); the backend's
+// ParseRole also accepts the workspace alias "viewer" for reader.
+const UNIT_ROLES = ['reader', 'writer', 'operator', 'admin'] as const
+
+const ROLE_TAG_COLORS: Record<string, 'gray' | 'green' | 'blue' | 'purple'> = {
+  reader: 'gray',
+  writer: 'green',
+  operator: 'blue',
+  admin: 'purple',
+}
+
+/** True when an allowed-list permits everything: "*" (the store's default
+ * for absent lists) or an empty list. */
+export function allowsAnything(list?: string[] | null): boolean {
+  return !list || list.length === 0 || list.includes('*')
+}
+
+/** Compact per-dimension summary of what an execution identity may touch
+ * (docs/org-structure.md §47): "Agents: any" / "MCP: 2". */
+export function identitySummaryTags(i: ExecutionIdentity, t: (k: string, v?: Record<string, string>) => string) {
+  const anyText = t('org.policy_any') ?? 'any'
+  const dimension = (list: string[] | undefined, label: string) => ({
+    key: label,
+    text: `${label}: ${allowsAnything(list) ? anyText : String(list?.length ?? 0)}`,
+  })
+  return [
+    dimension(i.allowed_agents, t('org.identity_sum_agents') ?? 'Agents'),
+    dimension(i.allowed_mcp, t('org.identity_sum_mcp') ?? 'MCP'),
+    dimension(i.allowed_providers, t('org.identity_sum_providers') ?? 'Providers'),
+    dimension(i.allowed_projects, t('org.identity_sum_projects') ?? 'Projects'),
+    dimension(i.human_targets, t('org.identity_sum_targets') ?? 'Human targets'),
+  ]
+}
+
+// Identity dialog form: allowed-lists are edited as comma-separated strings;
+// the store turns empty lists back into "*" ("any") on save.
+type IdentityForm = {
+  name: string
+  description: string
+  org_unit_id: string
+  allowed_agents: string
+  allowed_mcp: string
+  allowed_providers: string
+  allowed_projects: string
+  human_targets: string
+}
+
+const emptyIdentityForm = (): IdentityForm => ({
+  name: '', description: '', org_unit_id: '',
+  allowed_agents: '', allowed_mcp: '', allowed_providers: '',
+  allowed_projects: '', human_targets: '',
+})
+
+// "*" is hidden from the form: an empty field means the same thing and
+// round-trips back to ["*"] server-side. Mixing "*" with concrete entries is
+// redundant (allowsAny treats "*" as allow-all), so dropping it is neutral.
+const joinList = (list?: string[] | null) => (list ?? []).filter((x) => x !== '*').join(', ')
+
+const identityFormOf = (i: ExecutionIdentity): IdentityForm => ({
+  name: i.name,
+  description: i.description ?? '',
+  org_unit_id: i.org_unit_id ?? '',
+  allowed_agents: joinList(i.allowed_agents),
+  allowed_mcp: joinList(i.allowed_mcp),
+  allowed_providers: joinList(i.allowed_providers),
+  allowed_projects: joinList(i.allowed_projects),
+  human_targets: joinList(i.human_targets),
+})
+
 function buildTree(units: OrgUnit[]): Node[] {
   const nodes = new Map<string, Node>(units.map((u) => [u.id, { unit: u, children: [] }]))
   const roots: Node[] = []
@@ -132,6 +201,21 @@ export default function Org() {
   const [deletingPolicy, setDeletingPolicy] = useState<Policy | null>(null)
   const [effective, setEffective] = useState<{ policy: Policy; sources: Policy[] } | null>(null)
 
+  // Unit role grants (docs/org-structure.md §13): who is upgraded on this node
+  const [unitRoles, setUnitRoles] = useState<OrgUnitRoleGrant[]>([])
+  const [users, setUsers] = useState<User[]>([])
+  const [grantUser, setGrantUser] = useState('')
+  const [grantRoleKind, setGrantRoleKind] = useState<string>('writer')
+  const [revoking, setRevoking] = useState<OrgUnitRoleGrant | null>(null)
+
+  // Execution identities (docs/org-structure.md §20)
+  const [identities, setIdentities] = useState<ExecutionIdentity[]>([])
+  const [identityFilter, setIdentityFilter] = useState('')
+  const [editingIdentity, setEditingIdentity] = useState<ExecutionIdentity | null>(null)
+  const [identityDialogOpen, setIdentityDialogOpen] = useState(false)
+  const [identityForm, setIdentityForm] = useState<IdentityForm>(emptyIdentityForm())
+  const [deletingIdentity, setDeletingIdentity] = useState<ExecutionIdentity | null>(null)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -139,6 +223,14 @@ export default function Org() {
       setUnits(data.units ?? [])
       const pl = await workspaceApi.listPolicies()
       setPolicies(pl.policies ?? [])
+      // Users feed the role-grant picker; identities the section below. Both
+      // degrade to empty on older kernels instead of failing the page.
+      const [us, ids] = await Promise.all([
+        workspaceApi.listUsers().catch(() => ({ users: [] as User[] })),
+        workspaceApi.listExecutionIdentities().catch(() => ({ identities: [] as ExecutionIdentity[] })),
+      ])
+      setUsers(us.users ?? [])
+      setIdentities(ids.identities ?? [])
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }, [])
@@ -148,13 +240,16 @@ export default function Org() {
     void whoami().then((w) => setIsAdmin(w.role === 'admin')).catch(() => setIsAdmin(false))
   }, [])
   useEffect(() => {
-    if (!selected) { setResources(null); setEffective(null); return }
+    if (!selected) { setResources(null); setEffective(null); setUnitRoles([]); return }
     void workspaceApi.unitResources(selected)
       .then(setResources)
       .catch(() => setResources(null))
     void workspaceApi.effectivePolicy(selected)
       .then(setEffective)
       .catch(() => setEffective(null))
+    void workspaceApi.listUnitRoles(selected)
+      .then((r) => setUnitRoles(r.roles ?? []))
+      .catch(() => setUnitRoles([]))
   }, [selected, units])
 
   const roots = buildTree(units)
@@ -274,6 +369,87 @@ export default function Org() {
       if (selected) {
         void workspaceApi.effectivePolicy(selected).then(setEffective).catch(() => setEffective(null))
       }
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }
+
+  const userName = (id: string) => users.find((u) => u.id === id)?.name ?? id
+
+  // PUT is upsert: granting a user who already holds a role on the unit
+  // replaces their role.
+  const grantRole = async () => {
+    if (!selected || !grantUser) return
+    setLoading(true); setError('')
+    try {
+      await workspaceApi.setUnitRole(selected, grantUser, grantRoleKind)
+      setGrantUser('')
+      const r = await workspaceApi.listUnitRoles(selected)
+      setUnitRoles(r.roles ?? [])
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }
+
+  const doRevokeRole = async () => {
+    if (!revoking || !selected) return
+    setLoading(true); setError('')
+    try {
+      await workspaceApi.removeUnitRole(selected, revoking.user_id)
+      setRevoking(null)
+      const r = await workspaceApi.listUnitRoles(selected)
+      setUnitRoles(r.roles ?? [])
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }
+
+  const openIdentityCreate = () => {
+    setEditingIdentity(null)
+    setIdentityForm({ ...emptyIdentityForm(), org_unit_id: selected ?? '' })
+    setIdentityDialogOpen(true)
+  }
+
+  const openIdentityEdit = (i: ExecutionIdentity) => {
+    setEditingIdentity(i)
+    setIdentityForm(identityFormOf(i))
+    setIdentityDialogOpen(true)
+  }
+
+  const saveIdentity = async () => {
+    const name = identityForm.name.trim()
+    if (!name) return
+    // Empty lists are sent as []: the store normalizes them to "*" (any),
+    // mirroring the form placeholders.
+    const payload = {
+      name,
+      description: identityForm.description.trim(),
+      org_unit_id: identityForm.org_unit_id,
+      allowed_agents: splitList(identityForm.allowed_agents),
+      allowed_mcp: splitList(identityForm.allowed_mcp),
+      allowed_providers: splitList(identityForm.allowed_providers),
+      allowed_projects: splitList(identityForm.allowed_projects),
+      human_targets: splitList(identityForm.human_targets),
+    }
+    setLoading(true); setError('')
+    try {
+      if (editingIdentity) {
+        await workspaceApi.updateExecutionIdentity(editingIdentity.id, payload)
+      } else {
+        await workspaceApi.createExecutionIdentity(payload)
+      }
+      setEditingIdentity(null)
+      setIdentityDialogOpen(false)
+      setIdentityForm(emptyIdentityForm())
+      void load()
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }
+
+  const doDeleteIdentity = async () => {
+    if (!deletingIdentity) return
+    setLoading(true); setError('')
+    try {
+      await workspaceApi.deleteExecutionIdentity(deletingIdentity.id)
+      setDeletingIdentity(null)
+      void load()
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }
@@ -434,6 +610,71 @@ export default function Org() {
               ) : (
                 <Loading withOverlay={false} />
               )}
+
+              {/* Roles granted on this unit (docs/org-structure.md §13): each
+                  grant upgrades the user's effective role on the unit and its
+                  subtree; the installation role keeps applying everywhere. */}
+              <div style={{ marginTop: '1rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.75rem' }}>
+                <div className="org-section-title">{t('org.roles_title') ?? 'Roles on unit'} <span className="org-section-count">{unitRoles.length}</span></div>
+                <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0.25rem 0 0.5rem' }}>
+                  {t('org.roles_hint') ?? 'A grant upgrades the effective role on this unit and its whole subtree; the installation role still applies everywhere.'}
+                </p>
+                {unitRoles.length === 0 ? (
+                  <div style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', paddingLeft: '0.25rem' }}>{t('org.roles_empty') ?? 'No extra role grants on this unit'}</div>
+                ) : (
+                  <div style={{ display: 'grid', gap: '0.35rem', marginBottom: isAdmin ? '0.75rem' : 0 }}>
+                    {unitRoles.map((g) => {
+                      const grantee = users.find((u) => u.id === g.user_id)
+                      return (
+                        <div key={g.user_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', border: '1px solid var(--tm-border)', borderRadius: '8px', padding: '0.35rem 0.6rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', minWidth: 0 }}>
+                            <span style={{ fontSize: '0.875rem' }}>{grantee?.name ?? g.user_id}</span>
+                            <Tag type={ROLE_TAG_COLORS[g.role] ?? 'gray'} size="sm">{g.role}</Tag>
+                            {grantee?.role === 'admin' && (
+                              <Tag type="purple" size="sm" title={t('org.roles_installation_hint') ?? 'Already an installation-wide admin — this grant adds nothing.'}>
+                                {t('org.roles_installation_admin') ?? 'admin (installation)'}
+                              </Tag>
+                            )}
+                            {g.granted_by && (
+                              <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem' }} title={g.granted_at}>
+                                {t('org.roles_granted_by', { name: g.granted_by }) ?? `by ${g.granted_by}`}
+                              </span>
+                            )}
+                          </div>
+                          {isAdmin && (
+                            <Button size="sm" kind="ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('org.roles_revoke') ?? 'Revoke'} onClick={() => setRevoking(g)} />
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+                {isAdmin && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr auto', gap: '0.5rem', alignItems: 'end' }}>
+                    <Select
+                      id="org-role-user"
+                      labelText={t('org.roles_user_label') ?? 'User'}
+                      value={grantUser}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setGrantUser(e.target.value)}
+                    >
+                      <SelectItem value="" text={t('org.roles_pick_user') ?? '— pick a user —'} />
+                      {users.map((u) => <SelectItem key={u.id} value={u.id} text={u.name || u.id} />)}
+                    </Select>
+                    <Select
+                      id="org-role-kind"
+                      labelText={t('org.roles_role_label') ?? 'Role'}
+                      value={grantRoleKind}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setGrantRoleKind(e.target.value)}
+                    >
+                      {UNIT_ROLES.map((r) => <SelectItem key={r} value={r} text={t(`org.role.${r}`) ?? r} />)}
+                    </Select>
+                    <Button size="sm" renderIcon={Add} onClick={() => void grantRole()} disabled={!grantUser}>
+                      {t('org.roles_grant') ?? 'Grant'}
+                    </Button>
+                  </div>
+                )}
+              </div>
+
               {effective && (
                 <div style={{ marginTop: '1rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.75rem' }}>
                   <div className="org-section-title">{t('org.policy_effective_title') ?? 'Effective policy'}</div>
@@ -517,6 +758,69 @@ export default function Org() {
                       <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
                         <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} hasIconOnly onClick={() => openPolicyEdit(p)} />
                         <Button size="sm" kind="ghost" renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} hasIconOnly onClick={() => setDeletingPolicy(p)} />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+          </div>
+        )}
+      </div>
+
+      {/* Execution identities (docs/org-structure.md §20, §47): the security
+          contexts trigger-fired runs act under. Mutations are admin-gated
+          server-side; the UI mirrors that by hiding the controls. */}
+      <div style={{ marginTop: '1.25rem', border: '1px solid var(--tm-border)', borderRadius: '8px', padding: '1rem', background: 'var(--tm-elevated)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+          <Heading style={{ fontSize: '1rem' }}>{t('org.identities_title') ?? 'Execution identities'}</Heading>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <div style={{ width: '220px' }}>
+              <ListFilter value={identityFilter} onChange={setIdentityFilter} placeholder={t('common.filter') ?? 'Filter…'} />
+            </div>
+            {isAdmin && (
+              <Button size="sm" renderIcon={Add} onClick={openIdentityCreate}>{t('org.identity_create') ?? 'Create identity'}</Button>
+            )}
+          </div>
+        </div>
+        <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.75rem' }}>
+          {t('org.identities_hint') ?? 'Security contexts for automated runs: which agents, MCP servers, providers, projects and human question recipients a trigger-fired run may touch.'}
+        </p>
+        {identities.length === 0 ? (
+          <div style={{ color: 'var(--tm-text-3)', fontSize: '0.875rem', padding: '1rem 0.5rem', textAlign: 'center' }}>
+            <div>{t('org.identity_none') ?? 'No execution identities yet'}</div>
+            <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>{t('org.identity_none_hint') ?? 'Create one so trigger-fired runs act under their own permissions instead of the creator\'s.'}</div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '0.5rem' }}>
+            {identities
+              .filter((i) =>
+                matchesFilter(identityFilter, i.name, i.id, i.description) ||
+                matchesFilter(identityFilter, units.find((u) => u.id === i.org_unit_id)?.name))
+              .map((i) => {
+                const unit = units.find((u) => u.id === i.org_unit_id)
+                return (
+                  <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', border: '1px solid var(--tm-border)', borderRadius: '8px', padding: '0.5rem 0.75rem' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: '0.875rem' }}>{i.name}</strong>
+                        <code style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{i.id}</code>
+                        {unit
+                          ? <Tag type="blue" size="sm">{unit.name}</Tag>
+                          : <Tag type="cyan" size="sm">{t('org.policy_scope_installation') ?? 'Whole installation'}</Tag>}
+                      </div>
+                      {i.description && (
+                        <div style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.15rem' }}>{i.description}</div>
+                      )}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.35rem' }}>
+                        {identitySummaryTags(i, t).map((tag) => (
+                          <Tag key={tag.key} type="gray" size="sm">{tag.text}</Tag>
+                        ))}
+                      </div>
+                    </div>
+                    {isAdmin && (
+                      <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
+                        <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} hasIconOnly onClick={() => openIdentityEdit(i)} />
+                        <Button size="sm" kind="ghost" renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} hasIconOnly onClick={() => setDeletingIdentity(i)} />
                       </div>
                     )}
                   </div>
@@ -728,6 +1032,117 @@ export default function Org() {
             <div className="form-actions" style={{ marginTop: '0.75rem' }}>
               <Button kind="secondary" onClick={() => setDeletingPolicy(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button kind="danger" onClick={() => void doDeletePolicy()}>{t('action.delete') ?? 'Delete'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Role revoke confirm */}
+      {revoking && selectedUnit && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '460px' }}>
+            <Heading>{t('org.roles_delete_confirm', { role: revoking.role, name: userName(revoking.user_id) }) ?? `Revoke "${revoking.role}" from ${userName(revoking.user_id)}?`}</Heading>
+            <p style={{ color: 'var(--tm-text-3)', margin: '0.75rem 0' }}>
+              {t('org.roles_delete_warning') ?? 'The user keeps their installation role and any grants on ancestor units.'}
+            </p>
+            <div className="form-actions">
+              <Button kind="secondary" onClick={() => setRevoking(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button kind="danger" onClick={() => void doRevokeRole()}>{t('org.roles_revoke') ?? 'Revoke'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Identity create / edit dialog */}
+      {(editingIdentity || identityDialogOpen) && isAdmin && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '560px' }}>
+            <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>
+              {editingIdentity ? (t('org.identity_edit') ?? 'Edit identity') : (t('org.identity_create') ?? 'Create identity')}
+            </Heading>
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              <TextInput
+                id="identity-name"
+                labelText={t('org.name_label') ?? 'Name'}
+                value={identityForm.name}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdentityForm({ ...identityForm, name: e.target.value })}
+                placeholder="PR Reviewer"
+                autoFocus
+              />
+              <TextInput
+                id="identity-description"
+                labelText={t('org.identity_description_label') ?? 'Description'}
+                value={identityForm.description}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdentityForm({ ...identityForm, description: e.target.value })}
+                placeholder={t('org.identity_description_placeholder') ?? 'What this identity is for'}
+              />
+              <Select
+                id="identity-scope"
+                labelText={t('org.identity_unit_label') ?? 'Org unit'}
+                value={identityForm.org_unit_id}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setIdentityForm({ ...identityForm, org_unit_id: e.target.value })}
+                helperText={t('org.identity_unit_helper') ?? 'The identity sees resources visible in this unit and its subtree.'}
+              >
+                <SelectItem value="" text={t('org.policy_scope_installation') ?? 'Whole installation'} />
+                {flat.map(({ unit, depth }) => (
+                  <SelectItem key={unit.id} value={unit.id} text={`${'　'.repeat(depth)}${unit.name}`} />
+                ))}
+              </Select>
+              <TextInput
+                id="identity-agents"
+                labelText={t('org.identity_agents_label') ?? 'Allowed agents'}
+                value={identityForm.allowed_agents}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdentityForm({ ...identityForm, allowed_agents: e.target.value })}
+                placeholder={t('org.identity_agents_placeholder') ?? 'agent-a, agent-b — empty = any'}
+              />
+              <TextInput
+                id="identity-mcp"
+                labelText={t('org.identity_mcp_label') ?? 'Allowed MCP servers'}
+                value={identityForm.allowed_mcp}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdentityForm({ ...identityForm, allowed_mcp: e.target.value })}
+                placeholder={t('org.identity_mcp_placeholder') ?? 'server-a, server-b — empty = any'}
+              />
+              <TextInput
+                id="identity-providers"
+                labelText={t('org.identity_providers_label') ?? 'Allowed providers'}
+                value={identityForm.allowed_providers}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdentityForm({ ...identityForm, allowed_providers: e.target.value })}
+                placeholder={t('org.identity_providers_placeholder') ?? 'provider-a, provider-b — empty = any'}
+              />
+              <TextInput
+                id="identity-projects"
+                labelText={t('org.identity_projects_label') ?? 'Allowed projects'}
+                value={identityForm.allowed_projects}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdentityForm({ ...identityForm, allowed_projects: e.target.value })}
+                placeholder={t('org.identity_projects_placeholder') ?? 'project-a, project-b — empty = any'}
+              />
+              <TextInput
+                id="identity-targets"
+                labelText={t('org.identity_targets_label') ?? 'Human question recipients'}
+                value={identityForm.human_targets}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdentityForm({ ...identityForm, human_targets: e.target.value })}
+                placeholder={t('org.identity_targets_placeholder') ?? 'user-a, user-b — empty = anyone'}
+              />
+              <div className="form-actions">
+                <Button kind="secondary" onClick={() => { setEditingIdentity(null); setIdentityDialogOpen(false); setIdentityForm(emptyIdentityForm()) }}>{t('action.cancel') ?? 'Cancel'}</Button>
+                <Button onClick={() => void saveIdentity()} disabled={!identityForm.name.trim()}>{editingIdentity ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Identity delete confirm */}
+      {deletingIdentity && (
+        <div className="modal-overlay">
+          <div className="modal-panel" style={{ width: '460px' }}>
+            <Heading>{t('org.identity_delete_confirm', { name: deletingIdentity.name }) ?? `Delete identity "${deletingIdentity.name}"?`}</Heading>
+            <p style={{ color: 'var(--tm-text-3)', margin: '0.75rem 0' }}>
+              {t('org.identity_delete_warning') ?? 'If a trigger uses this identity, deletion is refused — detach it there first.'}
+            </p>
+            <div className="form-actions">
+              <Button kind="secondary" onClick={() => setDeletingIdentity(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
+              <Button kind="danger" onClick={() => void doDeleteIdentity()}>{t('action.delete') ?? 'Delete'}</Button>
             </div>
           </div>
         </div>

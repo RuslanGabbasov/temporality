@@ -9,13 +9,12 @@ import (
 
 // Project groups tasks and runs. Agents are top-level and reusable across projects.
 type Project struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Description    string   `json:"description"`
-	DefaultAgentID string   `json:"default_agent_id,omitempty"`
-	DefaultModel   string   `json:"default_model,omitempty"`
-	Archived       bool     `json:"archived,omitempty"`
-	AllowedUsers   []string `json:"allowed_users,omitempty"` // "*" = all, empty = admin only, ["user-1"] = specific users
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	DefaultAgentID string `json:"default_agent_id,omitempty"`
+	DefaultModel   string `json:"default_model,omitempty"`
+	Archived       bool   `json:"archived,omitempty"`
 	// Org bindings (docs/org-structure.md §3.4): a project spans several org
 	// units; it is visible where the project's units intersect the viewer's
 	// ancestor chain. Empty = org-neutral, visible everywhere (transition).
@@ -388,13 +387,12 @@ type UserChannel struct {
 
 // User is an operator who can log in and use the platform.
 type User struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Email    string   `json:"email,omitempty"`
-	Role     string   `json:"role"`                // viewer, operator, admin
-	Token    string   `json:"token,omitempty"`     // bearer token; only set in create/regenerate responses, never in list
-	HasToken bool     `json:"has_token,omitempty"` // list responses: whether a token exists (value is never exposed)
-	Projects []string `json:"projects,omitempty"`  // empty = all
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Email    string `json:"email,omitempty"`
+	Role     string `json:"role"`                // viewer, operator, admin
+	Token    string `json:"token,omitempty"`     // bearer token; only set in create/regenerate responses, never in list
+	HasToken bool   `json:"has_token,omitempty"` // list responses: whether a token exists (value is never exposed)
 	// Org position (docs/org-structure.md §3.3): the single unit the user
 	// belongs to; empty = unassigned, sees everything (transition semantics).
 	OrgUnitID string `json:"org_unit_id,omitempty"`
@@ -439,8 +437,7 @@ type CreateProjectRequest struct {
 	Description    string   `json:"description"`
 	DefaultAgentID string   `json:"default_agent_id"`
 	DefaultModel   string   `json:"default_model"`
-	AllowedUsers   []string `json:"allowed_users,omitempty"` // "*" = all, empty = admin only
-	OrgUnits       []string `json:"org_units,omitempty"`     // org unit ids the project spans
+	OrgUnits       []string `json:"org_units,omitempty"` // org unit ids the project spans
 }
 
 // CreateOrgUnitRequest is the payload for creating or updating an org unit.
@@ -512,8 +509,7 @@ type CreateUserRequest struct {
 	Name             string        `json:"name"`
 	Email            string        `json:"email,omitempty"`
 	Role             string        `json:"role"`
-	Token            string        `json:"token,omitempty"` // auto-generated if empty
-	Projects         []string      `json:"projects,omitempty"`
+	Token            string        `json:"token,omitempty"`       // auto-generated if empty
 	OrgUnitID        *string       `json:"org_unit_id,omitempty"` // nil on update = keep; "" = unassign
 	Active           *bool         `json:"active,omitempty"`
 	Channels         []UserChannel `json:"channels,omitempty"`
