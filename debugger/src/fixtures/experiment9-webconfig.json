@@ -1,0 +1,4341 @@
+[
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000001",
+  "occurred_at": "2026-10-07T05:10:01.000000Z",
+  "received_at": "2026-10-07T05:10:02.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.started",
+  "data": {
+   "parent_run_id": "",
+   "role": ""
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "0dd07a0e-47df-586f-9157-b0d057d45d93",
+  "occurred_at": "2026-10-07T05:10:03.000000Z",
+  "received_at": "2026-10-07T05:10:04.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.query",
+  "data": {
+   "query": "how does webconfig connect to its database"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000002",
+  "occurred_at": "2026-10-07T05:10:05.000000Z",
+  "received_at": "2026-10-07T05:10:06.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-01/turn/01/call_e898d19423c1cf17",
+    "arguments": {
+     "command": [
+      "cat",
+      "README.md"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000003",
+  "occurred_at": "2026-10-07T05:10:07.000000Z",
+  "received_at": "2026-10-07T05:10:08.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-01/turn/01/call_e898d19423c1cf17",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000004",
+  "occurred_at": "2026-10-07T05:10:09.000000Z",
+  "received_at": "2026-10-07T05:10:10.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-01/turn/01/call_e898d19423c1cf17",
+   "tool": "run_command",
+   "output": "configure via DATABASE_URL, config.yaml or --db-url",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000005",
+  "occurred_at": "2026-10-07T05:10:11.000000Z",
+  "received_at": "2026-10-07T05:10:12.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-01/turn/02/call_2479dcdd274dc0c1",
+    "arguments": {
+     "command": [
+      "go",
+      "build",
+      "-o",
+      "/tmp/webconfig",
+      "."
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000006",
+  "occurred_at": "2026-10-07T05:10:13.000000Z",
+  "received_at": "2026-10-07T05:10:14.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-01/turn/02/call_2479dcdd274dc0c1",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000007",
+  "occurred_at": "2026-10-07T05:10:15.000000Z",
+  "received_at": "2026-10-07T05:10:16.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-01/turn/02/call_2479dcdd274dc0c1",
+   "tool": "run_command",
+   "output": "",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000008",
+  "occurred_at": "2026-10-07T05:10:17.000000Z",
+  "received_at": "2026-10-07T05:10:18.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.proposed",
+  "data": {
+   "knowledge_id": "auto/3f9c1d84a2b7e6d50c91f4a2",
+   "proposition": "Build command `go build -o OUT .` exited 0 in workspace /workspace",
+   "kind": "observation",
+   "policy_id": "kernel-heuristic/execution-observation.v1",
+   "command": "go build -o OUT .",
+   "command_class": "build",
+   "exit_code": 0
+  },
+  "evidence": [
+   {
+    "ref": "webconfig-20261007-01/turn/02/call_2479dcdd274dc0c1",
+    "type": "execution"
+   }
+  ]
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000009",
+  "occurred_at": "2026-10-07T05:10:19.000000Z",
+  "received_at": "2026-10-07T05:10:20.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-01/turn/03/call_3c79f605da456dec",
+    "arguments": {
+     "command": [
+      "DATABASE_URL=postgres://localhost/app",
+      "./webconfig",
+      "migrate"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000010",
+  "occurred_at": "2026-10-07T05:10:21.000000Z",
+  "received_at": "2026-10-07T05:10:22.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-01/turn/03/call_3c79f605da456dec",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000011",
+  "occurred_at": "2026-10-07T05:10:23.000000Z",
+  "received_at": "2026-10-07T05:10:24.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-01/turn/03/call_3c79f605da456dec",
+   "tool": "run_command",
+   "output": "migrate: ok",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000012",
+  "occurred_at": "2026-10-07T05:10:25.000000Z",
+  "received_at": "2026-10-07T05:10:26.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-01/turn/04/call_a0e414c74f3c762e",
+    "arguments": {
+     "command": [
+      "go",
+      "test",
+      "./..."
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000013",
+  "occurred_at": "2026-10-07T05:10:27.000000Z",
+  "received_at": "2026-10-07T05:10:28.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-01/turn/04/call_a0e414c74f3c762e",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000014",
+  "occurred_at": "2026-10-07T05:10:29.000000Z",
+  "received_at": "2026-10-07T05:10:30.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-01/turn/04/call_a0e414c74f3c762e",
+   "tool": "run_command",
+   "output": "ok  webconfig  0.012s",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000015",
+  "occurred_at": "2026-10-07T05:10:31.000000Z",
+  "received_at": "2026-10-07T05:10:32.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.proposed",
+  "data": {
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4",
+   "proposition": "Verification command `go test ./...` exited 0 in workspace /workspace",
+   "kind": "observation",
+   "policy_id": "kernel-heuristic/execution-observation.v1",
+   "command": "go test ./...",
+   "command_class": "test",
+   "exit_code": 0
+  },
+  "evidence": [
+   {
+    "ref": "webconfig-20261007-01/turn/04/call_a0e414c74f3c762e",
+    "type": "execution"
+   }
+  ]
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000016",
+  "occurred_at": "2026-10-07T05:10:33.000000Z",
+  "received_at": "2026-10-07T05:10:34.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.proposed",
+  "data": {
+   "knowledge_id": "webconfig-20261007-01/knowledge/41",
+   "proposition": "webconfig reads its database connection from the `DATABASE_URL` environment variable: `DATABASE_URL=postgres://localhost/app ./webconfig migrate` prints 'migrate: ok' and exits 0.",
+   "kind": "claim",
+   "operation_id": "webconfig-20261007-01/turn/09/call_c816fad95db2d1b9",
+   "arguments_hash": "sha256:58f2ef36932e959771e5e2232f2b7545"
+  },
+  "evidence": [
+   {
+    "ref": "run 1: DATABASE_URL=postgres://localhost/app ./webconfig migrate -> exit 0, 'migrate: ok'",
+    "type": "artifact"
+   },
+   {
+    "ref": "run 1: go build -o /tmp/webconfig . -> exit 0",
+    "type": "artifact"
+   }
+  ]
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000017",
+  "occurred_at": "2026-10-07T05:10:35.000000Z",
+  "received_at": "2026-10-07T05:10:36.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "agent.summary",
+  "data": {
+   "answer": "webconfig connects through the DATABASE_URL environment variable; recorded with evidence."
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a179be7a1fac95cfdde382d438a1dbfc/event/000018",
+  "occurred_at": "2026-10-07T05:10:37.000000Z",
+  "received_at": "2026-10-07T05:10:38.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-01",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.completed",
+  "data": {
+   "status": "completed"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000001",
+  "occurred_at": "2026-10-07T05:10:39.000000Z",
+  "received_at": "2026-10-07T05:10:40.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.started",
+  "data": {
+   "parent_run_id": "",
+   "role": ""
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "43aec922-744a-52a0-b033-36d6707ca59f",
+  "occurred_at": "2026-10-07T05:10:41.000000Z",
+  "received_at": "2026-10-07T05:10:42.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.query",
+  "data": {
+   "query": "is there another way, e.g. a config file"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "5b326951-c9ec-5225-96d5-38941fa14aab",
+  "occurred_at": "2026-10-07T05:10:43.000000Z",
+  "received_at": "2026-10-07T05:10:44.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "5b326951-c9ec-5225-96d5-38941fa14aab",
+   "knowledge_id": "webconfig-20261007-01/knowledge/41",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000002",
+  "occurred_at": "2026-10-07T05:10:45.000000Z",
+  "received_at": "2026-10-07T05:10:46.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "5b326951-c9ec-5225-96d5-38941fa14aab",
+   "knowledge_id": "webconfig-20261007-01/knowledge/41"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000003",
+  "occurred_at": "2026-10-07T05:10:47.000000Z",
+  "received_at": "2026-10-07T05:10:48.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-02/turn/01/call_da16724ee789fb4d",
+    "arguments": {
+     "command": [
+      "DATABASE_URL=postgres://localhost/app",
+      "./webconfig",
+      "migrate"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000004",
+  "occurred_at": "2026-10-07T05:10:49.000000Z",
+  "received_at": "2026-10-07T05:10:50.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-02/turn/01/call_da16724ee789fb4d",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000005",
+  "occurred_at": "2026-10-07T05:10:51.000000Z",
+  "received_at": "2026-10-07T05:10:52.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-02/turn/01/call_da16724ee789fb4d",
+   "tool": "run_command",
+   "output": "migrate: ok",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000006",
+  "occurred_at": "2026-10-07T05:10:53.000000Z",
+  "received_at": "2026-10-07T05:10:54.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.confirmed",
+  "data": {
+   "knowledge_id": "webconfig-20261007-01/knowledge/41",
+   "rule": "extraction-reverification.v1",
+   "extraction_id": "extraction-b9f24586d66e",
+   "extractor_version": "knowledge-extractor/v3"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000007",
+  "occurred_at": "2026-10-07T05:10:55.000000Z",
+  "received_at": "2026-10-07T05:10:56.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-02/turn/02/call_aedf7b17196eb896",
+    "arguments": {
+     "command": [
+      "./webconfig",
+      "serve",
+      "--config",
+      "config.yaml"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000008",
+  "occurred_at": "2026-10-07T05:10:57.000000Z",
+  "received_at": "2026-10-07T05:10:58.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-02/turn/02/call_aedf7b17196eb896",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000009",
+  "occurred_at": "2026-10-07T05:10:59.000000Z",
+  "received_at": "2026-10-07T05:11:00.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-02/turn/02/call_aedf7b17196eb896",
+   "tool": "run_command",
+   "output": "serving db from config.yaml",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000010",
+  "occurred_at": "2026-10-07T05:11:01.000000Z",
+  "received_at": "2026-10-07T05:11:02.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.proposed",
+  "data": {
+   "knowledge_id": "webconfig-20261007-02/knowledge/43",
+   "proposition": "webconfig also accepts the database URL from config.yaml: `./webconfig serve --config config.yaml` prints 'serving db from config.yaml' and exits 0, independent of DATABASE_URL.",
+   "kind": "claim",
+   "operation_id": "webconfig-20261007-02/turn/09/call_01abd746a42ae51f",
+   "arguments_hash": "sha256:b670d29b587bb0c933582317295b6b7d"
+  },
+  "evidence": [
+   {
+    "ref": "run 2: ./webconfig serve --config config.yaml -> exit 0, 'serving db from config.yaml'",
+    "type": "artifact"
+   }
+  ]
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000011",
+  "occurred_at": "2026-10-07T05:11:03.000000Z",
+  "received_at": "2026-10-07T05:11:04.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-02/turn/03/call_3cd5d41059e3b263",
+    "arguments": {
+     "command": [
+      "go",
+      "test",
+      "./..."
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000012",
+  "occurred_at": "2026-10-07T05:11:05.000000Z",
+  "received_at": "2026-10-07T05:11:06.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-02/turn/03/call_3cd5d41059e3b263",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000013",
+  "occurred_at": "2026-10-07T05:11:07.000000Z",
+  "received_at": "2026-10-07T05:11:08.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-02/turn/03/call_3cd5d41059e3b263",
+   "tool": "run_command",
+   "output": "ok  webconfig  0.011s",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000014",
+  "occurred_at": "2026-10-07T05:11:09.000000Z",
+  "received_at": "2026-10-07T05:11:10.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.confirmed",
+  "data": {
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4",
+   "rule": "execution-reverification.v1",
+   "command": "go test ./...",
+   "operation_id": "webconfig-20261007-02/turn/03/call_3cd5d41059e3b263"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000015",
+  "occurred_at": "2026-10-07T05:11:11.000000Z",
+  "received_at": "2026-10-07T05:11:12.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "agent.summary",
+  "data": {
+   "answer": "config.yaml works too; re-verified the DATABASE_URL path."
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b9f24586d66e4e63ca73fb86dfce80c4/event/000016",
+  "occurred_at": "2026-10-07T05:11:13.000000Z",
+  "received_at": "2026-10-07T05:11:14.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-02",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.completed",
+  "data": {
+   "status": "completed"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "d65ae08eadf226f8224cae0cfe55e0c0/event/000001",
+  "occurred_at": "2026-10-07T05:11:15.000000Z",
+  "received_at": "2026-10-07T05:11:16.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.started",
+  "data": {
+   "parent_run_id": "",
+   "role": ""
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "edd95cc5-cc4d-5e41-88d6-5fb041372e16",
+  "occurred_at": "2026-10-07T05:11:17.000000Z",
+  "received_at": "2026-10-07T05:11:18.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.query",
+  "data": {
+   "query": "does --db-url override the other mechanisms"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "e37c049b-0b63-56f4-87bf-f071b43ceac0",
+  "occurred_at": "2026-10-07T05:11:19.000000Z",
+  "received_at": "2026-10-07T05:11:20.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "e37c049b-0b63-56f4-87bf-f071b43ceac0",
+   "knowledge_id": "webconfig-20261007-01/knowledge/41",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "41313eff-690e-5cdf-8d3f-0cab78b378c0",
+  "occurred_at": "2026-10-07T05:11:21.000000Z",
+  "received_at": "2026-10-07T05:11:22.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "41313eff-690e-5cdf-8d3f-0cab78b378c0",
+   "knowledge_id": "webconfig-20261007-02/knowledge/43",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "d65ae08eadf226f8224cae0cfe55e0c0/event/000002",
+  "occurred_at": "2026-10-07T05:11:23.000000Z",
+  "received_at": "2026-10-07T05:11:24.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "41313eff-690e-5cdf-8d3f-0cab78b378c0",
+   "knowledge_id": "webconfig-20261007-02/knowledge/43"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "d65ae08eadf226f8224cae0cfe55e0c0/event/000003",
+  "occurred_at": "2026-10-07T05:11:25.000000Z",
+  "received_at": "2026-10-07T05:11:26.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-03/turn/01/call_fbb95b3177e21aaa",
+    "arguments": {
+     "command": [
+      "./webconfig",
+      "serve",
+      "--config",
+      "config.yaml",
+      "--db-url",
+      "postgres://flag/db"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "d65ae08eadf226f8224cae0cfe55e0c0/event/000004",
+  "occurred_at": "2026-10-07T05:11:27.000000Z",
+  "received_at": "2026-10-07T05:11:28.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-03/turn/01/call_fbb95b3177e21aaa",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "d65ae08eadf226f8224cae0cfe55e0c0/event/000005",
+  "occurred_at": "2026-10-07T05:11:29.000000Z",
+  "received_at": "2026-10-07T05:11:30.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-03/turn/01/call_fbb95b3177e21aaa",
+   "tool": "run_command",
+   "output": "serving db from --db-url",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "d65ae08eadf226f8224cae0cfe55e0c0/event/000006",
+  "occurred_at": "2026-10-07T05:11:31.000000Z",
+  "received_at": "2026-10-07T05:11:32.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.proposed",
+  "data": {
+   "knowledge_id": "webconfig-20261007-03/knowledge/47",
+   "proposition": "The `--db-url` flag has the highest priority: `./webconfig serve --config config.yaml --db-url postgres://flag/db` uses the flag value even when DATABASE_URL and config.yaml are both set.",
+   "kind": "claim",
+   "operation_id": "webconfig-20261007-03/turn/09/call_cd440a31e25919cf",
+   "arguments_hash": "sha256:b37f1c9c0aafb55755a39dfc12503222"
+  },
+  "evidence": [
+   {
+    "ref": "run 3: ./webconfig serve --config config.yaml --db-url postgres://flag/db -> exit 0, flag value wins",
+    "type": "artifact"
+   }
+  ]
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "d65ae08eadf226f8224cae0cfe55e0c0/event/000007",
+  "occurred_at": "2026-10-07T05:11:33.000000Z",
+  "received_at": "2026-10-07T05:11:34.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.challenged",
+  "data": {
+   "knowledge_id": "webconfig-20261007-01/knowledge/41",
+   "rule": "extraction-contradiction.v1",
+   "reason": "--db-url overrides the environment variable"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "d65ae08eadf226f8224cae0cfe55e0c0/event/000008",
+  "occurred_at": "2026-10-07T05:11:35.000000Z",
+  "received_at": "2026-10-07T05:11:36.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.challenged",
+  "data": {
+   "knowledge_id": "webconfig-20261007-02/knowledge/43",
+   "rule": "extraction-contradiction.v1",
+   "reason": "--db-url overrides config.yaml"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "d65ae08eadf226f8224cae0cfe55e0c0/event/000009",
+  "occurred_at": "2026-10-07T05:11:37.000000Z",
+  "received_at": "2026-10-07T05:11:38.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "agent.summary",
+  "data": {
+   "answer": "The flag wins over both env and file."
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "d65ae08eadf226f8224cae0cfe55e0c0/event/000010",
+  "occurred_at": "2026-10-07T05:11:39.000000Z",
+  "received_at": "2026-10-07T05:11:40.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-03",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.completed",
+  "data": {
+   "status": "completed"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000001",
+  "occurred_at": "2026-10-07T05:11:41.000000Z",
+  "received_at": "2026-10-07T05:11:42.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.started",
+  "data": {
+   "parent_run_id": "",
+   "role": ""
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "307e24dd-473d-5d7d-9fbd-de25746d28d2",
+  "occurred_at": "2026-10-07T05:11:43.000000Z",
+  "received_at": "2026-10-07T05:11:44.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.query",
+  "data": {
+   "query": "nothing works after the upgrade - find out what still does"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "71e74536-41db-5eec-9bc3-4a54dc4a8734",
+  "occurred_at": "2026-10-07T05:11:45.000000Z",
+  "received_at": "2026-10-07T05:11:46.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "71e74536-41db-5eec-9bc3-4a54dc4a8734",
+   "knowledge_id": "webconfig-20261007-01/knowledge/41",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000002",
+  "occurred_at": "2026-10-07T05:11:47.000000Z",
+  "received_at": "2026-10-07T05:11:48.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "71e74536-41db-5eec-9bc3-4a54dc4a8734",
+   "knowledge_id": "webconfig-20261007-01/knowledge/41"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "df9fc2b1-fb2a-526d-8bf0-ef8566668aee",
+  "occurred_at": "2026-10-07T05:11:49.000000Z",
+  "received_at": "2026-10-07T05:11:50.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "df9fc2b1-fb2a-526d-8bf0-ef8566668aee",
+   "knowledge_id": "webconfig-20261007-02/knowledge/43",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000003",
+  "occurred_at": "2026-10-07T05:11:51.000000Z",
+  "received_at": "2026-10-07T05:11:52.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "df9fc2b1-fb2a-526d-8bf0-ef8566668aee",
+   "knowledge_id": "webconfig-20261007-02/knowledge/43"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "43718571-1267-5f45-89c6-8a6c90c93ef7",
+  "occurred_at": "2026-10-07T05:11:53.000000Z",
+  "received_at": "2026-10-07T05:11:54.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "43718571-1267-5f45-89c6-8a6c90c93ef7",
+   "knowledge_id": "webconfig-20261007-03/knowledge/47",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000004",
+  "occurred_at": "2026-10-07T05:11:55.000000Z",
+  "received_at": "2026-10-07T05:11:56.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-04/turn/01/call_709de6d61bcf19f0",
+    "arguments": {
+     "command": [
+      "DATABASE_URL=postgres://localhost/app",
+      "./webconfig",
+      "migrate"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000005",
+  "occurred_at": "2026-10-07T05:11:57.000000Z",
+  "received_at": "2026-10-07T05:11:58.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-04/turn/01/call_709de6d61bcf19f0",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000006",
+  "occurred_at": "2026-10-07T05:11:59.000000Z",
+  "received_at": "2026-10-07T05:12:00.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-04/turn/01/call_709de6d61bcf19f0",
+   "tool": "run_command",
+   "output": "migrate failed: DATABASE_URL is not supported in v2",
+   "exit_code": 1
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000007",
+  "occurred_at": "2026-10-07T05:12:01.000000Z",
+  "received_at": "2026-10-07T05:12:02.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-04/turn/02/call_fba30bf02947fe72",
+    "arguments": {
+     "command": [
+      "./webconfig",
+      "serve",
+      "--db-url",
+      "postgres://flag/db"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000008",
+  "occurred_at": "2026-10-07T05:12:03.000000Z",
+  "received_at": "2026-10-07T05:12:04.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-04/turn/02/call_fba30bf02947fe72",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000009",
+  "occurred_at": "2026-10-07T05:12:05.000000Z",
+  "received_at": "2026-10-07T05:12:06.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-04/turn/02/call_fba30bf02947fe72",
+   "tool": "run_command",
+   "output": "flag provided but not defined: -db-url",
+   "exit_code": 2
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000010",
+  "occurred_at": "2026-10-07T05:12:07.000000Z",
+  "received_at": "2026-10-07T05:12:08.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-04/turn/03/call_a6830364ebfa36fb",
+    "arguments": {
+     "command": [
+      "./webconfig",
+      "serve",
+      "--config",
+      "config.yaml"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000011",
+  "occurred_at": "2026-10-07T05:12:09.000000Z",
+  "received_at": "2026-10-07T05:12:10.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-04/turn/03/call_a6830364ebfa36fb",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000012",
+  "occurred_at": "2026-10-07T05:12:11.000000Z",
+  "received_at": "2026-10-07T05:12:12.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-04/turn/03/call_a6830364ebfa36fb",
+   "tool": "run_command",
+   "output": "serving db from config.yaml",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000013",
+  "occurred_at": "2026-10-07T05:12:13.000000Z",
+  "received_at": "2026-10-07T05:12:14.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.confirmed",
+  "data": {
+   "knowledge_id": "webconfig-20261007-02/knowledge/43",
+   "rule": "extraction-reverification.v1",
+   "extraction_id": "extraction-ad302eaae5c8",
+   "extractor_version": "knowledge-extractor/v3"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000014",
+  "occurred_at": "2026-10-07T05:12:15.000000Z",
+  "received_at": "2026-10-07T05:12:16.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.proposed",
+  "data": {
+   "knowledge_id": "webconfig-20261007-04/knowledge/51",
+   "proposition": "End to end after the v2 upgrade: (1) `go build -o /tmp/webconfig .` still exits 0, (2) `./webconfig serve --config config.yaml` is the only working database configuration path, (3) `DATABASE_URL=postgres://localhost/app ./webconfig migrate` now fails with exit 1 and the `--db-url` flag is rejected as unknown.",
+   "kind": "claim",
+   "operation_id": "webconfig-20261007-04/turn/09/call_32321b77db5eb1b0",
+   "arguments_hash": "sha256:2e2fc626792b02a3114d9b60c87a0b48"
+  },
+  "evidence": [
+   {
+    "ref": "run 4: DATABASE_URL=... ./webconfig migrate -> exit 1",
+    "type": "artifact"
+   },
+   {
+    "ref": "run 4: ./webconfig serve --db-url ... -> exit 2, unknown flag",
+    "type": "artifact"
+   },
+   {
+    "ref": "run 4: ./webconfig serve --config config.yaml -> exit 0",
+    "type": "artifact"
+   }
+  ]
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000015",
+  "occurred_at": "2026-10-07T05:12:17.000000Z",
+  "received_at": "2026-10-07T05:12:18.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-04/turn/04/call_7c291edb26c96086",
+    "arguments": {
+     "command": [
+      "go",
+      "test",
+      "./..."
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000016",
+  "occurred_at": "2026-10-07T05:12:19.000000Z",
+  "received_at": "2026-10-07T05:12:20.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-04/turn/04/call_7c291edb26c96086",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000017",
+  "occurred_at": "2026-10-07T05:12:21.000000Z",
+  "received_at": "2026-10-07T05:12:22.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-04/turn/04/call_7c291edb26c96086",
+   "tool": "run_command",
+   "output": "ok  webconfig  0.010s",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000018",
+  "occurred_at": "2026-10-07T05:12:23.000000Z",
+  "received_at": "2026-10-07T05:12:24.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4",
+   "rule": "execution-reuse.v1",
+   "command": "go test ./...",
+   "operation_id": "webconfig-20261007-04/turn/04/call_7c291edb26c96086"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000019",
+  "occurred_at": "2026-10-07T05:12:25.000000Z",
+  "received_at": "2026-10-07T05:12:26.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "agent.summary",
+  "data": {
+   "answer": "Only config.yaml works in v2."
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ad302eaae5c80dd41688ddad1d819426/event/000020",
+  "occurred_at": "2026-10-07T05:12:27.000000Z",
+  "received_at": "2026-10-07T05:12:28.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-04",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.completed",
+  "data": {
+   "status": "completed"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "9b26a060-1712-57f8-9266-93d672ac1e72",
+  "occurred_at": "2026-10-07T05:12:29.000000Z",
+  "received_at": "2026-10-07T05:12:30.000000Z",
+  "source": {
+   "id": "temporality-manual",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": null,
+   "actor": {
+    "id": "human-operator",
+    "type": "human"
+   }
+  },
+  "type": "knowledge.invalidated",
+  "data": {
+   "knowledge_id": "webconfig-20261007-03/knowledge/47",
+   "reason": "webconfig v2 removed flag parsing; the flag note no longer holds and nothing replaces it directly"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000001",
+  "occurred_at": "2026-10-07T05:12:31.000000Z",
+  "received_at": "2026-10-07T05:12:32.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.started",
+  "data": {
+   "parent_run_id": "",
+   "role": ""
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "1e354241-9dc9-523c-8cbc-c56cdfde22c7",
+  "occurred_at": "2026-10-07T05:12:33.000000Z",
+  "received_at": "2026-10-07T05:12:34.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.query",
+  "data": {
+   "query": "run the nightly check"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "05d8fb24-f767-530f-9ccd-e97d27075713",
+  "occurred_at": "2026-10-07T05:12:35.000000Z",
+  "received_at": "2026-10-07T05:12:36.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "05d8fb24-f767-530f-9ccd-e97d27075713",
+   "knowledge_id": "webconfig-20261007-01/knowledge/41",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "417fb4e6-f688-51bf-8878-8add68d185b9",
+  "occurred_at": "2026-10-07T05:12:37.000000Z",
+  "received_at": "2026-10-07T05:12:38.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.ignored",
+  "data": {
+   "hint_id": "05d8fb24-f767-530f-9ccd-e97d27075713",
+   "knowledge_id": "webconfig-20261007-01/knowledge/41",
+   "matcher": "hint-usage-lexical.v1"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "5dec3fc4-96b2-5c52-84de-d18b54f9aef1",
+  "occurred_at": "2026-10-07T05:12:39.000000Z",
+  "received_at": "2026-10-07T05:12:40.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "5dec3fc4-96b2-5c52-84de-d18b54f9aef1",
+   "knowledge_id": "webconfig-20261007-02/knowledge/43",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000002",
+  "occurred_at": "2026-10-07T05:12:41.000000Z",
+  "received_at": "2026-10-07T05:12:42.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "5dec3fc4-96b2-5c52-84de-d18b54f9aef1",
+   "knowledge_id": "webconfig-20261007-02/knowledge/43"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "60f72c4a-137e-5eac-aac0-4535b106d610",
+  "occurred_at": "2026-10-07T05:12:43.000000Z",
+  "received_at": "2026-10-07T05:12:44.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "60f72c4a-137e-5eac-aac0-4535b106d610",
+   "knowledge_id": "webconfig-20261007-04/knowledge/51",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000003",
+  "occurred_at": "2026-10-07T05:12:45.000000Z",
+  "received_at": "2026-10-07T05:12:46.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "60f72c4a-137e-5eac-aac0-4535b106d610",
+   "knowledge_id": "webconfig-20261007-04/knowledge/51"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "ee8127f1-1917-52de-bec2-a9f7690b4a41",
+  "occurred_at": "2026-10-07T05:12:47.000000Z",
+  "received_at": "2026-10-07T05:12:48.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "ee8127f1-1917-52de-bec2-a9f7690b4a41",
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000004",
+  "occurred_at": "2026-10-07T05:12:49.000000Z",
+  "received_at": "2026-10-07T05:12:50.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "ee8127f1-1917-52de-bec2-a9f7690b4a41",
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000005",
+  "occurred_at": "2026-10-07T05:12:51.000000Z",
+  "received_at": "2026-10-07T05:12:52.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-05/turn/01/call_d7c367f928fc722a",
+    "arguments": {
+     "command": [
+      "go",
+      "build",
+      "-o",
+      "/tmp/webconfig",
+      "."
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000006",
+  "occurred_at": "2026-10-07T05:12:53.000000Z",
+  "received_at": "2026-10-07T05:12:54.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-05/turn/01/call_d7c367f928fc722a",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000007",
+  "occurred_at": "2026-10-07T05:12:55.000000Z",
+  "received_at": "2026-10-07T05:12:56.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-05/turn/01/call_d7c367f928fc722a",
+   "tool": "run_command",
+   "output": "",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000008",
+  "occurred_at": "2026-10-07T05:12:57.000000Z",
+  "received_at": "2026-10-07T05:12:58.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.confirmed",
+  "data": {
+   "knowledge_id": "auto/3f9c1d84a2b7e6d50c91f4a2",
+   "rule": "execution-reverification.v1",
+   "command": "go build -o OUT .",
+   "operation_id": "webconfig-20261007-05/turn/01/call_d7c367f928fc722a"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000009",
+  "occurred_at": "2026-10-07T05:12:59.000000Z",
+  "received_at": "2026-10-07T05:13:00.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-05/turn/02/call_8d86f8cb86421f58",
+    "arguments": {
+     "command": [
+      "./webconfig",
+      "serve",
+      "--config",
+      "config.yaml"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000010",
+  "occurred_at": "2026-10-07T05:13:01.000000Z",
+  "received_at": "2026-10-07T05:13:02.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-05/turn/02/call_8d86f8cb86421f58",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000011",
+  "occurred_at": "2026-10-07T05:13:03.000000Z",
+  "received_at": "2026-10-07T05:13:04.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-05/turn/02/call_8d86f8cb86421f58",
+   "tool": "run_command",
+   "output": "serving db from config.yaml",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000012",
+  "occurred_at": "2026-10-07T05:13:05.000000Z",
+  "received_at": "2026-10-07T05:13:06.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.confirmed",
+  "data": {
+   "knowledge_id": "webconfig-20261007-02/knowledge/43",
+   "rule": "extraction-reverification.v1",
+   "extraction_id": "extraction-c3c577a07415",
+   "extractor_version": "knowledge-extractor/v3"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000013",
+  "occurred_at": "2026-10-07T05:13:07.000000Z",
+  "received_at": "2026-10-07T05:13:08.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-05/turn/03/call_beec699da33df784",
+    "arguments": {
+     "command": [
+      "go",
+      "test",
+      "./..."
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000014",
+  "occurred_at": "2026-10-07T05:13:09.000000Z",
+  "received_at": "2026-10-07T05:13:10.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-05/turn/03/call_beec699da33df784",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000015",
+  "occurred_at": "2026-10-07T05:13:11.000000Z",
+  "received_at": "2026-10-07T05:13:12.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-05/turn/03/call_beec699da33df784",
+   "tool": "run_command",
+   "output": "ok  webconfig  0.009s",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000016",
+  "occurred_at": "2026-10-07T05:13:13.000000Z",
+  "received_at": "2026-10-07T05:13:14.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4",
+   "rule": "execution-reuse.v1",
+   "command": "go test ./...",
+   "operation_id": "webconfig-20261007-05/turn/03/call_beec699da33df784"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000017",
+  "occurred_at": "2026-10-07T05:13:15.000000Z",
+  "received_at": "2026-10-07T05:13:16.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "agent.summary",
+  "data": {
+   "answer": "Nightly check green."
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c3c577a07415f571e8dab555a8071590/event/000018",
+  "occurred_at": "2026-10-07T05:13:17.000000Z",
+  "received_at": "2026-10-07T05:13:18.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-05",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.completed",
+  "data": {
+   "status": "completed"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c2112785f66d92f515d28d883ad204ea/event/000001",
+  "occurred_at": "2026-10-07T05:13:19.000000Z",
+  "received_at": "2026-10-07T05:13:20.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.started",
+  "data": {
+   "parent_run_id": "",
+   "role": ""
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "1db06ba3-4c7a-5d34-be08-e633352e5123",
+  "occurred_at": "2026-10-07T05:13:21.000000Z",
+  "received_at": "2026-10-07T05:13:22.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.query",
+  "data": {
+   "query": "has anything changed with v3"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "18de71f0-6515-579b-888f-4dcacbe7e6e5",
+  "occurred_at": "2026-10-07T05:13:23.000000Z",
+  "received_at": "2026-10-07T05:13:24.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "18de71f0-6515-579b-888f-4dcacbe7e6e5",
+   "knowledge_id": "webconfig-20261007-02/knowledge/43",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c2112785f66d92f515d28d883ad204ea/event/000002",
+  "occurred_at": "2026-10-07T05:13:25.000000Z",
+  "received_at": "2026-10-07T05:13:26.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "18de71f0-6515-579b-888f-4dcacbe7e6e5",
+   "knowledge_id": "webconfig-20261007-02/knowledge/43"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a86d87d9-9a34-574d-b84d-22b194b2d38f",
+  "occurred_at": "2026-10-07T05:13:27.000000Z",
+  "received_at": "2026-10-07T05:13:28.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "a86d87d9-9a34-574d-b84d-22b194b2d38f",
+   "knowledge_id": "webconfig-20261007-04/knowledge/51",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c2112785f66d92f515d28d883ad204ea/event/000003",
+  "occurred_at": "2026-10-07T05:13:29.000000Z",
+  "received_at": "2026-10-07T05:13:30.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "a86d87d9-9a34-574d-b84d-22b194b2d38f",
+   "knowledge_id": "webconfig-20261007-04/knowledge/51"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "9ddf1608-25ee-5912-954e-af8372da1734",
+  "occurred_at": "2026-10-07T05:13:31.000000Z",
+  "received_at": "2026-10-07T05:13:32.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "9ddf1608-25ee-5912-954e-af8372da1734",
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c2112785f66d92f515d28d883ad204ea/event/000004",
+  "occurred_at": "2026-10-07T05:13:33.000000Z",
+  "received_at": "2026-10-07T05:13:34.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-06/turn/01/call_610eae11c81e2e72",
+    "arguments": {
+     "command": [
+      "DATABASE_URL=postgres://localhost/app",
+      "./webconfig",
+      "migrate"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c2112785f66d92f515d28d883ad204ea/event/000005",
+  "occurred_at": "2026-10-07T05:13:35.000000Z",
+  "received_at": "2026-10-07T05:13:36.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-06/turn/01/call_610eae11c81e2e72",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c2112785f66d92f515d28d883ad204ea/event/000006",
+  "occurred_at": "2026-10-07T05:13:37.000000Z",
+  "received_at": "2026-10-07T05:13:38.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-06/turn/01/call_610eae11c81e2e72",
+   "tool": "run_command",
+   "output": "migrate: ok",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c2112785f66d92f515d28d883ad204ea/event/000007",
+  "occurred_at": "2026-10-07T05:13:39.000000Z",
+  "received_at": "2026-10-07T05:13:40.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.proposed",
+  "data": {
+   "knowledge_id": "webconfig-20261007-06/knowledge/57",
+   "proposition": "webconfig v3 restores the environment mechanism: `DATABASE_URL=postgres://localhost/app ./webconfig migrate` exits 0 again, so the env-var configuration path is valid once more; config.yaml keeps working and the flag stays removed.",
+   "kind": "claim",
+   "operation_id": "webconfig-20261007-06/turn/09/call_639964e1319f76cf",
+   "arguments_hash": "sha256:9f64ea3160fefe32142b12911d399fb2"
+  },
+  "evidence": [
+   {
+    "ref": "run 6: DATABASE_URL=postgres://localhost/app ./webconfig migrate -> exit 0, 'migrate: ok' (again)",
+    "type": "artifact"
+   }
+  ]
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c2112785f66d92f515d28d883ad204ea/event/000008",
+  "occurred_at": "2026-10-07T05:13:41.000000Z",
+  "received_at": "2026-10-07T05:13:42.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-06/turn/02/call_a100ab31e5283784",
+    "arguments": {
+     "command": [
+      "./webconfig",
+      "serve",
+      "--config",
+      "config.yaml"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c2112785f66d92f515d28d883ad204ea/event/000009",
+  "occurred_at": "2026-10-07T05:13:43.000000Z",
+  "received_at": "2026-10-07T05:13:44.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-06/turn/02/call_a100ab31e5283784",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c2112785f66d92f515d28d883ad204ea/event/000010",
+  "occurred_at": "2026-10-07T05:13:45.000000Z",
+  "received_at": "2026-10-07T05:13:46.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-06/turn/02/call_a100ab31e5283784",
+   "tool": "run_command",
+   "output": "serving db from config.yaml",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c2112785f66d92f515d28d883ad204ea/event/000011",
+  "occurred_at": "2026-10-07T05:13:47.000000Z",
+  "received_at": "2026-10-07T05:13:48.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "agent.summary",
+  "data": {
+   "answer": "The env-var path is back in v3."
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "c2112785f66d92f515d28d883ad204ea/event/000012",
+  "occurred_at": "2026-10-07T05:13:49.000000Z",
+  "received_at": "2026-10-07T05:13:50.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-06",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.completed",
+  "data": {
+   "status": "completed"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a02bd8a3-3f15-59a1-afa4-39da92d93c5a",
+  "occurred_at": "2026-10-07T05:13:51.000000Z",
+  "received_at": "2026-10-07T05:13:52.000000Z",
+  "source": {
+   "id": "temporality-manual",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": null,
+   "actor": {
+    "id": "human-operator",
+    "type": "human"
+   }
+  },
+  "type": "knowledge.invalidated",
+  "data": {
+   "knowledge_id": "webconfig-20261007-01/knowledge/41",
+   "reason": "the v1 env-var note webconfig-20261007-01/knowledge/41 is superseded by the resurrected v3 note webconfig-20261007-06/knowledge/57"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "3e0ab2170d477b47b494739b8ef21992/event/000001",
+  "occurred_at": "2026-10-07T05:13:53.000000Z",
+  "received_at": "2026-10-07T05:13:54.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.started",
+  "data": {
+   "parent_run_id": "",
+   "role": ""
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "94aa9556-4846-5710-a901-a73e2f0eacf3",
+  "occurred_at": "2026-10-07T05:13:55.000000Z",
+  "received_at": "2026-10-07T05:13:56.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.query",
+  "data": {
+   "query": "final audit: what is valid right now"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "e9960860-81cf-5a07-8215-8181274e95a5",
+  "occurred_at": "2026-10-07T05:13:57.000000Z",
+  "received_at": "2026-10-07T05:13:58.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "e9960860-81cf-5a07-8215-8181274e95a5",
+   "knowledge_id": "webconfig-20261007-06/knowledge/57",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "3e0ab2170d477b47b494739b8ef21992/event/000002",
+  "occurred_at": "2026-10-07T05:13:59.000000Z",
+  "received_at": "2026-10-07T05:14:00.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "e9960860-81cf-5a07-8215-8181274e95a5",
+   "knowledge_id": "webconfig-20261007-06/knowledge/57"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "6c9bdb0e-bfa8-590c-91d5-2396b6a42b24",
+  "occurred_at": "2026-10-07T05:14:01.000000Z",
+  "received_at": "2026-10-07T05:14:02.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "6c9bdb0e-bfa8-590c-91d5-2396b6a42b24",
+   "knowledge_id": "webconfig-20261007-02/knowledge/43",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "3e0ab2170d477b47b494739b8ef21992/event/000003",
+  "occurred_at": "2026-10-07T05:14:03.000000Z",
+  "received_at": "2026-10-07T05:14:04.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "6c9bdb0e-bfa8-590c-91d5-2396b6a42b24",
+   "knowledge_id": "webconfig-20261007-02/knowledge/43"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "6ce96433-9a89-5d66-8eea-13154e165ac5",
+  "occurred_at": "2026-10-07T05:14:05.000000Z",
+  "received_at": "2026-10-07T05:14:06.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "6ce96433-9a89-5d66-8eea-13154e165ac5",
+   "knowledge_id": "webconfig-20261007-04/knowledge/51",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "3e0ab2170d477b47b494739b8ef21992/event/000004",
+  "occurred_at": "2026-10-07T05:14:07.000000Z",
+  "received_at": "2026-10-07T05:14:08.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "6ce96433-9a89-5d66-8eea-13154e165ac5",
+   "knowledge_id": "webconfig-20261007-04/knowledge/51"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "45da712b-9b41-5adc-9ffb-8d0421bfb93a",
+  "occurred_at": "2026-10-07T05:14:09.000000Z",
+  "received_at": "2026-10-07T05:14:10.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "45da712b-9b41-5adc-9ffb-8d0421bfb93a",
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "3e0ab2170d477b47b494739b8ef21992/event/000005",
+  "occurred_at": "2026-10-07T05:14:11.000000Z",
+  "received_at": "2026-10-07T05:14:12.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "45da712b-9b41-5adc-9ffb-8d0421bfb93a",
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "3e0ab2170d477b47b494739b8ef21992/event/000006",
+  "occurred_at": "2026-10-07T05:14:13.000000Z",
+  "received_at": "2026-10-07T05:14:14.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-07/turn/01/call_26ea89a0007a715f",
+    "arguments": {
+     "command": [
+      "go",
+      "test",
+      "./..."
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "3e0ab2170d477b47b494739b8ef21992/event/000007",
+  "occurred_at": "2026-10-07T05:14:15.000000Z",
+  "received_at": "2026-10-07T05:14:16.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-07/turn/01/call_26ea89a0007a715f",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "3e0ab2170d477b47b494739b8ef21992/event/000008",
+  "occurred_at": "2026-10-07T05:14:17.000000Z",
+  "received_at": "2026-10-07T05:14:18.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-07/turn/01/call_26ea89a0007a715f",
+   "tool": "run_command",
+   "output": "ok  webconfig  0.009s",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "3e0ab2170d477b47b494739b8ef21992/event/000009",
+  "occurred_at": "2026-10-07T05:14:19.000000Z",
+  "received_at": "2026-10-07T05:14:20.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4",
+   "rule": "execution-reuse.v1",
+   "command": "go test ./...",
+   "operation_id": "webconfig-20261007-07/turn/01/call_26ea89a0007a715f"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "3e0ab2170d477b47b494739b8ef21992/event/000010",
+  "occurred_at": "2026-10-07T05:14:21.000000Z",
+  "received_at": "2026-10-07T05:14:22.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.proposed",
+  "data": {
+   "knowledge_id": "webconfig-20261007-07/knowledge/61",
+   "proposition": "Current valid setup for webconfig v3, verified end to end: (1) `DATABASE_URL=postgres://localhost/app ./webconfig migrate` exits 0, (2) `./webconfig serve --config config.yaml` exits 0, (3) the `--db-url` flag is rejected as unknown, (4) `go test ./...` passes.",
+   "kind": "claim",
+   "operation_id": "webconfig-20261007-07/turn/09/call_6b80c57bf4b05c25",
+   "arguments_hash": "sha256:0d998b93e34cc4548f10737e2135d6a8"
+  },
+  "evidence": [
+   {
+    "ref": "run 7: audit over runs 1-6",
+    "type": "artifact"
+   }
+  ]
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "3e0ab2170d477b47b494739b8ef21992/event/000011",
+  "occurred_at": "2026-10-07T05:14:23.000000Z",
+  "received_at": "2026-10-07T05:14:24.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "agent.summary",
+  "data": {
+   "answer": "Valid now: env var and config file; flag removed."
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "3e0ab2170d477b47b494739b8ef21992/event/000012",
+  "occurred_at": "2026-10-07T05:14:25.000000Z",
+  "received_at": "2026-10-07T05:14:26.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-07",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.completed",
+  "data": {
+   "status": "completed"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000001",
+  "occurred_at": "2026-10-07T05:14:27.000000Z",
+  "received_at": "2026-10-07T05:14:28.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.started",
+  "data": {
+   "parent_run_id": "",
+   "role": ""
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "87d81ceb-70ad-5e1d-ac16-1fe5dedf533e",
+  "occurred_at": "2026-10-07T05:14:29.000000Z",
+  "received_at": "2026-10-07T05:14:30.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.query",
+  "data": {
+   "query": "ship it: run the release checks"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "b6903660-fe54-51ba-b905-5a19d40f8c9a",
+  "occurred_at": "2026-10-07T05:14:31.000000Z",
+  "received_at": "2026-10-07T05:14:32.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "b6903660-fe54-51ba-b905-5a19d40f8c9a",
+   "knowledge_id": "webconfig-20261007-06/knowledge/57",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000002",
+  "occurred_at": "2026-10-07T05:14:33.000000Z",
+  "received_at": "2026-10-07T05:14:34.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "b6903660-fe54-51ba-b905-5a19d40f8c9a",
+   "knowledge_id": "webconfig-20261007-06/knowledge/57"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "815c602a-5e3a-57ce-ad8c-739985252036",
+  "occurred_at": "2026-10-07T05:14:35.000000Z",
+  "received_at": "2026-10-07T05:14:36.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "815c602a-5e3a-57ce-ad8c-739985252036",
+   "knowledge_id": "webconfig-20261007-02/knowledge/43",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000003",
+  "occurred_at": "2026-10-07T05:14:37.000000Z",
+  "received_at": "2026-10-07T05:14:38.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "815c602a-5e3a-57ce-ad8c-739985252036",
+   "knowledge_id": "webconfig-20261007-02/knowledge/43"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "a1971413-1ca7-5619-bb13-a59911886eb9",
+  "occurred_at": "2026-10-07T05:14:39.000000Z",
+  "received_at": "2026-10-07T05:14:40.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "a1971413-1ca7-5619-bb13-a59911886eb9",
+   "knowledge_id": "webconfig-20261007-04/knowledge/51",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000004",
+  "occurred_at": "2026-10-07T05:14:41.000000Z",
+  "received_at": "2026-10-07T05:14:42.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "a1971413-1ca7-5619-bb13-a59911886eb9",
+   "knowledge_id": "webconfig-20261007-04/knowledge/51"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "2e6637ec-fc1d-53fb-b89c-40b6c523b12c",
+  "occurred_at": "2026-10-07T05:14:43.000000Z",
+  "received_at": "2026-10-07T05:14:44.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "2e6637ec-fc1d-53fb-b89c-40b6c523b12c",
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000005",
+  "occurred_at": "2026-10-07T05:14:45.000000Z",
+  "received_at": "2026-10-07T05:14:46.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "2e6637ec-fc1d-53fb-b89c-40b6c523b12c",
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "cd5fb861-f120-5fc9-a41f-0377ff14e937",
+  "occurred_at": "2026-10-07T05:14:47.000000Z",
+  "received_at": "2026-10-07T05:14:48.000000Z",
+  "source": {
+   "id": "temporality-activation",
+   "integration": "temporality",
+   "version": "1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "hint.offered",
+  "data": {
+   "hint_id": "cd5fb861-f120-5fc9-a41f-0377ff14e937",
+   "knowledge_id": "auto/3f9c1d84a2b7e6d50c91f4a2",
+   "matched_by": [
+    "term:webconfig",
+    "term:database"
+   ]
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000006",
+  "occurred_at": "2026-10-07T05:14:49.000000Z",
+  "received_at": "2026-10-07T05:14:50.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "hint_id": "cd5fb861-f120-5fc9-a41f-0377ff14e937",
+   "knowledge_id": "auto/3f9c1d84a2b7e6d50c91f4a2"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000007",
+  "occurred_at": "2026-10-07T05:14:51.000000Z",
+  "received_at": "2026-10-07T05:14:52.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-08/turn/01/call_5f22295e3bb13a70",
+    "arguments": {
+     "command": [
+      "go",
+      "build",
+      "-o",
+      "/tmp/webconfig",
+      "."
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000008",
+  "occurred_at": "2026-10-07T05:14:53.000000Z",
+  "received_at": "2026-10-07T05:14:54.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-08/turn/01/call_5f22295e3bb13a70",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000009",
+  "occurred_at": "2026-10-07T05:14:55.000000Z",
+  "received_at": "2026-10-07T05:14:56.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-08/turn/01/call_5f22295e3bb13a70",
+   "tool": "run_command",
+   "output": "",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000010",
+  "occurred_at": "2026-10-07T05:14:57.000000Z",
+  "received_at": "2026-10-07T05:14:58.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "knowledge_id": "auto/3f9c1d84a2b7e6d50c91f4a2",
+   "rule": "execution-reuse.v1",
+   "command": "go build -o OUT .",
+   "operation_id": "webconfig-20261007-08/turn/01/call_5f22295e3bb13a70"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000011",
+  "occurred_at": "2026-10-07T05:14:59.000000Z",
+  "received_at": "2026-10-07T05:15:00.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-08/turn/02/call_96196f6e309fbfc4",
+    "arguments": {
+     "command": [
+      "./webconfig",
+      "serve",
+      "--config",
+      "config.yaml"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000012",
+  "occurred_at": "2026-10-07T05:15:01.000000Z",
+  "received_at": "2026-10-07T05:15:02.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-08/turn/02/call_96196f6e309fbfc4",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000013",
+  "occurred_at": "2026-10-07T05:15:03.000000Z",
+  "received_at": "2026-10-07T05:15:04.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-08/turn/02/call_96196f6e309fbfc4",
+   "tool": "run_command",
+   "output": "serving db from config.yaml",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000014",
+  "occurred_at": "2026-10-07T05:15:05.000000Z",
+  "received_at": "2026-10-07T05:15:06.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-08/turn/03/call_3bb23e3a4219057b",
+    "arguments": {
+     "command": [
+      "DATABASE_URL=postgres://localhost/app",
+      "./webconfig",
+      "migrate"
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000015",
+  "occurred_at": "2026-10-07T05:15:07.000000Z",
+  "received_at": "2026-10-07T05:15:08.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-08/turn/03/call_3bb23e3a4219057b",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000016",
+  "occurred_at": "2026-10-07T05:15:09.000000Z",
+  "received_at": "2026-10-07T05:15:10.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-08/turn/03/call_3bb23e3a4219057b",
+   "tool": "run_command",
+   "output": "migrate: ok",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000017",
+  "occurred_at": "2026-10-07T05:15:11.000000Z",
+  "received_at": "2026-10-07T05:15:12.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "approval.auto_granted",
+  "data": {
+   "operation": {
+    "operation_id": "webconfig-20261007-08/turn/04/call_351a2b499b4826ee",
+    "arguments": {
+     "command": [
+      "go",
+      "test",
+      "./..."
+     ]
+    }
+   },
+   "policy_id": "sandbox.workspace.v1",
+   "risk": "low",
+   "approver": "kernel-policy"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000018",
+  "occurred_at": "2026-10-07T05:15:13.000000Z",
+  "received_at": "2026-10-07T05:15:14.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.started",
+  "data": {
+   "operation_id": "webconfig-20261007-08/turn/04/call_351a2b499b4826ee",
+   "tool": "run_command"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000019",
+  "occurred_at": "2026-10-07T05:15:15.000000Z",
+  "received_at": "2026-10-07T05:15:16.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "tool.completed",
+  "data": {
+   "operation_id": "webconfig-20261007-08/turn/04/call_351a2b499b4826ee",
+   "tool": "run_command",
+   "output": "ok  webconfig  0.010s",
+   "exit_code": 0
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000020",
+  "occurred_at": "2026-10-07T05:15:17.000000Z",
+  "received_at": "2026-10-07T05:15:18.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "knowledge.used",
+  "data": {
+   "knowledge_id": "auto/9b4e27c0d8a1f536b0e7c2d4",
+   "rule": "execution-reuse.v1",
+   "command": "go test ./...",
+   "operation_id": "webconfig-20261007-08/turn/04/call_351a2b499b4826ee"
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000021",
+  "occurred_at": "2026-10-07T05:15:19.000000Z",
+  "received_at": "2026-10-07T05:15:20.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "agent.summary",
+  "data": {
+   "answer": "Release checks green."
+  }
+ },
+ {
+  "schema": "temporality.event/1",
+  "event_id": "08fa76d902ee4831037cb83d81fc934f/event/000022",
+  "occurred_at": "2026-10-07T05:15:21.000000Z",
+  "received_at": "2026-10-07T05:15:22.000000Z",
+  "source": {
+   "id": "temporality-agent-kernel",
+   "integration": "temporality-agent-kernel",
+   "version": "0.1"
+  },
+  "context": {
+   "project": "exp9-webconfig",
+   "run": "webconfig-20261007-08",
+   "actor": {
+    "id": "human-requester",
+    "type": "agent"
+   }
+  },
+  "type": "run.completed",
+  "data": {
+   "status": "completed"
+  }
+ }
+]

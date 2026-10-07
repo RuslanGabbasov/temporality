@@ -6,12 +6,14 @@ import exp5 from './fixtures/experiment5-nightlybox.json'
 import exp6 from './fixtures/experiment6-relay.json'
 import exp7 from './fixtures/experiment7-forge.json'
 import exp8 from './fixtures/experiment8-lighthouse.json'
+import exp9 from './fixtures/experiment9-webconfig.json'
 
 const GATEKEEPER = exp4 as unknown as ObservationEvent[]
 const NIGHTLYBOX = exp5 as unknown as ObservationEvent[]
 const RELAY = exp6 as unknown as ObservationEvent[]
 const FORGE = exp7 as unknown as ObservationEvent[]
 const LIGHTHOUSE = exp8 as unknown as ObservationEvent[]
+const WEBCONFIG = exp9 as unknown as ObservationEvent[]
 
 const K = (run: string, id: string) => `${run}/knowledge/${id}`
 
@@ -452,6 +454,141 @@ describe('Experiment 8 fixture — long-horizon evolution, resurrection, composi
     expect(deaths[0].actor).toBe('human-operator')
     expect(deaths[0].reason).toMatch(/revert/i)
     expect(deaths[0].supersededBy).toEqual([A3])
+  })
+})
+
+// Experiment 9 (docs/experiment-9-corpus.md): the comprehension corpus. Three
+// competing configuration hypotheses (env var / config file / flag) live
+// through repeated confirmation, contradiction, selective death, stale use,
+// supersession and resurrection, spread over five mechanism scope lanes. Every
+// assertion mirrors one acceptance question the operator must answer from the
+// Experience Timeline alone.
+describe('Experiment 9 fixture — competing hypotheses, resurrection, stale use', () => {
+  const model = foldExperience(WEBCONFIG)
+
+  const A1 = K('webconfig-20261007-01', '41') // env var DATABASE_URL (v1)
+  const B1 = K('webconfig-20261007-02', '43') // config.yaml (competing, survives)
+  const C1 = K('webconfig-20261007-03', '47') // --db-url flag (dies in v2)
+  const E1 = K('webconfig-20261007-04', '51') // end-to-end v2 pipeline
+  const A2 = K('webconfig-20261007-06', '57') // v3 restores the env mechanism
+  const AUDIT = K('webconfig-20261007-07', '61') // final audit note, never recalled
+  const GO_TEST = 'auto/9b4e27c0d8a1f536b0e7c2d4'
+  const GO_BUILD = 'auto/3f9c1d84a2b7e6d50c91f4a2'
+
+  const row = (id: string) => model.rows.find((item) => item.knowledgeId === id)
+  const usedIn = (id: string) => model.links.filter((link) => link.knowledgeId === id && link.usedRun).map((link) => link.usedRun)
+  const pointsOf = (id: string, kind: string) => row(id)!.points.filter((point) => point.kind === kind)
+
+  it('folds the recorded corpus shape', () => {
+    expect(model.totals.events).toBe(161)
+    expect(model.rows).toHaveLength(8)
+    expect(model.runs).toHaveLength(8)
+    expect(model.links).toHaveLength(22)
+  })
+
+  it('which hypothesis appeared first, and which died', () => {
+    expect(appearedIn(WEBCONFIG, A1)).toBe('webconfig-20261007-01')
+    expect(row(A1)!.firstAt < row(B1)!.firstAt).toBe(true)
+    expect(row(B1)!.firstAt < row(C1)!.firstAt).toBe(true)
+    expect(row(C1)!.state).toBe('invalidated')
+    expect(row(C1)!.terminal).toBeDefined()
+    expect(row(B1)!.terminal).toBeUndefined()
+  })
+
+  it('repeated confirmation: A1 validated once by re-derivation, B1 twice after the flip', () => {
+    expect(pointsOf(A1, 'validated')).toHaveLength(1)
+    expect(pointsOf(A1, 'validated').every((point) => point.rule === 'extraction-reverification.v1')).toBe(true)
+    expect(pointsOf(B1, 'validated')).toHaveLength(2)
+    expect(pointsOf(B1, 'validated').map((point) => point.run)).toEqual(['webconfig-20261007-04', 'webconfig-20261007-05'])
+  })
+
+  it('contradiction: the flag hypothesis challenges both elders with evidence-carrying rules', () => {
+    for (const id of [A1, B1]) {
+      const contradicted = pointsOf(id, 'contradicted')
+      expect(contradicted).toHaveLength(1)
+      expect(contradicted[0].run).toBe('webconfig-20261007-03')
+      expect(contradicted[0].rule).toBe('extraction-contradiction.v1')
+    }
+    expect(row(C1)!.firstAt < pointsOf(B1, 'contradicted')[0].at).toBe(true)
+  })
+
+  it('stale knowledge: challenged A1 is still offered, consumed in run 04 and offered-but-ignored in run 05', () => {
+    expect(usedIn(A1)).toEqual(['webconfig-20261007-02', 'webconfig-20261007-04'])
+    const used04 = model.links.find((link) => link.knowledgeId === A1 && link.usedRun === 'webconfig-20261007-04')
+    expect(used04).toBeDefined()
+    // the death only comes later, so run 04 consumed a challenged (stale) item
+    expect(row(A1)!.terminal!.at > used04!.usedAt!).toBe(true)
+    // run 05 offers A1 again but the agent ignores it (link without usedRun)
+    const ignored05 = model.links.find((link) => link.knowledgeId === A1 && link.offeredRun === 'webconfig-20261007-05' && !link.usedRun)
+    expect(ignored05).toBeDefined()
+  })
+
+  it('supersession and resurrection: the v1 env note dies naming its v3 restatement', () => {
+    expect(row(A1)!.state).toBe('invalidated')
+    expect(row(A2)!.state).toBe('proposed')
+    expect(row(A2)!.terminal).toBeUndefined()
+    expect(row(A1)!.proposition).toMatch(/DATABASE_URL/)
+    expect(row(A2)!.proposition).toMatch(/DATABASE_URL/)
+    expect(model.lineage.map((edge) => `${edge.fromId}->${edge.toId}`)).toEqual([`${A1}->${A2}`])
+    // C1 dies without a direct replacement: nothing supersedes the dead flag note
+    const { deaths } = forensicOf(row(C1)!, model)
+    expect(deaths).toHaveLength(1)
+    expect(deaths[0].kind).toBe('archived')
+    expect(deaths[0].actor).toBe('human-operator')
+    expect(deaths[0].supersededBy).toEqual([])
+  })
+
+  it('different scopes: five mechanism lanes with the competing pair sharing serve', () => {
+    expect(model.scopes.map((scope) => scope.id).sort()).toEqual(['build', 'end-to-end', 'migrate', 'serve', 'test'])
+    expect(row(A1)!.scopes.primary).toBe('migrate')
+    expect(row(A2)!.scopes.primary).toBe('migrate')
+    expect(row(B1)!.scopes.primary).toBe('serve')
+    expect(row(C1)!.scopes.primary).toBe('serve')
+    expect(row(E1)!.scopes.primary).toBe('end-to-end')
+    expect(row(E1)!.scopes.secondary).toEqual(expect.arrayContaining(['build', 'migrate', 'serve']))
+    expect(row(GO_TEST)!.scopes.primary).toBe('test')
+    expect(row(GO_BUILD)!.scopes.primary).toBe('build')
+    const serve = model.scopes.find((scope) => scope.id === 'serve')!
+    expect(serve.rows.map((item) => item.knowledgeId).sort()).toEqual([B1, C1].sort())
+  })
+
+  it('what is valid now and what was actually used: run 08 recalls the living set', () => {
+    const got = model.links.filter((link) => link.usedRun === 'webconfig-20261007-08').map((link) => link.knowledgeId)
+    for (const dead of [A1, C1]) expect(got).not.toContain(dead)
+    for (const alive of [A2, B1, E1, GO_TEST, GO_BUILD]) expect(got).toContain(alive)
+    expect(usedIn(AUDIT)).toEqual([])
+    // kernel-side execution knowledge: go test confirmed once, then reused by rule
+    expect(row(GO_TEST)!.state).toBe('confirmed')
+    expect(pointsOf(GO_TEST, 'reused').every((point) => point.rule === 'execution-reuse.v1')).toBe(true)
+    expect(pointsOf(GO_TEST, 'reused').map((point) => point.run)).toEqual([
+      'webconfig-20261007-04',
+      'webconfig-20261007-05',
+      'webconfig-20261007-07',
+      'webconfig-20261007-08',
+    ])
+  })
+
+  it('memory population after the flips: 6 alive rows at run 08', () => {
+    const run08 = model.runs.find((run) => run.id === 'webconfig-20261007-08')
+    expect(run08).toBeDefined()
+    expect(aliveRowAt(model.rows, run08!.startedAt)).toBe(6)
+  })
+
+  it('forensic: the resurrected note forms in run 06 with clean activations', () => {
+    const record = forensicOf(row(A2)!, model)
+    expect(record.formed?.run).toBe('webconfig-20261007-06')
+    expect(record.activations).toHaveLength(2)
+    expect(record.activations.every((activation) => activation.usedRunStatus === 'completed')).toBe(true)
+    expect(record.deaths).toHaveLength(0)
+    // the v1 note is first contradicted by the flag run, then archived by the
+    // operator naming the resurrected successor
+    const v1 = forensicOf(row(A1)!, model)
+    expect(v1.deaths).toHaveLength(2)
+    expect(v1.deaths[0].kind).toBe('contradicted')
+    expect(v1.deaths[0].run).toBe('webconfig-20261007-03')
+    expect(v1.deaths[1].kind).toBe('archived')
+    expect(v1.deaths[1].actor).toBe('human-operator')
+    expect(v1.deaths[1].supersededBy).toEqual([A2])
   })
 })
 
