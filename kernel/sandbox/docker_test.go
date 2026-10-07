@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExecuteCapturesCommandAndAlwaysRemovesContainer(t *testing.T) {
@@ -135,4 +136,106 @@ func TestOutputBufferTruncatesWithoutBlockingWriter(t *testing.T) {
 	if output.Len() != maxOutputBytes || !output.truncated {
 		t.Fatalf("buffer len=%d truncated=%v", output.Len(), output.truncated)
 	}
+}
+
+// The security matrix (docs/sandbox-security-matrix.md) is pinned by these
+// args-level tests: network defaults to none, credentials never ride along as
+// environment, and the workspace stays the single mount.
+
+func TestNetworkDefaultsToNoneAndBridgeIsExplicit(t *testing.T) {
+	runner := &Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Memory: "1g", CPUs: "2", PIDs: 128}
+	base := runner.arguments("/w", Request{Command: []string{"ls"}}, "n")
+	if got := flagValue(base, "--network"); got != "none" {
+		t.Fatalf("default network = %q, want none", got)
+	}
+	// Request-level network overrides the runner default.
+	bridged := runner.arguments("/w", Request{Command: []string{"ls"}, Network: "bridge"}, "n")
+	if got := flagValue(bridged, "--network"); got != "bridge" {
+		t.Fatalf("request network = %q, want bridge", got)
+	}
+	// A runner explicitly configured with bridge keeps it when the request is silent.
+	configured := (&Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Network: "bridge", Memory: "1g", CPUs: "2", PIDs: 128}).arguments("/w", Request{Command: []string{"ls"}}, "n")
+	if got := flagValue(configured, "--network"); got != "bridge" {
+		t.Fatalf("runner network = %q, want bridge", got)
+	}
+}
+
+func TestEnvironmentCarriesNoCredentials(t *testing.T) {
+	runner := &Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Memory: "1g", CPUs: "2", PIDs: 128}
+	args := runner.arguments("/w", Request{Command: []string{"ls"}}, "n")
+	envs := map[string]bool{}
+	for i, token := range args {
+		if token == "--env" && i+1 < len(args) {
+			envs[args[i+1]] = true
+		}
+	}
+	if len(envs) != 2 || !envs["HOME=/scratch"] || !envs["TMPDIR=/scratch"] {
+		t.Fatalf("sandbox env must be exactly HOME/TMPDIR, got %v", envs)
+	}
+	// The host environment (provider keys, kernel tokens) never leaks: only
+	// explicit --env values reach the container, and docker run inherits none.
+	for _, token := range args {
+		for _, leak := range []string{"TOKEN", "KEY", "SECRET", "PASSWORD"} {
+			if strings.Contains(token, leak) && strings.Contains(token, "=") {
+				t.Fatalf("potential credential in docker args: %s", token)
+			}
+		}
+	}
+}
+
+func TestWorkspaceIsTheOnlyVolumeMount(t *testing.T) {
+	runner := &Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Memory: "1g", CPUs: "2", PIDs: 128}
+	for _, request := range []Request{{Command: []string{"ls"}}, {Command: []string{"ls"}, ReadOnly: true}} {
+		args := runner.arguments("/srv/work/repo", request, "n")
+		mounts := 0
+		for i, token := range args {
+			if token == "--volume" {
+				mounts++
+				mount := args[i+1]
+				if want := "/srv/work/repo:/workspace:" + map[bool]string{true: "ro", false: "rw"}[request.ReadOnly]; mount != want {
+					t.Fatalf("workspace mount = %q, want %q", mount, want)
+				}
+			}
+			if token == "-v" || token == "--mount" || token == "--privileged" {
+				t.Fatalf("unexpected mount/privilege flag %q in %v", token, args)
+			}
+		}
+		if mounts != 1 {
+			t.Fatalf("expected exactly one volume mount, got %d in %v", mounts, args)
+		}
+	}
+}
+
+func TestExecuteEnforcesRequestTimeout(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "repo")
+	if err := os.Mkdir(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\ncase \"$1\" in\nrun) exec sleep 10;;\nrm) exit 0;;\nesac\n"
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &Docker{Root: root, Image: "sandbox@sha256:" + strings.Repeat("a", 64), Binary: binary, Memory: "1g", CPUs: "2", PIDs: 128, UID: os.Getuid(), GID: os.Getgid()}
+	started := time.Now()
+	_, err := runner.Execute(context.Background(), Request{Workspace: workspace, Command: []string{"sleep", "10"}, TimeoutSeconds: 1})
+	if err == nil || !strings.Contains(err.Error(), "exceeded 1 second timeout") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("timeout not enforced, took %s", elapsed)
+	}
+}
+
+func flagValue(args []string, flag string) string {
+	for i, token := range args {
+		if token == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+		if strings.HasPrefix(token, flag+"=") {
+			return strings.TrimPrefix(token, flag+"=")
+		}
+	}
+	return ""
 }
