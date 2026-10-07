@@ -1443,6 +1443,7 @@ func TestAgentRunPlanReworkLoop(t *testing.T) {
 	require.Contains(t, gateTools, "submit_review")
 
 	started := map[string]int{}
+	taskRuns := map[string][]string{}
 	completed := 0
 	rejected, reopened, invalidated := 0, 0, 0
 	gateAcceptAt, shipStartedAt := -1, -1
@@ -1451,6 +1452,7 @@ func TestAgentRunPlanReworkLoop(t *testing.T) {
 		switch event.Type {
 		case "plan.task.started":
 			started[event.Data["task_id"].(string)]++
+			taskRuns[event.Data["task_id"].(string)] = append(taskRuns[event.Data["task_id"].(string)], event.Data["child_run_id"].(string))
 			if event.Data["task_id"] == "ship" {
 				shipStartedAt = index
 			}
@@ -1477,6 +1479,12 @@ func TestAgentRunPlanReworkLoop(t *testing.T) {
 	require.Equal(t, 2, started["build"])
 	require.Equal(t, 2, started["gate"])
 	require.Equal(t, 1, started["ship"])
+	// Every launch is its own durable run: workflow ids and event scopes derive
+	// from the run id, so a rework round must not reuse the previous attempt's
+	// id (the append-only outbox rejects a reused id with new content).
+	require.Equal(t, []string{"run-rework/plan/01-build", "run-rework/plan/01-build-r2"}, taskRuns["build"])
+	require.Equal(t, []string{"run-rework/plan/02-gate", "run-rework/plan/02-gate-r2"}, taskRuns["gate"])
+	require.Equal(t, []string{"run-rework/plan/03-ship"}, taskRuns["ship"])
 	require.Equal(t, 5, completed) // build ×2, gate ×2 (rework + accept), ship
 	require.Equal(t, 1, rejected)
 	require.Equal(t, 1, reopened)
@@ -1838,12 +1846,19 @@ func TestAgentRunPlanTemplatesAndReplan(t *testing.T) {
 	require.Equal(t, "parent done", parentResult.Answer)
 	require.True(t, sawSummary, "the second plan summary must reach the parent")
 	completedPlans := 0
+	childRunIDs := map[string]bool{}
 	for index := range recorded {
 		if recorded[index].Type == "plan.completed" {
 			completedPlans++
 		}
+		if recorded[index].Type == "plan.task.started" {
+			childRunIDs[recorded[index].Data["child_run_id"].(string)] = true
+		}
 	}
 	require.Equal(t, 2, completedPlans, "both plans must execute")
+	require.True(t, childRunIDs["run-plan-tmpl/plan/01-first"])
+	require.True(t, childRunIDs["run-plan-tmpl/plan2/01-reuse"], "the second plan call must namespace its task runs")
+	require.True(t, childRunIDs["run-plan-tmpl/plan2/02-joined"])
 }
 
 func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {

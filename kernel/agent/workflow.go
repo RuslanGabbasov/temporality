@@ -290,6 +290,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// finishes (see runKnowledgeExtraction) so reuse accounting and aging track
 	// actual influence, not retrieval luck.
 	delegations := 0
+	// Plan calls in this run, for unique child run ids across re-plans.
+	plans := 0
 	// Acceptance-gate verdict of this run (docs/agent-delegation.md): set when
 	// a reviewer task calls submit_review; the run finishes at the end of that
 	// turn. Nil for normal runs — the plan executor treats that as accept.
@@ -597,6 +599,25 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if validationErr != "" {
 				return reject(validationErr)
 			}
+			plans++
+			planOrdinal := plans
+			// Child run ids must be unique per plan call and per launch round:
+			// workflow ids and event scopes derive from them, and the append-only
+			// outbox rejects a reused id carrying new content. A relaunched task
+			// (rework round, re-plan) is a new durable attempt, not a replay — so it
+			// gets its own id instead of colliding with the recorded events of the
+			// previous attempt. First plan, first round keeps the historical format.
+			planTaskRunID := func(index int, taskID string, round int) string {
+				id := input.RunID + "/plan"
+				if planOrdinal > 1 {
+					id += strconv.Itoa(planOrdinal)
+				}
+				id += fmt.Sprintf("/%02d-%s", index+1, taskID)
+				if round > 1 {
+					id += fmt.Sprintf("-r%d", round)
+				}
+				return id
+			}
 			agentIDs := map[string]string{}
 			taskIndex := map[string]int{}
 			for index := range spec.Tasks {
@@ -609,7 +630,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			resolved := map[string]RunInput{}
 			for index := range spec.Tasks {
 				task := spec.Tasks[index]
-				childRunID := fmt.Sprintf("%s/plan/%02d-%s", input.RunID, index+1, task.ID)
+				childRunID := planTaskRunID(index, task.ID, 1)
 				var childInput RunInput
 				resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: task.AgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: task.Prompt, ActorID: input.ActorID, MaxTurns: task.MaxTurns, DelegationDepth: input.DelegationDepth + 1}).Get(ctx, &childInput)
 				if resolveErr != nil {
@@ -850,8 +871,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						}
 						continue
 					}
-					childRunID := fmt.Sprintf("%s/plan/%02d-%s", input.RunID, index+1, task.ID)
+					childRunID := planTaskRunID(index, task.ID, launches[task.ID]+1)
 					child := resolved[task.ID]
+					child.RunID = childRunID
 					child.Prompt = planTaskPrompt(task, answers, planAnswers)
 					if feedback := reworkFeedback[task.ID]; feedback != "" {
 						// Rework round: the reviewer rejected the previous result. The
@@ -984,7 +1006,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 							if attempts[reviewed] > maxRework {
 								// Rework exhausted: the task failed its acceptance gate and
 								// nothing downstream may build on the rejected result.
-								reviewedRunID := fmt.Sprintf("%s/plan/%02d-%s", input.RunID, taskIndex[reviewed]+1, reviewed)
+								reviewedRunID := planTaskRunID(taskIndex[reviewed], reviewed, launches[reviewed])
 								failure := "rework exhausted after " + strconv.Itoa(maxRework) + " round(s); last reviewer feedback: " + feedback
 								statuses[reviewed] = planStatusFailed
 								outcomesByTask[reviewed] = planTaskOutcome{TaskID: reviewed, AgentID: agentIDs[reviewed], ChildRunID: reviewedRunID, Status: planStatusFailed, Round: attempts[reviewed], Error: failure}
