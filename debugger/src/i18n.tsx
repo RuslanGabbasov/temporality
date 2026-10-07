@@ -802,6 +802,9 @@ const translations: Record<Locale, Record<string, string>> = {
     'timeline.failed_abbr': 'failed',
     'timeline.knowledge_abbr': 'knowledge',
     'timeline.chain_failed': 'chain has a failed run',
+    'timeline.mislead': '{challenged} disputed knowledge proposed by {proposed}',
+    'timeline.misleads_abbr': 'disputes',
+    'timeline.open_in_runs': 'Open in Runs — delegation tree',
     'timeline.empty_project': 'No events for this project yet.',
     'timeline.empty_range': 'No events in the selected period. Try a wider one.',
     'timeline.empty_no_project': 'Enter a project ID and open the timeline.',
@@ -908,7 +911,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'timeline.kind.archived': 'archived',
 
     // Timeline - Misc
-    'timeline.hint': 'pinch / wheel — zoom · drag or two-finger swipe — pan · row click — details · bars are lifespans, points are events, ✕ marks death',
+    'timeline.hint': 'pinch / wheel — zoom · drag or two-finger swipe — pan · row click — details · bars are lifespans, points are events, ✕ marks death · ⚠ marks a cross-agent dispute · ↗ opens the run in Runs',
     'timeline.close_details': 'close the detail panel',
 
     // Onboarding
@@ -1853,6 +1856,9 @@ const translations: Record<Locale, Record<string, string>> = {
     'timeline.failed_abbr': 'ошибок',
     'timeline.knowledge_abbr': 'знаний',
     'timeline.chain_failed': 'в цепочке есть упавший прогон',
+    'timeline.mislead': '{challenged} оспорил знание, предложенное {proposed}',
+    'timeline.misleads_abbr': 'споров',
+    'timeline.open_in_runs': 'Открыть в Runs — дерево делегирования',
     'timeline.empty_project': 'По этому проекту пока нет событий.',
     'timeline.empty_range': 'В выбранном периоде нет событий. Попробуйте расширить период.',
     'timeline.empty_no_project': 'Введите project ID и нажмите Open timeline.',
@@ -1959,7 +1965,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'timeline.kind.archived': 'в архиве',
 
     // Timeline - Misc
-    'timeline.hint': 'pinch / колёсико — масштаб · перетаскивание или двумя пальцами — прокрутка · клик по строке — детали · полосы — сроки жизни, точки — события, ✕ — завершение',
+    'timeline.hint': 'pinch / колёсико — масштаб · перетаскивание или двумя пальцами — прокрутка · клик по строке — детали · полосы — сроки жизни, точки — события, ✕ — завершение · ⚠ — спор между агентами · ↗ — открыть прогон в Runs',
     'timeline.close_details': 'закрыть панель деталей',
 
     // Onboarding

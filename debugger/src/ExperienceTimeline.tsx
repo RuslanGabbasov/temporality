@@ -3,7 +3,7 @@ import { ChevronDown } from '@carbon/icons-react'
 import { API_BASE } from './api'
 import { useT } from './i18n'
 import { observationApi, type ObservationEvent } from './observationApi'
-import { aliveRowAt, buildRunChains, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type RunChain, type RunInfo } from './experience'
+import { aliveRowAt, buildRunChains, detectMisleads, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type MisleadSignal, type RunChain, type RunInfo } from './experience'
 import { useOrgUnits } from './orgUnits'
 import { workspaceApi, type User } from './workspaceApi'
 
@@ -51,7 +51,7 @@ const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
 const RANGE_MS: Record<Exclude<RangeFilter, 'all'>, number> = { '24h': 86400e3, '7d': 7 * 86400e3, '30d': 30 * 86400e3 }
 
 /** One collapsed run group: everything a team lead needs before drilling into
- * individual chains — volume, failures, knowledge touched. */
+ * individual chains — volume, failures, knowledge touched, disagreements. */
 interface RunGroup {
   id: string
   label: string
@@ -62,6 +62,7 @@ interface RunGroup {
   knowledgeEvents: number
   firstAt: string
   lastAt: string
+  misleads: MisleadSignal[]
 }
 const RECENCY_OPTIONS: { value: RecencyFilter; label: string }[] = [
   { value: 'all', label: 'timeline.recency.all' },
@@ -163,6 +164,15 @@ function roleColor(role: string | undefined, index: number) {
   if (!role) return '#565f89'
   const palette: Record<string, string> = { lead: '#7aa2f7', coder: '#73daca', reviewer: '#e0af68', qa: '#bb9af7' }
   return palette[role] ?? ROLE_COLORS[index % ROLE_COLORS.length]
+}
+
+/** Tooltip for a cross-agent disagreement: who proposed, who disputed, what
+ * and why — the "where agents misled each other" story in one line. */
+function misleadTitle(signal: MisleadSignal, t: (key: string, vars?: Record<string, string>) => string) {
+  const head = t('timeline.mislead', { proposed: signal.proposedBy ?? '?', challenged: signal.challengedBy ?? '?' })
+  const kind = t(`timeline.kind.${signal.kind}`) || signal.kind
+  const why = signal.reason ? `\n${signal.reason}` : ''
+  return `${head}\n${kind} · ${clock(signal.at)}\n«${claimLabel(signal.proposition)}»${why}`
 }
 
 /** Adaptive tick step so labels never collide. */
@@ -369,7 +379,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     for (const chain of chains) {
       const g = groupOf(chain.root)
       let group = groupsMap.get(g.key)
-      if (!group) { group = { id: g.key, label: g.label, order: g.order, chains: [], runs: [], failed: 0, knowledgeEvents: 0, firstAt: chain.root.startedAt, lastAt: chain.lastAt }; groupsMap.set(g.key, group) }
+      if (!group) { group = { id: g.key, label: g.label, order: g.order, chains: [], runs: [], failed: 0, knowledgeEvents: 0, firstAt: chain.root.startedAt, lastAt: chain.lastAt, misleads: [] }; groupsMap.set(g.key, group) }
       group.chains.push(chain)
       group.runs.push(...chain.runs)
       if (chain.failed) group.failed += 1
@@ -378,6 +388,21 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       if (chain.lastAt > group.lastAt) group.lastAt = chain.lastAt
     }
     const groups = [...groupsMap.values()].sort((a, b) => a.order < b.order ? -1 : a.order > b.order ? 1 : 0)
+    // Cross-agent disagreements land on the run where the contradiction was
+    // discovered, so each signal is attributable to a chain and a group.
+    const misleads = detectMisleads(visibleRows)
+    const runIdsByGroup = new Map(groups.map((group) => [group.id, new Set(group.runs.map((run) => run.id))]))
+    for (const group of groups) group.misleads = []
+    const misleadsByRun = new Map<string, MisleadSignal[]>()
+    for (const signal of misleads) {
+      if (!signal.run) continue
+      const list = misleadsByRun.get(signal.run) ?? []
+      list.push(signal)
+      misleadsByRun.set(signal.run, list)
+      for (const group of groups) {
+        if (runIdsByGroup.get(group.id)?.has(signal.run)) group.misleads.push(signal)
+      }
+    }
     const autoExpand = chains.length <= AUTO_EXPAND_CHAINS
     const groupExpanded: Record<string, boolean> = {}
     const chainExpanded: Record<string, boolean> = {}
@@ -437,7 +462,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       }
       return visibleRowIds.has(link.knowledgeId)
     })
-    return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleRunIds, visibleLinks, visibleScopes, aggregatedIds, conflictsPresent, showEpisodes, runLaneY, rowY, scopeHeaderY, bandY, populationY, groups, groupExpanded, groupHeaderY, groupBandY, chainLaneY, chainExpanded, rootOf, autoExpand, height: y + 8 }
+    return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleRunIds, visibleLinks, visibleScopes, aggregatedIds, conflictsPresent, showEpisodes, runLaneY, rowY, scopeHeaderY, bandY, populationY, groups, groupExpanded, groupHeaderY, groupBandY, chainLaneY, chainExpanded, rootOf, autoExpand, misleadsByRun, height: y + 8 }
   }, [model, window_, hiddenRoots, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, kinds, lens.experience, laneOverrides, query, groupBy, users, org.units, groupOverrides, chainOverrides, t])
 
   const activity = useMemo(() => {
@@ -733,6 +758,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                 {group.chains.length} {t('timeline.chains_abbr')} · {group.runs.length} {t('timeline.runs_abbr')}
                 {group.failed > 0 && <tspan fill="#f7768e"> · {group.failed} {t('timeline.failed_abbr')}</tspan>}
                 {group.knowledgeEvents > 0 && ` · ${group.knowledgeEvents} ${t('timeline.knowledge_abbr')}`}
+                {group.misleads.length > 0 && <tspan fill="#ff9e64"> · {group.misleads.length} {t('timeline.misleads_abbr')}</tspan>}
               </text>
               <line x1={GUTTER - 6} x2={width} y1={headerY + GROUP_HEADER / 2 - 2} y2={headerY + GROUP_HEADER / 2 - 2} stroke="#1c2530" strokeWidth={1} />
               {!expanded && bandCenter !== undefined && (() => {
@@ -747,6 +773,8 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                     <title>{`${group.label}: ${group.chains.length} ${t('timeline.chains_abbr')} · ${group.runs.length} ${t('timeline.runs_abbr')} · ${clock(group.firstAt)} → ${clock(group.lastAt)}`}</title>
                   </rect>
                   {ticks.map((at, index) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <line key={index} x1={px} x2={px} y1={bandCenter - 6} y2={bandCenter + 6} stroke={group.failed ? '#f7768e' : '#7aa2f7'} strokeWidth={1} opacity={0.35} /> : null })}
+                  {group.misleads.map((signal) => { const px = x(signal.at); if (px < GUTTER || px > GUTTER + track) return null; return <text key={`ms-${signal.knowledgeId}-${signal.at}`} x={px} y={bandCenter + 4} textAnchor="middle" fontSize={11} fill="#ff9e64" onClick={(click) => { click.stopPropagation(); setSelected(signal.knowledgeId) }} style={{ cursor: 'pointer' }}>
+                    <title>{misleadTitle(signal, t)}</title>⚠</text> })}
                 </g>
               })()}
               {expanded && group.chains.map((chain, index) => {
@@ -756,17 +784,24 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                   const x0 = x(chain.root.startedAt)
                   const x1 = x(chain.endedAt ?? chain.root.startedAt)
                   const expandChain = () => setChainOverrides((current) => ({ ...current, [chain.root.id]: true }))
+                  const openInRuns = (click: React.MouseEvent) => { click.stopPropagation(); window.location.assign(`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(chain.root.id)}`) }
                   const roles = [...new Set(chain.runs.map((run) => run.role).filter(Boolean))] as string[]
+                  const chainMisleads = chain.runs.flatMap((run) => view.misleadsByRun.get(run.id) ?? [])
                   const ticks: number[] = []
                   const dots: number[] = []
                   for (const run of chain.runs) { const acts = activity.get(run.id); if (acts) { ticks.push(...acts.tools); dots.push(...acts.models) } }
                   return <g key={chain.root.id} className={`chain-lane ${selected === chain.root.id ? 'selected' : ''}`} onClick={expandChain} style={{ cursor: 'pointer' }}>
-                    <title>{`${chain.root.title ?? chain.root.id}\n${roles.join(' → ')} · ${chain.runs.length} ${t('timeline.runs_abbr')}${chain.failed ? ` · ${t('timeline.chain_failed')}` : ''}\n${clock(chain.root.startedAt)} → ${clock(chain.endedAt ?? chain.root.startedAt)}`}</title>
+                    <title>{`${chain.root.title ?? chain.root.id}\n${roles.join(' → ')} · ${chain.runs.length} ${t('timeline.runs_abbr')}${chain.failed ? ` · ${t('timeline.chain_failed')}` : ''}${chainMisleads.length ? ` · ${chainMisleads.length} ${t('timeline.misleads_abbr')}` : ''}\n${clock(chain.root.startedAt)} → ${clock(chain.endedAt ?? chain.root.startedAt)}`}</title>
                     <text x={20} y={yLane + 3} className="lane-label run-label">{chain.root.title ?? shortRun(chain.root.id)}{chain.runs.length > 1 ? ` +${chain.runs.length - 1}` : ''}{chain.failed ? ' ✕' : ''}</text>
+                    <text x={GUTTER - 8} y={yLane + 3} textAnchor="end" className="lane-sublabel" onClick={openInRuns} style={{ cursor: 'pointer' }}>
+                      <title>{t('timeline.open_in_runs')}</title>↗
+                    </text>
                     <rect x={GUTTER} y={yLane - RUN_LANE / 2 + 3} width={track} height={RUN_LANE - 6} fill="var(--tm-ink)" rx={3} />
                     <rect x={Math.max(GUTTER, x0)} width={Math.max(2, Math.min(x1, GUTTER + track) - Math.max(GUTTER, x0))} y={yLane - RUN_LANE / 2 + 3} height={RUN_LANE - 6} fill={roleColor(chain.root.role, index)} opacity={0.28} rx={3} />
                     {ticks.map((at, ti) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <line key={`t${ti}`} x1={px} x2={px} y1={yLane - 6} y2={yLane + 6} stroke={roleColor(chain.root.role, index)} strokeWidth={1} opacity={0.55} /> : null })}
                     {dots.map((at, mi) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <circle key={`m${mi}`} cx={px} cy={yLane} r={1.8} fill="#e8e8e8" opacity={0.7} /> : null })}
+                    {chainMisleads.map((signal) => { const px = x(signal.at); if (px < GUTTER || px > GUTTER + track) return null; return <text key={`ms-${signal.knowledgeId}-${signal.at}`} x={px} y={yLane - RUN_LANE / 2 + 1} textAnchor="middle" fontSize={10} fill="#ff9e64" onClick={(click) => { click.stopPropagation(); setSelected(signal.knowledgeId) }} style={{ cursor: 'pointer' }}>
+                      <title>{misleadTitle(signal, t)}</title>⚠</text> })}
                   </g>
                 }
                 return <g key={chain.root.id} className="chain-expanded">
@@ -776,12 +811,18 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                     const x1 = x(run.endedAt ?? run.startedAt)
                     const acts = activity.get(run.id)
                     const chainRoot = view.rootOf.get(run.id) ?? run.id
+                    const runMisleads = view.misleadsByRun.get(run.id) ?? []
                     return <g key={run.id} className={`run-lane ${selected === run.id ? 'selected' : ''}`}>
                       <text x={20} y={yLane + 3} className="lane-label run-label">{run.parentRun ? '↳ ' : ''}{shortRun(run.id)}{run.status ? ` · ${run.status}` : ''}</text>
+                      <text x={runIndex === 0 ? GUTTER - 18 : GUTTER - 8} y={yLane + 3} textAnchor="end" className="lane-sublabel" onClick={(click) => { click.stopPropagation(); window.location.assign(`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(run.id)}`) }} style={{ cursor: 'pointer' }}>
+                        <title>{t('timeline.open_in_runs')}</title>↗
+                      </text>
                       <rect x={GUTTER} y={yLane - RUN_LANE / 2 + 3} width={track} height={RUN_LANE - 6} fill="var(--tm-ink)" rx={3} />
                       <rect x={Math.max(GUTTER, x0)} width={Math.max(2, Math.min(x1, GUTTER + track) - Math.max(GUTTER, x0))} y={yLane - RUN_LANE / 2 + 3} height={RUN_LANE - 6} fill={roleColor(run.role, runIndex)} opacity={0.28} rx={3} />
                       {acts?.tools.map((at, ti) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <line key={`t${ti}`} x1={px} x2={px} y1={yLane - 6} y2={yLane + 6} stroke={roleColor(run.role, runIndex)} strokeWidth={1} opacity={0.55} /> : null })}
                       {acts?.models.map((at, mi) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <circle key={`m${mi}`} cx={px} cy={yLane} r={1.8} fill="#e8e8e8" opacity={0.7} /> : null })}
+                      {runMisleads.map((signal) => { const px = x(signal.at); if (px < GUTTER || px > GUTTER + track) return null; return <text key={`ms-${signal.knowledgeId}-${signal.at}`} x={px} y={yLane - RUN_LANE / 2 + 1} textAnchor="middle" fontSize={10} fill="#ff9e64" onClick={(click) => { click.stopPropagation(); setSelected(signal.knowledgeId) }} style={{ cursor: 'pointer' }}>
+                        <title>{misleadTitle(signal, t)}</title>⚠</text> })}
                       {runIndex === 0 && <text x={GUTTER - 8} y={yLane + 3} textAnchor="end" className="lane-sublabel" onClick={() => setChainOverrides((current) => ({ ...current, [chainRoot]: false }))} style={{ cursor: 'pointer' }}>▾</text>}
                     </g>
                   })}

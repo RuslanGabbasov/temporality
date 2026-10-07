@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ObservationEvent } from './observationApi'
-import { aliveRowAt, buildRunChains, commandSegments, contentTokens, foldExperience, forensicOf, lifecycleKindOf, propositionMechanisms, roleOfKnowledgeId, roleOfRun, runOfEvidenceRef, scopeOfCommand, segmentSubcommand, shortKnowledge, stateBucket, windowAround, type RunInfo } from './experience'
+import { aliveRowAt, buildRunChains, commandSegments, contentTokens, detectMisleads, foldExperience, forensicOf, lifecycleKindOf, propositionMechanisms, roleOfKnowledgeId, roleOfRun, runOfEvidenceRef, scopeOfCommand, segmentSubcommand, shortKnowledge, stateBucket, windowAround, type RunInfo } from './experience'
 
 let counter = 0
 
@@ -114,6 +114,34 @@ describe('buildRunChains', () => {
     expect(root.agentId).toBe('lead')
     const child = model.runs.find((run) => run.id === 'fix-1/coder')!
     expect(child.parentRun).toBe('fix-1')
+  })
+})
+
+describe('detectMisleads', () => {
+  it('flags knowledge proposed by one role and disputed by another', () => {
+    const events = [
+      event('knowledge.proposed', T0, { knowledge_id: 'k/1', proposition: 'Tests pass without the fixture', kind: 'claim' }, { run: 'calc-03/coder' }),
+      // Same-role challenge is self-verification, not a dispute.
+      event('knowledge.challenged', T1, { knowledge_id: 'k/1', reason: 'coder re-checked' }, { run: 'calc-03/coder' }),
+      event('knowledge.disproved', T2, { knowledge_id: 'k/1', reason: 'reviewer found the missing fixture' }, { run: 'calc-03/reviewer' }),
+      event('knowledge.proposed', T0, { knowledge_id: 'k/2', proposition: 'Build needs no cache', kind: 'claim' }, { run: 'calc-04/lead' }),
+      event('knowledge.invalidated', T3, { knowledge_id: 'k/2', reason: 'build cache required' }, { run: 'calc-05/qa' }),
+    ]
+    const model = foldExperience(events)
+    const misleads = detectMisleads(model.rows)
+    expect(misleads).toHaveLength(2)
+    expect(misleads[0]).toMatchObject({ knowledgeId: 'k/2', proposedBy: 'lead', challengedBy: 'qa', kind: 'archived', run: 'calc-05/qa' })
+    expect(misleads[1]).toMatchObject({ knowledgeId: 'k/1', proposedBy: 'coder', challengedBy: 'reviewer', kind: 'contradicted', run: 'calc-03/reviewer' })
+    expect(misleads[1].reason).toContain('fixture')
+  })
+
+  it('stays silent when the same agent corrects itself', () => {
+    const events = [
+      event('knowledge.proposed', T0, { knowledge_id: 'k/1', proposition: 'Claim', kind: 'claim' }, { run: 'calc-03/coder' }),
+      event('knowledge.corrected', T1, { knowledge_id: 'k/1', replacement_id: 'k/2' }, { run: 'calc-03/coder' }),
+    ]
+    const model = foldExperience(events)
+    expect(detectMisleads(model.rows)).toHaveLength(0)
   })
 })
 

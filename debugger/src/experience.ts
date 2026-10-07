@@ -201,6 +201,47 @@ export function buildRunChains(runs: RunInfo[]): { chains: RunChain[]; rootOf: M
   return { chains, rootOf }
 }
 
+/** Cross-agent disagreement: one agent proposed knowledge, a different agent
+ * (different role) later contradicted, weakened or archived it. This is the
+ * "where agents misled each other" signal for the run timeline. */
+export interface MisleadSignal {
+  knowledgeId: string
+  proposition: string
+  kind: LifecycleKind
+  at: string
+  /** Run where the contradiction landed. */
+  run?: string
+  proposedBy?: string
+  challengedBy?: string
+  reason?: string
+}
+
+export function detectMisleads(rows: KnowledgeRow[]): MisleadSignal[] {
+  const out: MisleadSignal[] = []
+  for (const row of rows) {
+    const appeared = row.points.find((point) => point.kind === 'appeared')
+    const proposedBy = appeared?.role ?? ''
+    if (!proposedBy) continue
+    for (const death of row.deaths) {
+      const challengedBy = death.role ?? ''
+      // Self-correction inside one agent's own work is normal verification,
+      // not a dispute.
+      if (!challengedBy || challengedBy === proposedBy) continue
+      out.push({
+        knowledgeId: row.knowledgeId,
+        proposition: row.proposition,
+        kind: death.kind,
+        at: death.at,
+        run: death.run,
+        proposedBy,
+        challengedBy,
+        reason: death.reason,
+      })
+    }
+  }
+  return out.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+}
+
 /** recall → injection pairing: which run pulled which memory item when. */
 export interface ActivationLink {
   hintId: string
