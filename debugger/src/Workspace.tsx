@@ -133,11 +133,16 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const [newChatAgentId, setNewChatAgentId] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
   const streamRef = useRef<Map<string, EventSource>>(new Map())
+  // Live token streams (ephemeral /runs/{id}/tokens SSE), one per conversation.
+  const tokenStreamRef = useRef<Map<string, EventSource>>(new Map())
 
   const activeConv = conversations.find((c) => c.id === activeConvId) ?? null
 
   useEffect(() => { saveConversations(conversations) }, [conversations])
-  useEffect(() => () => { streamRef.current.forEach((es) => es.close()); streamRef.current.clear() }, [])
+  useEffect(() => () => {
+    streamRef.current.forEach((es) => es.close()); streamRef.current.clear()
+    tokenStreamRef.current.forEach((es) => es.close()); tokenStreamRef.current.clear()
+  }, [])
 
   // Reconnect SSE streams for in-progress messages on mount (e.g. after
   // navigating away and back to the Workspace tab). Also poll for stale
@@ -202,6 +207,8 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const deleteConversation = (id: string) => {
     const es = streamRef.current.get(id)
     if (es) { es.close(); streamRef.current.delete(id) }
+    const tes = tokenStreamRef.current.get(id)
+    if (tes) { tes.close(); tokenStreamRef.current.delete(id) }
     setConversations((prev) => prev.filter((c) => c.id !== id))
     if (activeConvId === id) setActiveConvId(null)
   }
@@ -235,6 +242,40 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     const es = new EventSource(`/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/stream${token ? `?token=${token}` : ''}`)
     streamRef.current.set(convId, es)
     const lines: string[] = []
+
+    // Live token stream (ephemeral SSE, never journaled): preview the model's
+    // answer and reasoning while it is being generated. The journal's
+    // model.text_delta / model.reasoning events remain the authoritative
+    // per-turn text and replace the live preview once the turn completes.
+    const closeTokenStream = () => {
+      const tes = tokenStreamRef.current.get(convId)
+      if (tes) { tes.close(); tokenStreamRef.current.delete(convId) }
+    }
+    const tes = new EventSource(`/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/tokens${token ? `?token=${token}` : ''}`)
+    tokenStreamRef.current.set(convId, tes)
+    let liveTurn = -1
+    let liveText = ''
+    let liveReasoning = ''
+    const applyLive = (data: { type?: string; turn?: number; text?: string; reasoning?: string }) => {
+      if (data.type === 'done') { closeTokenStream(); return }
+      const turn = Number(data.turn ?? 0)
+      if (turn !== liveTurn) {
+        liveTurn = turn
+        liveText = ''
+        liveReasoning = ''
+      }
+      if (data.text) liveText += data.text
+      if (data.reasoning) liveReasoning += data.reasoning
+      updateMsg(convId, runId, { content: liveText, reasoning: liveReasoning })
+    }
+    tes.addEventListener('snapshot', (e) => {
+      try { applyLive(JSON.parse((e as MessageEvent).data)) } catch { /* ignore */ }
+    })
+    tes.addEventListener('delta', (e) => {
+      try { applyLive(JSON.parse((e as MessageEvent).data)) } catch { /* ignore */ }
+    })
+    tes.addEventListener('done', closeTokenStream)
+    tes.onerror = closeTokenStream
 
     es.onmessage = () => {}
 
@@ -475,10 +516,12 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         updateMsg(convId, runId, { content: t('chat.run_failed') ?? 'Run failed', status: 'failed', streamLines: [...lines] })
       }
       es.close(); streamRef.current.delete(convId)
+      closeTokenStream()
     })
 
     es.addEventListener('done', () => {
       es.close(); streamRef.current.delete(convId)
+      closeTokenStream()
       setConversations((prev) => {
         const conv = prev.find((c) => c.id === convId)
         const m = conv?.messages.find((x) => x.runId === runId)
@@ -490,6 +533,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
     es.onerror = () => {
       es.close(); streamRef.current.delete(convId)
+      closeTokenStream()
       void fetchFinalAnswer(runId, convId)
     }
   }
@@ -510,6 +554,8 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       if (activeConv) {
         const es = streamRef.current.get(activeConv.id)
         if (es) { es.close(); streamRef.current.delete(activeConv.id) }
+        const tes = tokenStreamRef.current.get(activeConv.id)
+        if (tes) { tes.close(); tokenStreamRef.current.delete(activeConv.id) }
         updateMsg(activeConv.id, runId, { status: 'cancelled', content: t('chat.run_cancelled') ?? 'Run cancelled by user', streamLines: [] })
       }
     } catch (f) { setError(message(f)) }

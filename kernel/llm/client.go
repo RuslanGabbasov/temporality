@@ -351,9 +351,17 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 	return Completion{}, fmt.Errorf("giving up after retries: %w", lastErr)
 }
 
+// StreamDelta is one streamed chunk: answer text, reasoning text and/or a
+// partial tool call, exactly as the provider emitted it.
+type StreamDelta struct {
+	Text      string
+	Reasoning string
+	ToolCalls []ToolCallDelta
+}
+
 // TokenCallback is called for each streamed token/chunk.
 // Return true to stop streaming early.
-type TokenCallback func(delta string, toolCalls []ToolCallDelta) bool
+type TokenCallback func(delta StreamDelta) bool
 
 // ToolCallDelta is a partial tool call in a streaming chunk.
 type ToolCallDelta struct {
@@ -448,13 +456,16 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		// Accumulate content
 		if choice.Delta.Content != "" {
 			accumulated.WriteString(choice.Delta.Content)
-			if onToken != nil && onToken(choice.Delta.Content, nil) {
+			if onToken != nil && onToken(StreamDelta{Text: choice.Delta.Content}) {
 				stop = true
 			}
 		}
 		// Accumulate reasoning content
 		if choice.Delta.ReasoningContent != "" {
 			reasoning.WriteString(choice.Delta.ReasoningContent)
+			if onToken != nil && onToken(StreamDelta{Reasoning: choice.Delta.ReasoningContent}) {
+				stop = true
+			}
 		}
 		// Accumulate tool calls
 		for _, tc := range choice.Delta.ToolCalls {
@@ -471,7 +482,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 			}
 			existing.ArgsRaw += tc.Function.Arguments
 			if onToken != nil {
-				onToken("", []ToolCallDelta{{Index: tc.Index, ID: tc.ID, Name: tc.Function.Name, ArgsDelta: tc.Function.Arguments}})
+				onToken(StreamDelta{ToolCalls: []ToolCallDelta{{Index: tc.Index, ID: tc.ID, Name: tc.Function.Name, ArgsDelta: tc.Function.Arguments}}})
 			}
 		}
 		if stop {
