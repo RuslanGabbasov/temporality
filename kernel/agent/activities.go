@@ -57,6 +57,9 @@ type Activities struct {
 	SourceID      string
 	Sandbox       SandboxRunner
 	NetworkAccess bool
+	// Tokens is the ephemeral live-token bus feeding the /runs/{id}/tokens SSE
+	// endpoint; nil disables streaming (tests run the blocking path).
+	Tokens *TokenBus
 }
 
 func NewActivities(events EventOutbox) (*Activities, error) {
@@ -231,9 +234,7 @@ func (a *Activities) RecordEvent(ctx context.Context, event observation.Event) e
 }
 
 func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.Completion, error) {
-	if a.Model == nil {
-		return llm.Completion{}, errors.New("model client is not configured")
-	}
+	client := a.Model
 	if request.Model != "" {
 		// The existing client config is immutable; constructing a provider client
 		// per run keeps model selection out of deterministic Workflow code.
@@ -242,9 +243,26 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 			return llm.Completion{}, err
 		}
 		config.Model = request.Model
-		return llm.New(config).Complete(ctx, request.Messages, request.Tools)
+		client = llm.New(config)
 	}
-	return a.Model.Complete(ctx, request.Messages, request.Tools)
+	if client == nil {
+		return llm.Completion{}, errors.New("model client is not configured")
+	}
+	if a.Tokens != nil && request.RunID != "" {
+		// Live path: stream tokens to the ephemeral bus for subscribed UIs. A
+		// streaming failure falls through to the blocking call below, which has
+		// its own retries — the live preview is best-effort, the Completion is
+		// the source of truth the workflow records.
+		if completion, err := client.StreamComplete(ctx, request.Messages, request.Tools, func(delta llm.StreamDelta) bool {
+			if delta.Text != "" || delta.Reasoning != "" {
+				a.Tokens.Publish(request.RunID, request.Turn, delta.Text, delta.Reasoning)
+			}
+			return false
+		}); err == nil {
+			return completion, nil
+		}
+	}
+	return client.Complete(ctx, request.Messages, request.Tools)
 }
 
 func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResult, error) {
@@ -319,6 +337,10 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleSkillAction(ctx, request)
 	case "skill_propose":
 		return a.handleSkillPropose(ctx, request)
+	case "skill_evaluate":
+		return a.handleSkillEvaluate(ctx, request)
+	case "skill_diff":
+		return a.handleSkillDiff(ctx, request)
 	default:
 		if a.MCP != nil && a.MCP.HasTool(request.Name) {
 			if faultAfterEffect(request.RunID, request.Name, request.OperationID) {

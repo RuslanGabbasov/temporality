@@ -179,6 +179,10 @@ func main() {
 		log.Error("migrate workspace v43", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000044_skill_evolution_phase2.up.sql"); err != nil {
+		log.Error("migrate workspace v44", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -189,6 +193,9 @@ func main() {
 		log.Error("configure activities", "error", err)
 		os.Exit(1)
 	}
+	// Ephemeral live-token streaming: the activity worker and the HTTP server
+	// share one process, so an in-memory bus connects them without a broker.
+	activities.Tokens = agent.NewTokenBus()
 	loadMCPServers(ctx, log, ws, activities.MCP)
 	temporalClient, err := client.Dial(client.Options{HostPort: env("TEMPORAL_ADDRESS", client.DefaultHostPort)})
 	if err != nil {
@@ -1698,7 +1705,88 @@ func main() {
 		flusher.Flush()
 	})
 
-	// Trajectory extraction: deterministic structures from a run's event stream.
+	// Ephemeral token stream: live model output (answer text + reasoning) as
+	// it is generated, fed by the CallModel activity through the in-memory
+	// TokenBus. Tokens never enter the journal; the run's terminal state is
+	// observed through Temporal so the stream ends with a done event even when
+	// nobody else asks for the run.
+	mux.HandleFunc("GET /v1/workspace/runs/{runID}/tokens", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		runID := r.PathValue("runID")
+		run, err := ws.GetRun(r.Context(), runID)
+		if err != nil {
+			writeError(w, 404, err)
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			writeError(w, 500, errors.New("streaming not supported"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		events, snapshot, cancel := activities.Tokens.Subscribe(runID)
+		defer cancel()
+		writeEvent := func(event agent.TokenEvent) bool {
+			data, _ := json.Marshal(event)
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
+			flusher.Flush()
+			return event.Type == "done"
+		}
+		if snapshot.Type == "done" {
+			writeEvent(TokenDoneEvent)
+			return
+		}
+		if snapshot.Text != "" || snapshot.Reasoning != "" {
+			writeEvent(snapshot)
+		}
+		ctx := r.Context()
+		statusTicker := time.NewTicker(5 * time.Second)
+		defer statusTicker.Stop()
+		terminal := func() bool {
+			description, dErr := temporalClient.DescribeWorkflowExecution(ctx, workflowIDFor(activities.SourceID, run.ProjectID, run.RunID), "")
+			if dErr != nil {
+				return false
+			}
+			if description.WorkflowExecutionInfo == nil {
+				return false
+			}
+			switch description.WorkflowExecutionInfo.Status {
+			case enums.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+				enums.WORKFLOW_EXECUTION_STATUS_FAILED,
+				enums.WORKFLOW_EXECUTION_STATUS_CANCELED,
+				enums.WORKFLOW_EXECUTION_STATUS_TERMINATED,
+				enums.WORKFLOW_EXECUTION_STATUS_TIMED_OUT,
+				enums.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW:
+				return true
+			default:
+				return false
+			}
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-events:
+				if !ok || writeEvent(event) {
+					// Bus closed (run finished): also drop the bus entry so late
+					// subscribers get done immediately.
+					activities.Tokens.Close(runID)
+					return
+				}
+			case <-statusTicker.C:
+				if terminal() {
+					activities.Tokens.Close(runID)
+					writeEvent(TokenDoneEvent)
+					return
+				}
+			}
+		}
+	})
 	mux.HandleFunc("GET /v1/workspace/runs/{runID}/trajectory", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -2504,6 +2592,31 @@ func main() {
 		emitSkillLifecycleEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "skill.applied", skillID, skill.Name, applied, actorFromRequest(r))
 		writeJSON(w, 200, skill)
 	})
+	// Reject a draft proposal (docs/living-skills.md §23): the version stays in
+	// history as rejected and can no longer be applied. Human-driven path —
+	// agents propose, people decide.
+	mux.HandleFunc("POST /v1/workspace/skills/{skillID}/versions/{version}/reject", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		skillID, version := r.PathValue("skillID"), r.PathValue("version")
+		rejected, err := ws.RejectSkillVersion(r.Context(), skillID, version)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			if errors.Is(err, workspace.ErrConflict) {
+				writeError(w, 409, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		skill, _ := ws.GetSkill(r.Context(), skillID)
+		emitSkillLifecycleEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "skill.rejected", skillID, skill.Name, rejected, actorFromRequest(r))
+		writeJSON(w, 200, rejected)
+	})
 	mux.HandleFunc("POST /v1/workspace/skills/{skillID}/validate", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -2550,6 +2663,116 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"memory": memory})
+	})
+
+	// Skill evaluation suites and runs (docs/living-skills.md §29).
+	mux.HandleFunc("GET /v1/workspace/skills/{skillID}/evaluation-suite", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		suite, err := ws.GetEvaluationSuite(r.Context(), r.PathValue("skillID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, suite)
+	})
+	mux.HandleFunc("PUT /v1/workspace/skills/{skillID}/evaluation-suite", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var suite workspace.EvaluationSuite
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&suite); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if len(suite.Cases) > 16 {
+			writeError(w, 422, errors.New("at most 16 evaluation cases are supported"))
+			return
+		}
+		for i, c := range suite.Cases {
+			if strings.TrimSpace(c.Input) == "" {
+				writeError(w, 422, fmt.Errorf("case %d: input is required", i+1))
+				return
+			}
+		}
+		skillID := r.PathValue("skillID")
+		if _, err := ws.GetSkill(r.Context(), skillID); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.SaveEvaluationSuite(r.Context(), skillID, suite.Cases); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		saved, _ := ws.GetEvaluationSuite(r.Context(), skillID)
+		writeJSON(w, 200, saved)
+	})
+	// POST runs the suite synchronously (one grounded model call per case) and
+	// records the run; GET lists run history. The internal record sink lives at
+	// .../evaluation-runs so the evaluator's loopback write cannot recurse into
+	// a fresh evaluation.
+	mux.HandleFunc("POST /v1/workspace/skills/{skillID}/evaluation-runs", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var run workspace.EvaluationRun
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&run); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		run.SkillID = r.PathValue("skillID")
+		if run.SkillVersion == "" {
+			writeError(w, 422, errors.New("skill_version is required"))
+			return
+		}
+		if err := ws.RecordEvaluationRun(r.Context(), &run); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 201, run)
+	})
+	mux.HandleFunc("POST /v1/workspace/skills/{skillID}/evaluations", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		skillID := r.PathValue("skillID")
+		var req struct {
+			Version string `json:"version"`
+		}
+		if r.ContentLength > 0 {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+				writeError(w, 400, err)
+				return
+			}
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+		defer cancel()
+		if _, err := activities.RunSkillEvaluation(ctx, skillID, req.Version); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		runs, err := ws.ListEvaluationRuns(r.Context(), skillID, 1)
+		if err != nil || len(runs) == 0 {
+			writeError(w, 500, errors.New("evaluation ran but the result could not be read back"))
+			return
+		}
+		writeJSON(w, 200, runs[0])
+	})
+	mux.HandleFunc("GET /v1/workspace/skills/{skillID}/evaluations", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		runs, err := ws.ListEvaluationRuns(r.Context(), r.PathValue("skillID"), 0)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"runs": runs})
 	})
 
 	// MCP servers (workspace-global registry; stdio / sse / http)
@@ -4202,6 +4425,10 @@ type skillRequest struct {
 	EvidenceRefs  []string `json:"evidence_refs"`
 	KnowledgeIDs  []string `json:"knowledge_ids"`
 	ChangeSummary string   `json:"change_summary"`
+	// Evolution proposal anatomy (docs/living-skills.md §21).
+	ObservedProblem string `json:"observed_problem"`
+	ProposedChange  string `json:"proposed_change"`
+	ExpectedEffect  string `json:"expected_effect"`
 }
 
 func (req skillRequest) provenance(defaultOrigin string) workspace.SkillProvenance {
@@ -4212,6 +4439,7 @@ func (req skillRequest) provenance(defaultOrigin string) workspace.SkillProvenan
 	return workspace.SkillProvenance{
 		Origin: origin, SourceRuns: req.SourceRuns, EvidenceRefs: req.EvidenceRefs,
 		KnowledgeIDs: req.KnowledgeIDs, ChangeSummary: req.ChangeSummary,
+		ObservedProblem: req.ObservedProblem, ProposedChange: req.ProposedChange, ExpectedEffect: req.ExpectedEffect,
 	}
 }
 
@@ -4386,6 +4614,9 @@ func actorFromRequest(r *http.Request) observation.Actor {
 	}
 	return observation.Actor{ID: "anonymous", Type: "human"}
 }
+
+// TokenDoneEvent is the terminal frame of the ephemeral token stream.
+var TokenDoneEvent = agent.TokenEvent{Type: "done"}
 
 // emitSkillLifecycleEvent records skill.proposed / skill.applied in the
 // journal so the evolution chain is observable (docs/knowledge-evolution.md

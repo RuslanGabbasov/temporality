@@ -71,11 +71,12 @@ Not in MVP: agent-driven skill mutation beyond 0.x drafts (full evolution workfl
 
 ### Phase 2 (after MVP)
 
-- [ ] Evolution proposals — agent/human-driven, evidence-backed, approval workflow
-- [ ] Skill diff / rollback / snapshots
-- [ ] Evaluations — suites referenced by manifest
+- [x] Evolution proposals — draft versions carry the proposal anatomy (observed problem / proposed change / expected effect + evidence & knowledge provenance); apply/reject are the human approval workflow (`skill.applied` / `skill.rejected` journal events); `skill_diff`, `skill_evaluate` agent tools; CLI `apply/reject/diff`
+- [x] Skill diff / rollback — apply of an older active version is the rollback path (history immutable); diff in Skills UI and CLI. Snapshots as a separate artifact remain open (versions already are immutable snapshots)
+- [x] Evaluations — per-skill suites (cases with must/must-not-contain patterns), synchronous runner recording run history, `skill.evaluation.completed` events, Skills UI «Оценки» tab, CLI `evals` / `eval-run`
 - [ ] Contextual memory retrieval per skill/capability
 - [ ] Evolution analytics
+- Note: `skill_apply` / `skill_rollback` stay human-only by design (docs/living-skills.md §26: agents observe/propose/evaluate, people approve) — an agent requests approval via `request_approval`
 
 ---
 
@@ -121,7 +122,7 @@ Status: **complete** — all plan items done.
 ## P1 — Platform usability
 
 - [x] **State-at-T as product feature** — not just an API endpoint. "What did the system know when this decision was made?" needs a proper UI accessible from timeline/trace.
-- [ ] **Streaming improvements** — show model tokens as they arrive (not just turn-level). Analysis: LLM client supports it (`StreamComplete` + `TokenCallback`) but the workflow uses blocking `Complete` from Temporal activities; per-token journal events are forbidden by the event model (a token is not a durable fact). Right design: keep the journal turn-level, add an **ephemeral** channel — kernel in-memory pub/sub (single binary today) fed by `TokenCallback` in `CallModel`, exposed as a separate SSE endpoint (e.g. `/v1/workspace/runs/{id}/tokens`), merged into the chat stream widget. Multi-node workers would need a real transport (Redis/NATS) — noted as the scaling boundary.
+- [x] **Streaming improvements** — live model tokens (answer + reasoning) now stream to the chat through an ephemeral in-memory bus (`TokenBus`) fed by `StreamComplete` in `CallModel` (blocking `Complete` remains the fallback), exposed as `GET /v1/workspace/runs/{id}/tokens` SSE; the journal stays turn-level (a token is not a durable fact). Single-process only — multi-node workers need a real transport (Redis/NATS), noted as the scaling boundary.
 - [x] **Agent templates** — pre-configured agents for common tasks (coder, reviewer, researcher)
 - [x] **Project settings** — per-project defaults for agent, model, sandbox
 - [x] **Bulk operations** — select multiple runs/operations for batch actions

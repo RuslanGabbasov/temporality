@@ -168,6 +168,10 @@ type ModelRequest struct {
 	Model    string        `json:"model"`
 	Messages []llm.Message `json:"messages"`
 	Tools    []llm.ToolDef `json:"tools"`
+	// RunID + Turn enable live token streaming through the ephemeral TokenBus;
+	// empty RunID keeps the blocking non-streaming path (tests, helpers).
+	RunID string `json:"run_id,omitempty"`
+	Turn  int    `json:"turn,omitempty"`
 }
 
 type ToolRequest struct {
@@ -332,7 +336,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			// last tool turn on more calls and the run ends with an empty handoff.
 			turnMessages = append(slices.Clone(messages), llm.Message{Role: "system", Content: "This is the final turn with tools. Complete only the remaining essential checks; your next message must be the final answer to the request."})
 		}
-		modelReq := ModelRequest{Model: input.Model, Messages: turnMessages, Tools: advertisedTools(&input)}
+		modelReq := ModelRequest{Model: input.Model, Messages: turnMessages, Tools: advertisedTools(&input), RunID: input.RunID, Turn: turn}
 		if err := emit(activityCtx, state, "model.started", map[string]any{"turn": turn, "model": input.Model}); err != nil {
 			return result, err
 		}
@@ -1652,7 +1656,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	var finale llm.Completion
 	modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Minute, ScheduleToCloseTimeout: 11 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
-	if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, ModelRequest{Model: input.Model, Messages: finaleMessages}).Get(ctx, &finale); err != nil {
+	if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn}).Get(ctx, &finale); err != nil {
 		failureDetail := boundedFailureDetail(err)
 		if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "forced_finale": true, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
 			return result, eventErr
@@ -1931,6 +1935,7 @@ var policySafeTools = map[string]bool{
 	"list_triggers": true,
 	"skill_search":  true, "skill_inspect": true, "skill_validate": true,
 	"skill_history": true, "skill_executions": true, "skill_memory": true,
+	"skill_diff": true, "skill_evaluate": true,
 }
 
 // policySafeTool reports whether a tool may run without approval when the
@@ -2307,6 +2312,8 @@ func KernelTools() []llm.ToolDef {
 		{Name: "skill_executions", Description: "List recent executions of a skill (runs with this skill attached)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_memory", Description: "List knowledge recorded from a skill's executions (memory stays a separate temporal layer; it never modifies the skill)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_propose", Description: "Propose a new living skill from a natural-language description of a repeatable capability. The skill builder extracts the contract (procedure, capabilities, tools, runtime, constraints) referencing only tools that actually exist, and saves a 0.x draft pending human review in the Skills UI. If the skill already exists, the draft becomes its next version. Never hand-write skill files in the repo — the registry is the only source of truth", Parameters: map[string]any{"type": "object", "properties": map[string]any{"description": map[string]any{"type": "string", "description": "What the skill should do, when to use it, and any constraints — the same way you would describe it to a human"}}, "required": []string{"description"}}},
+		{Name: "skill_evaluate", Description: "Run the stored evaluation suite of a skill against its current revision or a specific version (e.g. a pending draft). Each case is a grounded model call checked against expected answer patterns; results are recorded as an evaluation run. Use it to validate a proposal before asking a human to apply it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}, "version": map[string]any{"type": "string", "description": "Optional specific version to test (a draft); defaults to the current revision"}}, "required": []string{"skill_id"}}},
+		{Name: "skill_diff", Description: "Show what changed between two skill versions (manifest contract + SKILL.md). Defaults to current revision vs the newest draft proposal — use it to review an evolution proposal before recommending apply", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}, "from_version": map[string]any{"type": "string", "description": "Optional base version; defaults to the current revision"}, "to_version": map[string]any{"type": "string", "description": "Optional target version; defaults to the newest draft"}}, "required": []string{"skill_id"}}},
 		{Name: "delegate", Description: "Delegate a self-contained subtask to another agent and wait for its result. The delegated agent runs with its own model, system prompt and capabilities — you cannot grant it anything beyond what it already has. Give a complete, self-contained prompt: everything the agent needs to know must be in it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"agent_id": map[string]any{"type": "string", "description": "Agent to delegate to"}, "prompt": map[string]any{"type": "string", "description": "Self-contained subtask description"}, "max_turns": map[string]any{"type": "integer", "description": "Turn budget for the delegated run, 1–16 (default 8)"}}, "required": []string{"agent_id", "prompt"}}},
 		{Name: "plan", Description: "Execute a plan of dependent subtasks as a DAG across agents, in one call. Each task names an agent and a self-contained prompt; depends_on lists task ids that must complete successfully first — their final answers are appended to the dependent task's prompt automatically, or place them inline with {{task-id.answer}} placeholders. Tasks without shared dependencies run in parallel. A failed task skips only its transitive dependents; independent branches still finish. A task with review_of is an acceptance gate: its run receives the submit_review tool, and a rework verdict sends the rejected tasks back with concrete feedback and re-runs their consumers (bounded by max_rework). Use this instead of several delegate calls whenever the work has ordering dependencies, can fan out, or needs review gates.", Parameters: map[string]any{
 			"type": "object",
