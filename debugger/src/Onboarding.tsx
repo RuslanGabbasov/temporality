@@ -26,6 +26,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const [providerUrl, setProviderUrl] = useState('')
   const [providerKey, setProviderKey] = useState('')
   const [providerModels, setProviderModels] = useState('')
+  const [providerId, setProviderId] = useState('')
   const [agentName, setAgentName] = useState('Coder')
   const [agentModel, setAgentModel] = useState('')
   const [busy, setBusy] = useState(false)
@@ -63,6 +64,8 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         }),
       })
       if (!resp.ok) throw new Error(await resp.text())
+      const created = await resp.json().catch(() => null)
+      setProviderId(typeof created?.id === 'string' ? created.id : '')
       setAgentModel(providerModels.split(',')[0]?.trim() ?? '')
       setStep('agent')
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
@@ -79,7 +82,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         body: JSON.stringify({
           name: agentName.trim(),
           model: agentModel.trim(),
-          provider: providerName.trim(),
+          provider: providerId || providerName.trim(),
         }),
       })
       if (!resp.ok) throw new Error(await resp.text())

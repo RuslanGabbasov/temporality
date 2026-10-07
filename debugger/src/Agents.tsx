@@ -589,7 +589,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                   </div>
                   <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.15rem' }}>
                     <span>{a.model || (t('agents.no_model') ?? 'no model')}</span>
-                    {a.provider && <span>· {a.provider}</span>}
+                    {a.provider && <span>· {providers.find((p) => p.id === a.provider)?.name ?? a.provider}</span>}
                     {a.labels?.builtin === 'true' && <span>· {t('agents.builtin_tag') ?? 'builtin'}</span>}
                     {!!a.definition_version && <span>· v{a.definition_version}</span>}
                   </div>
