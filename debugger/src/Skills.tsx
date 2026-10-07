@@ -12,7 +12,7 @@ import {
 } from '@carbon/react'
 import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
-import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion } from './workspaceApi'
+import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion, type SkillEvaluationCase, type SkillEvaluationRun } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import { useOrgUnits, OrgUnitSelect, OrgBadge, type OrgUnitsState } from './orgUnits'
@@ -63,6 +63,51 @@ interface SkillFormState {
 function sectionOfField(field: string): string {
   const head = field.split('.')[0].split('[')[0].trim()
   return head || '*'
+}
+
+interface ManifestDiffEntry {
+  field: string
+  from: string
+  to: string
+}
+
+/** Field-level manifest diff mirroring skills/diff.go (capabilities, tools,
+ * runtime, conditions, evidence, evaluation suite reference). */
+function diffManifests(from: SkillManifest, to: SkillManifest): ManifestDiffEntry[] {
+  const entries: ManifestDiffEntry[] = []
+  const diffSets = (field: string, a: string[] = [], b: string[] = []) => {
+    const setA = new Set(a)
+    const setB = new Set(b)
+    const added = b.filter((v) => !setA.has(v))
+    const removed = a.filter((v) => !setB.has(v))
+    if (added.length) entries.push({ field, from: '∅', to: '+ ' + added.join(', + ') })
+    if (removed.length) entries.push({ field, from: '− ' + removed.join(', − '), to: '∅' })
+  }
+  if ((from.description ?? '') !== (to.description ?? '')) entries.push({ field: 'description', from: from.description ?? '', to: to.description ?? '' })
+  diffSets('capabilities', from.capabilities, to.capabilities)
+  diffSets('tools', from.tools, to.tools)
+  if ((from.runtime?.sandbox ?? '') !== (to.runtime?.sandbox ?? '')) entries.push({ field: 'runtime.sandbox', from: from.runtime?.sandbox ?? '', to: to.runtime?.sandbox ?? '' })
+  if ((from.runtime?.network ?? '') !== (to.runtime?.network ?? '')) entries.push({ field: 'runtime.network', from: from.runtime?.network ?? '', to: to.runtime?.network ?? '' })
+  diffSets('preconditions', from.preconditions, to.preconditions)
+  diffSets('postconditions', from.postconditions, to.postconditions)
+  diffSets('evidence.required', from.evidence?.required, to.evidence?.required)
+  return entries
+}
+
+/** Added/removed SKILL.md line counts (bag semantics, mirrors DiffMarkdown). */
+function diffMarkdownCounts(from: string, to: string): [number, number] {
+  const counts = (text: string) => {
+    const map = new Map<string, number>()
+    for (const line of text.split('\n')) map.set(line, (map.get(line) ?? 0) + 1)
+    return map
+  }
+  const a = counts(from)
+  const b = counts(to)
+  let added = 0
+  let removed = 0
+  for (const [line, count] of b) added += Math.max(0, count - (a.get(line) ?? 0))
+  for (const [line, count] of a) removed += Math.max(0, count - (b.get(line) ?? 0))
+  return [added, removed]
 }
 
 export default function Skills() {
@@ -293,6 +338,56 @@ export default function Skills() {
     finally { setLoading(false) }
   }
 
+  // Rejecting dismisses a draft proposal forever: the row stays in history as
+  // rejected and can no longer be applied (docs/living-skills.md §23).
+  const rejectVersion = async (skill: Skill, version: string) => {
+    setLoading(true); setError('')
+    try {
+      await workspaceApi.rejectSkillVersion(skill.id, version)
+      void openSkill(skill)
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }
+
+  // ── Evaluations: stored suite + run history ─────────────────────────
+  const [evalSuite, setEvalSuite] = useState<SkillEvaluationCase[]>([])
+  const [evalRuns, setEvalRuns] = useState<SkillEvaluationRun[]>([])
+  const [evalBusy, setEvalBusy] = useState(false)
+  const [openEvalRun, setOpenEvalRun] = useState<number | null>(null)
+
+  const loadEvaluations = useCallback(async (skillId: string) => {
+    try {
+      const [suite, runs] = await Promise.all([
+        workspaceApi.getSkillEvaluationSuite(skillId),
+        workspaceApi.listSkillEvaluationRuns(skillId),
+      ])
+      setEvalSuite(suite.cases ?? [])
+      setEvalRuns(runs.runs ?? [])
+    } catch (f) { setError(message(f)) }
+  }, [])
+
+  useEffect(() => { if (selected && tab === 'evals') void loadEvaluations(selected.id) }, [selected, tab, loadEvaluations])
+
+  const saveEvalSuite = async () => {
+    if (!selected) return
+    setEvalBusy(true); setError('')
+    try {
+      const saved = await workspaceApi.saveSkillEvaluationSuite(selected.id, evalSuite)
+      setEvalSuite(saved.cases ?? [])
+    } catch (f) { setError(message(f)) }
+    finally { setEvalBusy(false) }
+  }
+
+  const runEvaluations = async (version?: string) => {
+    if (!selected) return
+    setEvalBusy(true); setError('')
+    try {
+      await workspaceApi.runSkillEvaluation(selected.id, version)
+      await loadEvaluations(selected.id)
+    } catch (f) { setError(message(f)) }
+    finally { setEvalBusy(false) }
+  }
+
   const touchSection = (section: string) => {
     setProvenance((current) => {
       if (section === '*') {
@@ -465,24 +560,54 @@ export default function Skills() {
                     <div className="skill-evolution-timeline">
                       {[...versions].reverse().map((version) => {
                         const isDraft = version.status === 'draft'
+                        const isRejected = version.status === 'rejected'
                         const isCurrent = version.version === selected.version
+                        // Diff against the current revision for proposals.
+                        const currentRow = versions.find((v) => v.version === selected.version)
+                        const manifestDiff = currentRow && version.version !== selected.version ? diffManifests(currentRow.manifest as SkillManifest, version.manifest as SkillManifest) : []
+                        const [mdAdded, mdRemoved] = currentRow && version.version !== selected.version ? diffMarkdownCounts(currentRow.markdown, version.markdown) : [0, 0]
                         return (
-                        <div key={version.version} className="skill-version">
+                        <div key={version.version} className="skill-version" style={isRejected ? { opacity: 0.55 } : undefined}>
                           <button className="skill-version-head" onClick={() => setOpenVersion(openVersion === version.version ? null : version.version)}>
                             <span className="skill-version-dot" />
                             <Tag size="sm">{version.version}</Tag>
                             {isCurrent && <Tag size="sm" type="green">{t('skills.current') ?? 'current'}</Tag>}
                             {isDraft && <Tag size="sm" type="purple">{t('skills.draft') ?? 'draft'}</Tag>}
-                            {!isDraft && version.origin === 'agent-proposal' && <Tag size="sm" type="blue">{t('skills.origin_agent') ?? 'agent proposal'}</Tag>}
+                            {isRejected && <Tag size="sm" type="red">{t('skills.rejected') ?? 'rejected'}</Tag>}
+                            {!isDraft && !isRejected && version.origin === 'agent-proposal' && <Tag size="sm" type="blue">{t('skills.origin_agent') ?? 'agent proposal'}</Tag>}
                             <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>
                               {isDraft
                                 ? (t('skills.proposed') ?? 'proposed')
-                                : (t('skills.published') ?? 'published')} {new Date(version.created_at).toLocaleDateString()}
+                                : isRejected
+                                  ? (t('skills.rejected_at') ?? 'rejected')
+                                  : (t('skills.published') ?? 'published')} {new Date(version.created_at).toLocaleDateString()}
                             </span>
                           </button>
                           {openVersion === version.version && (
                             <div className="skill-version-body">
-                              {(version.change_summary || (version.source_runs?.length ?? 0) > 0) && (
+                              {(version.observed_problem || version.proposed_change || version.expected_effect) && (
+                                <div style={{ marginBottom: '0.75rem', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px', fontSize: '0.8rem' }}>
+                                  {version.observed_problem && (
+                                    <div style={{ marginBottom: '0.25rem' }}>
+                                      <span style={{ color: 'var(--tm-text-3)' }}>{t('skills.observed_problem') ?? 'Observed problem'}: </span>
+                                      <span style={{ color: 'var(--tm-text-2)' }}>{version.observed_problem}</span>
+                                    </div>
+                                  )}
+                                  {version.proposed_change && (
+                                    <div style={{ marginBottom: '0.25rem' }}>
+                                      <span style={{ color: 'var(--tm-text-3)' }}>{t('skills.proposed_change') ?? 'Proposed change'}: </span>
+                                      <span style={{ color: 'var(--tm-text-2)' }}>{version.proposed_change}</span>
+                                    </div>
+                                  )}
+                                  {version.expected_effect && (
+                                    <div>
+                                      <span style={{ color: 'var(--tm-text-3)' }}>{t('skills.expected_effect') ?? 'Expected effect'}: </span>
+                                      <span style={{ color: 'var(--tm-text-2)' }}>{version.expected_effect}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              {(version.change_summary || (version.source_runs?.length ?? 0) > 0 || (version.knowledge_ids?.length ?? 0) > 0) && (
                                 <div style={{ marginBottom: '0.5rem', fontSize: '0.8rem' }}>
                                   {version.change_summary && (
                                     <div style={{ color: 'var(--tm-text-2)' }}>
@@ -495,14 +620,37 @@ export default function Skills() {
                                       {t('skills.source_runs') ?? 'Source runs'}: {version.source_runs!.join(', ')}
                                     </div>
                                   )}
+                                  {(version.knowledge_ids?.length ?? 0) > 0 && (
+                                    <div style={{ color: 'var(--tm-text-3)', marginTop: '0.15rem' }}>
+                                      {t('skills.knowledge_ids') ?? 'Knowledge'}: {version.knowledge_ids!.join(', ')}
+                                    </div>
+                                  )}
                                 </div>
                               )}
-                              {!isCurrent && (
-                                <div style={{ marginBottom: '0.75rem' }}>
+                              {!isCurrent && !isRejected && manifestDiff.length > 0 && (
+                                <div style={{ marginBottom: '0.75rem', fontSize: '0.78rem', padding: '0.5rem 0.75rem', background: 'var(--tm-surface-2)', borderRadius: '6px' }}>
+                                  <div style={{ color: 'var(--tm-text-3)', marginBottom: '0.25rem' }}>{t('skills.diff_vs_current') ?? 'Changes vs current revision'} ({selected.version} → {version.version}):</div>
+                                  {manifestDiff.map((d, i) => (
+                                    <div key={i} style={{ fontFamily: 'var(--tm-mono, monospace)', color: 'var(--tm-text-2)' }}>
+                                      {d.field}: <span style={{ color: 'var(--tm-text-3)' }}>{d.from || '∅'}</span> → <span>{d.to || '∅'}</span>
+                                    </div>
+                                  ))}
+                                  {(mdAdded > 0 || mdRemoved > 0) && (
+                                    <div style={{ marginTop: '0.25rem', color: 'var(--tm-text-3)' }}>SKILL.md: +{mdAdded} −{mdRemoved}</div>
+                                  )}
+                                </div>
+                              )}
+                              {!isCurrent && !isRejected && (
+                                <div style={{ marginBottom: '0.75rem', display: 'flex', gap: '0.5rem' }}>
                                   {isDraft ? (
-                                    <Button size="sm" onClick={() => {
-                                      if (confirm(t('skills.apply_confirm', { version: version.version }) ?? `Apply draft ${version.version}? It becomes the current revision for all agents.`)) void applyVersion(selected, version.version)
-                                    }}>{t('skills.apply') ?? 'Apply'}</Button>
+                                    <>
+                                      <Button size="sm" onClick={() => {
+                                        if (confirm(t('skills.apply_confirm', { version: version.version }) ?? `Apply draft ${version.version}? It becomes the current revision for all agents.`)) void applyVersion(selected, version.version)
+                                      }}>{t('skills.apply') ?? 'Apply'}</Button>
+                                      <Button size="sm" kind="danger" onClick={() => {
+                                        if (confirm(t('skills.reject_confirm', { version: version.version }) ?? `Reject draft ${version.version}? It stays in history and can no longer be applied.`)) void rejectVersion(selected, version.version)
+                                      }}>{t('skills.reject') ?? 'Reject'}</Button>
+                                    </>
                                   ) : (
                                     <Button size="sm" kind="secondary" onClick={() => {
                                       if (confirm(t('skills.rollback_confirm', { version: version.version }) ?? `Make version ${version.version} the current revision?`)) void applyVersion(selected, version.version)
@@ -524,9 +672,107 @@ export default function Skills() {
                 )}
 
                 {tab === 'evals' && (
-                  <div style={{ padding: '2rem 0', textAlign: 'center', color: 'var(--tm-text-3)' }}>
-                    <p>{t('skills.evals_empty') ?? 'Evaluation suites are not configured yet.'}</p>
-                    <p style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>{t('skills.evals_empty_hint') ?? ''}</p>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <div className="skill-subheading" style={{ margin: 0 }}>{t('skills.evals_suite') ?? 'Evaluation suite'}</div>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <Button size="sm" kind="secondary" disabled={evalBusy} onClick={() => {
+                          setEvalSuite([...evalSuite, { name: '', input: '', must_contain: [], must_not_contain: [] }])
+                        }}>{t('skills.evals_add_case') ?? 'Add case'}</Button>
+                        <Button size="sm" kind="secondary" disabled={evalBusy} onClick={() => void saveEvalSuite()}>{t('skills.evals_save') ?? 'Save suite'}</Button>
+                        <Button size="sm" disabled={evalBusy || evalSuite.length === 0} onClick={() => void runEvaluations()}>{t('skills.evals_run') ?? 'Run evaluations'}</Button>
+                      </div>
+                    </div>
+                    {evalSuite.length === 0 ? (
+                      <div style={{ padding: '1.5rem 0', textAlign: 'center', color: 'var(--tm-text-3)' }}>
+                        <p>{t('skills.evals_empty') ?? 'Evaluation suite is not configured yet.'}</p>
+                        <p style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>{t('skills.evals_empty_hint') ?? 'Add cases: a task input plus expected phrases the answer must (or must not) contain. Each run checks the current skill revision against every case.'}</p>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                        {evalSuite.map((c, i) => (
+                          <div key={i} style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>
+                            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                              <TextInput
+                                id={`eval-case-name-${i}`}
+                                hideLabel
+                                labelText=""
+                                placeholder={t('skills.evals_case_name') ?? 'Case name'}
+                                value={c.name}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEvalSuite(evalSuite.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                              />
+                              <Button size="sm" kind="ghost" hasIconOnly iconDescription={t('action.delete') ?? 'Delete'} disabled={evalBusy} onClick={() => setEvalSuite(evalSuite.filter((_, j) => j !== i))}>
+                                <TrashCan size={16} />
+                              </Button>
+                            </div>
+                            <TextArea
+                              id={`eval-case-input-${i}`}
+                              hideLabel
+                              labelText=""
+                              rows={2}
+                              placeholder={t('skills.evals_case_input') ?? 'Task for the agent executing this skill…'}
+                              value={c.input}
+                              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEvalSuite(evalSuite.map((x, j) => j === i ? { ...x, input: e.target.value } : x))}
+                            />
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.4rem' }}>
+                              <TextInput
+                                id={`eval-case-must-${i}`}
+                                hideLabel
+                                labelText=""
+                                placeholder={t('skills.evals_must_contain') ?? 'Answer must contain (comma-separated)'}
+                                value={(c.must_contain ?? []).join(', ')}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEvalSuite(evalSuite.map((x, j) => j === i ? { ...x, must_contain: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) } : x))}
+                              />
+                              <TextInput
+                                id={`eval-case-must-not-${i}`}
+                                hideLabel
+                                labelText=""
+                                placeholder={t('skills.evals_must_not_contain') ?? 'Answer must NOT contain'}
+                                value={(c.must_not_contain ?? []).join(', ')}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEvalSuite(evalSuite.map((x, j) => j === i ? { ...x, must_not_contain: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) } : x))}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="skill-subheading">{t('skills.evals_history') ?? 'Run history'}</div>
+                    {evalBusy && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('skills.evals_running') ?? 'Running evaluations…'}</p>}
+                    {evalRuns.length === 0 && !evalBusy ? (
+                      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('skills.evals_no_runs') ?? 'No evaluation runs yet.'}</p>
+                    ) : (
+                      <div className="skill-evolution-timeline">
+                        {evalRuns.map((run) => {
+                          const ok = run.failed === 0
+                          return (
+                            <div key={run.id} className="skill-version">
+                              <button className="skill-version-head" onClick={() => setOpenEvalRun(openEvalRun === run.id ? null : run.id)}>
+                                <span className="skill-version-dot" />
+                                <Tag size="sm" type={ok ? 'green' : 'red'}>{run.passed}/{run.passed + run.failed}</Tag>
+                                <Tag size="sm">v{run.skill_version}</Tag>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{new Date(run.created_at).toLocaleString()}</span>
+                              </button>
+                              {openEvalRun === run.id && (
+                                <div className="skill-version-body">
+                                  {(run.cases ?? []).map((c, i) => (
+                                    <div key={i} style={{ padding: '0.4rem 0', borderTop: i === 0 ? 'none' : '1px solid var(--tm-border)' }}>
+                                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                        <span style={{ color: c.passed ? 'var(--tm-success, green)' : 'var(--tm-danger, red)' }}>{c.passed ? '✓' : '✗'}</span>
+                                        <strong style={{ fontSize: '0.8rem' }}>{c.name}</strong>
+                                        {(c.missed?.length ?? 0) > 0 && <Tag size="sm" type="red">{t('skills.evals_missed') ?? 'missed'}: {c.missed!.join(', ')}</Tag>}
+                                        {(c.unexpected?.length ?? 0) > 0 && <Tag size="sm" type="red">{t('skills.evals_unexpected') ?? 'unexpected'}: {c.unexpected!.join(', ')}</Tag>}
+                                      </div>
+                                      {c.answer && <details style={{ marginTop: '0.25rem' }}><summary style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', cursor: 'pointer' }}>{t('skills.evals_answer') ?? 'Answer'}</summary><pre className="skill-manifest-preview">{c.answer}</pre></details>}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

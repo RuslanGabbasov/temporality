@@ -245,8 +245,44 @@ export interface SkillVersion {
   evidence_refs?: string[]
   knowledge_ids?: string[]
   change_summary?: string
-  /** draft | active */
+  /** Evolution proposal anatomy (docs/living-skills.md §21). */
+  observed_problem?: string
+  proposed_change?: string
+  expected_effect?: string
+  /** draft | active | rejected */
   status?: string
+  created_at: string
+}
+
+/** One case of a skill evaluation suite: a task input + expected patterns. */
+export interface SkillEvaluationCase {
+  name: string
+  input: string
+  must_contain?: string[]
+  must_not_contain?: string[]
+}
+
+export interface SkillEvaluationSuite {
+  skill_id: string
+  cases: SkillEvaluationCase[]
+  updated_at?: string
+}
+
+export interface SkillEvaluationCaseResult {
+  name: string
+  passed: boolean
+  answer?: string
+  missed?: string[]
+  unexpected?: string[]
+}
+
+export interface SkillEvaluationRun {
+  id: number
+  skill_id: string
+  skill_version: string
+  passed: number
+  failed: number
+  cases: SkillEvaluationCaseResult[]
   created_at: string
 }
 
@@ -516,6 +552,16 @@ export const workspaceApi = {
     request<{ versions: SkillVersion[] }>(`/v1/workspace/skills/${id}/versions`),
   applySkillVersion: (id: string, version: string) =>
     request<Skill>(`/v1/workspace/skills/${id}/versions/${version}/apply`, { method: 'POST' }),
+  rejectSkillVersion: (id: string, version: string) =>
+    request<SkillVersion>(`/v1/workspace/skills/${id}/versions/${version}/reject`, { method: 'POST' }),
+  getSkillEvaluationSuite: (id: string) =>
+    request<SkillEvaluationSuite>(`/v1/workspace/skills/${id}/evaluation-suite`),
+  saveSkillEvaluationSuite: (id: string, cases: SkillEvaluationCase[]) =>
+    request<SkillEvaluationSuite>(`/v1/workspace/skills/${id}/evaluation-suite`, { method: 'PUT', body: JSON.stringify({ cases }) }),
+  runSkillEvaluation: (id: string, version?: string) =>
+    request<SkillEvaluationRun>(`/v1/workspace/skills/${id}/evaluations`, { method: 'POST', body: JSON.stringify(version ? { version } : {}) }),
+  listSkillEvaluationRuns: (id: string) =>
+    request<{ runs: SkillEvaluationRun[] }>(`/v1/workspace/skills/${id}/evaluations`),
   validateSkill: (id: string, data: { markdown: string; manifest_yaml: string }) =>
     request<SkillValidation>(`/v1/workspace/skills/${id}/validate`, { method: 'POST', body: JSON.stringify(data) }),
   draftSkill: (description: string, final?: boolean) =>

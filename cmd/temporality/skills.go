@@ -8,7 +8,10 @@ import (
 	"io"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/temporality-project/temporality/skills"
 )
 
 // API shapes of the skill registry served by agent-kernel (workspace.Skill
@@ -278,5 +281,230 @@ func runSkillMemory(args []string, env func(string) string, stdout, stderr io.Wr
 		return 0
 	}
 	writeMemoryList(stdout, payload.Memory)
+	return 0
+}
+
+// runSkillApply promotes a version: drafts become the current revision,
+// applying an older active version is the rollback path.
+func runSkillApply(args []string, env func(string) string, stdout, stderr io.Writer) int {
+	var opts options
+	fs := commonFlags("apply", env, &opts, stderr)
+	if code := parseExit(fs.Parse(args)); code != 0 {
+		return code
+	}
+	if fs.NArg() != 2 {
+		fmt.Fprintln(stderr, "usage: temporality skill apply <skill-id> <version>")
+		return 2
+	}
+	var s skill
+	if err := newClient(opts.url, opts.token).post(skillPath(fs.Arg(0))+"/versions/"+url.PathEscape(fs.Arg(1))+"/apply", struct{}{}, &s); err != nil {
+		fmt.Fprintln(stderr, "temporality skill apply:", err)
+		return 1
+	}
+	if opts.json {
+		return writeJSONOrFail(stdout, stderr, s)
+	}
+	fmt.Fprintf(stdout, "applied %s %s (now current)\n", s.ID, s.Version)
+	return 0
+}
+
+// runSkillReject dismisses a draft proposal forever.
+func runSkillReject(args []string, env func(string) string, stdout, stderr io.Writer) int {
+	var opts options
+	fs := commonFlags("reject", env, &opts, stderr)
+	if code := parseExit(fs.Parse(args)); code != 0 {
+		return code
+	}
+	if fs.NArg() != 2 {
+		fmt.Fprintln(stderr, "usage: temporality skill reject <skill-id> <version>")
+		return 2
+	}
+	var v skillVersion
+	if err := newClient(opts.url, opts.token).post(skillPath(fs.Arg(0))+"/versions/"+url.PathEscape(fs.Arg(1))+"/reject", struct{}{}, &v); err != nil {
+		fmt.Fprintln(stderr, "temporality skill reject:", err)
+		return 1
+	}
+	if opts.json {
+		return writeJSONOrFail(stdout, stderr, v)
+	}
+	fmt.Fprintf(stdout, "rejected %s %s\n", v.SkillID, v.Version)
+	return 0
+}
+
+// runSkillDiff prints the manifest + SKILL.md changes between two versions.
+// Defaults mirror the agent tool: current revision → newest draft.
+func runSkillDiff(args []string, env func(string) string, stdout, stderr io.Writer) int {
+	var opts options
+	fs := commonFlags("diff", env, &opts, stderr)
+	from := fs.String("from", "", "base version (default: current revision)")
+	to := fs.String("to", "", "target version (default: newest draft)")
+	if code := parseExit(fs.Parse(args)); code != 0 {
+		return code
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "usage: temporality skill diff <skill-id> [--from v] [--to v]")
+		return 2
+	}
+	var payload struct {
+		Versions []skillVersion `json:"versions"`
+	}
+	if err := newClient(opts.url, opts.token).get(skillPath(fs.Arg(0))+"/versions", nil, &payload); err != nil {
+		fmt.Fprintln(stderr, "temporality skill diff:", err)
+		return 1
+	}
+	if len(payload.Versions) == 0 {
+		fmt.Fprintln(stdout, "no versions")
+		return 0
+	}
+	pick := func(version string) int {
+		if version != "" {
+			for i, v := range payload.Versions {
+				if v.Version == version {
+					return i
+				}
+			}
+			fmt.Fprintf(stderr, "temporality skill diff: version %q not found\n", version)
+			return -1
+		}
+		return -1
+	}
+	fromIdx := pick(*from)
+	if fromIdx == -1 && *from != "" {
+		return 2
+	}
+	toIdx := pick(*to)
+	if toIdx == -1 && *to != "" {
+		return 2
+	}
+	if fromIdx < 0 {
+		for i, v := range payload.Versions {
+			if v.Status == "active" {
+				fromIdx = i
+				break
+			}
+		}
+		if fromIdx < 0 {
+			fromIdx = len(payload.Versions) - 1
+		}
+	}
+	if toIdx < 0 {
+		toIdx = 0
+		for i, v := range payload.Versions {
+			if v.Status == "draft" {
+				toIdx = i
+				break
+			}
+		}
+	}
+	if fromIdx == toIdx {
+		fmt.Fprintln(stdout, "no different versions to compare")
+		return 0
+	}
+	fromV, toV := payload.Versions[fromIdx], payload.Versions[toIdx]
+	fromManifest, err1 := skills.ParseManifest(string(fromV.Manifest))
+	toManifest, err2 := skills.ParseManifest(string(toV.Manifest))
+	if err1 != nil || err2 != nil {
+		fmt.Fprintln(stderr, "temporality skill diff: stored manifest is not parseable")
+		return 1
+	}
+	entries := skills.DiffManifests(fromManifest, toManifest)
+	added, removed := skills.DiffMarkdown(fromV.Markdown, toV.Markdown)
+	fmt.Fprint(stdout, skills.RenderDiff(fromV.Version, toV.Version, entries, added, removed))
+	return 0
+}
+
+type evaluationCaseResult struct {
+	Name       string   `json:"name"`
+	Passed     bool     `json:"passed"`
+	Missed     []string `json:"missed"`
+	Unexpected []string `json:"unexpected"`
+}
+
+type evaluationRun struct {
+	ID           int64                  `json:"id"`
+	SkillVersion string                 `json:"skill_version"`
+	Passed       int                    `json:"passed"`
+	Failed       int                    `json:"failed"`
+	Cases        []evaluationCaseResult `json:"cases"`
+	CreatedAt    time.Time              `json:"created_at"`
+}
+
+// runSkillEvals lists evaluation run history.
+func runSkillEvals(args []string, env func(string) string, stdout, stderr io.Writer) int {
+	var opts options
+	fs := commonFlags("evals", env, &opts, stderr)
+	if code := parseExit(fs.Parse(args)); code != 0 {
+		return code
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "usage: temporality skill evals <skill-id>")
+		return 2
+	}
+	var payload struct {
+		Runs []evaluationRun `json:"runs"`
+	}
+	if err := newClient(opts.url, opts.token).get(skillPath(fs.Arg(0))+"/evaluations", nil, &payload); err != nil {
+		fmt.Fprintln(stderr, "temporality skill evals:", err)
+		return 1
+	}
+	if opts.json {
+		return writeJSONOrFail(stdout, stderr, payload)
+	}
+	if len(payload.Runs) == 0 {
+		fmt.Fprintln(stdout, "no evaluation runs")
+		return 0
+	}
+	rows := [][]string{{"RUN", "VERSION", "PASSED", "FAILED", "CREATED"}}
+	for _, run := range payload.Runs {
+		rows = append(rows, []string{
+			strconv.FormatInt(run.ID, 10), run.SkillVersion,
+			strconv.Itoa(run.Passed), strconv.Itoa(run.Failed), formatTime(run.CreatedAt),
+		})
+	}
+	printLines(stdout, alignRows(rows))
+	return 0
+}
+
+// runSkillEvalRun executes the stored suite now (synchronous model calls).
+func runSkillEvalRun(args []string, env func(string) string, stdout, stderr io.Writer) int {
+	var opts options
+	fs := commonFlags("eval-run", env, &opts, stderr)
+	version := fs.String("version", "", "test a specific version (e.g. a pending draft)")
+	if code := parseExit(fs.Parse(args)); code != 0 {
+		return code
+	}
+	if fs.NArg() != 1 {
+		fmt.Fprintln(stderr, "usage: temporality skill eval-run <skill-id> [--version v]")
+		return 2
+	}
+	payload := map[string]any{}
+	if *version != "" {
+		payload["version"] = *version
+	}
+	var run evaluationRun
+	api := newClient(opts.url, opts.token)
+	api.http.Timeout = 10 * time.Minute
+	if err := api.post(skillPath(fs.Arg(0))+"/evaluations", payload, &run); err != nil {
+		fmt.Fprintln(stderr, "temporality skill eval-run:", err)
+		return 1
+	}
+	if opts.json {
+		return writeJSONOrFail(stdout, stderr, run)
+	}
+	fmt.Fprintf(stdout, "run #%d on %s: %d passed, %d failed\n", run.ID, run.SkillVersion, run.Passed, run.Failed)
+	for _, c := range run.Cases {
+		mark := "✓"
+		if !c.Passed {
+			mark = "✗"
+		}
+		fmt.Fprintf(stdout, "  %s %s", mark, dash(c.Name))
+		if len(c.Missed) > 0 || len(c.Unexpected) > 0 {
+			fmt.Fprintf(stdout, " (missed: %s; unexpected: %s)", strings.Join(c.Missed, ", "), strings.Join(c.Unexpected, ", "))
+		}
+		fmt.Fprintln(stdout)
+	}
+	if run.Failed > 0 {
+		return 1
+	}
 	return 0
 }

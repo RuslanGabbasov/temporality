@@ -51,12 +51,18 @@ type Skill struct {
 // SkillProvenance records why a version exists: who authored it and which
 // runs, evidence and knowledge produced it, so the evolution chain
 // (why vN became vN+1) stays reconstructible (docs/knowledge-evolution.md §8).
+// For agent evolution proposals (docs/living-skills.md §21) the anatomy is
+// explicit: what problem was observed, what change is proposed and what
+// effect it is expected to have.
 type SkillProvenance struct {
-	Origin        string   `json:"origin"`
-	SourceRuns    []string `json:"source_runs,omitempty"`
-	EvidenceRefs  []string `json:"evidence_refs,omitempty"`
-	KnowledgeIDs  []string `json:"knowledge_ids,omitempty"`
-	ChangeSummary string   `json:"change_summary,omitempty"`
+	Origin          string   `json:"origin"`
+	SourceRuns      []string `json:"source_runs,omitempty"`
+	EvidenceRefs    []string `json:"evidence_refs,omitempty"`
+	KnowledgeIDs    []string `json:"knowledge_ids,omitempty"`
+	ChangeSummary   string   `json:"change_summary,omitempty"`
+	ObservedProblem string   `json:"observed_problem,omitempty"`
+	ProposedChange  string   `json:"proposed_change,omitempty"`
+	ExpectedEffect  string   `json:"expected_effect,omitempty"`
 }
 
 // SkillVersion is an immutable snapshot of a skill's content plus the
@@ -115,10 +121,10 @@ func (s *Store) createSkill(ctx context.Context, sk *Skill, prov SkillProvenance
 		return err
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_skill_version (skill_id, version, markdown, manifest, created_at, origin, source_runs, evidence_refs, knowledge_ids, change_summary, status)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		`INSERT INTO workspace_skill_version (skill_id, version, markdown, manifest, created_at, origin, source_runs, evidence_refs, knowledge_ids, change_summary, observed_problem, proposed_change, expected_effect, status)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			 ON CONFLICT (skill_id, version) DO NOTHING`,
-		sk.ID, sk.Version, sk.Markdown, manifestOrNull(sk.Manifest), now, prov.Origin, textArray(prov.SourceRuns), textArray(prov.EvidenceRefs), textArray(prov.KnowledgeIDs), prov.ChangeSummary, status)
+		sk.ID, sk.Version, sk.Markdown, manifestOrNull(sk.Manifest), now, prov.Origin, textArray(prov.SourceRuns), textArray(prov.EvidenceRefs), textArray(prov.KnowledgeIDs), prov.ChangeSummary, prov.ObservedProblem, prov.ProposedChange, prov.ExpectedEffect, status)
 	return err
 }
 
@@ -228,7 +234,7 @@ func (s *Store) DeleteSkill(ctx context.Context, id string) error {
 
 func (s *Store) ListSkillVersions(ctx context.Context, skillID string) ([]SkillVersion, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT skill_id, version, markdown, manifest, origin, source_runs, evidence_refs, knowledge_ids, change_summary, status, created_at
+		`SELECT skill_id, version, markdown, manifest, origin, source_runs, evidence_refs, knowledge_ids, change_summary, observed_problem, proposed_change, expected_effect, status, created_at
 			 FROM workspace_skill_version WHERE skill_id = $1 ORDER BY created_at DESC`, skillID)
 	if err != nil {
 		return nil, err
@@ -238,7 +244,7 @@ func (s *Store) ListSkillVersions(ctx context.Context, skillID string) ([]SkillV
 	for rows.Next() {
 		var v SkillVersion
 		var manifest []byte
-		if err := rows.Scan(&v.SkillID, &v.Version, &v.Markdown, &manifest, &v.Origin, &v.SourceRuns, &v.EvidenceRefs, &v.KnowledgeIDs, &v.ChangeSummary, &v.Status, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.SkillID, &v.Version, &v.Markdown, &manifest, &v.Origin, &v.SourceRuns, &v.EvidenceRefs, &v.KnowledgeIDs, &v.ChangeSummary, &v.ObservedProblem, &v.ProposedChange, &v.ExpectedEffect, &v.Status, &v.CreatedAt); err != nil {
 			return nil, err
 		}
 		v.Manifest = rawMessage(manifest)
@@ -287,9 +293,9 @@ func (s *Store) ProposeSkillVersion(ctx context.Context, skillID, version, markd
 	}
 	now := time.Now().UTC()
 	if _, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_skill_version (skill_id, version, markdown, manifest, created_at, origin, source_runs, evidence_refs, knowledge_ids, change_summary, status)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft')`,
-		skillID, version, markdown, manifestOrNull(manifest), now, prov.Origin, textArray(prov.SourceRuns), textArray(prov.EvidenceRefs), textArray(prov.KnowledgeIDs), prov.ChangeSummary); err != nil {
+		`INSERT INTO workspace_skill_version (skill_id, version, markdown, manifest, created_at, origin, source_runs, evidence_refs, knowledge_ids, change_summary, observed_problem, proposed_change, expected_effect, status)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'draft')`,
+		skillID, version, markdown, manifestOrNull(manifest), now, prov.Origin, textArray(prov.SourceRuns), textArray(prov.EvidenceRefs), textArray(prov.KnowledgeIDs), prov.ChangeSummary, prov.ObservedProblem, prov.ProposedChange, prov.ExpectedEffect); err != nil {
 		return SkillVersion{}, err
 	}
 	return SkillVersion{
@@ -311,9 +317,9 @@ func (s *Store) ApplySkillVersion(ctx context.Context, skillID, version string) 
 	var applied SkillVersion
 	var manifest []byte
 	err = tx.QueryRow(ctx,
-		`SELECT skill_id, version, markdown, manifest, origin, source_runs, evidence_refs, knowledge_ids, change_summary, status, created_at
+		`SELECT skill_id, version, markdown, manifest, origin, source_runs, evidence_refs, knowledge_ids, change_summary, observed_problem, proposed_change, expected_effect, status, created_at
 			 FROM workspace_skill_version WHERE skill_id = $1 AND version = $2 FOR UPDATE`, skillID, version).
-		Scan(&applied.SkillID, &applied.Version, &applied.Markdown, &manifest, &applied.Origin, &applied.SourceRuns, &applied.EvidenceRefs, &applied.KnowledgeIDs, &applied.ChangeSummary, &applied.Status, &applied.CreatedAt)
+		Scan(&applied.SkillID, &applied.Version, &applied.Markdown, &manifest, &applied.Origin, &applied.SourceRuns, &applied.EvidenceRefs, &applied.KnowledgeIDs, &applied.ChangeSummary, &applied.ObservedProblem, &applied.ProposedChange, &applied.ExpectedEffect, &applied.Status, &applied.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Skill{}, SkillVersion{}, ErrNotFound
 	}
@@ -339,6 +345,53 @@ func (s *Store) ApplySkillVersion(ctx context.Context, skillID, version string) 
 	applied.Status = SkillVersionActive
 	skill, err := s.GetSkill(ctx, skillID)
 	return skill, applied, err
+}
+
+// RejectSkillVersion dismisses a draft proposal (docs/living-skills.md §23):
+// the version row stays in history for audit but is marked rejected and can
+// never be applied. Rejecting a non-draft is a conflict — published versions
+// are immutable history.
+func (s *Store) RejectSkillVersion(ctx context.Context, skillID, version string) (SkillVersion, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_skill_version SET status = 'rejected' WHERE skill_id = $1 AND version = $2 AND status = 'draft'`, skillID, version)
+	if err != nil {
+		return SkillVersion{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		// Distinguish "no such version" from "not a draft" for an honest error.
+		var status string
+		err := s.pool.QueryRow(ctx, `SELECT status FROM workspace_skill_version WHERE skill_id = $1 AND version = $2`, skillID, version).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return SkillVersion{}, ErrNotFound
+		}
+		if err != nil {
+			return SkillVersion{}, err
+		}
+		return SkillVersion{}, fmt.Errorf("%w: only draft proposals can be rejected (status %q)", ErrConflict, status)
+	}
+	v, err := s.GetSkillVersion(ctx, skillID, version)
+	if err != nil {
+		return SkillVersion{}, err
+	}
+	return v, nil
+}
+
+// GetSkillVersion returns one immutable version row (for diffs and evals).
+func (s *Store) GetSkillVersion(ctx context.Context, skillID, version string) (SkillVersion, error) {
+	var v SkillVersion
+	var manifest []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT skill_id, version, markdown, manifest, origin, source_runs, evidence_refs, knowledge_ids, change_summary, observed_problem, proposed_change, expected_effect, status, created_at
+			 FROM workspace_skill_version WHERE skill_id = $1 AND version = $2`, skillID, version).
+		Scan(&v.SkillID, &v.Version, &v.Markdown, &manifest, &v.Origin, &v.SourceRuns, &v.EvidenceRefs, &v.KnowledgeIDs, &v.ChangeSummary, &v.ObservedProblem, &v.ProposedChange, &v.ExpectedEffect, &v.Status, &v.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return v, ErrNotFound
+	}
+	if err != nil {
+		return v, err
+	}
+	v.Manifest = rawMessage(manifest)
+	return v, nil
 }
 
 // nextFreePatch returns the first patch bump after current that no existing

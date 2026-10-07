@@ -30,6 +30,11 @@ Commands:
   history <id>       immutable version history of a skill
   executions <id>    executions (runs) linked to a skill
   memory <id>        knowledge linked to a skill
+  apply <id> <ver>   make a version current (draft apply / rollback)
+  reject <id> <ver>  dismiss a draft proposal forever
+  diff <id>          changes between versions (default: current → newest draft)
+  evals <id>         evaluation run history
+  eval-run <id>      run the evaluation suite now
 
 Flags:
   --url <base>       workspace API base URL (env TEMPORALITY_URL,
@@ -91,6 +96,16 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 		return runSkillExecutions(rest, env, stdout, stderr)
 	case "memory":
 		return runSkillMemory(rest, env, stdout, stderr)
+	case "apply":
+		return runSkillApply(rest, env, stdout, stderr)
+	case "reject":
+		return runSkillReject(rest, env, stdout, stderr)
+	case "diff":
+		return runSkillDiff(rest, env, stdout, stderr)
+	case "evals":
+		return runSkillEvals(rest, env, stdout, stderr)
+	case "eval-run":
+		return runSkillEvalRun(rest, env, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "temporality skill: unknown command %q\n\n", sub)
 		fmt.Fprint(stderr, usage)
