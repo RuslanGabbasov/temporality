@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ObservationEvent } from './observationApi'
-import { aliveRowAt, commandSegments, contentTokens, foldExperience, forensicOf, lifecycleKindOf, propositionMechanisms, roleOfKnowledgeId, roleOfRun, runOfEvidenceRef, scopeOfCommand, segmentSubcommand, shortKnowledge, stateBucket, windowAround } from './experience'
+import { aliveRowAt, buildRunChains, commandSegments, contentTokens, foldExperience, forensicOf, lifecycleKindOf, propositionMechanisms, roleOfKnowledgeId, roleOfRun, runOfEvidenceRef, scopeOfCommand, segmentSubcommand, shortKnowledge, stateBucket, windowAround, type RunInfo } from './experience'
 
 let counter = 0
 
@@ -67,6 +67,53 @@ describe('canonicalCommand / scopeOfCommand', () => {
     expect(scopeOfCommand('go vet ./...')).toBe('vet')
     expect(scopeOfCommand('go build ./...')).toBe('build')
     expect(scopeOfCommand('gofmt -l .')).toBe('fmt')
+  })
+})
+
+function runInfo(id: string, startedAt: string, overrides: Partial<RunInfo> = {}): RunInfo {
+  return { id, startedAt, toolCalls: 0, modelCalls: 0, knowledgeEvents: 0, commands: [], ...overrides }
+}
+
+describe('buildRunChains', () => {
+  it('groups a delegation tree under its root and flags failures', () => {
+    const runs = [
+      runInfo('root-1', '2026-10-01T10:00:00Z'),
+      runInfo('root-1/coder', '2026-10-01T10:01:00Z', { parentRun: 'root-1', status: 'completed', endedAt: '2026-10-01T10:05:00Z' }),
+      runInfo('root-1/reviewer', '2026-10-01T10:02:00Z', { parentRun: 'root-1', status: 'failed', endedAt: '2026-10-01T10:06:00Z' }),
+      runInfo('root-2', '2026-10-01T11:00:00Z', { status: 'completed', endedAt: '2026-10-01T11:04:00Z' }),
+    ]
+    const { chains, rootOf } = buildRunChains(runs)
+    expect(chains).toHaveLength(2)
+    const first = chains.find((chain) => chain.root.id === 'root-1')!
+    expect(first.runs.map((run) => run.id)).toEqual(['root-1', 'root-1/coder', 'root-1/reviewer'])
+    expect(first.failed).toBe(true)
+    expect(first.endedAt).toBe('2026-10-01T10:06:00Z')
+    const second = chains.find((chain) => chain.root.id === 'root-2')!
+    expect(second.failed).toBe(false)
+    expect(rootOf.get('root-1/reviewer')).toBe('root-1')
+    expect(rootOf.get('root-2')).toBe('root-2')
+  })
+
+  it('keeps runs whose parent falls outside the loaded window as their own roots', () => {
+    const runs = [runInfo('orphan/delegate/01', '2026-10-01T10:00:00Z', { parentRun: 'orphan' })]
+    const { chains, rootOf } = buildRunChains(runs)
+    expect(chains).toHaveLength(1)
+    expect(chains[0].root.id).toBe('orphan/delegate/01')
+    expect(rootOf.get('orphan/delegate/01')).toBe('orphan/delegate/01')
+  })
+
+  it('captures actor, title and agent id from run.started during folding', () => {
+    const events = [
+      event('run.started', '2026-10-01T10:00:00Z', { role: 'lead', agent_id: 'lead', title: 'Fix login timeout', parent_run_id: '' }, { run: 'fix-1' }),
+      event('run.started', '2026-10-01T10:01:00Z', { role: 'coder', agent_id: 'coder', parent_run_id: 'fix-1' }, { run: 'fix-1/coder' }),
+    ]
+    const model = foldExperience(events)
+    const root = model.runs.find((run) => run.id === 'fix-1')!
+    expect(root.title).toBe('Fix login timeout')
+    expect(root.actor).toBe('test')
+    expect(root.agentId).toBe('lead')
+    const child = model.runs.find((run) => run.id === 'fix-1/coder')!
+    expect(child.parentRun).toBe('fix-1')
   })
 })
 

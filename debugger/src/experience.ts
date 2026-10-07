@@ -136,10 +136,69 @@ export interface RunInfo {
   startedAt: string
   endedAt?: string
   status?: string
+  /** Run initiator (context.actor): a user id, trigger id or agent id. */
+  actor?: string
+  /** Generated human title attached to run.started (runtitle.go). */
+  title?: string
+  agentId?: string
   toolCalls: number
   modelCalls: number
   knowledgeEvents: number
   commands: RunCommand[]
+}
+
+/** A delegation chain: the root run plus every run it spawned (directly or
+ * transitively). The collapsed unit of the timeline run section — one lane
+ * per chain, expandable to per-run lanes. */
+export interface RunChain {
+  root: RunInfo
+  runs: RunInfo[]
+  /** Deepest failure inside the chain, if any run failed. */
+  failed: boolean
+  endedAt?: string
+  lastAt: string
+}
+
+/** Group runs into delegation chains by parent_run_id. Runs whose parent is
+ * missing from the stream stay attached to their own root (the parent events
+ * may live outside the loaded window). */
+export function buildRunChains(runs: RunInfo[]): { chains: RunChain[]; rootOf: Map<string, string> } {
+  const byId = new Map(runs.map((run) => [run.id, run]))
+  const rootOf = new Map<string, string>()
+  const resolveRoot = (run: RunInfo): string => {
+    const cached = rootOf.get(run.id)
+    if (cached !== undefined) return cached
+    // Guard against parent cycles: mark before descending.
+    rootOf.set(run.id, run.id)
+    const parent = run.parentRun ? byId.get(run.parentRun) : undefined
+    const root = parent ? resolveRoot(parent) : run.id
+    rootOf.set(run.id, root)
+    return root
+  }
+  const byRoot = new Map<string, RunInfo[]>()
+  for (const run of runs) {
+    const root = resolveRoot(run)
+    const list = byRoot.get(root) ?? []
+    list.push(run)
+    byRoot.set(root, list)
+  }
+  const chains: RunChain[] = []
+  for (const [rootId, members] of byRoot) {
+    const root = byId.get(rootId)!
+    const sorted = [...members].sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : a.id < b.id ? -1 : 1))
+    let lastAt = root.startedAt
+    let endedAt: string | undefined
+    let failed = false
+    for (const run of sorted) {
+      if (!lastAt || run.startedAt > lastAt) lastAt = run.startedAt
+      const end = run.endedAt ?? run.startedAt
+      if (!endedAt || end > endedAt) endedAt = end
+      if (run.status === 'failed') failed = true
+    }
+    chains.push({ root, runs: sorted, failed, endedAt: endedAt ?? root.startedAt, lastAt })
+  }
+  chains.sort((a, b) => (a.root.startedAt < b.root.startedAt ? 1 : a.root.startedAt > b.root.startedAt ? -1 : a.root.id < b.root.id ? 1 : -1))
+  return { chains, rootOf }
 }
 
 /** recall → injection pairing: which run pulled which memory item when. */
@@ -482,7 +541,7 @@ export function foldExperience(events: ObservationEvent[]): ExperienceModel {
     if (event.type === 'run.started') {
       const id = run ?? event.event_id
       if (!runs.has(id)) {
-        runs.set(id, { id, role, parentRun: stringOf(event.data?.parent_run_id) || undefined, startedAt: event.occurred_at, toolCalls: 0, modelCalls: 0, knowledgeEvents: 0, commands: [] })
+        runs.set(id, { id, role, parentRun: stringOf(event.data?.parent_run_id) || undefined, startedAt: event.occurred_at, status: undefined, actor: event.context?.actor?.id || undefined, title: stringOf(event.data?.title) || undefined, agentId: stringOf(event.data?.agent_id) || undefined, toolCalls: 0, modelCalls: 0, knowledgeEvents: 0, commands: [] })
       }
       continue
     }

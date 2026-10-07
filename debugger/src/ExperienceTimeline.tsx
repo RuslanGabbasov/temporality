@@ -3,11 +3,14 @@ import { ChevronDown } from '@carbon/icons-react'
 import { API_BASE } from './api'
 import { useT } from './i18n'
 import { observationApi, type ObservationEvent } from './observationApi'
-import { aliveRowAt, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type RunInfo } from './experience'
+import { aliveRowAt, buildRunChains, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type RunChain, type RunInfo } from './experience'
+import { useOrgUnits } from './orgUnits'
+import { workspaceApi, type User } from './workspaceApi'
 
 const GUTTER = 210
 const AXIS_HEIGHT = 34
 const RUN_LANE = 24
+const GROUP_HEADER = 34
 const SCOPE_HEADER = 34
 const ROW_LANE = 22
 const AGGREGATE_LANE = 26
@@ -20,11 +23,46 @@ const AUTO_AGGREGATE_ROWS = 12
 // Episode zoom: when the visible span is below this share of the full span,
 // individual tool-call episodes become visible within each knowledge row.
 const EPISODE_RATIO = 0.15
+// Run grouping: with few chains the collapsed-by-default groups would only
+// add a pointless click, so small corpora auto-expand.
+const AUTO_EXPAND_CHAINS = 12
 
 const MEMORY_BUCKETS: MemoryBucket[] = ['active', 'stale', 'invalidated', 'archived']
 
 type RecencyFilter = 'all' | 'last-run' | '24h' | '7d' | '30d'
 type TerminalFilter = 'all' | 'alive' | 'dead'
+/** Server-side load window: the timeline never needs the full history to be
+ * useful — a week of runs is already thousands of events at team scale. */
+type RangeFilter = '24h' | '7d' | '30d' | 'all'
+const RANGE_OPTIONS: { value: RangeFilter; label: string }[] = [
+  { value: '24h', label: 'timeline.range.24h' },
+  { value: '7d', label: 'timeline.range.7d' },
+  { value: '30d', label: 'timeline.range.30d' },
+  { value: 'all', label: 'timeline.range.all' },
+]
+/** Primary run-section grouping dimension. */
+type GroupBy = 'unit' | 'agent' | 'day' | 'none'
+const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
+  { value: 'unit', label: 'timeline.group.unit' },
+  { value: 'agent', label: 'timeline.group.agent' },
+  { value: 'day', label: 'timeline.group.day' },
+  { value: 'none', label: 'timeline.group.none' },
+]
+const RANGE_MS: Record<Exclude<RangeFilter, 'all'>, number> = { '24h': 86400e3, '7d': 7 * 86400e3, '30d': 30 * 86400e3 }
+
+/** One collapsed run group: everything a team lead needs before drilling into
+ * individual chains — volume, failures, knowledge touched. */
+interface RunGroup {
+  id: string
+  label: string
+  order: string
+  chains: RunChain[]
+  runs: RunInfo[]
+  failed: number
+  knowledgeEvents: number
+  firstAt: string
+  lastAt: string
+}
 const RECENCY_OPTIONS: { value: RecencyFilter; label: string }[] = [
   { value: 'all', label: 'timeline.recency.all' },
   { value: 'last-run', label: 'timeline.recency.last_run' },
@@ -136,11 +174,15 @@ function tickStep(span: number, width: number): number {
 
 export default function ExperienceTimeline({ project }: { project: string }) {
   const t = useT()
+  const org = useOrgUnits()
   const params = new URLSearchParams(window.location.search)
   const [events, setEvents] = useState<ObservationEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
+  const [users, setUsers] = useState<User[]>([])
+  const [range, setRange] = useState<RangeFilter>(() => { const v = params.get('range'); return (['24h','7d','30d','all'] as const).includes(v as RangeFilter) ? v as RangeFilter : '7d' })
+  const [groupBy, setGroupBy] = useState<GroupBy>(() => { const v = params.get('group'); return (['unit','agent','day','none'] as const).includes(v as GroupBy) ? v as GroupBy : 'unit' })
   const parseLens = (s: string | null): Lens => { if (!s) return DEFAULT_LENS; try { return { ...DEFAULT_LENS, ...JSON.parse(s) } } catch { return DEFAULT_LENS } }
   const [lens, setLens] = useState<Lens>(() => parseLens(params.get('lens')))
   const parseKinds = (s: string | null): Set<LifecycleKind> => { if (!s) return new Set(LIFECYCLE_KINDS); const arr = s.split(',').filter((k): k is LifecycleKind => LIFECYCLE_KINDS.includes(k as LifecycleKind)); return arr.length ? new Set(arr) : new Set(LIFECYCLE_KINDS) }
@@ -157,6 +199,11 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   // Lane aggregation state: id → aggregated?. Auto execution observations are
   // noise lanes (one per command); their merged lane starts aggregated.
   const [laneOverrides, setLaneOverrides] = useState<Record<string, boolean>>({ execution: true })
+  // Run section collapse state, same override pattern as knowledge lanes:
+  // groups default collapsed (the point of grouping at team scale), but a
+  // small corpus auto-expands so single-user projects stay readable.
+  const [groupOverrides, setGroupOverrides] = useState<Record<string, boolean>>({})
+  const [chainOverrides, setChainOverrides] = useState<Record<string, boolean>>({})
   const [query, setQuery] = useState(params.get('q') ?? '')
   // The detail panel is selection-driven: it exists only while a knowledge
   // row is selected (opened by clicking a row, closed by its × button).
@@ -172,15 +219,16 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const dragRef = useRef<{ x: number; t0: number; t1: number } | null>(null)
 
-  const load = useCallback(async (projectID: string) => {
+  const load = useCallback(async (projectID: string, rangeFilter: RangeFilter) => {
     if (!projectID.trim()) return
     setLoading(true); setError(''); setEvents([]); setWindow(null); setSelected('')
     try {
+      const since = rangeFilter !== 'all' ? new Date(Date.now() - RANGE_MS[rangeFilter]).toISOString() : undefined
       const collected: ObservationEvent[] = []
       let cursor: string | undefined
       let pages = 0
       do {
-        const page = await observationApi.events(projectID.trim(), cursor, undefined, undefined, { limit: 500 })
+        const page = await observationApi.events(projectID.trim(), cursor, undefined, undefined, { limit: 500, since })
         collected.push(...page.events)
         cursor = page.next_cursor
         pages += 1
@@ -195,7 +243,12 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   }, [])
 
   const [initialised, setInitialised] = useState(false)
-  useEffect(() => { setInitialised(true); void load(project) }, [project, load])
+  useEffect(() => { setInitialised(true); void load(project, range) }, [project, load])
+  // Range switches reload from the server: the window is a load filter, not a
+  // client-side mask.
+  useEffect(() => { if (initialised) void load(project, range) }, [range])
+  // Org-unit grouping maps run actors to their unit via the user directory.
+  useEffect(() => { void workspaceApi.listUsers().then((data) => setUsers(data.users ?? [])).catch(() => setUsers([])) }, [])
 
   // Sync investigation state to URL for shareable links.
   useEffect(() => {
@@ -218,8 +271,10 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     if (query) urlParams.set('q', query)
     if (selected) urlParams.set('selected', selected)
     if (window_) urlParams.set('w', `${window_.t0},${window_.t1}`)
+    if (range !== '7d') urlParams.set('range', range)
+    if (groupBy !== 'unit') urlParams.set('group', groupBy)
     window.history.replaceState(null, '', `/experience?${urlParams.toString()}`)
-  }, [project, lens, kinds, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, hiddenRoots, query, selected, window_])
+  }, [project, lens, kinds, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, hiddenRoots, query, selected, window_, range, groupBy])
 
   const model = useMemo(() => (events.length ? foldExperience(events) : null), [events])
 
@@ -294,9 +349,69 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     }
     const conflictsPresent = model.lineage.length > 0 || model.rows.some((row) => row.points.some((point) => point.kind === 'contradicted' || point.kind === 'weakened' || point.kind === 'archived'))
     const showEpisodes = (active.t1 - active.t0) / Math.max(1, full.t1 - full.t0) < EPISODE_RATIO
+    // ── Run section layout: groups → chains → run lanes ─────────────────────
+    // At team scale a flat run list is unreadable, so runs collapse three
+    // levels deep: org group (or agent/day) → delegation chain → single run.
+    const { chains, rootOf } = buildRunChains(visibleRuns)
+    const userById = new Map(users.map((u) => [u.id, u]))
+    const unitName = new Map(org.units.map((u) => [u.id, u.name]))
+    const groupOf = (root: RunInfo): { key: string; label: string; order: string } => {
+      if (groupBy === 'none') return { key: 'all', label: t('timeline.group.all_runs'), order: '0' }
+      if (groupBy === 'day') { const day = root.startedAt.slice(0, 10); return { key: day, label: day, order: day } }
+      if (groupBy === 'agent') { const agent = root.agentId || root.role || '—'; return { key: agent, label: agent, order: agent } }
+      const actor = root.actor
+      const user = actor ? userById.get(actor) : undefined
+      if (user?.org_unit_id) { const name = unitName.get(user.org_unit_id) ?? user.org_unit_id; return { key: user.org_unit_id, label: name, order: name } }
+      if (actor && !user) return { key: `actor:${actor}`, label: actor, order: `zz-${actor}` }
+      return { key: 'unassigned', label: t('timeline.group.unassigned'), order: 'zzz-unassigned' }
+    }
+    const groupsMap = new Map<string, RunGroup>()
+    for (const chain of chains) {
+      const g = groupOf(chain.root)
+      let group = groupsMap.get(g.key)
+      if (!group) { group = { id: g.key, label: g.label, order: g.order, chains: [], runs: [], failed: 0, knowledgeEvents: 0, firstAt: chain.root.startedAt, lastAt: chain.lastAt }; groupsMap.set(g.key, group) }
+      group.chains.push(chain)
+      group.runs.push(...chain.runs)
+      if (chain.failed) group.failed += 1
+      for (const run of chain.runs) group.knowledgeEvents += run.knowledgeEvents
+      if (chain.root.startedAt < group.firstAt) group.firstAt = chain.root.startedAt
+      if (chain.lastAt > group.lastAt) group.lastAt = chain.lastAt
+    }
+    const groups = [...groupsMap.values()].sort((a, b) => a.order < b.order ? -1 : a.order > b.order ? 1 : 0)
+    const autoExpand = chains.length <= AUTO_EXPAND_CHAINS
+    const groupExpanded: Record<string, boolean> = {}
+    const chainExpanded: Record<string, boolean> = {}
+    const groupHeaderY = new Map<string, number>()
+    const groupBandY = new Map<string, number>()
+    const chainLaneY = new Map<string, number>()
     const runLaneY = new Map<string, number>()
     let y = AXIS_HEIGHT
-    for (const run of visibleRuns) { runLaneY.set(run.id, y + RUN_LANE / 2); y += RUN_LANE }
+    for (const group of groups) {
+      const expanded = groupOverrides[group.id] ?? autoExpand
+      groupExpanded[group.id] = expanded
+      groupHeaderY.set(group.id, y + GROUP_HEADER / 2)
+      y += GROUP_HEADER
+      if (!expanded) {
+        const bandCenter = y + AGGREGATE_LANE / 2
+        groupBandY.set(group.id, bandCenter)
+        y += AGGREGATE_LANE
+        for (const run of group.runs) runLaneY.set(run.id, bandCenter)
+        continue
+      }
+      for (const chain of group.chains) {
+        const chainOpen = chainOverrides[chain.root.id] ?? autoExpand
+        chainExpanded[chain.root.id] = chainOpen
+        if (!chainOpen) {
+          const laneCenter = y + RUN_LANE / 2
+          chainLaneY.set(chain.root.id, laneCenter)
+          y += RUN_LANE
+          for (const run of chain.runs) runLaneY.set(run.id, laneCenter)
+          continue
+        }
+        for (const run of chain.runs) { runLaneY.set(run.id, y + RUN_LANE / 2); y += RUN_LANE }
+      }
+      y += 4
+    }
     const rowY = new Map<string, number>()
     const scopeHeaderY = new Map<string, number>()
     const bandY = new Map<string, number>()
@@ -322,8 +437,8 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       }
       return visibleRowIds.has(link.knowledgeId)
     })
-    return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleRunIds, visibleLinks, visibleScopes, aggregatedIds, conflictsPresent, showEpisodes, runLaneY, rowY, scopeHeaderY, bandY, populationY, height: y + 8 }
-  }, [model, window_, hiddenRoots, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, kinds, lens.experience, laneOverrides, query])
+    return { full, active, roots, roles, scopes, visibleRuns, visibleRows, visibleRowIds, visibleRunIds, visibleLinks, visibleScopes, aggregatedIds, conflictsPresent, showEpisodes, runLaneY, rowY, scopeHeaderY, bandY, populationY, groups, groupExpanded, groupHeaderY, groupBandY, chainLaneY, chainExpanded, rootOf, autoExpand, height: y + 8 }
+  }, [model, window_, hiddenRoots, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, kinds, lens.experience, laneOverrides, query, groupBy, users, org.units, groupOverrides, chainOverrides, t])
 
   const activity = useMemo(() => {
     const map = new Map<string, { tools: number[]; models: number[] }>()
@@ -400,7 +515,14 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       <Header project={project} load={load} loading={loading} />
       {error && <div className="obs-error" role="alert">{error}<small>Проверьте, что журнал доступен на {API_BASE}.</small></div>}
       {loading && <div className="status" role="status"><span className="spinner" /> Loading experience… {progress}</div>}
-      {!loading && !error && <div className="obs-controls"><p className="obs-empty">Введите project ID и нажмите Open timeline.</p></div>}
+      {!loading && !error && <div className="obs-controls">
+        <p className="obs-empty">{project
+          ? (range === 'all'
+              ? (t('timeline.empty_project') ?? 'No events for this project yet.')
+              : (t('timeline.empty_range') ?? `No events in the selected period (${RANGE_OPTIONS.find((opt) => opt.value === range) ? t(RANGE_OPTIONS.find((opt) => opt.value === range)!.label) : range}). Try a wider period.`))
+          : (t('timeline.empty_no_project') ?? 'Enter a project ID and open the timeline.')}</p>
+        {project && range !== 'all' && <p><button className="preset-chip" onClick={() => setRange('30d')}>{t('timeline.range.30d')}</button>{' '}<button className="preset-chip" onClick={() => setRange('all')}>{t('timeline.range.all')}</button></p>}
+      </div>}
     </div>
   }
 
@@ -447,7 +569,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     <Header project={project} load={load} loading={loading} />
     {error && <div className="obs-error" role="alert">{error}</div>}
     <div className="experience-meta">
-      <span>{model.runs.filter((run) => !run.parentRun).length} {t('timeline.team_runs')} · {view.visibleRows.length}{view.visibleRows.length < model.rows.length ? `/${model.rows.length}` : ''} {t('timeline.experiences')} · {model.scopes.length} {t('timeline.scopes')} · {model.totals.events} {t('timeline.events')}</span>
+      <span>{view.groups.length} {t('timeline.groups_abbr')} · {view.groups.reduce((sum, group) => sum + group.chains.length, 0)} {t('timeline.team_runs')} · {view.visibleRows.length}{view.visibleRows.length < model.rows.length ? `/${model.rows.length}` : ''} {t('timeline.experiences')} · {model.scopes.length} {t('timeline.scopes')} · {model.totals.events} {t('timeline.events')}</span>
       <span className="experience-note">
         {t('timeline.active')} {model.rows.filter((row) => stateBucket(row.state) === 'active').length} · {t('timeline.stale')} {model.rows.filter((row) => stateBucket(row.state) === 'stale').length} · {t('timeline.invalidated')} {model.rows.filter((row) => stateBucket(row.state) === 'invalidated').length} · {t('timeline.archived')} {model.rows.filter((row) => stateBucket(row.state) === 'archived').length} · {t('timeline.activations')} {view.visibleLinks.length}
       </span>
@@ -523,6 +645,16 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       <label>{t('timeline.filter.search')}
         <input type="search" value={query} onChange={(change) => setQuery(change.target.value)} placeholder={t('timeline.claim_text_id')} title={t('timeline.filter_experiences')} />
       </label>
+      <label>{t('timeline.range.label')}
+        <select value={range} onChange={(change) => setRange(change.target.value as RangeFilter)} title={t('timeline.range.title')}>
+          {RANGE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{t(opt.label)}</option>)}
+        </select>
+      </label>
+      <label>{t('timeline.group.label')}
+        <select value={groupBy} onChange={(change) => { setGroupBy(change.target.value as GroupBy); setGroupOverrides({}); setChainOverrides({}) }} title={t('timeline.group.title')}>
+          {GROUP_BY_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{t(opt.label)}</option>)}
+        </select>
+      </label>
       <div className="run-picker">
         {runsOpen && <div className="run-picker-backdrop" onClick={() => setRunsOpen(false)} />}
         <button className={`run-picker-toggle ${hiddenRoots.size ? 'filtered' : ''}`} onClick={() => setRunsOpen((open) => !open)}>
@@ -535,15 +667,18 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             <button onClick={() => setHiddenRoots(new Set(view.roots.map((root) => root.id)))}>{t('timeline.runs_none')}</button>
           </div>
           <ul>
-            {view.roots.map((root) => (
-              <li key={root.id}>
-                <label>
-                  <input type="checkbox" checked={!hiddenRoots.has(root.id)} onChange={() => toggleRoot(root.id)} />
-                  <span>{shortRun(root.id)}</span>
-                  <small>{clock(root.startedAt)}{root.status ? ` · ${root.status}` : ''}</small>
-                </label>
-              </li>
-            ))}
+            {view.roots.map((root) => {
+              const title = model.runs.find((run) => run.id === root.id)?.title
+              return (
+                <li key={root.id}>
+                  <label>
+                    <input type="checkbox" checked={!hiddenRoots.has(root.id)} onChange={() => toggleRoot(root.id)} />
+                    <span>{title ?? shortRun(root.id)}</span>
+                    <small>{clock(root.startedAt)}{root.status ? ` · ${root.status}` : ''}</small>
+                  </label>
+                </li>
+              )
+            })}
           </ul>
         </div>}
       </div>
@@ -582,18 +717,76 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             </g>)}
           </g>
           {/* Activation links target run lanes: keep the lanes rendered
-             (labels + bars) whenever the arrows need somewhere to land. */}
-          {(lens.trajectory || lens.activation) && view.visibleRuns.map((run, index) => {
-            const yLane = view.runLaneY.get(run.id)!
-            const x0 = x(run.startedAt)
-            const x1 = x(run.endedAt ?? run.startedAt)
-            const acts = activity.get(run.id)
-            return <g key={run.id} className={`run-lane ${selected === run.id ? 'selected' : ''}`}>
-              <text x={8} y={yLane + 3} className="lane-label run-label">{shortRun(run.id)}{run.status ? ` · ${run.status}` : ''}</text>
-              <rect x={GUTTER} y={yLane - RUN_LANE / 2 + 3} width={track} height={RUN_LANE - 6} fill="var(--tm-ink)" rx={3} />
-              <rect x={Math.max(GUTTER, x0)} width={Math.max(2, Math.min(x1, GUTTER + track) - Math.max(GUTTER, x0))} y={yLane - RUN_LANE / 2 + 3} height={RUN_LANE - 6} fill={roleColor(run.role, index)} opacity={0.28} rx={3} />
-              {acts?.tools.map((at, index) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <line key={`t${index}`} x1={px} x2={px} y1={yLane - 6} y2={yLane + 6} stroke={roleColor(run.role, index)} strokeWidth={1} opacity={0.55} /> : null })}
-              {acts?.models.map((at, index) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <circle key={`m${index}`} cx={px} cy={yLane} r={1.8} fill="#e8e8e8" opacity={0.7} /> : null })}
+             (labels + bars) whenever the arrows need somewhere to land.
+             Runs render three levels deep: group → delegation chain → run. */}
+          {(lens.trajectory || lens.activation) && view.groups.map((group) => {
+            const headerY = view.groupHeaderY.get(group.id)!
+            const expanded = view.groupExpanded[group.id]
+            const toggleGroup = () => setGroupOverrides((current) => ({ ...current, [group.id]: !expanded }))
+            const bandCenter = view.groupBandY.get(group.id)
+            return <g key={group.id} className={`run-group ${expanded ? 'expanded' : ''}`}>
+              <text x={8} y={headerY - 2} className="lane-label scope-label" onClick={toggleGroup} style={{ cursor: 'pointer', fill: group.failed ? '#f7768e' : undefined }}>
+                <title>{expanded ? t('timeline.collapse') : t('timeline.expand')}</title>
+                {expanded ? '▾' : '▸'} {group.label.toUpperCase()}
+              </text>
+              <text x={8} y={headerY + 10} className="lane-sublabel">
+                {group.chains.length} {t('timeline.chains_abbr')} · {group.runs.length} {t('timeline.runs_abbr')}
+                {group.failed > 0 && <tspan fill="#f7768e"> · {group.failed} {t('timeline.failed_abbr')}</tspan>}
+                {group.knowledgeEvents > 0 && ` · ${group.knowledgeEvents} ${t('timeline.knowledge_abbr')}`}
+              </text>
+              <line x1={GUTTER - 6} x2={width} y1={headerY + GROUP_HEADER / 2 - 2} y2={headerY + GROUP_HEADER / 2 - 2} stroke="#1c2530" strokeWidth={1} />
+              {!expanded && bandCenter !== undefined && (() => {
+                const bx0 = Math.max(GUTTER, x(group.firstAt))
+                const bx1 = Math.min(GUTTER + track, x(group.lastAt))
+                const expand = () => setGroupOverrides((current) => ({ ...current, [group.id]: true }))
+                const ticks: number[] = []
+                for (const run of group.runs) { const acts = activity.get(run.id); if (acts) ticks.push(...acts.tools) }
+                return <g className="group-band" onClick={expand} style={{ cursor: 'pointer' }}>
+                  <rect x={0} y={bandCenter - AGGREGATE_LANE / 2} width={width} height={AGGREGATE_LANE} fill="transparent" onClick={expand} />
+                  <rect x={bx0} y={bandCenter - 4} width={Math.max(3, bx1 - bx0)} height={8} rx={4} fill={group.failed ? '#f7768e' : '#7aa2f7'} opacity={0.16}>
+                    <title>{`${group.label}: ${group.chains.length} ${t('timeline.chains_abbr')} · ${group.runs.length} ${t('timeline.runs_abbr')} · ${clock(group.firstAt)} → ${clock(group.lastAt)}`}</title>
+                  </rect>
+                  {ticks.map((at, index) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <line key={index} x1={px} x2={px} y1={bandCenter - 6} y2={bandCenter + 6} stroke={group.failed ? '#f7768e' : '#7aa2f7'} strokeWidth={1} opacity={0.35} /> : null })}
+                </g>
+              })()}
+              {expanded && group.chains.map((chain, index) => {
+                const chainOpen = view.chainExpanded[chain.root.id]
+                if (!chainOpen) {
+                  const yLane = view.chainLaneY.get(chain.root.id)!
+                  const x0 = x(chain.root.startedAt)
+                  const x1 = x(chain.endedAt ?? chain.root.startedAt)
+                  const expandChain = () => setChainOverrides((current) => ({ ...current, [chain.root.id]: true }))
+                  const roles = [...new Set(chain.runs.map((run) => run.role).filter(Boolean))] as string[]
+                  const ticks: number[] = []
+                  const dots: number[] = []
+                  for (const run of chain.runs) { const acts = activity.get(run.id); if (acts) { ticks.push(...acts.tools); dots.push(...acts.models) } }
+                  return <g key={chain.root.id} className={`chain-lane ${selected === chain.root.id ? 'selected' : ''}`} onClick={expandChain} style={{ cursor: 'pointer' }}>
+                    <title>{`${chain.root.title ?? chain.root.id}\n${roles.join(' → ')} · ${chain.runs.length} ${t('timeline.runs_abbr')}${chain.failed ? ` · ${t('timeline.chain_failed')}` : ''}\n${clock(chain.root.startedAt)} → ${clock(chain.endedAt ?? chain.root.startedAt)}`}</title>
+                    <text x={20} y={yLane + 3} className="lane-label run-label">{chain.root.title ?? shortRun(chain.root.id)}{chain.runs.length > 1 ? ` +${chain.runs.length - 1}` : ''}{chain.failed ? ' ✕' : ''}</text>
+                    <rect x={GUTTER} y={yLane - RUN_LANE / 2 + 3} width={track} height={RUN_LANE - 6} fill="var(--tm-ink)" rx={3} />
+                    <rect x={Math.max(GUTTER, x0)} width={Math.max(2, Math.min(x1, GUTTER + track) - Math.max(GUTTER, x0))} y={yLane - RUN_LANE / 2 + 3} height={RUN_LANE - 6} fill={roleColor(chain.root.role, index)} opacity={0.28} rx={3} />
+                    {ticks.map((at, ti) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <line key={`t${ti}`} x1={px} x2={px} y1={yLane - 6} y2={yLane + 6} stroke={roleColor(chain.root.role, index)} strokeWidth={1} opacity={0.55} /> : null })}
+                    {dots.map((at, mi) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <circle key={`m${mi}`} cx={px} cy={yLane} r={1.8} fill="#e8e8e8" opacity={0.7} /> : null })}
+                  </g>
+                }
+                return <g key={chain.root.id} className="chain-expanded">
+                  {chain.runs.map((run, runIndex) => {
+                    const yLane = view.runLaneY.get(run.id)!
+                    const x0 = x(run.startedAt)
+                    const x1 = x(run.endedAt ?? run.startedAt)
+                    const acts = activity.get(run.id)
+                    const chainRoot = view.rootOf.get(run.id) ?? run.id
+                    return <g key={run.id} className={`run-lane ${selected === run.id ? 'selected' : ''}`}>
+                      <text x={20} y={yLane + 3} className="lane-label run-label">{run.parentRun ? '↳ ' : ''}{shortRun(run.id)}{run.status ? ` · ${run.status}` : ''}</text>
+                      <rect x={GUTTER} y={yLane - RUN_LANE / 2 + 3} width={track} height={RUN_LANE - 6} fill="var(--tm-ink)" rx={3} />
+                      <rect x={Math.max(GUTTER, x0)} width={Math.max(2, Math.min(x1, GUTTER + track) - Math.max(GUTTER, x0))} y={yLane - RUN_LANE / 2 + 3} height={RUN_LANE - 6} fill={roleColor(run.role, runIndex)} opacity={0.28} rx={3} />
+                      {acts?.tools.map((at, ti) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <line key={`t${ti}`} x1={px} x2={px} y1={yLane - 6} y2={yLane + 6} stroke={roleColor(run.role, runIndex)} strokeWidth={1} opacity={0.55} /> : null })}
+                      {acts?.models.map((at, mi) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <circle key={`m${mi}`} cx={px} cy={yLane} r={1.8} fill="#e8e8e8" opacity={0.7} /> : null })}
+                      {runIndex === 0 && <text x={GUTTER - 8} y={yLane + 3} textAnchor="end" className="lane-sublabel" onClick={() => setChainOverrides((current) => ({ ...current, [chainRoot]: false }))} style={{ cursor: 'pointer' }}>▾</text>}
+                    </g>
+                  })}
+                </g>
+              })}
             </g>
           })}
           {lens.experience && <g className="population-lane">
@@ -781,7 +974,7 @@ function zoom(current: { t0: number; t1: number }, full: { t0: number; t1: numbe
   return { t0: Math.max(full.t0, t0), t1: Math.min(full.t1, t1) }
 }
 
-function Header({ project, load, loading }: { project: string; load: (project: string) => Promise<void> | void; loading: boolean }) {
+function Header({ project, load, loading }: { project: string; load: (project: string, range: RangeFilter) => Promise<void> | void; loading: boolean }) {
   return null
 }
 
