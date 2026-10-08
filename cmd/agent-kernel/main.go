@@ -3496,6 +3496,10 @@ func main() {
 			writeError(w, 422, err)
 			return
 		}
+		if err := validateChannelTypes(req.Channels); err != nil {
+			writeError(w, 422, err)
+			return
+		}
 		orgUnitID := ""
 		if req.OrgUnitID != nil {
 			orgUnitID = *req.OrgUnitID
@@ -3578,6 +3582,10 @@ func main() {
 			writeError(w, 422, err)
 			return
 		}
+		if err := validateChannelTypes(req.Channels); err != nil {
+			writeError(w, 422, err)
+			return
+		}
 		preferred := strings.TrimSpace(req.PreferredChannel)
 		if preferred != "" && preferred != "web" {
 			found := false
@@ -3608,6 +3616,16 @@ func main() {
 		user.HasToken = user.Token != ""
 		user.Token = "" // never expose bearer tokens on reads
 		writeJSON(w, 200, user)
+	})
+	// Deliverable channel types (docs/triggers-and-escalations.md §7): the
+	// kernel's transport registry, served to the UI so users pick from what
+	// the kernel can actually deliver. Configured flags reflect the live
+	// environment, so an admin wiring bot credentials is visible at once.
+	mux.HandleFunc("GET /v1/workspace/channel-types", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		writeJSON(w, 200, map[string]any{"types": agent.ChannelTypes()})
 	})
 	// Regenerate a user's bearer token server-side. The new token takes
 	// effect immediately and the old one is revoked at once.
@@ -4137,6 +4155,25 @@ func requestUserID(r *http.Request) string {
 		return principal.Subject
 	}
 	return ""
+}
+
+// validateChannelTypes checks channel rows against the kernel transport
+// registry: storage accepts any slug, but a user must not be able to save a
+// channel nothing can deliver to.
+func validateChannelTypes(channels []workspace.UserChannel) error {
+	if len(channels) == 0 {
+		return nil
+	}
+	known := make(map[string]bool, len(channels))
+	for _, spec := range agent.ChannelTypes() {
+		known[spec.Type] = true
+	}
+	for _, channel := range channels {
+		if !known[channel.Type] {
+			return fmt.Errorf("unknown channel type %q — the kernel cannot deliver to it", channel.Type)
+		}
+	}
+	return nil
 }
 
 // agentSemanticsChanged reports whether the compiled prompt inputs changed:

@@ -117,3 +117,22 @@ describe('workspaceApi error surface', () => {
     await expect(workspaceApi.setUnitRole('unit-1', 'ruslan', 'root')).rejects.toThrow('role must be one of reader')
   })
 })
+
+describe('workspaceApi channel registry', () => {
+  it('lists the kernel transport registry', async () => {
+    const calls = stubFetch(() => ({
+      body: {
+        types: [
+          { type: 'matrix', label: 'Matrix', address_hint: 'room id', configured: false, not_configured_hint: 'KERNEL_MATRIX_HOMESERVER' },
+          { type: 'webhook', label: 'Webhook', address_hint: 'https url', configured: true },
+        ],
+      },
+    }))
+    const page = await workspaceApi.channelTypes()
+    expect(calls[0].url).toBe(`${BASE}/v1/workspace/channel-types`)
+    expect(page.types).toHaveLength(2)
+    expect(page.types[0].configured).toBe(false)
+    expect(page.types[0].not_configured_hint).toBe('KERNEL_MATRIX_HOMESERVER')
+    expect(page.types[1].configured).toBe(true)
+  })
+})

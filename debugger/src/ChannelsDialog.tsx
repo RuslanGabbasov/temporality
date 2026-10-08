@@ -10,25 +10,48 @@ import {
   Tag,
 } from '@carbon/react'
 import { Add, TrashCan } from '@carbon/icons-react'
-import { workspaceApi, type UserChannel } from './workspaceApi'
+import { workspaceApi, type ChannelTypeSpec, type UserChannel } from './workspaceApi'
 import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
-const CHANNEL_TYPES: { value: UserChannel['type']; label: string }[] = [
-  { value: 'matrix', label: 'Matrix' },
-  { value: 'telegram', label: 'Telegram' },
+/** Offline fallback when the registry endpoint is unreachable: the built-in
+ * transports. Anything the kernel adds beyond this list only shows up through
+ * the API — that is the extensibility contract. */
+const DEFAULT_TYPES: ChannelTypeSpec[] = [
+  { type: 'matrix', label: 'Matrix', address_hint: 'Matrix room ID, e.g. !room:matrix.org', configured: true },
+  { type: 'telegram', label: 'Telegram', address_hint: 'Telegram chat ID, e.g. 123456789', configured: true },
+  { type: 'slack', label: 'Slack', address_hint: 'Slack incoming webhook URL', configured: true },
+  { type: 'webhook', label: 'Webhook', address_hint: 'HTTPS URL accepting a JSON payload', configured: true },
 ]
+
+/** Address field help per type: localized first, registry hint as fallback. */
+function addressHelper(spec: ChannelTypeSpec | undefined, t: (k: string) => string): string | undefined {
+  if (!spec) return undefined
+  const localized = t(`channels.address_${spec.type}`)
+  return localized || spec.address_hint
+}
+
+function addressPlaceholder(spec: ChannelTypeSpec | undefined): string {
+  switch (spec?.type) {
+    case 'matrix': return '!room:matrix.org'
+    case 'telegram': return '123456789'
+    case 'slack': return 'https://hooks.slack.com/services/…'
+    case 'webhook': return 'https://example.com/temporality'
+    default: return ''
+  }
+}
 
 /**
  * Self-service communication channels (docs/triggers-and-escalations.md §6):
  * the user owns their delivery transports and the preferred one. The web
- * inbox is always available; Matrix/Telegram carry the question to wherever
- * the user actually is.
+ * inbox is always available; the other transports come from the kernel's
+ * channel registry, so new channel types appear here without UI changes.
  */
 export default function ChannelsDialog({ userId, onClose }: { userId: string; onClose: () => void }) {
   const t = useT()
   const [channels, setChannels] = useState<UserChannel[]>([])
+  const [specs, setSpecs] = useState<ChannelTypeSpec[]>(DEFAULT_TYPES)
   const [preferred, setPreferred] = useState('web')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -38,10 +61,14 @@ export default function ChannelsDialog({ userId, onClose }: { userId: string; on
     let cancelled = false
     void (async () => {
       try {
-        const user = await workspaceApi.getUser(userId)
+        const [user, registry] = await Promise.all([
+          workspaceApi.getUser(userId),
+          workspaceApi.channelTypes().catch(() => ({ types: DEFAULT_TYPES })),
+        ])
         if (cancelled) return
         setChannels((user.channels ?? []).map((c: UserChannel) => ({ ...c })))
         setPreferred(user.preferred_channel || 'web')
+        if (registry.types.length > 0) setSpecs(registry.types)
       } catch (e) {
         if (!cancelled) setError(message(e))
       } finally {
@@ -51,15 +78,17 @@ export default function ChannelsDialog({ userId, onClose }: { userId: string; on
     return () => { cancelled = true }
   }, [userId])
 
+  const specOf = (type: string) => specs.find((s) => s.type === type)
+
   const updateChannel = (index: number, patch: Partial<UserChannel>) => {
     setChannels((current) => current.map((c, i) => (i === index ? { ...c, ...patch } : c)))
   }
 
   const addChannel = () => {
     const used = new Set(channels.map((c) => c.type))
-    const free = CHANNEL_TYPES.find((type) => !used.has(type.value))
+    const free = specs.find((s) => !used.has(s.type))
     if (!free) return
-    setChannels((current) => [...current, { type: free.value, address: '', enabled: true }])
+    setChannels((current) => [...current, { type: free.type, address: '', enabled: true }])
   }
 
   const removeChannel = (index: number) => {
@@ -80,7 +109,7 @@ export default function ChannelsDialog({ userId, onClose }: { userId: string; on
       setError(t('channels.error_address') ?? 'Every channel needs an address.')
       return
     }
-    if (preferred !== 'web' && !enabledTypes.includes(preferred as UserChannel['type'])) {
+    if (preferred !== 'web' && !enabledTypes.includes(preferred)) {
       setError(t('channels.error_preferred') ?? 'The preferred channel must be web or an enabled channel with an address.')
       return
     }
@@ -109,23 +138,27 @@ export default function ChannelsDialog({ userId, onClose }: { userId: string; on
           <>
             {channels.length === 0 && (
               <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-3)', margin: '0 0 0.75rem', padding: '0.75rem', background: 'var(--tm-surface-2)', borderRadius: 'var(--tm-radius-sm)' }}>
-                {t('channels.empty') ?? 'No channels yet. Add Matrix or Telegram to receive agent questions outside the app.'}
+                {t('channels.empty') ?? 'No channels yet. Add one to receive agent questions outside the app.'}
               </p>
             )}
-            {channels.map((channel, index) => (
+            {channels.map((channel, index) => {
+              const spec = specOf(channel.type)
+              return (
               <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', padding: '0.75rem', marginBottom: '0.75rem', background: 'var(--tm-surface-2)', borderRadius: 'var(--tm-radius-sm)' }}>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   <Select
                     id={`channel-type-${index}`}
                     labelText={t('channels.type') ?? 'Type'}
                     value={channel.type}
-                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => updateChannel(index, { type: e.target.value as UserChannel['type'] })}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => updateChannel(index, { type: e.target.value })}
                     style={{ flex: 1 }}
                     size="sm"
                   >
-                    {CHANNEL_TYPES.filter((type) => type.value === channel.type || !channels.some((c, i) => i !== index && c.type === type.value)).map((type) => (
-                      <SelectItem key={type.value} value={type.value} text={type.label} />
-                    ))}
+                    {specs
+                      .filter((s) => s.type === channel.type || !channels.some((c, i) => i !== index && c.type === s.type))
+                      .map((s) => (
+                        <SelectItem key={s.type} value={s.type} text={s.label} />
+                      ))}
                   </Select>
                   <Toggle
                     id={`channel-enabled-${index}`}
@@ -148,17 +181,22 @@ export default function ChannelsDialog({ userId, onClose }: { userId: string; on
                 <TextInput
                   id={`channel-address-${index}`}
                   labelText={t('channels.address') ?? 'Address'}
-                  placeholder={channel.type === 'matrix' ? '!room:matrix.org' : '123456789'}
-                  helperText={channel.type === 'matrix'
-                    ? (t('channels.address_matrix') ?? 'Matrix room ID the kernel bot has joined')
-                    : (t('channels.address_telegram') ?? 'Telegram chat ID the bot can message')}
+                  placeholder={addressPlaceholder(spec)}
+                  helperText={addressHelper(spec, t)}
                   value={channel.address}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateChannel(index, { address: e.target.value })}
                   size="sm"
                 />
+                {spec && !spec.configured && (
+                  <div style={{ fontSize: '0.72rem', color: 'var(--tm-amber, #e6b85c)', display: 'flex', gap: '0.4rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    <span>⚠ {t('channels.not_configured') ?? 'Transport is not configured on the server yet — delivery falls back to the in-app inbox.'}</span>
+                    {spec.not_configured_hint && <code style={{ fontSize: '0.68rem' }}>{spec.not_configured_hint}</code>}
+                  </div>
+                )}
               </div>
-            ))}
-            {channels.length < CHANNEL_TYPES.length && (
+              )
+            })}
+            {channels.length < specs.length && (
               <Button kind="ghost" size="sm" renderIcon={Add} onClick={addChannel} style={{ marginBottom: '0.9rem', padding: 0 }}>
                 {t('channels.add') ?? 'Add channel'}
               </Button>
@@ -169,12 +207,12 @@ export default function ChannelsDialog({ userId, onClose }: { userId: string; on
               labelText={t('channels.preferred') ?? 'Preferred channel'}
               value={preferred}
               onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPreferred(e.target.value)}
-              helperText={t('channels.preferred_hint') ?? 'Where ask_human questions are delivered first; other channels are fallback.'}
+              helperText={t('channels.preferred_hint') ?? 'Where agent questions are delivered first; other channels are fallback.'}
               size="sm"
             >
               <SelectItem value="web" text={t('channels.web') ?? 'In-app inbox'} />
               {channels.filter((c) => c.enabled).map((c) => (
-                <SelectItem key={c.type} value={c.type} text={c.type === 'matrix' ? 'Matrix' : 'Telegram'} />
+                <SelectItem key={c.type} value={c.type} text={specOf(c.type)?.label ?? c.type} />
               ))}
             </Select>
           </>

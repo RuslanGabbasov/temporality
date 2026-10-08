@@ -385,9 +385,21 @@ export interface Provider {
 }
 
 export interface UserChannel {
-  type: 'matrix' | 'telegram'
+  // Transport slug from the kernel's channel registry (matrix, telegram,
+  // slack, webhook, …) — see channelTypes().
+  type: string
   address: string
   enabled: boolean
+}
+
+/** One transport from the kernel's channel registry: what it is, what the
+ * address means and whether the kernel can deliver through it right now. */
+export interface ChannelTypeSpec {
+  type: string
+  label: string
+  address_hint: string
+  configured: boolean
+  not_configured_hint?: string
 }
 
 // Human-in-the-loop request (docs/org-structure.md §28): a question an agent
@@ -597,6 +609,8 @@ export const workspaceApi = {
     request<{ id: string; token: string }>(`/v1/workspace/users/${id}/token`, { method: 'POST' }),
   updateUserChannels: (id: string, data: { channels: UserChannel[]; preferred_channel: string }) =>
     request<User>(`/v1/workspace/users/${id}/channels`, { method: 'PUT', body: JSON.stringify(data) }),
+  // Kernel transport registry: the channel types users may configure
+  channelTypes: () => request<{ types: ChannelTypeSpec[] }>('/v1/workspace/channel-types'),
   deleteUser: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/users/${id}`, { method: 'DELETE' }),
 

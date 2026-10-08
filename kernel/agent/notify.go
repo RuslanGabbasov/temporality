@@ -144,15 +144,7 @@ func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChanne
 	}
 	channel, mode := pickChannel(recipientChannels{Channels: target.Channels, Preferred: target.Preferred}, channelConfigured)
 	if mode != "web" {
-		text := notificationText(request)
-		var err error
-		switch channel.Type {
-		case "matrix":
-			err = a.sendMatrix(ctx, channel.Address, text)
-		case "telegram":
-			err = a.sendTelegram(ctx, channel.Address, text)
-		}
-		if err != nil {
+		if err := a.sendToChannel(ctx, channel.Type, channel.Address, request); err != nil {
 			return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "failed", Detail: truncate(err.Error(), 300)}
 		}
 		return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "delivered"}
@@ -317,17 +309,6 @@ func ResolveRecipient(recipient, actor string, users []WorkspaceUser) (Workspace
 	}
 }
 
-// channelConfigured reports whether the kernel can send through a transport.
-func channelConfigured(channelType string) bool {
-	switch channelType {
-	case "matrix":
-		return strings.TrimSpace(os.Getenv("KERNEL_MATRIX_HOMESERVER")) != "" && strings.TrimSpace(os.Getenv("KERNEL_MATRIX_ACCESS_TOKEN")) != ""
-	case "telegram":
-		return strings.TrimSpace(os.Getenv("KERNEL_TELEGRAM_BOT_TOKEN")) != ""
-	}
-	return false
-}
-
 // pickChannel applies the recipient policy (§6): preferred channel when it
 // is enabled and configured, otherwise the first enabled+configured channel,
 // otherwise the web inbox. The second return value is the delivery mode.
@@ -349,6 +330,24 @@ func pickChannel(profile recipientChannels, configured func(string) bool) (recip
 		return enabled[0], enabled[0].Type
 	}
 	return recipientChannel{}, "web"
+}
+
+// sendToChannel dispatches one delivery to its transport adapter. The set of
+// types mirrors the channel registry (channels.go); unknown types fall back
+// to the web inbox via the caller's failed status.
+func (a *Activities) sendToChannel(ctx context.Context, channelType, address string, request NotifyChannelRequest) error {
+	text := notificationText(request)
+	switch channelType {
+	case "matrix":
+		return a.sendMatrix(ctx, address, text)
+	case "telegram":
+		return a.sendTelegram(ctx, address, text)
+	case "slack":
+		return a.sendSlack(ctx, address, text)
+	case "webhook":
+		return a.sendWebhook(ctx, address, request)
+	}
+	return fmt.Errorf("no transport for channel %q", channelType)
 }
 
 // notificationText renders the human-facing message for external transports.

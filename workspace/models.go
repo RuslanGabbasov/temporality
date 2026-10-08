@@ -3,6 +3,7 @@ package workspace
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -378,10 +379,13 @@ type Provider struct {
 
 // UserChannel is one delivery transport owned by the user profile
 // (docs/triggers-and-escalations.md §6). The agent never picks transports;
-// the kernel resolves the recipient and their preferred channel.
+// the kernel resolves the recipient and their preferred channel. The type is
+// a free slug on purpose: the deliverable set lives in the kernel's channel
+// registry (kernel/agent/channels.go), so new transports need no storage
+// migration — the API layer checks types against the registry.
 type UserChannel struct {
-	Type    string `json:"type"`    // matrix, telegram
-	Address string `json:"address"` // matrix room id, telegram chat id
+	Type    string `json:"type"`    // matrix, telegram, slack, webhook, …
+	Address string `json:"address"` // room id, chat id, webhook URL, …
 	Enabled bool   `json:"enabled"`
 }
 
@@ -405,19 +409,18 @@ type User struct {
 	UpdatedAt        time.Time     `json:"updated_at"`
 }
 
-// ValidChannelTypes lists the transports the kernel knows how to deliver to.
-var ValidChannelTypes = map[string]bool{
-	"matrix":   true,
-	"telegram": true,
-}
+// channelTypePattern is the shape every channel type slug must have. Which
+// slugs actually deliver is the kernel registry's business; storage only
+// refuses nonsense.
+var channelTypePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 
-// ValidateChannels normalizes a channel list: known types only, non-empty
+// ValidateChannels normalizes a channel list: plausible type slugs, non-empty
 // addresses, at most one entry per type. It reports the first problem found.
 func ValidateChannels(channels []UserChannel) error {
 	seen := make(map[string]bool, len(channels))
 	for _, channel := range channels {
-		if !ValidChannelTypes[channel.Type] {
-			return fmt.Errorf("unknown channel type %q (supported: matrix, telegram)", channel.Type)
+		if !channelTypePattern.MatchString(channel.Type) {
+			return fmt.Errorf("invalid channel type %q", channel.Type)
 		}
 		if strings.TrimSpace(channel.Address) == "" {
 			return fmt.Errorf("channel %q needs an address", channel.Type)

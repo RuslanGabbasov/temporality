@@ -116,6 +116,9 @@ services:
       KERNEL_MATRIX_HOMESERVER: ${KERNEL_MATRIX_HOMESERVER:-}
       KERNEL_MATRIX_ACCESS_TOKEN: ${KERNEL_MATRIX_ACCESS_TOKEN:-}
       KERNEL_TELEGRAM_BOT_TOKEN: ${KERNEL_TELEGRAM_BOT_TOKEN:-}
+      # Shared secret signing generic webhook channel payloads
+      # (X-Temporality-Signature header). Optional: unset sends unsigned.
+      KERNEL_WEBHOOK_SECRET: ${KERNEL_WEBHOOK_SECRET:-}
       # Base URL of the debugger UI, used for links inside notifications.
       KERNEL_UI_URL: ${KERNEL_UI_URL:-}
     ports:

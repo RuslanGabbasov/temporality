@@ -2,6 +2,9 @@ package agent
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -41,6 +44,99 @@ func TestPickChannelHonorsPreferredEnabledAndConfigured(t *testing.T) {
 	// No channels at all: the web inbox is always available.
 	_, mode = pickChannel(recipientChannels{}, func(string) bool { return true })
 	require.Equal(t, "web", mode)
+}
+
+// TestChannelRegistryIsWellFormed pins the extensibility contract: every
+// registry entry has a unique slug, self-contained transports are always
+// configured, bot-mediated ones explain what env is missing.
+func TestChannelRegistryIsWellFormed(t *testing.T) {
+	types := ChannelTypes()
+	seen := map[string]bool{}
+	for _, spec := range types {
+		require.False(t, seen[spec.Type], "duplicate channel type %q", spec.Type)
+		seen[spec.Type] = true
+		require.NotEmpty(t, spec.Type, "type slug")
+		require.NotEmpty(t, spec.Label, "label for "+spec.Type)
+		require.NotEmpty(t, spec.AddressHint, "address hint for "+spec.Type)
+		switch spec.Type {
+		case "slack", "webhook":
+			require.True(t, spec.Configured, "%s is self-contained and must always be configured", spec.Type)
+		case "matrix", "telegram":
+			require.NotEmpty(t, spec.NotConfiguredHint, "%s needs a not-configured hint", spec.Type)
+		}
+	}
+}
+
+func TestParseHTTPURLRequiresFullScheme(t *testing.T) {
+	for _, valid := range []string{"https://example.com/hook", "http://localhost:9090/x?y=1"} {
+		_, err := parseHTTPURL(valid)
+		require.NoError(t, err, valid)
+	}
+	for _, invalid := range []string{"", "example.com/hook", "ftp://example.com", "file:///etc/passwd", "javascript:alert(1)"} {
+		_, err := parseHTTPURL(invalid)
+		require.Error(t, err, invalid)
+	}
+}
+
+// TestNotifyChannelDeliversViaWebhookWithSignature covers the extensible
+// transport: the generic webhook receives the full question envelope and an
+// HMAC signature over the raw body when the shared secret is set.
+func TestNotifyChannelDeliversViaWebhookWithSignature(t *testing.T) {
+	var seenBody []byte
+	var seenSignature string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenBody, _ = io.ReadAll(r.Body)
+		seenSignature = r.Header.Get("X-Temporality-Signature")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+	t.Setenv("KERNEL_WEBHOOK_SECRET", "s3cret")
+
+	workspace := workspaceStub(t, `{"users":[{"id":"ruslan","name":"Ruslan","active":true,"channels":[{"type":"webhook","address":"`+target.URL+`/hook","enabled":true}],"preferred_channel":"webhook"}]}`, nil)
+
+	activities := &Activities{HTTP: target.Client(), WorkspaceURL: workspace.URL, WorkspaceToken: "internal"}
+	delivery, err := activities.NotifyChannel(context.Background(), NotifyChannelRequest{
+		Recipient: "ruslan", Question: "Deploy to prod?", OperationID: "op-9", RunID: "run-9", Project: "repo", Options: []string{"yes", "no"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "webhook", delivery.Channel)
+	require.Equal(t, "delivered", delivery.Status)
+
+	mac := hmac.New(sha256.New, []byte("s3cret"))
+	mac.Write(seenBody)
+	require.Equal(t, "sha256-"+hex.EncodeToString(mac.Sum(nil)), seenSignature)
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal(seenBody, &envelope))
+	require.Equal(t, "temporality.human_request/v1", envelope["type"])
+	require.Equal(t, "Deploy to prod?", envelope["question"])
+	require.Equal(t, "op-9", envelope["operation_id"])
+	require.ElementsMatch(t, []string{"yes", "no"}, envelope["options"].([]any))
+}
+
+// TestNotifyChannelDeliversViaSlack: a slack channel is just the incoming
+// webhook URL the user owns — no kernel env involved.
+func TestNotifyChannelDeliversViaSlack(t *testing.T) {
+	var seenPath string
+	var seenBody map[string]any
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &seenBody)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer hook.Close()
+
+	workspace := workspaceStub(t, `{"users":[{"id":"ruslan","name":"Ruslan","active":true,"channels":[{"type":"slack","address":"`+hook.URL+`/services/T00/B00/xyz","enabled":true}],"preferred_channel":"slack"}]}`, nil)
+
+	activities := &Activities{HTTP: hook.Client(), WorkspaceURL: workspace.URL, WorkspaceToken: "internal"}
+	delivery, err := activities.NotifyChannel(context.Background(), NotifyChannelRequest{
+		Recipient: "ruslan", Question: "Release today?", OperationID: "op-10", RunID: "run-10", Project: "repo",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "slack", delivery.Channel)
+	require.Equal(t, "delivered", delivery.Status)
+	require.Equal(t, "/services/T00/B00/xyz", seenPath)
+	require.Contains(t, seenBody["text"], "Release today?")
 }
 
 // workspaceStub serves the user list plus the human-request upsert endpoint
