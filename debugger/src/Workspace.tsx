@@ -539,13 +539,25 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   }
 
   const fetchFinalAnswer = async (runId: string, convId: string) => {
-    try {
-      const run = await workspaceApi.getRun(runId)
-      if (run.status === 'completed' || run.status === 'failed' || run.status === 'turn_limit' || run.status === 'cancelled' || run.status === 'time_limit' || run.status === 'token_limit' || run.status === 'budget_limit') {
-        const answer = run.answer || run.error || 'No answer received'
-        updateMsg(convId, runId, { content: answer, status: run.status })
-      }
-    } catch { /* ignore */ }
+    // run.completed lands in the journal while knowledge extraction (another
+    // model call, up to minutes) still keeps the Temporal workflow running —
+    // the run row reaches its terminal status noticeably later than the
+    // event. A single check here loses that race and the chat spinner never
+    // stops; poll with a backoff until the run is actually terminal.
+    const terminal = ['completed', 'failed', 'turn_limit', 'cancelled', 'time_limit', 'token_limit', 'budget_limit']
+    // ~5 minutes total: extraction StartToClose is 3m, cover its retries too.
+    const delays = [...Array(10).fill(2000), ...Array(55).fill(5000)]
+    for (const delay of delays) {
+      try {
+        const run = await workspaceApi.getRun(runId)
+        if (terminal.includes(run.status)) {
+          const answer = run.answer || run.error || 'No answer received'
+          updateMsg(convId, runId, { content: answer, status: run.status })
+          return
+        }
+      } catch { /* transient — keep polling */ }
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
   }
 
   const cancelRun = async (runId: string) => {
