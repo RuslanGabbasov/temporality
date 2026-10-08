@@ -960,9 +960,9 @@ func (s *Store) CreateUser(ctx context.Context, u *User) error {
 	}
 	channels, _ := json.Marshal(channelList(u.Channels))
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_user (id, name, email, role, token, org_unit_id, active, channels, preferred_channel, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		u.ID, u.Name, u.Email, u.Role, u.Token, nullString(u.OrgUnitID), u.Active, channels, u.PreferredChannel, u.CreatedAt, u.UpdatedAt)
+		`INSERT INTO workspace_user (id, name, email, role, token, password_hash, org_unit_id, active, channels, preferred_channel, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		u.ID, u.Name, u.Email, u.Role, u.Token, u.PasswordHash, nullString(u.OrgUnitID), u.Active, channels, u.PreferredChannel, u.CreatedAt, u.UpdatedAt)
 	return err
 }
 
@@ -985,9 +985,9 @@ func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
 	var channels []byte
 	var orgUnitID *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, email, role, COALESCE(token, ''), org_unit_id, active, channels, preferred_channel, created_at, updated_at
+		`SELECT id, name, email, role, COALESCE(token, ''), (password_hash <> '') AS has_password, org_unit_id, active, channels, preferred_channel, created_at, updated_at
 		 FROM workspace_user WHERE id = $1`, id).
-		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt)
+		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &u.HasPassword, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return u, ErrNotFound
 	}
@@ -1002,7 +1002,7 @@ func (s *Store) GetUser(ctx context.Context, id string) (User, error) {
 // ListUsers returns users for API responses: the token value is never
 // included, only HasToken reporting whether one exists.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, (token <> '') AS has_token, org_unit_id, active, channels, preferred_channel, created_at, updated_at FROM workspace_user ORDER BY created_at`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, email, role, (token <> '') AS has_token, (password_hash <> '') AS has_password, org_unit_id, active, channels, preferred_channel, created_at, updated_at FROM workspace_user ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -1012,7 +1012,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 		var u User
 		var channels []byte
 		var orgUnitID *string
-		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.HasToken, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.HasToken, &u.HasPassword, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		u.OrgUnitID = derefPtr(orgUnitID)
@@ -1057,6 +1057,45 @@ func (s *Store) UpdateUserToken(ctx context.Context, id, token string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SetUserPassword stores a bcrypt hash for password login. An empty hash
+// disables password login for the user.
+func (s *Store) SetUserPassword(ctx context.Context, id, passwordHash string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE workspace_user SET password_hash = $2, updated_at = now() WHERE id = $1`, id, passwordHash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetUserByLogin resolves a password-login attempt: the login may be the
+// user's name or email (case-insensitive). Only active users match. The
+// returned User carries the bcrypt hash and the bearer token so the caller
+// can verify the password and hand out the token without a second query.
+func (s *Store) GetUserByLogin(ctx context.Context, login string) (User, error) {
+	var u User
+	var channels []byte
+	var orgUnitID *string
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, name, email, role, COALESCE(token, ''), password_hash, org_unit_id, active, channels, preferred_channel, created_at, updated_at
+		 FROM workspace_user
+		 WHERE active = true AND (lower(name) = lower($1) OR (email <> '' AND lower(email) = lower($1)))`, login).
+		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &u.PasswordHash, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return u, ErrNotFound
+	}
+	if err != nil {
+		return u, err
+	}
+	u.OrgUnitID = derefPtr(orgUnitID)
+	u.Channels = scanChannels(channels)
+	u.HasToken = u.Token != ""
+	u.HasPassword = u.PasswordHash != ""
+	return u, nil
 }
 
 func (s *Store) UpdateUser(ctx context.Context, u User) error {

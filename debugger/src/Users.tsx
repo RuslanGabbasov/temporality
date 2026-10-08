@@ -52,13 +52,13 @@ export default function Users() {
 
   const startCreate = () => {
     setEditing(null)
-    setForm({ name: '', email: '', role: 'viewer', active: true, org_unit_id: '' })
+    setForm({ name: '', email: '', role: 'viewer', active: true, org_unit_id: '', password: '' })
     setShowForm(true)
   }
 
   const startEdit = (u: User) => {
     setEditing(u)
-    setForm({ ...u })
+    setForm({ ...u, password: '' })
     setShowForm(true)
   }
 
@@ -66,11 +66,15 @@ export default function Users() {
     if (!form.name?.trim() || !form.role?.trim()) return
     setLoading(true); setError('')
     try {
+      // Password travels only when the admin typed one: absent on edit keeps
+      // the current hash, so ordinary role/name edits never lock users out.
+      const payload: Partial<User> = { ...form }
+      if (!payload.password) delete payload.password
       let result: User
       if (editing) {
-        result = await workspaceApi.updateUser(editing.id, form)
+        result = await workspaceApi.updateUser(editing.id, payload)
       } else {
-        result = await workspaceApi.createUser(form as User & { name: string; role: string })
+        result = await workspaceApi.createUser(payload as User & { name: string; role: string })
       }
       setShowForm(false); setEditing(null)
       // Show token if created
@@ -148,6 +152,7 @@ export default function Users() {
                   <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                     <Tag type={ROLE_COLORS[u.role] || 'gray'} size="sm">{u.role}</Tag>
                     <Tag type={u.active ? 'green' : 'red'} size="sm">{u.active ? (t('users.active') ?? 'active') : (t('users.inactive') ?? 'inactive')}</Tag>
+                    {u.has_password && <Tag type="outline" size="sm">{t('users.has_password') ?? 'password login'}</Tag>}
                   </div>
                   <ChannelBadges user={u} />
                 </div>
@@ -185,6 +190,17 @@ export default function Users() {
                   allowUnassigned
                 />
               )}
+              <TextInput
+                id="user-password"
+                labelText={t('users.password') ?? 'Password'}
+                type="password"
+                value={form.password ?? ''}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, password: e.target.value })}
+                placeholder="••••••••"
+                helperText={editing
+                  ? (t('users.password_hint_edit') ?? 'Leave empty to keep the current password.')
+                  : (t('users.password_hint_create') ?? 'Optional — lets the user sign in with name and password.')}
+              />
               <div className="form-actions">
                 <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
                 <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>

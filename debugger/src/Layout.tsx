@@ -12,14 +12,15 @@ import {
   SelectItem,
   Modal,
   Heading,
+  InlineNotification,
 } from '@carbon/react'
 import { User, Settings, Add, Edit, TrashCan, Folder, ChevronDown } from '@carbon/icons-react'
 import { Menu } from '@carbon/icons-react'
 import { TOKEN_STORAGE_KEY, authToken, authHeaders } from './api'
 import Onboarding from './Onboarding'
-import { useI18n, type Locale } from './i18n'
+import { useI18n, useT, type Locale } from './i18n'
 import { useTheme } from './theme'
-import { whoami, type Whoami } from './kernelApi'
+import { whoami, login as apiLogin, type Whoami } from './kernelApi'
 import ChannelsDialog from './ChannelsDialog'
 import { workspaceApi, type OrgUnit } from './workspaceApi'
 import { flattenUnits } from './orgUnits'
@@ -74,6 +75,94 @@ interface ProjectMember {
   role: string
 }
 
+// Shared login form: password-first (the familiar path), with the raw API
+// token kept as a secondary mode for service accounts and recovery.
+interface LoginFieldsProps {
+  mode: 'password' | 'token'
+  onModeChange: (mode: 'password' | 'token') => void
+  loginName: string
+  onLoginNameChange: (v: string) => void
+  loginPassword: string
+  onLoginPasswordChange: (v: string) => void
+  token: string
+  onTokenChange: (v: string) => void
+  busy: boolean
+  error: string
+  fullWidth?: boolean
+  onSubmitPassword: () => void
+  onSubmitToken: () => void
+}
+
+function LoginFields(props: LoginFieldsProps) {
+  const t = useT()
+  const enterSubmit = (handler: () => void) => (e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') handler() }
+  return (
+    <>
+      <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '1rem', background: 'var(--tm-surface-2)', borderRadius: 'var(--tm-radius-sm)', padding: '0.2rem' }}>
+        {(['password', 'token'] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => props.onModeChange(mode)}
+            style={{
+              flex: 1, padding: '0.4rem 0.5rem', cursor: 'pointer', fontSize: '0.8rem',
+              border: 'none', borderRadius: 'calc(var(--tm-radius-sm) - 2px)',
+              background: props.mode === mode ? 'var(--tm-elevated)' : 'transparent',
+              color: props.mode === mode ? 'var(--tm-text)' : 'var(--tm-text-3)',
+              fontWeight: props.mode === mode ? 500 : 400,
+            }}
+          >
+            {mode === 'password' ? (t('login.mode_password') ?? 'Password') : (t('login.mode_token') ?? 'API token')}
+          </button>
+        ))}
+      </div>
+      {props.mode === 'password' ? (
+        <>
+          <TextInput
+            id="login-name"
+            labelText={t('login.username') ?? 'Name or email'}
+            value={props.loginName}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => props.onLoginNameChange(e.target.value)}
+            placeholder={t('login.username_placeholder') ?? 'ruslan or ruslan@example.com'}
+            onKeyDown={enterSubmit(props.onSubmitPassword)}
+            style={{ marginBottom: '0.75rem' }}
+            autoFocus
+          />
+          <TextInput
+            id="login-password"
+            labelText={t('login.password') ?? 'Password'}
+            type="password"
+            value={props.loginPassword}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => props.onLoginPasswordChange(e.target.value)}
+            placeholder="••••••••"
+            onKeyDown={enterSubmit(props.onSubmitPassword)}
+            style={{ marginBottom: '0.75rem' }}
+          />
+        </>
+      ) : (
+        <TextInput
+          id="login-api-token"
+          labelText={t('login.token') ?? 'API Token'}
+          type="password"
+          value={props.token}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => props.onTokenChange(e.target.value)}
+          placeholder={t('login.placeholder') ?? 'Enter your bearer token'}
+          onKeyDown={enterSubmit(props.onSubmitToken)}
+          style={{ marginBottom: '0.75rem' }}
+        />
+      )}
+      {props.error && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={props.error} hideCloseButton lowContrast style={{ marginBottom: '0.75rem' }} />}
+      <Button
+        onClick={props.mode === 'password' ? props.onSubmitPassword : props.onSubmitToken}
+        disabled={props.busy || (props.mode === 'password' ? !(props.loginName.trim() && props.loginPassword) : !props.token.trim())}
+        style={props.fullWidth ? { width: '100%' } : undefined}
+      >
+        {props.busy ? (t('login.signing_in') ?? 'Signing in…') : (t('action.login') ?? 'Sign in')}
+      </Button>
+    </>
+  )
+}
+
 export default function Layout({ children, activePage }: LayoutProps) {
   const params = new URLSearchParams(window.location.search)
   const [project, setProject] = useState(params.get('project') ?? '')
@@ -92,6 +181,11 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const { theme, setTheme, resolved } = useTheme()
   const [token, setToken] = useState(authToken() ?? '')
   const [loggedIn, setLoggedIn] = useState(!!authToken())
+  const [loginMode, setLoginMode] = useState<'password' | 'token'>('password')
+  const [loginName, setLoginName] = useState('')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [loginBusy, setLoginBusy] = useState(false)
+  const [loginError, setLoginError] = useState('')
 
   // Project management
   const [editProject, setEditProject] = useState<Project | null>(null)
@@ -236,6 +330,29 @@ export default function Layout({ children, activePage }: LayoutProps) {
     setLoggedIn(true)
     setShowLogin(false)
     window.location.reload()
+  }
+
+  // Password login: the kernel verifies the bcrypt hash and returns the
+  // user's bearer token, which then lives in localStorage like a pasted one.
+  const doPasswordLogin = () => {
+    const name = loginName.trim()
+    if (!name || !loginPassword || loginBusy) return
+    setLoginBusy(true)
+    setLoginError('')
+    void (async () => {
+      try {
+        const result = await apiLogin(name, loginPassword)
+        localStorage.setItem(TOKEN_STORAGE_KEY, result.token)
+        setLoggedIn(true)
+        setShowLogin(false)
+        window.location.reload()
+      } catch (e) {
+        const text = e instanceof Error ? e.message : 'Request failed'
+        setLoginError(text.startsWith('401') ? (t('login.invalid') ?? 'Invalid login or password') : text)
+      } finally {
+        setLoginBusy(false)
+      }
+    })()
   }
 
   const doLogout = () => {
@@ -530,20 +647,24 @@ export default function Layout({ children, activePage }: LayoutProps) {
           <div className="modal-panel" style={{ width: '420px' }}>
             <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{t('action.login') ?? 'Sign in'}</Heading>
             <p style={{ marginBottom: '1rem', color: 'var(--tm-text-2)' }}>
-              {t('login.description') ?? 'Enter your API token to access the Temporality workspace.'}
+              {t('login.description') ?? 'Sign in to the Temporality workspace.'}
             </p>
-            <TextInput
-              id="api-token"
-              labelText={t('login.token') ?? 'API Token'}
-              type="password"
-              value={token}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setToken(e.target.value)}
-              placeholder={t('login.placeholder') ?? 'Enter your bearer token'}
-              onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') doLogin() }}
+            <LoginFields
+              mode={loginMode}
+              onModeChange={setLoginMode}
+              loginName={loginName}
+              onLoginNameChange={setLoginName}
+              loginPassword={loginPassword}
+              onLoginPasswordChange={setLoginPassword}
+              token={token}
+              onTokenChange={setToken}
+              busy={loginBusy}
+              error={loginError}
+              onSubmitPassword={doPasswordLogin}
+              onSubmitToken={doLogin}
             />
-            <div className="form-actions">
+            <div className="form-actions" style={{ marginTop: '0.75rem' }}>
               <Button kind="secondary" onClick={() => setShowLogin(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
-              <Button onClick={doLogin} disabled={!token.trim()}>{t('action.login') ?? 'Sign in'}</Button>
             </div>
           </div>
         </div>
@@ -718,18 +839,22 @@ export default function Layout({ children, activePage }: LayoutProps) {
           <div style={{ maxWidth: '380px', width: '100%', textAlign: 'center' }}>
             <img src="/temporality.svg" alt="Temporality" style={{ height: '48px', marginBottom: '1rem' }} />
             <h1 style={{ fontSize: '1.25rem', fontWeight: 500, marginBottom: '0.5rem', color: 'var(--tm-text)' }}>Temporality</h1>
-            <p style={{ color: 'var(--tm-text-2)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>{t('login.description') ?? 'Enter your API token to continue.'}</p>
-            <TextInput
-              id="login-token"
-              labelText={t('login.token') ?? 'API Token'}
-              type="password"
-              value={token}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setToken(e.target.value)}
-              placeholder={t('login.placeholder') ?? 'Enter your bearer token'}
-              onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') doLogin() }}
-              style={{ marginBottom: '1rem' }}
+            <p style={{ color: 'var(--tm-text-2)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>{t('login.description') ?? 'Sign in to the Temporality workspace.'}</p>
+            <LoginFields
+              mode={loginMode}
+              onModeChange={setLoginMode}
+              loginName={loginName}
+              onLoginNameChange={setLoginName}
+              loginPassword={loginPassword}
+              onLoginPasswordChange={setLoginPassword}
+              token={token}
+              onTokenChange={setToken}
+              busy={loginBusy}
+              error={loginError}
+              fullWidth
+              onSubmitPassword={doPasswordLogin}
+              onSubmitToken={doLogin}
             />
-            <Button onClick={doLogin} style={{ width: '100%' }} disabled={!token.trim()}>{t('action.login') ?? 'Sign in'}</Button>
           </div>
         </div>
       ) : (

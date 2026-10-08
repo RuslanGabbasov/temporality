@@ -31,6 +31,12 @@ export interface Whoami {
   org_unit_id?: string // caller's primary unit (docs/org-structure.md §11)
 }
 
+export interface LoginResponse {
+  token: string
+  user_id: string
+  subject: string
+}
+
 export type ReconcileEffect = 'none' | 'occurred' | 'unknown'
 
 export interface ReconcileRequest {
@@ -87,6 +93,12 @@ export function operations(project: string): Promise<{ operations: UncertainOper
 
 export function whoami(): Promise<Whoami> {
   return request('/v1/agent/whoami')
+}
+
+// Password login: exchanges name-or-email + password for the user's bearer
+// token, which then lives in localStorage exactly like a pasted token.
+export function login(login: string, password: string): Promise<LoginResponse> {
+  return request('/v1/auth/login', { method: 'POST', body: JSON.stringify({ login, password }) })
 }
 
 export function reconcile(body: ReconcileRequest): Promise<ReconcileReceipt> {

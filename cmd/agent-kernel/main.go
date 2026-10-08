@@ -187,6 +187,10 @@ func main() {
 		log.Error("migrate workspace v45", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000046_user_password.up.sql"); err != nil {
+		log.Error("migrate workspace v46", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -367,6 +371,48 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"subject": principal.Subject, "role": principal.Role.String(), "projects": principal.Projects, "auth_enabled": true, "user_id": principal.UserID, "org_unit_id": principal.OrgUnitID})
+	})
+	// Password login exchanges name-or-email + password for the user's bearer
+	// token. The route is mounted outside the auth gate (see server setup
+	// below): unauthenticated callers may reach exactly this one endpoint.
+	// Every failure is the same generic 401 — unknown login, wrong password,
+	// inactive user and "no password configured" are indistinguishable, so
+	// the endpoint cannot be used to enumerate users.
+	mux.HandleFunc("POST /v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Login    string `json:"login"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		login := strings.TrimSpace(req.Login)
+		if login == "" || req.Password == "" {
+			writeError(w, 401, errors.New("invalid login or password"))
+			return
+		}
+		user, err := ws.GetUserByLogin(r.Context(), login)
+		if err != nil {
+			writeError(w, 401, errors.New("invalid login or password"))
+			return
+		}
+		if !workspace.CheckPassword(user.PasswordHash, req.Password) {
+			writeError(w, 401, errors.New("invalid login or password"))
+			return
+		}
+		token := user.Token
+		if token == "" {
+			// Password-capable users always leave with a bearer token: mint one
+			// on first login so the gate accepts subsequent requests.
+			token = generateToken()
+			if err := ws.UpdateUserToken(r.Context(), user.ID, token); err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			refreshUserTokens()
+		}
+		writeJSON(w, 200, map[string]any{"token": token, "user_id": user.ID, "subject": user.Name})
 	})
 	mux.HandleFunc("POST /v1/agent/runs", func(w http.ResponseWriter, r *http.Request) {
 		var input agent.RunInput
@@ -3524,7 +3570,21 @@ func main() {
 		if req.OrgUnitID != nil {
 			orgUnitID = *req.OrgUnitID
 		}
-		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Token: token, OrgUnitID: orgUnitID, Active: active, Channels: req.Channels, PreferredChannel: req.PreferredChannel}
+		// Optional password login: hashed before the insert, never stored raw.
+		passwordHash := ""
+		if req.Password != nil && *req.Password != "" {
+			if len(*req.Password) < 8 {
+				writeError(w, 422, errors.New("password must be at least 8 characters"))
+				return
+			}
+			hash, err := workspace.HashPassword(*req.Password)
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			passwordHash = hash
+		}
+		user := &workspace.User{ID: req.ID, Name: req.Name, Email: req.Email, Role: req.Role, Token: token, PasswordHash: passwordHash, OrgUnitID: orgUnitID, Active: active, Channels: req.Channels, PreferredChannel: req.PreferredChannel}
 		if err := ws.CreateUser(r.Context(), user); err != nil {
 			writeError(w, 500, err)
 			return
@@ -3567,6 +3627,23 @@ func main() {
 			}
 			writeError(w, 500, err)
 			return
+		}
+		// A non-empty password replaces the stored hash; empty/absent keeps the
+		// current one — an admin editing a role must not lock the user out.
+		if req.Password != nil && *req.Password != "" {
+			if len(*req.Password) < 8 {
+				writeError(w, 422, errors.New("password must be at least 8 characters"))
+				return
+			}
+			hash, err := workspace.HashPassword(*req.Password)
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			if err := ws.SetUserPassword(r.Context(), user.ID, hash); err != nil {
+				writeError(w, 500, err)
+				return
+			}
 		}
 		// A scope change reshapes what the user sees — audit it (§36).
 		if orgUnitID != existing.OrgUnitID {
@@ -3816,7 +3893,19 @@ func main() {
 	})
 
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
-	server := &http.Server{Addr: address, Handler: gate.Authenticate(mux), ReadHeaderTimeout: 5 * time.Second}
+	// The gate wraps everything except the password-login route: an
+	// unauthenticated caller may reach exactly POST /v1/auth/login, every other
+	// path still requires a bearer token (or the anonymous pass-through when
+	// the gate is disabled).
+	authed := gate.Authenticate(mux)
+	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/auth/login" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		authed.ServeHTTP(w, r)
+	})
+	server := &http.Server{Addr: address, Handler: root, ReadHeaderTimeout: 5 * time.Second}
 	go func() { <-ctx.Done(); _ = server.Shutdown(context.Background()) }()
 	log.Info("agent kernel started", "address", address, "task_queue", taskQueue)
 	serveErr := server.ListenAndServe()

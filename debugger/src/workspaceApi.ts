@@ -465,6 +465,8 @@ export interface User {
   role: string
   token?: string
   has_token?: boolean // list responses: whether a token exists (value is never exposed)
+  password?: string // create/update only: set or replace the password login
+  has_password?: boolean // responses: whether password login is configured
   org_unit_id?: string // primary unit; empty = unassigned (sees everything, transition)
   active: boolean
   channels?: UserChannel[]

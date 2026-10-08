@@ -397,6 +397,10 @@ type User struct {
 	Role     string `json:"role"`                // viewer, operator, admin
 	Token    string `json:"token,omitempty"`     // bearer token; only set in create/regenerate responses, never in list
 	HasToken bool   `json:"has_token,omitempty"` // list responses: whether a token exists (value is never exposed)
+	// Password login (optional per user): bcrypt hash, never serialized;
+	// HasPassword reports in list/get responses whether it is configured.
+	PasswordHash string `json:"-"`
+	HasPassword  bool   `json:"has_password,omitempty"`
 	// Org position (docs/org-structure.md §3.3): the single unit the user
 	// belongs to; empty = unassigned, sees everything (transition semantics).
 	OrgUnitID string `json:"org_unit_id,omitempty"`
@@ -513,6 +517,7 @@ type CreateUserRequest struct {
 	Email            string        `json:"email,omitempty"`
 	Role             string        `json:"role"`
 	Token            string        `json:"token,omitempty"`       // auto-generated if empty
+	Password         *string       `json:"password,omitempty"`    // optional; set/replace the bcrypt password login
 	OrgUnitID        *string       `json:"org_unit_id,omitempty"` // nil on update = keep; "" = unassign
 	Active           *bool         `json:"active,omitempty"`
 	Channels         []UserChannel `json:"channels,omitempty"`
