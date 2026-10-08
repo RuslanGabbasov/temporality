@@ -395,7 +395,9 @@ func (a *Activities) sendMatrix(ctx context.Context, roomID, text string, settin
 	}
 	txnID := "temporality-" + transactionFingerprint(roomID, text)
 	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)
-	payload := map[string]any{"msgtype": "m.text", "body": text}
+	// The transport is two-way (matrixinbound.go): replying in the room routes
+	// the answer back into the paused run, so say so next to the question.
+	payload := map[string]any{"msgtype": "m.text", "body": text + "\n\nReply in this room to answer."}
 	body, status, err := a.postJSON(ctx, http.MethodPut, endpoint, payload, map[string]string{"Authorization": "Bearer " + accessToken})
 	if err != nil {
 		return err

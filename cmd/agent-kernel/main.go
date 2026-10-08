@@ -539,7 +539,9 @@ func main() {
 		childRunID, _, _ := strings.Cut(approval.OperationID, "/turn/")
 		workflowID := workflowIDFor(sourceID, project, r.PathValue("runID"))
 		if childRunID != r.PathValue("runID") && strings.HasPrefix(childRunID, r.PathValue("runID")+"/") {
-			workflowID = "agent-child/" + agent.EventScope(sourceID, project, childRunID)
+			// The ask was issued from a delegated child run: every AgentRun
+			// workflow (top-level or child) is identified by the full run path.
+			workflowID = workflowIDFor(sourceID, project, childRunID)
 		}
 		if err := temporalClient.SignalWorkflow(r.Context(), workflowID, "", agent.ApprovalSignal, approval); err != nil {
 			writeError(w, 409, err)
@@ -3895,6 +3897,20 @@ func main() {
 	})
 
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
+	// Inbound matrix replies: the delivery transport is two-way — room replies
+	// route back into paused runs through the same approval signal the web
+	// inbox uses. Idles (30s re-check) while matrix is not configured.
+	matrixInbound := &matrixInboundLoop{
+		httpClient: activities.HTTP,
+		settings:   activities.ChannelSettings,
+		store:      ws,
+		sourceID:   activities.SourceID,
+		log:        log,
+		signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
+			return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
+		},
+	}
+	go matrixInbound.run(ctx)
 	// The gate wraps everything except the password-login route: an
 	// unauthenticated caller may reach exactly POST /v1/auth/login, every other
 	// path still requires a bearer token (or the anonymous pass-through when
