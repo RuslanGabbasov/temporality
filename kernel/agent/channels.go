@@ -53,6 +53,18 @@ type TransportSettings struct {
 	UIURL             string
 }
 
+// TrimBearerPrefix normalizes a pasted access token: admins routinely copy
+// the whole "Authorization: Bearer …" header value (or "Bearer …" alone)
+// into the token field, and sending "Bearer Bearer …" makes homeservers
+// reject the request with M_MISSING_TOKEN. Only the bare token is kept.
+func TrimBearerPrefix(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 7 && strings.EqualFold(value[:7], "bearer ") {
+		return strings.TrimSpace(value[7:])
+	}
+	return value
+}
+
 // TransportSettingsFromEnv reads the legacy credential environment. It stays
 // the source of truth when no database overlay exists and the fallback per
 // field when the overlay is partial.

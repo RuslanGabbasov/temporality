@@ -387,7 +387,9 @@ func notificationText(request NotifyChannelRequest, uiURL string) string {
 // the kernel's shared bot account.
 func (a *Activities) sendMatrix(ctx context.Context, roomID, text string, settings TransportSettings) error {
 	homeserver := strings.TrimRight(strings.TrimSpace(settings.MatrixHomeserver), "/")
-	accessToken := strings.TrimSpace(settings.MatrixAccessToken)
+	// TrimBearerPrefix guards against a token saved with its "Bearer " header
+	// prefix (database or env) — homeservers reject the doubled prefix.
+	accessToken := TrimBearerPrefix(settings.MatrixAccessToken)
 	if homeserver == "" || accessToken == "" || roomID == "" {
 		return fmt.Errorf("matrix transport is not configured")
 	}

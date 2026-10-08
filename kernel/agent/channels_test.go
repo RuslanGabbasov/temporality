@@ -41,6 +41,18 @@ func TestTransportSettingsConfiguredFlags(t *testing.T) {
 	require.False(t, (TransportSettings{}).Configured("smoke-signals"))
 }
 
+// TestTrimBearerPrefix: a pasted "Authorization: Bearer …" header value must
+// collapse to the bare token — sending "Bearer Bearer …" makes homeservers
+// answer M_MISSING_TOKEN and the delivery fail.
+func TestTrimBearerPrefix(t *testing.T) {
+	require.Equal(t, "syt_foo_bar", TrimBearerPrefix("Bearer syt_foo_bar"))
+	require.Equal(t, "syt_foo_bar", TrimBearerPrefix("bearer syt_foo_bar"))
+	require.Equal(t, "syt_foo_bar", TrimBearerPrefix("  Bearer   syt_foo_bar  "))
+	require.Equal(t, "Authorization: Bearer XYZ", TrimBearerPrefix("Authorization: Bearer XYZ"), "only a leading Bearer prefix is stripped")
+	require.Equal(t, "syt_plain", TrimBearerPrefix("syt_plain"), "a clean token passes through untouched")
+	require.Equal(t, "Bearer", TrimBearerPrefix("Bearer"), "the bare word alone is not a prefix")
+}
+
 // TestChannelRegistryReflectsEffectiveSettings: the registry's configured
 // flags follow the settings passed in — the UI's channel picker and the
 // admin settings screen see the same truth.

@@ -3822,7 +3822,9 @@ func main() {
 			current.UIURL = strings.TrimSpace(*req.UIURL)
 		}
 		if value := strings.TrimSpace(req.MatrixAccessToken); value != "" {
-			current.MatrixAccessToken = value
+			// Tolerate a pasted "Authorization: Bearer …" value: the homeserver
+			// wants the bare token, and a double prefix reads as M_MISSING_TOKEN.
+			current.MatrixAccessToken = agent.TrimBearerPrefix(value)
 		}
 		if value := strings.TrimSpace(req.TelegramBotToken); value != "" {
 			current.TelegramBotToken = value
