@@ -325,6 +325,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return ToolResult{Content: fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, result.Output), ExitCode: &exitCode}, nil
 	case "list_triggers":
 		return a.handleListTriggers(ctx, request)
+	case "human_contacts":
+		return a.handleHumanContacts(ctx, request)
 	case "create_trigger":
 		return a.handleCreateTrigger(ctx, request)
 	case "update_trigger":
