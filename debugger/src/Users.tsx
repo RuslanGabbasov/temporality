@@ -13,11 +13,11 @@ import {
   Stack,
   Heading,
 } from '@carbon/react'
-import { Add, Edit, TrashCan, Key } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, Key, Chat } from '@carbon/icons-react'
 import { workspaceApi, type User } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
-import { ChannelBadges } from './ChannelsDialog'
+import ChannelsDialog, { ChannelBadges } from './ChannelsDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -34,6 +34,7 @@ export default function Users() {
   const [generatedToken, setGeneratedToken] = useState<string | null>(null)
   const [tokenUser, setTokenUser] = useState<User | null>(null)
   const [confirmRegen, setConfirmRegen] = useState<User | null>(null)
+  const [channelsUser, setChannelsUser] = useState<User | null>(null)
   const [filter, setFilter] = useState('')
 
   const visibleUsers = users.filter((u) => matchesFilter(filter, u.name, u.email, u.role, u.id))
@@ -151,6 +152,7 @@ export default function Users() {
                   <ChannelBadges user={u} />
                 </div>
                 <Stack orientation="horizontal" gap={1}>
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Chat} iconDescription={t('users.edit_channels') ?? 'Communication channels'} onClick={() => setChannelsUser(u)} />
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Key} iconDescription={t('users.generate_token') ?? 'Generate Token'} onClick={() => generateToken(u)} />
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} onClick={() => startEdit(u)} />
                   <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(u)} />
@@ -221,6 +223,14 @@ export default function Users() {
             </div>
           </div>
         </div>
+      )}
+
+      {channelsUser && (
+        <ChannelsDialog
+          userId={channelsUser.id}
+          userName={channelsUser.name}
+          onClose={() => setChannelsUser(null)}
+        />
       )}
 
       {loading && <Loading withOverlay={false} />}

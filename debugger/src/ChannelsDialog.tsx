@@ -48,7 +48,7 @@ function addressPlaceholder(spec: ChannelTypeSpec | undefined): string {
  * inbox is always available; the other transports come from the kernel's
  * channel registry, so new channel types appear here without UI changes.
  */
-export default function ChannelsDialog({ userId, onClose }: { userId: string; onClose: () => void }) {
+export default function ChannelsDialog({ userId, userName, onClose }: { userId: string; userName?: string; onClose: () => void }) {
   const t = useT()
   const [channels, setChannels] = useState<UserChannel[]>([])
   const [specs, setSpecs] = useState<ChannelTypeSpec[]>(DEFAULT_TYPES)
@@ -127,7 +127,7 @@ export default function ChannelsDialog({ userId, onClose }: { userId: string; on
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal-panel" style={{ width: '480px' }}>
-        <Heading style={{ fontSize: '1.1rem', marginBottom: '0.25rem' }}>{t('channels.title') ?? 'Notification channels'}</Heading>
+        <Heading style={{ fontSize: '1.1rem', marginBottom: '0.25rem' }}>{(t('channels.title') ?? 'Notification channels') + (userName ? ` — ${userName}` : '')}</Heading>
         <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-3)', margin: '0 0 0.9rem' }}>
           {t('channels.description') ?? 'Where agents should reach you when they ask a question. The in-app inbox always works.'}
         </p>
