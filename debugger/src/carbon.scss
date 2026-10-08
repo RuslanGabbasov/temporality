@@ -1584,6 +1584,113 @@ button.header-nav-link {
   margin-bottom: 0.15rem;
 }
 
+// Cross-agent dispute banner in the Runs panel — the same orange the
+// timeline uses for mislead markers (#ff9e64)
+.run-disputes {
+  border: 1px solid rgba(255, 158, 100, 0.35);
+  border-left: 3px solid #ff9e64;
+  border-radius: 6px;
+  background: var(--tm-surface);
+  padding: 0.35rem 0.5rem;
+}
+
+.run-disputes-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0.15rem 0;
+  cursor: pointer;
+  color: var(--tm-text);
+  font-size: 0.8rem;
+  text-align: left;
+}
+
+.run-disputes-toggle:hover {
+  background: rgba(128, 145, 140, 0.08);
+}
+
+.run-disputes-icon {
+  color: #ff9e64;
+  flex-shrink: 0;
+}
+
+.run-disputes-count {
+  color: #ff9e64;
+  font-size: 0.7rem;
+}
+
+.run-disputes-arrow {
+  margin-left: auto;
+  color: var(--tm-text-3);
+  font-size: 0.7rem;
+}
+
+.run-disputes-item {
+  border-top: 1px dashed var(--tm-border);
+  padding: 0.4rem 0 0.3rem;
+  font-size: 0.78rem;
+}
+
+.run-disputes-item-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.run-disputes-item-text {
+  color: var(--tm-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.run-disputes-item-kind {
+  color: #ff9e64;
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+.run-disputes-item-time {
+  color: var(--tm-muted);
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+.run-disputes-open {
+  background: none;
+  border: none;
+  color: var(--tm-teal);
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.run-disputes-open:hover {
+  background: rgba(128, 145, 140, 0.12);
+}
+
+.run-disputes-item-proposition {
+  color: var(--tm-text-3);
+  margin-top: 0.15rem;
+  overflow-wrap: anywhere;
+}
+
+.run-disputes-item-reason {
+  color: var(--tm-muted);
+  font-size: 0.72rem;
+  margin-top: 0.1rem;
+  overflow-wrap: anywhere;
+}
+
 // Plan DAG view — layered task graph of plan calls
 .chat-plan {
   margin-top: 0.75rem;

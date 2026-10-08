@@ -4,6 +4,7 @@ import { observationApi, type ObservationEvent } from './observationApi'
 import { workspaceApi, type Agent } from './workspaceApi'
 import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
+import RunDisputes from './RunDisputes'
 import Markdown from './Markdown'
 import { useT } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString } from './eventSummary'
@@ -585,6 +586,9 @@ export default function AgentRuns({ project }: { project: string }) {
                     </Tile>
                   )
                 })}
+
+                {/* Cross-agent knowledge disputes across the selected run's chain */}
+                <RunDisputes project={project.trim()} selected={selected} rows={rows} onOpenRun={setSelected} />
 
                 {/* Delegation call tree — children runs with live status */}
                 <DelegationTree project={project.trim()} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
