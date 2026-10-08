@@ -681,7 +681,7 @@ export default function Org() {
                   <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0.25rem 0 0.5rem' }}>
                     {t('org.policy_effective_hint') ?? 'What applies to runs at this unit: installation-wide rows plus everything inherited from ancestors, merged restrictively.'}
                   </p>
-                  {effective.sources.length === 0 ? (
+                  {(effective.sources ?? []).length === 0 ? (
                     <div style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>{t('org.policy_effective_none') ?? 'No policy restricts runs at this unit.'}</div>
                   ) : (
                     <>
@@ -697,7 +697,7 @@ export default function Org() {
                       </div>
                       <div style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginBottom: '0.25rem' }}>{t('org.policy_sources') ?? 'Contributing policies'}:</div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
-                        {effective.sources.map((s) => (
+                        {(effective.sources ?? []).map((s) => (
                           <Tag key={s.id} type="gray" size="sm">{s.name}</Tag>
                         ))}
                       </div>

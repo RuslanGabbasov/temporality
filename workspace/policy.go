@@ -176,6 +176,9 @@ func normalizePolicyLists(p *Policy) {
 // the contributing rows in input order.
 func MergePolicies(rows []Policy) (effective Policy, sources []Policy) {
 	effective = Policy{AllowedModels: nil, AllowedMCP: nil, Enabled: true}
+	// Non-nil from the start: JSON marshalling of a nil slice yields null,
+	// which clients reading "sources": [...] must not have to handle.
+	sources = make([]Policy, 0, len(rows))
 	firstModel := true
 	firstMCP := true
 	for _, p := range rows {
