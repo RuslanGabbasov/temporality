@@ -402,6 +402,34 @@ export interface ChannelTypeSpec {
   not_configured_hint?: string
 }
 
+/** Admin transport settings (channel_transport row over env): non-secrets
+ * come back as {value, source}, secrets as {set, hint, source} — the value
+ * itself never leaves the kernel. Source says who wins: database | env | none. */
+export interface ChannelSettingsField {
+  value?: string
+  set?: boolean
+  hint?: string
+  source: 'database' | 'env' | 'none'
+}
+
+export interface ChannelSettings {
+  matrix_homeserver: ChannelSettingsField
+  matrix_access_token: ChannelSettingsField
+  telegram_bot_token: ChannelSettingsField
+  webhook_secret: ChannelSettingsField
+  ui_url: ChannelSettingsField
+  updated_at?: string
+}
+
+export interface ChannelSettingsUpdate {
+  matrix_homeserver?: string // present (even "") sets/clears the plain field
+  ui_url?: string
+  matrix_access_token?: string // non-empty sets the secret; absent keeps
+  telegram_bot_token?: string
+  webhook_secret?: string
+  clear?: string[] // field names to wipe (secrets and plain alike)
+}
+
 // Human-in-the-loop request (docs/org-structure.md §28): a question an agent
 // paused on, delivered to a resolved recipient. The inbox lists open rows;
 // answers ride the existing approval endpoint.
@@ -611,6 +639,10 @@ export const workspaceApi = {
     request<User>(`/v1/workspace/users/${id}/channels`, { method: 'PUT', body: JSON.stringify(data) }),
   // Kernel transport registry: the channel types users may configure
   channelTypes: () => request<{ types: ChannelTypeSpec[] }>('/v1/workspace/channel-types'),
+  // Admin transport credentials (masked view + upsert)
+  getChannelSettings: () => request<ChannelSettings>('/v1/workspace/channel-settings'),
+  updateChannelSettings: (data: ChannelSettingsUpdate) =>
+    request<ChannelSettings>('/v1/workspace/channel-settings', { method: 'PUT', body: JSON.stringify(data) }),
   deleteUser: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/users/${id}`, { method: 'DELETE' }),
 

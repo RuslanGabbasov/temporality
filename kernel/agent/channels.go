@@ -19,6 +19,11 @@ import (
 // storage migration is involved. The registry is also served to the UI
 // (GET /v1/workspace/channel-types) so users only ever pick from what the
 // kernel can actually deliver.
+//
+// Transport credentials live in two layers: the admin-editable overlay in the
+// workspace database (channel_transport row, edited in the UI) with the
+// KERNEL_* environment variables as fallback. Either source alone works; the
+// database wins per field.
 
 // ChannelTypeSpec describes one deliverable transport for the UI.
 type ChannelTypeSpec struct {
@@ -32,30 +37,103 @@ type ChannelTypeSpec struct {
 	// credentials; self-contained ones (slack, webhook) carry everything in
 	// the address and are always ready.
 	Configured bool `json:"configured"`
-	// NotConfiguredHint names the missing environment for bot-mediated
-	// transports, so the UI can tell the user what to ask the admin for.
+	// NotConfiguredHint names what the admin has to provide, so the UI can
+	// link the missing piece to the transport settings screen.
 	NotConfiguredHint string `json:"not_configured_hint,omitempty"`
+}
+
+// TransportSettings is the effective credential set of the delivery
+// transports: database overlay merged over the environment. The zero value
+// means "env only" — which is exactly the pre-database behavior.
+type TransportSettings struct {
+	MatrixHomeserver  string
+	MatrixAccessToken string
+	TelegramBotToken  string
+	WebhookSecret     string
+	UIURL             string
+}
+
+// TransportSettingsFromEnv reads the legacy credential environment. It stays
+// the source of truth when no database overlay exists and the fallback per
+// field when the overlay is partial.
+func TransportSettingsFromEnv() TransportSettings {
+	return TransportSettings{
+		MatrixHomeserver:  strings.TrimSpace(os.Getenv("KERNEL_MATRIX_HOMESERVER")),
+		MatrixAccessToken: strings.TrimSpace(os.Getenv("KERNEL_MATRIX_ACCESS_TOKEN")),
+		TelegramBotToken:  strings.TrimSpace(os.Getenv("KERNEL_TELEGRAM_BOT_TOKEN")),
+		WebhookSecret:     strings.TrimSpace(os.Getenv("KERNEL_WEBHOOK_SECRET")),
+		UIURL:             strings.TrimSpace(os.Getenv("KERNEL_UI_URL")),
+	}
+}
+
+// OverlayEnv fills every empty field from the environment: the database
+// overlay wins per field, env covers the rest.
+func (s TransportSettings) OverlayEnv() TransportSettings {
+	env := TransportSettingsFromEnv()
+	if s.MatrixHomeserver == "" {
+		s.MatrixHomeserver = env.MatrixHomeserver
+	}
+	if s.MatrixAccessToken == "" {
+		s.MatrixAccessToken = env.MatrixAccessToken
+	}
+	if s.TelegramBotToken == "" {
+		s.TelegramBotToken = env.TelegramBotToken
+	}
+	if s.WebhookSecret == "" {
+		s.WebhookSecret = env.WebhookSecret
+	}
+	if s.UIURL == "" {
+		s.UIURL = env.UIURL
+	}
+	return s
+}
+
+// Configured reports whether the kernel holds the credentials a transport
+// needs. Self-contained transports are always configured.
+func (s TransportSettings) Configured(channelType string) bool {
+	switch channelType {
+	case "matrix":
+		return s.MatrixHomeserver != "" && s.MatrixAccessToken != ""
+	case "telegram":
+		return s.TelegramBotToken != ""
+	case "slack", "webhook":
+		return true
+	}
+	return false
+}
+
+// SecretHint renders a non-reversible display form of a secret for admin
+// screens: never the value itself, just proof it is set.
+func SecretHint(secret string) string {
+	trimmed := strings.TrimSpace(secret)
+	if trimmed == "" {
+		return ""
+	}
+	if len(trimmed) <= 4 {
+		return "…"
+	}
+	return "…" + trimmed[len(trimmed)-4:]
 }
 
 // channelRegistry lists the transports in preference order. The set is
 // intentionally small: matrix and telegram are bot-mediated; slack rides an
 // incoming webhook; webhook is the generic escape hatch any external system
 // (Slack, Discord, Mattermost, a corporate messenger gateway) can answer.
-func channelRegistry() []ChannelTypeSpec {
+func channelRegistry(settings TransportSettings) []ChannelTypeSpec {
 	return []ChannelTypeSpec{
 		{
 			Type:              "matrix",
 			Label:             "Matrix",
 			AddressHint:       "Matrix room ID, e.g. !room:matrix.org — the kernel bot must have joined it",
-			Configured:        channelConfigured("matrix"),
-			NotConfiguredHint: "KERNEL_MATRIX_HOMESERVER / KERNEL_MATRIX_ACCESS_TOKEN",
+			Configured:        settings.Configured("matrix"),
+			NotConfiguredHint: "Matrix homeserver + bot access token",
 		},
 		{
 			Type:              "telegram",
 			Label:             "Telegram",
 			AddressHint:       "Telegram chat ID, e.g. 123456789 — the user must have started the bot",
-			Configured:        channelConfigured("telegram"),
-			NotConfiguredHint: "KERNEL_TELEGRAM_BOT_TOKEN",
+			Configured:        settings.Configured("telegram"),
+			NotConfiguredHint: "Telegram bot token",
 		},
 		{
 			Type:        "slack",
@@ -72,21 +150,25 @@ func channelRegistry() []ChannelTypeSpec {
 	}
 }
 
-// ChannelTypes returns the registry for the API surface.
-func ChannelTypes() []ChannelTypeSpec { return channelRegistry() }
+// ChannelTypes returns the registry for the env-only configuration surface.
+func ChannelTypes() []ChannelTypeSpec { return channelRegistry(TransportSettingsFromEnv()) }
 
-// channelConfigured reports whether the kernel holds the credentials a
-// transport needs. Self-contained transports are always configured.
-func channelConfigured(channelType string) bool {
-	switch channelType {
-	case "matrix":
-		return strings.TrimSpace(os.Getenv("KERNEL_MATRIX_HOMESERVER")) != "" && strings.TrimSpace(os.Getenv("KERNEL_MATRIX_ACCESS_TOKEN")) != ""
-	case "telegram":
-		return strings.TrimSpace(os.Getenv("KERNEL_TELEGRAM_BOT_TOKEN")) != ""
-	case "slack", "webhook":
-		return true
+// ChannelTypesWith returns the registry computed from the effective settings
+// (database overlay over env) — the live view the API serves.
+func ChannelTypesWith(settings TransportSettings) []ChannelTypeSpec {
+	return channelRegistry(settings.OverlayEnv())
+}
+
+// transports resolves the effective transport settings for one delivery: the
+// database overlay injected by main when available, env as the fallback. A
+// broken loader degrades to env rather than silencing delivery.
+func (a *Activities) transports(ctx context.Context) TransportSettings {
+	if a.ChannelSettings != nil {
+		if stored, err := a.ChannelSettings(ctx); err == nil {
+			return stored.OverlayEnv()
+		}
 	}
-	return false
+	return TransportSettingsFromEnv()
 }
 
 // sendSlack posts the message through a per-user incoming webhook: the user
@@ -108,15 +190,15 @@ func (a *Activities) sendSlack(ctx context.Context, webhookURL, text string) err
 }
 
 // sendWebhook posts the full question envelope to any HTTPS endpoint — the
-// extensible transport. When KERNEL_WEBHOOK_SECRET is set the raw body is
-// signed (X-Temporality-Signature: sha256-<hmac>) so the receiver can verify
-// origin and integrity.
-func (a *Activities) sendWebhook(ctx context.Context, target string, request NotifyChannelRequest) error {
+// extensible transport. When a signing secret is configured (database
+// overlay or env) the raw body is signed (X-Temporality-Signature:
+// sha256-<hmac>) so the receiver can verify origin and integrity.
+func (a *Activities) sendWebhook(ctx context.Context, target string, request NotifyChannelRequest, settings TransportSettings) error {
 	parsed, err := parseHTTPURL(target)
 	if err != nil {
 		return err
 	}
-	encoded, err := json.Marshal(webhookEnvelope(request))
+	encoded, err := json.Marshal(webhookEnvelope(request, settings.UIURL))
 	if err != nil {
 		return err
 	}
@@ -125,7 +207,7 @@ func (a *Activities) sendWebhook(ctx context.Context, target string, request Not
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if secret := strings.TrimSpace(os.Getenv("KERNEL_WEBHOOK_SECRET")); secret != "" {
+	if secret := strings.TrimSpace(settings.WebhookSecret); secret != "" {
 		mac := hmac.New(sha256.New, []byte(secret))
 		mac.Write(encoded)
 		req.Header.Set("X-Temporality-Signature", "sha256-"+hex.EncodeToString(mac.Sum(nil)))
@@ -145,7 +227,7 @@ func (a *Activities) sendWebhook(ctx context.Context, target string, request Not
 
 // webhookEnvelope is the payload generic webhooks receive: everything needed
 // to identify the ask and build an answer link.
-func webhookEnvelope(request NotifyChannelRequest) map[string]any {
+func webhookEnvelope(request NotifyChannelRequest, uiURL string) map[string]any {
 	envelope := map[string]any{
 		"type":            "temporality.human_request/v1",
 		"project":         request.Project,
@@ -161,8 +243,8 @@ func webhookEnvelope(request NotifyChannelRequest) map[string]any {
 	if envelope["options"] == nil {
 		envelope["options"] = []string{}
 	}
-	if uiURL := strings.TrimSpace(os.Getenv("KERNEL_UI_URL")); uiURL != "" {
-		envelope["answer_url"] = strings.TrimRight(uiURL, "/") + "/agents?project=" + url.QueryEscape(request.Project)
+	if trimmed := strings.TrimSpace(uiURL); trimmed != "" {
+		envelope["answer_url"] = strings.TrimRight(trimmed, "/") + "/agents?project=" + url.QueryEscape(request.Project)
 	}
 	return envelope
 }

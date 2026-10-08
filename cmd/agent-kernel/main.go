@@ -183,6 +183,10 @@ func main() {
 		log.Error("migrate workspace v44", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000045_channel_transport.up.sql"); err != nil {
+		log.Error("migrate workspace v45", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -196,6 +200,22 @@ func main() {
 	// Ephemeral live-token streaming: the activity worker and the HTTP server
 	// share one process, so an in-memory bus connects them without a broker.
 	activities.Tokens = agent.NewTokenBus()
+	// Admin-editable transport credentials (channel_transport row) overlay the
+	// KERNEL_* env vars: delivery reads the database per send, so saving the
+	// settings screen takes effect without a restart.
+	activities.ChannelSettings = func(ctx context.Context) (agent.TransportSettings, error) {
+		row, err := ws.ChannelTransport(ctx)
+		if err != nil {
+			return agent.TransportSettings{}, err
+		}
+		return agent.TransportSettings{
+			MatrixHomeserver:  row.MatrixHomeserver,
+			MatrixAccessToken: row.MatrixAccessToken,
+			TelegramBotToken:  row.TelegramBotToken,
+			WebhookSecret:     row.WebhookSecret,
+			UIURL:             row.UIURL,
+		}, nil
+	}
 	loadMCPServers(ctx, log, ws, activities.MCP)
 	temporalClient, err := client.Dial(client.Options{HostPort: env("TEMPORAL_ADDRESS", client.DefaultHostPort)})
 	if err != nil {
@@ -3619,13 +3639,147 @@ func main() {
 	})
 	// Deliverable channel types (docs/triggers-and-escalations.md §7): the
 	// kernel's transport registry, served to the UI so users pick from what
-	// the kernel can actually deliver. Configured flags reflect the live
-	// environment, so an admin wiring bot credentials is visible at once.
+	// the kernel can actually deliver. Configured flags reflect the effective
+	// credentials (database overlay over env), so an admin wiring bot
+	// credentials in the settings screen is visible at once.
 	mux.HandleFunc("GET /v1/workspace/channel-types", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		writeJSON(w, 200, map[string]any{"types": agent.ChannelTypes()})
+		stored, err := ws.ChannelTransport(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		effective := agent.TransportSettings{
+			MatrixHomeserver: stored.MatrixHomeserver, MatrixAccessToken: stored.MatrixAccessToken,
+			TelegramBotToken: stored.TelegramBotToken, WebhookSecret: stored.WebhookSecret, UIURL: stored.UIURL,
+		}.OverlayEnv()
+		writeJSON(w, 200, map[string]any{"types": agent.ChannelTypesWith(effective)})
+	})
+	// channelSettingsView is the masked admin view of the transport overlay:
+	// plain values for non-secrets, set+hint for secrets, and the winning
+	// source per field so precedence is never a mystery.
+	channelSettingsView := func(stored workspace.ChannelTransport, envSettings agent.TransportSettings, err error) (map[string]any, error) {
+		if err != nil {
+			return nil, err
+		}
+		plain := func(storedValue, envValue string) map[string]any {
+			field := map[string]any{"value": storedValue, "source": "none"}
+			switch {
+			case storedValue != "":
+				field["source"] = "database"
+			case envValue != "":
+				field["value"] = envValue
+				field["source"] = "env"
+			}
+			return field
+		}
+		secret := func(storedValue, envValue string) map[string]any {
+			field := map[string]any{"set": false, "source": "none"}
+			switch {
+			case storedValue != "":
+				field["set"] = true
+				field["hint"] = agent.SecretHint(storedValue)
+				field["source"] = "database"
+			case envValue != "":
+				field["set"] = true
+				field["hint"] = agent.SecretHint(envValue)
+				field["source"] = "env"
+			}
+			return field
+		}
+		return map[string]any{
+			"matrix_homeserver":   plain(stored.MatrixHomeserver, envSettings.MatrixHomeserver),
+			"matrix_access_token": secret(stored.MatrixAccessToken, envSettings.MatrixAccessToken),
+			"telegram_bot_token":  secret(stored.TelegramBotToken, envSettings.TelegramBotToken),
+			"webhook_secret":      secret(stored.WebhookSecret, envSettings.WebhookSecret),
+			"ui_url":              plain(stored.UIURL, envSettings.UIURL),
+			"updated_at":          stored.UpdatedAt,
+		}, nil
+	}
+	// Transport settings (admin): read masked, write upsert. Secrets never
+	// travel back — GET reports set+hint only; PUT sets a secret when a
+	// non-empty value is posted and clears the named fields via "clear".
+	mux.HandleFunc("GET /v1/workspace/channel-settings", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		stored, err := ws.ChannelTransport(r.Context())
+		view, viewErr := channelSettingsView(stored, agent.TransportSettingsFromEnv(), err)
+		if viewErr != nil {
+			writeError(w, 500, viewErr)
+			return
+		}
+		writeJSON(w, 200, view)
+	})
+	mux.HandleFunc("PUT /v1/workspace/channel-settings", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleAdmin) {
+			return
+		}
+		var req struct {
+			MatrixHomeserver  *string  `json:"matrix_homeserver"`
+			UIURL             *string  `json:"ui_url"`
+			MatrixAccessToken string   `json:"matrix_access_token"`
+			TelegramBotToken  string   `json:"telegram_bot_token"`
+			WebhookSecret     string   `json:"webhook_secret"`
+			Clear             []string `json:"clear"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		clear := map[string]bool{}
+		for _, name := range req.Clear {
+			clear[name] = true
+		}
+		current, err := ws.ChannelTransport(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if req.MatrixHomeserver != nil {
+			current.MatrixHomeserver = strings.TrimSpace(*req.MatrixHomeserver)
+		}
+		if req.UIURL != nil {
+			current.UIURL = strings.TrimSpace(*req.UIURL)
+		}
+		if value := strings.TrimSpace(req.MatrixAccessToken); value != "" {
+			current.MatrixAccessToken = value
+		}
+		if value := strings.TrimSpace(req.TelegramBotToken); value != "" {
+			current.TelegramBotToken = value
+		}
+		if value := strings.TrimSpace(req.WebhookSecret); value != "" {
+			current.WebhookSecret = value
+		}
+		for _, name := range []string{"matrix_homeserver", "matrix_access_token", "telegram_bot_token", "webhook_secret", "ui_url"} {
+			if clear[name] {
+				switch name {
+				case "matrix_homeserver":
+					current.MatrixHomeserver = ""
+				case "matrix_access_token":
+					current.MatrixAccessToken = ""
+				case "telegram_bot_token":
+					current.TelegramBotToken = ""
+				case "webhook_secret":
+					current.WebhookSecret = ""
+				case "ui_url":
+					current.UIURL = ""
+				}
+			}
+		}
+		if err := ws.SaveChannelTransport(r.Context(), current); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		stored, err := ws.ChannelTransport(r.Context())
+		view, viewErr := channelSettingsView(stored, agent.TransportSettingsFromEnv(), err)
+		if viewErr != nil {
+			writeError(w, 500, viewErr)
+			return
+		}
+		writeJSON(w, 200, view)
 	})
 	// Regenerate a user's bearer token server-side. The new token takes
 	// effect immediately and the old one is revoked at once.

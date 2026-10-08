@@ -25,6 +25,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.projects': 'Projects',
     'nav.settings': 'Settings',
     'nav.org': 'Organization',
+    'nav.channels': 'Delivery channels',
 
     // Common actions
     'action.create': 'Create',
@@ -624,6 +625,23 @@ const translations: Record<Locale, Record<string, string>> = {
     'channels.title': 'Notification channels',
     'channels.description': 'Where agents should reach you when they ask a question. The in-app inbox always works.',
     'channels.add': 'Add channel',
+
+    // Admin transport settings (delivery channel credentials)
+    'channels_admin.title': 'Delivery channels',
+    'channels_admin.intro': 'Kernel-side credentials for delivering agent questions (bot tokens, signing secret, UI URL). Values set here apply immediately and override the environment variables.',
+    'channels_admin.source_db': 'settings',
+    'channels_admin.source_env': 'env',
+    'channels_admin.source_none': 'not set',
+    'channels_admin.set': 'configured',
+    'channels_admin.not_set': 'not configured',
+    'channels_admin.will_clear': 'will be cleared',
+    'channels_admin.clear': 'Clear stored value',
+    'channels_admin.cleared_placeholder': 'will be cleared',
+    'channels_admin.replace_hint': 'leave empty to keep the stored value',
+    'channels_admin.ready': 'ready',
+    'channels_admin.saved': 'Saved',
+    'channels_admin.saved_body': 'Transport settings applied: delivery uses them from the next request on.',
+    'channels_admin.ui_url_hint': 'Base URL of this UI — used for answer links inside notifications.',
     'channels.type': 'Type',
     'channels.address': 'Address',
     'channels.address_matrix': 'Matrix room ID the kernel bot has joined',
@@ -1084,6 +1102,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.projects': 'Проекты',
     'nav.settings': 'Настройки',
     'nav.org': 'Организация',
+    'nav.channels': 'Каналы доставки',
 
     // Common actions
     'action.create': 'Создать',
@@ -1682,8 +1701,25 @@ const translations: Record<Locale, Record<string, string>> = {
     // Channels (user communication transports)
     'channels.menu': 'Каналы уведомлений',
     'channels.title': 'Каналы уведомлений',
-    'channels.description': 'Куда доставлять вопросы агентов. Встроенный почтовый ячик в приложении работает всегда.',
+    'channels.description': 'Куда доставлять вопросы агентов. Встроенный почтовый ящик в приложении работает всегда.',
     'channels.add': 'Добавить канал',
+
+    // Admin transport settings (delivery channel credentials)
+    'channels_admin.title': 'Каналы доставки',
+    'channels_admin.intro': 'Креды ядра для доставки вопросов агентов (токены ботов, секрет подписи, адрес UI). Значения применяются сразу и переопределяют переменные окружения.',
+    'channels_admin.source_db': 'в настройках',
+    'channels_admin.source_env': 'в окружении',
+    'channels_admin.source_none': 'не задано',
+    'channels_admin.set': 'настроен',
+    'channels_admin.not_set': 'не настроен',
+    'channels_admin.will_clear': 'будет очищен',
+    'channels_admin.clear': 'Очистить сохранённое значение',
+    'channels_admin.cleared_placeholder': 'будет очищен',
+    'channels_admin.replace_hint': 'оставьте пустым, чтобы сохранить текущее значение',
+    'channels_admin.ready': 'готов',
+    'channels_admin.saved': 'Сохранено',
+    'channels_admin.saved_body': 'Настройки каналов применены: доставка использует их со следующего запроса.',
+    'channels_admin.ui_url_hint': 'Базовый адрес этого UI — для ссылок ответа в уведомлениях.',
     'channels.type': 'Тип',
     'channels.address': 'Адрес',
     'channels.address_matrix': 'ID комнаты Matrix, в которую приглашён бот ядра',

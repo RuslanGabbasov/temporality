@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -142,9 +141,10 @@ func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChanne
 			return denied(detail)
 		}
 	}
-	channel, mode := pickChannel(recipientChannels{Channels: target.Channels, Preferred: target.Preferred}, channelConfigured)
+	settings := a.transports(ctx)
+	channel, mode := pickChannel(recipientChannels{Channels: target.Channels, Preferred: target.Preferred}, settings.Configured)
 	if mode != "web" {
-		if err := a.sendToChannel(ctx, channel.Type, channel.Address, request); err != nil {
+		if err := a.sendToChannel(ctx, channel.Type, channel.Address, request, settings); err != nil {
 			return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "failed", Detail: truncate(err.Error(), 300)}
 		}
 		return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "delivered"}
@@ -335,17 +335,17 @@ func pickChannel(profile recipientChannels, configured func(string) bool) (recip
 // sendToChannel dispatches one delivery to its transport adapter. The set of
 // types mirrors the channel registry (channels.go); unknown types fall back
 // to the web inbox via the caller's failed status.
-func (a *Activities) sendToChannel(ctx context.Context, channelType, address string, request NotifyChannelRequest) error {
-	text := notificationText(request)
+func (a *Activities) sendToChannel(ctx context.Context, channelType, address string, request NotifyChannelRequest, settings TransportSettings) error {
+	text := notificationText(request, settings.UIURL)
 	switch channelType {
 	case "matrix":
-		return a.sendMatrix(ctx, address, text)
+		return a.sendMatrix(ctx, address, text, settings)
 	case "telegram":
-		return a.sendTelegram(ctx, address, text)
+		return a.sendTelegram(ctx, address, text, settings)
 	case "slack":
 		return a.sendSlack(ctx, address, text)
 	case "webhook":
-		return a.sendWebhook(ctx, address, request)
+		return a.sendWebhook(ctx, address, request, settings)
 	}
 	return fmt.Errorf("no transport for channel %q", channelType)
 }
@@ -353,7 +353,7 @@ func (a *Activities) sendToChannel(ctx context.Context, channelType, address str
 // notificationText renders the human-facing message for external transports.
 // The answer itself always happens in the product UI; external channels
 // carry the question and a link.
-func notificationText(request NotifyChannelRequest) string {
+func notificationText(request NotifyChannelRequest, uiURL string) string {
 	var builder strings.Builder
 	builder.WriteString("Temporality: an agent is waiting for your answer\n\n")
 	builder.WriteString(request.Question)
@@ -374,9 +374,9 @@ func notificationText(request NotifyChannelRequest) string {
 		builder.WriteString(strconv.Itoa(request.TimeoutSeconds))
 		builder.WriteString("s")
 	}
-	if uiURL := strings.TrimSpace(os.Getenv("KERNEL_UI_URL")); uiURL != "" {
+	if trimmed := strings.TrimSpace(uiURL); trimmed != "" {
 		builder.WriteString("\nAnswer here: ")
-		builder.WriteString(strings.TrimRight(uiURL, "/"))
+		builder.WriteString(strings.TrimRight(trimmed, "/"))
 		builder.WriteString("/agents?project=")
 		builder.WriteString(url.QueryEscape(request.Project))
 	}
@@ -385,9 +385,9 @@ func notificationText(request NotifyChannelRequest) string {
 
 // sendMatrix posts a text message to a room via the client-server API using
 // the kernel's shared bot account.
-func (a *Activities) sendMatrix(ctx context.Context, roomID, text string) error {
-	homeserver := strings.TrimRight(strings.TrimSpace(os.Getenv("KERNEL_MATRIX_HOMESERVER")), "/")
-	accessToken := strings.TrimSpace(os.Getenv("KERNEL_MATRIX_ACCESS_TOKEN"))
+func (a *Activities) sendMatrix(ctx context.Context, roomID, text string, settings TransportSettings) error {
+	homeserver := strings.TrimRight(strings.TrimSpace(settings.MatrixHomeserver), "/")
+	accessToken := strings.TrimSpace(settings.MatrixAccessToken)
 	if homeserver == "" || accessToken == "" || roomID == "" {
 		return fmt.Errorf("matrix transport is not configured")
 	}
@@ -405,8 +405,8 @@ func (a *Activities) sendMatrix(ctx context.Context, roomID, text string) error 
 }
 
 // sendTelegram posts a text message through the Bot API.
-func (a *Activities) sendTelegram(ctx context.Context, chatID, text string) error {
-	botToken := strings.TrimSpace(os.Getenv("KERNEL_TELEGRAM_BOT_TOKEN"))
+func (a *Activities) sendTelegram(ctx context.Context, chatID, text string, settings TransportSettings) error {
+	botToken := strings.TrimSpace(settings.TelegramBotToken)
 	if botToken == "" || chatID == "" {
 		return fmt.Errorf("telegram transport is not configured")
 	}

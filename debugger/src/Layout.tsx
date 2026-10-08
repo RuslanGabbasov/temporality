@@ -57,6 +57,7 @@ const CONFIG_ITEMS = [
   { path: '/providers', label: 'nav.providers' },
   { path: '/users', label: 'nav.users' },
   { path: '/org', label: 'nav.org', adminOnly: true },
+  { path: '/channels', label: 'nav.channels', adminOnly: true },
 ]
 
 interface Project {
