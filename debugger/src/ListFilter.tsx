@@ -12,15 +12,20 @@ export default function ListFilter({ value, onChange, placeholder }: {
   placeholder?: string
 }) {
   const t = useT()
+  // NB: Carbon Search forwards the `style` prop down to the <input>, so a
+  // margin on it becomes the input's own margin; with `align-items: center`
+  // that grows the flex container and drops the magnifier icon below the
+  // input's optical center. Spacing therefore lives on this wrapper.
   return (
-    <Search
-      size="sm"
-      labelText=""
-      placeholder={placeholder ?? t('common.filter') ?? 'Filter'}
-      value={value}
-      onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
-      style={{ marginBottom: '0.5rem' }}
-    />
+    <div style={{ marginBottom: '0.5rem' }}>
+      <Search
+        size="sm"
+        labelText=""
+        placeholder={placeholder ?? t('common.filter') ?? 'Filter'}
+        value={value}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+      />
+    </div>
   )
 }
 
