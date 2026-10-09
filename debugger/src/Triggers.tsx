@@ -19,6 +19,7 @@ import { Add, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Trigger, type Agent, type ExecutionIdentity } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
+import AppModal from './Modal'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -193,8 +194,7 @@ export default function Triggers({ project }: { project: string }) {
 
       {/* Create/Edit modal */}
       {showForm && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '600px' }}>
+        <AppModal onClose={() => { setShowForm(false); setEditing(null) }} panelStyle={{ width: '600px' }}>
             <Heading>{editing ? (t('triggers.edit_trigger') ?? 'Edit Trigger') : (t('triggers.new_trigger') ?? 'New Trigger')}</Heading>
             <Select id="trigger-type" labelText={t('triggers.type') ?? 'Type'} value={form.type ?? 'schedule'} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
               const type = e.target.value as 'schedule' | 'webhook' | 'event'
@@ -268,8 +268,7 @@ export default function Triggers({ project }: { project: string }) {
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
     </div>
   )

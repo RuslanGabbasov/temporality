@@ -15,6 +15,7 @@ import { Add, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Provider } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
+import AppModal from './Modal'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -126,8 +127,7 @@ export default function Providers() {
       </Grid>
 
       {showForm && (
-        <div className="modal-overlay">
-          <div className="modal-panel">
+        <AppModal onClose={() => { setShowForm(false); setEditing(null) }}>
             <Heading>{editing ? (t('providers.edit_provider') ?? 'Edit Provider') : (t('providers.new_provider') ?? 'New Provider')}</Heading>
             <Stack gap={3}>
               <TextInput id="prov-name" labelText={t('providers.name_label') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="z.ai" autoFocus />
@@ -153,8 +153,7 @@ export default function Providers() {
                 <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
               </div>
             </Stack>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {loading && <Loading withOverlay={false} />}

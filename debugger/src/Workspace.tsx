@@ -8,7 +8,6 @@ import {
   InlineNotification,
   Tag,
   Heading,
-  Modal,
 } from '@carbon/react'
 import { Add, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent } from './workspaceApi'
@@ -16,6 +15,7 @@ import Markdown from './Markdown'
 import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
 import ListFilter, { matchesFilter } from './ListFilter'
+import AppModal from './Modal'
 import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -801,8 +801,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
       {/* New chat modal */}
       {showNewChat && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '420px' }}>
+        <AppModal onClose={() => setShowNewChat(false)} panelStyle={{ width: '420px' }}>
             <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{t('new.conversation') ?? 'New conversation'}</Heading>
             <Select
               id="new-chat-agent"
@@ -822,8 +821,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
               <Button kind="secondary" onClick={() => setShowNewChat(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button onClick={createConversation}>{t('action.create') ?? 'Create'}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
     </div>
   )

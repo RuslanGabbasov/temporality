@@ -20,6 +20,7 @@ import {
 import { Add, Edit, TrashCan, Copy, Star, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
 import ListFilter, { matchesFilter } from './ListFilter'
+import AppModal from './Modal'
 import {
   workspaceApi,
   type Agent,
@@ -739,8 +740,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
 
       {/* Wizard: describe the specialist in natural language */}
       {wizardOpen && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '560px' }}>
+        <AppModal onClose={() => setWizardOpen(false)} panelStyle={{ width: '560px' }}>
             <Heading>{t('agents.wizard_title') ?? 'Create agent'}</Heading>
             {wizardBusy ? (
               <GeneratingState
@@ -771,14 +771,12 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                 </div>
               </>
             )}
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {/* Edit/Create modal */}
       {showForm && (
-        <div className="modal-overlay">
-          <div className="modal-panel tabbed" style={{ width: '760px', maxWidth: 'calc(100vw - 2rem)', maxHeight: '85vh', minHeight: '480px' }}>
+        <AppModal onClose={() => { setShowForm(false); setEditing(null); setPromptPreview(null) }} panelClassName="tabbed" panelStyle={{ width: '760px', maxWidth: 'calc(100vw - 2rem)', maxHeight: '85vh', minHeight: '480px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
               <Heading>{editing ? (t('agents.edit_agent') ?? 'Edit Agent') : (t('agents.new_agent') ?? 'New Agent')}</Heading>
               {editing?.definition_version ? <Tag type="purple" size="sm">{t('agents.def_version', { count: String(editing.definition_version) }) ?? `Definition v${editing.definition_version}`}</Tag> : null}
@@ -1080,14 +1078,12 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             </div>
             </>
             )}
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {/* Rebuild diff (§13): user edits are never silently replaced */}
       {regenDraft && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '640px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+        <AppModal onClose={() => setRegenDraft(null)} panelStyle={{ width: '640px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
             <Heading>{t('agents.regen_title') ?? 'Apply rebuilt definition?'}</Heading>
             <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
               {t('agents.regen_hint') ?? 'The agent rebuilt the definition from the current purpose. Review the changes — fields you edited manually are marked.'}
@@ -1117,16 +1113,14 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
               <Button kind="secondary" onClick={() => setRegenDraft(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button onClick={acceptRegen}>{t('agents.accept') ?? 'Accept'}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {loading && <Loading withOverlay={false} />}
 
       {/* Template selection modal: curated builtin definitions from the server */}
       {showTemplates && (
-        <div className="modal-overlay">
-          <div className="modal-panel">
+        <AppModal onClose={() => setShowTemplates(false)}>
             <Heading>{t('agents.choose_template') ?? 'Choose a template'}</Heading>
             <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', marginBottom: '1rem' }}>{t('agents.template_hint') ?? 'Start with a curated agent and customize as needed.'}</p>
             <Stack gap={2}>
@@ -1166,8 +1160,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             <div className="form-actions">
               <Button kind="secondary" onClick={() => setShowTemplates(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
     </div>
   )

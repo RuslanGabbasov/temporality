@@ -14,6 +14,7 @@ import { workspaceApi, type OrgUnit, type UnitResources, type OrgUnitKind, type 
 import { useT } from './i18n'
 import { whoami } from './kernelApi'
 import ListFilter, { matchesFilter } from './ListFilter'
+import AppModal from './Modal'
 import { flattenUnits } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -832,8 +833,7 @@ export default function Org() {
 
       {/* Create / rename dialog */}
       {(editing || creatingParent !== null) && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '420px' }}>
+        <AppModal onClose={() => { setEditing(null); setCreatingParent(null) }} panelStyle={{ width: '420px' }}>
             <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>
               {editing
                 ? (t('org.rename') ?? 'Rename unit')
@@ -867,14 +867,12 @@ export default function Org() {
                 <Button onClick={() => void saveUnit()} disabled={!formName.trim()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
               </div>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {/* Move dialog */}
       {moving && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '460px' }}>
+        <AppModal onClose={() => setMoving(null)} panelStyle={{ width: '460px' }}>
             <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{t('org.move') ?? 'Move unit'}</Heading>
             <p style={{ color: 'var(--tm-text-2)', fontSize: '0.875rem', margin: '0 0 0.75rem' }}>
               {t('org.move_confirm', { name: moving.name }) ?? `Moving "${moving.name}" changes visibility for the whole subtree. Users of the moved branch will see resources of the new parent chain.`}
@@ -894,14 +892,12 @@ export default function Org() {
               <Button kind="secondary" onClick={() => setMoving(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button onClick={() => void applyMove()}>{t('action.confirm') ?? 'Move'}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {/* Delete confirm */}
       {confirmDelete && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '460px' }}>
+        <AppModal onClose={() => setConfirmDelete(null)} panelStyle={{ width: '460px' }}>
             <Heading>{t('org.delete_confirm', { name: confirmDelete.name }) ?? `Delete "${confirmDelete.name}"?`}</Heading>
             <p style={{ color: 'var(--tm-text-3)', margin: '0.75rem 0' }}>
               {t('org.delete_warning') ?? 'Only an empty unit can be deleted: move its children, unbind resources and reassign users first.'}
@@ -910,14 +906,12 @@ export default function Org() {
               <Button kind="secondary" onClick={() => setConfirmDelete(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button kind="danger" onClick={() => void doDelete()}>{t('action.delete') ?? 'Delete'}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {/* Policy create / edit dialog */}
       {(editingPolicy || policyDialogOpen) && isAdmin && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '520px' }}>
+        <AppModal onClose={() => { setEditingPolicy(null); setPolicyDialogOpen(false); setPolicyForm(emptyPolicyForm()) }} panelStyle={{ width: '520px' }}>
             <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>
               {editingPolicy ? (t('org.policy_edit') ?? 'Edit policy') : (t('org.policy_create') ?? 'Create policy')}
             </Heading>
@@ -1020,27 +1014,23 @@ export default function Org() {
                 <Button onClick={() => void savePolicy()} disabled={!policyForm.name.trim()}>{editingPolicy ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
               </div>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {/* Policy delete confirm */}
       {deletingPolicy && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '460px' }}>
+        <AppModal onClose={() => setDeletingPolicy(null)} panelStyle={{ width: '460px' }}>
             <Heading>{t('org.policy_delete_confirm', { name: deletingPolicy.name }) ?? `Delete policy "${deletingPolicy.name}"?`}</Heading>
             <div className="form-actions" style={{ marginTop: '0.75rem' }}>
               <Button kind="secondary" onClick={() => setDeletingPolicy(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button kind="danger" onClick={() => void doDeletePolicy()}>{t('action.delete') ?? 'Delete'}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {/* Role revoke confirm */}
       {revoking && selectedUnit && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '460px' }}>
+        <AppModal onClose={() => setRevoking(null)} panelStyle={{ width: '460px' }}>
             <Heading>{t('org.roles_delete_confirm', { role: revoking.role, name: userName(revoking.user_id) }) ?? `Revoke "${revoking.role}" from ${userName(revoking.user_id)}?`}</Heading>
             <p style={{ color: 'var(--tm-text-3)', margin: '0.75rem 0' }}>
               {t('org.roles_delete_warning') ?? 'The user keeps their installation role and any grants on ancestor units.'}
@@ -1049,14 +1039,12 @@ export default function Org() {
               <Button kind="secondary" onClick={() => setRevoking(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button kind="danger" onClick={() => void doRevokeRole()}>{t('org.roles_revoke') ?? 'Revoke'}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {/* Identity create / edit dialog */}
       {(editingIdentity || identityDialogOpen) && isAdmin && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '560px' }}>
+        <AppModal onClose={() => { setEditingIdentity(null); setIdentityDialogOpen(false); setIdentityForm(emptyIdentityForm()) }} panelStyle={{ width: '560px' }}>
             <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>
               {editingIdentity ? (t('org.identity_edit') ?? 'Edit identity') : (t('org.identity_create') ?? 'Create identity')}
             </Heading>
@@ -1128,14 +1116,12 @@ export default function Org() {
                 <Button onClick={() => void saveIdentity()} disabled={!identityForm.name.trim()}>{editingIdentity ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
               </div>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {/* Identity delete confirm */}
       {deletingIdentity && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '460px' }}>
+        <AppModal onClose={() => setDeletingIdentity(null)} panelStyle={{ width: '460px' }}>
             <Heading>{t('org.identity_delete_confirm', { name: deletingIdentity.name }) ?? `Delete identity "${deletingIdentity.name}"?`}</Heading>
             <p style={{ color: 'var(--tm-text-3)', margin: '0.75rem 0' }}>
               {t('org.identity_delete_warning') ?? 'If a trigger uses this identity, deletion is refused — detach it there first.'}
@@ -1144,8 +1130,7 @@ export default function Org() {
               <Button kind="secondary" onClick={() => setDeletingIdentity(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button kind="danger" onClick={() => void doDeleteIdentity()}>{t('action.delete') ?? 'Delete'}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {loading && <Loading withOverlay={false} />}

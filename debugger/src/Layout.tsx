@@ -10,7 +10,6 @@ import {
   TextInput,
   Select,
   SelectItem,
-  Modal,
   Heading,
   InlineNotification,
 } from '@carbon/react'
@@ -22,6 +21,7 @@ import { useI18n, useT, type Locale } from './i18n'
 import { useTheme } from './theme'
 import { whoami, login as apiLogin, type Whoami } from './kernelApi'
 import ChannelsDialog from './ChannelsDialog'
+import AppModal from './Modal'
 import { workspaceApi, type OrgUnit } from './workspaceApi'
 import { flattenUnits } from './orgUnits'
 
@@ -643,8 +643,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
 
       {/* Login modal */}
       {showLogin && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '420px' }}>
+        <AppModal onClose={() => setShowLogin(false)} panelStyle={{ width: '420px' }}>
             <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{t('action.login') ?? 'Sign in'}</Heading>
             <p style={{ marginBottom: '1rem', color: 'var(--tm-text-2)' }}>
               {t('login.description') ?? 'Sign in to the Temporality workspace.'}
@@ -666,14 +665,12 @@ export default function Layout({ children, activePage }: LayoutProps) {
             <div className="form-actions" style={{ marginTop: '0.75rem' }}>
               <Button kind="secondary" onClick={() => setShowLogin(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {/* Project edit/create modal */}
       {(!!editProject || showNewProject) && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '460px' }}>
+        <AppModal onClose={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectDesc(''); setProjectMembers([]); setMemberDraft([]); setNewMemberUser('') }} panelStyle={{ width: '460px' }}>
             <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{editProject ? (t('action.edit') ?? 'Edit') + ' ' + (t('nav.projects') ?? 'project') : (t('new.project') ?? 'New project')}</Heading>
             {!editProject && (
               <TextInput
@@ -815,13 +812,11 @@ export default function Layout({ children, activePage }: LayoutProps) {
               <Button kind="secondary" onClick={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectDesc(''); setProjectMembers([]); setMemberDraft([]); setNewMemberUser('') }}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button onClick={() => void saveProject()}>{editProject ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {confirmDelete && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '460px' }}>
+        <AppModal onClose={() => setConfirmDelete(null)} panelStyle={{ width: '460px' }}>
             <Heading>{t('projects.delete_confirm')}</Heading>
             <p style={{ color: 'var(--tm-text-3)', margin: '0.75rem 0' }}>
               {t('projects.delete_warning', { name: projects.find((p) => p.id === confirmDelete)?.name ?? confirmDelete })}
@@ -830,8 +825,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
               <Button kind="secondary" onClick={() => setConfirmDelete(null)}>{t('action.cancel')}</Button>
               <Button kind="danger" onClick={() => { const id = confirmDelete; setConfirmDelete(null); void deleteProject(id) }}>{t('action.delete')}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {!loggedIn ? (

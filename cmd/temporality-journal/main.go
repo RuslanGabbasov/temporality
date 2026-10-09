@@ -64,6 +64,31 @@ func main() {
 		log.Warn("open workspace store; org-unit knowledge visibility disabled", "error", err)
 	} else {
 		defer ws.Close()
+		// Workspace user tokens must authorize on the journal exactly like on
+		// the kernel (password login returns the user's bearer token, and the
+		// debugger sends it to both /kernel-api and /api). The kernel owns
+		// user mutations but cannot notify the journal, so the principals are
+		// reloaded on a short interval — created, rotated and revoked tokens
+		// apply here within the interval.
+		refreshUserTokens := func() {
+			reloadCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			principals, err := ws.LoadTokenPrincipals(reloadCtx, log)
+			if err != nil {
+				log.Error("load workspace user tokens", "error", err)
+				return
+			}
+			gate.SetDBTokens(principals)
+			log.Info("loaded workspace user tokens", "count", len(principals))
+		}
+		refreshUserTokens()
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				refreshUserTokens()
+			}
+		}()
 		opts = append(opts,
 			httpapi.WithProjectUnits(func(ctx context.Context, project string) ([]string, error) {
 				links, err := ws.ProjectOrgUnits(ctx, project)

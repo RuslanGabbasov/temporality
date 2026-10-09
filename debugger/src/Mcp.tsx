@@ -20,6 +20,7 @@ import { Add, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type MCPServer, type MCPToolInfo } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
+import AppModal from './Modal'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -214,8 +215,7 @@ export default function Mcp() {
       </Grid>
 
       {showForm && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '640px' }}>
+        <AppModal onClose={() => { setShowForm(false); setEditing(null) }} panelStyle={{ width: '640px' }}>
             <Heading>{editing ? (t('mcp.edit_server') ?? 'Edit MCP Server') : (t('mcp.new_server') ?? 'New MCP Server')}</Heading>
             <Stack gap={3}>
               <TextInput id="mcp-name" labelText={t('mcp.name_label') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="github" autoFocus />
@@ -325,8 +325,7 @@ export default function Mcp() {
                 <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
               </div>
             </Stack>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {loading && <Loading withOverlay={false} />}

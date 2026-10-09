@@ -12,6 +12,7 @@ import {
 import { Add, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type ChannelTypeSpec, type UserChannel } from './workspaceApi'
 import { useT } from './i18n'
+import AppModal from './Modal'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -125,8 +126,7 @@ export default function ChannelsDialog({ userId, userName, onClose }: { userId: 
   }
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal-panel" style={{ width: '480px' }}>
+    <AppModal onClose={onClose} panelStyle={{ width: '480px' }}>
         <Heading style={{ fontSize: '1.1rem', marginBottom: '0.25rem' }}>{(t('channels.title') ?? 'Notification channels') + (userName ? ` — ${userName}` : '')}</Heading>
         <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-3)', margin: '0 0 0.9rem' }}>
           {t('channels.description') ?? 'Where agents should reach you when they ask a question. The in-app inbox always works.'}
@@ -224,8 +224,7 @@ export default function ChannelsDialog({ userId, userName, onClose }: { userId: 
           <Button kind="secondary" onClick={onClose}>{t('action.cancel') ?? 'Cancel'}</Button>
           <Button onClick={save} disabled={loading || saving}>{saving ? (t('common.saving') ?? 'Saving…') : (t('action.save') ?? 'Save')}</Button>
         </div>
-      </div>
-    </div>
+    </AppModal>
   )
 }
 

@@ -17,6 +17,7 @@ import { Add, Edit, TrashCan, Key, Chat } from '@carbon/icons-react'
 import { workspaceApi, type User } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
+import AppModal from './Modal'
 import ChannelsDialog, { ChannelBadges } from './ChannelsDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
@@ -169,8 +170,7 @@ export default function Users() {
       </Grid>
 
       {showForm && (
-        <div className="modal-overlay">
-          <div className="modal-panel">
+        <AppModal onClose={() => { setShowForm(false); setEditing(null) }}>
             <Heading>{editing ? (t('users.edit_user') ?? 'Edit User') : (t('new.user') ?? 'New User')}</Heading>
             <Stack gap={3}>
               <TextInput id="user-name" labelText={t('users.name_label') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="John Doe" autoFocus />
@@ -206,13 +206,11 @@ export default function Users() {
                 <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
               </div>
             </Stack>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {generatedToken && tokenUser && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '600px' }}>
+        <AppModal onClose={() => { setGeneratedToken(null); setTokenUser(null) }} panelStyle={{ width: '600px' }}>
             <Heading>{t('users.token_for', { name: tokenUser.name }) ?? `Token for ${tokenUser.name}`}</Heading>
             <p style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>{t('users.token_hint') ?? 'Token stored in database. User can log in immediately after kernel restart.'}</p>
             <div style={{ background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all', marginBottom: '1rem' }}>
@@ -222,13 +220,11 @@ export default function Users() {
               <Button kind="secondary" onClick={() => { setGeneratedToken(null); setTokenUser(null) }}>{t('action.close') ?? 'Close'}</Button>
               <Button onClick={() => { copyToClipboard(generatedToken); setGeneratedToken(null); setTokenUser(null) }}>{t('users.copy_close') ?? 'Copy & Close'}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {confirmRegen && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '460px' }}>
+        <AppModal onClose={() => setConfirmRegen(null)} panelStyle={{ width: '460px' }}>
             <Heading>{t('users.regenerate_confirm') ?? 'Regenerate token?'}</Heading>
             <p style={{ color: 'var(--tm-text-3)', margin: '0.75rem 0' }}>
               {t('users.regenerate_warning', { name: confirmRegen.name }) ?? `${confirmRegen.name} already has an active token. Generating a new one will invalidate the current token immediately — the user will be logged out.`}
@@ -237,8 +233,7 @@ export default function Users() {
               <Button kind="secondary" onClick={() => setConfirmRegen(null)}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button kind="danger" onClick={() => { const u = confirmRegen; setConfirmRegen(null); doGenerateToken(u) }}>{t('action.regenerate') ?? 'Regenerate'}</Button>
             </div>
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {channelsUser && (

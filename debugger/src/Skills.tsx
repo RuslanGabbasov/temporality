@@ -15,6 +15,7 @@ import GeneratingState from './GeneratingState'
 import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion, type SkillEvaluationCase, type SkillEvaluationRun } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
+import AppModal from './Modal'
 import { useOrgUnits, OrgUnitSelect, OrgBadge, type OrgUnitsState } from './orgUnits'
 import Markdown from './Markdown'
 import SkillManifestEditor, { manifestToYaml, type SkillManifest, type ManifestSuggestions, type SectionProvenance } from './SkillManifestEditor'
@@ -783,8 +784,7 @@ export default function Skills() {
 
       {/* Wizard: describe the skill in natural language */}
       {wizardOpen && (
-        <div className="modal-overlay">
-          <div className="modal-panel" style={{ width: '560px' }}>
+        <AppModal onClose={() => setWizardOpen(false)} panelStyle={{ width: '560px' }}>
             <Heading>{t('skills.wizard_title') ?? 'Create skill'}</Heading>
             {wizardBusy ? (
               <GeneratingState
@@ -834,14 +834,12 @@ export default function Skills() {
             </div>
               </>
             )}
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {/* Create/Edit form (prefilled by the agent after the wizard) */}
       {showForm && (
-        <div className="modal-overlay">
-          <div className="modal-panel tabbed" style={{ width: '760px', maxHeight: '85vh', minHeight: '480px' }}>
+        <AppModal onClose={() => { setShowForm(false); setEditing(null) }} panelClassName="tabbed" panelStyle={{ width: '760px', maxHeight: '85vh', minHeight: '480px' }}>
             <SkillFormFields
               form={form}
               setForm={setForm}
@@ -860,8 +858,7 @@ export default function Skills() {
               onSendAnswers={() => { setShowForm(false); setWizardOpen(true); void generate(answers) }}
               saving={loading}
             />
-          </div>
-        </div>
+        </AppModal>
       )}
 
       {loading && <Loading withOverlay={false} />}
