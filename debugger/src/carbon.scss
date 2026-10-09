@@ -2550,17 +2550,24 @@ button.header-nav-link {
 .experience-svg { display: block; cursor: grab; user-select: none; }
 .experience-svg:active { cursor: grabbing; }
 
-// Detail panel
+// Detail panel: fixed overlay over its reserved 340px grid column — sticky
+// kept growing the grid row (and the page scrollbar) when its content was
+// taller than the canvas, producing a second scroll. Fixed takes it out of
+// flow so the page scrolls for the canvas only; the panel scrolls inside.
 .experience-detail {
-  position: sticky;
-  top: 48px;
-  align-self: start;
-  border-left: 1px solid var(--tm-border);
-  max-height: calc(100vh - 68px);
+  position: fixed;
+  top: 64px;
+  right: var(--tm-space-6);
+  bottom: var(--tm-space-6);
+  width: 340px;
+  z-index: 5;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  border-radius: var(--tm-radius-md);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
 }
 
 .experience-hint {
@@ -2603,7 +2610,7 @@ button.header-nav-link {
 
 @media (max-width: 1080px) {
   .experience-grid { grid-template-columns: 1fr; }
-  .experience-detail { border-left: 0; border-top: 1px solid var(--tm-border); max-height: 50vh; }
+  .experience-detail { position: static; width: auto; max-height: 50vh; border-left: 0; border-radius: 0; box-shadow: none; border-top: 1px solid var(--tm-border); }
 }
 
 // ═══════════════════════════════════════════════════════════════
