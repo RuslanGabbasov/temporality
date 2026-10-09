@@ -1,6 +1,9 @@
 services:
   postgres:
     image: pgvector/pgvector:pg17
+    # The whole stack crash-loops without the database: it must survive host
+    # and daemon restarts like the services depending on it.
+    restart: unless-stopped
     environment:
       POSTGRES_DB: temporality
       POSTGRES_USER: temporality
@@ -56,6 +59,7 @@ services:
     image: temporalio/temporal:latest
     container_name: temporality-dev
     command: ["server", "start-dev", "--ip", "0.0.0.0"]
+    restart: unless-stopped
     ports:
       - "7233:7233"
       - "8233:8233"
