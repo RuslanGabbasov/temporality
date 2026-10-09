@@ -1987,7 +1987,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'timeline.derived': 'расчётное',
 
     // Timeline - Detail panel
-    'timeline.forensics': 'Криминалистика',
+    'timeline.forensics': 'Ретроспективный аудит',
     'timeline.lifecycle_heading': 'Жизненный цикл',
     'timeline.episodes': 'Эпизоды',
     'timeline.lineage': 'Родословная',
