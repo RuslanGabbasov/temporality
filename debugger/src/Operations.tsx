@@ -195,12 +195,29 @@ export default function Operations({ project }: { project: string }) {
                 </Tile>
               )}
               {selectedSet.size > 0 && operator && (
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', padding: '0.5rem', marginBottom: '0.5rem', background: 'var(--tm-elevated)', borderRadius: '6px', border: '1px solid var(--tm-border)' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--tm-text-3)' }}>{selectedSet.size} {t('operations.selected') ?? 'selected'}</span>
-                  <Button size="sm" kind="ghost" onClick={() => void batchReconcile('occurred')} disabled={busy}>{t('operations.batch_occurred') ?? 'All occurred'}</Button>
-                  <Button size="sm" kind="ghost" onClick={() => void batchReconcile('none')} disabled={busy}>{t('operations.batch_none') ?? 'All none'}</Button>
-                  <Button size="sm" kind="ghost" onClick={() => void batchReconcile('unknown')} disabled={busy}>{t('operations.batch_unknown') ?? 'All unknown'}</Button>
-                  <Button size="sm" kind="ghost" onClick={() => setSelectedSet(new Set())}>{t('operations.batch_clear') ?? 'Clear'}</Button>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', alignItems: 'center', padding: '0.375rem 0.5rem', marginBottom: '0.5rem', background: 'var(--tm-elevated)', borderRadius: '6px', border: '1px solid var(--tm-border)' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginRight: 'auto' }}>{selectedSet.size} {t('operations.selected') ?? 'selected'}</span>
+                  {([
+                    { effect: 'occurred', mark: '✓', label: t('operations.happened') ?? 'Happened', color: '#9ece6a', title: t('operations.batch_occurred') ?? 'All occurred' },
+                    { effect: 'none', mark: '✗', label: t('operations.did_not_happen') ?? 'Did NOT happen', color: '#f7768e', title: t('operations.batch_none') ?? 'All none' },
+                    { effect: 'unknown', mark: '?', label: t('operations.unknown_verdict') ?? 'Unknown', color: '#e0af68', title: t('operations.batch_unknown') ?? 'All unknown' },
+                  ] as const).map(({ effect: batchEffect, mark, label, color, title }) => (
+                    <button
+                      key={batchEffect}
+                      onClick={() => void batchReconcile(batchEffect)}
+                      disabled={busy}
+                      title={title}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid var(--tm-border)', background: 'transparent', color, cursor: 'pointer', fontSize: '0.75rem', lineHeight: 1.4 }}
+                    >
+                      <span style={{ fontWeight: 700 }}>{mark}</span>{label}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setSelectedSet(new Set())}
+                    disabled={busy}
+                    title={t('operations.batch_clear') ?? 'Clear'}
+                    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '1.5rem', height: '1.5rem', padding: 0, borderRadius: '4px', border: '1px solid var(--tm-border)', background: 'transparent', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.75rem', lineHeight: 1 }}
+                  >✕</button>
                 </div>
               )}
               {visibleOps.map((op) => {
