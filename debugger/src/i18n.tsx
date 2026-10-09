@@ -954,7 +954,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'timeline.kind.archived': 'archived',
 
     // Timeline - Misc
-    'timeline.hint': 'pinch / wheel — zoom · drag or two-finger swipe — pan · row click — details · bars are lifespans, points are events, ✕ marks death · ⚠ marks a cross-agent dispute · ↗ opens the run in Runs',
+    'timeline.hint': 'bars are lifespans · ○ are events · ✕ marks death · ⚠ marks a cross-agent dispute · ↗ opens the run in Runs',
     'timeline.close_details': 'close the detail panel',
 
     // Onboarding
@@ -2051,7 +2051,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'timeline.kind.archived': 'в архиве',
 
     // Timeline - Misc
-    'timeline.hint': 'pinch / колёсико — масштаб · перетаскивание или двумя пальцами — прокрутка · клик по строке — детали · полосы — сроки жизни, точки — события, ✕ — завершение · ⚠ — спор между агентами · ↗ — открыть прогон в Runs',
+    'timeline.hint': 'полосы — сроки жизни · ○ — события · ✕ — завершение · ⚠ — спор между агентами · ↗ — открыть прогон в панели Запуски',
     'timeline.close_details': 'закрыть панель деталей',
 
     // Onboarding
