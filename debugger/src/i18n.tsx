@@ -808,6 +808,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'timeline.conflicts': 'conflicts',
     'timeline.activation': 'activation',
     'timeline.preset.all': 'all',
+    'timeline.preset.active': 'active',
     'timeline.preset.activation': 'activation only',
     'timeline.preset.conflicts': 'conflicts only',
 
@@ -863,9 +864,12 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Timeline - Controls
     'timeline.fit': 'fit',
-    'timeline.zoom_in': 'zoom +',
-    'timeline.zoom_out': 'zoom −',
     'timeline.reset': 'reset',
+    'timeline.tune': 'tune',
+    'timeline.tune.layers': 'layers',
+    'timeline.tune.kinds': 'event types',
+    'timeline.tune.memory': 'memory',
+    'timeline.tune.dimensions': 'role & scope',
 
     // Timeline - Status line
     'timeline.team_runs': 'team runs',
@@ -1898,6 +1902,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'timeline.conflicts': 'конфликты',
     'timeline.activation': 'активация',
     'timeline.preset.all': 'все',
+    'timeline.preset.active': 'активные',
     'timeline.preset.activation': 'только активация',
     'timeline.preset.conflicts': 'только конфликты',
 
@@ -1953,9 +1958,12 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Timeline - Controls
     'timeline.fit': 'вписать',
-    'timeline.zoom_in': 'приблизить',
-    'timeline.zoom_out': 'отдалить',
     'timeline.reset': 'сбросить',
+    'timeline.tune': 'настройка',
+    'timeline.tune.layers': 'слои',
+    'timeline.tune.kinds': 'типы событий',
+    'timeline.tune.memory': 'память',
+    'timeline.tune.dimensions': 'роль и область',
 
     // Timeline - Status line
     'timeline.team_runs': 'командные запуски',

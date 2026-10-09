@@ -218,6 +218,13 @@ $css--font-face: false;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
 }
 
+:root[data-theme="light"] .tune-panel {
+  background: var(--tm-elevated) !important;
+  color: var(--tm-text) !important;
+  border-color: var(--tm-border) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
 :root[data-theme="light"] .obs-panel {
   background: var(--tm-surface) !important;
 }
@@ -2328,7 +2335,21 @@ button.header-nav-link {
 .experience-controls { display: flex; gap: 0.5rem; padding: 0.55rem 0; }
 .experience-meta { display: flex; justify-content: space-between; gap: 1rem; padding: 0.55rem 0; color: var(--tm-text-2); font: 0.68rem var(--tm-mono); border-bottom: 1px solid var(--tm-border); }
 .experience-note { color: var(--tm-amber); }
-.experience-lens { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.6rem 0; border-bottom: 1px solid var(--tm-border); }
+
+// Compact toolbar: presets + frequently used controls in one row; everything
+// else lives in the tune dropdown.
+.experience-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.6rem 0; border-bottom: 1px solid var(--tm-border); }
+
+.toolbar-search { padding: 0.28rem 0.5rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: var(--tm-surface); color: var(--tm-text); font-size: 0.72rem; width: 190px; }
+.toolbar-search:focus { outline: none; border-color: var(--tm-teal); }
+
+.toolbar-select { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--tm-text-2); font-size: 0.66rem; }
+.toolbar-select select { padding: 0.26rem 0.35rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: var(--tm-surface); color: var(--tm-text); font-size: 0.72rem; }
+
+.toolbar-btn { padding: 0.25rem 0.55rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: transparent; color: var(--tm-text-3); font: 0.68rem var(--tm-mono); cursor: pointer; }
+.toolbar-btn:hover { color: var(--tm-teal); border-color: var(--tm-teal); }
+
+.toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; }
 
 .lens-toggle {
   display: inline-flex;
@@ -2353,29 +2374,6 @@ button.header-nav-link {
 
 .lens-toggle input { display: none; }
 .lens-sep { width: 1px; height: 18px; background: var(--tm-border); margin: 0 0.25rem; }
-
-.experience-lens button {
-  padding: 0.25rem 0.55rem;
-  border: 1px solid var(--tm-border);
-  border-radius: var(--tm-radius-sm);
-  background: transparent;
-  color: var(--tm-text-3);
-  font: 0.68rem var(--tm-mono);
-  cursor: pointer;
-}
-
-.experience-lens button:hover { color: var(--tm-teal); border-color: var(--tm-teal); }
-
-.experience-filters {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.55rem 0;
-  border-bottom: 1px solid var(--tm-border);
-}
-
-.experience-filters label { display: grid; gap: 0.3rem; color: var(--tm-text-2); font-size: 0.66rem; }
-.experience-filters select, .experience-filters input { padding: 0.3rem 0.4rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: var(--tm-surface); color: var(--tm-text); font-size: 0.72rem; }
 
 .experience-svg { display: block; }
 .eyebrow { color: var(--tm-text-3); font-size: 0.62rem; letter-spacing: 0.15em; font-weight: 600; font-family: var(--tm-mono); }
@@ -2482,17 +2480,19 @@ button.header-nav-link {
 }
 
 .preset-chip:hover { color: var(--tm-teal); border-color: var(--tm-teal); }
+.preset-chip.on { color: var(--tm-teal); border-color: var(--tm-teal); background: rgba(42, 107, 99, 0.12); }
 
 // Strength slider
-.experience-filters input[type="range"] {
+.tune-panel input[type="range"] {
   -webkit-appearance: none;
+  width: 100%;
   height: 4px;
   border-radius: 2px;
   background: var(--tm-border-strong);
   outline: none;
 }
 
-.experience-filters input[type="range"]::-webkit-slider-thumb {
+.tune-panel input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 12px;
   height: 12px;
@@ -2501,8 +2501,25 @@ button.header-nav-link {
   cursor: pointer;
 }
 
+// Fine-tune dropdown (same pattern as run-picker)
+.tune-picker { position: relative; }
+.tune-toggle { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.55rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: transparent; color: var(--tm-text-3); font: 0.68rem var(--tm-mono); cursor: pointer; }
+.tune-toggle:hover, .tune-toggle.filtered, .tune-toggle.open { color: var(--tm-teal); border-color: var(--tm-teal); }
+.tune-badge { min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; background: var(--tm-teal); color: #0f1419; font-size: 0.58rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+
+.tune-panel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 31; width: min(600px, calc(100vw - 2.5rem)); max-height: min(70vh, 620px); overflow-y: auto; padding: 0.4rem 0.85rem 0.75rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-lg); background: var(--tm-surface); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25); }
+.tune-panel section { padding: 0.55rem 0 0.6rem; }
+.tune-panel section + section { border-top: 1px solid var(--tm-border); }
+.tune-panel h5 { margin: 0 0 0.45rem; color: var(--tm-text-3); font: 600 0.6rem var(--tm-mono); letter-spacing: 0.12em; text-transform: uppercase; }
+.tune-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+.tune-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem 1rem; margin-top: 0.5rem; align-items: start; }
+.tune-grid label:not(.lens-toggle) { display: grid; gap: 0.25rem; color: var(--tm-text-2); font-size: 0.64rem; }
+.tune-grid .lens-toggle { justify-self: start; align-self: center; }
+.tune-panel select { padding: 0.26rem 0.4rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: var(--tm-surface); color: var(--tm-text); font-size: 0.72rem; }
+.tune-reset, .tune-reset:hover { color: var(--tm-danger); border-color: var(--tm-danger); }
+
 // Run picker
-.run-picker { position: relative; margin-left: auto; }
+.run-picker { position: relative; }
 .run-picker-toggle { padding: 0.3rem 0.6rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: transparent; color: var(--tm-text-3); font: 0.68rem var(--tm-mono); cursor: pointer; }
 .run-picker-toggle:hover, .run-picker-toggle.filtered { color: var(--tm-teal); border-color: var(--tm-teal); }
 .run-picker-backdrop { position: fixed; inset: 0; z-index: 30; }

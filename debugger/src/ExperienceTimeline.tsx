@@ -108,12 +108,6 @@ const DEFAULT_LENS: Lens = { trajectory: true, experience: true, lifecycle: true
 // only the conflicts, on top of the same folded event space.
 const ACTIVATION_KINDS: LifecycleKind[] = ['recalled', 'injected', 'reused']
 const CONFLICT_KINDS: LifecycleKind[] = ['contradicted', 'weakened', 'archived']
-const PRESETS = {
-  all: { lens: DEFAULT_LENS, kinds: LIFECYCLE_KINDS },
-  activation: { lens: { trajectory: true, experience: true, lifecycle: true, conflicts: false, activation: true }, kinds: ACTIVATION_KINDS },
-  conflicts: { lens: { trajectory: false, experience: true, lifecycle: true, conflicts: true, activation: false }, kinds: CONFLICT_KINDS },
-} as const
-type PresetName = keyof typeof PRESETS
 
 type MemoryLensPreset = { label: string; bucket: 'all' | MemoryBucket; terminal: TerminalFilter; recency: RecencyFilter; activated: boolean; xscope: boolean; strength: number }
 const MEMORY_LENS_PRESETS: MemoryLensPreset[] = [
@@ -124,6 +118,16 @@ const MEMORY_LENS_PRESETS: MemoryLensPreset[] = [
   { label: 'timeline.strong_recent', bucket: 'active', terminal: 'alive', recency: '7d', activated: false, xscope: false, strength: 0.5 },
   { label: 'timeline.dead', bucket: 'all', terminal: 'dead', recency: 'all', activated: false, xscope: false, strength: 0 },
 ]
+
+// View presets merge the three independent lens/kinds/memory states into
+// one-click starting points; any manual tweak moves the toolbar to `custom`.
+const VIEW_PRESETS = {
+  all: { lens: DEFAULT_LENS, kinds: LIFECYCLE_KINDS, memory: MEMORY_LENS_PRESETS[0] },
+  active: { lens: DEFAULT_LENS, kinds: LIFECYCLE_KINDS, memory: MEMORY_LENS_PRESETS[1] },
+  activation: { lens: { trajectory: true, experience: true, lifecycle: true, conflicts: false, activation: true }, kinds: ACTIVATION_KINDS, memory: MEMORY_LENS_PRESETS[0] },
+  conflicts: { lens: { trajectory: false, experience: true, lifecycle: true, conflicts: true, activation: false }, kinds: CONFLICT_KINDS, memory: MEMORY_LENS_PRESETS[0] },
+} as const
+type PresetName = keyof typeof VIEW_PRESETS
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 function shortRun(id: string) {
@@ -219,6 +223,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   // row is selected (opened by clicking a row, closed by its × button).
   const [selected, setSelected] = useState(params.get('selected') ?? '')
   const [runsOpen, setRunsOpen] = useState(false)
+  const [tuneOpen, setTuneOpen] = useState(false)
   const [focus, setFocus] = useState<{ at: string; eventId: string; label: string } | null>(null)
   const parseWindow = (s: string | null): { t0: number; t1: number } | null => { if (!s) return null; const [a, b] = s.split(',').map(Number); return a && b ? { t0: a, t1: b } : null }
   const [window_, setWindow] = useState<{ t0: number; t1: number } | null>(() => parseWindow(params.get('w')))
@@ -580,11 +585,26 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     setBucketFilter('all'); setTerminalFilter('all'); setRecencyFilter('all')
     setHasActivations(false); setCrossScopeOnly(false); setStrengthMin(0)
   }
-  const activePreset: PresetName | 'custom' = (Object.keys(PRESETS) as PresetName[]).find((name) => {
-    const preset = PRESETS[name]
+  const applyViewPreset = (name: PresetName) => {
+    const preset = VIEW_PRESETS[name]
+    setLens({ ...preset.lens })
+    setKinds(new Set(preset.kinds))
+    setBucketFilter(preset.memory.bucket)
+    setTerminalFilter(preset.memory.terminal)
+    setRecencyFilter(preset.memory.recency)
+    setHasActivations(preset.memory.activated)
+    setCrossScopeOnly(preset.memory.xscope)
+    setStrengthMin(preset.memory.strength)
+  }
+  const activePreset: PresetName | 'custom' = (Object.keys(VIEW_PRESETS) as PresetName[]).find((name) => {
+    const preset = VIEW_PRESETS[name]
     return (Object.keys(DEFAULT_LENS) as (keyof Lens)[]).every((key) => lens[key] === preset.lens[key]) &&
-      kinds.size === preset.kinds.length && [...kinds].every((kind) => preset.kinds.includes(kind))
+      kinds.size === preset.kinds.length && [...kinds].every((kind) => preset.kinds.includes(kind)) &&
+      preset.memory.bucket === bucketFilter && preset.memory.terminal === terminalFilter && preset.memory.recency === recencyFilter &&
+      preset.memory.activated === hasActivations && preset.memory.xscope === crossScopeOnly && preset.memory.strength === strengthMin
   }) ?? 'custom'
+  // Tune-button badge: how many fine-grained filters currently constrain the view.
+  const fineCount = [roleFilter !== 'all', scopeFilter !== 'all', bucketFilter !== 'all', terminalFilter !== 'all', recencyFilter !== 'all', strengthMin > 0, hasActivations, crossScopeOnly].filter(Boolean).length
 
   const step = tickStep(view.active.t1 - view.active.t0, track)
   const ticks: number[] = []
@@ -600,112 +620,137 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       </span>
       {lens.conflicts && !view.conflictsPresent && <span className="experience-note">{t('timeline.no_conflicts')}</span>}
     </div>
-    <div className="experience-lens">
-      {(Object.keys(DEFAULT_LENS) as (keyof Lens)[]).map((key) => (
-        <label key={key} className={`lens-toggle ${lens[key] ? 'on' : ''}`}>
-          <input type="checkbox" checked={lens[key]} onChange={(change) => setLens((current) => ({ ...current, [key]: change.target.checked }))} />
-          {t(`timeline.${key}`)}
-        </label>
+    <div className="experience-toolbar">
+      {(Object.keys(VIEW_PRESETS) as PresetName[]).map((name) => (
+        <button key={name} className={`preset-chip ${activePreset === name ? 'on' : ''}`} onClick={() => applyViewPreset(name)}>{t(`timeline.preset.${name}`)}</button>
       ))}
       <span className="lens-sep" />
-      {(Object.keys(PRESETS) as PresetName[]).map((name) => (
-        <button key={name} className={`preset-chip ${activePreset === name ? 'on' : ''}`} onClick={() => { setLens(PRESETS[name].lens); setKinds(new Set(PRESETS[name].kinds)) }}>{t(`timeline.preset.${name}`)}</button>
-      ))}
-      <span className="lens-sep" />
-      <button onClick={() => { setWindow(null); setFocus(null); setLaneOverrides({ execution: true }) }}>{t('timeline.fit')}</button>
-      <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 0.6))}>{t('timeline.zoom_in')}</button>
-      <button onClick={() => setWindow((current) => zoom(current ?? view.full, view.full, 1.6))}>{t('timeline.zoom_out')}</button>
-      <span className="lens-sep" />
-      {LIFECYCLE_KINDS.map((kind) => (
-        <button key={kind} className={`kind-chip ${kinds.has(kind) ? 'on' : ''}`} style={{ ['--chip' as string]: LIFECYCLE_COLORS[kind] }} onClick={() => toggleKind(kind)}>{t(`timeline.kind.${kind}`)}</button>
-      ))}
-      <span className="lens-sep" />
-      {MEMORY_LENS_PRESETS.map((preset) => (
-        <button key={preset.label} className="preset-chip" onClick={() => { setBucketFilter(preset.bucket); setTerminalFilter(preset.terminal); setRecencyFilter(preset.recency); setHasActivations(preset.activated); setCrossScopeOnly(preset.xscope); setStrengthMin(preset.strength) }}>{t(preset.label)}</button>
-      ))}
-      {(bucketFilter !== 'all' || terminalFilter !== 'all' || recencyFilter !== 'all' || hasActivations || crossScopeOnly || strengthMin > 0) && (
-        <button className="preset-chip" onClick={resetMemoryLens} style={{ color: '#f7768e', borderColor: '#f7768e' }}>{t('timeline.reset')}</button>
-      )}
-    </div>
-    <div className="experience-filters">
-      <label>{t('timeline.filter.role')}
-        <select value={roleFilter} onChange={(change) => setRoleFilter(change.target.value)}>
-          <option value="all">{t('timeline.terminal.all')}</option>
-          {view.roles.map((role) => <option key={role} value={role}>{role}</option>)}
-        </select>
-      </label>
-      <label>{t('timeline.filter.scope')}
-        <select value={scopeFilter} onChange={(change) => setScopeFilter(change.target.value)}>
-          <option value="all">{t('timeline.terminal.all')}</option>
-          {view.scopes.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
-        </select>
-      </label>
-      <label>{t('timeline.filter.memory')}
-        <select value={bucketFilter} onChange={(change) => setBucketFilter(change.target.value as 'all' | MemoryBucket)}>
-          <option value="all">{t('timeline.terminal.all')}</option>
-          {MEMORY_BUCKETS.map((bucket) => <option key={bucket} value={bucket}>{bucket}</option>)}
-        </select>
-      </label>
-      <label>{t('timeline.filter.terminal')}
-        <select value={terminalFilter} onChange={(change) => setTerminalFilter(change.target.value as TerminalFilter)}>
-          {([['all','timeline.terminal.all'],['alive','timeline.terminal.alive'],['dead','timeline.terminal.dead']] as const).map(([v, l]) => <option key={v} value={v}>{t(l)}</option>)}
-        </select>
-      </label>
-      <label>{t('timeline.filter.recency')}
-        <select value={recencyFilter} onChange={(change) => setRecencyFilter(change.target.value as RecencyFilter)}>
-          {RECENCY_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{t(opt.label)}</option>)}
-        </select>
-      </label>
-      <label>{t('timeline.filter.strength')} ≥ {strengthMin.toFixed(2)}
-        <input type="range" min={0} max={1} step={0.05} value={strengthMin} onChange={(change) => setStrengthMin(parseFloat(change.target.value))} style={{ width: '80px', verticalAlign: 'middle' }} />
-      </label>
-      <label className={`lens-toggle ${hasActivations ? 'on' : ''}`}>
-        <input type="checkbox" checked={hasActivations} onChange={(change) => setHasActivations(change.target.checked)} />
-        {t('timeline.filter.activated')}
-      </label>
-      <label className={`lens-toggle ${crossScopeOnly ? 'on' : ''}`}>
-        <input type="checkbox" checked={crossScopeOnly} onChange={(change) => setCrossScopeOnly(change.target.checked)} />
-        {t('timeline.filter.cross_scope')}
-      </label>
-      <label>{t('timeline.filter.search')}
-        <input type="search" value={query} onChange={(change) => setQuery(change.target.value)} placeholder={t('timeline.claim_text_id')} title={t('timeline.filter_experiences')} />
-      </label>
-      <label>{t('timeline.range.label')}
+      <input className="toolbar-search" type="search" value={query} onChange={(change) => setQuery(change.target.value)} placeholder={t('timeline.claim_text_id')} title={t('timeline.filter_experiences')} />
+      <label className="toolbar-select">{t('timeline.range.label')}
         <select value={range} onChange={(change) => setRange(change.target.value as RangeFilter)} title={t('timeline.range.title')}>
           {RANGE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{t(opt.label)}</option>)}
         </select>
       </label>
-      <label>{t('timeline.group.label')}
+      <label className="toolbar-select">{t('timeline.group.label')}
         <select value={groupBy} onChange={(change) => { setGroupBy(change.target.value as GroupBy); setGroupOverrides({}); setChainOverrides({}) }} title={t('timeline.group.title')}>
           {GROUP_BY_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{t(opt.label)}</option>)}
         </select>
       </label>
-      <div className="run-picker">
-        {runsOpen && <div className="run-picker-backdrop" onClick={() => setRunsOpen(false)} />}
-        <button className={`run-picker-toggle ${hiddenRoots.size ? 'filtered' : ''}`} onClick={() => setRunsOpen((open) => !open)}>
-          {t('timeline.runs_abbr')} {view.roots.filter((root) => !hiddenRoots.has(root.id)).length}/{view.roots.length}
-          <ChevronDown size={12} className="chevron-flip" data-open={runsOpen ? 'true' : 'false'} style={{ color: 'currentColor', flexShrink: 0 }} />
-        </button>
-        {runsOpen && <div className="run-picker-panel">
-          <div className="run-picker-actions">
-            <button onClick={() => setHiddenRoots(new Set())}>{t('timeline.runs_all')}</button>
-            <button onClick={() => setHiddenRoots(new Set(view.roots.map((root) => root.id)))}>{t('timeline.runs_none')}</button>
-          </div>
-          <ul>
-            {view.roots.map((root) => {
-              const title = model.runs.find((run) => run.id === root.id)?.title
-              return (
-                <li key={root.id}>
-                  <label>
-                    <input type="checkbox" checked={!hiddenRoots.has(root.id)} onChange={() => toggleRoot(root.id)} />
-                    <span>{title ?? shortRun(root.id)}</span>
-                    <small>{clock(root.startedAt)}{root.status ? ` · ${root.status}` : ''}</small>
+      <div className="toolbar-right">
+        <div className="run-picker">
+          {runsOpen && <div className="run-picker-backdrop" onClick={() => setRunsOpen(false)} />}
+          <button className={`run-picker-toggle ${hiddenRoots.size ? 'filtered' : ''}`} onClick={() => setRunsOpen((open) => !open)}>
+            {t('timeline.runs_abbr')} {view.roots.filter((root) => !hiddenRoots.has(root.id)).length}/{view.roots.length}
+            <ChevronDown size={12} className="chevron-flip" data-open={runsOpen ? 'true' : 'false'} style={{ color: 'currentColor', flexShrink: 0 }} />
+          </button>
+          {runsOpen && <div className="run-picker-panel">
+            <div className="run-picker-actions">
+              <button onClick={() => setHiddenRoots(new Set())}>{t('timeline.runs_all')}</button>
+              <button onClick={() => setHiddenRoots(new Set(view.roots.map((root) => root.id)))}>{t('timeline.runs_none')}</button>
+            </div>
+            <ul>
+              {view.roots.map((root) => {
+                const title = model.runs.find((run) => run.id === root.id)?.title
+                return (
+                  <li key={root.id}>
+                    <label>
+                      <input type="checkbox" checked={!hiddenRoots.has(root.id)} onChange={() => toggleRoot(root.id)} />
+                      <span>{title ?? shortRun(root.id)}</span>
+                      <small>{clock(root.startedAt)}{root.status ? ` · ${root.status}` : ''}</small>
+                    </label>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>}
+        </div>
+        <button className="toolbar-btn" onClick={() => { setWindow(null); setFocus(null); setLaneOverrides({ execution: true }) }}>{t('timeline.fit')}</button>
+        <div className="tune-picker">
+          {tuneOpen && <div className="run-picker-backdrop" onClick={() => setTuneOpen(false)} />}
+          <button className={`tune-toggle ${tuneOpen ? 'open' : ''} ${fineCount ? 'filtered' : ''}`} onClick={() => setTuneOpen((open) => !open)}>
+            {t('timeline.tune')}
+            {fineCount > 0 && <span className="tune-badge">{fineCount}</span>}
+            <ChevronDown size={12} className="chevron-flip" data-open={tuneOpen ? 'true' : 'false'} style={{ color: 'currentColor', flexShrink: 0 }} />
+          </button>
+          {tuneOpen && <div className="tune-panel">
+            <section>
+              <h5>{t('timeline.tune.layers')}</h5>
+              <div className="tune-row">
+                {(Object.keys(DEFAULT_LENS) as (keyof Lens)[]).map((key) => (
+                  <label key={key} className={`lens-toggle ${lens[key] ? 'on' : ''}`}>
+                    <input type="checkbox" checked={lens[key]} onChange={(change) => setLens((current) => ({ ...current, [key]: change.target.checked }))} />
+                    {t(`timeline.${key}`)}
                   </label>
-                </li>
-              )
-            })}
-          </ul>
-        </div>}
+                ))}
+              </div>
+            </section>
+            <section>
+              <h5>{t('timeline.tune.kinds')}</h5>
+              <div className="tune-row">
+                {LIFECYCLE_KINDS.map((kind) => (
+                  <button key={kind} className={`kind-chip ${kinds.has(kind) ? 'on' : ''}`} style={{ ['--chip' as string]: LIFECYCLE_COLORS[kind] }} onClick={() => toggleKind(kind)}>{t(`timeline.kind.${kind}`)}</button>
+                ))}
+              </div>
+            </section>
+            <section>
+              <h5>{t('timeline.tune.memory')}</h5>
+              <div className="tune-row">
+                {MEMORY_LENS_PRESETS.map((preset) => (
+                  <button key={preset.label} className="preset-chip" onClick={() => { setBucketFilter(preset.bucket); setTerminalFilter(preset.terminal); setRecencyFilter(preset.recency); setHasActivations(preset.activated); setCrossScopeOnly(preset.xscope); setStrengthMin(preset.strength) }}>{t(preset.label)}</button>
+                ))}
+                {(bucketFilter !== 'all' || terminalFilter !== 'all' || recencyFilter !== 'all' || hasActivations || crossScopeOnly || strengthMin > 0) && (
+                  <button className="preset-chip tune-reset" onClick={resetMemoryLens}>{t('timeline.reset')}</button>
+                )}
+              </div>
+              <div className="tune-grid">
+                <label>{t('timeline.filter.memory')}
+                  <select value={bucketFilter} onChange={(change) => setBucketFilter(change.target.value as 'all' | MemoryBucket)}>
+                    <option value="all">{t('timeline.terminal.all')}</option>
+                    {MEMORY_BUCKETS.map((bucket) => <option key={bucket} value={bucket}>{bucket}</option>)}
+                  </select>
+                </label>
+                <label>{t('timeline.filter.terminal')}
+                  <select value={terminalFilter} onChange={(change) => setTerminalFilter(change.target.value as TerminalFilter)}>
+                    {([['all','timeline.terminal.all'],['alive','timeline.terminal.alive'],['dead','timeline.terminal.dead']] as const).map(([v, l]) => <option key={v} value={v}>{t(l)}</option>)}
+                  </select>
+                </label>
+                <label>{t('timeline.filter.recency')}
+                  <select value={recencyFilter} onChange={(change) => setRecencyFilter(change.target.value as RecencyFilter)}>
+                    {RECENCY_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{t(opt.label)}</option>)}
+                  </select>
+                </label>
+                <label>{t('timeline.filter.strength')} ≥ {strengthMin.toFixed(2)}
+                  <input type="range" min={0} max={1} step={0.05} value={strengthMin} onChange={(change) => setStrengthMin(parseFloat(change.target.value))} />
+                </label>
+                <label className={`lens-toggle ${hasActivations ? 'on' : ''}`}>
+                  <input type="checkbox" checked={hasActivations} onChange={(change) => setHasActivations(change.target.checked)} />
+                  {t('timeline.filter.activated')}
+                </label>
+                <label className={`lens-toggle ${crossScopeOnly ? 'on' : ''}`}>
+                  <input type="checkbox" checked={crossScopeOnly} onChange={(change) => setCrossScopeOnly(change.target.checked)} />
+                  {t('timeline.filter.cross_scope')}
+                </label>
+              </div>
+            </section>
+            <section>
+              <h5>{t('timeline.tune.dimensions')}</h5>
+              <div className="tune-grid">
+                <label>{t('timeline.filter.role')}
+                  <select value={roleFilter} onChange={(change) => setRoleFilter(change.target.value)}>
+                    <option value="all">{t('timeline.terminal.all')}</option>
+                    {view.roles.map((role) => <option key={role} value={role}>{role}</option>)}
+                  </select>
+                </label>
+                <label>{t('timeline.filter.scope')}
+                  <select value={scopeFilter} onChange={(change) => setScopeFilter(change.target.value)}>
+                    <option value="all">{t('timeline.terminal.all')}</option>
+                    {view.scopes.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
+                  </select>
+                </label>
+              </div>
+            </section>
+          </div>}
+        </div>
       </div>
     </div>
     <main className={`experience-grid ${selected ? '' : 'no-details'}`}>
@@ -1005,15 +1050,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   </div>
 }
 
-function zoom(current: { t0: number; t1: number }, full: { t0: number; t1: number }, factor: number) {
-  const center = (current.t0 + current.t1) / 2
-  let t0 = center - (center - current.t0) * factor
-  let t1 = center + (current.t1 - center) * factor
-  if (t1 - t0 < 5000) return current
-  if (t0 < full.t0) { t1 += full.t0 - t0; t0 = full.t0 }
-  if (t1 > full.t1) { t0 -= t1 - full.t1; t1 = full.t1 }
-  return { t0: Math.max(full.t0, t0), t1: Math.min(full.t1, t1) }
-}
+
 
 function Header({ project, load, loading }: { project: string; load: (project: string, range: RangeFilter) => Promise<void> | void; loading: boolean }) {
   return null
