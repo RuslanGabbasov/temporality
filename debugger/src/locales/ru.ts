@@ -133,6 +133,9 @@ export const ru: Record<string, string> = {
     'chat.cancel_run': 'Остановить запуск',
     'chat.branch_title': 'Создать ветку разговора с этого момента',
     'chat.placeholder': 'Введите сообщение… (Shift+Enter для новой строки)',
+    'chat.attach_file': 'Прикрепить файлы',
+    'chat.uploading': 'Загрузка…',
+    'chat.remove_attachment': 'Убрать вложение',
 
     // Runs
     'runs.title': 'Запуски',

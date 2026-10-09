@@ -133,6 +133,9 @@ export const en: Record<string, string> = {
     'chat.cancel_run': 'Cancel this run',
     'chat.branch_title': 'Branch conversation from this point',
     'chat.placeholder': 'Type a message… (Shift+Enter for newline)',
+    'chat.attach_file': 'Attach files',
+    'chat.uploading': 'Uploading…',
+    'chat.remove_attachment': 'Remove attachment',
 
     // Runs
     'runs.title': 'Runs',

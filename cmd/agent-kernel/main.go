@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -1094,6 +1095,79 @@ func main() {
 		// Membership feeds token project scopes — refresh.
 		refreshUserTokens()
 		writeJSON(w, 200, map[string]bool{"removed": true})
+	})
+	mux.HandleFunc("POST /v1/workspace/projects/{projectID}/files", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		// Uploaded files land in the project's persistent sandbox workspace, so
+		// agents read them at /workspace/uploads/... like any other project file.
+		root := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_ROOT"))
+		if root == "" {
+			writeError(w, 503, errors.New("file uploads require KERNEL_SANDBOX_ROOT to be configured"))
+			return
+		}
+		projectID := r.PathValue("projectID")
+		if _, err := ws.GetProject(r.Context(), projectID); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 200<<20)
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			writeError(w, 413, err)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			writeError(w, 422, errors.New("multipart field 'file' is required"))
+			return
+		}
+		defer file.Close()
+		name := filepath.Base(filepath.Clean(header.Filename))
+		if name == "" || name == "." || name == ".." || strings.HasPrefix(name, ".") {
+			writeError(w, 422, errors.New("invalid file name"))
+			return
+		}
+		ext := filepath.Ext(name)
+		base := strings.TrimSuffix(name, ext)
+		final := slugify(translit(base)) + ext
+		if final == "" || final == ext {
+			final = "upload" + ext
+		}
+		dir := filepath.Join(root, "projects", projectID, "uploads")
+		if err := os.MkdirAll(dir, 0o777); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		target := filepath.Join(dir, final)
+		if _, err := os.Stat(target); err == nil {
+			final = time.Now().UTC().Format("20060102-150405") + "-" + final
+			target = filepath.Join(dir, final)
+		}
+		dst, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		defer dst.Close()
+		written, err := io.Copy(dst, file)
+		if err != nil {
+			os.Remove(target)
+			writeError(w, 500, err)
+			return
+		}
+		if err := dst.Chmod(0o666); err != nil {
+			log.Warn("chmod upload", "error", err) // container user must be able to read it
+		}
+		writeJSON(w, 201, map[string]any{
+			"name": final,
+			"path": "/workspace/uploads/" + final,
+			"size": written,
+		})
 	})
 	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/agents", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
@@ -4978,6 +5052,28 @@ func cronMatches(expr string, t time.Time) bool {
 		}
 	}
 	return true
+}
+
+// translit maps Cyrillic runes to Latin so uploaded file names survive
+// slugification (slugify itself only keeps [a-z0-9]).
+func translit(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if lat, ok := translitMap[r]; ok {
+			b.WriteString(lat)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+var translitMap = map[rune]string{
+	'а': "a", 'б': "b", 'в': "v", 'г': "g", 'д': "d", 'е': "e", 'ё': "e",
+	'ж': "zh", 'з': "z", 'и': "i", 'й': "y", 'к': "k", 'л': "l", 'м': "m",
+	'н': "n", 'о': "o", 'п': "p", 'р': "r", 'с': "s", 'т': "t", 'у': "u",
+	'ф': "f", 'х': "kh", 'ц': "ts", 'ч': "ch", 'ш': "sh", 'щ': "shch",
+	'ъ': "", 'ы': "y", 'ь': "", 'э': "e", 'ю': "yu", 'я': "ya",
 }
 
 func slugify(name string) string {

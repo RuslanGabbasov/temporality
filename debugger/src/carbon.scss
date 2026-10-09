@@ -1322,6 +1322,76 @@ button.header-nav-link {
   max-width: 80%;
 }
 
+/* Attachment chips: pending in the input bar, sent inside the user bubble */
+.chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.chat-attachments-sent {
+  margin-bottom: 0.4rem;
+  justify-content: flex-end;
+}
+
+.chat-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 280px;
+  padding: 0.2rem 0.55rem;
+  border-radius: 12px;
+  border: 1px solid var(--tm-border);
+  background: var(--tm-raised);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.chat-attachment-chip .chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attachment-chip .chip-size {
+  color: var(--tm-text-3);
+  font-size: 0.65rem;
+  flex-shrink: 0;
+}
+
+.chat-attachment-chip button {
+  background: none;
+  border: none;
+  color: var(--tm-text-3);
+  cursor: pointer;
+  padding: 0 0.1rem;
+  font-size: 0.85rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.chat-attachment-chip button:hover {
+  color: var(--tm-danger);
+}
+
+/* Inside the teal user bubble the default chip colors wash out */
+.chat-bubble-user .chat-attachment-chip {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+
+.chat-bubble-user .chat-attachment-chip .chip-size {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.chat-attachment-uploading .spinner {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex-shrink: 0;
+}
+
 .chat-thinking {
   margin-bottom: 0.5rem;
   border-radius: 4px;

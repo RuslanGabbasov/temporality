@@ -9,8 +9,8 @@ import {
   Tag,
   Heading,
 } from '@carbon/react'
-import { Add, Send, TrashCan } from '@carbon/icons-react'
-import { workspaceApi, type Agent } from './workspaceApi'
+import { Add, Attachment, Send, TrashCan } from '@carbon/icons-react'
+import { workspaceApi, type Agent, type UploadedFile } from './workspaceApi'
 import Markdown from './Markdown'
 import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
@@ -19,6 +19,12 @@ import AppModal from './Modal'
 import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
 function shortTime(iso: string) {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString()
@@ -38,6 +44,7 @@ interface ChatMessage {
   runId?: string
   status?: string
   streamLines?: string[]
+  attachments?: UploadedFile[]
 }
 
 interface Conversation {
@@ -131,12 +138,38 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const [inputValue, setInputValue] = useState('')
   const [showNewChat, setShowNewChat] = useState(false)
   const [newChatAgentId, setNewChatAgentId] = useState('')
+  const [attachments, setAttachments] = useState<UploadedFile[]>([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const streamRef = useRef<Map<string, EventSource>>(new Map())
   // Live token streams (ephemeral /runs/{id}/tokens SSE), one per conversation.
   const tokenStreamRef = useRef<Map<string, EventSource>>(new Map())
 
   const activeConv = conversations.find((c) => c.id === activeConvId) ?? null
+
+  // Pending attachments belong to the active conversation — never leak them
+  // into another chat when the user switches.
+  useEffect(() => { setAttachments([]) }, [activeConvId])
+
+  const onFilesPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = '' // allow picking the same file twice
+    if (!files.length) return
+    setUploading(true)
+    setError('')
+    try {
+      const uploaded: UploadedFile[] = []
+      for (const f of files) {
+        uploaded.push(await workspaceApi.uploadFile(project, f))
+      }
+      setAttachments((prev) => [...prev, ...uploaded])
+    } catch (f) {
+      setError(message(f))
+    } finally {
+      setUploading(false)
+    }
+  }
 
   useEffect(() => { saveConversations(conversations) }, [conversations])
   useEffect(() => () => {
@@ -574,16 +607,19 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   }
 
   const sendMessage = async () => {
-    if (!inputValue.trim() || loading || !activeConv) return
+    if ((!inputValue.trim() && attachments.length === 0) || loading || uploading || !activeConv) return
     const content = inputValue.trim()
+    const sentAttachments = attachments
+    setAttachments([])
     setInputValue('')
     setLoading(true)
     setError('')
 
-    const userMsg: ChatMessage = { role: 'user', content, timestamp: new Date() }
+    const userMsg: ChatMessage = { role: 'user', content, timestamp: new Date(), attachments: sentAttachments.length ? sentAttachments : undefined }
     const updatedConv = { ...activeConv, messages: [...activeConv.messages, userMsg] }
+    const firstLine = content || sentAttachments[0]?.name || ''
     if (updatedConv.messages.length === 1) {
-      updatedConv.title = content.slice(0, 60) + (content.length > 60 ? '…' : '')
+      updatedConv.title = firstLine.slice(0, 60) + (firstLine.length > 60 ? '…' : '')
     }
     setConversations((prev) => prev.map((c) => c.id === updatedConv.id ? updatedConv : c))
 
@@ -592,7 +628,12 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       const historyLines: string[] = []
       for (const msg of updatedConv.messages) {
         if (msg.role === 'user') {
-          historyLines.push(`User: ${msg.content}`)
+          let line = `User: ${msg.content}`
+          // Files travel as sandbox paths only — never inlined into the prompt.
+          if (msg.attachments?.length) {
+            line += '\n' + msg.attachments.map((a) => `[Attached file: ${a.path}]`).join('\n')
+          }
+          historyLines.push(line)
         } else if (msg.role === 'assistant' && msg.content) {
           historyLines.push(`Assistant: ${msg.content}`)
         }
@@ -605,7 +646,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const task = await workspaceApi.createTask({
           project_id: project,
           agent_id: activeConv.agentId || undefined,
-          title: content.slice(0, 80),
+          title: firstLine.slice(0, 80),
           prompt: fullPrompt,
         })
         taskId = task.id
@@ -716,6 +757,17 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                       </details>
                     )}
 
+                    {msg.role === 'user' && msg.attachments && msg.attachments.length > 0 && (
+                      <div className="chat-attachments chat-attachments-sent">
+                        {msg.attachments.map((a) => (
+                          <span key={a.path} className="chat-attachment-chip" title={a.path}>
+                            <span className="chip-name">📎 {a.name}</span>
+                            <span className="chip-size">{formatSize(a.size)}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
                     {msg.content && msg.role === 'assistant' ? (
                       <Markdown content={msg.content} />
                     ) : msg.content ? (
@@ -767,7 +819,39 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
             {/* Input area */}
             <div className="workspace-input-bar">
               {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '0.5rem' }} />}
+              {(attachments.length > 0 || uploading) && (
+                <div className="chat-attachments">
+                  {attachments.map((a, i) => (
+                    <span key={a.path} className="chat-attachment-chip" title={a.path}>
+                      <span className="chip-name">{a.name}</span>
+                      <span className="chip-size">{formatSize(a.size)}</span>
+                      <button
+                        onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                        title={t('chat.remove_attachment') ?? 'Remove attachment'}
+                        aria-label={t('chat.remove_attachment') ?? 'Remove attachment'}
+                      >×</button>
+                    </span>
+                  ))}
+                  {uploading && (
+                    <span className="chat-attachment-chip chat-attachment-uploading">
+                      <span className="spinner" /><span className="chip-name">{t('chat.uploading') ?? 'Uploading…'}</span>
+                    </span>
+                  )}
+                </div>
+              )}
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end' }}>
+                <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => void onFilesPicked(e)} />
+                <Button
+                  kind="ghost"
+                  size="md"
+                  renderIcon={Attachment}
+                  iconDescription={t('chat.attach_file') ?? 'Attach files'}
+                  tooltipPosition="top"
+                  hasIconOnly
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading || uploading}
+                  style={{ marginBottom: '2px', flexShrink: 0 }}
+                />
                 <div style={{ flex: 1 }}>
                   <TextArea
                     id="chat-input"
@@ -784,7 +868,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                   />
                 </div>
                 {loading && <span className="spinner" title={t('chat.sending') ?? 'Sending…'} style={{ alignSelf: 'center', flexShrink: 0 }} />}
-                <Button renderIcon={Send} onClick={() => void sendMessage()} disabled={loading || !inputValue.trim()} style={{ marginBottom: '2px' }}>{t('chat.send') ?? 'Send'}</Button>
+                <Button renderIcon={Send} onClick={() => void sendMessage()} disabled={loading || uploading || (!inputValue.trim() && attachments.length === 0)} style={{ marginBottom: '2px' }}>{t('chat.send') ?? 'Send'}</Button>
               </div>
             </div>
           </>

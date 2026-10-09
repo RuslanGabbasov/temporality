@@ -477,6 +477,13 @@ export interface User {
 
 const headers = () => ({ 'Content-Type': 'application/json', ...authHeaders() })
 
+/** Uploaded project file: `path` is inside the agent sandbox (/workspace/uploads/…). */
+export interface UploadedFile {
+  name: string
+  path: string
+  size: number
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${KERNEL_API}${path}`, { ...init, headers: headers() })
   if (!response.ok) {
@@ -502,6 +509,22 @@ export const workspaceApi = {
     request<{ added: boolean }>(`/v1/workspace/projects/${id}/members`, { method: 'POST', body: JSON.stringify(data) }),
   removeProjectMember: (id: string, userID: string) =>
     request<{ removed: boolean }>(`/v1/workspace/projects/${id}/members/${userID}`, { method: 'DELETE' }),
+
+  // Files (multipart — bypasses the JSON request() helper)
+  uploadFile: async (projectId: string, file: File): Promise<UploadedFile> => {
+    const body = new FormData()
+    body.append('file', file)
+    const response = await fetch(`${KERNEL_API}/v1/workspace/projects/${projectId}/files`, {
+      method: 'POST',
+      body,
+      headers: authHeaders(),
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      throw new Error(payload.error ?? `HTTP ${response.status}`)
+    }
+    return response.json()
+  },
 
   // Agents
   listAllAgents: () => request<{ agents: Agent[] }>('/v1/workspace/agents'),
