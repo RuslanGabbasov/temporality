@@ -16,7 +16,7 @@ import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
-import { useT } from './i18n'
+import { useI18n } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -76,27 +76,44 @@ function saveConversations(convs: Conversation[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(convs))
 }
 
+type Translate = (key: string, vars?: Record<string, string>) => string
+
+/** Pick a plural form for the locale: English one/other, Russian
+ * one/few/many. Keys follow the {{key}}_one/_few/_other convention. */
+export function pluralT(t: Translate, locale: string, key: string, count: number, vars?: Record<string, string>): string {
+  const n = Math.abs(count)
+  let suffix: 'one' | 'few' | 'other'
+  if (locale === 'ru') {
+    const mod10 = n % 10, mod100 = n % 100
+    suffix = (mod10 === 1 && mod100 !== 11) ? 'one'
+      : (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) ? 'few' : 'other'
+  } else {
+    suffix = n === 1 ? 'one' : 'other'
+  }
+  return t(`${key}_${suffix}`, { ...vars, count: String(count) })
+}
+
 /** Format a stream event into a human-readable status line. */
-function formatStreamEvent(type: string, outer: any): string | null {
+export function formatStreamEvent(type: string, outer: any, t: Translate, locale: string): string | null {
   const d = outer.data ?? outer
   switch (type) {
     case 'run.started':
-      return `Run started${d.model ? ` · model ${d.model}` : ''}`
+      return t('chat.stream.run_started') + (d.model ? t('chat.stream.model_suffix', { model: String(d.model) }) : '')
     case 'model.completed': {
-      const tokens = d.total_tokens ? ` · ${d.total_tokens} tokens` : ''
-      const latency = d.latency_ms ? ` · ${(d.latency_ms / 1000).toFixed(1)}s` : ''
-      return `Model turn ${d.turn ?? ''}${tokens}${latency}`
+      const tokens = d.total_tokens ? t('chat.stream.tokens_suffix', { count: pluralT(t, locale, 'chat.stream.tokens_n', Number(d.total_tokens)) }) : ''
+      const latency = d.latency_ms ? t('chat.stream.latency_suffix', { seconds: (d.latency_ms / 1000).toFixed(1) }) : ''
+      return t('chat.stream.model_turn', { turn: String(d.turn ?? '') }) + tokens + latency
     }
     case 'turn.completed':
-      return `Turn ${d.turn ?? ''} done${d.tool_calls ? ` · ${d.tool_calls} tool calls` : ''}`
+      return t('chat.stream.turn_done', { turn: String(d.turn ?? '') }) + (d.tool_calls ? t('chat.stream.tool_calls_suffix', { count: pluralT(t, locale, 'chat.stream.tool_calls_n', Number(d.tool_calls)) }) : '')
     case 'tool.completed':
-      return `Tool: ${d.name ?? d.tool ?? '?'}`
+      return t('chat.stream.tool_line', { name: String(d.name ?? d.tool ?? '?') })
     case 'knowledge.proposed':
-      return `Learned: ${(d.proposition ?? '').slice(0, 60)}`
+      return t('chat.stream.learned', { proposition: String(d.proposition ?? '').slice(0, 60) })
     case 'run.completed':
-      return `Completed · ${d.turns ?? '?'} turns`
+      return t('chat.stream.completed', { turns: pluralT(t, locale, 'chat.stream.turns_n', Number(d.turns ?? 0)) })
     case 'run.failed':
-      return `Failed: ${d.error ?? 'unknown'}`
+      return t('chat.stream.failed', { error: String(d.error ?? 'unknown') })
     default:
       return null
   }
@@ -127,7 +144,7 @@ function ChatStreamLines({ lines }: { lines: string[] }) {
 }
 
 export default function Workspace({ project, defaultAgentId, defaultModel }: { project: string; defaultAgentId?: string; defaultModel?: string }) {
-  const t = useT()
+  const { locale, t } = useI18n()
   const [allAgents, setAllAgents] = useState<Agent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -326,7 +343,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     const handleEvent = (type: string) => (e: MessageEvent) => {
       try {
         const outer = JSON.parse(e.data)
-        const line = formatStreamEvent(type, outer)
+        const line = formatStreamEvent(type, outer, t, locale)
         if (line) { lines.push(line); updateMsg(convId, runId, { streamLines: [...lines] }) }
       } catch { /* ignore */ }
     }
@@ -396,19 +413,19 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         const action = d.action ?? d.operation?.tool ?? 'action'
-        lines.push(`⚠ Approval needed: ${action}`)
+        lines.push(t('chat.stream.approval_needed', { action: String(action) }))
         updateMsg(convId, runId, { streamLines: [...lines] })
       } catch { /* ignore */ }
     })
     es.addEventListener('approval.granted', (e) => {
       try {
-        lines.push('✓ Approval granted')
+        lines.push(t('chat.stream.approval_granted'))
         updateMsg(convId, runId, { streamLines: [...lines] })
       } catch { /* ignore */ }
     })
     es.addEventListener('approval.rejected', (e) => {
       try {
-        lines.push('✗ Approval rejected')
+        lines.push(t('chat.stream.approval_rejected'))
         updateMsg(convId, runId, { streamLines: [...lines] })
       } catch { /* ignore */ }
     })
@@ -417,7 +434,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         const tool = d.operation?.tool ?? d.policy_id ?? 'tool'
-        lines.push(`✓ Auto-approved: ${tool}`)
+        lines.push(t('chat.stream.auto_approved', { tool: String(tool) }))
         updateMsg(convId, runId, { streamLines: [...lines] })
       } catch { /* ignore */ }
     })
@@ -553,9 +570,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       try {
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
-        const line = formatStreamEvent('run.failed', outer)
+        const line = formatStreamEvent('run.failed', outer, t, locale)
         if (line) lines.push(line)
-        updateMsg(convId, runId, { content: `Failed: ${d.error ?? 'unknown'}`, status: 'failed', streamLines: [...lines] })
+        updateMsg(convId, runId, { content: t('chat.stream.failed', { error: String(d.error ?? 'unknown') }), status: 'failed', streamLines: [...lines] })
       } catch {
         updateMsg(convId, runId, { content: t('chat.run_failed') ?? 'Run failed', status: 'failed', streamLines: [...lines] })
       }
