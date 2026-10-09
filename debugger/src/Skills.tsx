@@ -784,7 +784,7 @@ export default function Skills() {
 
       {/* Wizard: describe the skill in natural language */}
       {wizardOpen && (
-        <AppModal onClose={() => setWizardOpen(false)} panelStyle={{ width: '560px' }}>
+        <AppModal onClose={() => setWizardOpen(false)} panelStyle={{ width: '640px' }}>
             <Heading>{t('skills.wizard_title') ?? 'Create skill'}</Heading>
             {wizardBusy ? (
               <GeneratingState

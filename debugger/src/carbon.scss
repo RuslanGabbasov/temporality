@@ -2082,6 +2082,8 @@ button.header-nav-link {
 .form-actions {
   display: flex;
   justify-content: flex-end;
+  // Long localized labels (ru/de) can overflow narrow modals — wrap instead.
+  flex-wrap: wrap;
   gap: 0.5rem;
   padding-top: 0.75rem;
   border-top: 1px solid rgba(237, 232, 223, 0.08);
