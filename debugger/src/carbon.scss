@@ -2560,8 +2560,14 @@ button.header-nav-link {
   right: var(--tm-space-6);
   bottom: var(--tm-space-6);
   width: 340px;
+  max-width: calc(100vw - 2 * var(--tm-space-6));
+  box-sizing: border-box;
   z-index: 5;
   overflow-y: auto;
+  overflow-x: hidden;
+  // Long refs/commands/ids must wrap — otherwise the fixed-width panel grows
+  // a horizontal scrollbar next to the vertical one.
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   background: var(--tm-surface);
@@ -2569,6 +2575,8 @@ button.header-nav-link {
   border-radius: var(--tm-radius-md);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
 }
+
+.experience-detail code { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .experience-hint {
   color: var(--tm-text-3);
