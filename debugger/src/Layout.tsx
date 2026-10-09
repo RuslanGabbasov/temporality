@@ -17,7 +17,7 @@ import { User, Settings, Add, Edit, TrashCan, Folder, ChevronDown } from '@carbo
 import { Menu } from '@carbon/icons-react'
 import { TOKEN_STORAGE_KEY, authToken, authHeaders } from './api'
 import Onboarding from './Onboarding'
-import { useI18n, useT, type Locale } from './i18n'
+import { LOCALES, useI18n, useT, type Locale } from './i18n'
 import { useTheme } from './theme'
 import { whoami, login as apiLogin, type Whoami } from './kernelApi'
 import ChannelsDialog from './ChannelsDialog'
@@ -567,9 +567,9 @@ export default function Layout({ children, activePage }: LayoutProps) {
                     </div>
                   )}
                   <div style={{ padding: '0.4rem 0.5rem', fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.25rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.5rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('settings.language') ?? 'Language'}</div>
-                  {(['en', 'ru'] as const).map((opt) => (
-                    <div key={opt} onClick={() => { setLocale(opt); setShowUserMenu(false) }} style={{ padding: '0.3rem 0.5rem 0.3rem 1.2rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: locale === opt ? 'var(--tm-amber)' : 'var(--tm-text-2)', fontWeight: locale === opt ? 500 : 400, display: 'flex', alignItems: 'center', gap: '0.4rem' }} onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
-                      <span style={{ width: '0.75rem', textAlign: 'center', fontSize: '0.7rem' }}>{locale === opt ? '✓' : ''}</span>{opt === 'en' ? 'English' : 'Русский'}
+                  {Object.entries(LOCALES).map(([opt, meta]) => (
+                    <div key={opt} onClick={() => { setLocale(opt as Locale); setShowUserMenu(false) }} style={{ padding: '0.3rem 0.5rem 0.3rem 1.2rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: locale === opt ? 'var(--tm-amber)' : 'var(--tm-text-2)', fontWeight: locale === opt ? 500 : 400, display: 'flex', alignItems: 'center', gap: '0.4rem' }} onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+                      <span style={{ width: '0.75rem', textAlign: 'center', fontSize: '0.7rem' }}>{locale === opt ? '✓' : ''}</span>{meta.name}
                     </div>
                   ))}
                   <div style={{ padding: '0.4rem 0.5rem', fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.25rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.5rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('settings.theme') ?? 'Theme'}</div>
