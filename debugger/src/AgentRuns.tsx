@@ -547,13 +547,13 @@ export default function AgentRuns({ project }: { project: string }) {
                           {Boolean(event.data?.context) && (
                             <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', margin: '0 0 0.5rem', whiteSpace: 'pre-wrap' }}>{String(event.data?.context)}</p>
                           )}
-                          {options.length > 0 && (
-                            <Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem', flexWrap: 'wrap' }}>
-                              {options.map((option) => (
-                                <Button key={option} size="sm" onClick={() => void decide(event, true, option)} disabled={busy}>{option}</Button>
-                              ))}
-                            </Stack>
-                          )}
+                          								{options.length > 0 && (
+                          									<Stack orientation="horizontal" gap={2} style={{ marginTop: '0.5rem', flexWrap: 'nowrap', overflowX: 'auto', maxWidth: '100%', paddingBottom: '0.25rem' }}>
+                          										{options.map((option) => (
+                          											<Button key={option} size="sm" style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }} title={option} onClick={() => void decide(event, true, option)} disabled={busy}>{option}</Button>
+                          										))}
+                          									</Stack>
+                          								)}
                           <div style={{ marginTop: '0.75rem' }}>
                             <TextInput id="human-answer" labelText={t('runs.answer_label') ?? 'Your answer'} value={reason} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)} placeholder={t('runs.answer_placeholder') ?? 'Type a free-form answer…'} />
                           </div>
