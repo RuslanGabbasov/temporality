@@ -142,6 +142,13 @@ function clock(iso: string) {
   const date = new Date(iso)
   return Number.isNaN(date.getTime()) ? '' : date.toTimeString().slice(0, 8)
 }
+/** Picker-friendly stamp: time only for today, `Mon DD HH:MM` for older runs. */
+function when(iso: string) {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  if (date.toDateString() === new Date().toDateString()) return date.toTimeString().slice(0, 8)
+  return `${date.toLocaleDateString('en', { month: 'short', day: 'numeric' })} ${date.toTimeString().slice(0, 5)}`
+}
 
 /** Format tick label adaptively based on visible time span. */
 function formatTick(ms: number, span: number): string {
@@ -223,6 +230,8 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   // row is selected (opened by clicking a row, closed by its × button).
   const [selected, setSelected] = useState(params.get('selected') ?? '')
   const [runsOpen, setRunsOpen] = useState(false)
+  const [runsQuery, setRunsQuery] = useState('')
+  const [runsFailedOnly, setRunsFailedOnly] = useState(false)
   const [tuneOpen, setTuneOpen] = useState(false)
   const [focus, setFocus] = useState<{ at: string; eventId: string; label: string } | null>(null)
   const parseWindow = (s: string | null): { t0: number; t1: number } | null => { if (!s) return null; const [a, b] = s.split(',').map(Number); return a && b ? { t0: a, t1: b } : null }
@@ -610,6 +619,16 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const ticks: number[] = []
   for (let t = Math.ceil(view.active.t0 / step) * step; t <= view.active.t1; t += step) ticks.push(t)
 
+  // Run-picker list: search + failed-only narrow the roots; «all/none» act on
+  // this visible subset so filtering stays meaningful with hundreds of runs.
+  const runsNeedle = runsQuery.trim().toLowerCase()
+  const pickerRoots = view.roots.filter((root) => {
+    if (runsFailedOnly && root.status !== 'failed') return false
+    if (!runsNeedle) return true
+    const title = model.runs.find((run) => run.id === root.id)?.title
+    return (title ?? root.id).toLowerCase().includes(runsNeedle) || root.id.toLowerCase().includes(runsNeedle)
+  })
+
   return <div className="observability-shell" ref={shellRef}>
     <Header project={project} load={load} loading={loading} />
     {error && <div className="obs-error" role="alert">{error}</div>}
@@ -644,23 +663,28 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             <ChevronDown size={12} className="chevron-flip" data-open={runsOpen ? 'true' : 'false'} style={{ color: 'currentColor', flexShrink: 0 }} />
           </button>
           {runsOpen && <div className="run-picker-panel">
+            <div className="run-picker-filter">
+              <input type="search" value={runsQuery} onChange={(change) => setRunsQuery(change.target.value)} placeholder={t('timeline.runs_filter')} />
+              <button className={`run-picker-chip ${runsFailedOnly ? 'on' : ''}`} onClick={() => setRunsFailedOnly((only) => !only)}>{t('timeline.runs_failed_only')}</button>
+            </div>
             <div className="run-picker-actions">
-              <button onClick={() => setHiddenRoots(new Set())}>{t('timeline.runs_all')}</button>
-              <button onClick={() => setHiddenRoots(new Set(view.roots.map((root) => root.id)))}>{t('timeline.runs_none')}</button>
+              <button onClick={() => setHiddenRoots((current) => { const next = new Set(current); pickerRoots.forEach((root) => next.delete(root.id)); return next })}>{t('timeline.runs_all')}</button>
+              <button onClick={() => setHiddenRoots((current) => { const next = new Set(current); pickerRoots.forEach((root) => next.add(root.id)); return next })}>{t('timeline.runs_none')}</button>
             </div>
             <ul>
-              {view.roots.map((root) => {
+              {pickerRoots.map((root) => {
                 const title = model.runs.find((run) => run.id === root.id)?.title
                 return (
                   <li key={root.id}>
                     <label>
                       <input type="checkbox" checked={!hiddenRoots.has(root.id)} onChange={() => toggleRoot(root.id)} />
                       <span>{title ?? shortRun(root.id)}</span>
-                      <small>{clock(root.startedAt)}{root.status ? ` · ${root.status}` : ''}</small>
+                      <small className={root.status === 'failed' ? 'failed' : ''}>{when(root.startedAt)}{root.status ? ` · ${root.status}` : ''}</small>
                     </label>
                   </li>
                 )
               })}
+              {pickerRoots.length === 0 && <li className="run-picker-empty">{t('timeline.runs_not_found')}</li>}
             </ul>
           </div>}
         </div>

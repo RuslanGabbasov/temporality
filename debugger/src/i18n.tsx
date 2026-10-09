@@ -930,6 +930,9 @@ const translations: Record<Locale, Record<string, string>> = {
     'timeline.insufficient_events': 'Not enough events to reconstruct the chain.',
     'timeline.runs_all': 'all',
     'timeline.runs_none': 'none',
+    'timeline.runs_filter': 'filter runs',
+    'timeline.runs_failed_only': 'failed only',
+    'timeline.runs_not_found': 'no runs match',
     'timeline.superseded_by_arrow': 'superseded by →',
 
     // Timeline - States
@@ -2024,6 +2027,9 @@ const translations: Record<Locale, Record<string, string>> = {
     'timeline.insufficient_events': 'Недостаточно событий для реконструкции цепочки.',
     'timeline.runs_all': 'все',
     'timeline.runs_none': 'нет',
+    'timeline.runs_filter': 'фильтр запусков',
+    'timeline.runs_failed_only': 'только упавшие',
+    'timeline.runs_not_found': 'ничего не найдено',
     'timeline.superseded_by_arrow': 'заменено на →',
 
     // Timeline - States

@@ -2523,11 +2523,25 @@ button.header-nav-link {
 .run-picker-toggle { padding: 0.3rem 0.6rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: transparent; color: var(--tm-text-3); font: 0.68rem var(--tm-mono); cursor: pointer; }
 .run-picker-toggle:hover, .run-picker-toggle.filtered { color: var(--tm-teal); border-color: var(--tm-teal); }
 .run-picker-backdrop { position: fixed; inset: 0; z-index: 30; }
-.run-picker-panel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 31; min-width: 240px; padding: 0.5rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-lg); background: var(--tm-surface); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25); }
-.run-picker-panel label { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.25rem; cursor: pointer; }
+.run-picker-panel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 31; width: 360px; max-width: calc(100vw - 2.5rem); padding: 0.5rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-lg); background: var(--tm-surface); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25); }
+.run-picker-filter { display: flex; gap: 0.4rem; }
+.run-picker-filter input[type="search"] { flex: 1; min-width: 0; padding: 0.26rem 0.5rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: var(--tm-surface); color: var(--tm-text); font-size: 0.72rem; }
+.run-picker-filter input[type="search"]:focus { outline: none; border-color: var(--tm-teal); }
+.run-picker-chip { padding: 0.2rem 0.55rem; border: 1px solid var(--tm-border); border-radius: 999px; background: transparent; color: var(--tm-text-3); font: 0.66rem var(--tm-mono); cursor: pointer; white-space: nowrap; }
+.run-picker-chip:hover { color: var(--tm-teal); border-color: var(--tm-teal); }
+.run-picker-chip.on { color: var(--tm-teal); border-color: var(--tm-teal); background: rgba(42, 107, 99, 0.12); }
+.run-picker-actions { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; }
+.run-picker-actions button { padding: 0.2rem 0.55rem; border: 1px solid var(--tm-border); border-radius: 999px; background: transparent; color: var(--tm-text-3); font: 0.66rem var(--tm-mono); cursor: pointer; }
+.run-picker-actions button:hover { color: var(--tm-teal); border-color: var(--tm-teal); }
+.run-picker-panel ul { list-style: none; margin: 0.4rem 0 0; padding: 0; max-height: 320px; overflow-y: auto; }
+.run-picker-panel li { min-width: 0; }
+.run-picker-panel label { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.25rem; cursor: pointer; min-width: 0; }
 .run-picker-panel label:hover { background: rgba(42, 107, 99, 0.06); }
 .run-picker-panel input { accent-color: var(--tm-teal); }
-.run-picker-panel label span { color: var(--tm-text); font: 0.7rem var(--tm-mono); }
+.run-picker-panel label span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tm-text); font: 0.7rem var(--tm-mono); }
+.run-picker-panel label small { flex: 0 0 auto; color: var(--tm-text-3); font-size: 0.6rem; white-space: nowrap; }
+.run-picker-panel label small.failed { color: var(--tm-danger); }
+.run-picker-empty { padding: 0.6rem 0.25rem; color: var(--tm-text-3); font-size: 0.68rem; }
 
 // Timeline grid
 .experience-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 0; }
