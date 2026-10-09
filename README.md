@@ -161,6 +161,14 @@ Living skills: инструменты `skill_search` / `skill_inspect` /
 для `run_command`: no network (или `bridge` если `network_access: true`),
 read-only root, dropped capabilities, resource limits, bounded output.
 
+Образ запинен по sha256-digest и запускается с `--pull=never`
+(`docs/sandbox-security-matrix.md`), поэтому локальный docker должен содержать
+именно тот образ, на который указывает digest. После правки
+`sandbox/Dockerfile` или чистки образов (`docker system prune`) запускайте
+`./sandbox/build.sh` — он пересоберёт образ, обновит `KERNEL_SANDBOX_IMAGE`
+в `.env` и пересоздаст agent-kernel. Без этого `run_command` падает с
+exit 125 «No such image».
+
 ### MCP
 
 Основной способ — реестр MCP-серверов в workspace (`/mcp`): транспорт
