@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -228,9 +230,20 @@ func (m *matrixInboundLoop) matrixWhoami(ctx context.Context, homeserver, token 
 // routeReply signals the waiting workflow and closes the human request row.
 // The signal goes first: resuming the run is the point. When it fails the row
 // stays open — the workflow is still waiting and a later retry (e.g. after a
-// restart's history replay) may yet deliver the answer.
+// restart's history replay) may yet deliver the answer. File replies are
+// downloaded into the project workspace first, so the resumed run — and every
+// agent in the project — can read the attachment by path.
 func (m *matrixInboundLoop) routeReply(ctx context.Context, reply agent.MatrixReply) {
 	response := truncateForLog(reply.Message.Body, 4000)
+	if reply.Message.URL != "" {
+		saved, err := m.saveInboundFile(ctx, reply)
+		if err != nil {
+			m.log.Warn("matrix inbound file", "operation", reply.Ask.RequestID, "error", err)
+			response = "[File could not be received: " + err.Error() + "] " + response
+		} else {
+			response = strings.TrimSpace("[Attached file: " + saved + "] " + response)
+		}
+	}
 	actor := reply.Ask.UserID // anyone in the room answers as the room owner (MVP)
 	approval := agent.Approval{
 		OperationID: reply.Ask.RequestID,
@@ -280,6 +293,121 @@ func truncateForLog(s string, limit int) string {
 		return s
 	}
 	return string(runes[:limit]) + "…"
+}
+
+// inboundFileCap bounds one inbound attachment (same spirit as the outbound
+// send_file cap; uploads and downloads share generous-but-bounded limits).
+const inboundFileCap = 100 << 20
+
+// saveInboundFile downloads the attachment of a file reply into the project's
+// persistent workspace ({sandbox}/projects/{project}/inbox/) and returns the
+// container-side path the run will see (/workspace/inbox/…). Cyrillic and
+// otherwise unsafe names are transliterated like chat uploads, collisions get
+// a timestamp prefix.
+func (m *matrixInboundLoop) saveInboundFile(ctx context.Context, reply agent.MatrixReply) (string, error) {
+	root := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_ROOT"))
+	if root == "" {
+		return "", errors.New("KERNEL_SANDBOX_ROOT is not configured")
+	}
+	settings := agent.TransportSettingsFromEnv()
+	if m.settings != nil {
+		if stored, err := m.settings(ctx); err == nil {
+			settings = stored.OverlayEnv()
+		}
+	}
+	homeserver := strings.TrimRight(strings.TrimSpace(settings.MatrixHomeserver), "/")
+	token := agent.TrimBearerPrefix(settings.MatrixAccessToken)
+	if homeserver == "" || token == "" {
+		return "", errors.New("matrix transport is not configured")
+	}
+	payload, err := m.matrixDownloadMedia(ctx, homeserver, token, reply.Message.URL)
+	if err != nil {
+		return "", err
+	}
+	name := safeFileName(reply.Message.Filename)
+	dir := filepath.Join(root, "projects", reply.Ask.ProjectID, "inbox")
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		return "", err
+	}
+	target := filepath.Join(dir, name)
+	if _, err := os.Stat(target); err == nil {
+		name = time.Now().UTC().Format("20060102-150405") + "-" + name
+		target = filepath.Join(dir, name)
+	}
+	if err := os.WriteFile(target, payload, 0o666); err != nil {
+		return "", err
+	}
+	return "/workspace/inbox/" + name, nil
+}
+
+// matrixDownloadMedia fetches an mxc:// content URI through the authenticated
+// media endpoints: the modern client/v1 route first, the legacy media/v3 as
+// the fallback for homeservers that have not moved yet.
+func (m *matrixInboundLoop) matrixDownloadMedia(ctx context.Context, homeserver, token, mxcURL string) ([]byte, error) {
+	server, mediaID, err := parseMxcURL(mxcURL)
+	if err != nil {
+		return nil, err
+	}
+	routes := []string{
+		fmt.Sprintf("%s/_matrix/client/v1/media/download/%s/%s?timeout_ms=30000", homeserver, url.PathEscape(server), url.PathEscape(mediaID)),
+		fmt.Sprintf("%s/_matrix/media/v3/download/%s/%s", homeserver, url.PathEscape(server), url.PathEscape(mediaID)),
+	}
+	var lastErr error
+	for _, endpoint := range routes {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, doErr := m.httpClient.Do(req)
+		if doErr != nil {
+			lastErr = doErr
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+			resp.Body.Close()
+			lastErr = fmt.Errorf("returned %d: %s", resp.StatusCode, truncateForLog(string(body), 200))
+			continue
+		}
+		payload, readErr := io.ReadAll(io.LimitReader(resp.Body, inboundFileCap+1))
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			continue
+		}
+		if len(payload) > inboundFileCap {
+			return nil, fmt.Errorf("attachment exceeds the %d-byte inbound cap", inboundFileCap)
+		}
+		return payload, nil
+	}
+	return nil, lastErr
+}
+
+// parseMxcURL splits mxc://<server>/<mediaID> into its parts.
+func parseMxcURL(raw string) (string, string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "mxc" || parsed.Host == "" || strings.Trim(parsed.Path, "/") == "" {
+		return "", "", fmt.Errorf("invalid matrix content URI %q", raw)
+	}
+	return parsed.Host, strings.Trim(parsed.Path, "/"), nil
+}
+
+// safeFileName normalizes an inbound attachment name the same way chat
+// uploads are: base name, transliterated, slugified, extension preserved.
+func safeFileName(name string) string {
+	name = filepath.Base(strings.TrimSpace(name))
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext == "." || strings.ContainsAny(ext, " /") {
+		// "..." and similar junk yield a lone-dot extension; drop it.
+		ext = ""
+	}
+	base := strings.TrimSuffix(name, filepath.Ext(name))
+	slug := slugify(translit(base))
+	if slug == "" || slug == "untitled" {
+		slug = "attachment"
+	}
+	return slug + ext
 }
 
 // sleepContext waits for d or ctx cancellation; false means the ctx is done.

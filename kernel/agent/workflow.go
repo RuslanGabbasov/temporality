@@ -175,13 +175,16 @@ type ModelRequest struct {
 }
 
 type ToolRequest struct {
-	RunID         string         `json:"run_id"`
-	OperationID   string         `json:"operation_id"`
-	Name          string         `json:"name"`
-	Role          string         `json:"role,omitempty"`
-	WorkspacePath string         `json:"workspace_path,omitempty"`
-	Project       string         `json:"project,omitempty"`
-	Arguments     map[string]any `json:"arguments"`
+	RunID         string `json:"run_id"`
+	OperationID   string `json:"operation_id"`
+	Name          string `json:"name"`
+	Role          string `json:"role,omitempty"`
+	WorkspacePath string `json:"workspace_path,omitempty"`
+	Project       string `json:"project,omitempty"`
+	// ActorID is the run starter; send_file resolves them as the default
+	// recipient of agent-produced files.
+	ActorID   string         `json:"actor_id,omitempty"`
+	Arguments map[string]any `json:"arguments"`
 	// AllowedTools mirrors RunInput.ToolAllowlist so the activity also
 	// rejects calls to tools that were never advertised to the model.
 	AllowedTools []string `json:"allowed_tools,omitempty"`
@@ -1426,7 +1429,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					} else if err := startMCP(); err != nil {
 						return result, err
-					} else if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly}).Get(ctx, &toolResult); err != nil {
+					} else if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly}).Get(ctx, &toolResult); err != nil {
 						toolFailed = true
 						if eventErr := emit(activityCtx, state, "tool.failed", toolFailureData(operationID, argumentsHash, call.Name, err)); eventErr != nil {
 							return result, eventErr
@@ -2302,6 +2305,7 @@ func KernelTools() []llm.ToolDef {
 		{Name: "request_approval", Description: "Pause this run and request a human decision before a consequential action", Parameters: map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"}}, "required": []string{"action"}}},
 		{Name: "ask_human", Description: "Ask a human a question when you cannot proceed without additional context or a decision. The question must be self-contained: what task you are running, what you have established, what exactly is missing and which options exist. Prefer short structured options over open-ended questions. The run pauses until an answer arrives or the timeout expires.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"question": map[string]any{"type": "string", "description": "The exact question for the human, self-contained"}, "recipient": map[string]any{"type": "string", "description": "Logical recipient: a workspace user id/name (user:ruslan), role:admin, org:<unit-id>, or project_owner. Defaults to the operator who started this run"}, "context": map[string]any{"type": "string", "description": "Brief human-facing background: what you are doing and what you already established"}, "options": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Short answer variants to choose from"}, "timeout_sec": map[string]any{"type": "integer", "description": "How long to wait for the answer"}, "timeout_policy": map[string]any{"type": "string", "enum": []string{"fallback", "fail", "retry", "escalate", "cancel"}, "description": "What happens on timeout: fallback (default) proceeds with the safest option, fail aborts the tool call, retry asks once more, escalate re-asks the project owner, cancel stops the run"}}, "required": []string{"question"}}},
 		{Name: "human_contacts", Description: "Find who to ask before ask_human: search workspace users by name, role or org unit, or resolve an escalation target with escalate_for (the nearest org level above that user with active people, falling back to installation admins). Returns contact cards with user_id, role, org unit and enabled channel types — channel addresses are never exposed, delivery is automatic", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "Optional substring matched against user name or id"}, "role": map[string]any{"type": "string", "description": "Filter by workspace role: admin, operator, writer, reader"}, "org_unit_id": map[string]any{"type": "string", "description": "Filter by org unit id (the exact unit, not its subtree)"}, "escalate_for": map[string]any{"type": "string", "description": "User id or name: resolve who to escalate to when that user cannot answer"}}}},
+		{Name: "send_file", Description: "Deliver a file you produced in the workspace to a human: it is uploaded to their enabled messaging channels (Matrix, Telegram) and appears as a download in the product UI. Use it to hand over reports, archives, generated documents — not for files the user can already find in the repo", Parameters: map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "description": "Workspace path of the file, e.g. /workspace/report.md"}, "note": map[string]any{"type": "string", "description": "One-line human-facing caption for the file"}, "recipient": map[string]any{"type": "string", "description": "Logical recipient like ask_human: user id/name, role:admin, org:<unit>, project_owner. Defaults to the operator who started this run"}}, "required": []string{"path"}}},
 		{Name: "list_triggers", Description: "List all configured triggers (schedules, webhooks, event listeners) for this project", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
 		{Name: "create_trigger", Description: "Create a new trigger to automatically launch agent runs. Types: schedule (cron-based), webhook (HTTP endpoint), event (reacts to journal events).", Parameters: map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}, "type": map[string]any{"type": "string", "enum": []string{"schedule", "webhook", "event"}}, "cron": map[string]any{"type": "string", "description": "Cron expression for schedule triggers, e.g. '0 9 * * 1-5'"}, "prompt": map[string]any{"type": "string", "description": "The prompt sent to the agent when the trigger fires"}, "path": map[string]any{"type": "string", "description": "URL path for webhook triggers"}, "event_type": map[string]any{"type": "string", "description": "Event type to react to for event triggers, e.g. 'tool.failed'"}, "agent_id": map[string]any{"type": "string", "description": "Agent to use (optional, uses default if empty)"}}, "required": []string{"name", "type", "prompt"}}},
 		{Name: "update_trigger", Description: "Update an existing trigger's configuration (enable/disable, change cron, update prompt, etc.)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}, "enabled": map[string]any{"type": "boolean"}, "cron": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},

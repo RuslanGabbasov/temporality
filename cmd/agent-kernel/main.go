@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -1168,6 +1169,70 @@ func main() {
 			"path": "/workspace/uploads/" + final,
 			"size": written,
 		})
+	})
+	// GET mirrors POST /files: agents produce files in the sandbox (reports,
+	// exports, archives) and send_file shares them by workspace path; the chat
+	// turns those paths into download links through this endpoint. Reads are
+	// sandboxed to the project's own workspace directory.
+	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/files", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		root := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_ROOT"))
+		if root == "" {
+			writeError(w, 503, errors.New("file downloads require KERNEL_SANDBOX_ROOT to be configured"))
+			return
+		}
+		projectID := r.PathValue("projectID")
+		workspacePath := filepath.Join(root, "projects", projectID)
+		pathArg := strings.TrimSpace(r.URL.Query().Get("path"))
+		pathArg = strings.TrimPrefix(pathArg, "/workspace")
+		pathArg = strings.TrimPrefix(pathArg, "/")
+		if pathArg == "" {
+			writeError(w, 400, errors.New("query parameter 'path' is required"))
+			return
+		}
+		clean := filepath.Clean(pathArg)
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			writeError(w, 422, errors.New("path escapes the workspace"))
+			return
+		}
+		abs := filepath.Join(workspacePath, clean)
+		if abs != workspacePath && !strings.HasPrefix(abs, workspacePath+string(filepath.Separator)) {
+			writeError(w, 422, errors.New("path escapes the workspace"))
+			return
+		}
+		info, err := os.Stat(abs)
+		if err != nil {
+			writeError(w, 404, err)
+			return
+		}
+		if info.IsDir() {
+			writeError(w, 422, errors.New("path is a directory"))
+			return
+		}
+		name := filepath.Base(clean)
+		contentType := mime.TypeByExtension(filepath.Ext(name))
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		disposition := "attachment"
+		if r.URL.Query().Get("inline") == "1" {
+			disposition = "inline"
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", disposition+`; filename="`+strings.ReplaceAll(name, `"`, "_")+`"`)
+		w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+		file, err := os.Open(abs)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		defer file.Close()
+		if _, err := io.Copy(w, file); err != nil {
+			log.Warn("serve workspace file", "project", projectID, "path", clean, "error", err)
+			return
+		}
 	})
 	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/agents", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
@@ -5058,7 +5123,10 @@ func cronMatches(expr string, t time.Time) bool {
 // slugification (slugify itself only keeps [a-z0-9]).
 func translit(s string) string {
 	var b strings.Builder
-	for _, r := range s {
+	// translitMap only covers lowercase Cyrillic, so fold the input to
+	// lowercase first; callers feed the result into slugify which is
+	// case-insensitive anyway.
+	for _, r := range strings.ToLower(s) {
 		if lat, ok := translitMap[r]; ok {
 			b.WriteString(lat)
 			continue

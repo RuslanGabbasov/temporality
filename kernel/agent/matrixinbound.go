@@ -19,6 +19,10 @@ type MatrixInboundMessage struct {
 	Sender    string
 	Body      string
 	Timestamp time.Time
+	// File attachments (m.file/m.image/m.audio/m.video): URL is the mxc://
+	// content URI, Filename the original name. Text messages leave both empty.
+	URL      string
+	Filename string
 }
 
 // MatrixPendingAsk is the matching projection of one open human request that
@@ -66,13 +70,18 @@ type matrixRoomEvent struct {
 }
 
 type matrixEventContent struct {
-	MsgType string `json:"msgtype"`
-	Body    string `json:"body"`
+	MsgType  string `json:"msgtype"`
+	Body     string `json:"body"`
+	Filename string `json:"filename,omitempty"`
+	URL      string `json:"url,omitempty"`
 }
 
-// ParseMatrixSync extracts room text messages from a /sync response body.
-// Non-message events, notices and empty bodies are ignored; messages are
-// returned in chronological order across rooms.
+// ParseMatrixSync extracts room messages from a /sync response body. Text
+// messages answer asks with words; file messages (m.file/m.image/m.audio/
+// m.video carrying an mxc content URI) answer them with an attachment the
+// loop downloads into the project workspace. Notices, empty bodies and files
+// without a content URI are ignored; messages are returned in chronological
+// order across rooms.
 func ParseMatrixSync(body []byte) (string, []MatrixInboundMessage, error) {
 	var decoded matrixSyncResponse
 	if err := json.Unmarshal(body, &decoded); err != nil {
@@ -81,18 +90,39 @@ func ParseMatrixSync(body []byte) (string, []MatrixInboundMessage, error) {
 	messages := []MatrixInboundMessage{}
 	for roomID, room := range decoded.Rooms.Join {
 		for _, event := range room.Timeline.Events {
-			if event.Type != "m.room.message" || event.Content.MsgType != "m.text" {
+			if event.Type != "m.room.message" {
 				continue
 			}
 			text := strings.TrimSpace(event.Content.Body)
-			if text == "" {
+			if event.Content.MsgType == "m.text" {
+				if text == "" {
+					continue
+				}
+				messages = append(messages, MatrixInboundMessage{
+					RoomID:    roomID,
+					Sender:    event.Sender,
+					Body:      text,
+					Timestamp: time.UnixMilli(event.OriginServerTS),
+				})
 				continue
+			}
+			if !matrixFileMsgTypes[event.Content.MsgType] || event.Content.URL == "" {
+				continue
+			}
+			name := strings.TrimSpace(event.Content.Filename)
+			if name == "" {
+				name = text
+			}
+			if name == "" {
+				name = "attachment"
 			}
 			messages = append(messages, MatrixInboundMessage{
 				RoomID:    roomID,
 				Sender:    event.Sender,
 				Body:      text,
 				Timestamp: time.UnixMilli(event.OriginServerTS),
+				URL:       event.Content.URL,
+				Filename:  name,
 			})
 		}
 	}
@@ -112,6 +142,12 @@ const matrixReplySkew = 2 * time.Minute
 
 // matrixCancelBodies decline the question instead of answering it.
 var matrixCancelBodies = map[string]bool{"cancel": true, "отмена": true, "cancelled": true}
+
+// matrixFileMsgTypes are the m.room.message content types that carry an
+// attachment (content.url = mxc://…).
+var matrixFileMsgTypes = map[string]bool{
+	"m.file": true, "m.image": true, "m.audio": true, "m.video": true,
+}
 
 // MatchMatrixReplies maps messages to the asks they answer. A message answers
 // the oldest still-unmatched ask whose recipient owns an enabled matrix channel

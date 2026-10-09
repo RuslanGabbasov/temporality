@@ -51,6 +51,52 @@ func TestParseMatrixSyncKeepsTextMessagesOnly(t *testing.T) {
 	}
 }
 
+func TestParseMatrixSyncCapturesFileMessages(t *testing.T) {
+	at := time.Now()
+	body := syncPayload(t, "s4", map[string][]matrixRoomEvent{
+		"!room:hs": {
+			{Type: "m.room.message", Sender: "@u:hs", OriginServerTS: at.UnixMilli(), Content: matrixEventContent{MsgType: "m.file", Body: "here is the export", Filename: "skills-export.zip", URL: "mxc://hs/abc123"}},
+			{Type: "m.room.message", Sender: "@u:hs", OriginServerTS: at.UnixMilli(), Content: matrixEventContent{MsgType: "m.image", Body: "screenshot.png", URL: "mxc://hs/img"}},
+			{Type: "m.room.message", Sender: "@u:hs", OriginServerTS: at.UnixMilli(), Content: matrixEventContent{MsgType: "m.file", Filename: "broken.zip"}},
+			{Type: "m.room.message", Sender: "@u:hs", OriginServerTS: at.UnixMilli(), Content: matrixEventContent{MsgType: "m.text", Body: "plain text still works"}},
+		},
+	})
+	_, messages, err := ParseMatrixSync(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("expected 3 messages (file, image, text), got %d", len(messages))
+	}
+	file := messages[0]
+	if file.URL != "mxc://hs/abc123" || file.Filename != "skills-export.zip" || file.Body != "here is the export" {
+		t.Fatalf("file message not captured: %+v", file)
+	}
+	image := messages[1]
+	if image.Filename != "screenshot.png" {
+		t.Fatalf("filename should fall back to body: %+v", image)
+	}
+	if messages[2].URL != "" {
+		t.Fatalf("text message must not carry a file URL: %+v", messages[2])
+	}
+}
+
+func TestParseMatrixSyncFileWithoutURLIsIgnored(t *testing.T) {
+	at := time.Now()
+	body := syncPayload(t, "s5", map[string][]matrixRoomEvent{
+		"!room:hs": {
+			{Type: "m.room.message", Sender: "@u:hs", OriginServerTS: at.UnixMilli(), Content: matrixEventContent{MsgType: "m.file", Body: "nameless", URL: ""}},
+		},
+	})
+	_, messages, err := ParseMatrixSync(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("file without content URI must be ignored, got %+v", messages)
+	}
+}
+
 func TestParseMatrixSyncOrdersChronologically(t *testing.T) {
 	base := time.Now()
 	body := syncPayload(t, "s3", map[string][]matrixRoomEvent{

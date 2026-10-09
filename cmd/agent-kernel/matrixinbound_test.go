@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -240,5 +242,97 @@ func TestMatrixInboundKeepsRowOpenWhenSignalFails(t *testing.T) {
 	}
 	if len(store.answered) != 0 || len(store.cancelled) != 0 {
 		t.Fatalf("row closed despite signal failure: %+v", store.answered)
+	}
+}
+
+func TestParseMxcURL(t *testing.T) {
+	server, media, err := parseMxcURL("mxc://hs.example/AbCdEf123")
+	if err != nil || server != "hs.example" || media != "AbCdEf123" {
+		t.Fatalf("unexpected parse: %q %q %v", server, media, err)
+	}
+	for _, bad := range []string{"", "https://hs/x", "mxc://hs", "mxc:///onlymedia", "mxc://"} {
+		if _, _, err := parseMxcURL(bad); err == nil {
+			t.Fatalf("%q must be rejected", bad)
+		}
+	}
+}
+
+func TestSafeFileName(t *testing.T) {
+	cases := map[string]string{
+		"report.md":                  "report.md",
+		"Отчёт по тестам.zip":        "otchet-po-testam.zip",
+		"../../etc/passwd":           "passwd",
+		"weird name (final) v2.xlsx": "weird-name-final-v2.xlsx",
+		"...":                        "attachment",
+		"":                           "attachment",
+	}
+	for input, want := range cases {
+		if got := safeFileName(input); got != want {
+			t.Fatalf("safeFileName(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+// matrixFileHomeServer fakes whoami + sync with one m.file reply and serves the
+// media download on both the v1 and v3 routes.
+func matrixFileHomeServer(t *testing.T, payload string) *httptest.Server {
+	t.Helper()
+	askedAt := time.Now()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/account/whoami"):
+			_ = json.NewEncoder(w).Encode(map[string]string{"user_id": "@bot:hs"})
+		case strings.HasSuffix(r.URL.Path, "/sync"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"next_batch": "batch-1",
+				"rooms": map[string]any{"join": map[string]any{
+					"!r1:hs": map[string]any{"timeline": map[string]any{"events": []any{
+						map[string]any{"type": "m.room.message", "sender": "@human:hs", "origin_server_ts": askedAt.UnixMilli(), "content": map[string]any{"msgtype": "m.file", "body": "вот экспорт", "filename": "Навыки QA.zip", "url": "mxc://hs/media1"}},
+					}}},
+				}},
+			})
+		case strings.Contains(r.URL.Path, "/media/download/") || strings.Contains(r.URL.Path, "/download/"):
+			if r.Header.Get("Authorization") == "" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = w.Write([]byte(payload))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestMatrixInboundRoutesFileReplyIntoInbox(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KERNEL_SANDBOX_ROOT", root)
+	store := &fakeInboundStore{
+		requests: []workspace.HumanRequest{{
+			ID: "run/turn/01/call_f", RunID: "run", ProjectID: "proj", ResolvedUser: "u1",
+			Channel: "matrix", Status: "delivered", CreatedAt: time.Now().Add(-time.Minute),
+		}},
+		users: []workspace.User{{ID: "u1", Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", Enabled: true}}}},
+	}
+	sig := &recordedSignal{}
+	loop := newInboundLoop(t, matrixFileHomeServer(t, "ZIPDATA"), store, sig)
+
+	if _, err := loop.cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if sig.count() != 1 {
+		t.Fatalf("expected one signal, got %d", sig.count())
+	}
+	saved := filepath.Join(root, "projects", "proj", "inbox", "navyki-qa.zip")
+	if _, err := os.Stat(saved); err != nil {
+		t.Fatalf("attachment not saved to inbox: %v", err)
+	}
+	want := "[Attached file: /workspace/inbox/navyki-qa.zip] вот экспорт"
+	if sig.calls[0].Response != want {
+		t.Fatalf("response %q, want %q", sig.calls[0].Response, want)
+	}
+	if store.answered["run/turn/01/call_f"] != want {
+		t.Fatalf("row not answered with file note: %+v", store.answered)
 	}
 }

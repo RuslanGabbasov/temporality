@@ -331,6 +331,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleListTriggers(ctx, request)
 	case "human_contacts":
 		return a.handleHumanContacts(ctx, request)
+	case "send_file":
+		return a.handleSendFile(ctx, request)
 	case "create_trigger":
 		return a.handleCreateTrigger(ctx, request)
 	case "update_trigger":

@@ -136,6 +136,7 @@ export const ru: Record<string, string> = {
     'chat.attach_file': 'Прикрепить файлы',
     'chat.uploading': 'Загрузка…',
     'chat.remove_attachment': 'Убрать вложение',
+    'chat.download_failed': 'Не удалось скачать файл',
 
     // Runs
     'runs.title': 'Запуски',

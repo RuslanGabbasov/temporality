@@ -136,6 +136,7 @@ export const en: Record<string, string> = {
     'chat.attach_file': 'Attach files',
     'chat.uploading': 'Uploading…',
     'chat.remove_attachment': 'Remove attachment',
+    'chat.download_failed': 'Failed to download file',
 
     // Runs
     'runs.title': 'Runs',

@@ -11,7 +11,7 @@ import {
 } from '@carbon/react'
 import { Add, Attachment, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent, type UploadedFile } from './workspaceApi'
-import Markdown from './Markdown'
+import Markdown, { linkifyWorkspacePaths } from './Markdown'
 import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
 import ListFilter, { matchesFilter } from './ListFilter'
@@ -168,6 +168,17 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       setError(message(f))
     } finally {
       setUploading(false)
+    }
+  }
+
+  // Assistant messages reference agent-produced files by /workspace/... path;
+  // clicking such a link downloads the file from the project sandbox.
+  const onFileLink = async (path: string) => {
+    try {
+      await workspaceApi.downloadFile(project, path)
+    } catch (f) {
+      setError(t('chat.download_failed') ?? 'Failed to download file')
+      console.error(f)
     }
   }
 
@@ -769,7 +780,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     )}
 
                     {msg.content && msg.role === 'assistant' ? (
-                      <Markdown content={msg.content} />
+                      <Markdown content={linkifyWorkspacePaths(msg.content, project)} onFile={(path) => void onFileLink(path)} />
                     ) : msg.content ? (
                       <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                     ) : null}

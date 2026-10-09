@@ -526,6 +526,33 @@ export const workspaceApi = {
     return response.json()
   },
 
+  // File download from the project sandbox: chat messages carry /workspace/...
+  // paths produced by agents; this fetches them with auth and hands the blob
+  // to the browser as a download.
+  downloadFile: async (projectId: string, path: string): Promise<void> => {
+    const query = new URLSearchParams({ path })
+    const response = await fetch(`${KERNEL_API}/v1/workspace/projects/${projectId}/files?${query}`, {
+      headers: authHeaders(),
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      throw new Error(payload.error ?? `HTTP ${response.status}`)
+    }
+    const blob = await response.blob()
+    const disposition = response.headers.get('Content-Disposition') ?? ''
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i)
+    const fallback = path.split('/').filter(Boolean).pop() ?? 'download'
+    const name = match ? decodeURIComponent(match[1]) : fallback
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = name
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  },
+
   // Agents
   listAllAgents: () => request<{ agents: Agent[] }>('/v1/workspace/agents'),
   listAgentsByProject: (projectId: string) =>
