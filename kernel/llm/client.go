@@ -74,11 +74,15 @@ type Completion struct {
 // is not a normal completion.
 func (c Completion) Truncated() bool { return c.Finish == "length" }
 
-// Usage carries provider token accounting.
+// Usage carries provider token accounting. CachedTokens is the part of
+// PromptTokens served from the provider's prompt cache (OpenAI reports it in
+// usage.prompt_tokens_details.cached_tokens, Anthropic-compatible gateways in
+// usage.cache_read_input_tokens); 0 when the provider does not report it.
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	CachedTokens     int `json:"cached_tokens,omitempty"`
 }
 
 // Config is resolved from the environment.
@@ -191,6 +195,10 @@ type chatRequest struct {
 	// (json_object). Only set by explicit option: free-form chat turns must
 	// keep plain text.
 	ResponseFormat map[string]any `json:"response_format,omitempty"`
+	// PromptCacheKey asks the provider to route requests with the same key to
+	// one prompt cache entry. It is stable across the turns of a run (task id)
+	// so the append-only conversation prefix stays cacheable.
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
 // Option tunes a single completion call.
@@ -203,6 +211,12 @@ func JSONMode() Option {
 	return func(req *chatRequest) { req.ResponseFormat = map[string]any{"type": "json_object"} }
 }
 
+// WithPromptCacheKey routes same-key requests to one provider prompt cache
+// entry. Unsupported providers ignore unknown body fields.
+func WithPromptCacheKey(key string) Option {
+	return func(req *chatRequest) { req.PromptCacheKey = key }
+}
+
 type chatResponse struct {
 	Choices []struct {
 		Message struct {
@@ -212,11 +226,7 @@ type chatResponse struct {
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage *wireUsage `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 		Code    int    `json:"code"`
@@ -233,11 +243,38 @@ type chatStreamChunk struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage *wireUsage `json:"usage"`
+}
+
+// wireUsage is the OpenAI-compatible usage object. Cached input tokens live
+// in provider-specific fields: prompt_tokens_details.cached_tokens (OpenAI)
+// and cache_read_input_tokens (Anthropic-style gateways).
+type wireUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+	PromptDetails    *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	CacheReadInputTokens int `json:"cache_read_input_tokens"`
+}
+
+// toUsage folds the wire usage into the client-side accounting, picking the
+// cached-token figure from whichever field the provider populated.
+func (u *wireUsage) toUsage() Usage {
+	if u == nil {
+		return Usage{}
+	}
+	cached := u.CacheReadInputTokens
+	if u.PromptDetails != nil && u.PromptDetails.CachedTokens > cached {
+		cached = u.PromptDetails.CachedTokens
+	}
+	return Usage{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		TotalTokens:      u.TotalTokens,
+		CachedTokens:     cached,
+	}
 }
 
 // toolCallWireDelta is a partial tool call in a streaming chunk.
@@ -373,7 +410,7 @@ type ToolCallDelta struct {
 
 // StreamComplete sends a streaming request and calls onToken for each chunk.
 // The final Completion is returned with accumulated content and tool calls.
-func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools []ToolDef, onToken TokenCallback) (Completion, error) {
+func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools []ToolDef, onToken TokenCallback, options ...Option) (Completion, error) {
 	req := chatRequest{
 		Model:       c.cfg.Model,
 		Messages:    toRequestMessages(messages),
@@ -389,6 +426,9 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	}
 	for _, tool := range tools {
 		req.Tools = append(req.Tools, chatTool{Type: "function", Function: tool})
+	}
+	for _, option := range options {
+		option(&req)
 	}
 	payload, err := json.Marshal(req)
 	if err != nil {
@@ -441,11 +481,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		if len(chunk.Choices) == 0 {
 			// Might be a usage-only chunk
 			if chunk.Usage != nil {
-				usage = Usage{
-					PromptTokens:     chunk.Usage.PromptTokens,
-					CompletionTokens: chunk.Usage.CompletionTokens,
-					TotalTokens:      chunk.Usage.TotalTokens,
-				}
+				usage = chunk.Usage.toUsage()
 			}
 			continue
 		}
@@ -605,11 +641,7 @@ func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {
 		})
 	}
 	if decoded.Usage != nil {
-		completion.Usage = Usage{
-			PromptTokens:     decoded.Usage.PromptTokens,
-			CompletionTokens: decoded.Usage.CompletionTokens,
-			TotalTokens:      decoded.Usage.TotalTokens,
-		}
+		completion.Usage = decoded.Usage.toUsage()
 	}
 	completion.Provider = c.providerHost
 	completion.RequestRef = contentRef(payload)

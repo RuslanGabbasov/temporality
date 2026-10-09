@@ -262,11 +262,11 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 				a.Tokens.Publish(request.RunID, request.Turn, delta.Text, delta.Reasoning)
 			}
 			return false
-		}); err == nil {
+		}, llm.WithPromptCacheKey(request.PromptCacheKey)); err == nil {
 			return completion, nil
 		}
 	}
-	return client.Complete(ctx, request.Messages, request.Tools)
+	return client.Complete(ctx, request.Messages, request.Tools, llm.WithPromptCacheKey(request.PromptCacheKey))
 }
 
 func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResult, error) {

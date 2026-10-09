@@ -108,6 +108,59 @@ func TestCompleteToolChoiceOnlyWithTools(t *testing.T) {
 	}
 }
 
+func TestCompleteParsesCachedTokens(t *testing.T) {
+	responses := []string{
+		// OpenAI shape: usage.prompt_tokens_details.cached_tokens
+		`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":10,"total_tokens":110,"prompt_tokens_details":{"cached_tokens":80}}}`,
+		// Anthropic-style gateway shape: usage.cache_read_input_tokens
+		`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":10,"total_tokens":110,"cache_read_input_tokens":60}}`,
+	}
+	for _, body := range responses {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(body))
+		}))
+		client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+		completion, err := client.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil)
+		if err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		if completion.Usage.PromptTokens != 100 || completion.Usage.CachedTokens == 0 {
+			t.Errorf("usage = %+v, want prompt 100 with cached > 0", completion.Usage)
+		}
+		server.Close()
+	}
+}
+
+func TestPromptCacheKeySentWhenOptionGiven(t *testing.T) {
+	var sawKey any
+	hasKey := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		sawKey, hasKey = body["prompt_cache_key"]
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(okResponse))
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	if _, err := client.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if hasKey {
+		t.Errorf("prompt_cache_key sent without option: %v", sawKey)
+	}
+	if _, err := client.Complete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, WithPromptCacheKey("task-42")); err != nil {
+		t.Fatal(err)
+	}
+	if sawKey != "task-42" {
+		t.Errorf("prompt_cache_key = %v, want task-42", sawKey)
+	}
+}
+
 func TestCompleteRetriesTransientStatus(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

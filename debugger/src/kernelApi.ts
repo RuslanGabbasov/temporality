@@ -104,3 +104,19 @@ export function login(login: string, password: string): Promise<LoginResponse> {
 export function reconcile(body: ReconcileRequest): Promise<ReconcileReceipt> {
   return request('/v1/agent/operations/reconcile', { method: 'POST', body: JSON.stringify(body) })
 }
+
+// Run cost is aggregated by the kernel from model.completed events
+// (docs: cost accounting); cached prompt tokens are billed at half price.
+export interface RunCost {
+  run_id: string
+  project: string
+  total_cost_usd: number
+  total_prompt_tokens: number
+  total_cached_tokens?: number
+  total_completion_tokens: number
+  call_count: number
+}
+
+export function runCost(project: string, runID: string): Promise<RunCost> {
+  return request(`/v1/agent/cost/run?project=${encodeURIComponent(project)}&run=${encodeURIComponent(runID)}`)
+}

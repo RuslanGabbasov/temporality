@@ -56,13 +56,19 @@ func ParsePrices(raw string) (Config, error) {
 	return cfg, nil
 }
 
-// ModelCost returns the cost in dollars for a model call.
-func (c Config) ModelCost(model string, promptTokens, completionTokens int) float64 {
+// ModelCost returns the cost in dollars for a model call. Cached prompt tokens
+// are billed at half the prompt price (see kernel/agent cachedPriceFactor for
+// the same rule in budget accounting).
+func (c Config) ModelCost(model string, promptTokens, cachedTokens, completionTokens int) float64 {
 	price, ok := c.prices[model]
 	if !ok {
 		return 0
 	}
-	return (float64(promptTokens)/1000)*price.PromptPer1k + (float64(completionTokens)/1000)*price.CompPer1k
+	cached := min(cachedTokens, promptTokens)
+	fresh := promptTokens - cached
+	return (float64(fresh)/1000)*price.PromptPer1k +
+		(float64(cached)/1000)*price.PromptPer1k*0.5 +
+		(float64(completionTokens)/1000)*price.CompPer1k
 }
 
 // Price returns the configured price for a model and whether one exists.
@@ -87,6 +93,7 @@ type CallCost struct {
 	Model            string    `json:"model"`
 	Provider         string    `json:"provider"`
 	PromptTokens     int       `json:"prompt_tokens"`
+	CachedTokens     int       `json:"cached_tokens,omitempty"`
 	CompletionTokens int       `json:"completion_tokens"`
 	CostUSD          float64   `json:"cost_usd"`
 	At               time.Time `json:"at"`
@@ -98,6 +105,7 @@ type RunCost struct {
 	Project               string     `json:"project"`
 	TotalCostUSD          float64    `json:"total_cost_usd"`
 	TotalPromptTokens     int        `json:"total_prompt_tokens"`
+	TotalCachedTokens     int        `json:"total_cached_tokens,omitempty"`
 	TotalCompletionTokens int        `json:"total_completion_tokens"`
 	CallCount             int        `json:"call_count"`
 	Calls                 []CallCost `json:"calls,omitempty"`
@@ -108,6 +116,7 @@ type ProjectCost struct {
 	Project               string    `json:"project"`
 	TotalCostUSD          float64   `json:"total_cost_usd"`
 	TotalPromptTokens     int       `json:"total_prompt_tokens"`
+	TotalCachedTokens     int       `json:"total_cached_tokens,omitempty"`
 	TotalCompletionTokens int       `json:"total_completion_tokens"`
 	RunCount              int       `json:"run_count"`
 	Runs                  []RunCost `json:"runs,omitempty"`
@@ -219,14 +228,16 @@ func (a *CostAPI) aggregateRun(project, runID string, events []observation.Event
 			model, _ = ev.Data["provider"].(string)
 		}
 		prompt := toInt(ev.Data["prompt_tokens"])
+		cached := toInt(ev.Data["cached_tokens"])
 		comp := toInt(ev.Data["completion_tokens"])
 		provider, _ := ev.Data["provider"].(string)
-		costUSD := a.config.ModelCost(model, prompt, comp)
+		costUSD := a.config.ModelCost(model, prompt, cached, comp)
 		cc := CallCost{
 			RunID:            runID,
 			Model:            model,
 			Provider:         provider,
 			PromptTokens:     prompt,
+			CachedTokens:     cached,
 			CompletionTokens: comp,
 			CostUSD:          costUSD,
 			At:               ev.OccurredAt,
@@ -234,6 +245,7 @@ func (a *CostAPI) aggregateRun(project, runID string, events []observation.Event
 		cost.Calls = append(cost.Calls, cc)
 		cost.TotalCostUSD += costUSD
 		cost.TotalPromptTokens += prompt
+		cost.TotalCachedTokens += cached
 		cost.TotalCompletionTokens += comp
 		cost.CallCount++
 	}
@@ -254,14 +266,16 @@ func (a *CostAPI) aggregateProject(project string, events []observation.Event) P
 			model, _ = ev.Data["provider"].(string)
 		}
 		prompt := toInt(ev.Data["prompt_tokens"])
+		cached := toInt(ev.Data["cached_tokens"])
 		comp := toInt(ev.Data["completion_tokens"])
 		provider, _ := ev.Data["provider"].(string)
-		costUSD := a.config.ModelCost(model, prompt, comp)
+		costUSD := a.config.ModelCost(model, prompt, cached, comp)
 		cc := CallCost{
 			RunID:            runID,
 			Model:            model,
 			Provider:         provider,
 			PromptTokens:     prompt,
+			CachedTokens:     cached,
 			CompletionTokens: comp,
 			CostUSD:          costUSD,
 			At:               ev.OccurredAt,
@@ -269,6 +283,7 @@ func (a *CostAPI) aggregateProject(project string, events []observation.Event) P
 		byRun[runID].Calls = append(byRun[runID].Calls, cc)
 		byRun[runID].TotalCostUSD += costUSD
 		byRun[runID].TotalPromptTokens += prompt
+		byRun[runID].TotalCachedTokens += cached
 		byRun[runID].TotalCompletionTokens += comp
 		byRun[runID].CallCount++
 	}
@@ -276,6 +291,7 @@ func (a *CostAPI) aggregateProject(project string, events []observation.Event) P
 		pc.Runs = append(pc.Runs, *rc)
 		pc.TotalCostUSD += rc.TotalCostUSD
 		pc.TotalPromptTokens += rc.TotalPromptTokens
+		pc.TotalCachedTokens += rc.TotalCachedTokens
 		pc.TotalCompletionTokens += rc.TotalCompletionTokens
 		pc.RunCount++
 	}

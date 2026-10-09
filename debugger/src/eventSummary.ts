@@ -137,9 +137,10 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       return { icon: '⏳', label: t('runs.event.model_call'), detail: String(d.model ?? t('runs.event.started')), color: 'var(--tm-text-3)' }
     case 'model.completed': {
       const tokens = d.total_tokens ? `${d.total_tokens} tok` : ''
+      const cached = d.cached_tokens ? `↻ ${d.cached_tokens}` : ''
       const latency = d.latency_ms ? `${(Number(d.latency_ms) / 1000).toFixed(1)}s` : ''
       const calls = d.tool_call_count ? `${d.tool_call_count} tools` : ''
-      const parts = [tokens, latency, calls].filter(Boolean).join(' · ')
+      const parts = [tokens, cached, latency, calls].filter(Boolean).join(' · ')
       return { icon: '🧠', label: t('runs.event.model_response'), detail: parts, color: '#bb9af7' }
     }
     case 'model.failed': {

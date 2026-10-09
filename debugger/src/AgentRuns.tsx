@@ -23,6 +23,7 @@ import {
 } from '@carbon/react'
 import { Time, Play, ChevronDown, ChevronRight } from '@carbon/icons-react'
 import ListFilter, { matchesFilter } from './ListFilter'
+import { runCost, type RunCost } from './kernelApi'
 
 const KERNEL_API = '/kernel-api'
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -225,6 +226,7 @@ export default function AgentRuns({ project }: { project: string }) {
   const [agents, setAgents] = useState<Agent[]>([])
   const [timeline, setTimeline] = useState<ObservationEvent[]>([])
   const [trajectory, setTrajectory] = useState<any>(null)
+  const [runCostData, setRunCostData] = useState<RunCost | null>(null)
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
   const [reason, setReason] = useState('Reviewed in Agent Runs UI')
   const [busy, setBusy] = useState(false)
@@ -325,6 +327,9 @@ export default function AgentRuns({ project }: { project: string }) {
     if (!project.trim() || !run) return
     if (!silent) setBusy(true)
     setError('')
+    // Drop extras from the previously selected run while loading.
+    setTrajectory(null)
+    setRunCostData(null)
     try {
       const page = await observationApi.events(project.trim(), undefined, undefined, undefined, { run, limit: 500 })
       const root = page.events.find((event) => event.type === 'run.started')
@@ -358,6 +363,11 @@ export default function AgentRuns({ project }: { project: string }) {
         const tResp = await fetch(`${KERNEL_API}/v1/workspace/runs/${encodeURIComponent(run)}/trajectory`, { headers: authHeaders() })
         if (tResp.ok) setTrajectory(await tResp.json())
       } catch { /* ignore */ }
+      // Token/cost totals for the run (cached prompt tokens billed at half
+      // price); stays zero until model prices are configured.
+      try {
+        setRunCostData(await runCost(project.trim(), run))
+      } catch { /* totals stay hidden */ }
     } catch (failure) { setError(message(failure)) }
     finally { if (!silent) setBusy(false) }
   }, [project])
@@ -634,19 +644,28 @@ export default function AgentRuns({ project }: { project: string }) {
                   </Stack>
                 </Tile>
 
-                {/* Trajectory extraction */}
-                {trajectory && (
+                {/* Trajectory extraction & run cost totals */}
+                {(trajectory || runCostData) && (
                   <Tile>
                     <Heading style={{ fontSize: '0.875rem', marginBottom: '0.75rem' }}>{t('runs.trajectory') ?? 'Trajectory'}</Heading>
                     {/* Summary */}
                     <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.75rem', fontSize: '0.8rem' }}>
+                      {trajectory && (<>
                       <span><strong>{trajectory.summary?.total_turns ?? 0}</strong> {t('runs.turns') ?? 'turns'}</span>
                       <span><strong>{trajectory.summary?.total_tools ?? 0}</strong> {t('runs.tool_calls') ?? 'tool calls'}</span>
                       <span><strong>{trajectory.summary?.total_tokens ?? 0}</strong> {t('runs.tokens') ?? 'tokens'}</span>
                       <span><strong>{trajectory.summary?.knowledge_formed ?? 0}</strong> {t('runs.learned') ?? 'learned'}</span>
                       <span><strong>{trajectory.summary?.knowledge_recalled ?? 0}</strong> {t('runs.recalled') ?? 'recalled'}</span>
                       {trajectory.summary?.failed_tools > 0 && <span style={{ color: '#f7768e' }}><strong>{trajectory.summary.failed_tools}</strong> {t('runs.failed') ?? 'failed'}</span>}
+                      </>)}
+                      {runCostData && runCostData.total_cost_usd > 0 && (
+                        <span><strong>${runCostData.total_cost_usd.toFixed(4)}</strong> {t('runs.cost') ?? 'cost'}</span>
+                      )}
+                      {runCostData && (runCostData.total_cached_tokens ?? 0) > 0 && (
+                        <span>↻ <strong>{(runCostData.total_cached_tokens ?? 0).toLocaleString()}</strong> {t('runs.cached') ?? 'cached'}</span>
+                      )}
                     </div>
+                    {trajectory && (<>
                     {trajectory.summary?.tools_used?.length > 0 && (
                       <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
                         {trajectory.summary.tools_used.map((t: string) => <Tag key={t} type="blue" size="sm">{t}</Tag>)}
@@ -697,6 +716,7 @@ export default function AgentRuns({ project }: { project: string }) {
                         ))}
                       </div>
                     )}
+                    </>)}
                   </Tile>
                 )}
               </Stack>

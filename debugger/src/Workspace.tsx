@@ -11,6 +11,7 @@ import {
 } from '@carbon/react'
 import { Add, Attachment, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent, type UploadedFile } from './workspaceApi'
+import { runCost } from './kernelApi'
 import Markdown, { linkifyWorkspacePaths } from './Markdown'
 import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
@@ -45,6 +46,7 @@ interface ChatMessage {
   status?: string
   streamLines?: string[]
   attachments?: UploadedFile[]
+  totals?: string
 }
 
 interface Conversation {
@@ -613,7 +615,19 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const run = await workspaceApi.getRun(runId)
         if (terminal.includes(run.status)) {
           const answer = run.answer || run.error || 'No answer received'
-          updateMsg(convId, runId, { content: answer, status: run.status })
+          // Best-effort token/cost totals for the finished run; pricing may be
+          // unconfigured, and this must never block the answer itself.
+          let totals: string | undefined
+          try {
+            const cost = await runCost(project, runId)
+            const parts: string[] = []
+            const tokens = (cost.total_prompt_tokens ?? 0) + (cost.total_completion_tokens ?? 0)
+            if (tokens > 0) parts.push(t('chat.totals.tokens', { count: tokens.toLocaleString(locale) }))
+            if ((cost.total_cached_tokens ?? 0) > 0) parts.push(t('chat.totals.cached', { count: (cost.total_cached_tokens ?? 0).toLocaleString(locale) }))
+            if (cost.total_cost_usd > 0) parts.push(`$${cost.total_cost_usd.toFixed(4)}`)
+            if (parts.length) totals = parts.join(' · ')
+          } catch { /* totals stay hidden */ }
+          updateMsg(convId, runId, { content: answer, status: run.status, totals })
           return
         }
       } catch { /* transient — keep polling */ }
@@ -829,6 +843,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     {msg.runId && msg.status && msg.status !== 'running' && (
                       <div className={msg.role === 'user' ? 'chat-status chat-status-user' : 'chat-status'}>
                         <Tag type={STATUS_COLORS[msg.status] || 'gray'} size="sm">{msg.status}</Tag>
+                        {msg.role === 'assistant' && msg.totals && (
+                          <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem' }}>{msg.totals}</span>
+                        )}
                         {activeConv && (
                           <button
                             onClick={() => branchConversation(activeConv.id, i)}

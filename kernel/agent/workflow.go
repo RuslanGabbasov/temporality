@@ -172,6 +172,10 @@ type ModelRequest struct {
 	// empty RunID keeps the blocking non-streaming path (tests, helpers).
 	RunID string `json:"run_id,omitempty"`
 	Turn  int    `json:"turn,omitempty"`
+	// PromptCacheKey routes same-key requests to one provider prompt cache
+	// entry. Empty disables the hint. See the append-only invariant on the
+	// conversation history below.
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 }
 
 type ToolRequest struct {
@@ -339,7 +343,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			// last tool turn on more calls and the run ends with an empty handoff.
 			turnMessages = append(slices.Clone(messages), llm.Message{Role: "system", Content: "This is the final turn with tools. Complete only the remaining essential checks; your next message must be the final answer to the request."})
 		}
-		modelReq := ModelRequest{Model: input.Model, Messages: turnMessages, Tools: advertisedTools(&input), RunID: input.RunID, Turn: turn}
+		// Conversation history invariant: `messages` is strictly append-only —
+		// turns only append the assistant response and tool results, never
+		// rewrite or drop earlier entries. Provider prompt caching (keyed by
+		// PromptCacheKey) relies on the prefix being byte-stable across turns;
+		// mutating history would silently invalidate the cache and reset billing.
+		modelReq := ModelRequest{Model: input.Model, Messages: turnMessages, Tools: advertisedTools(&input), RunID: input.RunID, Turn: turn, PromptCacheKey: input.TaskID}
 		if err := emit(activityCtx, state, "model.started", map[string]any{"turn": turn, "model": input.Model}); err != nil {
 			return result, err
 		}
@@ -393,7 +402,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn}); err != nil {
 				return result, err
 			}
-			if err := emit(activityCtx, state, "run.completed", map[string]any{"turns": turn}); err != nil {
+			if err := emit(activityCtx, state, "run.completed", runCompletedTotals(turn, usedTokens+completion.Usage.TotalTokens, usedCostUSD+modelCallCostUSD(input, completion.Usage))); err != nil {
 				return result, err
 			}
 			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
@@ -1659,7 +1668,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	var finale llm.Completion
 	modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 10 * time.Minute, ScheduleToCloseTimeout: 11 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
-	if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn}).Get(ctx, &finale); err != nil {
+	if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, PromptCacheKey: input.TaskID}).Get(ctx, &finale); err != nil {
 		failureDetail := boundedFailureDetail(err)
 		if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "forced_finale": true, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
 			return result, eventErr
@@ -1681,7 +1690,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": finaleTurn, "forced_finale": true, "tool_calls": len(finale.ToolCalls)}); err != nil {
 		return result, err
 	}
-	runData := map[string]any{"status": finaleStatus, "turns": finaleTurn, "forced_finale": true, "reason": finaleStatus}
+	runData := map[string]any{"status": finaleStatus, "turns": finaleTurn, "forced_finale": true, "reason": finaleStatus,
+		"total_tokens": usedTokens + finale.Usage.TotalTokens, "cost_usd": usedCostUSD + modelCallCostUSD(input, finale.Usage)}
 	if result.Answer != "" {
 		runData["final_answer"] = true
 	}
@@ -1782,7 +1792,7 @@ func boundedFailureDetail(err error) string {
 // the exact request/response payloads. References are hashes only — payload
 // contents never enter the event stream.
 func modelObservability(completion llm.Completion) map[string]any {
-	return map[string]any{
+	data := map[string]any{
 		"provider":          completion.Provider,
 		"latency_ms":        completion.LatencyMs,
 		"prompt_tokens":     completion.Usage.PromptTokens,
@@ -1792,6 +1802,10 @@ func modelObservability(completion llm.Completion) map[string]any {
 		"truncated":         completion.Truncated(),
 		"attempts":          completion.Attempts,
 	}
+	if completion.Usage.CachedTokens > 0 {
+		data["cached_tokens"] = completion.Usage.CachedTokens
+	}
+	return data
 }
 
 // resultContentRef derives the sha256 content reference for an MCP tool
@@ -1922,10 +1936,25 @@ func policyStopReason(input RunInput, usedTokens int, usedCostUSD float64) strin
 
 // modelCallCostUSD prices one model call with the run-config-resolved prices.
 // Zero prices mean no price is configured: the USD budget degrades to the
-// token cap and this returns 0.
+// token cap and this returns 0. Cached input tokens are billed at half the
+// prompt price — a conservative default covering the common 10%..50% discounts
+// without extending the run config with a per-model cached price.
 func modelCallCostUSD(input RunInput, usage llm.Usage) float64 {
-	return (float64(usage.PromptTokens)/1000)*input.ModelPromptPricePer1k +
+	cached := min(usage.CachedTokens, usage.PromptTokens)
+	fresh := usage.PromptTokens - cached
+	return (float64(fresh)/1000)*input.ModelPromptPricePer1k +
+		(float64(cached)/1000)*input.ModelPromptPricePer1k*cachedPriceFactor +
 		(float64(usage.CompletionTokens)/1000)*input.ModelCompPricePer1k
+}
+
+// cachedPriceFactor is the billing factor applied to cached prompt tokens.
+const cachedPriceFactor = 0.5
+
+// runCompletedTotals shapes the normal-completion run.completed payload: turn
+// count plus the run's token and cost totals (all model calls, finale
+// included) so UIs can show what the run spent without replaying events.
+func runCompletedTotals(turns, totalTokens int, costUSD float64) map[string]any {
+	return map[string]any{"turns": turns, "total_tokens": totalTokens, "cost_usd": costUSD}
 }
 
 // policySafeTools are exempt from policy-mandated tool approval
