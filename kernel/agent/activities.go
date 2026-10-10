@@ -1014,9 +1014,23 @@ type KnowledgeLookupQuery struct {
 }
 
 type Hint struct {
-	KnowledgeID string `json:"knowledge_id"`
-	HintID      string `json:"hint_id"`
-	Proposition string `json:"proposition"`
-	State       string `json:"state"`
-	Caution     string `json:"caution,omitempty"`
+	KnowledgeID string   `json:"knowledge_id"`
+	HintID      string   `json:"hint_id"`
+	Proposition string   `json:"proposition"`
+	State       string   `json:"state"`
+	MatchedBy   []string `json:"matched_by"`
+	Caution     string   `json:"caution,omitempty"`
+}
+
+// toObservationHints mirrors the wire hints into the observation type so the
+// shared renderer (budgets, cue contract) works on the runtime path.
+func toObservationHints(hints []Hint) []observation.Hint {
+	out := make([]observation.Hint, 0, len(hints))
+	for _, hint := range hints {
+		out = append(out, observation.Hint{
+			KnowledgeID: hint.KnowledgeID, HintID: hint.HintID, Proposition: hint.Proposition,
+			State: hint.State, MatchedBy: hint.MatchedBy, Caution: hint.Caution,
+		})
+	}
+	return out
 }

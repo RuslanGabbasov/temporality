@@ -299,6 +299,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		return result, err
 	}
 	var priorHints []Hint
+	var hintBlock string
 	// A team program run has no model turns at the root, so prior-knowledge
 	// hints would never be consumed (docs/agent-teams.md §9).
 	if input.Team == nil && !input.SkipKnowledge {
@@ -310,7 +311,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			priorHints = nil
 		} else {
-			if err := emit(activityCtx, state, "memory.read", map[string]any{"hint_count": len(priorHints)}); err != nil {
+			// One budgeted block instead of per-hint messages: the model sees a
+			// compact cue list with the knowledge_id contract, not a wall of prose.
+			rendered := observation.RenderHintBlock(toObservationHints(priorHints), observation.DefaultRenderOptions())
+			hintBlock = rendered.Block
+			if err := emit(activityCtx, state, "memory.read", map[string]any{"hint_count": len(priorHints), "primed_hints": rendered.Kept, "primed_tokens": rendered.Tokens, "dropped_hints": rendered.Dropped}); err != nil {
 				return result, err
 			}
 		}
@@ -323,8 +328,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		systemPrompt += "\n\n" + skillSection
 	}
 	messages := []llm.Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: input.Prompt}}
-	for _, hint := range priorHints {
-		messages = append(messages, llm.Message{Role: "system", Content: "Temporality context (prior knowledge, inspect provenance): " + hint.Proposition + " [" + hint.State + "] " + hint.Caution})
+	if hintBlock != "" {
+		messages = append(messages, llm.Message{Role: "system", Content: hintBlock})
 	}
 	// Hint usage is NOT recorded here: injection is an offer, not a use. The
 	// honest used/ignored signal is derived from the run's own output after it
