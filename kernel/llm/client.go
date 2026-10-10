@@ -191,6 +191,10 @@ type chatRequest struct {
 	MaxTokens         int            `json:"max_tokens"`
 	Reasoning         map[string]any `json:"reasoning,omitempty"`
 	Stream            bool           `json:"stream,omitempty"`
+	// StreamOptions asks OpenAI-compatible providers to include token usage
+	// in the final streaming chunk. Without it many gateways omit usage from
+	// SSE responses entirely, and token accounting silently reads zero.
+	StreamOptions *streamOptions `json:"stream_options,omitempty"`
 	// ResponseFormat asks OpenAI-compatible providers for structured output
 	// (json_object). Only set by explicit option: free-form chat turns must
 	// keep plain text.
@@ -215,6 +219,11 @@ func JSONMode() Option {
 // entry. Unsupported providers ignore unknown body fields.
 func WithPromptCacheKey(key string) Option {
 	return func(req *chatRequest) { req.PromptCacheKey = key }
+}
+
+// streamOptions is the OpenAI streaming options object.
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type chatResponse struct {
@@ -412,12 +421,13 @@ type ToolCallDelta struct {
 // The final Completion is returned with accumulated content and tool calls.
 func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools []ToolDef, onToken TokenCallback, options ...Option) (Completion, error) {
 	req := chatRequest{
-		Model:       c.cfg.Model,
-		Messages:    toRequestMessages(messages),
-		Temperature: c.cfg.Temperature,
-		MaxTokens:   c.cfg.MaxOutputTokens,
-		Reasoning:   reasoningRequest(c.cfg.Reasoning),
-		Stream:      true,
+		Model:         c.cfg.Model,
+		Messages:      toRequestMessages(messages),
+		Temperature:   c.cfg.Temperature,
+		MaxTokens:     c.cfg.MaxOutputTokens,
+		Reasoning:     reasoningRequest(c.cfg.Reasoning),
+		Stream:        true,
+		StreamOptions: &streamOptions{IncludeUsage: true},
 	}
 	if len(tools) > 0 {
 		req.ToolChoice = "auto"
@@ -478,11 +488,12 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
 		}
+		// Usage may ride either a usage-only chunk (empty choices) or the final
+		// finish_reason chunk depending on the gateway — accept both.
+		if chunk.Usage != nil {
+			usage = chunk.Usage.toUsage()
+		}
 		if len(chunk.Choices) == 0 {
-			// Might be a usage-only chunk
-			if chunk.Usage != nil {
-				usage = chunk.Usage.toUsage()
-			}
 			continue
 		}
 		choice := chunk.Choices[0]

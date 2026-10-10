@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"fmt"
 	"context"
 	"encoding/json"
 	"errors"
@@ -270,5 +271,59 @@ func TestJSONModeFallsBackOnRejection(t *testing.T) {
 	}
 	if _, still := requests[1]["response_format"]; still {
 		t.Errorf("retry still carries response_format: %v", requests[1]["response_format"])
+	}
+}
+
+func TestStreamCompleteRequestsAndParsesUsage(t *testing.T) {
+	var includeUsage bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if opts, ok := body["stream_options"].(map[string]any); ok {
+			includeUsage, _ = opts["include_usage"].(bool)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"he\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"llo\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":40,\"completion_tokens\":5,\"total_tokens\":45}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	completion, err := client.StreamComplete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("StreamComplete: %v", err)
+	}
+	if !includeUsage {
+		t.Error("stream_options.include_usage was not requested")
+	}
+	if completion.Content != "hello" {
+		t.Errorf("content = %q, want hello", completion.Content)
+	}
+	// Usage on the finish_reason chunk (choices non-empty) must be honored.
+	if completion.Usage.TotalTokens != 45 {
+		t.Errorf("usage = %+v, want total 45", completion.Usage)
+	}
+}
+
+func TestStreamCompleteParsesUsageOnlyChunk(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n")
+		fmt.Fprint(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10,\"prompt_tokens_details\":{\"cached_tokens\":4}}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	completion, err := client.StreamComplete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("StreamComplete: %v", err)
+	}
+	if completion.Usage.TotalTokens != 10 || completion.Usage.CachedTokens != 4 {
+		t.Errorf("usage = %+v, want total 10 cached 4", completion.Usage)
 	}
 }
