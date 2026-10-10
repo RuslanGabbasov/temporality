@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/temporality-project/temporality/observation"
 )
@@ -119,6 +120,79 @@ func TestFetchKnowledgeByIDsUpstreamError(t *testing.T) {
 	}
 	if found != nil || missing != nil {
 		t.Errorf("found/missing = %v/%v, want nil on error", found, missing)
+	}
+}
+
+func TestFetchKnowledgeBatchDeadline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(500 * time.Millisecond)
+		http.Error(w, "slow journal", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	// The outer 100ms deadline fires before any upstream response arrives, so
+	// the batch must return an error instead of hanging for the full loop.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	var err error
+	go func() {
+		defer close(done)
+		_, _, err = fetchKnowledgeByIDs(ctx, server.Client(), server.URL, "", "proj", []string{"kn-1"})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fetchKnowledgeByIDs did not return under the outer deadline")
+	}
+	if err == nil {
+		t.Fatal("fetchKnowledgeByIDs succeeded, want deadline error")
+	}
+}
+
+func TestFetchUpstreamErrorTruncated(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, strings.Repeat("x", 1000000), http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	_, _, err := fetchKnowledgeByIDs(context.Background(), server.Client(), server.URL, "", "proj", []string{"kn-1"})
+	if err == nil {
+		t.Fatal("fetchKnowledgeByIDs succeeded, want error on upstream 500")
+	}
+	message := err.Error()
+	if !strings.HasPrefix(message, "knowledge") {
+		t.Errorf("error %q does not start with %q", message, "knowledge")
+	}
+	if runeCount := len([]rune(message)); runeCount >= 1200 {
+		t.Errorf("error length = %d runes, want < 1200", runeCount)
+	}
+}
+
+func TestFetchFiltersForeignProject(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSONForTest(w, map[string]any{
+			"knowledge": []observation.Knowledge{{
+				ID:      "X",
+				Project: "other",
+				State:   "confirmed",
+			}},
+			"count": 1,
+		})
+	}))
+	defer server.Close()
+
+	found, missing, err := fetchKnowledgeByIDs(context.Background(), server.Client(), server.URL, "", "proj", []string{"X"})
+	if err != nil {
+		t.Fatalf("fetchKnowledgeByIDs: %v", err)
+	}
+	if len(found) != 0 {
+		t.Errorf("found = %v, want empty: foreign-project items must be dropped", found)
+	}
+	if len(missing) != 0 {
+		t.Errorf("missing = %v, want empty: foreign-project items are an anomaly, not a miss", missing)
 	}
 }
 
