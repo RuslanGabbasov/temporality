@@ -9,15 +9,16 @@
 |------|----------|------|
 | Образ | только digest `@sha256:…`, mutable-теги запрещены; `--pull=never` — образ не может «уехать» под песочницей | `TestSandboxImageMustUseSHA256Digest`, `TestExecuteCapturesCommandAndAlwaysRemovesContainer` |
 | Сеть | `--network=none` по умолчанию; `bridge` только при явной возможности (agent.network_access / capability network / run policy) | `TestNetworkDefaultsToNoneAndBridgeIsExplicit` |
-| Credentials | в контейнер не передаётся **ничего** из окружения хоста: только `HOME=/scratch`, `TMPDIR=/scratch`; токены ядра и ключи провайдеров физически не попадают в argv | `TestEnvironmentCarriesNoCredentials` |
-| Файловая система | корень контейнера `--read-only`; единственный mount — workspace (`:ro` для reviewer/qa и read-only агентов, иначе `:rw`); никаких `--mount`/`-v` кроме workspace | `TestWorkspaceIsTheOnlyVolumeMount`, `TestDockerArgumentsEnforceIsolation` |
+| Credentials | в контейнер не передаётся **ничего** из окружения хоста: только `HOME=/scratch`, `TMPDIR=/scratch` и пути кэшей `GOCACHE`/`GOMODCACHE`/`GOTMPDIR` (пути, не секреты); токены ядра и ключи провайдеров физически не попадают в argv | `TestEnvironmentCarriesNoCredentials` |
+| Файловая система | корень контейнера `--read-only`; mount'ы — workspace (`:ro` для reviewer/qa и read-only агентов, иначе `:rw`) и per-project кэш `/cache` (см. ниже); никаких `--mount`/`-v` кроме них | `TestWorkspaceIsTheOnlyVolumeMount`, `TestProjectCacheMountsPerProjectUnderRoot`, `TestDockerArgumentsEnforceIsolation` |
+| /cache | второй mount: `{KERNEL_SANDBOX_ROOT}/cache/{project}` → `/cache:rw` — персистентный кэш тулчейнов (GOCACHE, GOMODCACHE) вне git-воркспейса, чтобы `git clean` и пересоздание проекта не убивали сборочные кэши; остаётся `:rw` даже для read-only воркспейса, потому что не содержит файлов проекта | `TestProjectCacheMountsPerProjectUnderRoot` |
 | /tmp | tmpfs `rw,noexec,nosuid,size=64m` — временные файлы без исполнения | `TestDockerArgumentsEnforceIsolation` |
 | /scratch | tmpfs `rw,exec,nosuid` (по умолчанию 512m, `KERNEL_SANDBOX_SCRATCH_SIZE`) — единственная исполняемая зона для сборки/тестов; `HOME`/`TMPDIR` указывают на неё | `TestDockerArgumentsEnforceIsolation`, `TestScratchSizeMustBeAPositiveByteSize` |
 | Privileges | `--cap-drop=ALL`, `--security-opt=no-new-privileges`, без `--privileged` | `TestDockerArgumentsEnforceIsolation` |
 | Identity | непривилегированный `--user uid:gid` хоста (владелец файлов workspace) | `TestDockerArgumentsEnforceIsolation` |
 | Resources | `--pids-limit`, `--memory`/`--memory-swap` (swap = memory, т.е. без доп. swap), `--cpus`, `--ulimit nofile` | `TestDockerArgumentsEnforceIsolation` |
-| Workspace containment | workspace обязан существовать, быть каталогом внутри `KERNEL_SANDBOX_ROOT` (после symlink-резолва); symlink-побег отклоняется; `:`/`,` в пути запрещены (docker-инъекция опций) | `TestWorkspaceMustStayWithinConfiguredRoot` |
-| Команда | argv валидируется: непустой, ограничение длины аргументов; вывод ограничен буфером с отметкой обрезки | `TestValidateCommandBoundsArguments`, `TestOutputBufferTruncatesWithoutBlockingWriter` |
+| Workspace containment | workspace обязан существовать, быть каталогом внутри `KERNEL_SANDBOX_ROOT` (после symlink-резолва); symlink-побег отклоняется; `:`/`,` в пути запрещены (docker-инъекция опций). Нативные файловые инструменты (read_file/write_file/edit_file) идут мимо контейнера и проверяют containment сами — включая symlink-побег и абсолютные пути | `TestWorkspaceMustStayWithinConfiguredRoot`, `TestFileToolsPathsStayInsideWorkspace` |
+| Команда | argv валидируется: непустой, до 128 аргументов, аргумент до 32КБ, суммарно до 128КБ (большие файловые полезные нагрузки — через нативный write_file, без шелла); вывод ограничен буфером с отметкой обрезки | `TestValidateCommandBoundsArguments`, `TestOutputBufferTruncatesWithoutBlockingWriter` |
 | Время | таймаут запроса (по умолчанию/максимум с клампом) через context; контейнер всегда удаляется `rm --force`, включая упавший | `TestExecuteEnforcesRequestTimeout`, `TestExecuteCapturesCommandAndAlwaysRemovesContainer` |
 
 ## Известные границы

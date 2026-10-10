@@ -20,7 +20,12 @@ import (
 
 const (
 	maxCommandArgs = 128
-	maxArgBytes    = 8192
+	// maxArgBytes keeps any single argv element within exec() limits while
+	// leaving room for substantial inline scripts (sed/awk programs, small
+	// heredocs). File payloads belong to the native write_file tool, which has
+	// no shell argument cap.
+	maxArgBytes    = 32 << 10
+	maxTotalArgs   = 128 << 10
 	maxOutputBytes = 64 << 10
 	defaultTimeout = 60
 	maxTimeout     = 600
@@ -237,8 +242,42 @@ func (d *Docker) arguments(workspace string, request Request, name string) []str
 	if network == "" {
 		network = "none"
 	}
-	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=" + network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(d.PIDs), "--memory", d.Memory, "--memory-swap", d.Memory, "--cpus", d.CPUs, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "--tmpfs", "/scratch:rw,exec,nosuid,size=" + scratchSize, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode, d.Image}
+	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=" + network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(d.PIDs), "--memory", d.Memory, "--memory-swap", d.Memory, "--cpus", d.CPUs, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "--tmpfs", "/scratch:rw,exec,nosuid,size=" + scratchSize, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode}
+	// Per-project persistent cache: a host directory under the sandbox root,
+	// outside any git workspace, so `git clean` and workspace resets cannot
+	// destroy toolchain caches. Toolchains see it at /cache; it stays writable
+	// even for read-only workspaces because it never carries project files.
+	if cache := d.projectCacheDir(workspace); cache != "" {
+		args = append(args, "--volume", cache+":/cache:rw",
+			"--env", "GOCACHE=/cache/go-build",
+			"--env", "GOMODCACHE=/cache/go-mod",
+			"--env", "GOTMPDIR=/scratch")
+	}
+	args = append(args, d.Image)
 	return append(args, request.Command...)
+}
+
+// projectCacheDir returns the host directory mounted at /cache for the
+// workspace's project, creating its toolchain subdirectories when needed.
+// Empty means "no cache mount": the runner has no root (unit-test harness) or
+// the workspace lives outside it (defensive; Execute resolves workspaces
+// first, so this never triggers in production).
+func (d *Docker) projectCacheDir(workspace string) string {
+	if d.Root == "" || workspace == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(d.Root, workspace)
+	if err != nil || rel == ".." || rel == "." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	// The workspace base name is the project id; per-project caches never mix.
+	cache := filepath.Join(d.Root, "cache", filepath.Base(workspace))
+	for _, sub := range []string{"go-build", "go-mod"} {
+		if err := os.MkdirAll(filepath.Join(cache, sub), 0o777); err != nil {
+			return ""
+		}
+	}
+	return cache
 }
 
 func containerName() (string, error) {
@@ -277,7 +316,7 @@ func validateCommand(args []string) error {
 		}
 		total += len(arg)
 	}
-	if total > 32<<10 {
+	if total > maxTotalArgs {
 		return errors.New("command exceeds total size limit")
 	}
 	return nil

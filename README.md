@@ -160,6 +160,13 @@ Living skills: инструменты `skill_search` / `skill_inspect` /
 `KERNEL_SANDBOX_ROOT` + `KERNEL_SANDBOX_IMAGE` — изолированный контейнер
 для `run_command`: no network (или `bridge` если `network_access: true`),
 read-only root, dropped capabilities, resource limits, bounded output.
+Персистентный per-project кэш тулчейнов монтируется в `/cache`
+(GOCACHE/GOMODCACHE) — переживает `git clean` и пересоздание воркспейса.
+
+Нативные файловые инструменты `write_file` / `read_file` / `edit_file`
+выполняются на стороне kernel прямо по воркспейсу: без шелла, без лимитов
+аргументов команды, с атомарной записью и symlink-проверками. Правки файлов
+предпочтительны им, а не heredoc'ами через `run_command`.
 
 Образ запинен по sha256-digest и запускается с `--pull=never`
 (`docs/sandbox-security-matrix.md`), поэтому локальный docker должен содержать

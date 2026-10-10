@@ -184,6 +184,9 @@ func TestEnvironmentCarriesNoCredentials(t *testing.T) {
 }
 
 func TestWorkspaceIsTheOnlyVolumeMount(t *testing.T) {
+	// Note: with a configured Root a second mount appears — the per-project
+	// /cache volume covered by TestProjectCacheMountsPerProjectUnderRoot. This
+	// test pins the baseline: no Root, no cache, workspace stays the only mount.
 	runner := &Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Memory: "1g", CPUs: "2", PIDs: 128}
 	for _, request := range []Request{{Command: []string{"ls"}}, {Command: []string{"ls"}, ReadOnly: true}} {
 		args := runner.arguments("/srv/work/repo", request, "n")
@@ -225,6 +228,42 @@ func TestExecuteEnforcesRequestTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("timeout not enforced, took %s", elapsed)
+	}
+}
+
+// The per-project cache: a second host mount under the sandbox root, kept
+// outside the git workspace so toolchain caches survive `git clean` and
+// workspace resets. It must appear for in-root workspaces and never for
+// foreign ones.
+func TestProjectCacheMountsPerProjectUnderRoot(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "projects", "demo")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &Docker{Root: root, Image: "sandbox@sha256:" + strings.Repeat("a", 64), Memory: "1g", CPUs: "2", PIDs: 128}
+	args := runner.arguments(workspace, Request{Command: []string{"ls"}, ReadOnly: true}, "n")
+	joined := strings.Join(args, " ")
+	cache := filepath.Join(root, "cache", "demo")
+	for _, required := range []string{
+		"--volume " + cache + ":/cache:rw",
+		"--env GOCACHE=/cache/go-build",
+		"--env GOMODCACHE=/cache/go-mod",
+		"--env GOTMPDIR=/scratch",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Errorf("docker args missing %q: %s", required, joined)
+		}
+	}
+	if info, err := os.Stat(filepath.Join(cache, "go-build")); err != nil || !info.IsDir() {
+		t.Fatalf("cache subdirectory must exist: %v", err)
+	}
+	// Foreign workspaces and runners without a root get no cache mount.
+	if runner.projectCacheDir(filepath.Join(t.TempDir(), "other")) != "" {
+		t.Fatal("workspace outside the root must not get a cache mount")
+	}
+	if (&Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64)}).projectCacheDir(workspace) != "" {
+		t.Fatal("runner without a root must not mount a cache")
 	}
 }
 
