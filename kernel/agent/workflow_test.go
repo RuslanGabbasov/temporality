@@ -2018,6 +2018,10 @@ func TestKnowledgeExtractionWorkflowProposesAndStrengthens(t *testing.T) {
 			{HintID: "hint-1", KnowledgeID: "ext/hint", Proposition: "The fetch command accepts a -limit flag.", Used: true, MatchedBy: []string{"term:fetch", "term:limit"}},
 			{HintID: "hint-2", KnowledgeID: "ext/other", Proposition: "The indexer skips vendored directories.", Used: false},
 		},
+		HintOutcomes: []HintOutcome{
+			{HintID: "hint-1", KnowledgeID: "ext/hint", Outcome: "helpful"},
+			{HintID: "hint-2", KnowledgeID: "ext/other", Outcome: "harmful"},
+		},
 	}, nil)
 	env.RegisterActivityWithOptions(func(_ context.Context, query KnowledgeLookupQuery) (KnowledgeLookupResult, error) {
 		require.Equal(t, existingID, query.KnowledgeID)
@@ -2031,6 +2035,7 @@ func TestKnowledgeExtractionWorkflowProposesAndStrengthens(t *testing.T) {
 	recorded := *recordedPtr
 
 	var proposed, confirmed, started, completed, hintUsed, hintIgnored *observation.Event
+	var hintOutcomes []*observation.Event
 	for index := range recorded {
 		event := &recorded[index]
 		switch event.Type {
@@ -2050,6 +2055,8 @@ func TestKnowledgeExtractionWorkflowProposesAndStrengthens(t *testing.T) {
 			hintUsed = event
 		case "hint.ignored":
 			hintIgnored = event
+		case "hint.outcome":
+			hintOutcomes = append(hintOutcomes, event)
 		}
 	}
 	require.NotNil(t, started, "knowledge.extraction.started missing")
@@ -2091,6 +2098,18 @@ func TestKnowledgeExtractionWorkflowProposesAndStrengthens(t *testing.T) {
 	require.NotNil(t, hintIgnored, "hint.ignored missing")
 	require.Equal(t, "hint-2", hintIgnored.Data["hint_id"])
 	require.Equal(t, "hint-usage-lexical.v1", hintIgnored.Data["matcher"])
+
+	// Judged outcomes are separate events: used ≠ helpful (§11), the verdict
+	// is the extractor's, and it feeds the B4 ranking factor via the journal.
+	require.Len(t, hintOutcomes, 2)
+	require.Equal(t, "hint-1", hintOutcomes[0].Data["hint_id"])
+	require.Equal(t, "ext/hint", hintOutcomes[0].Data["knowledge_id"])
+	require.Equal(t, "helpful", hintOutcomes[0].Data["outcome"])
+	require.Equal(t, "extraction-judgment.v1", hintOutcomes[0].Data["matcher"])
+	require.Equal(t, "harmful", hintOutcomes[1].Data["outcome"])
+	for _, outcome := range hintOutcomes {
+		require.NoError(t, outcome.Validate())
+	}
 }
 
 func TestKnowledgeExtractionWorkflowChallengesContradictedAndAged(t *testing.T) {

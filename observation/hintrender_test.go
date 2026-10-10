@@ -86,7 +86,15 @@ func TestRenderHintBlockDeterministic(t *testing.T) {
 	hints := renderFixtureHints()
 	first := RenderHintBlock(hints, DefaultRenderOptions())
 	second := RenderHintBlock(hints, DefaultRenderOptions())
-	if first != second {
+	if first.Block != second.Block || first.Tokens != second.Tokens || first.Kept != second.Kept || first.Dropped != second.Dropped {
 		t.Fatal("identical input and options must render identical blocks")
+	}
+	if len(first.KeptIDs) != len(second.KeptIDs) {
+		t.Fatal("identical input and options must keep the same ids")
+	}
+	for i := range first.KeptIDs {
+		if first.KeptIDs[i] != second.KeptIDs[i] {
+			t.Fatalf("kept id %d differs: %q vs %q", i, first.KeptIDs[i], second.KeptIDs[i])
+		}
 	}
 }

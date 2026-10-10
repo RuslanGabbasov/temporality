@@ -1,0 +1,97 @@
+[
+  {
+    "name": "dedup-exact-duplicate",
+    "query": {
+      "text": "run the migrations",
+      "entities": ["migrations"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-mig-a", "proposition": "Run   gofmt before committing the migration files", "kind": "claim", "entities": ["migrations"], "state": "confirmed"},
+      {"id": "k-mig-b", "proposition": "run gofmt before committing the migration files", "kind": "claim", "entities": ["migrations"], "state": "confirmed"}
+    ],
+    "useful": ["k-mig-a"],
+    "stale": [],
+    "expected_order": ["k-mig-a"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "dedup-distinct-same-topic",
+    "query": {
+      "text": "run the integration tests",
+      "entities": ["tests"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-t-1", "proposition": "Integration tests require the docker daemon running before the suite starts", "kind": "claim", "entities": ["tests"], "state": "confirmed"},
+      {"id": "k-t-2", "proposition": "Flaky retry tests must be quarantined with a label so the suite stays green", "kind": "claim", "entities": ["tests"], "state": "confirmed"}
+    ],
+    "useful": ["k-t-1", "k-t-2"],
+    "stale": [],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "dedup-topic-cap",
+    "query": {
+      "text": "configure the gateway authentication",
+      "entities": ["iam"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-auth-1", "proposition": "The gateway issues short-lived tokens for service accounts", "kind": "claim", "entities": ["iam"], "topics": ["auth"], "state": "confirmed"},
+      {"id": "k-auth-2", "proposition": "Token refresh must use the rotation endpoint, never reissue", "kind": "claim", "entities": ["iam"], "topics": ["auth"], "state": "confirmed"},
+      {"id": "k-auth-3", "proposition": "Revocation propagates to the edge cache within five seconds", "kind": "claim", "entities": ["iam"], "topics": ["auth"], "state": "confirmed"}
+    ],
+    "useful": ["k-auth-1", "k-auth-2"],
+    "stale": [],
+    "expected_order": ["k-auth-1", "k-auth-2"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "dedup-topic-cap-not-theme-exile",
+    "query": {
+      "text": "harden the gateway authentication rollout",
+      "entities": ["iam"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-auth-1", "proposition": "The gateway issues short-lived tokens for service accounts", "kind": "claim", "entities": ["iam"], "topics": ["auth"], "state": "confirmed"},
+      {"id": "k-auth-2", "proposition": "Token refresh must use the rotation endpoint, never reissue", "kind": "claim", "entities": ["iam"], "topics": ["auth"], "state": "confirmed"},
+      {"id": "k-auth-4", "proposition": "Audit log entries retain the caller identity and scopes", "kind": "claim", "entities": ["iam"], "state": "confirmed"}
+    ],
+    "useful": ["k-auth-1", "k-auth-2", "k-auth-4"],
+    "stale": [],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "dedup-russian-wording",
+    "query": {
+      "text": "настроить миграции базы данных",
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-ru-mig", "proposition": "Миграции базы запускаются командой migrate up из корня репозитория", "kind": "claim", "state": "confirmed"},
+      {"id": "k-ru-tx", "proposition": "Миграции применяются в одной транзакции и откатываются целиком", "kind": "claim", "state": "confirmed"},
+      {"id": "k-cms-login", "proposition": "The marketing site uses a shared CMS login for editors", "kind": "claim", "state": "confirmed"}
+    ],
+    "useful": ["k-ru-mig"],
+    "stale": [],
+    "expected_order": ["k-ru-mig"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "dedup-russian-exact-duplicate",
+    "query": {
+      "text": "запустить миграции базы",
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-ru-a", "proposition": "Миграции базы требуют ручной запуск на проде", "kind": "claim", "state": "confirmed"},
+      {"id": "k-ru-b", "proposition": "миграции базы требуют ручной запуск на проде", "kind": "claim", "state": "confirmed"}
+    ],
+    "useful": ["k-ru-a"],
+    "stale": [],
+    "expected_order": ["k-ru-a"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  }
+]

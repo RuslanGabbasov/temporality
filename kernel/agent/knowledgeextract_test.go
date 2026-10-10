@@ -381,14 +381,14 @@ func TestExtractKnowledgeDropsDuplicatesOfExistingKnowledge(t *testing.T) {
 
 func TestRenderExtractionContextCitesEventIDs(t *testing.T) {
 	trajectory := ExtractTrajectory(toEventLikes(extractionRunEvents("run-ctx")))
-	rendered := renderExtractionContext(KnowledgeExtractRequest{Project: "repo", RunID: "run-ctx", Prompt: "run the report"}, trajectory, nil)
+	rendered := renderExtractionContext(KnowledgeExtractRequest{Project: "repo", RunID: "run-ctx", Prompt: "run the report"}, trajectory, nil, nil)
 	require.Contains(t, rendered, "run_command [failed] r/event/000004")
 	require.Contains(t, rendered, "report failed: out/ directory missing")
 	require.Contains(t, rendered, "Final answer:")
 	require.Contains(t, rendered, "The report command needs an existing out directory.")
 
 	existing := []existingKnowledge{{ID: "ext/known", Proposition: "The report command writes its output to out/report.txt."}}
-	rendered = renderExtractionContext(KnowledgeExtractRequest{Project: "repo", RunID: "run-ctx"}, trajectory, existing)
+	rendered = renderExtractionContext(KnowledgeExtractRequest{Project: "repo", RunID: "run-ctx"}, trajectory, existing, nil)
 	require.Contains(t, rendered, "- [ext/known] The report command writes its output to out/report.txt.")
 	require.Contains(t, rendered, "contradicts")
 }
@@ -399,4 +399,52 @@ func TestParseExtractionCandidatesReadsContradicts(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, parsed.Candidates, 1)
 	require.Equal(t, "ext/old", parsed.Candidates[0].Contradicts)
+}
+
+func TestValidateHintOutcomesKeepsOnlyRealOffers(t *testing.T) {
+	offered := []offeredHint{
+		{HintID: "h1", KnowledgeID: "ext/1", Proposition: "The fetch command accepts a -limit flag."},
+		{HintID: "h2", KnowledgeID: "ext/2", Proposition: "The indexer skips vendored directories."},
+	}
+	raw := []extractionHintOutcome{
+		{HintID: "h1", Outcome: "helpful"},
+		// Same hint judged twice — the second verdict is dropped.
+		{HintID: "h1", Outcome: "harmful"},
+		// A hint this run never saw: hallucinated id, must not survive.
+		{HintID: "h-ghost", Outcome: "helpful"},
+		// Not a verdict the contract knows.
+		{HintID: "h2", Outcome: "neutral"},
+		{HintID: "h2", Outcome: "harmful"},
+	}
+	outcomes := validateHintOutcomes(raw, offered)
+	require.Len(t, outcomes, 2)
+	require.Equal(t, HintOutcome{HintID: "h1", KnowledgeID: "ext/1", Outcome: "helpful"}, outcomes[0])
+	require.Equal(t, HintOutcome{HintID: "h2", KnowledgeID: "ext/2", Outcome: "harmful"}, outcomes[1])
+
+	// No offers means nothing to judge — even a full list of verdicts.
+	require.Empty(t, validateHintOutcomes(raw, nil))
+	require.Empty(t, validateHintOutcomes(nil, offered))
+}
+
+func TestParseExtractionCandidatesReadsHintOutcomes(t *testing.T) {
+	payload := `{"candidates":[],"hint_outcomes":[{"hint_id":"h1","outcome":"helpful"},{"hint_id":"h2","outcome":"harmful"}]}`
+	parsed, err := parseExtractionCandidates("```json\n" + payload + "\n```")
+	require.NoError(t, err)
+	require.Len(t, parsed.HintOutcomes, 2)
+	require.Equal(t, "h1", parsed.HintOutcomes[0].HintID)
+	require.Equal(t, "helpful", parsed.HintOutcomes[0].Outcome)
+}
+
+func TestRenderExtractionContextListsOfferedHints(t *testing.T) {
+	request := KnowledgeExtractRequest{Project: "repo-a", RunID: "run-h", Prompt: "fetch the manifest"}
+	trajectory := Trajectory{Summary: TrajectorySummary{Answer: "done"}}
+	offered := []offeredHint{
+		{HintID: "h1", KnowledgeID: "ext/1", Proposition: "The fetch command accepts a -limit flag."},
+	}
+	rendered := renderExtractionContext(request, trajectory, nil, offered)
+	require.Contains(t, rendered, "Hints offered to this run")
+	require.Contains(t, rendered, "[h1] The fetch command accepts a -limit flag.")
+
+	// Without offers the section is absent — most runs see no hints.
+	require.NotContains(t, renderExtractionContext(request, trajectory, nil, nil), "Hints offered")
 }

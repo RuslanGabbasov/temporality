@@ -920,6 +920,12 @@ type observationHintRequest struct {
 	Entities   []string          `json:"entities,omitempty"`
 	Topics     []string          `json:"topics,omitempty"`
 	Limit      int               `json:"limit,omitempty"`
+	// ActiveSkills carries the digests of skills already attached to the
+	// agent's prompt (plan-priming-relevance.md §7); duplicating candidates
+	// are demoted, not excluded.
+	ActiveSkills []observation.HintSkill `json:"active_skills,omitempty"`
+	// IssuedKnowledgeIDs suppresses knowledge already offered in this run.
+	IssuedKnowledgeIDs []string `json:"issued_knowledge_ids,omitempty"`
 }
 
 func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request) {
@@ -947,6 +953,22 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnprocessableEntity, errors.New("limit must be between 1 and 20"))
 		return
 	}
+	if len(input.ActiveSkills) > 16 {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("active_skills must contain at most 16 skills"))
+		return
+	}
+	skillSummaryRunes := 0
+	for _, skill := range input.ActiveSkills {
+		skillSummaryRunes += len([]rune(skill.Summary))
+	}
+	if skillSummaryRunes > 8192 {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("active_skills summaries exceed the 8192 character limit in total"))
+		return
+	}
+	if len(input.IssuedKnowledgeIDs) > 64 {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("issued_knowledge_ids must contain at most 64 ids"))
+		return
+	}
 	events, chain, err := s.visibleKnowledgeEvents(r.Context(), input.Project, nil, nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
@@ -958,14 +980,14 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 		return
 	}
 	knowledge = filterKnowledgeVisible(knowledge, input.Project, chain)
-	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit})
+	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit, ActiveSkills: input.ActiveSkills, IssuedKnowledgeIDs: input.IssuedKnowledgeIDs})
 	activationID := newUUID()
 	context := observation.Context{Project: input.Project, Run: input.Run, Task: input.Task, Actor: input.Actor}
 	activationEvent := observation.Event{
 		Schema: observation.Schema, EventID: activationID, OccurredAt: s.now().UTC(),
 		Source:  observation.Source{ID: "temporality-activation", Integration: "temporality", Version: "1"},
 		Context: context, Type: "hint.query",
-		Data: map[string]any{"activation_id": activationID, "candidate_count": len(hints), "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion, "has_text_query": queryText != ""},
+		Data: map[string]any{"activation_id": activationID, "candidate_count": len(hints), "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion, "has_text_query": queryText != "", "active_skill_count": len(input.ActiveSkills), "issued_knowledge_count": len(input.IssuedKnowledgeIDs)},
 	}
 	if err = appendObservationNow(r, s.store, s.now, activationEvent); err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not record hint activation"))

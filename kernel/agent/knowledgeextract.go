@@ -27,8 +27,9 @@ import (
 
 // ExtractorVersion identifies the extraction prompt and heuristics. Bumping it
 // changes extractionIdentity, so every run becomes eligible for re-extraction
-// under the new version (docs/knowledge-extraction.md §27).
-const ExtractorVersion = "knowledge-extractor.v2"
+// under the new version (docs/knowledge-extraction.md §27). v3 adds judged
+// hint outcomes to the same model call (plan-priming-relevance.md §11).
+const ExtractorVersion = "knowledge-extractor.v3"
 
 // Extraction observability events. They are markers on the run's trajectory,
 // not knowledge lifecycle transitions, so the projection skips them.
@@ -118,6 +119,15 @@ type HintFeedback struct {
 	MatchedBy   []string
 }
 
+// HintOutcome is the extractor's judgment that an offered hint actually moved
+// this run's result (plan-priming-relevance.md §11): used ≠ helpful — mechanical
+// reflection says the model leaned on the hint, the outcome says it helped.
+type HintOutcome struct {
+	HintID      string
+	KnowledgeID string
+	Outcome     string // helpful | harmful
+}
+
 // KnowledgeExtractResult reports what the extractor produced.
 type KnowledgeExtractResult struct {
 	ExtractionID string
@@ -126,6 +136,7 @@ type KnowledgeExtractResult struct {
 	Invalid      int              // dropped by validation (no real evidence, bad kind, ...)
 	Aging        []AgingCandidate // stale unconfirmed proposals to challenge
 	HintFeedback []HintFeedback   // offered hints classified as used/ignored by this run
+	HintOutcomes []HintOutcome    // offered hints this run's result proves helpful or harmful
 	Model        string
 	DurationMs   int64
 	Skipped      bool // this run was already extracted with this version
@@ -189,7 +200,8 @@ func (a *Activities) ExtractKnowledge(ctx context.Context, request KnowledgeExtr
 	// aging sweep. Best-effort: without it extraction sees less context.
 	knowledge, _ := a.projectKnowledge(ctx, request.Project)
 	existing, states := extractionContext(request, trajectory, knowledge)
-	user := renderExtractionContext(request, trajectory, existing)
+	offered := offeredHints(events)
+	user := renderExtractionContext(request, trajectory, existing, offered)
 	completion, err := completeParsed(ctx, a.Model, []llm.Message{
 		{Role: "system", Content: extractionSystemPrompt},
 		{Role: "user", Content: user},
@@ -203,6 +215,7 @@ func (a *Activities) ExtractKnowledge(ctx context.Context, request KnowledgeExtr
 	result.Invalid = invalid
 	result.Aging = agingCandidates(knowledge, time.Now())
 	result.HintFeedback = hintUsageFeedback(events, trajectory)
+	result.HintOutcomes = validateHintOutcomes(completion.HintOutcomes, offered)
 	result.DurationMs = time.Since(started).Milliseconds()
 	return result, nil
 }
@@ -317,7 +330,7 @@ You read one completed agent run and decide which durable facts are worth rememb
 
 Answer with a single JSON object and nothing else. No markdown fences, no commentary.
 Schema:
-{"candidates": [{"kind": "observation|claim", "proposition": "...", "evidence": ["event id from the trajectory"], "confidence": 0.0-1.0, "contradicts": "optional: existing knowledge id this run disproves"}]}
+{"candidates": [{"kind": "observation|claim", "proposition": "...", "evidence": ["event id from the trajectory"], "confidence": 0.0-1.0, "contradicts": "optional: existing knowledge id this run disproves"}], "hint_outcomes": [{"hint_id": "id of an offered hint from the context", "outcome": "helpful|harmful"}]}
 
 What qualifies:
 - Facts that will help a future run in this project: how it is built, tested, deployed; non-obvious tool or CLI behavior; environment quirks; verified workarounds; documentation that turned out to be stale.
@@ -331,13 +344,19 @@ Rules:
 - Do not restate items of the existing knowledge listed in the context unless this run independently re-verified them; a verified repeat is valuable — state it again as a candidate citing this run's evidence.
 - If the run directly disproves an item of the existing knowledge listed in the context, set contradicts to that item's id (shown in brackets) and state the corrected fact as the proposition.
 - One self-contained sentence per proposition, in the language of the run.
-- At most 5 candidates. An empty list is a valid answer: most runs teach nothing durable.`
+- At most 5 candidates. An empty list is a valid answer: most runs teach nothing durable.
+
+Hint outcomes (fill only when the context lists offered hints):
+- "helpful" = the run used the hint and it clearly moved the result forward (a command worked, an error was avoided, the answer got grounded in it).
+- "harmful" = following the hint wasted work or pushed the run in a wrong direction.
+- A hint with no clear effect on the result must NOT appear in hint_outcomes; an empty or absent hint_outcomes is the expected answer for most runs.
+- Only ids of hints listed in the context, each at most once.`
 
 // renderExtractionContext builds the compact extraction context (§7): the
-// task, the tool trajectory with citable event ids, the final answer, and the
+// task, the tool trajectory with citable event ids, the final answer, the
 // existing knowledge the model restates on re-verification or contradicts on
-// disproof.
-func renderExtractionContext(request KnowledgeExtractRequest, trajectory Trajectory, existing []existingKnowledge) string {
+// disproof, and the hints offered to this run whose usefulness it judges.
+func renderExtractionContext(request KnowledgeExtractRequest, trajectory Trajectory, existing []existingKnowledge, offered []offeredHint) string {
 	var b strings.Builder
 	b.WriteString("Project: " + request.Project + "\nRun: " + request.RunID + "\n\n")
 	b.WriteString("Task:\n" + truncateRunes(strings.TrimSpace(request.Prompt), extractionPromptLimit) + "\n")
@@ -382,13 +401,20 @@ func renderExtractionContext(request KnowledgeExtractRequest, trajectory Traject
 			b.WriteString("- [" + item.ID + "] " + truncateRunes(item.Proposition, 200) + "\n")
 		}
 	}
+	if len(offered) > 0 {
+		b.WriteString("\nHints offered to this run (hint ids in brackets; judge each in hint_outcomes only when the result clearly proves it helped or harmed):\n")
+		for _, hint := range offered {
+			b.WriteString("- [" + hint.HintID + "] " + truncateRunes(hint.Proposition, 200) + "\n")
+		}
+	}
 	b.WriteString("\nAnswer with the JSON object only.")
 	return b.String()
 }
 
 // extractionCompletion is the strict JSON shape the model must answer with.
 type extractionCompletion struct {
-	Candidates []extractionCandidate `json:"candidates"`
+	Candidates   []extractionCandidate   `json:"candidates"`
+	HintOutcomes []extractionHintOutcome `json:"hint_outcomes"`
 }
 
 type extractionCandidate struct {
@@ -397,6 +423,11 @@ type extractionCandidate struct {
 	Evidence    []string `json:"evidence"`
 	Confidence  float64  `json:"confidence"`
 	Contradicts string   `json:"contradicts"`
+}
+
+type extractionHintOutcome struct {
+	HintID  string `json:"hint_id"`
+	Outcome string `json:"outcome"`
 }
 
 // parseExtractionCandidates tolerates reasoning blocks, fences and prose
@@ -540,15 +571,19 @@ func agingCandidates(knowledge []observation.Knowledge, now time.Time) []AgingCa
 	return candidates
 }
 
-// hintUsageFeedback classifies every hint offered to this run as used or
-// ignored by matching each proposition's distinctive terms against what the
-// run actually produced (docs/knowledge-evolution.md §2 Hint: applied context
-// and influence must stay determinable). Deterministic and cheap, it grounds
-// reuse accounting in observed work instead of the bare fact of injection.
-func hintUsageFeedback(events []observation.Event, trajectory Trajectory) []HintFeedback {
-	var feedback []HintFeedback
+// offeredHint is one hint this run was primed with, recovered from its own
+// trajectory so the extractor can judge outcomes against real offers only.
+type offeredHint struct {
+	HintID      string
+	KnowledgeID string
+	Proposition string
+}
+
+// offeredHints lists the hints offered to this run, deduplicated by hint id
+// (duplicate offers of one hint exist in degenerate trajectories).
+func offeredHints(events []observation.Event) []offeredHint {
+	var hints []offeredHint
 	seen := make(map[string]bool)
-	corpus := usageCorpusTokens(trajectory)
 	for _, event := range events {
 		if event.Type != "hint.offered" {
 			continue
@@ -559,9 +594,51 @@ func hintUsageFeedback(events []observation.Event, trajectory Trajectory) []Hint
 			continue
 		}
 		seen[hintID] = true
-		proposition := stringField(event.Data, "proposition")
-		used, matched := hintReflected(proposition, corpus)
-		feedback = append(feedback, HintFeedback{HintID: hintID, KnowledgeID: knowledgeID, Proposition: proposition, Used: used, MatchedBy: matched})
+		hints = append(hints, offeredHint{HintID: hintID, KnowledgeID: knowledgeID, Proposition: stringField(event.Data, "proposition")})
+	}
+	return hints
+}
+
+// validateHintOutcomes keeps only judgments a real offer can back: known hint
+// ids, helpful|harmful verdicts, one per hint. Anything else the model produced
+// is silently dropped — outcomes feed ranking, so hallucinated ids must not.
+func validateHintOutcomes(raw []extractionHintOutcome, offered []offeredHint) []HintOutcome {
+	if len(raw) == 0 || len(offered) == 0 {
+		return nil
+	}
+	byID := make(map[string]offeredHint, len(offered))
+	for _, hint := range offered {
+		byID[hint.HintID] = hint
+	}
+	seen := make(map[string]bool, len(raw))
+	outcomes := make([]HintOutcome, 0, len(raw))
+	for _, item := range raw {
+		hintID := strings.TrimSpace(item.HintID)
+		outcome := strings.TrimSpace(item.Outcome)
+		hint, known := byID[hintID]
+		if !known || seen[hintID] || (outcome != "helpful" && outcome != "harmful") {
+			continue
+		}
+		seen[hintID] = true
+		outcomes = append(outcomes, HintOutcome{HintID: hintID, KnowledgeID: hint.KnowledgeID, Outcome: outcome})
+	}
+	if len(outcomes) == 0 {
+		return nil
+	}
+	return outcomes
+}
+
+// hintUsageFeedback classifies every hint offered to this run as used or
+// ignored by matching each proposition's distinctive terms against what the
+// run actually produced (docs/knowledge-evolution.md §2 Hint: applied context
+// and influence must stay determinable). Deterministic and cheap, it grounds
+// reuse accounting in observed work instead of the bare fact of injection.
+func hintUsageFeedback(events []observation.Event, trajectory Trajectory) []HintFeedback {
+	corpus := usageCorpusTokens(trajectory)
+	feedback := make([]HintFeedback, 0)
+	for _, hint := range offeredHints(events) {
+		used, matched := hintReflected(hint.Proposition, corpus)
+		feedback = append(feedback, HintFeedback{HintID: hint.HintID, KnowledgeID: hint.KnowledgeID, Proposition: hint.Proposition, Used: used, MatchedBy: matched})
 	}
 	return feedback
 }

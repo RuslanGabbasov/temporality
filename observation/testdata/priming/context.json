@@ -1,0 +1,93 @@
+[
+  {
+    "name": "context-skill-duplicate-demoted",
+    "query": {
+      "text": "publish the changelog",
+      "entities": ["reporting"],
+      "limit": 8,
+      "active_skills": [
+        {"id": "skill-release", "summary": "Release checklist: the report tool requires the --out flag"}
+      ]
+    },
+    "knowledge": [
+      {"id": "k-a-dup", "proposition": "The report tool requires the --out flag", "kind": "claim", "entities": ["reporting"], "state": "confirmed"},
+      {"id": "k-z-fresh", "proposition": "Changelog generation emails subscribers every monday", "kind": "claim", "entities": ["reporting"], "state": "confirmed"}
+    ],
+    "useful": ["k-a-dup", "k-z-fresh"],
+    "stale": [],
+    "expected_order": ["k-z-fresh", "k-a-dup"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "context-skill-partial-overlap-keeps-rank",
+    "query": {
+      "text": "publish the changelog",
+      "entities": ["reporting"],
+      "limit": 8,
+      "active_skills": [
+        {"id": "skill-release", "summary": "Release checklist: the report tool requires the --out flag"}
+      ]
+    },
+    "knowledge": [
+      {"id": "k-a-db", "proposition": "The report tool requires a postgres connection string with sslmode", "kind": "claim", "entities": ["reporting"], "state": "confirmed"},
+      {"id": "k-z-fresh", "proposition": "Changelog generation emails subscribers every monday", "kind": "claim", "entities": ["reporting"], "state": "confirmed"}
+    ],
+    "useful": ["k-a-db", "k-z-fresh"],
+    "stale": [],
+    "expected_order": ["k-a-db", "k-z-fresh"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "context-issued-suppressed",
+    "query": {
+      "text": "reindex the search corpus",
+      "entities": ["indexer"],
+      "limit": 8,
+      "issued_knowledge_ids": ["k-ix-vendored"]
+    },
+    "knowledge": [
+      {"id": "k-ix-vendored", "proposition": "The indexer skips vendored directories entirely by default", "kind": "claim", "entities": ["indexer"], "state": "confirmed"},
+      {"id": "k-ix-parquet", "proposition": "The indexer emits parquet shards after every crawl", "kind": "claim", "entities": ["indexer"], "state": "confirmed"}
+    ],
+    "useful": ["k-ix-parquet"],
+    "stale": [],
+    "expected_order": ["k-ix-parquet"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "context-issued-exhausted",
+    "query": {
+      "text": "reindex the search corpus",
+      "entities": ["indexer"],
+      "limit": 8,
+      "issued_knowledge_ids": ["k-ix-vendored", "k-ix-parquet"]
+    },
+    "knowledge": [
+      {"id": "k-ix-vendored", "proposition": "The indexer skips vendored directories entirely by default", "kind": "claim", "entities": ["indexer"], "state": "confirmed"},
+      {"id": "k-ix-parquet", "proposition": "The indexer emits parquet shards after every crawl", "kind": "claim", "entities": ["indexer"], "state": "confirmed"}
+    ],
+    "useful": [],
+    "stale": [],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "context-skill-and-outcomes-combined",
+    "query": {
+      "text": "tune the indexer crawl",
+      "entities": ["indexer"],
+      "limit": 8,
+      "active_skills": [
+        {"id": "skill-indexer", "summary": "Indexer runbook: the crawler respects robots.txt and the sitemap hints"}
+      ]
+    },
+    "knowledge": [
+      {"id": "k-ix-robots", "proposition": "The crawler respects robots.txt and the sitemap hints", "kind": "claim", "entities": ["indexer"], "state": "confirmed"},
+      {"id": "k-ix-budget", "proposition": "Crawl budgets are per-domain and reset at midnight UTC", "kind": "claim", "entities": ["indexer"], "state": "confirmed", "helpful_outcomes": 3},
+      {"id": "k-ix-backoff", "proposition": "Backoff on 429 responses is exponential with a nine-minute ceiling", "kind": "claim", "entities": ["indexer"], "state": "confirmed"}
+    ],
+    "useful": ["k-ix-robots", "k-ix-budget", "k-ix-backoff"],
+    "stale": [],
+    "expected_order": ["k-ix-budget", "k-ix-backoff", "k-ix-robots"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  }
+]

@@ -11,6 +11,21 @@ type HintQuery struct {
 	Entities []string
 	Topics   []string
 	Limit    int
+	// ActiveSkills carries the digests of skills already attached to the agent
+	// (plan-priming-relevance.md §7): a candidate whose content is mostly
+	// covered by them is demoted for novelty (B5), never excluded — it may
+	// still be a useful clarification the skill lacks.
+	ActiveSkills []HintSkill
+	// IssuedKnowledgeIDs lists knowledge already offered earlier in the same
+	// run: re-offering it spends budget on repetition.
+	IssuedKnowledgeIDs []string
+}
+
+// HintSkill is one active skill of the querying agent: identity plus the
+// budgeted digest that already sits in the agent's prompt.
+type HintSkill struct {
+	ID      string `json:"id"`
+	Summary string `json:"summary"`
 }
 
 type Hint struct {
@@ -30,6 +45,13 @@ type hintCandidate struct {
 	matchTier int
 	kindTier  int
 	stateTier int
+	// usefulTier (B4) demotes candidates whose recorded outcomes contradict
+	// their usefulness and promotes proven-helpful ones at otherwise equal
+	// rank: 0 helpful-dominant, 1 insufficient data, 2 harmful-dominant.
+	usefulTier int
+	// noveltyTier (B5) demotes candidates whose content is already covered by
+	// the agent's active skills: 0 novel, 1 duplicating skill context.
+	noveltyTier int
 	// topic is the deterministic grouping key for per-topic diversity capping:
 	// the alphabetically first topic, or "" when the item carries none.
 	topic string
@@ -39,9 +61,17 @@ type hintCandidate struct {
 // ranking, near-duplicate propositions are dropped so the budget is not spent
 // on repeats, and one topic cannot crowd out everything else. Diversity is
 // not a goal in itself — distinct same-topic rules survive up to the cap.
+//
+// Usefulness (B4) needs a minimum number of recorded outcomes before it may
+// move a candidate at all: one lucky run proves nothing. Novelty (B5) fires on
+// containment — the share of the candidate's own tokens already present in
+// the active-skill digests — because a proposition is short and a skill digest
+// is long, so plain Jaccard would undercount real duplication.
 const (
-	hintNearDupJaccard = 0.8
-	hintMaxPerTopic    = 2
+	hintNearDupJaccard      = 0.8
+	hintMaxPerTopic         = 2
+	hintOutcomeMinSamples   = 3
+	hintSkillDupContainment = 0.75
 )
 
 // FindHints uses explainable exact entity/topic and lexical matching. It does
@@ -58,6 +88,8 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 	candidates := make([]hintCandidate, 0)
 	direct := make(map[string]hintCandidate)
 	itemsByID := make(map[string]Knowledge, len(knowledge))
+	issued := normalizedSet(query.IssuedKnowledgeIDs)
+	skillTokens := activeSkillTokens(query.ActiveSkills)
 	// Retired items that matched the query and name a live replacement: the
 	// replacement — not the retired rule — is what the task actually needs.
 	replacements := make([]struct {
@@ -66,6 +98,9 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 	}, 0)
 	for _, item := range knowledge {
 		itemsByID[item.ID] = item
+		if issued[item.ID] {
+			continue
+		}
 		matched, tier := matchKnowledge(item, queryEntities, queryTopics, queryTokens, queryPhrase)
 		if retired := item.State == "invalidated" || item.State == "superseded" || item.State == "corrected"; retired {
 			// A retired item never surfaces as an acting rule, but when it named
@@ -82,7 +117,7 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 		if len(matched) == 0 {
 			continue
 		}
-		candidate, ok := makeHintCandidate(item, matched, tier)
+		candidate, ok := makeHintCandidate(item, matched, tier, skillTokens)
 		if !ok {
 			continue
 		}
@@ -93,11 +128,11 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 	// source node are returned as the reason, so this expansion is inspectable.
 	relatedSeen := make(map[string]bool)
 	for _, expansion := range replacements {
-		if _, already := direct[expansion.targetID]; already || relatedSeen[expansion.targetID] {
+		if _, already := direct[expansion.targetID]; already || relatedSeen[expansion.targetID] || issued[expansion.targetID] {
 			continue
 		}
 		if target, found := itemsByID[expansion.targetID]; found {
-			candidate, eligible := makeHintCandidate(target, []string{"replaces:" + expansion.fromID}, expansion.tier)
+			candidate, eligible := makeHintCandidate(target, []string{"replaces:" + expansion.fromID}, expansion.tier, skillTokens)
 			if eligible {
 				candidates = append(candidates, candidate)
 				relatedSeen[expansion.targetID] = true
@@ -108,11 +143,11 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 		for _, relation := range source.Relationships {
 			targetID := relation.TargetID
 			if directSource, ok := direct[source.ID]; ok {
-				if _, already := direct[targetID]; already || relatedSeen[targetID] {
+				if _, already := direct[targetID]; already || relatedSeen[targetID] || issued[targetID] {
 					continue
 				}
 				if target, found := itemsByID[targetID]; found {
-					candidate, eligible := makeHintCandidate(target, []string{"related:" + relation.Type, "via:" + source.ID}, directSource.matchTier+1)
+					candidate, eligible := makeHintCandidate(target, []string{"related:" + relation.Type, "via:" + source.ID}, directSource.matchTier+1, skillTokens)
 					if eligible {
 						candidates = append(candidates, candidate)
 						relatedSeen[targetID] = true
@@ -120,10 +155,10 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 				}
 			}
 			if directTarget, ok := direct[targetID]; ok {
-				if _, already := direct[source.ID]; already || relatedSeen[source.ID] {
+				if _, already := direct[source.ID]; already || relatedSeen[source.ID] || issued[source.ID] {
 					continue
 				}
-				candidate, eligible := makeHintCandidate(source, []string{"related:" + relation.Type, "via:" + targetID}, directTarget.matchTier+1)
+				candidate, eligible := makeHintCandidate(source, []string{"related:" + relation.Type, "via:" + targetID}, directTarget.matchTier+1, skillTokens)
 				if eligible {
 					candidates = append(candidates, candidate)
 					relatedSeen[source.ID] = true
@@ -144,6 +179,17 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 		if candidates[i].stateTier != candidates[j].stateTier {
 			return candidates[i].stateTier < candidates[j].stateTier
 		}
+		// Proven usefulness (B4) breaks ties between equally trusted items:
+		// rank stays grounded in the current match, but a track record of
+		// helping (or actively misleading) moves the candidate within it.
+		if candidates[i].usefulTier != candidates[j].usefulTier {
+			return candidates[i].usefulTier < candidates[j].usefulTier
+		}
+		// Novelty (B5) is the weakest factor: at otherwise equal rank a fresh
+		// rule beats one the agent's own skills already state.
+		if candidates[i].noveltyTier != candidates[j].noveltyTier {
+			return candidates[i].noveltyTier < candidates[j].noveltyTier
+		}
 		return candidates[i].hint.KnowledgeID < candidates[j].hint.KnowledgeID
 	})
 	candidates = diversifyCandidates(candidates)
@@ -157,7 +203,7 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 	return result
 }
 
-func makeHintCandidate(item Knowledge, matched []string, matchTier int) (hintCandidate, bool) {
+func makeHintCandidate(item Knowledge, matched []string, matchTier int, skillTokens map[string]bool) (hintCandidate, bool) {
 	if item.State == "invalidated" || item.State == "superseded" || item.State == "corrected" {
 		return hintCandidate{}, false
 	}
@@ -192,7 +238,70 @@ func makeHintCandidate(item Knowledge, matched []string, matchTier int) (hintCan
 		KnowledgeID: item.ID, Proposition: item.Proposition, State: item.State,
 		MatchedBy: boundedStrings(matched, 8), Caution: caution,
 		Evidence: boundedEvidence(item.Evidence, 8), History: boundedHistory(item.History, 5),
-	}, matchTier: matchTier, kindTier: kindTier, stateTier: stateTier, topic: primaryTopic(item)}, true
+	}, matchTier: matchTier, kindTier: kindTier, stateTier: stateTier, usefulTier: usefulnessTier(item), noveltyTier: noveltyTier(item, skillTokens), topic: primaryTopic(item)}, true
+}
+
+// usefulnessTier ranks recorded hint outcomes (B4, plan §11): only judged
+// outcomes count — offers and mechanical reuse do not. Fewer than
+// hintOutcomeMinSamples samples is neutral: reuse alone must not masquerade
+// as usefulness. Dominance needs a two-thirds majority, judged symmetrically
+// in integer arithmetic so 2-of-3 counts on either side and floats never
+// decide an edge case.
+func usefulnessTier(item Knowledge) int {
+	total := item.HelpfulOutcomes + item.HarmfulOutcomes
+	if total < hintOutcomeMinSamples {
+		return 1
+	}
+	switch {
+	case item.HelpfulOutcomes*3 >= total*2:
+		return 0
+	case item.HarmfulOutcomes*3 >= total*2:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// noveltyTier demotes (B5, plan §7) a candidate whose content is mostly
+// covered by the agent's active skills — a duplication penalty, not an
+// exclusion: the rule may still carry a clarification the skill lacks.
+// Containment is measured over the candidate's own tokens, so a short rule
+// fully stated inside a long skill digest still counts as covered.
+func noveltyTier(item Knowledge, skillTokens map[string]bool) int {
+	if len(skillTokens) == 0 {
+		return 0
+	}
+	tokens := contentTokens(item.Proposition)
+	if len(tokens) == 0 {
+		return 0
+	}
+	covered := 0
+	for token := range tokens {
+		if skillTokens[token] {
+			covered++
+		}
+	}
+	if float64(covered)/float64(len(tokens)) >= hintSkillDupContainment {
+		return 1
+	}
+	return 0
+}
+
+// activeSkillTokens unions the content tokens of every active skill digest.
+func activeSkillTokens(skills []HintSkill) map[string]bool {
+	var result map[string]bool
+	for _, skill := range skills {
+		if strings.TrimSpace(skill.Summary) == "" {
+			continue
+		}
+		if result == nil {
+			result = make(map[string]bool)
+		}
+		for token := range contentTokens(skill.Summary) {
+			result[token] = true
+		}
+	}
+	return result
 }
 
 // primaryTopic is the deterministic diversity grouping key.

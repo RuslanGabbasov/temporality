@@ -1,0 +1,112 @@
+[
+  {
+    "name": "nightlybox-build-command",
+    "query": {
+      "text": "run the nightly build",
+      "entities": ["nightlybox"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-nb-cmd", "proposition": "The nightly build runs via nightlybox build --profile release", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed"},
+      {"id": "k-nb-time", "proposition": "Nightly builds start at 02:00 UTC and take nine minutes", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed"},
+      {"id": "k-cms-login", "proposition": "The marketing site uses a shared CMS login for editors", "kind": "claim", "entities": ["cms"], "state": "confirmed"}
+    ],
+    "useful": ["k-nb-cmd", "k-nb-time"],
+    "stale": [],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "nightlybox-flaky-quarantine",
+    "query": {
+      "text": "the integration suite fails randomly",
+      "entities": ["nightlybox"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-nb-flaky", "proposition": "Flaky nightlybox tests must be quarantined with the @flaky label", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed"},
+      {"id": "k-nb-retry", "proposition": "CI retries flaky tests twice before reporting failure", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed"}
+    ],
+    "useful": ["k-nb-flaky", "k-nb-retry"],
+    "stale": [],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "nightlybox-docker-requirement",
+    "query": {
+      "text": "integration tests require a docker daemon",
+      "entities": ["nightlybox"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-nb-docker", "proposition": "Nightlybox integration tests require the docker daemon running before the suite starts", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed"},
+      {"id": "k-nb-dind", "proposition": "The test harness starts docker-in-docker on privileged runners", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed"}
+    ],
+    "useful": ["k-nb-docker", "k-nb-dind"],
+    "stale": [],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "nightlybox-cache-near-duplicate",
+    "query": {
+      "text": "prepare the cache directories before building",
+      "entities": ["nightlybox"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-nb-cache", "proposition": "Nightlybox cache directories under /workspace/.gocache must exist before the build", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed"},
+      {"id": "k-nb-cache-echo", "proposition": "Nightlybox cache directories under /workspace/.gocache must exist before the build starts", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed"}
+    ],
+    "useful": ["k-nb-cache"],
+    "stale": [],
+    "expected_order": ["k-nb-cache"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "nightlybox-proposed-caution",
+    "query": {
+      "text": "publish the nightly artifacts",
+      "entities": ["nightlybox"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-nb-artifacts", "proposition": "Nightly artifacts publish to the s3 bucket after a green build", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed"},
+      {"id": "k-nb-sign", "proposition": "Artifact signing keys rotate every quarter and live in the vault", "kind": "claim", "entities": ["nightlybox"], "state": "proposed"}
+    ],
+    "useful": ["k-nb-artifacts", "k-nb-sign"],
+    "stale": [],
+    "expected_order": ["k-nb-artifacts", "k-nb-sign"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "nightlybox-harmful-demoted",
+    "query": {
+      "text": "speed up the nightly pipeline",
+      "entities": ["nightlybox"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-nb-parallel", "proposition": "Running the suite shards in parallel triples the nightly wall time", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed", "harmful_outcomes": 3, "helpful_outcomes": 0},
+      {"id": "k-nb-remote", "proposition": "Remote cache hits cut the nightly pipeline to four minutes", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed"}
+    ],
+    "useful": ["k-nb-parallel", "k-nb-remote"],
+    "stale": [],
+    "expected_order": ["k-nb-remote", "k-nb-parallel"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "nightlybox-helpful-promoted",
+    "query": {
+      "text": "speed up the nightly pipeline",
+      "entities": ["nightlybox"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-nb-remote", "proposition": "Remote cache hits cut the nightly pipeline to four minutes", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed"},
+      {"id": "k-nb-shards", "proposition": "Splitting the suite into three shards balances the load", "kind": "claim", "entities": ["nightlybox"], "state": "confirmed", "helpful_outcomes": 4}
+    ],
+    "useful": ["k-nb-remote", "k-nb-shards"],
+    "stale": [],
+    "expected_order": ["k-nb-shards", "k-nb-remote"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  }
+]

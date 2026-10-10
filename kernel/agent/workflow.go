@@ -304,7 +304,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// hints would never be consumed (docs/agent-teams.md §9).
 	if input.Team == nil && !input.SkipKnowledge {
 		hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
-		if err := workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt}).Get(ctx, &priorHints); err != nil {
+		if err := workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills}).Get(ctx, &priorHints); err != nil {
 			// Retrieval is best-effort, but the miss is still part of the trajectory.
 			if eventErr := emit(activityCtx, state, "memory.read.failed", map[string]any{"error_type": "activation_unavailable"}); eventErr != nil {
 				return result, eventErr
@@ -2393,6 +2393,15 @@ func runKnowledgeExtraction(ctx workflow.Context, activityCtx workflow.Context, 
 			data["matched_by"] = hint.MatchedBy
 		}
 		if err := emit(activityCtx, state, eventType, data); err != nil {
+			return
+		}
+	}
+	// Judged outcomes close the usefulness loop (plan-priming-relevance.md
+	// §11): used ≠ helpful, so the extractor's verdict is a separate event the
+	// projection aggregates into the knowledge's B4 ranking factor.
+	for _, outcome := range extraction.HintOutcomes {
+		data := map[string]any{"hint_id": outcome.HintID, "knowledge_id": outcome.KnowledgeID, "outcome": outcome.Outcome, "matcher": "extraction-judgment.v1"}
+		if err := emit(activityCtx, state, "hint.outcome", data); err != nil {
 			return
 		}
 	}

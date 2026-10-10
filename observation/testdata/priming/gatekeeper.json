@@ -1,0 +1,108 @@
+[
+  {
+    "name": "gatekeeper-auth-oauth",
+    "query": {
+      "text": "authenticate the CLI against gatekeeper v2",
+      "entities": ["gatekeeper"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-gk-oauth", "proposition": "Gatekeeper v2 authenticates CLI calls with an oauth bearer token", "kind": "claim", "entities": ["gatekeeper"], "state": "confirmed"},
+      {"id": "k-gk-tokenscope", "proposition": "Gatekeeper tokens expire after one hour and must be refreshed", "kind": "claim", "entities": ["gatekeeper"], "state": "confirmed"},
+      {"id": "k-cms-login", "proposition": "The marketing site uses a shared CMS login for editors", "kind": "claim", "entities": ["cms"], "state": "confirmed"}
+    ],
+    "useful": ["k-gk-oauth", "k-gk-tokenscope"],
+    "stale": [],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "gatekeeper-superseded-basic-auth",
+    "query": {
+      "text": "gatekeeper CLI basic auth",
+      "entities": ["gatekeeper"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-gk-basic", "proposition": "Gatekeeper accepts basic auth for all endpoints", "kind": "claim", "entities": ["gatekeeper"], "state": "superseded", "replacement_id": "k-gk-oauth"},
+      {"id": "k-gk-oauth", "proposition": "Gatekeeper v2 authenticates CLI calls with an oauth bearer token", "kind": "claim", "entities": ["gatekeeper"], "state": "confirmed"}
+    ],
+    "useful": ["k-gk-oauth"],
+    "stale": ["k-gk-basic"],
+    "expected_order": ["k-gk-oauth"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "gatekeeper-invalidated-no-replacement",
+    "query": {
+      "text": "gatekeeper static api keys",
+      "entities": ["gatekeeper"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-gk-keys", "proposition": "Gatekeeper v1 accepts static api keys from the config file", "kind": "claim", "entities": ["gatekeeper"], "state": "invalidated"}
+    ],
+    "useful": [],
+    "stale": ["k-gk-keys"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "gatekeeper-report-flags",
+    "query": {
+      "text": "write the compliance report with lint checks",
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-gk-out", "proposition": "The gatekeeper report command requires the --out flag to write files", "kind": "claim", "state": "confirmed"},
+      {"id": "k-gk-lint", "proposition": "Report lint failures block the pipeline until acknowledged", "kind": "claim", "state": "proposed"},
+      {"id": "k-cms-login", "proposition": "The marketing site uses a shared CMS login for editors", "kind": "claim", "state": "confirmed"}
+    ],
+    "useful": ["k-gk-out", "k-gk-lint"],
+    "stale": [],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "gatekeeper-token-file",
+    "query": {
+      "text": "point the CLI at a token file for auth",
+      "entities": ["gatekeeper"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-gk-file", "proposition": "Gatekeeper reads credentials from .token-file in the home directory", "kind": "claim", "entities": ["gatekeeper"], "state": "confirmed"},
+      {"id": "k-gk-oauth", "proposition": "Gatekeeper v2 authenticates CLI calls with an oauth bearer token", "kind": "claim", "entities": ["gatekeeper"], "state": "confirmed"}
+    ],
+    "useful": ["k-gk-file", "k-gk-oauth"],
+    "stale": [],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "gatekeeper-entity-beats-term",
+    "query": {
+      "text": "gatekeeper report",
+      "entities": ["gatekeeper"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-gk-obs", "proposition": "Verification command exited 0 for the gatekeeper CLI", "kind": "observation", "entities": ["gatekeeper"], "state": "confirmed"},
+      {"id": "k-gk-phrase", "proposition": "The gatekeeper report is generated nightly by the cron runner", "kind": "claim", "state": "confirmed"}
+    ],
+    "useful": ["k-gk-obs", "k-gk-phrase"],
+    "stale": [],
+    "expected_order": ["k-gk-obs", "k-gk-phrase"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "gatekeeper-irrelevant-zero",
+    "query": {
+      "text": "redesign the landing page hero copy",
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-gk-oauth", "proposition": "Gatekeeper v2 authenticates CLI calls with an oauth bearer token", "kind": "claim", "entities": ["gatekeeper"], "state": "confirmed"},
+      {"id": "k-gk-out", "proposition": "The gatekeeper report command requires the --out flag to write files", "kind": "claim", "state": "confirmed"}
+    ],
+    "useful": [],
+    "stale": [],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  }
+]

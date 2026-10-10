@@ -988,3 +988,76 @@ func TestKnowledgePromoteValidation(t *testing.T) {
 		t.Fatalf("promote retired status = %d, want 409, body = %v", res.StatusCode, body)
 	}
 }
+
+func TestObservationHintsHonorsAgentContext(t *testing.T) {
+	handler := newTestServer(t)
+
+	// Two entity-matched confirmed rules: k-dup restates the attached skill,
+	// k-fresh does not. Without context k-dup wins alphabetically.
+	ingest := []observation.Event{
+		{Schema: observation.Schema, EventID: "evt-1", OccurredAt: time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC),
+			Source:  observation.Source{ID: "kernel-test", Integration: "agent-kernel", Version: "1"},
+			Context: observation.Context{Project: "lighthouse", Run: "run-1", Actor: observation.Actor{ID: "coder", Type: "agent"}},
+			Type:    "knowledge.proposed",
+			Data:    map[string]any{"knowledge_id": "k-dup", "proposition": "The report tool requires the --out flag", "entities": []string{"reporting"}}},
+		{Schema: observation.Schema, EventID: "evt-2", OccurredAt: time.Date(2026, 10, 10, 9, 1, 0, 0, time.UTC),
+			Source:  observation.Source{ID: "kernel-test", Integration: "agent-kernel", Version: "1"},
+			Context: observation.Context{Project: "lighthouse", Run: "run-1", Actor: observation.Actor{ID: "coder", Type: "agent"}},
+			Type:    "knowledge.confirmed", Data: map[string]any{"knowledge_id": "k-dup"}},
+		{Schema: observation.Schema, EventID: "evt-3", OccurredAt: time.Date(2026, 10, 10, 9, 2, 0, 0, time.UTC),
+			Source:  observation.Source{ID: "kernel-test", Integration: "agent-kernel", Version: "1"},
+			Context: observation.Context{Project: "lighthouse", Run: "run-1", Actor: observation.Actor{ID: "coder", Type: "agent"}},
+			Type:    "knowledge.proposed",
+			Data:    map[string]any{"knowledge_id": "k-fresh", "proposition": "Changelog generation emails subscribers every monday", "entities": []string{"reporting"}}},
+		{Schema: observation.Schema, EventID: "evt-4", OccurredAt: time.Date(2026, 10, 10, 9, 3, 0, 0, time.UTC),
+			Source:  observation.Source{ID: "kernel-test", Integration: "agent-kernel", Version: "1"},
+			Context: observation.Context{Project: "lighthouse", Run: "run-1", Actor: observation.Actor{ID: "coder", Type: "agent"}},
+			Type:    "knowledge.confirmed", Data: map[string]any{"knowledge_id": "k-fresh"}},
+	}
+	res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": ingest})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	// Skill context demotes the duplicate but keeps it admitted.
+	res, body = doJSON(t, handler, "POST", "/v1/observations/hints", map[string]any{
+		"project": "lighthouse", "query": "publish the changelog", "entities": []string{"reporting"},
+		"actor": map[string]any{"id": "coder", "type": "agent"},
+		"active_skills": []map[string]any{
+			{"id": "skill-release", "summary": "Release checklist: the report tool requires the --out flag"},
+		},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("hints status = %d, body = %v", res.StatusCode, body)
+	}
+	hints := body["hints"].([]any)
+	if len(hints) != 2 {
+		t.Fatalf("hints = %d, want 2 (duplicate demoted, not excluded)", len(hints))
+	}
+	if first := hints[0].(map[string]any)["knowledge_id"]; first != "k-fresh" {
+		t.Fatalf("first hint = %v, want k-fresh", first)
+	}
+
+	// Issued ids suppress re-offering within the same run.
+	res, body = doJSON(t, handler, "POST", "/v1/observations/hints", map[string]any{
+		"project": "lighthouse", "query": "publish the changelog", "entities": []string{"reporting"},
+		"actor":                map[string]any{"id": "coder", "type": "agent"},
+		"issued_knowledge_ids": []string{"k-dup", "k-fresh"},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("hints status = %d, body = %v", res.StatusCode, body)
+	}
+	if count := body["count"].(float64); count != 0 {
+		t.Fatalf("issued knowledge must be suppressed, got %v hints", body["hints"])
+	}
+
+	// Oversized skill context is rejected up front.
+	res, body = doJSON(t, handler, "POST", "/v1/observations/hints", map[string]any{
+		"project": "lighthouse", "query": "publish the changelog",
+		"actor":         map[string]any{"id": "coder", "type": "agent"},
+		"active_skills": []map[string]any{{"id": "skill-huge", "summary": strings.Repeat("x", 9000)}},
+	})
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("oversized active_skills status = %d, body = %v", res.StatusCode, body)
+	}
+}

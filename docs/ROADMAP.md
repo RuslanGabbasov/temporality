@@ -8,7 +8,7 @@
 - [x] **Live MCP E2E** — test-mcp in image, sandbox volume, KERNEL_MCP_TEST_ROOT, approval flow
 - [x] **Journal endpoints** — state-at-T, diff, activation chain, run state-at-T, compare runs
 - [x] **Workspace refactor** — agents top-level, providers CRUD, users CRUD with DB tokens
-- [x] **Experience Priming v1** — deterministic pipeline (group by scope → score → top 7)
+- [x] **Experience Priming** — unified engine `observation.FindHints` (individual ranking, lifecycle gating, budgets 600/120/8, dedup/diversity, skill-context novelty B5, outcome usefulness B4, issued suppression), benchmark corpus in CI (see docs/plan-priming-relevance.md)
 - [x] **Carbon Design System** — full integration, dark theme, proper input styles
 - [x] **Workspace chat** — SSE streaming, conversation history, Markdown rendering, agent selector on new chat
 - [x] **Operations page** — human-readable tool display, verdict buttons, pending badge

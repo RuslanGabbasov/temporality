@@ -1,0 +1,66 @@
+[
+  {
+    "name": "budget-truncation-keeps-top-ranked",
+    "query": {
+      "text": "release the service",
+      "entities": ["release"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-rel-a", "proposition": "Release builds require the changelog committed before tagging", "kind": "claim", "entities": ["release"], "state": "confirmed"},
+      {"id": "k-rel-b", "proposition": "Release tags are signed with the team gpg key", "kind": "claim", "entities": ["release"], "state": "confirmed"},
+      {"id": "k-rel-c", "proposition": "Release notes are generated from merged pull request titles", "kind": "claim", "entities": ["release"], "state": "confirmed"},
+      {"id": "k-rel-d", "proposition": "Release announcements post to the internal channel automatically", "kind": "claim", "entities": ["release"], "state": "confirmed"}
+    ],
+    "useful": ["k-rel-a", "k-rel-b", "k-rel-c", "k-rel-d"],
+    "stale": [],
+    "budget": {"max_tokens": 120, "max_cue_tokens": 40, "max_hints": 8}
+  },
+  {
+    "name": "budget-single-huge-cue-truncated",
+    "query": {
+      "text": "document the deploy pipeline",
+      "entities": ["deploy"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-dep-long", "proposition": "The deploy pipeline first builds a container image then runs the unit suite then the integration suite then promotes the image through dev staging and production environments with manual gates in between each environment", "kind": "claim", "entities": ["deploy"], "state": "confirmed"}
+    ],
+    "useful": ["k-dep-long"],
+    "stale": [],
+    "budget": {"max_tokens": 200, "max_cue_tokens": 30, "max_hints": 4}
+  },
+  {
+    "name": "budget-limit-caps-output",
+    "query": {
+      "text": "audit the billing stack",
+      "entities": ["billing"],
+      "limit": 2
+    },
+    "knowledge": [
+      {"id": "k-bill-a", "proposition": "Billing invoices regenerate on the first of each month", "kind": "claim", "entities": ["billing"], "state": "confirmed"},
+      {"id": "k-bill-b", "proposition": "Billing webhooks retry with backoff for six hours", "kind": "claim", "entities": ["billing"], "state": "confirmed"},
+      {"id": "k-bill-c", "proposition": "Billing exports land in the finance s3 bucket", "kind": "claim", "entities": ["billing"], "state": "confirmed"}
+    ],
+    "useful": ["k-bill-a", "k-bill-b"],
+    "stale": [],
+    "expected_order": ["k-bill-a", "k-bill-b"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "budget-compact-cues-efficiency",
+    "query": {
+      "text": "harden the api gateway",
+      "entities": ["gateway"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-gw-ratelimit", "proposition": "Gateway rate limits are per api key, not per ip", "kind": "claim", "entities": ["gateway"], "state": "confirmed"},
+      {"id": "k-gw-timeout", "proposition": "Gateway timeouts default to 30 seconds", "kind": "claim", "entities": ["gateway"], "state": "confirmed"},
+      {"id": "k-gw-mtls", "proposition": "Gateway mTLS is mandatory for internal callers", "kind": "claim", "entities": ["gateway"], "state": "confirmed"}
+    ],
+    "useful": ["k-gw-ratelimit", "k-gw-timeout", "k-gw-mtls"],
+    "stale": [],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  }
+]

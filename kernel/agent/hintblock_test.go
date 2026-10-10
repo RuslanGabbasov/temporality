@@ -26,7 +26,9 @@ func TestAgentRunInjectsHintsAsSingleBudgetedBlock(t *testing.T) {
 		recorded = append(recorded, event)
 		return nil
 	}, activity.RegisterOptions{Name: ActivityRecordEvent})
-	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) {
+	var capturedHints []HintRequest
+	env.RegisterActivityWithOptions(func(_ context.Context, request HintRequest) ([]Hint, error) {
+		capturedHints = append(capturedHints, request)
 		return []Hint{
 			{KnowledgeID: "k-claim1", HintID: "hint-1", Proposition: "The gatekeeper CLI requires the --out flag to write the report", State: "confirmed", MatchedBy: []string{"entity:gatekeeper"}},
 			{KnowledgeID: "auto/obs1", HintID: "hint-2", Proposition: "Report generation command exited 0 with the required flag", State: "proposed", MatchedBy: []string{"term:report"}, Caution: "unconfirmed hypothesis"},
@@ -38,8 +40,13 @@ func TestAgentRunInjectsHintsAsSingleBudgetedBlock(t *testing.T) {
 		return llm.Completion{Content: "done"}, nil
 	}, activity.RegisterOptions{Name: ActivityCallModel})
 	registerExtraction(env, KnowledgeExtractResult{}, nil)
-	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-hints", Project: "repo-a", Prompt: "write the gatekeeper report", MaxTurns: 1})
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-hints", Project: "repo-a", Prompt: "write the gatekeeper report", MaxTurns: 1, Skills: []SkillRef{{ID: "skill-qa", Version: "3", Name: "qa", Digest: "Run gofmt before committing the migration files"}}})
 	require.NoError(t, env.GetWorkflowError())
+
+	// The run's skills ride along so the journal can demote hints that only
+	// restate them (plan §7): novelty context, not exclusion.
+	require.NotEmpty(t, capturedHints)
+	require.Equal(t, []SkillRef{{ID: "skill-qa", Version: "3", Name: "qa", Digest: "Run gofmt before committing the migration files"}}, capturedHints[0].Skills)
 
 	var hintBlocks []string
 	for _, message := range captured {

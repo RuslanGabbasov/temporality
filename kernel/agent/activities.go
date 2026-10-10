@@ -1049,11 +1049,21 @@ func faultAfterEffect(runID, toolName, operationID string) bool {
 }
 
 func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([]Hint, error) {
-	payload, err := json.Marshal(map[string]any{"project": request.Project, "run": request.RunID, "task": request.TaskID, "actor": map[string]string{"id": request.ActorID, "type": "agent"}, "query": request.Query, "limit": 8})
+	payload := map[string]any{"project": request.Project, "run": request.RunID, "task": request.TaskID, "actor": map[string]string{"id": request.ActorID, "type": "agent"}, "query": request.Query, "limit": 8}
+	if len(request.Skills) > 0 {
+		// Skill digests already ride in the agent prompt; the journal uses them
+		// as novelty context so hints that restate a skill lose rank (§7).
+		skills := make([]map[string]string, 0, len(request.Skills))
+		for _, skill := range request.Skills {
+			skills = append(skills, map[string]string{"id": skill.ID, "summary": skill.Digest})
+		}
+		payload["active_skills"] = skills
+	}
+	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, a.TemporalityURL+"/v1/observations/hints", bytes.NewReader(payload))
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, a.TemporalityURL+"/v1/observations/hints", bytes.NewReader(encoded))
 	if err != nil {
 		return nil, err
 	}
@@ -1091,6 +1101,10 @@ type HintRequest struct {
 	TaskID  string `json:"task_id"`
 	ActorID string `json:"actor_id"`
 	Query   string `json:"query"`
+	// Skills are the run's resolved skills: their digests already sit in the
+	// agent prompt, so the journal demotes knowledge that only restates them
+	// (plan-priming-relevance.md §7) instead of spending hint budget on it.
+	Skills []SkillRef `json:"skills,omitempty"`
 }
 
 // KnowledgeLookupResult reports the current projected state of one knowledge

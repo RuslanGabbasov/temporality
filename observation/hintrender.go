@@ -6,8 +6,10 @@ import (
 
 // HintsAlgorithmVersion identifies the hint selection algorithm (matching,
 // admission, ranking, diversification) so events and runs can be compared
-// across versions. v2 adds exact/Jaccard deduplication and per-topic capping.
-const HintsAlgorithmVersion = "lexical-entity-topic.v2"
+// across versions. v2 added exact/Jaccard deduplication and per-topic capping;
+// v3 adds outcome usefulness (B4), skill-context novelty (B5) and suppression
+// of knowledge already issued in the same run.
+const HintsAlgorithmVersion = "lexical-entity-topic.v3"
 
 // RenderOptions caps the compact prior-knowledge block injected into a prompt.
 type RenderOptions struct {
@@ -28,6 +30,9 @@ type RenderResult struct {
 	Tokens  int
 	Kept    int
 	Dropped int
+	// KeptIDs lists the knowledge ids that made it into the block, in render
+	// order — the per-hint accounting behind Kept, for telemetry and tests.
+	KeptIDs []string
 }
 
 // hintBlockHeader teaches the model the cue contract in one line: a rule with
@@ -62,6 +67,7 @@ func RenderHintBlock(hints []Hint, opts RenderOptions) RenderResult {
 	}
 	dropped := len(hints) - len(capped)
 	lines := make([]string, 0, len(capped))
+	keptIDs := make([]string, 0, len(capped))
 	remaining := opts.MaxTokens - cueTokens(hintBlockHeader)
 	for i, hint := range capped {
 		cap := opts.MaxCueTokens
@@ -78,13 +84,17 @@ func RenderHintBlock(hints []Hint, opts RenderOptions) RenderResult {
 			continue
 		}
 		lines = append(lines, line)
-		remaining -= cueTokens(line)
+		keptIDs = append(keptIDs, hint.KnowledgeID)
+		// Every rendered line costs one separator rune in the joined block;
+		// charging it per line keeps the assembled block provably within
+		// MaxTokens (ceil is subadditive over the header and line costs).
+		remaining -= cueTokens(line + "\n")
 	}
 	if len(lines) == 0 {
 		return RenderResult{Dropped: dropped}
 	}
 	block := hintBlockHeader + "\n" + strings.Join(lines, "\n")
-	return RenderResult{Block: block, Tokens: cueTokens(block), Kept: len(lines), Dropped: dropped}
+	return RenderResult{Block: block, Tokens: cueTokens(block), Kept: len(lines), Dropped: dropped, KeptIDs: keptIDs}
 }
 
 // renderCue renders one hint as a single cue line within capTokens:

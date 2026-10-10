@@ -1,0 +1,80 @@
+[
+  {
+    "name": "lifecycle-invalidated-strong-match-gated",
+    "query": {
+      "text": "deploy with the legacy token flow",
+      "entities": ["gatekeeper"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-legacy-flow", "proposition": "Deploy with the legacy token flow by copying keys to every node", "kind": "claim", "entities": ["gatekeeper"], "state": "invalidated"}
+    ],
+    "useful": [],
+    "stale": ["k-legacy-flow"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "lifecycle-superseded-offers-replacement",
+    "query": {
+      "text": "authenticate the gatekeeper CLI",
+      "entities": ["gatekeeper"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-old-basic", "proposition": "The gatekeeper CLI accepts basic auth for all endpoints", "kind": "claim", "entities": ["gatekeeper"], "state": "superseded", "replacement_id": "k-new-oauth"},
+      {"id": "k-new-oauth", "proposition": "An oauth bearer token must accompany every gatekeeper CLI call", "kind": "claim", "entities": ["gatekeeper"], "state": "confirmed"}
+    ],
+    "useful": ["k-new-oauth"],
+    "stale": ["k-old-basic"],
+    "expected_order": ["k-new-oauth"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "lifecycle-corrected-offers-replacement",
+    "query": {
+      "text": "run the database migrations",
+      "entities": ["migrations"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-mig-shell", "proposition": "Run migrations with the old shell script", "kind": "claim", "entities": ["migrations"], "state": "corrected", "replacement_id": "k-mig-tool"},
+      {"id": "k-mig-tool", "proposition": "Migrations run through the versioned migrate tool, never the shell script", "kind": "claim", "entities": ["migrations"], "state": "confirmed"}
+    ],
+    "useful": ["k-mig-tool"],
+    "stale": ["k-mig-shell"],
+    "expected_order": ["k-mig-tool"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "lifecycle-challenged-below-confirmed",
+    "query": {
+      "text": "rotate the service credentials",
+      "entities": ["secrets"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-sec-challenged", "proposition": "Credential rotation happens through the api endpoint", "kind": "claim", "entities": ["secrets"], "state": "challenged"},
+      {"id": "k-sec-confirmed", "proposition": "Credential rotation is scheduled by the rotation daemon every 30 days", "kind": "claim", "entities": ["secrets"], "state": "confirmed"}
+    ],
+    "useful": ["k-sec-confirmed", "k-sec-challenged"],
+    "stale": [],
+    "expected_order": ["k-sec-confirmed", "k-sec-challenged"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  },
+  {
+    "name": "lifecycle-proposed-needs-strong-match",
+    "query": {
+      "text": "set up the staging database",
+      "entities": ["staging"],
+      "limit": 8
+    },
+    "knowledge": [
+      {"id": "k-stg-snap", "proposition": "Staging databases are restored from the nightly anonymized snapshot", "kind": "claim", "entities": ["staging"], "state": "proposed"},
+      {"id": "k-cms-login", "proposition": "The marketing site uses a shared CMS login for editors", "kind": "claim", "entities": ["cms"], "state": "confirmed"}
+    ],
+    "useful": ["k-stg-snap"],
+    "stale": [],
+    "expected_order": ["k-stg-snap"],
+    "budget": {"max_tokens": 600, "max_cue_tokens": 120, "max_hints": 8}
+  }
+]
