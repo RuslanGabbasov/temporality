@@ -347,6 +347,18 @@ Behavioral impact — важнейшая и самая сложная метри
 
 ## 14. План работ
 
+### Статус реализации (2026-10-10)
+
+Сделано в рамках P0:
+
+* п.1 консолидация — ✅ `kernel/priming` и эндпоинты `/v1/agent/priming*` удалены; единственный движок — `observation.FindHints`;
+* п.2, п.3 — ✅ жили и закреплены тестами в живом движке (гейтинг invalidated/superseded/corrected, индивидуальный рейтинг, honest zero);
+* п.4 — ✅ детерминизм + `observation.HintsAlgorithmVersion` в событиях `hint.query`/`hint.offered` и ответе;
+* п.5, п.6 — ✅ `observation.RenderHintBlock`: один блок, бюджеты 600/120/8, cue-контракт `правило [статус] (почему сматчилось) knowledge_id`; инъекция одним system-сообщением в `AgentRun`;
+* п.10 (P1) — ✅ тул `knowledge_lookup` (авто-апрув, project-scoped) замыкает контракт `knowledge_id`.
+
+Не сделано: п.7 (типизированные связи `replaces`/`superseded_by`), P1 п.8–9, 11–13 (дедупликация, учёт Skills, benchmark-корпус, замыкание полезности), P2 целиком.
+
 ### P0 — базовая семантика (консолидация и контракт)
 
 1. **Консолидация**: единственный движок отбора — `FindHints` v2 в observation; `kernel/priming` выводится из рантайма (эндпоинт — удалить или проксировать).
