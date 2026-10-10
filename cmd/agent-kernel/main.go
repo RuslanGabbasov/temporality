@@ -4780,6 +4780,13 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	if a.Model != "" {
 		input.Model = a.Model
 	}
+	// The agent card's turn budget is part of the enforced run configuration:
+	// honoring it here carries the configured budget through every path that
+	// resolves an agent (task runs, triggers, delegation via run-config)
+	// instead of silently falling back to the workflow default.
+	if a.MaxTurns != nil && *a.MaxTurns > 0 {
+		input.MaxTurns = *a.MaxTurns
+	}
 	if a.SystemPrompt != "" {
 		input.SystemPrompt = a.SystemPrompt
 	}

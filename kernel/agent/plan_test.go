@@ -110,7 +110,8 @@ func TestValidatePlanSpec(t *testing.T) {
 		{"bad id charset", valid(PlanTask{ID: "bad id!", AgentID: "x", Prompt: "p"}), "invalid"},
 		{"missing agent", valid(PlanTask{ID: "a", Prompt: "p"}), "agent_id"},
 		{"missing prompt", valid(PlanTask{ID: "a", AgentID: "x"}), "prompt"},
-		{"bad max turns", valid(PlanTask{ID: "a", AgentID: "x", Prompt: "p", MaxTurns: 99}), "max_turns"},
+		{"bad max turns", valid(PlanTask{ID: "a", AgentID: "x", Prompt: "p", MaxTurns: MaxTurnsCeiling + 1}), "max_turns"},
+		{"large budget allowed", valid(PlanTask{ID: "a", AgentID: "x", Prompt: "p", MaxTurns: MaxTurnsCeiling}), ""},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

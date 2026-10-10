@@ -2090,3 +2090,25 @@ func eventsOfType(events []observation.Event, eventType string) []observation.Ev
 	}
 	return matched
 }
+
+func TestNormalizeTurnBudgetHonorsConfiguredValues(t *testing.T) {
+	cases := []struct {
+		in   int
+		want int
+	}{
+		{0, DefaultMaxTurns},
+		{-3, DefaultMaxTurns},
+		{1, 1},
+		{8, 8},
+		{24, 24},
+		{40, 40},
+		{100, 100},
+		{101, MaxTurnsCeiling},
+		{1000, MaxTurnsCeiling},
+	}
+	for _, c := range cases {
+		if got := normalizeTurnBudget(c.in); got != c.want {
+			t.Fatalf("normalizeTurnBudget(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}

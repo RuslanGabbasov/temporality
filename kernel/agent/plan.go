@@ -136,8 +136,8 @@ func validatePlanSpec(spec PlanSpec, priorAnswers map[string]string) (*planDAG, 
 		if task.Prompt == "" {
 			return nil, fmt.Sprintf("task %q: prompt is required", task.ID)
 		}
-		if task.MaxTurns < 0 || task.MaxTurns > 16 {
-			return nil, fmt.Sprintf("task %q: max_turns must be between 1 and 16", task.ID)
+		if task.MaxTurns < 0 || task.MaxTurns > MaxTurnsCeiling {
+			return nil, fmt.Sprintf("task %q: max_turns must be between 1 and %d", task.ID, MaxTurnsCeiling)
 		}
 	}
 	if spec.MaxRework < 0 || spec.MaxRework > MaxPlanRework {

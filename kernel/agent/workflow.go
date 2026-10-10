@@ -41,6 +41,14 @@ const (
 	// but they wait for a free slot — launched in FIFO order, awaited in FIFO
 	// order, so the event stream stays deterministic for replay.
 	MaxDelegationWidth = 8
+
+	// DefaultMaxTurns is the turn budget of runs that do not configure one.
+	DefaultMaxTurns = 8
+	// MaxTurnsCeiling bounds explicitly configured turn budgets. Configured
+	// values are honored (clamped here, never silently reset to the default):
+	// team manifests already default to 40 turns per member
+	// (docs/agent-teams.md), so the old ceiling of 24 truncated real budgets.
+	MaxTurnsCeiling = 100
 )
 
 type RunInput struct {
@@ -227,9 +235,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if input.SourceID == "" {
 		input.SourceID = "temporality-agent-kernel"
 	}
-	if input.MaxTurns <= 0 || input.MaxTurns > 24 {
-		input.MaxTurns = 8
-	}
+	input.MaxTurns = normalizeTurnBudget(input.MaxTurns)
 	if input.ApprovalTimeoutSeconds <= 0 {
 		input.ApprovalTimeoutSeconds = 3600
 	}
@@ -1707,6 +1713,20 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	return result, nil
 }
 
+// normalizeTurnBudget honors an explicitly configured turn budget instead of
+// resetting it: unset/negative falls back to the default, oversized budgets
+// are clamped to the ceiling. The previous behavior (>24 → 8) silently
+// discarded every configured budget above 24 (e.g. team defaults of 40).
+func normalizeTurnBudget(n int) int {
+	if n <= 0 {
+		return DefaultMaxTurns
+	}
+	if n > MaxTurnsCeiling {
+		return MaxTurnsCeiling
+	}
+	return n
+}
+
 func contains(values []string, value string) bool {
 	for _, item := range values {
 		if item == value {
@@ -2348,7 +2368,7 @@ func KernelTools() []llm.ToolDef {
 		{Name: "skill_propose", Description: "Propose a new living skill from a natural-language description of a repeatable capability. The skill builder extracts the contract (procedure, capabilities, tools, runtime, constraints) referencing only tools that actually exist, and saves a 0.x draft pending human review in the Skills UI. If the skill already exists, the draft becomes its next version. Never hand-write skill files in the repo — the registry is the only source of truth", Parameters: map[string]any{"type": "object", "properties": map[string]any{"description": map[string]any{"type": "string", "description": "What the skill should do, when to use it, and any constraints — the same way you would describe it to a human"}}, "required": []string{"description"}}},
 		{Name: "skill_evaluate", Description: "Run the stored evaluation suite of a skill against its current revision or a specific version (e.g. a pending draft). Each case is a grounded model call checked against expected answer patterns; results are recorded as an evaluation run. Use it to validate a proposal before asking a human to apply it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}, "version": map[string]any{"type": "string", "description": "Optional specific version to test (a draft); defaults to the current revision"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_diff", Description: "Show what changed between two skill versions (manifest contract + SKILL.md). Defaults to current revision vs the newest draft proposal — use it to review an evolution proposal before recommending apply", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}, "from_version": map[string]any{"type": "string", "description": "Optional base version; defaults to the current revision"}, "to_version": map[string]any{"type": "string", "description": "Optional target version; defaults to the newest draft"}}, "required": []string{"skill_id"}}},
-		{Name: "delegate", Description: "Delegate a self-contained subtask to another agent and wait for its result. The delegated agent runs with its own model, system prompt and capabilities — you cannot grant it anything beyond what it already has. Give a complete, self-contained prompt: everything the agent needs to know must be in it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"agent_id": map[string]any{"type": "string", "description": "Agent to delegate to"}, "prompt": map[string]any{"type": "string", "description": "Self-contained subtask description"}, "max_turns": map[string]any{"type": "integer", "description": "Turn budget for the delegated run, 1–16 (default 8)"}}, "required": []string{"agent_id", "prompt"}}},
+		{Name: "delegate", Description: "Delegate a self-contained subtask to another agent and wait for its result. The delegated agent runs with its own model, system prompt and capabilities — you cannot grant it anything beyond what it already has. Give a complete, self-contained prompt: everything the agent needs to know must be in it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"agent_id": map[string]any{"type": "string", "description": "Agent to delegate to"}, "prompt": map[string]any{"type": "string", "description": "Self-contained subtask description"}, "max_turns": map[string]any{"type": "integer", "description": "Turn budget for the delegated run, 1–100 (default 8)"}}, "required": []string{"agent_id", "prompt"}}},
 		{Name: "plan", Description: "Execute a plan of dependent subtasks as a DAG across agents, in one call. Each task names an agent and a self-contained prompt; depends_on lists task ids that must complete successfully first — their final answers are appended to the dependent task's prompt automatically, or place them inline with {{task-id.answer}} placeholders. Tasks without shared dependencies run in parallel. A failed task skips only its transitive dependents; independent branches still finish. A task with review_of is an acceptance gate: its run receives the submit_review tool, and a rework verdict sends the rejected tasks back with concrete feedback and re-runs their consumers (bounded by max_rework). Use this instead of several delegate calls whenever the work has ordering dependencies, can fan out, or needs review gates.", Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -2365,7 +2385,7 @@ func KernelTools() []llm.ToolDef {
 							"prompt":     map[string]any{"type": "string", "description": "Self-contained instruction; {{dep-id.answer}} inlines a dependency's result"},
 							"depends_on": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Task ids that must complete before this one"},
 							"review_of":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Acceptance gate: this task reviews these task ids (auto-added to depends_on). Its run receives the submit_review tool; a rework verdict reopens the rejected tasks with the feedback"},
-							"max_turns":  map[string]any{"type": "integer", "description": "Turn budget for this task's run, 1–16 (default 8)"},
+							"max_turns":  map[string]any{"type": "integer", "description": "Turn budget for this task's run, 1–100 (default 8)"},
 						},
 						"required": []string{"id", "agent_id", "prompt"},
 					},
