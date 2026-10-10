@@ -50,6 +50,12 @@ const (
 	AuditPolicyCreated        = "policy.created"
 	AuditPolicyUpdated        = "policy.updated"
 	AuditPolicyDeleted        = "policy.deleted"
+	AuditTeamCreated          = "team.created"
+	AuditTeamUpdated          = "team.updated"
+	AuditTeamDeleted          = "team.deleted"
+	AuditTeamVersionProposed  = "team_version.proposed"
+	AuditTeamVersionApplied   = "team_version.applied"
+	AuditTeamVersionRejected  = "team_version.rejected"
 )
 
 // RecordAccessAudit appends one event. Nil details is stored as {}.

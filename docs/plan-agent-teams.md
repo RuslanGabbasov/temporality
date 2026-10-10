@@ -31,14 +31,16 @@ Source spec: `docs/agent-teams.md` (21 раздел / 8 фаз).
 
 ## 2. Волны работ
 
-### Волна A. Модель и API — M — фаза 1
+### Волна A. Модель и API — M — фаза 1 — **готово**
 
-- [ ] Миграция: `workspace_team` (id, name, description, version, manifest JSONB — слоты/протокол/дефолты, org_unit_id) + `workspace_team_version` (immutable, PK(team_id,version)); аналог 000028.
-- [ ] Стор `workspace/teams.go`: Team/TeamVersion-структуры, Create/Get/ListAll/ListVisible/Update/Delete, ListVersions, ProposeVersion/ApplyVersion (переиспользовать паттерн draft→apply из skills).
-- [ ] Валидация манифеста в сторe: известный `protocol.kind`, непустые слоты с уникальными id, `binding.mode` ∈ {fixed, role}, `fixed` требует agent_id; синтаксис-ошибки — 422.
-- [ ] API `/v1/workspace/teams` CRUD (+ `GET /{id}/versions`, `POST /{id}/versions/{v}/apply`); списки фильтруются по OrgVisible, мутации — по роли; PUT не сбрасывает `org_unit_id` (binding — админ-эндпоинт, как у остальных).
-- [ ] Аудит `team.created/updated/deleted`, `team_version.proposed/applied`.
-- [ ] Go-тесты: CRUD, версии (immutable, apply переключает указатель), видимость по дереву, валидация манифеста.
+- [x] Миграция: `workspace_team` (id, name, description, version, manifest JSONB — слоты/протокол/дефолты, org_unit_id) + `workspace_team_version` (immutable, PK(team_id,version)); аналог 000028. (000047)
+- [x] Стор `workspace/teams.go`: Team/TeamVersion-структуры, Create/Get/ListAll/ListVisible/Update/Delete, ListVersions, ProposeVersion/ApplyVersion (переиспользовать паттерн draft→apply из skills). (+ Reject)
+- [x] Валидация манифеста в сторe: известный `protocol.kind`, непустые слоты с уникальными id, `binding.mode` ∈ {fixed, role}, `fixed` требует agent_id; синтаксис-ошибки — 422. (+ cycle/dangling-проверки для dag)
+- [x] API `/v1/workspace/teams` CRUD (+ `GET /{id}/versions`, `POST /{id}/versions/{v}/apply`, `POST /{id}/versions/{v}/reject`); списки фильтруются по OrgVisible, мутации — по роли; PUT не сбрасывает `org_unit_id` (binding — админ-эндпоинт, как у остальных).
+- [x] Аудит `team.created/updated/deleted`, `team_version.proposed/applied/rejected`.
+- [x] Go-тесты: валидация манифеста (22 кейса), версии (immutable, apply переключает указатель, повторный apply 409), видимость по дереву, CRUD.
+
+Заметки: аудит проверен на стенде (`team.created/proposed/applied` в `access_audit_log`, actor ops); binding-smoke: `PUT /v1/org/resources/team/code-delivery/binding` → появляется в `GET /v1/org/units/rd/resources` → unbind очищает.
 
 ### Волна B. Рантайм командных запусков — L — фаза 2
 

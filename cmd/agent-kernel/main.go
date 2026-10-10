@@ -193,6 +193,10 @@ func main() {
 		log.Error("migrate workspace v46", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000047_teams.up.sql"); err != nil {
+		log.Error("migrate workspace v47", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -2914,6 +2918,215 @@ func main() {
 		writeJSON(w, 200, map[string]any{"runs": runs})
 	})
 
+	// Agent teams (docs/agent-teams.md Wave A): versioned definitions of
+	// multi-agent compositions. The manifest (protocol + role slots) is data;
+	// the runtime compiles it into plan/delegate (Wave B). Users edit the
+	// structured form — team.yaml never surfaces as a user-facing format.
+	mux.HandleFunc("GET /v1/workspace/teams", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		list, err := ws.ListTeamsVisible(r.Context(), visibleUnits(r))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"teams": list, "count": len(list)})
+	})
+	mux.HandleFunc("POST /v1/workspace/teams", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req teamRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		team, prov, err := req.toTeam("")
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		if team.ID == "" {
+			writeError(w, 422, errors.New("id is required"))
+			return
+		}
+		if req.Draft {
+			if err := ws.CreateTeamDraft(r.Context(), &team, prov); err != nil {
+				writeError(w, 409, err)
+				return
+			}
+			_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamCreated, "team", team.ID, map[string]any{"name": team.Name, "draft": true})
+			writeJSON(w, 201, team)
+			return
+		}
+		if err := ws.CreateTeam(r.Context(), &team); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamCreated, "team", team.ID, map[string]any{"name": team.Name, "version": team.Version})
+		writeJSON(w, 201, team)
+	})
+	mux.HandleFunc("GET /v1/workspace/teams/{teamID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		team, err := ws.GetTeam(r.Context(), r.PathValue("teamID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(team.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		writeJSON(w, 200, team)
+	})
+	mux.HandleFunc("PUT /v1/workspace/teams/{teamID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req teamRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		team, _, err := req.toTeam(r.PathValue("teamID"))
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		// Editing content must not re-scope a team: bindings change only
+		// through the admin binding endpoint (same rule as skills).
+		if prev, err := ws.GetTeam(r.Context(), team.ID); err == nil {
+			team.OrgUnitID = prev.OrgUnitID
+		}
+		if err := ws.UpdateTeam(r.Context(), &team); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamUpdated, "team", team.ID, map[string]any{"version": team.Version})
+		writeJSON(w, 200, team)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/teams/{teamID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		if err := ws.DeleteTeam(r.Context(), r.PathValue("teamID")); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamDeleted, "team", r.PathValue("teamID"), nil)
+		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+	mux.HandleFunc("GET /v1/workspace/teams/{teamID}/versions", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		versions, err := ws.ListTeamVersions(r.Context(), r.PathValue("teamID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"versions": versions})
+	})
+	mux.HandleFunc("GET /v1/workspace/teams/{teamID}/versions/{version}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		version, err := ws.GetTeamVersion(r.Context(), r.PathValue("teamID"), r.PathValue("version"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, version)
+	})
+	mux.HandleFunc("POST /v1/workspace/teams/{teamID}/versions", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req teamVersionRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if err := workspace.ValidateTeamManifest(req.Manifest); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		version, err := ws.ProposeTeamVersion(r.Context(), r.PathValue("teamID"), req.Version, req.Manifest, req.provenance())
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			if errors.Is(err, workspace.ErrConflict) {
+				writeError(w, 409, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamVersionProposed, "team", r.PathValue("teamID"), map[string]any{"version": version.Version, "origin": version.Origin})
+		writeJSON(w, 201, version)
+	})
+	mux.HandleFunc("POST /v1/workspace/teams/{teamID}/versions/{version}/apply", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		team, _, err := ws.ApplyTeamVersion(r.Context(), r.PathValue("teamID"), r.PathValue("version"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			if errors.Is(err, workspace.ErrConflict) {
+				writeError(w, 409, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamVersionApplied, "team", team.ID, map[string]any{"version": team.Version})
+		writeJSON(w, 200, team)
+	})
+	mux.HandleFunc("POST /v1/workspace/teams/{teamID}/versions/{version}/reject", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		version, err := ws.RejectTeamVersion(r.Context(), r.PathValue("teamID"), r.PathValue("version"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			if errors.Is(err, workspace.ErrConflict) {
+				writeError(w, 409, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamVersionRejected, "team", r.PathValue("teamID"), map[string]any{"version": version.Version})
+		writeJSON(w, 200, version)
+	})
+
 	// MCP servers (workspace-global registry; stdio / sse / http)
 	mux.HandleFunc("GET /v1/workspace/mcp-servers", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
@@ -4863,6 +5076,69 @@ func (req skillRequest) toSkill(skillID string) (workspace.Skill, error) {
 		Version: version, Markdown: req.Markdown, Manifest: skills.MarshalJSONForStorage(manifest),
 		OrgUnitID: req.OrgUnitID,
 	}, nil
+}
+
+// teamRequest is the create/update payload for a team. The manifest arrives as
+// structured JSON (protocol + slots + defaults) and is validated against the
+// spec vocabulary before storage; team.yaml never appears in the API surface.
+type teamRequest struct {
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Version     string          `json:"version"`
+	Manifest    json.RawMessage `json:"manifest"`
+	OrgUnitID   string          `json:"org_unit_id"` // only set on create; updates keep the stored binding
+	Draft       bool            `json:"draft"`
+}
+
+func (req teamRequest) toTeam(teamID string) (workspace.Team, workspace.TeamProvenance, error) {
+	if strings.TrimSpace(req.Name) == "" {
+		return workspace.Team{}, workspace.TeamProvenance{}, errors.New("name is required")
+	}
+	if err := workspace.ValidateTeamManifest(req.Manifest); err != nil {
+		return workspace.Team{}, workspace.TeamProvenance{}, err
+	}
+	id := req.ID
+	if teamID != "" {
+		id = teamID
+	}
+	if id == "" {
+		id = slugify(req.Name)
+	}
+	version := req.Version
+	if version == "" {
+		version = "1.0.0"
+	}
+	return workspace.Team{
+		ID: id, Name: req.Name, Description: req.Description,
+		Version: version, Manifest: req.Manifest, OrgUnitID: req.OrgUnitID,
+	}, workspace.TeamProvenance{Origin: workspace.TeamOriginInitial}, nil
+}
+
+// teamVersionRequest proposes a draft version (docs/agent-teams.md §12):
+// evolution proposals carry the observed problem, the proposed change and the
+// expected effect so the version chain stays explainable.
+type teamVersionRequest struct {
+	Version  string          `json:"version"`
+	Manifest json.RawMessage `json:"manifest"`
+	Origin   string          `json:"origin"`
+	// Evolution proposal anatomy.
+	SourceRuns      []string `json:"source_runs"`
+	ChangeSummary   string   `json:"change_summary"`
+	ObservedProblem string   `json:"observed_problem"`
+	ProposedChange  string   `json:"proposed_change"`
+	ExpectedEffect  string   `json:"expected_effect"`
+}
+
+func (req teamVersionRequest) provenance() workspace.TeamProvenance {
+	origin := req.Origin
+	if origin != workspace.TeamOriginAgentProposal && origin != workspace.TeamOriginHumanEdit && origin != workspace.TeamOriginInitial {
+		origin = workspace.TeamOriginAgentProposal
+	}
+	return workspace.TeamProvenance{
+		Origin: origin, SourceRuns: req.SourceRuns, ChangeSummary: req.ChangeSummary,
+		ObservedProblem: req.ObservedProblem, ProposedChange: req.ProposedChange, ExpectedEffect: req.ExpectedEffect,
+	}
 }
 
 // skillMemory returns knowledge linked to a skill: knowledge.proposed events

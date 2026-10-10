@@ -200,6 +200,7 @@ const (
 	OrgResourceMCPServer = "mcp-server"
 	OrgResourceProvider  = "provider"
 	OrgResourceTrigger   = "trigger"
+	OrgResourceTeam      = "team"
 )
 
 var orgResourceTables = map[string]string{
@@ -208,6 +209,7 @@ var orgResourceTables = map[string]string{
 	OrgResourceMCPServer: "workspace_mcp_server",
 	OrgResourceProvider:  "workspace_provider",
 	OrgResourceTrigger:   "workspace_trigger",
+	OrgResourceTeam:      "workspace_team",
 }
 
 // SetResourceOrgUnit binds a resource to an org unit; unitID empty clears the
@@ -242,6 +244,7 @@ type UnitResources struct {
 	MCPServers []NamedRef        `json:"mcp_servers"`
 	Providers  []NamedRef        `json:"providers"`
 	Triggers   []NamedRef        `json:"triggers"`
+	Teams      []NamedRef        `json:"teams"`
 	Users      []NamedRef        `json:"users"`
 	Projects   []NamedRef        `json:"projects"`
 	Roles      []OrgUnitRoleInfo `json:"roles"`
@@ -258,7 +261,8 @@ type NamedRef struct {
 func (s *Store) ListUnitResources(ctx context.Context, unitID string) (UnitResources, error) {
 	out := UnitResources{
 		Agents: []NamedRef{}, Skills: []NamedRef{}, MCPServers: []NamedRef{},
-		Providers: []NamedRef{}, Triggers: []NamedRef{}, Users: []NamedRef{}, Projects: []NamedRef{},
+		Providers: []NamedRef{}, Triggers: []NamedRef{}, Teams: []NamedRef{},
+		Users: []NamedRef{}, Projects: []NamedRef{},
 		Roles: []OrgUnitRoleInfo{},
 	}
 	queries := []struct {
@@ -270,6 +274,7 @@ func (s *Store) ListUnitResources(ctx context.Context, unitID string) (UnitResou
 		{`SELECT id, name FROM workspace_mcp_server WHERE org_unit_id = $1 ORDER BY name`, &out.MCPServers},
 		{`SELECT id, name FROM workspace_provider WHERE org_unit_id = $1 ORDER BY name`, &out.Providers},
 		{`SELECT id, name FROM workspace_trigger WHERE org_unit_id = $1 ORDER BY name`, &out.Triggers},
+		{`SELECT id, name FROM workspace_team WHERE org_unit_id = $1 ORDER BY name`, &out.Teams},
 		{`SELECT id, name FROM workspace_user WHERE org_unit_id = $1 ORDER BY name`, &out.Users},
 		{`SELECT p.id, p.name FROM workspace_project p
 		   JOIN workspace_project_org_unit pu ON pu.project_id = p.id
