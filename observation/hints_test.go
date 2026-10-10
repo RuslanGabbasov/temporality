@@ -30,6 +30,74 @@ func hintKnowledge(t *testing.T, events []Event) []Knowledge {
 	return knowledge
 }
 
+func TestFindHintsOffersReplacementForRetiredMatch(t *testing.T) {
+	// The replacement contract: a retired rule that matched the task must not
+	// surface itself, but its named successor is offered in its place with an
+	// explainable "replaces:" reason (plan-priming-relevance.md §10).
+	base := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		hintProposalEvent("e1", "k-old", "claim", "The gatekeeper CLI accepts basic auth for all endpoints", []string{"gatekeeper"}, base),
+		{
+			Schema: Schema, EventID: "e2", OccurredAt: base.Add(time.Minute),
+			Source:  Source{ID: "kernel", Integration: "temporality-agent-kernel"},
+			Context: Context{Project: "repo-a", Actor: Actor{ID: "agent", Type: "agent"}},
+			Type:    "knowledge.superseded",
+			Data:    map[string]any{"knowledge_id": "k-old", "replacement_id": "k-new"},
+		},
+		hintProposalEvent("e3", "k-new", "claim", "An oauth bearer token must accompany every CLI call", nil, base.Add(2*time.Minute)),
+		transitionEvent("e4", "k-new", "knowledge.confirmed", base.Add(3*time.Minute)),
+	}
+	hints := FindHints(hintKnowledge(t, events), HintQuery{Text: "authenticate to gatekeeper", Entities: []string{"gatekeeper"}, Limit: 8})
+	if len(hints) != 1 || hints[0].KnowledgeID != "k-new" {
+		t.Fatalf("the replacement must be offered in place of the retired rule, got %+v", hints)
+	}
+	if len(hints[0].MatchedBy) != 1 || hints[0].MatchedBy[0] != "replaces:k-old" {
+		t.Fatalf("replacement must carry the replaces reason, got %v", hints[0].MatchedBy)
+	}
+}
+
+func TestFindHintsReplacementDoesNotDuplicateDirectMatch(t *testing.T) {
+	base := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		hintProposalEvent("e1", "k-old", "claim", "The gatekeeper CLI accepts basic auth", []string{"gatekeeper"}, base),
+		{
+			Schema: Schema, EventID: "e2", OccurredAt: base.Add(time.Minute),
+			Source:  Source{ID: "kernel", Integration: "temporality-agent-kernel"},
+			Context: Context{Project: "repo-a", Actor: Actor{ID: "agent", Type: "agent"}},
+			Type:    "knowledge.superseded",
+			Data:    map[string]any{"knowledge_id": "k-old", "replacement_id": "k-new"},
+		},
+		hintProposalEvent("e3", "k-new", "claim", "An oauth bearer token must accompany every gatekeeper CLI call", []string{"gatekeeper"}, base.Add(2*time.Minute)),
+	}
+	hints := FindHints(hintKnowledge(t, events), HintQuery{Text: "authenticate to gatekeeper", Entities: []string{"gatekeeper"}, Limit: 8})
+	if len(hints) != 1 || hints[0].KnowledgeID != "k-new" {
+		t.Fatalf("a direct match must win without duplicating itself, got %+v", hints)
+	}
+	if len(hints[0].MatchedBy) == 0 || hints[0].MatchedBy[0] != "entity:gatekeeper" {
+		t.Fatalf("direct entity match must outrank the replacement expansion, got %v", hints[0].MatchedBy)
+	}
+}
+
+func TestFindHintsRetiredReplacementStaysGated(t *testing.T) {
+	base := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		hintProposalEvent("e1", "k-old", "claim", "The gatekeeper CLI accepts basic auth", []string{"gatekeeper"}, base),
+		hintProposalEvent("e2", "k-mid", "claim", "Use the legacy token flow", []string{"gatekeeper"}, base.Add(time.Minute)),
+		transitionEvent("e3", "k-mid", "knowledge.invalidated", base.Add(2*time.Minute)),
+		{
+			Schema: Schema, EventID: "e4", OccurredAt: base.Add(3 * time.Minute),
+			Source:  Source{ID: "kernel", Integration: "temporality-agent-kernel"},
+			Context: Context{Project: "repo-a", Actor: Actor{ID: "agent", Type: "agent"}},
+			Type:    "knowledge.superseded",
+			Data:    map[string]any{"knowledge_id": "k-old", "replacement_id": "k-mid"},
+		},
+	}
+	hints := FindHints(hintKnowledge(t, events), HintQuery{Text: "authenticate to gatekeeper", Entities: []string{"gatekeeper"}, Limit: 8})
+	if len(hints) != 0 {
+		t.Fatalf("a retired replacement must not resurrect, got %+v", hints)
+	}
+}
+
 func TestFindHintsGatesInvalidatedEvenOnStrongMatch(t *testing.T) {
 	// Ported from kernel/priming integration corpus: a lifecycle-gated item
 	// must never surface as an acting rule, however well it matches.

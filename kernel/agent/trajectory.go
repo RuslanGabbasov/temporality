@@ -59,12 +59,13 @@ type ToolStep struct {
 
 // KnowledgeEvent captures knowledge formation, recall, or invalidation.
 type KnowledgeEvent struct {
-	Kind        string    `json:"kind"` // proposed, recalled, invalidated, superseded, corrected
-	KnowledgeID string    `json:"knowledge_id"`
-	Proposition string    `json:"proposition,omitempty"`
-	EventID     string    `json:"event_id"` // provenance
-	TurnNumber  int       `json:"turn_number"`
-	At          time.Time `json:"at"`
+	Kind          string    `json:"kind"` // proposed, recalled, invalidated, superseded, corrected
+	KnowledgeID   string    `json:"knowledge_id"`
+	Proposition   string    `json:"proposition,omitempty"`
+	ReplacementID string    `json:"replacement_id,omitempty"`
+	EventID       string    `json:"event_id"` // provenance
+	TurnNumber    int       `json:"turn_number"`
+	At            time.Time `json:"at"`
 }
 
 // Pattern is a repeating tool-call sequence found across multiple turns.
@@ -220,11 +221,12 @@ func ExtractTrajectory(events []EventLike) Trajectory {
 
 		case "knowledge.invalidated", "knowledge.superseded", "knowledge.corrected":
 			trajectory.Knowledge = append(trajectory.Knowledge, KnowledgeEvent{
-				Kind:        strings.TrimPrefix(ev.Type, "knowledge."),
-				KnowledgeID: stringField(d, "knowledge_id"),
-				EventID:     ev.EventID,
-				TurnNumber:  turnNumber,
-				At:          ev.OccurredAt,
+				Kind:          strings.TrimPrefix(ev.Type, "knowledge."),
+				KnowledgeID:   stringField(d, "knowledge_id"),
+				ReplacementID: stringField(d, "replacement_id"),
+				EventID:       ev.EventID,
+				TurnNumber:    turnNumber,
+				At:            ev.OccurredAt,
 			})
 
 		case "run.completed":

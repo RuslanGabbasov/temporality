@@ -215,6 +215,78 @@ func TestJournalFlowIngestListHintsInvalidate(t *testing.T) {
 	}
 }
 
+func TestManualInvalidationWithReplacementSupersedes(t *testing.T) {
+	handler := newTestServer(t)
+	events := []observation.Event{
+		proposedEvent("lighthouse", "evt-1", "K1", "gatekeeper v2 authenticates via .token-file"),
+		proposedEvent("lighthouse", "evt-2", "K2", "gatekeeper v3 authenticates via oauth device flow"),
+	}
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": events}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	// Invalidation naming a successor becomes a supersession carrying the
+	// typed replacement link, not a bare retirement.
+	res, body := doJSON(t, handler, "POST", "/v1/observations/knowledge/invalidate", map[string]any{
+		"knowledge_id": "K1", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"},
+		"reason": "v3 replaced the token-file flow", "replacement_id": "K2",
+	})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("supersede status = %d, body = %v", res.StatusCode, body)
+	}
+	if body["type"] != "knowledge.superseded" {
+		t.Fatalf("event type = %v, want knowledge.superseded", body["type"])
+	}
+	if data := body["data"].(map[string]any); data["replacement_id"] != "K2" {
+		t.Fatalf("replacement_id = %v, want K2", data["replacement_id"])
+	}
+
+	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&knowledge_id=K1", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("knowledge K1 status = %d", res.StatusCode)
+	}
+	retired := body["knowledge"].([]any)[0].(map[string]any)
+	if retired["state"] != "superseded" || retired["replacement_id"] != "K2" {
+		t.Fatalf("retired item = state %v replacement %v, want superseded/K2", retired["state"], retired["replacement_id"])
+	}
+
+	// The replacement contract end to end: hints answer with the successor
+	// when the task matches the retired rule.
+	res, body = doJSON(t, handler, "POST", "/v1/observations/hints", map[string]any{
+		"project": "lighthouse", "query": "how do I authenticate to gatekeeper v2", "actor": map[string]any{"id": "coder", "type": "agent"},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("hints status = %d", res.StatusCode)
+	}
+	hints := body["hints"].([]any)
+	if len(hints) != 1 {
+		t.Fatalf("hints = %d, want the replacement only", len(hints))
+	}
+	hint := hints[0].(map[string]any)
+	if hint["knowledge_id"] != "K2" {
+		t.Fatalf("hint knowledge_id = %v, want K2 (the replacement)", hint["knowledge_id"])
+	}
+	if matched := hint["matched_by"].([]any); len(matched) != 1 || matched[0] != "replaces:K1" {
+		t.Fatalf("matched_by = %v, want [replaces:K1]", matched)
+	}
+
+	// A replacement that does not exist is rejected, not silently dropped.
+	res, _ = doJSON(t, handler, "POST", "/v1/observations/knowledge/invalidate", map[string]any{
+		"knowledge_id": "K2", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"},
+		"reason": "bad link", "replacement_id": "K404",
+	})
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown replacement status = %d, want 404", res.StatusCode)
+	}
+	res, _ = doJSON(t, handler, "POST", "/v1/observations/knowledge/invalidate", map[string]any{
+		"knowledge_id": "K2", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"},
+		"reason": "self link", "replacement_id": "K2",
+	})
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("self replacement status = %d, want 422", res.StatusCode)
+	}
+}
+
 func TestIngestBatchLimits(t *testing.T) {
 	handler := newTestServer(t)
 

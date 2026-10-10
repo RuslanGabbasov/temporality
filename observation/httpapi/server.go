@@ -204,12 +204,13 @@ func (s *Server) listObservations(w http.ResponseWriter, r *http.Request) {
 }
 
 type invalidateObservationRequest struct {
-	KnowledgeID string                 `json:"knowledge_id"`
-	Project     string                 `json:"project"`
-	Run         string                 `json:"run,omitempty"`
-	Actor       observation.Actor      `json:"actor"`
-	Reason      string                 `json:"reason"`
-	Evidence    []observation.Evidence `json:"evidence,omitempty"`
+	KnowledgeID   string                 `json:"knowledge_id"`
+	Project       string                 `json:"project"`
+	Run           string                 `json:"run,omitempty"`
+	Actor         observation.Actor      `json:"actor"`
+	Reason        string                 `json:"reason"`
+	ReplacementID string                 `json:"replacement_id,omitempty"`
+	Evidence      []observation.Evidence `json:"evidence,omitempty"`
 }
 
 func (s *Server) projectKnowledge(r *http.Request, project string, asOf, knownAt *time.Time) ([]observation.Event, error) {
@@ -552,6 +553,9 @@ func (s *Server) knowledgeChain(w http.ResponseWriter, r *http.Request) {
 					details["scope_kind"] = ev.Data["scope_kind"]
 					details["scope_id"] = ev.Data["scope_id"]
 				}
+				if replacement, _ := ev.Data["replacement_id"].(string); replacement != "" {
+					details["replacement_id"] = replacement
+				}
 				chain = append(chain, ChainEntry{Type: "lifecycle", EventID: ev.EventID, At: ev.OccurredAt, Details: details})
 			}
 		}
@@ -698,6 +702,7 @@ func (s *Server) invalidateObservationKnowledge(w http.ResponseWriter, r *http.R
 	input.Project = strings.TrimSpace(input.Project)
 	input.Actor.ID = strings.TrimSpace(input.Actor.ID)
 	input.Reason = strings.TrimSpace(input.Reason)
+	input.ReplacementID = strings.TrimSpace(input.ReplacementID)
 	if input.KnowledgeID == "" || input.Project == "" || input.Actor.ID == "" || input.Reason == "" {
 		writeError(w, http.StatusUnprocessableEntity, errors.New("knowledge_id, project, actor.id, and reason are required"))
 		return
@@ -731,12 +736,42 @@ func (s *Server) invalidateObservationKnowledge(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusConflict, errors.New("knowledge is already retired"))
 		return
 	}
+	// Invalidation with a successor is a supersession, not a bare retirement:
+	// hints then offer the replacement in place of the retired rule
+	// (docs/plan-priming-relevance.md §10, «замена предлагается вместо
+	// исключения»). The successor must be a visible, live item — never itself,
+	// never another retired rule.
+	eventType := "knowledge.invalidated"
+	eventData := map[string]any{"knowledge_id": input.KnowledgeID, "reason": input.Reason, "method": "manual"}
+	if input.ReplacementID != "" {
+		if input.ReplacementID == input.KnowledgeID {
+			writeError(w, http.StatusUnprocessableEntity, errors.New("replacement_id must differ from knowledge_id"))
+			return
+		}
+		var replacement *observation.Knowledge
+		for i := range knowledge {
+			if knowledge[i].ID == input.ReplacementID {
+				replacement = &knowledge[i]
+				break
+			}
+		}
+		if replacement == nil {
+			writeError(w, http.StatusNotFound, errors.New("replacement knowledge not found"))
+			return
+		}
+		if replacement.State == "corrected" || replacement.State == "superseded" || replacement.State == "invalidated" {
+			writeError(w, http.StatusConflict, errors.New("replacement knowledge is already retired"))
+			return
+		}
+		eventType = "knowledge.superseded"
+		eventData["replacement_id"] = input.ReplacementID
+	}
 	event := observation.Event{
 		Schema: observation.Schema, EventID: newUUID(), OccurredAt: s.now().UTC(),
 		Source:   observation.Source{ID: "temporality-manual", Integration: "temporality", Version: "1"},
 		Context:  observation.Context{Project: input.Project, Run: input.Run, Actor: input.Actor},
-		Type:     "knowledge.invalidated",
-		Data:     map[string]any{"knowledge_id": input.KnowledgeID, "reason": input.Reason, "method": "manual"},
+		Type:     eventType,
+		Data:     eventData,
 		Evidence: input.Evidence,
 	}
 	if err = event.Validate(); err != nil {

@@ -122,6 +122,9 @@ func ExtractActivationChain(knowledgeID string, trajectories []Trajectory) Activ
 					Kind:    k.Kind,
 					EventID: k.EventID,
 				}
+				if k.ReplacementID != "" {
+					chain.SupersededBy = k.ReplacementID
+				}
 				runSet[traj.RunID] = true
 			}
 		}

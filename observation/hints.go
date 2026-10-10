@@ -46,12 +46,27 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 	candidates := make([]hintCandidate, 0)
 	direct := make(map[string]hintCandidate)
 	itemsByID := make(map[string]Knowledge, len(knowledge))
+	// Retired items that matched the query and name a live replacement: the
+	// replacement — not the retired rule — is what the task actually needs.
+	replacements := make([]struct {
+		targetID, fromID string
+		tier             int
+	}, 0)
 	for _, item := range knowledge {
 		itemsByID[item.ID] = item
-		if item.State == "invalidated" || item.State == "superseded" || item.State == "corrected" {
+		matched, tier := matchKnowledge(item, queryEntities, queryTopics, queryTokens, queryPhrase)
+		if retired := item.State == "invalidated" || item.State == "superseded" || item.State == "corrected"; retired {
+			// A retired item never surfaces as an acting rule, but when it named
+			// its successor the successor is offered in its place (one hop, with
+			// the retired id as the explainable reason).
+			if len(matched) > 0 && item.Replacement != "" && item.Replacement != item.ID {
+				replacements = append(replacements, struct {
+					targetID, fromID string
+					tier             int
+				}{targetID: item.Replacement, fromID: item.ID, tier: tier + 1})
+			}
 			continue
 		}
-		matched, tier := matchKnowledge(item, queryEntities, queryTopics, queryTokens, queryPhrase)
 		if len(matched) == 0 {
 			continue
 		}
@@ -65,6 +80,18 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 	// Add one-hop graph neighbors after direct matches. The relationship and
 	// source node are returned as the reason, so this expansion is inspectable.
 	relatedSeen := make(map[string]bool)
+	for _, expansion := range replacements {
+		if _, already := direct[expansion.targetID]; already || relatedSeen[expansion.targetID] {
+			continue
+		}
+		if target, found := itemsByID[expansion.targetID]; found {
+			candidate, eligible := makeHintCandidate(target, []string{"replaces:" + expansion.fromID}, expansion.tier)
+			if eligible {
+				candidates = append(candidates, candidate)
+				relatedSeen[expansion.targetID] = true
+			}
+		}
+	}
 	for _, source := range knowledge {
 		for _, relation := range source.Relationships {
 			targetID := relation.TargetID
