@@ -28,7 +28,6 @@ import (
 	"github.com/temporality-project/temporality/kernel/cost"
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/outbox"
-	"github.com/temporality-project/temporality/kernel/priming"
 	"github.com/temporality-project/temporality/kernel/quota"
 	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/skills"
@@ -82,7 +81,6 @@ func main() {
 	if len(costPrices.Prices()) > 0 {
 		log.Info("model cost accounting enabled", "models", len(costPrices.Prices()))
 	}
-	primer := priming.NewPrimer(priming.DefaultConfig(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"))
 	ws, err := workspace.Open(ctx, databaseURL)
 	if err != nil {
 		log.Error("open workspace store", "error", err)
@@ -740,34 +738,6 @@ func main() {
 			return
 		}
 		costAPI.ProjectCostHandler(w, r)
-	})
-	mux.HandleFunc("GET /v1/agent/priming", func(w http.ResponseWriter, r *http.Request) {
-		project := r.URL.Query().Get("project")
-		if !gate.Allow(w, r, controlplane.RoleReader, project) {
-			return
-		}
-		primer.Handler(w, r)
-	})
-	mux.HandleFunc("GET /v1/agent/priming/knowledge", func(w http.ResponseWriter, r *http.Request) {
-		project := r.URL.Query().Get("project")
-		if project == "" {
-			writeError(w, 400, errors.New("project is required"))
-			return
-		}
-		ids, err := parseKnowledgeIDs(r.URL.Query().Get("ids"))
-		if err != nil {
-			writeError(w, 400, err)
-			return
-		}
-		if !gate.Allow(w, r, controlplane.RoleReader, project) {
-			return
-		}
-		found, missing, err := fetchKnowledgeByIDs(r.Context(), nil, observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), project, ids)
-		if err != nil {
-			writeError(w, 502, err)
-			return
-		}
-		writeJSON(w, 200, map[string]any{"project": project, "knowledge": found, "count": len(found), "missing": missing})
 	})
 	liveness := &temporalLiveness{client: temporalClient}
 	mux.HandleFunc("GET /v1/agent/operations", func(w http.ResponseWriter, r *http.Request) {
