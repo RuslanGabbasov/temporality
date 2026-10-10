@@ -32,6 +32,10 @@ type ExperiencePattern struct {
 	KnowledgeIDs []string `json:"knowledge_ids"`
 	ActiveCount  int      `json:"active_count"`
 	InvalidCount int      `json:"invalid_count"`
+
+	// items holds the source knowledge items behind the pattern; it is
+	// unexported scoring state and does not affect the JSON shape.
+	items []observation.Knowledge
 }
 
 // Signal is a single actionable cue derived from experience.
@@ -89,31 +93,55 @@ func (p *Primer) Prime(ctx context.Context, project, task string) (PrimingResult
 		return PrimingResult{}, fmt.Errorf("retrieve knowledge: %w", err)
 	}
 
-	patterns := groupPatterns(knowledge)
-
-	for i := range patterns {
-		patterns[i].Score = scorePattern(patterns[i], task)
-	}
-
-	sort.Slice(patterns, func(i, j int) bool { return patterns[i].Score > patterns[j].Score })
-	filtered := patterns[:0]
-	for _, pat := range patterns {
-		if pat.Score >= p.config.MinScore {
-			filtered = append(filtered, pat)
-		}
-	}
-	if len(filtered) > p.config.MaxPatterns {
-		filtered = filtered[:p.config.MaxPatterns]
-	}
+	patterns := rankPatterns(knowledge, task, p.config)
 
 	return PrimingResult{
 		Project:        project,
 		Task:           task,
-		Patterns:       filtered,
+		Patterns:       patterns,
 		TotalKnowledge: len(knowledge),
-		Primed:         len(filtered),
+		Primed:         len(patterns),
 		GeneratedAt:    time.Now().UTC(),
 	}, nil
+}
+
+// rankPatterns runs the full ranking pipeline: grouping, scoring,
+// deterministic ordering, threshold filtering and truncation.
+func rankPatterns(knowledge []observation.Knowledge, task string, config Config) []ExperiencePattern {
+	patterns := groupPatterns(knowledge)
+	fallback := len(tokenize(task)) == 0
+
+	for i := range patterns {
+		patterns[i].Score = scorePattern(patterns[i], task)
+	}
+	sortPatterns(patterns)
+
+	// MinScore applies only to task-aware scoring; the fallback ranks by
+	// validity and reuse and must not be filtered away.
+	if !fallback {
+		filtered := patterns[:0]
+		for _, pat := range patterns {
+			if pat.Score >= config.MinScore {
+				filtered = append(filtered, pat)
+			}
+		}
+		patterns = filtered
+	}
+	if len(patterns) > config.MaxPatterns {
+		patterns = patterns[:config.MaxPatterns]
+	}
+	return patterns
+}
+
+// sortPatterns orders patterns by score descending; ties are broken by
+// pattern ID in byte order, so equal scores keep a deterministic order.
+func sortPatterns(patterns []ExperiencePattern) {
+	sort.Slice(patterns, func(i, j int) bool {
+		if patterns[i].Score != patterns[j].Score {
+			return patterns[i].Score > patterns[j].Score
+		}
+		return patterns[i].ID < patterns[j].ID
+	})
 }
 
 func (p *Primer) retrieveKnowledge(ctx context.Context, project string) ([]observation.Knowledge, error) {
@@ -143,6 +171,8 @@ func (p *Primer) retrieveKnowledge(ctx context.Context, project string) ([]obser
 }
 
 // groupPatterns clusters knowledge into experience patterns by scope.
+// Scopes are assembled in sorted order so the resulting slice — and with
+// it any downstream ordering — is deterministic for identical input.
 func groupPatterns(knowledge []observation.Knowledge) []ExperiencePattern {
 	byScope := map[string][]observation.Knowledge{}
 	for _, k := range knowledge {
@@ -150,12 +180,20 @@ func groupPatterns(knowledge []observation.Knowledge) []ExperiencePattern {
 		byScope[scope] = append(byScope[scope], k)
 	}
 
+	scopes := make([]string, 0, len(byScope))
+	for scope := range byScope {
+		scopes = append(scopes, scope)
+	}
+	sort.Strings(scopes)
+
 	var patterns []ExperiencePattern
-	for scope, items := range byScope {
+	for _, scope := range scopes {
+		items := byScope[scope]
 		pat := ExperiencePattern{
 			ID:    scope,
 			Scope: scope,
 			Title: scopeTitle(scope, items),
+			items: items,
 		}
 		for _, k := range items {
 			pat.KnowledgeIDs = append(pat.KnowledgeIDs, k.ID)
@@ -236,31 +274,89 @@ func signalsFromKnowledge(k observation.Knowledge) []Signal {
 	return signals
 }
 
-func scorePattern(pat ExperiencePattern, task string) float64 {
-	score := 0.0
-
-	activeRatio := float64(pat.ActiveCount) / math.Max(1, float64(pat.ActiveCount+pat.InvalidCount))
-	score += activeRatio * 2.0
-
-	score += math.Min(float64(len(pat.KnowledgeIDs)), 10) * 0.3
-
-	for _, sig := range pat.Signals {
-		score += sig.Weight * 0.1
+// validityWeight maps a knowledge state to how much the state is worth
+// when pooling the experience of a pattern. Unknown states are treated
+// as unverified guesses.
+func validityWeight(state string) float64 {
+	switch state {
+	case "confirmed":
+		return 1.0
+	case "proposed":
+		return 0.7
+	case "challenged", "corrected":
+		return 0.5
+	case "invalidated", "superseded":
+		return 0.2
+	default:
+		return 0.5
 	}
+}
 
-	taskTokens := tokenize(task)
-	scopeTokens := tokenize(pat.Scope + " " + pat.Title)
-	overlap := 0
+// itemTokens is the token set of everything an item asserts: its
+// proposition plus its topics and entities.
+func itemTokens(k observation.Knowledge) map[string]bool {
+	return tokenize(k.Proposition + " " + strings.Join(k.Topics, " ") + " " + strings.Join(k.Entities, " "))
+}
+
+// overlap is the fraction of task tokens found in the given token set:
+// 0 when the task carries no tokens.
+func overlap(taskTokens map[string]bool, tokens map[string]bool) float64 {
+	if len(taskTokens) == 0 {
+		return 0
+	}
+	matched := 0
 	for t := range taskTokens {
-		if scopeTokens[t] {
-			overlap++
+		if tokens[t] {
+			matched++
 		}
 	}
-	if len(taskTokens) > 0 {
-		score += float64(overlap) / float64(len(taskTokens)) * 3.0
+	return float64(matched) / float64(len(taskTokens))
+}
+
+// scorePattern scores a pattern against the task. With task tokens
+// present it combines per-item and scope relevance (each normalized to
+// [0,1]) with pattern validity. Without task tokens (empty task) it
+// falls back to ranking by validity and accumulated reuse.
+func scorePattern(pat ExperiencePattern, task string) float64 {
+	taskTokens := tokenize(task)
+
+	validity := 0.0
+	reuse := 0
+	for _, k := range pat.items {
+		validity += validityWeight(k.State)
+		reuse += k.ReuseCount
+	}
+	if n := len(pat.items); n > 0 {
+		validity /= float64(n)
 	}
 
-	return score
+	if len(taskTokens) == 0 {
+		// Fallback: no task context, rank by validity and reuse.
+		return validity + 0.05*math.Min(float64(reuse), 10)
+	}
+
+	overlaps := make([]float64, len(pat.items))
+	weights := make([]float64, len(pat.items))
+	maxOverlap := 0.0
+	for i, k := range pat.items {
+		overlaps[i] = overlap(taskTokens, itemTokens(k))
+		weights[i] = validityWeight(k.State)
+		if overlaps[i] > maxOverlap {
+			maxOverlap = overlaps[i]
+		}
+	}
+	weightedSum, weightTotal := 0.0, 0.0
+	for i := range overlaps {
+		weightedSum += overlaps[i] * weights[i]
+		weightTotal += weights[i]
+	}
+	weightedMean := 0.0
+	if weightTotal > 0 {
+		weightedMean = weightedSum / weightTotal
+	}
+
+	relevance := 0.7*maxOverlap + 0.3*weightedMean + 0.2*overlap(taskTokens, tokenize(pat.Scope))
+	return relevance * (0.3 + validity)
 }
 
 var stopWords = map[string]bool{
