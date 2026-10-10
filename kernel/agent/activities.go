@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -565,13 +566,31 @@ func (a *Activities) handleSkillSearch(ctx context.Context, request ToolRequest)
 	if err := json.Unmarshal([]byte(body), &page); err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
 	}
-	needle := strings.ToLower(query)
-	var matches []map[string]any
+	// Match per keyword instead of one literal substring: a multi-word query
+	// like "code review quality gate" must still surface relevant skills.
+	keywords := strings.Fields(strings.ToLower(query))
+	type scoredMatch struct {
+		item  map[string]any
+		score int
+	}
+	var scored []scoredMatch
 	for _, s := range page.Skills {
 		haystack := strings.ToLower(s.ID + " " + s.Name + " " + strings.Join(s.Manifest.Capabilities, " ") + " " + strings.Join(s.Manifest.Tools, " "))
-		if strings.Contains(haystack, needle) {
-			matches = append(matches, map[string]any{"id": s.ID, "name": s.Name, "version": s.Version, "capabilities": s.Manifest.Capabilities, "tools": s.Manifest.Tools})
+		score := 0
+		for _, kw := range keywords {
+			if strings.Contains(haystack, kw) {
+				score++
+			}
 		}
+		if score > 0 {
+			scored = append(scored, scoredMatch{item: map[string]any{"id": s.ID, "name": s.Name, "version": s.Version, "capabilities": s.Manifest.Capabilities, "tools": s.Manifest.Tools}, score: score})
+		}
+	}
+	// Deterministic order: more keyword coverage first, registry order on ties.
+	sort.SliceStable(scored, func(i, j int) bool { return scored[i].score > scored[j].score })
+	var matches []map[string]any
+	for _, m := range scored {
+		matches = append(matches, m.item)
 	}
 	encoded, _ := json.Marshal(map[string]any{"skills": matches, "count": len(matches)})
 	return ToolResult{Content: string(encoded)}, nil

@@ -90,6 +90,57 @@ func TestSkillSearchReportsHTTPErrorsAsToolErrors(t *testing.T) {
 	}
 }
 
+func TestSkillSearchMatchesAnyKeyword(t *testing.T) {
+	// A multi-word query must match per keyword, not as one literal substring:
+	// "code review quality gate" should still surface review-related skills.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"skills": []any{
+			map[string]any{"id": "code-review", "name": "Code Review", "version": "1.0.0", "manifest": map[string]any{"capabilities": []string{"review"}, "tools": []string{}}},
+			map[string]any{"id": "review-quality-gate", "name": "Review Quality Gate", "version": "1.0.0", "manifest": map[string]any{"capabilities": []string{"quality"}, "tools": []string{}}},
+			map[string]any{"id": "deploy", "name": "Deploy", "version": "1.0.0", "manifest": map[string]any{"capabilities": []string{"deploy"}, "tools": []string{}}},
+		}})
+	}))
+	defer server.Close()
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+
+	type page struct {
+		Skills []struct {
+			ID string `json:"id"`
+		} `json:"skills"`
+		Count int `json:"count"`
+	}
+	run := func(query string) page {
+		t.Helper()
+		result, err := activities.RunTool(context.Background(), ToolRequest{
+			Project: "demo", Name: "skill_search", Arguments: map[string]any{"query": query},
+		})
+		if err != nil {
+			t.Fatalf("skill_search(%q): %v", query, err)
+		}
+		var out page
+		if err := json.Unmarshal([]byte(result.Content), &out); err != nil {
+			t.Fatalf("skill_search(%q): parse result: %v (content %q)", query, err, result.Content)
+		}
+		return out
+	}
+
+	got := run("code review quality gate")
+	if got.Count != 2 {
+		t.Fatalf("want 2 skills for multi-word query, got %d", got.Count)
+	}
+	if ids := []string{got.Skills[0].ID, got.Skills[1].ID}; ids[0] != "review-quality-gate" || ids[1] != "code-review" {
+		t.Fatalf("want [review-quality-gate code-review] ordered by keyword coverage, got %v", ids)
+	}
+
+	if got := run("deploy nothing matches here"); got.Count != 1 || got.Skills[0].ID != "deploy" {
+		t.Fatalf("want deploy skill on partial keyword match, got %+v", got)
+	}
+
+	if got := run("database migration"); got.Count != 0 {
+		t.Fatalf("want no skills for unrelated query, got %d", got.Count)
+	}
+}
+
 func TestSkillSlug(t *testing.T) {
 	for input, want := range map[string]string{
 		"Deploy Service":      "deploy-service",
