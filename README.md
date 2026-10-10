@@ -1,5 +1,7 @@
 # Temporality
 
+**Русский** · [English](README.en.md)
+
 Temporality — система наблюдаемости и накопления опыта для ИИ-агентов.
 
 Агент выполняет задачу; Temporality фиксирует, что он знал и делал, откуда
@@ -18,40 +20,40 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 
 | Компонент | Путь | Назначение |
 |---|---|---|
-| Journal | `observation/`, `cmd/temporality-journal` | append-only события, knowledge-проекция, hint retrieval, bitemporal запросы |
-| Agent Kernel | `kernel/`, `cmd/agent-kernel` | durable agent harness на Temporal: model gateway, MCP, sandbox, approvals, delegation |
-| Workspace | `debugger/src/Workspace.tsx` | чат с агентом: SSE streaming, reasoning, conversations, branching |
-| Debugger | `debugger/` | UI для наблюдения и анализа опыта агента |
-| Control Plane | `controlplane/` | auth/RBAC, org-структура и доступы, bearer-токены, project-scoping |
+| Journal | `observation/`, `cmd/temporality-journal` | append-only события, проекция знаний, подбор подсказок, байтемпоральные запросы |
+| Agent Kernel | `kernel/`, `cmd/agent-kernel` | долговременный harness агента на Temporal: модельный шлюз, MCP, песочница, подтверждения, делегирование |
+| Workspace | `debugger/src/Workspace.tsx` | чат с агентом: SSE-стриминг, reasoning, диалоги, ветвление |
+| Debugger | `debugger/` | UI наблюдения и анализа опыта агента |
+| Control Plane | `controlplane/` | авторизация и RBAC, оргструктура и доступы, bearer-токены, область проектов |
 
 ### Страницы UI
 
 | Путь | Назначение |
 |---|---|
-| `/workspace` | Чат с агентом — SSE streaming, reasoning, Markdown, conversations |
+| `/workspace` | Чат с агентом — SSE-стриминг, reasoning, Markdown, диалоги |
 | `/agent-config` | Управление агентами — CRUD, шаблоны, полная конфигурация |
-| `/agents` | Traces запусков — timeline событий, trajectory extraction |
-| `/operations` | Uncertain operations — batch reconcile, verdict buttons |
-| `/observability` | Knowledge — lifecycle, activation chains, patterns, projection |
-| `/experience` | Experience Timeline — memory lens, semantic zoom, forensics |
-| `/skills` | Living Skills — контракт, версии, выполнения, память, эволюция, skill builder |
+| `/agents` | Трассы запусков — лента событий, извлечение траекторий |
+| `/operations` | Неопределённые операции — пакетный reconcile, кнопки вердиктов |
+| `/observability` | Знания — жизненный цикл, цепочки активации, паттерны, проекция |
+| `/experience` | Таймлайн опыта — memory lens, семантический зум, ретроспективный аудит |
+| `/skills` | Живые навыки — контракт, версии, выполнения, память, эволюция, сборщик навыков |
 | `/mcp` | MCP-серверы — stdio / SSE / Streamable HTTP, привязка к агентам |
-| `/providers` | Model providers — OpenAI-compatible endpoints |
-| `/users` | Users — RBAC, tokens, каналы уведомлений |
-| `/triggers` | Триггеры — cron, webhook, event listeners, execution identity |
+| `/providers` | Провайдеры моделей — OpenAI-совместимые эндпоинты |
+| `/users` | Пользователи — RBAC, токены, каналы уведомлений |
+| `/triggers` | Триггеры — cron, webhook, слушатели событий, execution identity |
 | `/org` | Организация — дерево оргструктуры, роли на узлах, политики, эффективный доступ |
 
 ## Запуск
 
 ```sh
-cp .env.example .env   # настроить TEMPORALITY_MODEL_* и опционально sandbox
+cp .env.example .env   # настроить TEMPORALITY_MODEL_* и опционально песочницу
 docker compose up --build -d
 ```
 
-Поднимаются: PostgreSQL, Journal (`:8080`), debugger (`:3000`), Temporal
-dev server (UI на `:8233`) и Agent Kernel (`:8090`).
+Поднимаются: PostgreSQL, Journal (`:8080`), debugger (`:3000`), dev-сервер
+Temporal (UI на `:8233`) и Agent Kernel (`:8090`).
 
-Остановить, сохранив данные:
+Остановить стек, сохранив данные:
 
 ```sh
 make stack-stop
@@ -59,7 +61,7 @@ make stack-stop
 
 ## Настройка модели
 
-Kernel вызывает провайдера через OpenAI-compatible Chat Completions API.
+Ядро вызывает провайдера через OpenAI-совместимый Chat Completions API.
 
 | Переменная | Описание | По умолчанию |
 |---|---|---|
@@ -69,13 +71,13 @@ Kernel вызывает провайдера через OpenAI-compatible Chat C
 | `TEMPORALITY_MODEL_TEMPERATURE` | `0..2` | `0` |
 | `TEMPORALITY_MODEL_TIMEOUT` | Go duration — общий лимит одной блокирующей попытки (стриминг его не использует) | `180s` |
 | `TEMPORALITY_MODEL_STREAM_IDLE_TIMEOUT` | Максимум тишины между чанками стрима; медленная, но живая генерация не прерывается | `90s` |
-| `TEMPORALITY_MODEL_ACTIVITY_TIMEOUT` | Потолок одной активности `call_model` в Temporal (общий на стрим-попытку и блокирующий fallback с ретраями) | `20m` |
+| `TEMPORALITY_MODEL_ACTIVITY_TIMEOUT` | Потолок одной активности `call_model` в Temporal (общий для стрим-попытки и блокирующего fallback с ретраями) | `20m` |
 | `TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS` | `64..1000000` | `16384` |
 | `TEMPORALITY_MODEL_REASONING` | `off` / `exclude` / `low` / `medium` / `high` | — |
 
-Для reasoning-моделей CoT считается в том же бюджете — ставьте
-с запасом (например `16384` или больше), иначе ответ может остаться
-пустым с `finish_reason=length`. Default уже `16384`.
+Для reasoning-моделей CoT считается в том же бюджете — ставьте с запасом
+(например, `16384` или больше), иначе ответ может остаться пустым с
+`finish_reason=length`. По умолчанию уже `16384`.
 
 Примеры:
 
@@ -96,10 +98,10 @@ TEMPORALITY_MODEL_ID=llama3.2
 TEMPORALITY_MODEL_API_KEY=
 ```
 
-## Auth
+## Авторизация
 
-Bearer-токены с RBAC и project-scoping. Пустые переменные = auth выключен
-(только для локальной разработки).
+Bearer-токены с RBAC и областью проектов. Пустые переменные = авторизация
+выключена (только для локальной разработки).
 
 Формат: `token:subject:role:projects`, записи через `;` или переносы строк.
 Роли: `reader < writer < operator < admin`. Projects — `*` или список через
@@ -114,64 +116,66 @@ TEMPORALITY_API_TOKEN=token2   # ядро → journal
 
 | Слой | reader | writer | operator | admin |
 |---|---|---|---|---|
-| journal | чтение, hints | ingest | + invalidation | всё |
-| kernel | GET runs | POST runs | + approvals, reconcile | всё |
+| journal | чтение, подсказки | ingest | + invalidation | всё |
+| kernel | GET runs | POST runs | + подтверждения, reconcile | всё |
 
-В UI токен вводится через Login в хедере (хранится в localStorage).
+В UI токен вводится через Login в шапке (хранится в localStorage).
 
 ## Каналы уведомлений
 
 Когда агент вызывает `ask_human`, ядро доставляет вопрос получателю по его
 предпочтительному каналу (см. `docs/triggers-and-escalations.md` §6-7). Каналы —
-часть профиля пользователя и настраиваются самостоятельно в меню пользователя →
-«Каналы уведомлений». Встроенный канал — почтовый ящик в приложении (Runs →
-вопросы); внешние транспорты включаются переменными ядра:
+часть профиля пользователя и настраиваются самостоятельно в меню
+пользователя → «Каналы уведомлений». Встроенный канал — почтовый ящик в
+приложении (Runs → вопросы); внешние транспорты включаются переменными ядра:
 
 ```sh
 # .env
 KERNEL_MATRIX_HOMESERVER=https://matrix.org       # homeserver бота ядра
-KERNEL_MATRIX_ACCESS_TOKEN=syt_...                  # токен бота (состоит в комнатах пользователей)
-KERNEL_TELEGRAM_BOT_TOKEN=123456:ABC...             # токен бота для Bot API
-KERNEL_UI_URL=http://localhost:3000                 # для ссылок в уведомлениях
+KERNEL_MATRIX_ACCESS_TOKEN=syt_...                # токен бота (состоит в комнатах пользователей)
+KERNEL_TELEGRAM_BOT_TOKEN=123456:ABC...           # токен бота для Bot API
+KERNEL_UI_URL=http://localhost:3000               # для ссылок в уведомлениях
 ```
 
-Адрес канала: для Matrix — ID комнаты (`!room:matrix.org`), для Telegram — chat
-ID. Доставка не блокирует выполнение: сбой транспорта фиксируется событием
-`notification.sent` со статусом `failed`, а вопрос остаётся доступным в UI.
-Ответ всегда происходит в приложении; внешние каналы — только доставка вопроса.
+Адрес канала: для Matrix — ID комнаты (`!room:matrix.org`), для Telegram —
+chat ID. Доставка не блокирует выполнение: сбой транспорта фиксируется
+событием `notification.sent` со статусом `failed`, а вопрос остаётся
+доступным в UI. Ответ всегда происходит в приложении; внешние каналы —
+только доставка вопроса.
 
 ## Agent Kernel
 
-Durable Temporal workflow: model calls, approvals, `remember` proposals,
-auto-capture verification observations, at-least-once outbox, MCP
-(stdio / SSE / Streamable HTTP), Docker command sandbox.
+Долговременный workflow на Temporal: вызовы модели, подтверждения (approvals),
+предложения `remember`, автоматические verification-наблюдения, outbox с
+доставкой at-least-once, MCP (stdio / SSE / Streamable HTTP), песочница
+команд в Docker.
 
-Делегирование: `delegate` — параллельные субагенты, `plan` — DAG-план
-между агентами с зависимостями и предикатами (`docs/agent-delegation.md`).
+Делегирование: `delegate` — параллельные субагенты, `plan` — DAG-план между
+агентами с зависимостями и предикатами (`docs/agent-delegation.md`).
 
-Living skills: инструменты `skill_search` / `skill_inspect` /
-`skill_validate` / `skill_history` / `skill_executions` / `skill_memory` /
-`skill_propose` (`docs/living-skills.md`).
+Живые навыки: инструменты `skill_search` / `skill_inspect` / `skill_validate` /
+`skill_history` / `skill_executions` / `skill_memory` / `skill_propose`
+(`docs/living-skills.md`).
 
-Также: knowledge hints и extraction по траекториям, triggers
-(cron/webhook/listeners), human requests (`ask_human`) и org policies
-(ограничения моделей/MCP/токенов/сети/песочницы).
+Также: подсказки знаний и извлечение знаний из траекторий, триггеры
+(cron/webhook/listeners), вопросы человеку (`ask_human`) и политики
+организации (ограничения моделей/MCP/токенов/сети/песочницы).
 
-### Sandbox
+### Песочница
 
-`KERNEL_SANDBOX_ROOT` + `KERNEL_SANDBOX_IMAGE` — изолированный контейнер
-для `run_command`: no network (или `bridge` если `network_access: true`),
-read-only root, dropped capabilities, resource limits, bounded output.
-Персистентный per-project кэш тулчейнов монтируется в `/cache`
+`KERNEL_SANDBOX_ROOT` + `KERNEL_SANDBOX_IMAGE` — изолированный контейнер для
+`run_command`: без сети (или `bridge`, если `network_access: true`),
+read-only root, сброшенные capabilities, лимиты ресурсов, ограниченный
+вывод. Персистентный кэш тулчейнов на проект монтируется в `/cache`
 (GOCACHE/GOMODCACHE) — переживает `git clean` и пересоздание воркспейса.
 
 Нативные файловые инструменты `write_file` / `read_file` / `edit_file`
-выполняются на стороне kernel прямо по воркспейсу: без шелла, без лимитов
-аргументов команды, с атомарной записью и symlink-проверками. Правки файлов
-предпочтительны им, а не heredoc'ами через `run_command`.
+выполняются на стороне ядра прямо по воркспейсу: без шелла, без лимитов
+аргументов команды, с атомарной записью и проверками symlink. Правки файлов
+предпочтительны через них, а не heredoc-ами через `run_command`.
 
 Образ запинен по sha256-digest и запускается с `--pull=never`
-(`docs/sandbox-security-matrix.md`), поэтому локальный docker должен содержать
+(`docs/sandbox-security-matrix.md`), поэтому локальный Docker должен содержать
 именно тот образ, на который указывает digest. После правки
 `sandbox/Dockerfile` или чистки образов (`docker system prune`) запускайте
 `./sandbox/build.sh` — он пересоберёт образ, обновит `KERNEL_SANDBOX_IMAGE`
@@ -180,22 +184,23 @@ exit 125 «No such image».
 
 ### MCP
 
-Основной способ — реестр MCP-серверов в workspace (`/mcp`): транспорт
-stdio, SSE или Streamable HTTP, привязка серверов к агентам и панель
-инструментов в карточке агента (включая полученные из MCP тумблеры
-доступности).
+Основной способ — реестр MCP-серверов в workspace (`/mcp`): транспорт stdio,
+SSE или Streamable HTTP, привязка серверов к агентам и панель инструментов
+в карточке агента (включая тумблеры доступности полученных из MCP
+инструментов).
 
-Переменные `KERNEL_MCP_COMMAND`, `KERNEL_MCP_ARGS` (JSON array),
-`KERNEL_MCP_ALLOW` (tools list), `KERNEL_MCP_APPROVAL` (subset requiring
-human approval) — legacy-вариант для запуска ядра без workspace.
+Переменные `KERNEL_MCP_COMMAND`, `KERNEL_MCP_ARGS` (JSON-массив),
+`KERNEL_MCP_ALLOW` (список tools), `KERNEL_MCP_APPROVAL` (подмножество,
+требующее подтверждения человеком) — legacy-вариант для запуска ядра без
+workspace.
 
-### Failure reconciliation
+### Согласование сбоев
 
-`tool.failed` несёт семантику эффекта: `effect=none` (отказ до исполнения)
-vs `effect=uncertain` (сбой на границе исполнения). Read-only tools
-(read_file, search, grep) автоматически получают `effect=none`.
+`tool.failed` несёт семантику эффекта: `effect=none` (отказ до исполнения) и
+`effect=uncertain` (сбой на границе исполнения). Инструменты только для
+чтения (read_file, search, grep) автоматически получают `effect=none`.
 
-Неурегулированные операции видны на `/operations` с batch reconcile.
+Неурегулированные операции видны на `/operations` с пакетным reconcile.
 
 ```sh
 curl 'http://localhost:8090/v1/agent/operations?project=repo-a' -H "Authorization: Bearer $TOKEN"
@@ -204,62 +209,62 @@ curl -X POST http://localhost:8090/v1/agent/operations/reconcile \
   -d '{"project":"repo-a","run_id":"...","operation_id":"...","effect":"occurred","note":"verified","actor_id":"ops","started_event_id":"..."}'
 ```
 
-## Trajectory & Experience
+## Траектории и опыт
 
-Trajectory extraction строит из event stream структурированные данные:
-turns, tool calls, knowledge events, repeating patterns. Experience
-projection агрегирует trajectories across runs: tool patterns, knowledge
-lifecycle, scopes, success rates.
+Извлечение траекторий строит из потока событий структурированные данные:
+ходы, вызовы инструментов, события знаний, повторяющиеся паттерны. Проекция
+опыта агрегирует траектории между запусками: паттерны инструментов,
+жизненный цикл знаний, области, статистику успеха.
 
 | Endpoint | Описание |
 |---|---|
-| `GET /v1/workspace/runs/{id}/trajectory` | Пер-run extraction |
-| `GET /v1/workspace/projects/{id}/projection` | Cross-run aggregation |
-| `GET /v1/workspace/runs/compare?a=X&b=Y` | Side-by-side diff |
-| `GET /v1/workspace/runs/{id}/artifacts` | Reusable tool sequences |
-| `GET /v1/workspace/knowledge/{id}/chain` | Activation chain |
-| `GET /v1/workspace/projects/{id}/chains` | All chains |
-| `GET /v1/workspace/runs/{id}/stream` | SSE event stream |
+| `GET /v1/workspace/runs/{id}/trajectory` | Извлечение по одному запуску |
+| `GET /v1/workspace/projects/{id}/projection` | Агрегация по запускам |
+| `GET /v1/workspace/runs/compare?a=X&b=Y` | Сравнение бок о бок |
+| `GET /v1/workspace/runs/{id}/artifacts` | Переиспользуемые последовательности инструментов |
+| `GET /v1/workspace/knowledge/{id}/chain` | Цепочка активации |
+| `GET /v1/workspace/projects/{id}/chains` | Все цепочки |
+| `GET /v1/workspace/runs/{id}/stream` | SSE-поток событий |
 | `GET /v1/workspace/runs/{id}/stream` | + model.text_delta, model.reasoning |
 
 ## Workspace
 
-Чат с агентом через SSE streaming. Каждое сообщение → task + run.
-Follow-up messages reuse the same task (PATCH prompt). Conversation
-history передаётся как context. Agent selector при создании чата.
-Branching — форк из любой точки.
+Чат с агентом через SSE-стриминг. Каждое сообщение → task + run. Повторные
+сообщения переиспользуют ту же task (PATCH prompt). История диалога
+передаётся как контекст. Выбор агента при создании чата. Ветвление — форк из
+любой точки.
 
-Features:
-- SSE streaming: model.text_delta, model.reasoning, tool events
-- Markdown rendering для ответов (включая ответы субагентов)
-- Reasoning/thinking block (collapsible)
-- Conversation persistence (localStorage)
-- Agent templates (Coder, Reviewer, Researcher, DevOps, QA)
-- Project settings (default agent, default model)
-- Дерево делегирования и план-DAG: прогресс субагентов прямо в чате
+Возможности:
+- SSE-стриминг: model.text_delta, model.reasoning, события инструментов
+- Markdown-рендеринг ответов (включая ответы субагентов)
+- Блок reasoning/thinking (сворачиваемый)
+- Сохранение диалогов (localStorage)
+- Шаблоны агентов (Coder, Reviewer, Researcher, DevOps, QA)
+- Настройки проекта (агент по умолчанию, модель по умолчанию)
+- Дерево делегирования и DAG-план: прогресс субагентов прямо в чате
 - Автозаголовки запусков — краткое имя генерируется отдельным лёгким вызовом модели
 
 ## Control Plane
 
-- **Auth**: bearer-токены `token:subject:role:projects`
-- **Org structure**: дерево оргструктуры, наследуемая видимость ресурсов сверху вниз, роли на узлах, явное членство в проектах, execution identities, политики — `docs/org-structure.md`
-- **Quotas**: `KERNEL_RUN_QUOTAS="*:50,project:200"` — лимит запусков/день
-- **Secrets**: конвенция `<VAR>_FILE` — значение берётся из файла
-- **Providers**: OpenAI-compatible model endpoints, API key masking
-- **Users**: CRUD with token generation, RBAC roles
+- **Авторизация**: bearer-токены `token:subject:role:projects`
+- **Оргструктура**: дерево оргструктуры, наследуемая видимость ресурсов сверху вниз, роли на узлах, явное членство в проектах, execution identities, политики — `docs/org-structure.md`
+- **Квоты**: `KERNEL_RUN_QUOTAS="*:50,project:200"` — лимит запусков в день
+- **Секреты**: конвенция `<VAR>_FILE` — значение берётся из файла
+- **Провайдеры**: OpenAI-совместимые эндпоинты моделей, маскирование API-ключей
+- **Пользователи**: CRUD с генерацией токенов, роли RBAC
 
-## Experience Timeline
+## Таймлайн опыта
 
 `/experience` — визуализация жизни памяти агента:
 
-- **Runs** по горизонтали, **knowledge-полосы** по вертикали
-- **Lifecycle**: appeared → recalled → injected → reused → validated → contradicted → invalidated
-- **Memory Lens filters**: strength, recency, activated, cross-scope, terminal state
-- **Semantic zoom**: scope lanes → knowledge rows → episode detail
-- **Forensic panel**: formation evidence, activation chain, lineage
-- **Conflicts lens**: supersession arrows (K82 → K73)
-- **Population lane**: active memory count over time
-- **Shareable URLs**: full investigation state in URL
+- **Запуски** по горизонтали, **полосы знаний** по вертикали
+- **Жизненный цикл**: appeared → recalled → injected → reused → validated → contradicted → invalidated
+- **Фильтры memory lens**: strength, recency, activated, cross-scope, terminal state
+- **Семантический зум**: полосы областей → строки знаний → детали эпизода
+- **Панель ретроспективного аудита**: свидетельства формирования, цепочка активации, происхождение
+- **Линза конфликтов**: стрелки замещения (K82 → K73)
+- **Полоса популяции**: количество активной памяти во времени
+- **Ссылки с состоянием**: полный статус исследования в URL
 
 ## Разработка
 
@@ -267,19 +272,19 @@ Features:
 make fmt          # gofmt
 make test         # go test ./...
 make race         # go test -race ./...
-make build        # bin/temporality-journal + bin/temporality-agent-kernel
+make build        # bin/temporality-journal + bin/agent-kernel
 make debugger-test
 make debugger-build
 ```
 
-Debugger dev-сервер (`npm --prefix debugger run dev`) проксирует `/api`
-на `localhost:8080` (journal) и `/kernel-api` на `localhost:8090`.
+Dev-сервер debugger (`npm --prefix debugger run dev`) проксирует `/api` на
+`localhost:8080` (journal) и `/kernel-api` на `localhost:8090`.
 
 ## Схемы и контракты
 
 - Схема события: [`schemas/temporality.event.v1.schema.json`](schemas/temporality.event.v1.schema.json)
 - Контракты: [`docs/temporality-contract.md`](docs/temporality-contract.md)
-- Knowledge model: [`docs/knowledge-model.md`](docs/knowledge-model.md)
-- Event model: [`docs/event-model.md`](docs/event-model.md)
-- Architecture: [`docs/architecture.md`](docs/architecture.md)
-- Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- Модель знаний: [`docs/knowledge-model.md`](docs/knowledge-model.md)
+- Модель событий: [`docs/event-model.md`](docs/event-model.md)
+- Архитектура: [`docs/architecture.md`](docs/architecture.md)
+- Роадмап: [`docs/ROADMAP.md`](docs/ROADMAP.md)
