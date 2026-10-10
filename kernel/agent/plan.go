@@ -15,10 +15,12 @@ const MaxPlanTasks = 16
 
 // Rework rounds (docs/agent-delegation.md, acceptance gates): how many times
 // a reviewer may send a task back. The plan-level max_rework argument may set
-// 0..MaxPlanRework; when absent the default applies.
+// 0..MaxPlanRework; when absent the default applies. The cap is four: real
+// DAGs with review gates occasionally need more than two send-backs before a
+// task converges, and stopping the whole branch at two wasted full reviews.
 const (
 	DefaultMaxRework = 2
-	MaxPlanRework    = 2
+	MaxPlanRework    = 4
 )
 
 // PlanTask is one node of a plan DAG (docs/agent-delegation.md, plans): an

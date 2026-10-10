@@ -2445,7 +2445,7 @@ func KernelTools() []llm.ToolDef {
 			"type": "object",
 			"properties": map[string]any{
 				"goal":       map[string]any{"type": "string", "description": "Short human-readable goal of the plan"},
-				"max_rework": map[string]any{"type": "integer", "description": "How many times a reviewer may send a task back for rework, 0-2 (default 2)"},
+				"max_rework": map[string]any{"type": "integer", "description": "How many times a reviewer may send a task back for rework, 0-4 (default 2)"},
 				"tasks": map[string]any{
 					"type":        "array",
 					"description": "Plan tasks; ids must be unique, depends_on references task ids",
