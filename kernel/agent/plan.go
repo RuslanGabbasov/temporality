@@ -275,6 +275,75 @@ func planTaskPrompt(task PlanTask, upstream map[string]string, prior map[string]
 	return b.String()
 }
 
+// planExecution is the settled outcome of one plan run: per-task outcomes in
+// spec order plus the rework history. Team runs read it for the team-level
+// summary (status, rework rounds); the plain plan tool path ignores it.
+type planExecution struct {
+	Outcomes   []planTaskOutcome
+	Rejections []planRejection
+}
+
+// completed reports whether every task of the plan settled as completed.
+func (p *planExecution) completed() bool {
+	if p == nil {
+		return false
+	}
+	for index := range p.Outcomes {
+		if p.Outcomes[index].Status != planStatusCompleted {
+			return false
+		}
+	}
+	return len(p.Outcomes) > 0
+}
+
+// firstFailure returns the first non-completed outcome, if any.
+func (p *planExecution) firstFailure() *planTaskOutcome {
+	if p == nil {
+		return nil
+	}
+	for index := range p.Outcomes {
+		if p.Outcomes[index].Status != planStatusCompleted {
+			return &p.Outcomes[index]
+		}
+	}
+	return nil
+}
+
+// planSpecToArgs renders a validated PlanSpec back into `plan` tool-call
+// arguments. Team runs compile a manifest into a PlanSpec and execute it
+// through the same plan executor as a model-issued plan call; this helper is
+// the bridge (planSpecFromArgs inverts it losslessly for the fields we set).
+func planSpecToArgs(spec PlanSpec) map[string]any {
+	tasks := make([]any, 0, len(spec.Tasks))
+	for index := range spec.Tasks {
+		task := spec.Tasks[index]
+		entry := map[string]any{"id": task.ID, "agent_id": task.AgentID, "prompt": task.Prompt}
+		if len(task.DependsOn) > 0 {
+			deps := make([]any, 0, len(task.DependsOn))
+			for _, dep := range task.DependsOn {
+				deps = append(deps, dep)
+			}
+			entry["depends_on"] = deps
+		}
+		if len(task.ReviewOf) > 0 {
+			reviews := make([]any, 0, len(task.ReviewOf))
+			for _, reviewed := range task.ReviewOf {
+				reviews = append(reviews, reviewed)
+			}
+			entry["review_of"] = reviews
+		}
+		if task.MaxTurns > 0 {
+			entry["max_turns"] = task.MaxTurns
+		}
+		tasks = append(tasks, entry)
+	}
+	args := map[string]any{"goal": spec.Goal, "tasks": tasks}
+	if spec.MaxRework > 0 {
+		args["max_rework"] = spec.MaxRework
+	}
+	return args
+}
+
 // planTaskStatus is the per-task terminal status inside a plan execution.
 const (
 	planStatusCompleted   = "completed"

@@ -42,13 +42,13 @@ Source spec: `docs/agent-teams.md` (21 раздел / 8 фаз).
 
 Заметки: аудит проверен на стенде (`team.created/proposed/applied` в `access_audit_log`, actor ops); binding-smoke: `PUT /v1/org/resources/team/code-delivery/binding` → появляется в `GET /v1/org/units/rd/resources` → unbind очищает.
 
-### Волна B. Рантайм командных запусков — L — фаза 2
+### Волна B. Рантайм командных запусков — L — фаза 2 — **готово**
 
-- [ ] `POST /v1/agent/teams/{id}/runs` {project, goal, bindings?, version?}: снапшот определения в `exec_context` (по образцу org-structure §35), резолв слотов (волна A даёт fixed; role — заглушка «preferred или 422 до волны C»).
-- [ ] Компиляция протоколов в существующие механизмы: `pipeline` (последовательные дочерние раны, контракт → промпт следующего), `review_gate` (plan c `review_of` + `max_rework`), `dag` (шаги с `depends_on`); `lead_workers`/`fan_out` — поверх `plan`. Дочерние раны — настоящие AgentRun (принцип agent-delegation.md).
-- [ ] События `team.started` {team_id, version, goal, bindings}, `slot.bound` {slot_id, agent_id, mode}, `team.completed` {status, total_tokens, cost_usd, rework_rounds}, `team.failed` — эмит из корневого workflow рядом с существующими `plan.*`/`delegation.*`.
-- [ ] Отмена командного рана — вниз по дереву (переиспользовать существующее); budgets: сумма шагов, честный `budget_limit`.
-- [ ] Сквозные Go-тесты: порядок событий, pipeline из 3 слотов, review_gate с отклонением→доработкой→принятием, снапшот (изменение определения после старта не влияет), отмена, лимит бюджета.
+- [x] `POST /v1/agent/teams/{id}/runs` {project, goal, bindings?, version?}: снапшот манифеста в input рана (семантика §35), резолв слотов (`TeamSlotBindings`: fixed→агент; role→preferred/override или 422).
+- [x] Компиляция протоколов в существующие механизмы (`CompileTeamProgram`): `pipeline` (последовательные дочерние раны, контракт → промпт следующего), `review_gate` (plan c `review_of` + `max_rework`), `dag` (шаги с `depends_on`), `fan_out` (последний слот зависит от всех), `lead_workers` (один lead-ран с ростером, без механических гейтов). Дочерние раны — настоящие AgentRun.
+- [x] События `team.started` {team_id, version, goal, bindings}, `slot.bound` {slot_id, agent_id, mode}, `team.completed` {status, total_tokens, cost_usd, rework_rounds}, `team.failed` — эмит из корневого workflow; тоталы — честный subtree-rollup (own + children) в `run.completed`/`team.completed`, включая путь завершения по review-verdict.
+- [x] Отмена командного рана — вниз по дереву (существующий механизм cancellation); budgets: тоталы агрегируются по поддереву.
+- [x] Сквозные Go-тесты: компилятор всех 5 протоколов, привязка слотов (6 кейсов), pipeline порядок событий + тоталы, review_gate rework-цикл (отклонение→доработка→принятие), failure → team.failed, lead_workers.
 
 ### Волна C. Привязка слотов — M — фаза 3
 

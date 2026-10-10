@@ -425,6 +425,162 @@ func main() {
 		}
 		writeJSON(w, http.StatusAccepted, map[string]string{"run_id": input.RunID, "project": input.Project, "workflow_id": run.GetID(), "temporal_run_id": run.GetRunID(), "status": "started"})
 	})
+	// Team program runs (docs/agent-teams.md §9): snapshot the definition,
+	// resolve every slot up front and execute the compiled protocol as real
+	// child AgentRuns. Writer role + operation-level authorization below.
+	mux.HandleFunc("POST /v1/agent/teams/{teamID}/runs", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Project  string            `json:"project"`
+			Goal     string            `json:"goal"`
+			Version  string            `json:"version,omitempty"`
+			Bindings map[string]string `json:"bindings,omitempty"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Project) == "" || strings.TrimSpace(req.Goal) == "" {
+			writeError(w, 422, errors.New("project and goal are required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleWriter, req.Project) {
+			return
+		}
+		team, err := ws.GetTeam(r.Context(), r.PathValue("teamID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("team not found"))
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		manifestRaw := team.Manifest
+		if strings.TrimSpace(req.Version) != "" && req.Version != team.Version {
+			version, vErr := ws.GetTeamVersion(r.Context(), team.ID, req.Version)
+			if vErr != nil {
+				if errors.Is(vErr, workspace.ErrNotFound) {
+					writeError(w, 404, fmt.Errorf("team version %s not found", req.Version))
+					return
+				}
+				writeError(w, 500, vErr)
+				return
+			}
+			manifestRaw = version.Manifest
+		}
+		manifest, mErr := workspace.ParseTeamManifest(manifestRaw)
+		if mErr != nil {
+			writeError(w, 422, mErr)
+			return
+		}
+		// Team visibility follows the org tree like every other resource; admins
+		// and service tokens (nil VisibleUnits) skip the check.
+		if principal, ok := controlplane.FromContext(r.Context()); ok && principal.VisibleUnits != nil && principal.Role < controlplane.RoleAdmin {
+			if !workspace.OrgVisible(team.OrgUnitID, principal.VisibleUnits) {
+				writeError(w, 403, fmt.Errorf("team %q is not available in your org scope", team.ID))
+				return
+			}
+		}
+		// Project visibility + effective writer (docs/org-structure.md §22).
+		if principal, ok := controlplane.FromContext(r.Context()); ok && principal.VisibleUnits != nil && principal.Role < controlplane.RoleAdmin {
+			if effective, pErr := projectAccessRole(r.Context(), ws, &principal, req.Project); pErr != nil {
+				writeError(w, 403, pErr)
+				return
+			} else if effective < controlplane.RoleWriter {
+				writeError(w, 403, fmt.Errorf("effective role %s is not enough to start runs in project %q (writer required)", effective, req.Project))
+				return
+			}
+		}
+		bindings, reason := agent.TeamSlotBindings(manifest, req.Bindings)
+		if reason != "" {
+			writeError(w, 422, errors.New(reason))
+			return
+		}
+		// Every bound agent must exist and be org-visible with an effective
+		// writer role at its binding — the same rule authorizeRunUse applies to
+		// manual runs, checked per slot before anything starts (effect=none).
+		boundAgents := make(map[string]bool, len(bindings))
+		for _, slot := range manifest.Slots {
+			binding := bindings[slot.ID]
+			if boundAgents[binding.AgentID] {
+				continue
+			}
+			boundAgents[binding.AgentID] = true
+			a, aErr := ws.GetAgent(r.Context(), binding.AgentID)
+			if aErr != nil {
+				if errors.Is(aErr, workspace.ErrNotFound) {
+					writeError(w, 422, fmt.Errorf("slot %q: agent %q not found", slot.ID, binding.AgentID))
+					return
+				}
+				writeError(w, 500, aErr)
+				return
+			}
+			if principal, ok := controlplane.FromContext(r.Context()); ok && principal.VisibleUnits != nil && principal.Role < controlplane.RoleAdmin {
+				if a.OrgUnitID != "" && !workspace.OrgVisible(a.OrgUnitID, principal.VisibleUnits) {
+					writeError(w, 403, fmt.Errorf("slot %q: agent %q is not available in your org scope", slot.ID, a.ID))
+					return
+				}
+				if a.OrgUnitID != "" {
+					if unit, uErr := ws.GetOrgUnit(r.Context(), a.OrgUnitID); uErr == nil {
+						if at := principal.MaxRoleAt(unit.ID, unit.Path); at < controlplane.RoleWriter {
+							writeError(w, 403, fmt.Errorf("slot %q: effective role %s is not enough to run agent %q (writer required)", slot.ID, at, a.ID))
+							return
+						}
+					}
+				}
+			}
+		}
+		// Compilability is validated before start: an invalid program is
+		// rejected with 422 and nothing launches (docs/agent-teams.md §6).
+		if !agent.TeamIsLeadWorkers(manifest.Protocol.Kind) {
+			if _, cReason := agent.CompileTeamProgram(manifest, bindings, req.Goal); cReason != "" {
+				writeError(w, 422, errors.New("team program is invalid: "+cReason))
+				return
+			}
+		}
+		runID := team.ID + "-" + time.Now().UTC().Format("20060102-150405")
+		input := agent.RunInput{
+			RunID:   runID,
+			Project: req.Project,
+			TaskID:  runID,
+			Prompt:  req.Goal,
+			Team: &agent.TeamRunInput{
+				TeamID:   team.ID,
+				TeamName: team.Name,
+				Version:  team.Version,
+				Goal:     req.Goal,
+				Bindings: bindings,
+				Manifest: manifest,
+			},
+		}
+		if req.Version != "" {
+			input.Team.Version = req.Version
+		}
+		if manifest.Defaults.ParallelLimit > 0 {
+			input.DelegationWidth = manifest.Defaults.ParallelLimit
+		}
+		if manifest.Defaults.BudgetUSD > 0 {
+			// Team-level budget ceiling: recorded on the root run. The root itself
+			// makes no model calls; per-child enforcement stays with each child's
+			// own policy, and the rollup in team.completed reports the honest
+			// total (full enforcement lands with the telemetry wave).
+			input.MaxBudgetUSD = manifest.Defaults.BudgetUSD
+		}
+		if principal, ok := controlplane.FromContext(r.Context()); ok && principal.UserID != "" {
+			input.ActorID = principal.UserID
+		} else {
+			input.ActorID = requestUserID(r)
+		}
+		workflowID := workflowIDFor(activities.SourceID, req.Project, runID)
+		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
+		run, wfErr := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
+		if wfErr != nil {
+			writeError(w, 409, wfErr)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamRunStarted, "team", team.ID, map[string]any{"run_id": runID, "version": input.Team.Version, "project": req.Project})
+		writeJSON(w, http.StatusAccepted, map[string]string{"run_id": runID, "project": req.Project, "team_id": team.ID, "workflow_id": run.GetID(), "temporal_run_id": run.GetRunID(), "status": "started"})
+	})
 	mux.HandleFunc("GET /v1/agent/runs/{runID}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		if project == "" {

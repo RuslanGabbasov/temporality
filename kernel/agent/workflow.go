@@ -116,6 +116,22 @@ type RunInput struct {
 	// a USD budget then degrades to the token cap.
 	ModelPromptPricePer1k float64 `json:"model_prompt_price_per_1k,omitempty"`
 	ModelCompPricePer1k   float64 `json:"model_comp_price_per_1k,omitempty"`
+	// Team, when set, turns the run into a team program run (docs/agent-teams.md
+	// §9): the root makes no model calls; the compiled protocol drives child
+	// AgentRuns through the regular plan/delegate machinery instead.
+	Team *TeamRunInput `json:"team,omitempty"`
+	// DelegationWidth caps concurrent child runs of this run's plans below the
+	// installation MaxDelegationWidth (team defaults.parallel_limit). 0 keeps
+	// the default.
+	DelegationWidth int `json:"delegation_width,omitempty"`
+}
+
+// subtreeTotals accumulates the spend of a run's child runs as their results
+// land: each child reports its own subtree (own model calls plus its
+// children), so the sum is the whole delegation tree of the run.
+type subtreeTotals struct {
+	tokens  int
+	costUSD float64
 }
 
 // SkillRef is a skill resolved for a run: identity plus a budgeted digest for
@@ -166,6 +182,11 @@ type RunResult struct {
 	Answer string `json:"answer"`
 	Turns  int    `json:"turns"`
 	Status string `json:"status"`
+	// TotalTokens and CostUSD roll up the whole run subtree: the run's own
+	// model calls plus every delegated/planned child run. Parents and team
+	// roots report honest totals without replaying journal events.
+	TotalTokens int     `json:"total_tokens,omitempty"`
+	CostUSD     float64 `json:"cost_usd,omitempty"`
 	// ReviewVerdict is set when a reviewer run submitted submit_review; the
 	// plan executor turns rework verdicts into bounded rework rounds
 	// (docs/agent-delegation.md, acceptance gates).
@@ -277,7 +298,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		return result, err
 	}
 	var priorHints []Hint
-	if !input.SkipKnowledge {
+	// A team program run has no model turns at the root, so prior-knowledge
+	// hints would never be consumed (docs/agent-teams.md §9).
+	if input.Team == nil && !input.SkipKnowledge {
 		hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 		if err := workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt}).Get(ctx, &priorHints); err != nil {
 			// Retrieval is best-effort, but the miss is still part of the trajectory.
@@ -325,6 +348,548 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	usedCostUSD := 0.0
 	runStartedAt := workflow.Now(ctx)
 	forcedFinaleReason := "" // empty = turn budget; policy checks set their own
+	// Subtree spend rollup: every awaited child run (delegate or plan task)
+	// adds its own totals here, so run.completed and team.completed report
+	// honest numbers without replaying the journal.
+	var subtree subtreeTotals
+	// executePlan validates, resolves and runs a whole plan DAG inside one
+	// tool call (docs/agent-delegation.md, plans). Defined before the turn
+	// loop: team program runs (docs/agent-teams.md §9) execute it directly,
+	// without a model turn at the root. Rejections before the first child
+	// starts are inline failures with effect=none; after that a failed task
+	// skips only its transitive dependents while independent branches finish.
+	// Prior plan answers from the same run are available to task prompts as
+	// {{task-id.answer}} placeholders (re-plan support).
+	executePlan := func(call llm.ToolCall, operationID, argumentsHash string, startTool func() error) (string, *planExecution, error) {
+		if err := startTool(); err != nil {
+			return "", nil, err
+		}
+		reject := func(detail string) (string, *planExecution, error) {
+			if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "error_type": "plan_invalid", "effect": "none", "detail": detail}); err != nil {
+				return "", nil, err
+			}
+			return "Plan rejected before execution, no effect: " + detail + ". Re-issue the plan with corrected arguments.", nil, nil
+		}
+		spec, parseErr := planSpecFromArgs(call.Args)
+		if parseErr != "" {
+			return reject(parseErr)
+		}
+		if input.DelegationDepth >= MaxDelegationDepth {
+			if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "error_type": "delegation_depth_exceeded", "effect": "none", "depth": input.DelegationDepth}); err != nil {
+				return "", nil, err
+			}
+			return "Plan rejected before execution, no effect: the delegation depth limit is reached. Perform the remaining work yourself with your own tools.", nil, nil
+		}
+		dag, validationErr := validatePlanSpec(spec, planAnswers)
+		if validationErr != "" {
+			return reject(validationErr)
+		}
+		plans++
+		planOrdinal := plans
+		// Child run ids must be unique per plan call and per launch round:
+		// workflow ids and event scopes derive from them, and the append-only
+		// outbox rejects a reused id carrying new content. A relaunched task
+		// (rework round, re-plan) is a new durable attempt, not a replay — so it
+		// gets its own id instead of colliding with the recorded events of the
+		// previous attempt. First plan, first round keeps the historical format.
+		planTaskRunID := func(index int, taskID string, round int) string {
+			id := input.RunID + "/plan"
+			if planOrdinal > 1 {
+				id += strconv.Itoa(planOrdinal)
+			}
+			id += fmt.Sprintf("/%02d-%s", index+1, taskID)
+			if round > 1 {
+				id += fmt.Sprintf("-r%d", round)
+			}
+			return id
+		}
+		agentIDs := map[string]string{}
+		taskIndex := map[string]int{}
+		for index := range spec.Tasks {
+			agentIDs[spec.Tasks[index].ID] = spec.Tasks[index].AgentID
+			taskIndex[spec.Tasks[index].ID] = index
+		}
+		// Resolve every task up front: an unknown agent rejects the whole plan
+		// before any child starts (effect=none) — no partial fan-out on a typo.
+		resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
+		resolved := map[string]RunInput{}
+		for index := range spec.Tasks {
+			task := spec.Tasks[index]
+			childRunID := planTaskRunID(index, task.ID, 1)
+			var childInput RunInput
+			resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: task.AgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: task.Prompt, ActorID: input.ActorID, MaxTurns: task.MaxTurns, DelegationDepth: input.DelegationDepth + 1}).Get(ctx, &childInput)
+			if resolveErr != nil {
+				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "error_type": "agent_resolution_failed", "effect": "none", "detail": boundedFailureDetail(resolveErr)}); err != nil {
+					return "", nil, err
+				}
+				return "Plan rejected before execution, no effect: agent \"" + task.AgentID + "\" for task \"" + task.ID + "\" could not be resolved (" + boundedFailureDetail(resolveErr) + "). Check the agent_id and re-issue the plan.", nil, nil
+			}
+			resolved[task.ID] = childInput
+		}
+		// Acceptance-gate budget (docs/agent-delegation.md): a task may be
+		// sent back at most maxRework times, so one plan launches at most
+		// tasks × (1+maxRework) child runs before settling honestly.
+		maxRework := spec.MaxRework
+		if maxRework <= 0 {
+			maxRework = DefaultMaxRework
+		}
+		launchBudget := len(spec.Tasks) * (1 + maxRework)
+		totalLaunches := 0
+		tasksData := make([]map[string]any, 0, len(spec.Tasks))
+		for index := range spec.Tasks {
+			task := spec.Tasks[index]
+			deps := task.DependsOn
+			if deps == nil {
+				deps = []string{}
+			}
+			entry := map[string]any{"id": task.ID, "agent_id": task.AgentID, "depends_on": deps}
+			if len(task.ReviewOf) > 0 {
+				entry["review_of"] = append([]string{}, task.ReviewOf...)
+			}
+			tasksData = append(tasksData, entry)
+		}
+		if err := emit(activityCtx, state, "plan.started", map[string]any{"operation_id": operationID, "goal": spec.Goal, "tasks": tasksData, "max_rework": maxRework}); err != nil {
+			return "", nil, err
+		}
+		summarizeChild := func(runID string) *ChildRunSummary {
+			summaryCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
+			var summary ChildRunSummary
+			if err := workflow.ExecuteActivity(summaryCtx, ActivitySummarizeChildRun, ChildRunSummaryRequest{Project: input.Project, RunID: runID}).Get(ctx, &summary); err != nil {
+				return nil
+			}
+			return &summary
+		}
+		statuses := map[string]string{} // "" = pending, running, completed, failed, skipped, invalidated
+		// Every task gets an explicit pending entry: activeCount() ranges over
+		// the map, so tasks that never launched must still count as active.
+		for index := range spec.Tasks {
+			statuses[spec.Tasks[index].ID] = ""
+		}
+		answers := map[string]string{}
+		outcomesByTask := map[string]planTaskOutcome{}
+		var inflightPlan []*planPendingTask
+		// Acceptance-gate state (docs/agent-delegation.md): rework rounds used
+		// per task, child launches per task, per-round feedback, and why a
+		// running child was cancelled (its upstream reopened or died).
+		attempts := map[string]int{}
+		launches := map[string]int{}
+		lastAnswer := map[string]string{}
+		reworkFeedback := map[string]string{}
+		staleReason := map[string]string{}
+		var rejections []planRejection
+		activeCount := func() int {
+			count := 0
+			for _, s := range statuses {
+				if s == "" || s == "running" {
+					count++
+				}
+			}
+			return count
+		}
+		skipBranch := func(failedID string) error {
+			queue := append([]string{}, dag.Dependents[failedID]...)
+			for len(queue) > 0 {
+				id := queue[0]
+				queue = queue[1:]
+				if statuses[id] != "" {
+					continue
+				}
+				statuses[id] = planStatusSkipped
+				outcomesByTask[id] = planTaskOutcome{TaskID: id, AgentID: agentIDs[id], Status: planStatusSkipped, BlockedBy: failedID, SkipReason: "upstream_failed"}
+				if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": id, "agent_id": agentIDs[id], "reason": "upstream_failed", "blocked_by": failedID}); err != nil {
+					return err
+				}
+				queue = append(queue, dag.Dependents[id]...)
+			}
+			return nil
+		}
+		// cancelRunningChild requests cancellation of a still-inflight child;
+		// tasks whose future already resolved are skipped silently.
+		cancelRunningChild := func(taskID string) {
+			for _, pending := range inflightPlan {
+				if pending.taskID == taskID && pending.exec.ID != "" {
+					_ = workflow.RequestCancelExternalWorkflow(ctx, pending.exec.ID, pending.exec.RunID)
+					return
+				}
+			}
+		}
+		// regateDownstream re-opens the consumers of a reopened task: completed
+		// dependents go back to pending (their stale answers are dropped), running
+		// ones are cancelled and re-gated when their future resolves, pending ones
+		// just get their dep counter restored. The graph never gains edges —
+		// this is executor state, not a back-edge in the DAG.
+		regateDownstream := func(root string) error {
+			var walk func(id string) error
+			walk = func(id string) error {
+				for _, dependent := range dag.Dependents[id] {
+					switch statuses[dependent] {
+					case "":
+						dag.DepsLeft[dependent]++
+					case planStatusCompleted:
+						dag.DepsLeft[dependent]++
+						statuses[dependent] = ""
+						delete(answers, dependent)
+						delete(planAnswers, dependent)
+						delete(outcomesByTask, dependent)
+						if err := emit(activityCtx, state, "plan.task.invalidated", map[string]any{"operation_id": operationID, "task_id": dependent, "agent_id": agentIDs[dependent], "reason": "upstream_rework"}); err != nil {
+							return err
+						}
+						if err := walk(dependent); err != nil {
+							return err
+						}
+					case "running":
+						dag.DepsLeft[dependent]++
+						if _, stale := staleReason[dependent]; !stale {
+							staleReason[dependent] = "upstream_rework"
+							if err := emit(activityCtx, state, "plan.task.invalidated", map[string]any{"operation_id": operationID, "task_id": dependent, "agent_id": agentIDs[dependent], "reason": "upstream_rework"}); err != nil {
+								return err
+							}
+							cancelRunningChild(dependent)
+						}
+					}
+				}
+				return nil
+			}
+			return walk(root)
+		}
+		// discardDownstream settles the branch under a task that exhausted its
+		// rework rounds: nothing downstream may run on the rejected result.
+		// Pending dependents are skipped, completed ones invalidated, running
+		// ones cancelled into invalidated.
+		discardDownstream := func(root string) error {
+			var walk func(id string) error
+			walk = func(id string) error {
+				for _, dependent := range dag.Dependents[id] {
+					switch statuses[dependent] {
+					case "":
+						statuses[dependent] = planStatusSkipped
+						outcomesByTask[dependent] = planTaskOutcome{TaskID: dependent, AgentID: agentIDs[dependent], Status: planStatusSkipped, BlockedBy: id, SkipReason: "upstream_rework_exhausted"}
+						if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": dependent, "agent_id": agentIDs[dependent], "reason": "upstream_rework_exhausted", "blocked_by": id}); err != nil {
+							return err
+						}
+						if err := walk(dependent); err != nil {
+							return err
+						}
+					case planStatusCompleted:
+						dag.DepsLeft[dependent]++
+						statuses[dependent] = planStatusInvalidated
+						delete(answers, dependent)
+						delete(planAnswers, dependent)
+						outcomesByTask[dependent] = planTaskOutcome{TaskID: dependent, AgentID: agentIDs[dependent], Status: planStatusInvalidated, BlockedBy: id, SkipReason: "upstream_rework_exhausted"}
+						if err := emit(activityCtx, state, "plan.task.invalidated", map[string]any{"operation_id": operationID, "task_id": dependent, "agent_id": agentIDs[dependent], "reason": "upstream_rework_exhausted"}); err != nil {
+							return err
+						}
+						if err := walk(dependent); err != nil {
+							return err
+						}
+					case "running":
+						dag.DepsLeft[dependent]++
+						if _, stale := staleReason[dependent]; !stale {
+							staleReason[dependent] = "upstream_dead"
+							if err := emit(activityCtx, state, "plan.task.invalidated", map[string]any{"operation_id": operationID, "task_id": dependent, "agent_id": agentIDs[dependent], "reason": "upstream_rework_exhausted"}); err != nil {
+								return err
+							}
+							cancelRunningChild(dependent)
+						}
+					}
+				}
+				return nil
+			}
+			return walk(root)
+		}
+		failTask := func(taskID, childRunID, errorType string, err error, summary *ChildRunSummary) error {
+			statuses[taskID] = planStatusFailed
+			outcomesByTask[taskID] = planTaskOutcome{TaskID: taskID, AgentID: agentIDs[taskID], ChildRunID: childRunID, Status: planStatusFailed, Error: boundedFailureDetail(err)}
+			data := map[string]any{"operation_id": operationID, "task_id": taskID, "child_run_id": childRunID, "agent_id": agentIDs[taskID], "error_type": errorType, "error": boundedFailureDetail(err), "effect": "uncertain"}
+			if summary != nil {
+				data["child_ops_total"] = summary.Total
+				data["child_ops_unresolved"] = summary.Unresolved
+				if summary.Unresolved == 0 && summary.Total > 0 {
+					data["effect"] = "occurred"
+				}
+				if summary.Total == 0 {
+					data["effect"] = "none"
+				}
+			}
+			if err := emit(activityCtx, state, "plan.task.failed", data); err != nil {
+				return err
+			}
+			return skipBranch(taskID)
+		}
+		// The loop runs until every task reaches a terminal status (completed,
+		// failed, skipped, invalidated); rework rounds move tasks back to pending.
+		for activeCount() > 0 {
+			// Run-time policy: stop launching new tasks past the limit; running
+			// children finish, pending ones are skipped honestly.
+			if input.TimeoutSeconds > 0 && workflow.Now(ctx).Sub(runStartedAt) >= time.Duration(input.TimeoutSeconds)*time.Second {
+				for index := range spec.Tasks {
+					id := spec.Tasks[index].ID
+					if statuses[id] != "" {
+						continue
+					}
+					statuses[id] = planStatusSkipped
+					outcomesByTask[id] = planTaskOutcome{TaskID: id, AgentID: agentIDs[id], Status: planStatusSkipped, SkipReason: "run_time_limit"}
+					if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": id, "agent_id": agentIDs[id], "reason": "run_time_limit"}); err != nil {
+						return "", nil, err
+					}
+				}
+				if len(inflightPlan) == 0 {
+					break
+				}
+			}
+			// Launch every ready task in spec order while slots are free. Past the
+			// launch budget (rework included) ready tasks are skipped honestly.
+			budgetExhausted := totalLaunches >= launchBudget
+			for index := range spec.Tasks {
+				task := spec.Tasks[index]
+				if statuses[task.ID] != "" || dag.DepsLeft[task.ID] > 0 {
+					continue
+				}
+				if len(inflightPlan) >= delegationWidthLimit(&input) {
+					break
+				}
+				if budgetExhausted {
+					statuses[task.ID] = planStatusSkipped
+					outcomesByTask[task.ID] = planTaskOutcome{TaskID: task.ID, AgentID: agentIDs[task.ID], Status: planStatusSkipped, SkipReason: "execution_budget"}
+					if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": task.ID, "agent_id": agentIDs[task.ID], "reason": "execution_budget"}); err != nil {
+						return "", nil, err
+					}
+					continue
+				}
+				childRunID := planTaskRunID(index, task.ID, launches[task.ID]+1)
+				child := resolved[task.ID]
+				child.RunID = childRunID
+				child.Prompt = planTaskPrompt(task, answers, planAnswers)
+				if feedback := reworkFeedback[task.ID]; feedback != "" {
+					// Rework round: the reviewer rejected the previous result. The
+					// task gets the concrete fix instructions plus its last answer —
+					// a bounded retry, not a fresh start.
+					child.Prompt += "\n\nRework round " + strconv.Itoa(launches[task.ID]+1) + ": the reviewer rejected the previous result.\n\nReviewer feedback\n\n" + feedback
+					if previous := lastAnswer[task.ID]; previous != "" {
+						child.Prompt += "\n\nYour previous result\n\n" + previous
+					}
+					delete(reworkFeedback, task.ID)
+				}
+				if len(task.ReviewOf) > 0 {
+					child.Prompt += reviewContractPrompt(task.ReviewOf)
+					// The verdict tool is injected and force-allowed: the gate is
+					// the plan's contract, not the reviewer agent's own surface.
+					child.ReviewOf = task.ReviewOf
+					child.Tools = append(slices.Clone(child.Tools), ReviewVerdictTool())
+					if len(child.ToolAllowlist) > 0 {
+						child.ToolAllowlist = append(slices.Clone(child.ToolAllowlist), "submit_review")
+					}
+					child.DenyTools = withoutTool(child.DenyTools, "submit_review")
+				}
+				child.ParentRunID = input.RunID
+				child.ParentFrameID = state.frame
+				child.ParentEventID = state.previousEventID
+				taskDeps := task.DependsOn
+				if taskDeps == nil {
+					taskDeps = []string{}
+				}
+				startedData := map[string]any{"operation_id": operationID, "task_id": task.ID, "child_run_id": childRunID, "agent_id": task.AgentID, "depends_on": taskDeps, "round": launches[task.ID] + 1}
+				if len(task.ReviewOf) > 0 {
+					startedData["review_of"] = append([]string{}, task.ReviewOf...)
+				}
+				if err := emit(activityCtx, state, "plan.task.started", startedData); err != nil {
+					return "", nil, err
+				}
+				childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: WorkflowID(input.SourceID, input.Project, childRunID)})
+				future := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", child)
+				var childExec workflow.Execution
+				if startErr := future.GetChildWorkflowExecution().Get(ctx, &childExec); startErr != nil {
+					if ctx.Err() != nil {
+						return "", nil, startErr
+					}
+					if err := failTask(task.ID, childRunID, "delegated_run_start_failed", startErr, nil); err != nil {
+						return "", nil, err
+					}
+					continue
+				}
+				statuses[task.ID] = "running"
+				launches[task.ID]++
+				totalLaunches++
+				inflightPlan = append(inflightPlan, &planPendingTask{taskID: task.ID, agentID: task.AgentID, childRunID: childRunID, future: future, exec: childExec})
+			}
+			if len(inflightPlan) == 0 {
+				break
+			}
+			p := inflightPlan[0]
+			inflightPlan = inflightPlan[1:]
+			var child RunResult
+			childErr := p.future.Get(ctx, &child)
+			if childErr == nil {
+				// Subtree rollup: the child's totals (its own plus its children)
+				// flow into this run's honest spend.
+				subtree.tokens += child.TotalTokens
+				subtree.costUSD += child.CostUSD
+			}
+			// Stale settlement first (docs/agent-delegation.md, acceptance
+			// gates): this child was cancelled because its upstream reopened or
+			// died. Whatever it produced is discarded — no failure event here,
+			// the invalidation was emitted when the branch moved.
+			if reason, stale := staleReason[p.taskID]; stale {
+				delete(staleReason, p.taskID)
+				if reason == "upstream_dead" {
+					statuses[p.taskID] = planStatusInvalidated
+					outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusInvalidated, SkipReason: "upstream_rework_exhausted"}
+					// Its own pending consumers can no longer run: skip the branch.
+					if err := skipBranch(p.taskID); err != nil {
+						return "", nil, err
+					}
+				} else {
+					statuses[p.taskID] = ""
+					for _, dep := range spec.Tasks[taskIndex[p.taskID]].DependsOn {
+						if statuses[dep] == planStatusFailed || statuses[dep] == planStatusSkipped || statuses[dep] == planStatusInvalidated {
+							statuses[p.taskID] = planStatusSkipped
+							outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusSkipped, BlockedBy: dep, SkipReason: "upstream_failed"}
+							if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": p.taskID, "agent_id": p.agentID, "reason": "upstream_failed", "blocked_by": dep}); err != nil {
+								return "", nil, err
+							}
+							break
+						}
+					}
+				}
+				continue
+			}
+			if ctx.Err() != nil {
+				return "", nil, ctx.Err()
+			}
+			if childErr != nil {
+				if err := failTask(p.taskID, p.childRunID, "delegated_run_failed", childErr, summarizeChild(p.childRunID)); err != nil {
+					return "", nil, err
+				}
+				continue
+			}
+			specTask := spec.Tasks[taskIndex[p.taskID]]
+			// Reviewer verdict (acceptance gates): rework reopens the rejected
+			// tasks and re-gates their consumers; accept (or no verdict at all)
+			// completes normally.
+			verdict := ""
+			if len(specTask.ReviewOf) > 0 && child.ReviewVerdict != nil {
+				verdict = child.ReviewVerdict.Verdict
+			}
+			if verdict == "rework" {
+				rejected := make([]string, 0, len(specTask.ReviewOf))
+				feedbacks := map[string]string{}
+				for _, reviewed := range specTask.ReviewOf {
+					if feedback := strings.TrimSpace(child.ReviewVerdict.Feedback[reviewed]); feedback != "" {
+						rejected = append(rejected, reviewed)
+						feedbacks[reviewed] = feedback
+					}
+				}
+				if len(rejected) == 0 {
+					verdict = "accept" // rework without actionable feedback accepts
+				} else {
+					// The reviewer task itself is done for this round; its verdict —
+					// not its prose — is the deliverable, so no answer is recorded.
+					if err := emit(activityCtx, state, "plan.task.completed", map[string]any{"operation_id": operationID, "task_id": p.taskID, "child_run_id": p.childRunID, "agent_id": p.agentID, "child_status": child.Status, "turns": child.Turns, "round": launches[p.taskID], "verdict": "rework"}); err != nil {
+						return "", nil, err
+					}
+					for _, reviewed := range rejected {
+						attempts[reviewed]++
+						feedback := feedbacks[reviewed]
+						if err := emit(activityCtx, state, "plan.task.rejected", map[string]any{"operation_id": operationID, "task_id": reviewed, "agent_id": agentIDs[reviewed], "rejected_by": p.taskID, "round": attempts[reviewed], "feedback": feedback}); err != nil {
+							return "", nil, err
+						}
+						rejections = append(rejections, planRejection{TaskID: reviewed, By: p.taskID, Round: attempts[reviewed], Feedback: feedback})
+						if attempts[reviewed] > maxRework {
+							// Rework exhausted: the task failed its acceptance gate and
+							// nothing downstream may build on the rejected result.
+							reviewedRunID := planTaskRunID(taskIndex[reviewed], reviewed, launches[reviewed])
+							failure := "rework exhausted after " + strconv.Itoa(maxRework) + " round(s); last reviewer feedback: " + feedback
+							statuses[reviewed] = planStatusFailed
+							outcomesByTask[reviewed] = planTaskOutcome{TaskID: reviewed, AgentID: agentIDs[reviewed], ChildRunID: reviewedRunID, Status: planStatusFailed, Round: attempts[reviewed], Error: failure}
+							if err := emit(activityCtx, state, "plan.task.failed", map[string]any{"operation_id": operationID, "task_id": reviewed, "agent_id": agentIDs[reviewed], "child_run_id": reviewedRunID, "error_type": "rework_exhausted", "round": attempts[reviewed], "max_rework": maxRework, "rejected_by": p.taskID, "error": failure, "effect": "uncertain"}); err != nil {
+								return "", nil, err
+							}
+							if err := discardDownstream(reviewed); err != nil {
+								return "", nil, err
+							}
+						} else {
+							// Reopen: the task runs again with the reviewer's feedback; its
+							// stale answer is dropped everywhere so no consumer template
+							// resolves to the rejected result.
+							lastAnswer[reviewed] = answers[reviewed]
+							statuses[reviewed] = ""
+							delete(answers, reviewed)
+							delete(planAnswers, reviewed)
+							delete(outcomesByTask, reviewed)
+							reworkFeedback[reviewed] = feedback
+							if err := emit(activityCtx, state, "plan.task.reopened", map[string]any{"operation_id": operationID, "task_id": reviewed, "agent_id": agentIDs[reviewed], "round": attempts[reviewed], "rejected_by": p.taskID}); err != nil {
+								return "", nil, err
+							}
+							if err := regateDownstream(reviewed); err != nil {
+								return "", nil, err
+							}
+						}
+					}
+					// Settle the reviewer: regate marked it stale (a reviewed task
+					// reopened), so it re-runs and judges the fixed work; if the branch
+					// died instead, the reviewer is invalidated with it.
+					if reason, stale := staleReason[p.taskID]; stale {
+						delete(staleReason, p.taskID)
+						if reason == "upstream_dead" {
+							statuses[p.taskID] = planStatusInvalidated
+							outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusInvalidated, SkipReason: "upstream_rework_exhausted"}
+							if err := skipBranch(p.taskID); err != nil {
+								return "", nil, err
+							}
+						} else {
+							statuses[p.taskID] = ""
+						}
+					} else {
+						statuses[p.taskID] = planStatusCompleted
+						outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusCompleted, ChildStatus: child.Status, Turns: child.Turns, Round: launches[p.taskID], Verdict: "rework", Answer: strings.TrimSpace(child.ReviewVerdict.Summary)}
+						for _, dependent := range dag.Dependents[p.taskID] {
+							dag.DepsLeft[dependent]--
+						}
+					}
+					continue
+				}
+			}
+			answer, _ := BoundedNarrative(child.Answer)
+			answers[p.taskID] = answer
+			planAnswers[p.taskID] = answer
+			statuses[p.taskID] = planStatusCompleted
+			outcome := planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusCompleted, ChildStatus: child.Status, Turns: child.Turns, Round: launches[p.taskID], Answer: answer}
+			completedData := map[string]any{"operation_id": operationID, "task_id": p.taskID, "child_run_id": p.childRunID, "agent_id": p.agentID, "child_status": child.Status, "turns": child.Turns, "round": launches[p.taskID]}
+			if verdict != "" {
+				outcome.Verdict = verdict
+				completedData["verdict"] = verdict
+			}
+			outcomesByTask[p.taskID] = outcome
+			if err := emit(activityCtx, state, "plan.task.completed", completedData); err != nil {
+				return "", nil, err
+			}
+			for _, dependent := range dag.Dependents[p.taskID] {
+				dag.DepsLeft[dependent]--
+			}
+		}
+		// Assemble outcomes in spec order for a readable summary.
+		outcomes := make([]planTaskOutcome, 0, len(spec.Tasks))
+		for index := range spec.Tasks {
+			if outcome, ok := outcomesByTask[spec.Tasks[index].ID]; ok {
+				outcomes = append(outcomes, outcome)
+			}
+		}
+		statusData := map[string]any{}
+		for id, s := range statuses {
+			statusData[id] = s
+		}
+		if err := emit(activityCtx, state, "plan.completed", map[string]any{"operation_id": operationID, "goal": spec.Goal, "statuses": statusData}); err != nil {
+			return "", nil, err
+		}
+		content := planSummary(spec, outcomes, rejections)
+		if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "output": compactJSON(content, 1000)}); err != nil {
+			return "", nil, err
+		}
+		return content, &planExecution{Outcomes: outcomes, Rejections: rejections}, nil
+	}
+	if input.Team != nil {
+		return runTeamProgram(ctx, activityCtx, state, input, executePlan, &subtree)
+	}
 	for turn := 1; turn <= input.MaxTurns; turn++ {
 		result.Turns = turn
 		if input.TimeoutSeconds > 0 && workflow.Now(ctx).Sub(runStartedAt) >= time.Duration(input.TimeoutSeconds)*time.Second {
@@ -405,10 +970,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		if len(completion.ToolCalls) == 0 {
 			result.Answer = completion.Content
 			result.Status = "completed"
+			result.TotalTokens = usedTokens + completion.Usage.TotalTokens + subtree.tokens
+			result.CostUSD = usedCostUSD + modelCallCostUSD(input, completion.Usage) + subtree.costUSD
 			if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn}); err != nil {
 				return result, err
 			}
-			if err := emit(activityCtx, state, "run.completed", runCompletedTotals(turn, usedTokens+completion.Usage.TotalTokens, usedCostUSD+modelCallCostUSD(input, completion.Usage))); err != nil {
+			if err := emit(activityCtx, state, "run.completed", runCompletedTotals(turn, result.TotalTokens, result.CostUSD)); err != nil {
 				return result, err
 			}
 			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
@@ -448,6 +1015,10 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		awaitDelegation := func(p *pendingDelegation) error {
 			var child RunResult
 			childErr := p.future.Get(ctx, &child)
+			if childErr == nil {
+				subtree.tokens += child.TotalTokens
+				subtree.costUSD += child.CostUSD
+			}
 			content := ""
 			if childErr != nil {
 				if ctx.Err() != nil {
@@ -590,533 +1161,6 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			inflight = append(inflight, pending)
 			executed[callKey] = executedCall{operationID: operationID, pending: pending}
 			return "", true, nil
-		}
-		// executePlan validates, resolves and runs a whole plan DAG inside one
-		// tool call (docs/agent-delegation.md, plans). Rejections before the
-		// first child starts are inline failures with effect=none; after that a
-		// failed task skips only its transitive dependents while independent
-		// branches finish. Prior plan answers from the same run are available to
-		// task prompts as {{task-id.answer}} placeholders (re-plan support).
-		executePlan := func(call llm.ToolCall, operationID, argumentsHash string, startTool func() error) (string, error) {
-			if err := startTool(); err != nil {
-				return "", err
-			}
-			reject := func(detail string) (string, error) {
-				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "error_type": "plan_invalid", "effect": "none", "detail": detail}); err != nil {
-					return "", err
-				}
-				return "Plan rejected before execution, no effect: " + detail + ". Re-issue the plan with corrected arguments.", nil
-			}
-			spec, parseErr := planSpecFromArgs(call.Args)
-			if parseErr != "" {
-				return reject(parseErr)
-			}
-			if input.DelegationDepth >= MaxDelegationDepth {
-				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "error_type": "delegation_depth_exceeded", "effect": "none", "depth": input.DelegationDepth}); err != nil {
-					return "", err
-				}
-				return "Plan rejected before execution, no effect: the delegation depth limit is reached. Perform the remaining work yourself with your own tools.", nil
-			}
-			dag, validationErr := validatePlanSpec(spec, planAnswers)
-			if validationErr != "" {
-				return reject(validationErr)
-			}
-			plans++
-			planOrdinal := plans
-			// Child run ids must be unique per plan call and per launch round:
-			// workflow ids and event scopes derive from them, and the append-only
-			// outbox rejects a reused id carrying new content. A relaunched task
-			// (rework round, re-plan) is a new durable attempt, not a replay — so it
-			// gets its own id instead of colliding with the recorded events of the
-			// previous attempt. First plan, first round keeps the historical format.
-			planTaskRunID := func(index int, taskID string, round int) string {
-				id := input.RunID + "/plan"
-				if planOrdinal > 1 {
-					id += strconv.Itoa(planOrdinal)
-				}
-				id += fmt.Sprintf("/%02d-%s", index+1, taskID)
-				if round > 1 {
-					id += fmt.Sprintf("-r%d", round)
-				}
-				return id
-			}
-			agentIDs := map[string]string{}
-			taskIndex := map[string]int{}
-			for index := range spec.Tasks {
-				agentIDs[spec.Tasks[index].ID] = spec.Tasks[index].AgentID
-				taskIndex[spec.Tasks[index].ID] = index
-			}
-			// Resolve every task up front: an unknown agent rejects the whole plan
-			// before any child starts (effect=none) — no partial fan-out on a typo.
-			resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
-			resolved := map[string]RunInput{}
-			for index := range spec.Tasks {
-				task := spec.Tasks[index]
-				childRunID := planTaskRunID(index, task.ID, 1)
-				var childInput RunInput
-				resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: task.AgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: task.Prompt, ActorID: input.ActorID, MaxTurns: task.MaxTurns, DelegationDepth: input.DelegationDepth + 1}).Get(ctx, &childInput)
-				if resolveErr != nil {
-					if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "error_type": "agent_resolution_failed", "effect": "none", "detail": boundedFailureDetail(resolveErr)}); err != nil {
-						return "", err
-					}
-					return "Plan rejected before execution, no effect: agent \"" + task.AgentID + "\" for task \"" + task.ID + "\" could not be resolved (" + boundedFailureDetail(resolveErr) + "). Check the agent_id and re-issue the plan.", nil
-				}
-				resolved[task.ID] = childInput
-			}
-			// Acceptance-gate budget (docs/agent-delegation.md): a task may be
-			// sent back at most maxRework times, so one plan launches at most
-			// tasks × (1+maxRework) child runs before settling honestly.
-			maxRework := spec.MaxRework
-			if maxRework <= 0 {
-				maxRework = DefaultMaxRework
-			}
-			launchBudget := len(spec.Tasks) * (1 + maxRework)
-			totalLaunches := 0
-			tasksData := make([]map[string]any, 0, len(spec.Tasks))
-			for index := range spec.Tasks {
-				task := spec.Tasks[index]
-				deps := task.DependsOn
-				if deps == nil {
-					deps = []string{}
-				}
-				entry := map[string]any{"id": task.ID, "agent_id": task.AgentID, "depends_on": deps}
-				if len(task.ReviewOf) > 0 {
-					entry["review_of"] = append([]string{}, task.ReviewOf...)
-				}
-				tasksData = append(tasksData, entry)
-			}
-			if err := emit(activityCtx, state, "plan.started", map[string]any{"operation_id": operationID, "goal": spec.Goal, "tasks": tasksData, "max_rework": maxRework}); err != nil {
-				return "", err
-			}
-			summarizeChild := func(runID string) *ChildRunSummary {
-				summaryCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
-				var summary ChildRunSummary
-				if err := workflow.ExecuteActivity(summaryCtx, ActivitySummarizeChildRun, ChildRunSummaryRequest{Project: input.Project, RunID: runID}).Get(ctx, &summary); err != nil {
-					return nil
-				}
-				return &summary
-			}
-			statuses := map[string]string{} // "" = pending, running, completed, failed, skipped, invalidated
-			// Every task gets an explicit pending entry: activeCount() ranges over
-			// the map, so tasks that never launched must still count as active.
-			for index := range spec.Tasks {
-				statuses[spec.Tasks[index].ID] = ""
-			}
-			answers := map[string]string{}
-			outcomesByTask := map[string]planTaskOutcome{}
-			var inflightPlan []*planPendingTask
-			// Acceptance-gate state (docs/agent-delegation.md): rework rounds used
-			// per task, child launches per task, per-round feedback, and why a
-			// running child was cancelled (its upstream reopened or died).
-			attempts := map[string]int{}
-			launches := map[string]int{}
-			lastAnswer := map[string]string{}
-			reworkFeedback := map[string]string{}
-			staleReason := map[string]string{}
-			var rejections []planRejection
-			activeCount := func() int {
-				count := 0
-				for _, s := range statuses {
-					if s == "" || s == "running" {
-						count++
-					}
-				}
-				return count
-			}
-			skipBranch := func(failedID string) error {
-				queue := append([]string{}, dag.Dependents[failedID]...)
-				for len(queue) > 0 {
-					id := queue[0]
-					queue = queue[1:]
-					if statuses[id] != "" {
-						continue
-					}
-					statuses[id] = planStatusSkipped
-					outcomesByTask[id] = planTaskOutcome{TaskID: id, AgentID: agentIDs[id], Status: planStatusSkipped, BlockedBy: failedID, SkipReason: "upstream_failed"}
-					if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": id, "agent_id": agentIDs[id], "reason": "upstream_failed", "blocked_by": failedID}); err != nil {
-						return err
-					}
-					queue = append(queue, dag.Dependents[id]...)
-				}
-				return nil
-			}
-			// cancelRunningChild requests cancellation of a still-inflight child;
-			// tasks whose future already resolved are skipped silently.
-			cancelRunningChild := func(taskID string) {
-				for _, pending := range inflightPlan {
-					if pending.taskID == taskID && pending.exec.ID != "" {
-						_ = workflow.RequestCancelExternalWorkflow(ctx, pending.exec.ID, pending.exec.RunID)
-						return
-					}
-				}
-			}
-			// regateDownstream re-opens the consumers of a reopened task: completed
-			// dependents go back to pending (their stale answers are dropped), running
-			// ones are cancelled and re-gated when their future resolves, pending ones
-			// just get their dep counter restored. The graph never gains edges —
-			// this is executor state, not a back-edge in the DAG.
-			regateDownstream := func(root string) error {
-				var walk func(id string) error
-				walk = func(id string) error {
-					for _, dependent := range dag.Dependents[id] {
-						switch statuses[dependent] {
-						case "":
-							dag.DepsLeft[dependent]++
-						case planStatusCompleted:
-							dag.DepsLeft[dependent]++
-							statuses[dependent] = ""
-							delete(answers, dependent)
-							delete(planAnswers, dependent)
-							delete(outcomesByTask, dependent)
-							if err := emit(activityCtx, state, "plan.task.invalidated", map[string]any{"operation_id": operationID, "task_id": dependent, "agent_id": agentIDs[dependent], "reason": "upstream_rework"}); err != nil {
-								return err
-							}
-							if err := walk(dependent); err != nil {
-								return err
-							}
-						case "running":
-							dag.DepsLeft[dependent]++
-							if _, stale := staleReason[dependent]; !stale {
-								staleReason[dependent] = "upstream_rework"
-								if err := emit(activityCtx, state, "plan.task.invalidated", map[string]any{"operation_id": operationID, "task_id": dependent, "agent_id": agentIDs[dependent], "reason": "upstream_rework"}); err != nil {
-									return err
-								}
-								cancelRunningChild(dependent)
-							}
-						}
-					}
-					return nil
-				}
-				return walk(root)
-			}
-			// discardDownstream settles the branch under a task that exhausted its
-			// rework rounds: nothing downstream may run on the rejected result.
-			// Pending dependents are skipped, completed ones invalidated, running
-			// ones cancelled into invalidated.
-			discardDownstream := func(root string) error {
-				var walk func(id string) error
-				walk = func(id string) error {
-					for _, dependent := range dag.Dependents[id] {
-						switch statuses[dependent] {
-						case "":
-							statuses[dependent] = planStatusSkipped
-							outcomesByTask[dependent] = planTaskOutcome{TaskID: dependent, AgentID: agentIDs[dependent], Status: planStatusSkipped, BlockedBy: id, SkipReason: "upstream_rework_exhausted"}
-							if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": dependent, "agent_id": agentIDs[dependent], "reason": "upstream_rework_exhausted", "blocked_by": id}); err != nil {
-								return err
-							}
-							if err := walk(dependent); err != nil {
-								return err
-							}
-						case planStatusCompleted:
-							dag.DepsLeft[dependent]++
-							statuses[dependent] = planStatusInvalidated
-							delete(answers, dependent)
-							delete(planAnswers, dependent)
-							outcomesByTask[dependent] = planTaskOutcome{TaskID: dependent, AgentID: agentIDs[dependent], Status: planStatusInvalidated, BlockedBy: id, SkipReason: "upstream_rework_exhausted"}
-							if err := emit(activityCtx, state, "plan.task.invalidated", map[string]any{"operation_id": operationID, "task_id": dependent, "agent_id": agentIDs[dependent], "reason": "upstream_rework_exhausted"}); err != nil {
-								return err
-							}
-							if err := walk(dependent); err != nil {
-								return err
-							}
-						case "running":
-							dag.DepsLeft[dependent]++
-							if _, stale := staleReason[dependent]; !stale {
-								staleReason[dependent] = "upstream_dead"
-								if err := emit(activityCtx, state, "plan.task.invalidated", map[string]any{"operation_id": operationID, "task_id": dependent, "agent_id": agentIDs[dependent], "reason": "upstream_rework_exhausted"}); err != nil {
-									return err
-								}
-								cancelRunningChild(dependent)
-							}
-						}
-					}
-					return nil
-				}
-				return walk(root)
-			}
-			failTask := func(taskID, childRunID, errorType string, err error, summary *ChildRunSummary) error {
-				statuses[taskID] = planStatusFailed
-				outcomesByTask[taskID] = planTaskOutcome{TaskID: taskID, AgentID: agentIDs[taskID], ChildRunID: childRunID, Status: planStatusFailed, Error: boundedFailureDetail(err)}
-				data := map[string]any{"operation_id": operationID, "task_id": taskID, "child_run_id": childRunID, "agent_id": agentIDs[taskID], "error_type": errorType, "error": boundedFailureDetail(err), "effect": "uncertain"}
-				if summary != nil {
-					data["child_ops_total"] = summary.Total
-					data["child_ops_unresolved"] = summary.Unresolved
-					if summary.Unresolved == 0 && summary.Total > 0 {
-						data["effect"] = "occurred"
-					}
-					if summary.Total == 0 {
-						data["effect"] = "none"
-					}
-				}
-				if err := emit(activityCtx, state, "plan.task.failed", data); err != nil {
-					return err
-				}
-				return skipBranch(taskID)
-			}
-			// The loop runs until every task reaches a terminal status (completed,
-			// failed, skipped, invalidated); rework rounds move tasks back to pending.
-			for activeCount() > 0 {
-				// Run-time policy: stop launching new tasks past the limit; running
-				// children finish, pending ones are skipped honestly.
-				if input.TimeoutSeconds > 0 && workflow.Now(ctx).Sub(runStartedAt) >= time.Duration(input.TimeoutSeconds)*time.Second {
-					for index := range spec.Tasks {
-						id := spec.Tasks[index].ID
-						if statuses[id] != "" {
-							continue
-						}
-						statuses[id] = planStatusSkipped
-						outcomesByTask[id] = planTaskOutcome{TaskID: id, AgentID: agentIDs[id], Status: planStatusSkipped, SkipReason: "run_time_limit"}
-						if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": id, "agent_id": agentIDs[id], "reason": "run_time_limit"}); err != nil {
-							return "", err
-						}
-					}
-					if len(inflightPlan) == 0 {
-						break
-					}
-				}
-				// Launch every ready task in spec order while slots are free. Past the
-				// launch budget (rework included) ready tasks are skipped honestly.
-				budgetExhausted := totalLaunches >= launchBudget
-				for index := range spec.Tasks {
-					task := spec.Tasks[index]
-					if statuses[task.ID] != "" || dag.DepsLeft[task.ID] > 0 {
-						continue
-					}
-					if len(inflightPlan) >= MaxDelegationWidth {
-						break
-					}
-					if budgetExhausted {
-						statuses[task.ID] = planStatusSkipped
-						outcomesByTask[task.ID] = planTaskOutcome{TaskID: task.ID, AgentID: agentIDs[task.ID], Status: planStatusSkipped, SkipReason: "execution_budget"}
-						if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": task.ID, "agent_id": agentIDs[task.ID], "reason": "execution_budget"}); err != nil {
-							return "", err
-						}
-						continue
-					}
-					childRunID := planTaskRunID(index, task.ID, launches[task.ID]+1)
-					child := resolved[task.ID]
-					child.RunID = childRunID
-					child.Prompt = planTaskPrompt(task, answers, planAnswers)
-					if feedback := reworkFeedback[task.ID]; feedback != "" {
-						// Rework round: the reviewer rejected the previous result. The
-						// task gets the concrete fix instructions plus its last answer —
-						// a bounded retry, not a fresh start.
-						child.Prompt += "\n\nRework round " + strconv.Itoa(launches[task.ID]+1) + ": the reviewer rejected the previous result.\n\nReviewer feedback\n\n" + feedback
-						if previous := lastAnswer[task.ID]; previous != "" {
-							child.Prompt += "\n\nYour previous result\n\n" + previous
-						}
-						delete(reworkFeedback, task.ID)
-					}
-					if len(task.ReviewOf) > 0 {
-						child.Prompt += reviewContractPrompt(task.ReviewOf)
-						// The verdict tool is injected and force-allowed: the gate is
-						// the plan's contract, not the reviewer agent's own surface.
-						child.ReviewOf = task.ReviewOf
-						child.Tools = append(slices.Clone(child.Tools), ReviewVerdictTool())
-						if len(child.ToolAllowlist) > 0 {
-							child.ToolAllowlist = append(slices.Clone(child.ToolAllowlist), "submit_review")
-						}
-						child.DenyTools = withoutTool(child.DenyTools, "submit_review")
-					}
-					child.ParentRunID = input.RunID
-					child.ParentFrameID = state.frame
-					child.ParentEventID = state.previousEventID
-					taskDeps := task.DependsOn
-					if taskDeps == nil {
-						taskDeps = []string{}
-					}
-					startedData := map[string]any{"operation_id": operationID, "task_id": task.ID, "child_run_id": childRunID, "agent_id": task.AgentID, "depends_on": taskDeps, "round": launches[task.ID] + 1}
-					if len(task.ReviewOf) > 0 {
-						startedData["review_of"] = append([]string{}, task.ReviewOf...)
-					}
-					if err := emit(activityCtx, state, "plan.task.started", startedData); err != nil {
-						return "", err
-					}
-					childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: WorkflowID(input.SourceID, input.Project, childRunID)})
-					future := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", child)
-					var childExec workflow.Execution
-					if startErr := future.GetChildWorkflowExecution().Get(ctx, &childExec); startErr != nil {
-						if ctx.Err() != nil {
-							return "", startErr
-						}
-						if err := failTask(task.ID, childRunID, "delegated_run_start_failed", startErr, nil); err != nil {
-							return "", err
-						}
-						continue
-					}
-					statuses[task.ID] = "running"
-					launches[task.ID]++
-					totalLaunches++
-					inflightPlan = append(inflightPlan, &planPendingTask{taskID: task.ID, agentID: task.AgentID, childRunID: childRunID, future: future, exec: childExec})
-				}
-				if len(inflightPlan) == 0 {
-					break
-				}
-				p := inflightPlan[0]
-				inflightPlan = inflightPlan[1:]
-				var child RunResult
-				childErr := p.future.Get(ctx, &child)
-				// Stale settlement first (docs/agent-delegation.md, acceptance
-				// gates): this child was cancelled because its upstream reopened or
-				// died. Whatever it produced is discarded — no failure event here,
-				// the invalidation was emitted when the branch moved.
-				if reason, stale := staleReason[p.taskID]; stale {
-					delete(staleReason, p.taskID)
-					if reason == "upstream_dead" {
-						statuses[p.taskID] = planStatusInvalidated
-						outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusInvalidated, SkipReason: "upstream_rework_exhausted"}
-						// Its own pending consumers can no longer run: skip the branch.
-						if err := skipBranch(p.taskID); err != nil {
-							return "", err
-						}
-					} else {
-						statuses[p.taskID] = ""
-						for _, dep := range spec.Tasks[taskIndex[p.taskID]].DependsOn {
-							if statuses[dep] == planStatusFailed || statuses[dep] == planStatusSkipped || statuses[dep] == planStatusInvalidated {
-								statuses[p.taskID] = planStatusSkipped
-								outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusSkipped, BlockedBy: dep, SkipReason: "upstream_failed"}
-								if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": p.taskID, "agent_id": p.agentID, "reason": "upstream_failed", "blocked_by": dep}); err != nil {
-									return "", err
-								}
-								break
-							}
-						}
-					}
-					continue
-				}
-				if ctx.Err() != nil {
-					return "", ctx.Err()
-				}
-				if childErr != nil {
-					if err := failTask(p.taskID, p.childRunID, "delegated_run_failed", childErr, summarizeChild(p.childRunID)); err != nil {
-						return "", err
-					}
-					continue
-				}
-				specTask := spec.Tasks[taskIndex[p.taskID]]
-				// Reviewer verdict (acceptance gates): rework reopens the rejected
-				// tasks and re-gates their consumers; accept (or no verdict at all)
-				// completes normally.
-				verdict := ""
-				if len(specTask.ReviewOf) > 0 && child.ReviewVerdict != nil {
-					verdict = child.ReviewVerdict.Verdict
-				}
-				if verdict == "rework" {
-					rejected := make([]string, 0, len(specTask.ReviewOf))
-					feedbacks := map[string]string{}
-					for _, reviewed := range specTask.ReviewOf {
-						if feedback := strings.TrimSpace(child.ReviewVerdict.Feedback[reviewed]); feedback != "" {
-							rejected = append(rejected, reviewed)
-							feedbacks[reviewed] = feedback
-						}
-					}
-					if len(rejected) == 0 {
-						verdict = "accept" // rework without actionable feedback accepts
-					} else {
-						// The reviewer task itself is done for this round; its verdict —
-						// not its prose — is the deliverable, so no answer is recorded.
-						if err := emit(activityCtx, state, "plan.task.completed", map[string]any{"operation_id": operationID, "task_id": p.taskID, "child_run_id": p.childRunID, "agent_id": p.agentID, "child_status": child.Status, "turns": child.Turns, "round": launches[p.taskID], "verdict": "rework"}); err != nil {
-							return "", err
-						}
-						for _, reviewed := range rejected {
-							attempts[reviewed]++
-							feedback := feedbacks[reviewed]
-							if err := emit(activityCtx, state, "plan.task.rejected", map[string]any{"operation_id": operationID, "task_id": reviewed, "agent_id": agentIDs[reviewed], "rejected_by": p.taskID, "round": attempts[reviewed], "feedback": feedback}); err != nil {
-								return "", err
-							}
-							rejections = append(rejections, planRejection{TaskID: reviewed, By: p.taskID, Round: attempts[reviewed], Feedback: feedback})
-							if attempts[reviewed] > maxRework {
-								// Rework exhausted: the task failed its acceptance gate and
-								// nothing downstream may build on the rejected result.
-								reviewedRunID := planTaskRunID(taskIndex[reviewed], reviewed, launches[reviewed])
-								failure := "rework exhausted after " + strconv.Itoa(maxRework) + " round(s); last reviewer feedback: " + feedback
-								statuses[reviewed] = planStatusFailed
-								outcomesByTask[reviewed] = planTaskOutcome{TaskID: reviewed, AgentID: agentIDs[reviewed], ChildRunID: reviewedRunID, Status: planStatusFailed, Round: attempts[reviewed], Error: failure}
-								if err := emit(activityCtx, state, "plan.task.failed", map[string]any{"operation_id": operationID, "task_id": reviewed, "agent_id": agentIDs[reviewed], "child_run_id": reviewedRunID, "error_type": "rework_exhausted", "round": attempts[reviewed], "max_rework": maxRework, "rejected_by": p.taskID, "error": failure, "effect": "uncertain"}); err != nil {
-									return "", err
-								}
-								if err := discardDownstream(reviewed); err != nil {
-									return "", err
-								}
-							} else {
-								// Reopen: the task runs again with the reviewer's feedback; its
-								// stale answer is dropped everywhere so no consumer template
-								// resolves to the rejected result.
-								lastAnswer[reviewed] = answers[reviewed]
-								statuses[reviewed] = ""
-								delete(answers, reviewed)
-								delete(planAnswers, reviewed)
-								delete(outcomesByTask, reviewed)
-								reworkFeedback[reviewed] = feedback
-								if err := emit(activityCtx, state, "plan.task.reopened", map[string]any{"operation_id": operationID, "task_id": reviewed, "agent_id": agentIDs[reviewed], "round": attempts[reviewed], "rejected_by": p.taskID}); err != nil {
-									return "", err
-								}
-								if err := regateDownstream(reviewed); err != nil {
-									return "", err
-								}
-							}
-						}
-						// Settle the reviewer: regate marked it stale (a reviewed task
-						// reopened), so it re-runs and judges the fixed work; if the branch
-						// died instead, the reviewer is invalidated with it.
-						if reason, stale := staleReason[p.taskID]; stale {
-							delete(staleReason, p.taskID)
-							if reason == "upstream_dead" {
-								statuses[p.taskID] = planStatusInvalidated
-								outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusInvalidated, SkipReason: "upstream_rework_exhausted"}
-								if err := skipBranch(p.taskID); err != nil {
-									return "", err
-								}
-							} else {
-								statuses[p.taskID] = ""
-							}
-						} else {
-							statuses[p.taskID] = planStatusCompleted
-							outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusCompleted, ChildStatus: child.Status, Turns: child.Turns, Round: launches[p.taskID], Verdict: "rework", Answer: strings.TrimSpace(child.ReviewVerdict.Summary)}
-							for _, dependent := range dag.Dependents[p.taskID] {
-								dag.DepsLeft[dependent]--
-							}
-						}
-						continue
-					}
-				}
-				answer, _ := BoundedNarrative(child.Answer)
-				answers[p.taskID] = answer
-				planAnswers[p.taskID] = answer
-				statuses[p.taskID] = planStatusCompleted
-				outcome := planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusCompleted, ChildStatus: child.Status, Turns: child.Turns, Round: launches[p.taskID], Answer: answer}
-				completedData := map[string]any{"operation_id": operationID, "task_id": p.taskID, "child_run_id": p.childRunID, "agent_id": p.agentID, "child_status": child.Status, "turns": child.Turns, "round": launches[p.taskID]}
-				if verdict != "" {
-					outcome.Verdict = verdict
-					completedData["verdict"] = verdict
-				}
-				outcomesByTask[p.taskID] = outcome
-				if err := emit(activityCtx, state, "plan.task.completed", completedData); err != nil {
-					return "", err
-				}
-				for _, dependent := range dag.Dependents[p.taskID] {
-					dag.DepsLeft[dependent]--
-				}
-			}
-			// Assemble outcomes in spec order for a readable summary.
-			outcomes := make([]planTaskOutcome, 0, len(spec.Tasks))
-			for index := range spec.Tasks {
-				if outcome, ok := outcomesByTask[spec.Tasks[index].ID]; ok {
-					outcomes = append(outcomes, outcome)
-				}
-			}
-			statusData := map[string]any{}
-			for id, s := range statuses {
-				statusData[id] = s
-			}
-			if err := emit(activityCtx, state, "plan.completed", map[string]any{"operation_id": operationID, "goal": spec.Goal, "statuses": statusData}); err != nil {
-				return "", err
-			}
-			content := planSummary(spec, outcomes, rejections)
-			if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "output": compactJSON(content, 1000)}); err != nil {
-				return "", err
-			}
-			return content, nil
 		}
 		for _, call := range completion.ToolCalls {
 			operationID := fmt.Sprintf("%s/%s", frame, call.ID)
@@ -1435,7 +1479,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					} else if call.Name == "plan" {
 						// Approved plan: execute the DAG directly for the same reason as
 						// delegate — the tool activity does not know "plan".
-						content, planErr := executePlan(call, operationID, argumentsHash, startTool)
+						content, _, planErr := executePlan(call, operationID, argumentsHash, startTool)
 						if planErr != nil {
 							return result, planErr
 						}
@@ -1515,7 +1559,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			} else if call.Name == "plan" {
 				// A plan runs its whole DAG inside this call (docs/agent-delegation.md,
 				// plans); the summary text is the tool outcome.
-				content, planErr := executePlan(call, operationID, argumentsHash, startTool)
+				content, _, planErr := executePlan(call, operationID, argumentsHash, startTool)
 				if planErr != nil {
 					return result, planErr
 				}
@@ -1622,7 +1666,13 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 			}
 			result.ReviewVerdict = reviewVerdict
-			if err := emit(activityCtx, state, "run.completed", map[string]any{"turns": turn, "review_verdict": reviewVerdict.Verdict}); err != nil {
+			// The verdict turn's usage is already in usedTokens (added before tool
+			// execution); add the subtree so reviewer runs report honest totals.
+			result.TotalTokens = usedTokens + subtree.tokens
+			result.CostUSD = usedCostUSD + subtree.costUSD
+			completedData := runCompletedTotals(turn, result.TotalTokens, result.CostUSD)
+			completedData["review_verdict"] = reviewVerdict.Verdict
+			if err := emit(activityCtx, state, "run.completed", completedData); err != nil {
 				return result, err
 			}
 			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
@@ -1696,8 +1746,10 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": finaleTurn, "forced_finale": true, "tool_calls": len(finale.ToolCalls)}); err != nil {
 		return result, err
 	}
+	result.TotalTokens = usedTokens + finale.Usage.TotalTokens + subtree.tokens
+	result.CostUSD = usedCostUSD + modelCallCostUSD(input, finale.Usage) + subtree.costUSD
 	runData := map[string]any{"status": finaleStatus, "turns": finaleTurn, "forced_finale": true, "reason": finaleStatus,
-		"total_tokens": usedTokens + finale.Usage.TotalTokens, "cost_usd": usedCostUSD + modelCallCostUSD(input, finale.Usage)}
+		"total_tokens": result.TotalTokens, "cost_usd": result.CostUSD}
 	if result.Answer != "" {
 		runData["final_answer"] = true
 	}
@@ -1711,6 +1763,15 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	runKnowledgeExtraction(ctx, activityCtx, state, input)
 	return result, nil
+}
+
+// delegationWidthLimit is the concurrency cap for one run's plan children:
+// the team defaults.parallel_limit clamped to the installation maximum.
+func delegationWidthLimit(input *RunInput) int {
+	if input.DelegationWidth > 0 && input.DelegationWidth < MaxDelegationWidth {
+		return input.DelegationWidth
+	}
+	return MaxDelegationWidth
 }
 
 // normalizeTurnBudget honors an explicitly configured turn budget instead of
