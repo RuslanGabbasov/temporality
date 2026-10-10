@@ -18,6 +18,7 @@ import PlanGraph from './PlanGraph'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import { useI18n } from './i18n'
+import { pseudoToolLabel } from './eventSummary'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -109,7 +110,7 @@ export function formatStreamEvent(type: string, outer: any, t: Translate, locale
     case 'turn.completed':
       return t('chat.stream.turn_done', { turn: String(d.turn ?? '') }) + (d.tool_calls ? t('chat.stream.tool_calls_suffix', { count: pluralT(t, locale, 'chat.stream.tool_calls_n', Number(d.tool_calls)) }) : '')
     case 'tool.completed':
-      return t('chat.stream.tool_line', { name: String(d.name ?? d.tool ?? '?') })
+      return t('chat.stream.tool_line', { name: pseudoToolLabel(d.name ?? d.tool, t) })
     case 'knowledge.proposed':
       return t('chat.stream.learned', { proposition: String(d.proposition ?? '').slice(0, 60) })
     case 'run.completed':

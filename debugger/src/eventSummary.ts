@@ -109,6 +109,17 @@ function cleanMatchTerms(matched: unknown): string[] {
   return list.map((m) => String(m).replace(/^(term|entity|topic):/, '')).filter(Boolean)
 }
 
+/** The team runtime executes the compiled program as a pseudo tool call named
+ * "team", and DAG execution reports the "plan" tool — those two are product
+ * concepts, not real tools, so they get localized labels. Real tool ids
+ * (run_command, skill_*, mcp__server__tool) stay verbatim on purpose. */
+export function pseudoToolLabel(tool: unknown, t: TranslateFn): string {
+  const name = typeof tool === 'string' && tool ? tool : 'tool'
+  if (name === 'team') return t('runs.event.team')
+  if (name === 'plan') return t('runs.event.plan')
+  return name
+}
+
 /** Format an event into a human-readable summary line. `propositionOf` resolves
  * knowledge ids to their text for events recorded before propositions were
  * embedded (historical runs still carry bare ids). */
@@ -161,7 +172,7 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
           else preview = args.slice(0, 60)
         } catch { preview = String(args).slice(0, 60) }
       }
-      return { icon: '🔧', label: String(d.tool ?? 'tool'), detail: preview || t('runs.event.started'), color: '#e0af68' }
+      return { icon: '🔧', label: pseudoToolLabel(d.tool, t), detail: preview || t('runs.event.started'), color: '#e0af68' }
     }
     case 'tool.completed': {
       // tool.completed is only emitted when the call itself succeeded; only
@@ -173,7 +184,7 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       const exit = d.exit_code !== undefined ? `exit ${d.exit_code}` : ''
       const ms = d.latency_ms ? `${(Number(d.latency_ms) / 1000).toFixed(1)}s` : ''
       const output = typeof d.output === 'string' ? unwrapJsonString(d.output).slice(0, 80).replace(/\n/g, ' ') : ''
-      return { icon: failed ? '✗' : '✓', label: String(d.tool ?? 'tool'), detail: [exit, ms, output].filter(Boolean).join(' · '), color: failed ? '#f7768e' : '#9ece6a' }
+      return { icon: failed ? '✗' : '✓', label: pseudoToolLabel(d.tool, t), detail: [exit, ms, output].filter(Boolean).join(' · '), color: failed ? '#f7768e' : '#9ece6a' }
     }
     case 'tool.failed': {
       // A failed delegate tool is the parent's view of a crashed child run —
@@ -196,7 +207,7 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
           else if (parsed.path) preview = parsed.path
         } catch { /* ignore */ }
       }
-      return { icon: '✗', label: String(d.tool ?? 'tool'), detail: preview ? `${preview} → ${errDetail}` : errDetail, color: '#f7768e' }
+      return { icon: '✗', label: pseudoToolLabel(d.tool, t), detail: preview ? `${preview} → ${errDetail}` : errDetail, color: '#f7768e' }
     }
     case 'knowledge.proposed':
       return { icon: '💡', label: t('runs.event.learned'), detail: String(d.proposition ?? '').slice(0, 60), color: '#73daca' }
@@ -300,6 +311,28 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       const info = explainKernelError(String(d.error ?? ''))
       const suffix = info.timeout ? ` · ${t('errors.timeout_short')}` : ''
       return { icon: '↗', label: t('runs.event.delegation_failed'), detail: (info.cause.slice(0, 80) + suffix).trim(), color: '#f7768e' }
+    }
+    case 'team.started': {
+      const name = String(d.team_name ?? d.team_id ?? '')
+      const parts = [name, String(d.goal ?? '').slice(0, 60), d.version ? `v${d.version}` : ''].filter(Boolean)
+      return { icon: '👥', label: t('runs.event.team_started'), detail: parts.join(' · '), color: 'var(--tm-teal)' }
+    }
+    case 'slot.bound': {
+      const binding = d.slot_id != null || d.agent_id != null ? `${d.slot_id ?? '?'} → ${d.agent_id ?? '?'}` : ''
+      const mode = d.mode === 'matched' ? t('runs.event.slot_mode_matched') : d.mode === 'fixed' ? t('runs.event.slot_mode_fixed') : ''
+      return { icon: '⚓', label: t('runs.event.slot_bound'), detail: [binding, mode].filter(Boolean).join(' · '), color: '#7aa2f7' }
+    }
+    case 'team.completed': {
+      const tokens = d.total_tokens ? `${d.total_tokens} tok` : ''
+      const cost = d.cost_usd ? `$${Number(d.cost_usd).toFixed(4)}` : ''
+      const rework = d.rework_rounds ? t('runs.event.team_rework_rounds', { count: String(d.rework_rounds) }) : ''
+      return { icon: '👥', label: t('runs.event.team_completed'), detail: [tokens, cost, rework].filter(Boolean).join(' · '), color: '#9ece6a' }
+    }
+    case 'team.failed': {
+      const info = explainKernelError(String(d.error ?? ''))
+      const child = typeof d.child_run_id === 'string' ? d.child_run_id.split('/').pop() ?? '' : ''
+      const parts = [String(d.step ?? ''), info.cause.slice(0, 60), child ? `→ ${child}` : ''].filter(Boolean)
+      return { icon: '👥', label: t('runs.event.team_failed'), detail: parts.join(' · '), color: '#f7768e' }
     }
     case 'plan.started': {
       const tasks = Array.isArray(d.tasks) ? d.tasks.length : '?'

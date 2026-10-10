@@ -124,6 +124,44 @@ describe('knowledge, hint and skill lifecycle summaries', () => {
   })
 })
 
+describe('team run summaries', () => {
+  it('localizes team lifecycle events', () => {
+    const started = eventSummary(event('team.started', { team_id: 'code-delivery', team_name: 'Code Delivery', version: '1.0.0', goal: 'ship the feature', bindings: { coder: 'coder' } }), t)
+    expect(started.label).toBe('runs.event.team_started')
+    expect(started.detail).toContain('Code Delivery')
+    expect(started.detail).toContain('ship the feature')
+    expect(started.detail).toContain('v1.0.0')
+
+    const bound = eventSummary(event('slot.bound', { slot_id: 'coder', agent_id: 'qa-agent', mode: 'matched' }), t)
+    expect(bound.label).toBe('runs.event.slot_bound')
+    expect(bound.detail).toContain('coder → qa-agent')
+    expect(bound.detail).toContain('runs.event.slot_mode_matched')
+
+    const completed = eventSummary(event('team.completed', { team_id: 'code-delivery', version: '1.0.0', status: 'completed', total_tokens: 175, cost_usd: 0.0123, rework_rounds: 1 }), t)
+    expect(completed.label).toBe('runs.event.team_completed')
+    expect(completed.detail).toContain('175 tok')
+    expect(completed.detail).toContain('$0.0123')
+    expect(completed.detail).toContain('runs.event.team_rework_rounds')
+
+    const failed = eventSummary(event('team.failed', { team_id: 'code-delivery', version: '1.0.0', error: 'child workflow execution error', step: 'coder', child_run_id: 'root/team/01' }), t)
+    expect(failed.label).toBe('runs.event.team_failed')
+    expect(failed.color).toBe('#f7768e')
+    expect(failed.detail).toContain('coder')
+    expect(failed.detail).toContain('child workflow execution error')
+    expect(failed.detail).toContain('→ 01')
+  })
+
+  it('localizes pseudo tool names team and plan in tool events', () => {
+    expect(eventSummary(event('tool.started', { tool: 'team' }), t).label).toBe('runs.event.team')
+    expect(eventSummary(event('tool.completed', { tool: 'team' }), t).label).toBe('runs.event.team')
+    expect(eventSummary(event('tool.completed', { tool: 'plan' }), t).label).toBe('runs.event.plan')
+    expect(eventSummary(event('tool.failed', { tool: 'team', error: 'boom' }), t).label).toBe('runs.event.team')
+    // Real tool identifiers stay verbatim.
+    expect(eventSummary(event('tool.completed', { tool: 'run_command', exit_code: 0 }), t).label).toBe('run_command')
+    expect(eventSummary(event('tool.completed', { tool: 'mcp__graphmap__connect' }), t).label).toBe('mcp__graphmap__connect')
+  })
+})
+
 describe('plan rework folding', () => {
   const ts = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, n)).toISOString()
   const ev = (type: string, data: Record<string, unknown>, second = 0): ObservationEvent =>
