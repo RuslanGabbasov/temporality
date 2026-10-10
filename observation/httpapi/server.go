@@ -930,7 +930,7 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 		Schema: observation.Schema, EventID: activationID, OccurredAt: s.now().UTC(),
 		Source:  observation.Source{ID: "temporality-activation", Integration: "temporality", Version: "1"},
 		Context: context, Type: "hint.query",
-		Data: map[string]any{"activation_id": activationID, "candidate_count": len(hints), "matcher": "lexical-entity-topic.v1", "has_text_query": queryText != ""},
+		Data: map[string]any{"activation_id": activationID, "candidate_count": len(hints), "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion, "has_text_query": queryText != ""},
 	}
 	if err = appendObservationNow(r, s.store, s.now, activationEvent); err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not record hint activation"))
@@ -946,7 +946,7 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 			Context: context, Type: "hint.offered",
 			// The proposition rides along so run timelines show what was actually
 			// suggested — raw hint/knowledge ids mean nothing to a human.
-			Data: map[string]any{"hint_id": offerID, "activation_id": activationID, "knowledge_id": hints[i].KnowledgeID, "state": hints[i].State, "matched_by": hints[i].MatchedBy, "proposition": hints[i].Proposition},
+			Data: map[string]any{"hint_id": offerID, "activation_id": activationID, "knowledge_id": hints[i].KnowledgeID, "state": hints[i].State, "matched_by": hints[i].MatchedBy, "proposition": hints[i].Proposition, "algorithm_version": observation.HintsAlgorithmVersion},
 		}
 		if err = appendObservationNow(r, s.store, s.now, offered); err != nil {
 			writeError(w, http.StatusInternalServerError, errors.New("could not record offered hint"))
@@ -954,7 +954,7 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"activation_id": activationID, "matcher": "lexical-entity-topic.v1",
+		"activation_id": activationID, "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion,
 		"context_block": map[string]any{"type": "temporality.memory", "activation_id": activationID, "items": hints},
 		"hints":         hints, "count": len(hints),
 	})

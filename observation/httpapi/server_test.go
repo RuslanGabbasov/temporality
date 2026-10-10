@@ -150,6 +150,9 @@ func TestJournalFlowIngestListHintsInvalidate(t *testing.T) {
 	if hint["knowledge_id"] != "K1" {
 		t.Fatalf("hint knowledge_id = %v", hint["knowledge_id"])
 	}
+	if body["algorithm_version"] != observation.HintsAlgorithmVersion {
+		t.Fatalf("algorithm_version = %v, want %s", body["algorithm_version"], observation.HintsAlgorithmVersion)
+	}
 
 	res, body = doJSON(t, handler, "GET", "/v1/observations/events?project=lighthouse&type=hint.query", nil)
 	if res.StatusCode != http.StatusOK {
