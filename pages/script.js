@@ -42,14 +42,15 @@
 
   const viewer = document.getElementById('imageViewer');
   const viewerImage = document.getElementById('viewerImage');
-  const closeViewer = () => { viewer.classList.remove('open'); viewer.setAttribute('aria-hidden', 'true'); viewerImage.removeAttribute('src'); document.body.style.overflow = ''; };
+  const viewerClose = document.getElementById('viewerClose');
+  const hideViewer = () => { viewer.classList.remove('open'); viewer.setAttribute('aria-hidden', 'true'); viewerImage.removeAttribute('src'); document.body.style.overflow = ''; };
   document.querySelectorAll('[data-lightbox="true"]').forEach((link) => link.addEventListener('click', (event) => {
     event.preventDefault(); viewerImage.src = link.getAttribute('href'); viewerImage.alt = link.querySelector('img')?.alt || 'Temporality interface screenshot';
     viewer.classList.add('open'); viewer.setAttribute('aria-hidden', 'false'); document.body.style.overflow = 'hidden';
   }));
-  closeViewer.addEventListener('click', closeViewer);
-  viewer.addEventListener('click', (event) => { if (event.target === viewer) closeViewer(); });
-  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeViewer(); });
+  viewerClose.addEventListener('click', hideViewer);
+  viewer.addEventListener('click', (event) => { if (event.target === viewer) hideViewer(); });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') hideViewer(); });
 
   const menuToggle = document.getElementById('menuToggle');
   menuToggle.addEventListener('click', () => document.querySelector('.nav').classList.toggle('nav-open'));

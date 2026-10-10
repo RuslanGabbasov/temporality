@@ -25,5 +25,6 @@
 .image-viewer { position: fixed; z-index: 1000; inset: 0; display: none; align-items: center; justify-content: center; padding: 48px 28px 28px; background: rgba(4,10,9,.94); backdrop-filter: blur(12px); }
 .image-viewer.open { display: flex; }
 .image-viewer img { max-width: min(1500px,96vw); max-height: 88vh; object-fit: contain; border: 1px solid rgba(237,232,223,.15); border-radius: 8px; box-shadow: 0 24px 90px #0008; }
-.viewer-close { position: absolute; top: 16px; right: 22px; width: 42px; height: 42px; border: 1px solid rgba(237,232,223,.2); border-radius: 50%; background: #142522; color: #EDE8DF; font-size: 28px; cursor: pointer; }
+.viewer-close { position: absolute; top: 16px; right: 22px; display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 1px solid rgba(237,232,223,.2); border-radius: 50%; background: #142522; color: #EDE8DF; font-size: 24px; line-height: 1; cursor: pointer; }
+.viewer-close:hover { border-color: rgba(237,232,223,.45); color: #F7F5F0; }
 @media (max-width: 760px) { .real-gallery { grid-template-columns: 1fr; gap: 15px; margin-top: 25px; } .gallery-shot-wide { grid-column: auto; } .hero-shot, .hero-shot img { max-height: none; } .shot-expand { opacity: 1; transform: none; font-size: 11px; } .gallery-meta { padding: 12px 13px; } .image-viewer { padding: 58px 10px 14px; } }
