@@ -18,6 +18,16 @@ import (
 // one upstream request per id.
 const maxPrimingKnowledgeIDs = 20
 
+// knowledgeFetchBatchTimeout bounds the whole id-resolution batch: the loop
+// performs one upstream request per id, so without a batch-wide deadline a
+// slow Journal could hold the caller for the sum of every per-request timeout.
+const knowledgeFetchBatchTimeout = 30 * time.Second
+
+// maxKnowledgeSnippetRunes caps the upstream response body leaked into an
+// outbound error message: the Journal may answer with megabytes, and callers
+// only need the first bytes to recognise the failure.
+const maxKnowledgeSnippetRunes = 512
+
 // parseKnowledgeIDs parses the comma-separated "ids" query parameter into a
 // deduplicated id list preserving first-seen order. Whitespace around ids is
 // tolerated, empty segments are dropped.
@@ -49,6 +59,8 @@ func fetchKnowledgeByIDs(ctx context.Context, client *http.Client, observationUR
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
 	}
+	ctx, cancel := context.WithTimeout(ctx, knowledgeFetchBatchTimeout)
+	defer cancel()
 	found = make([]observation.Knowledge, 0, len(ids))
 	missing = make([]string, 0)
 	for _, id := range ids {
@@ -77,12 +89,32 @@ func fetchKnowledgeByIDs(ctx context.Context, client *http.Client, observationUR
 			if decodeErr := json.Unmarshal(body, &payload); decodeErr != nil {
 				return nil, nil, fmt.Errorf("knowledge %s: %w", id, decodeErr)
 			}
-			found = append(found, payload.Knowledge...)
+			for _, item := range payload.Knowledge {
+				if item.Project != "" && item.Project != project {
+					// The Journal is expected to scope responses to the
+					// requested project; a foreign item here is an upstream
+					// anomaly and is silently dropped rather than exposed.
+					continue
+				}
+				found = append(found, item)
+			}
 		case http.StatusNotFound:
 			missing = append(missing, id)
 		default:
-			return nil, nil, fmt.Errorf("knowledge %s: %s", id, strings.TrimSpace(string(body)))
+			return nil, nil, fmt.Errorf("knowledge %s: %s", id, snippetForKnowledgeError(body))
 		}
 	}
 	return found, missing, nil
+}
+
+// snippetForKnowledgeError renders a bounded, trimmed prefix of an upstream
+// error body so that a multi-megabyte Journal response never leaks into the
+// outbound error.
+func snippetForKnowledgeError(body []byte) string {
+	text := strings.TrimSpace(string(body))
+	runes := []rune(text)
+	if len(runes) > maxKnowledgeSnippetRunes {
+		runes = runes[:maxKnowledgeSnippetRunes]
+	}
+	return string(runes)
 }
