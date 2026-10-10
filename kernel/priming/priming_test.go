@@ -1,6 +1,8 @@
 package priming
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/temporality-project/temporality/observation"
@@ -285,5 +287,165 @@ func TestEmptyTaskFallback(t *testing.T) {
 	filtered := rankPatterns(knowledge, "totally unrelated tokens here", config)
 	if len(filtered) != 0 {
 		t.Fatalf("normal mode should filter out zero-relevance patterns, got %d", len(filtered))
+	}
+}
+
+// TestBudgetRespected feeds more than a hundred items across ten scopes
+// and requires the rendered output to stay inside the token budget, with
+// the reported estimate equal to the sum over titles, cues and IDs.
+func TestBudgetRespected(t *testing.T) {
+	task := "knowledge item detail"
+	var knowledge []observation.Knowledge
+	for i := 0; i < 10; i++ {
+		scope := fmt.Sprintf("scope-%02d", i)
+		for j := 0; j < 12; j++ {
+			knowledge = append(knowledge, observation.Knowledge{
+				ID:          fmt.Sprintf("K-%s-%02d", scope, j),
+				Proposition: fmt.Sprintf("knowledge item %s %02d %s", scope, j, strings.Repeat("detail ", 20)),
+				State:       "confirmed",
+				Topics:      []string{scope},
+				ReuseCount:  j,
+			})
+		}
+	}
+	if len(knowledge) < 100 {
+		t.Fatalf("test setup requires >=100 items, got %d", len(knowledge))
+	}
+
+	config := DefaultConfig()
+	kept, hidden, tokens := renderBudget(rankPatterns(knowledge, task, config), config)
+
+	if tokens > config.MaxTokens {
+		t.Fatalf("TokensEstimate = %d, must be <= MaxTokens %d", tokens, config.MaxTokens)
+	}
+
+	sum := 0
+	for _, pat := range kept {
+		sum += estimateTokens(pat.Title) + estimateTokens(pat.ID)
+		for _, cue := range pat.Cues {
+			sum += estimateTokens(cue)
+		}
+	}
+	if sum != tokens {
+		t.Fatalf("recomputed estimate %d != reported TokensEstimate %d", sum, tokens)
+	}
+
+	// The corpus is large enough that the budget must actually bite.
+	if hidden < 1 {
+		t.Fatalf("expected >=1 hidden pattern, got %d (kept %d, tokens %d)", hidden, len(kept), tokens)
+	}
+	if len(kept)+hidden != 7 { // 10 scopes truncated to MaxPatterns before budgeting
+		t.Fatalf("kept %d + hidden %d must cover the 7 ranked patterns", len(kept), hidden)
+	}
+}
+
+// TestTop1AlwaysRendered checks that with a minimal budget exactly one
+// pattern survives — the top-ranked one, with at least one cue — and
+// everything else is reported as hidden.
+func TestTop1AlwaysRendered(t *testing.T) {
+	task := "shared matching proposition"
+	var knowledge []observation.Knowledge
+	for _, scope := range []string{"scope-a", "scope-b", "scope-c"} {
+		for j := 0; j < 4; j++ {
+			knowledge = append(knowledge, observation.Knowledge{
+				ID:          fmt.Sprintf("K-%s-%d", scope, j),
+				Proposition: "shared matching proposition",
+				State:       "confirmed",
+				Topics:      []string{scope},
+			})
+		}
+	}
+
+	config := Config{MaxPatterns: 7, MinScore: 0.1, MaxTokens: 10, CuesPerPattern: 3}
+	ranked := rankPatterns(knowledge, task, config)
+	kept, hidden, tokens := renderBudget(ranked, config)
+
+	if len(ranked) != 3 {
+		t.Fatalf("setup expected 3 ranked patterns, got %d", len(ranked))
+	}
+	if len(kept) != 1 {
+		t.Fatalf("minimal budget must keep exactly 1 pattern, got %d", len(kept))
+	}
+	if len(kept[0].Cues) < 1 {
+		t.Fatalf("top-1 pattern must render at least one cue, got %d", len(kept[0].Cues))
+	}
+	if kept[0].ID != ranked[0].ID {
+		t.Fatalf("kept pattern %q must be the top-ranked %q", kept[0].ID, ranked[0].ID)
+	}
+	if hidden != len(ranked)-1 {
+		t.Fatalf("hidden = %d, want %d", hidden, len(ranked)-1)
+	}
+
+	// The reported estimate is the real cost of the over-budget top-1.
+	sum := estimateTokens(kept[0].Title) + estimateTokens(kept[0].ID)
+	for _, cue := range kept[0].Cues {
+		sum += estimateTokens(cue)
+	}
+	if tokens != sum || tokens <= config.MaxTokens {
+		t.Fatalf("tokens = %d, want the over-budget top-1 cost %d", tokens, sum)
+	}
+}
+
+// TestCueFormat verifies the cue line format, the reuse suffix rule, the
+// CuesPerPattern cap and the cue ordering (validity, then reuse, then ID).
+func TestCueFormat(t *testing.T) {
+	knowledge := []observation.Knowledge{
+		{ID: "K-a", Proposition: "proposed younger idea", State: "proposed", Topics: []string{"scope-cues"}},
+		{ID: "K-b", Proposition: "confirmed workhorse with plenty of reuse", State: "confirmed", ReuseCount: 5, Topics: []string{"scope-cues"}},
+		{ID: "K-c", Proposition: "challenged claim", State: "challenged", Topics: []string{"scope-cues"}},
+		{ID: "K-d", Proposition: "unrated leftover without a state", Topics: []string{"scope-cues"}},
+		{ID: "K-e", Proposition: "fresh unconfirmed idea", State: "confirmed", Topics: []string{"scope-cues"}},
+	}
+
+	config := Config{MaxPatterns: 7, MinScore: 0.1, MaxTokens: 600, CuesPerPattern: 3}
+	kept, _, _ := renderBudget(rankPatterns(knowledge, "confirmed workhorse", config), config)
+
+	if len(kept) != 1 {
+		t.Fatalf("expected 1 pattern, got %d", len(kept))
+	}
+	cues := kept[0].Cues
+	if len(cues) > 3 {
+		t.Fatalf("cues = %d, must be <= CuesPerPattern 3", len(cues))
+	}
+
+	// Highest validity first: the confirmed item with reuse must lead.
+	if !strings.HasPrefix(cues[0], "K-b: ") {
+		t.Fatalf("first cue = %q, must start with %q", cues[0], "K-b: ")
+	}
+	if !strings.Contains(cues[0], ", reused 5") {
+		t.Fatalf("cue %q must carry the reuse suffix", cues[0])
+	}
+
+	for _, cue := range cues {
+		id, rest, ok := strings.Cut(cue, ": ")
+		if !ok || id == "" || id != strings.TrimSpace(id) {
+			t.Fatalf("cue %q must start with \"<knowledge_id>: \"", cue)
+		}
+		if n := len([]rune(cue)); n > 140 {
+			t.Fatalf("cue is %d runes, must stay under 140: %q", n, cue)
+		}
+		if strings.Contains(rest, "reused 0") {
+			t.Fatalf("cue %q must omit the reuse suffix at zero reuse", cue)
+		}
+	}
+
+	// A never-reused confirmed item must render without the suffix.
+	for _, cue := range cues {
+		if strings.HasPrefix(cue, "K-e: ") && strings.Contains(cue, "reused") {
+			t.Fatalf("zero-reuse cue must not mention reuse: %q", cue)
+		}
+	}
+}
+
+// TestEstimateTokens pins the token approximation formula.
+func TestEstimateTokens(t *testing.T) {
+	if got := estimateTokens("12345678"); got != 2 {
+		t.Fatalf("estimateTokens(8 runes) = %d, want 2", got)
+	}
+	if got := estimateTokens("ab"); got != 1 {
+		t.Fatalf("estimateTokens(2 runes) = %d, want ceil(0.5)=1", got)
+	}
+	if got := estimateTokens(""); got != 0 {
+		t.Fatalf("estimateTokens(\"\") = %d, want 0", got)
 	}
 }
