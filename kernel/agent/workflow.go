@@ -1202,7 +1202,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			recentlyApproved := false // set true after request_approval succeeds
 			approvalRequired := call.Name == "request_approval" || contains(input.ApprovalTools, call.Name) ||
 				(input.RequireToolApproval && !policySafeTool(call.Name))
-			autoApproved := call.Name == "run_command" && contains(input.AutoApproveTools, call.Name)
+			autoApproved := sandboxAutoApprovedTools[call.Name] && contains(input.AutoApproveTools, call.Name)
 			toolStarted := false
 			// deferred marks a delegate call whose child run is in flight: its
 			// tool message and executed entry are handled at await time.
@@ -1831,9 +1831,9 @@ func toolFailureMessage(name string, err error) string {
 	// schema slip does not burn the run budget as repeated "uncertain" failures.
 	var application *temporal.ApplicationError
 	if errors.As(err, &application) && application.Type() == "InvalidToolArguments" {
-		return "Tool call rejected before execution, no effect: " + application.Message() + ". Re-issue the call with corrected arguments: run_command expects command as an array of strings, e.g. [\"go\",\"run\",\".\",\"check\"]."
+		return "Tool call rejected before execution, no effect: " + application.Message() + ". Re-issue the call with corrected arguments (run_command expects command as an array of strings; file tools expect workspace-relative paths)."
 	}
-	if strings.HasPrefix(name, "mcp__") || name == "run_command" {
+	if strings.HasPrefix(name, "mcp__") || name == "run_command" || name == "write_file" || name == "edit_file" {
 		return "Tool call failed; its effect may be uncertain. Do not repeat a consequential action without checking its status."
 	}
 	return "Tool failed: " + err.Error()
@@ -2038,11 +2038,22 @@ func runCompletedTotals(turns, totalTokens int, costUSD float64) map[string]any 
 	return map[string]any{"turns": turns, "total_tokens": totalTokens, "cost_usd": costUSD}
 }
 
+// sandboxAutoApprovedTools are consequential workspace tools covered by the
+// kernel's sandbox.workspace.v1 policy (the list is prepared by PrepareRun):
+// the project workspace is an isolated sandbox root, so running commands and
+// writing files there needs no human round-trip. An explicit approval policy
+// (approval_mode: tools) still forces confirmation — approvalRequired takes
+// precedence over auto-approval.
+var sandboxAutoApprovedTools = map[string]bool{
+	"run_command": true, "write_file": true, "edit_file": true,
+}
+
 // policySafeTools are exempt from policy-mandated tool approval
 // (approval_mode: tools): observation, knowledge-recording and escalation
 // tools the policy regime itself relies on. Consequential tools —
-// run_command, delegate, trigger writes, skill_propose, mcp__ tools — still
-// need a human decision. Read-only MCP tools are exempt via isReadOnlyTool.
+// run_command, write_file/edit_file, delegate, trigger writes, skill_propose,
+// mcp__ tools — still need a human decision. Read-only MCP tools are exempt
+// via isReadOnlyTool.
 var policySafeTools = map[string]bool{
 	"echo": true, "remember": true, "request_approval": true, "ask_human": true,
 	"human_contacts": true, "list_triggers": true,

@@ -77,6 +77,8 @@ func approvalOperation(operationID, tool string, args map[string]any, readOnly b
 	switch {
 	case tool == "run_command":
 		operationType, risk = "sandbox.exec", "high"
+	case tool == "write_file" || tool == "edit_file":
+		operationType, risk = "workspace.write", "medium"
 	case strings.HasPrefix(tool, "mcp__"):
 		operationType, risk = "mcp.call", "high"
 	}
@@ -94,6 +96,17 @@ func approvalOperation(operationID, tool string, args map[string]any, readOnly b
 			}
 		}
 	}
+	if tool == "write_file" || tool == "edit_file" {
+		if displayedArgs, ok := display.(map[string]any); ok {
+			if path, ok := displayedArgs["path"].(string); ok {
+				if tool == "write_file" {
+					summary = "Write file: " + path
+				} else {
+					summary = "Edit file: " + path
+				}
+			}
+		}
+	}
 	if len(summary) > approvalValueMaxBytes {
 		summary = summary[:approvalValueMaxBytes] + "…"
 		truncated = true
@@ -107,6 +120,12 @@ func approvalOperation(operationID, tool string, args map[string]any, readOnly b
 		details["workspace"] = "/workspace"
 		if timeout, ok := args["timeout_sec"]; ok {
 			details["timeout_sec"] = fmt.Sprint(timeout)
+		}
+	}
+	if tool == "write_file" || tool == "edit_file" {
+		details["workspace"] = "/workspace"
+		if path, ok := args["path"].(string); ok {
+			details["path"] = cleanPath(path)
 		}
 	}
 	return map[string]any{

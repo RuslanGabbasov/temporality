@@ -4959,6 +4959,10 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 		caps := a.Definition.Capabilities
 		if !caps.Cap(caps.ModifyFiles) {
 			input.ReadOnly = true
+			// The native file tools bypass the sandbox container mount, so
+			// read-only runs must deny them here too (defense-in-depth beside
+			// the activity-side read-only check).
+			input.DenyTools = append(input.DenyTools, "write_file", "edit_file")
 		}
 		if !caps.Cap(caps.RunCommands) {
 			input.DenyTools = append(input.DenyTools, "run_command")

@@ -32,36 +32,24 @@ const sendFileUploadCap = 50 << 20
 
 // resolveWorkspaceFile maps a model-supplied path ("/workspace/report.md" or
 // "report.md") onto the host-side project workspace and proves the result
-// stays inside it. WorkspacePath is the resolved absolute dir PrepareRun set.
+// stays inside it (symlinks included, via resolveWorkspacePath). WorkspacePath
+// is the resolved absolute dir PrepareRun set.
 func resolveWorkspaceFile(workspacePath, arg string) (abs, name string, err error) {
-	rel := strings.TrimSpace(arg)
-	rel = strings.TrimPrefix(rel, "/workspace")
-	rel = strings.TrimPrefix(rel, "/")
-	if rel == "" {
-		return "", "", errors.New("path is required")
-	}
-	clean := filepath.Clean(rel)
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", "", fmt.Errorf("path %q escapes the workspace", arg)
-	}
-	if workspacePath == "" {
-		return "", "", errors.New("run has no workspace")
-	}
-	abs = filepath.Join(workspacePath, clean)
-	if abs != workspacePath && !strings.HasPrefix(abs, workspacePath+string(filepath.Separator)) {
-		return "", "", fmt.Errorf("path %q escapes the workspace", arg)
+	abs, err = resolveWorkspacePath(workspacePath, arg)
+	if err != nil {
+		return "", "", err
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		return "", "", fmt.Errorf("file %q is not available: %w", clean, err)
+		return "", "", fmt.Errorf("file %q is not available: %w", cleanPath(arg), err)
 	}
 	if info.IsDir() {
-		return "", "", fmt.Errorf("path %q is a directory", clean)
+		return "", "", fmt.Errorf("path %q is a directory", cleanPath(arg))
 	}
 	if info.Size() > sendFileUploadCap {
-		return "", "", fmt.Errorf("file %q is %d bytes, transport attachment cap is %d", clean, info.Size(), sendFileUploadCap)
+		return "", "", fmt.Errorf("file %q is %d bytes, transport attachment cap is %d", cleanPath(arg), info.Size(), sendFileUploadCap)
 	}
-	return abs, filepath.Base(clean), nil
+	return abs, filepath.Base(abs), nil
 }
 
 // sendFileDelivery is one transport outcome, reported back to the model.

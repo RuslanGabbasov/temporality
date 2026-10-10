@@ -96,26 +96,30 @@ func (a *Activities) ToolDefs() []llm.ToolDef {
 // survives there and what does not.
 var runCommandTool = llm.ToolDef{
 	Name:        "run_command",
-	Description: "Run a command in an isolated sandbox container. The working directory is /workspace — persistent storage shared by all agents and runs of this project: files saved there survive across sessions and it may already contain files from earlier work, so treat them as shared and do not remove what you did not create. /tmp and /scratch are ephemeral and disappear between calls. Network access depends on agent configuration. Provide argv as an array.",
+	Description: "Run a command in an isolated sandbox container. The working directory is /workspace — persistent storage shared by all agents and runs of this project: files saved there survive across sessions and it may already contain files from earlier work, so treat them as shared and do not remove what you did not create. /tmp and /scratch are ephemeral and disappear between calls. Toolchain caches (GOCACHE, GOMODCACHE) point at the persistent per-project /cache volume, so builds keep their cache across runs. Network access depends on agent configuration. Provide argv as an array.",
 	Parameters:  map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}},
 }
 
-// BuiltinToolDefs returns kernel tools plus run_command (when the sandbox is
-// configured) — the tool surface independent of any MCP server.
+// BuiltinToolDefs returns kernel tools plus the sandbox surface (run_command
+// and the native file tools, when the sandbox is configured) — the tool set
+// independent of any MCP server.
 func (a *Activities) BuiltinToolDefs() []llm.ToolDef {
 	defs := KernelTools()
 	if a.Sandbox != nil {
 		defs = append(defs, runCommandTool)
+		defs = append(defs, fileToolDefs...)
 	}
 	return defs
 }
 
 // ToolDefsFor returns configured MCP tools for the given servers plus the
-// sandbox tool. An empty server list keeps the legacy env server only.
+// sandbox surface (run_command, file tools). An empty server list keeps the
+// legacy env server only.
 func (a *Activities) ToolDefsFor(servers []string) []llm.ToolDef {
 	defs := a.MCP.ToolDefsFor(servers)
 	if a.Sandbox != nil {
 		defs = append(defs, runCommandTool)
+		defs = append(defs, fileToolDefs...)
 	}
 	return defs
 }
@@ -136,7 +140,10 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 	input.MCPServer = MCPServerName()
 	a.NetworkAccess = input.NetworkAccess
 	if a.Sandbox != nil {
-		autoApproveTools := []string{"run_command"}
+		// Consequential workspace tools covered by the kernel's sandbox policy
+		// (sandbox.workspace.v1): the project workspace is an isolated sandbox
+		// root, so commands and file writes there need no human round-trip.
+		autoApproveTools := []string{"run_command", "write_file", "edit_file"}
 		input.AutoApproveTools = autoApproveTools
 		if input.WorkspacePath == "" {
 			// Persistent workspace per project: shared across agents and runs,
@@ -327,6 +334,12 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		}
 		exitCode := result.ExitCode
 		return ToolResult{Content: fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, result.Output), ExitCode: &exitCode}, nil
+	case "read_file":
+		return a.handleReadFile(request)
+	case "write_file":
+		return a.handleWriteFile(request)
+	case "edit_file":
+		return a.handleEditFile(request)
 	case "list_triggers":
 		return a.handleListTriggers(ctx, request)
 	case "human_contacts":
