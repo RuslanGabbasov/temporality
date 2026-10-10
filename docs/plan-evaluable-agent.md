@@ -1,7 +1,7 @@
 # План работ: Evaluable Agent — определение агента и компиляция системного промта
 
 Source spec: `docs/evaluable-agent.md`.
-Статус: Фаза 1 (этапы 1–7) реализована; ревизия 2026-10-10 сверила план со спекой и кодом — расхождения устранены в тексте, пост-плановые изменения зафиксированы в §2.1. Фаза 2: этап 8 (оценки агента) реализован; CLI — опциональный хвост. Legacy-конверсия — осознанно ручная: Rebuild/визард с человеком в цикле (автоматический проход при старте отвергнут: LLM-вызов на старте неработоспособен). Далее — этапы 9–10 (§2.2).
+Статус: Фаза 1 (этапы 1–7) реализована; ревизия 2026-10-10 сверила план со спекой и кодом — расхождения устранены в тексте, пост-плановые изменения зафиксированы в §2.1. Фаза 2 реализована целиком: этап 8 (оценки агента), этап 9 (аналитика эволюции: pass rate на версию, подсветка регрессий при неизменном сьюте), этап 10 (evolution proposals: анатомия problem/change/effect + evidence, инструмент agent_propose, применение только человеком через штатный update-путь). CLI — опциональный хвост, не реализован. Legacy-конверсия — осознанно ручная: Rebuild/визард с человеком в цикле (автоматический проход при старте отвергнут: LLM-вызов на старте неработоспособен).
 
 ## 0. Текущее состояние (baseline)
 
@@ -126,20 +126,21 @@ CompileAgentPrompt(def, env) =
 - [ ] CLI (опционально, зеркало skill CLI): `temporality agent evals <id>` / `eval-run <id> --version N`.
 - [x] Тесты (`kernel/agent/agenteval_test.go`): текущая версия через эффективный промт, pinned-версия тестирует снапшот (не текущий промт), неизвестная версия/агент, пустой сьют, failed-case с missed/unexpected, запись run и событие.
 
-#### Этап 9. Аналитика эволюции — S/M
+#### Этап 9. Аналитика эволюции — S/M — ✅
 
-- [ ] Агрегат на версию: runs (уже сгруппированы по `agent_version`) + eval pass rate + средние токены/ходы; без новых таблиц — соединение `workspace_agent_version` × eval-ранов × run-статистики.
-- [ ] Строка версии в «Эволюции» получает pass rate и подсветку регрессии (падение pass rate против предыдущей версии при неизменном сьюте).
-- [ ] Тесты: агрегация, детект регрессии.
+- [x] Агрегат на версию: runs (сгруппированы по `agent_version`, добавлены средние ходы) + eval pass rate (последний прогон версии); без новых таблиц — клиентская агрегация `debugger/src/agentEvolution.ts` поверх `workspace_agent_version` × eval-ранов × run-статистики.
+- [x] Строка версии в «Эволюции» получает pass rate и подсветку регрессии (падение pass rate против предыдущей версии при неизменном сьюте — оба сравниваемых прогона выполнены после `suite.updated_at`).
+- [x] Тесты: агрегация (`latestEvalByVersion`/`passRate`/`runsByVersion`), детект регрессии включая случай «сьют изменился между прогонами» (`agentEvolution.test.ts`).
 
-#### Этап 10. Evolution proposals — M/L
+#### Этап 10. Evolution proposals — M/L — ✅
 
-- [ ] Анатомия как у скилов: observed problem / proposed change / expected effect + provenance (свидетельства: run ids, knowledge ids).
-- [ ] Хранение: `workspace_agent_proposal` (agent_id, base_version, definition JSONB, problem/change/effect, evidence JSONB, status pending|applied|rejected, author, created_at); события `agent.definition.proposed/applied/rejected`.
-- [ ] Применение — только человеком, через штатный update-путь: версия растёт, снапшот пишется как обычно (зеркало living-skills §26: агенты предлагают — люди применяют).
-- [ ] Источники proposal: вручную из карточки агента; из прогона — инструмент `agent_propose` (зеркало `skill_propose`), пишет pending-proposal со ссылками на свидетельства.
-- [ ] UI: список proposals во вкладке «Эволюция», diff definition к текущей версии, применить/отклонить.
-- [ ] Тесты: CRUD, события, apply поднимает версию, права (writer на apply).
+- [x] Анатомия как у скилов: observed problem / proposed change / expected effect + provenance (свидетельства: run ids, knowledge ids; ран/операция добавляются автоматически).
+- [x] Хранение: миграция `000049_agent_proposals` — `workspace_agent_proposal` (agent_id, base_version, definition JSONB, problem/change/effect, evidence JSONB, status pending|applied|rejected, author, created_at, decided_at/by); события `agent.definition.proposed/applied/rejected` (best-effort через journal, как у скилов).
+- [x] Применение — только человеком (writer), через штатный update-путь: bindings заморожены, версия растёт только при реальном semantic change, снапшот пишется с `prompt_source="proposal"` (зеркало living-skills §26: агенты предлагают — люди применяют). Повторное применение/решение дважды — 409.
+- [x] Источники proposal: вручную из карточки агента (модалка без capabilities — предложение не даёт полномочий); из прогона — инструмент `agent_propose` (зеркало `skill_propose`, но без LLM-билдера: структурированные аргументы agent_id/problem/change/effect + constraints/completion/evidence). Capabilities не принимаются эндпоинтом вовсе — копируются из текущего определения (агент не может сам себе выписать полномочия).
+- [x] Эндпоинты: `GET/POST /v1/workspace/agents/{id}/proposals`, `POST .../proposals/{id}/apply|reject`; org-видимость агента проверяется (404 для чужих подразделений).
+- [x] UI: секция «Предложения» во вкладке «Эволюция» — список с проблемой/изменением/эффектом, evidence-чипами, diff definition к текущей версии, применить/отклонить с подтверждением; история решений видна. Локализация en/ru.
+- [x] Тесты: kernel-инструмент (`agentpropose_test.go` — провенанс, запрет capabilities, замена constraints/completion, валидация, неизвестный агент), агрегация/регрессия (`agentEvolution.test.ts`).
 
 #### Этап 11 (P2, опционально). Trajectory-level оценки
 

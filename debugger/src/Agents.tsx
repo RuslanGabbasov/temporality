@@ -30,6 +30,7 @@ import {
   type AgentVersion,
   type AgentEvaluationCase,
   type AgentEvaluationRun,
+  type AgentProposal,
   type BuiltinAgentSpec,
   type Provider,
   type Skill,
@@ -38,6 +39,7 @@ import {
   type MCPToolInfo,
   type Run,
 } from './workspaceApi'
+import { detectRegressions, latestEvalByVersion, passRate, runsByVersion as aggregateRunsByVersion } from './agentEvolution'
 import { useT } from './i18n'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
@@ -144,6 +146,14 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [evalBusy, setEvalBusy] = useState(false)
   const [evalVersion, setEvalVersion] = useState('') // '' = current definition
   const [openEvalRun, setOpenEvalRun] = useState<number | null>(null)
+  const [suiteUpdatedAt, setSuiteUpdatedAt] = useState<string | undefined>()
+
+  // Evolution proposals (plan §2.2 stage 10): pending definition changes with
+  // provenance; apply is human-only through the regular version path.
+  const [proposals, setProposals] = useState<AgentProposal[]>([])
+  const [proposalBusy, setProposalBusy] = useState(false)
+  const [proposalModalOpen, setProposalModalOpen] = useState(false)
+  const [proposalForm, setProposalForm] = useState({ problem: '', change: '', effect: '', description: '', constraints: '', completion: '' })
 
   // Prompt tab preview (reflects the saved agent).
   const [promptPreview, setPromptPreview] = useState<{ source: string; prompt: string } | null>(null)
@@ -431,18 +441,22 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     setAgentRuns([])
     setEvalSuite([])
     setEvalRuns([])
+    setProposals([])
     void (async () => {
       try {
-        const [vData, rData, sData, eData] = await Promise.all([
+        const [vData, rData, sData, eData, pData] = await Promise.all([
           workspaceApi.listAgentVersions(selectedId),
           workspaceApi.listAgentRuns(selectedId),
           workspaceApi.getAgentEvaluationSuite(selectedId),
           workspaceApi.listAgentEvaluationRuns(selectedId),
+          workspaceApi.listAgentProposals(selectedId),
         ])
         setVersions(vData.versions ?? [])
         setAgentRuns(rData.runs ?? [])
         setEvalSuite(sData.cases ?? [])
+        setSuiteUpdatedAt(sData.updated_at)
         setEvalRuns(eData.runs ?? [])
+        setProposals(pData.proposals ?? [])
       } catch (f) { setError(message(f)) }
     })()
   }, [detailTab, selectedId, evoLoadedFor])
@@ -468,14 +482,78 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     finally { setEvalBusy(false) }
   }
 
-  const runsByVersion = new Map<number, { total: number; completed: number; failed: number }>()
-  for (const run of agentRuns) {
-    const key = run.agent_version ?? 0
-    const entry = runsByVersion.get(key) ?? { total: 0, completed: 0, failed: 0 }
-    entry.total++
-    if (run.status === 'completed') entry.completed++
-    if (run.status === 'failed' || run.status === 'cancelled') entry.failed++
-    runsByVersion.set(key, entry)
+  const runsByVersion = aggregateRunsByVersion(agentRuns)
+  const latestEval = latestEvalByVersion(evalRuns)
+  const regressions = detectRegressions(evalRuns, suiteUpdatedAt)
+  const regressionBy = new Map(regressions.map((reg) => [reg.version, reg]))
+
+  // Evolution proposals: apply goes through the regular version path on the
+  // server; afterwards reload versions, runs and proposals so the timeline and
+  // the diff reflect the new definition version.
+  const refreshEvolution = async (agentId: string) => {
+    const [vData, rData, pData] = await Promise.all([
+      workspaceApi.listAgentVersions(agentId),
+      workspaceApi.listAgentRuns(agentId),
+      workspaceApi.listAgentProposals(agentId),
+    ])
+    setVersions(vData.versions ?? [])
+    setAgentRuns(rData.runs ?? [])
+    setProposals(pData.proposals ?? [])
+  }
+
+  const applyProposal = async (proposal: AgentProposal) => {
+    if (!selectedId) return
+    setProposalBusy(true); setError('')
+    try {
+      await workspaceApi.applyAgentProposal(selectedId, proposal.id)
+      await refreshEvolution(selectedId)
+      await load()
+    } catch (f) { setError(message(f)) }
+    finally { setProposalBusy(false) }
+  }
+
+  const rejectProposal = async (proposal: AgentProposal) => {
+    if (!selectedId) return
+    setProposalBusy(true); setError('')
+    try {
+      await workspaceApi.rejectAgentProposal(selectedId, proposal.id)
+      const pData = await workspaceApi.listAgentProposals(selectedId)
+      setProposals(pData.proposals ?? [])
+    } catch (f) { setError(message(f)) }
+    finally { setProposalBusy(false) }
+  }
+
+  const openProposalModal = () => {
+    setProposalForm({
+      problem: '', change: '', effect: '',
+      description: selected?.description ?? '',
+      constraints: listToText(selected?.definition?.constraints),
+      completion: listToText(selected?.definition?.completion),
+    })
+    setProposalModalOpen(true)
+  }
+
+  const submitProposal = async () => {
+    if (!selectedId) return
+    setProposalBusy(true); setError('')
+    try {
+      const definition: { constraints?: string[]; completion?: string[] } = {}
+      const constraints = cleanList(proposalForm.constraints.split('\n'))
+      const completion = cleanList(proposalForm.completion.split('\n'))
+      if (!sameList(constraints, cleanList(selected?.definition?.constraints))) definition.constraints = constraints
+      if (!sameList(completion, cleanList(selected?.definition?.completion))) definition.completion = completion
+      await workspaceApi.createAgentProposal(selectedId, {
+        problem: proposalForm.problem.trim(),
+        change: proposalForm.change.trim(),
+        effect: proposalForm.effect.trim(),
+        description: proposalForm.description.trim(),
+        definition,
+      })
+      setProposalModalOpen(false)
+      const pData = await workspaceApi.listAgentProposals(selectedId)
+      setProposals(pData.proposals ?? [])
+    } catch (f) { setError(message(f)) }
+    finally { setProposalBusy(false) }
   }
 
   // Rebuild (§13): regenerate from the current purpose, show the diff first.
@@ -730,6 +808,80 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
 
               {detailTab === 'evolution' && (
                 <div>
+                  {/* Proposals (plan §2.2 stage 10): pending definition changes. */}
+                  <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid var(--tm-border)', paddingBottom: '1rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <div className="skill-subheading" style={{ margin: 0 }}>{t('agents.proposals') ?? 'Proposals'}</div>
+                      <Button size="sm" kind="secondary" onClick={openProposalModal}>{t('agents.proposals_new') ?? 'Propose change'}</Button>
+                    </div>
+                    {proposals.length === 0 ? (
+                      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: 0 }}>
+                        {t('agents.proposals_empty') ?? 'No proposals yet. Agents file them with the agent_propose tool; changes go live only after a human applies them.'}
+                      </p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {proposals.map((p) => {
+                          const changes = versionChanges(
+                            { agent_id: selected.id, version: 0, definition: selected.definition ?? {}, description: selected.description, compiled_prompt: '', prompt_source: '', created_at: '' },
+                            { agent_id: selected.id, version: 0, definition: p.definition, description: p.description, compiled_prompt: '', prompt_source: '', created_at: '' },
+                          )
+                          const pending = p.status === 'pending'
+                          return (
+                            <div key={p.id} style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', opacity: pending ? 1 : 0.6 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                <Tag size="sm" type={p.status === 'applied' ? 'green' : p.status === 'rejected' ? 'red' : 'purple'}>{t(`agents.proposal_${p.status}`) ?? p.status}</Tag>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>
+                                  {t('agents.proposal_base', { version: String(p.base_version) }) ?? `based on v${p.base_version}`} · {new Date(p.created_at).toLocaleString()}{p.author ? ` · ${p.author}` : ''}
+                                </span>
+                              </div>
+                              <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem' }}><strong>{t('agents.proposal_problem') ?? 'Problem'}:</strong> {p.problem}</p>
+                              <p style={{ margin: '0.2rem 0 0', fontSize: '0.8rem' }}><strong>{t('agents.proposal_change') ?? 'Change'}:</strong> {p.change}</p>
+                              {p.effect && <p style={{ margin: '0.2rem 0 0', fontSize: '0.8rem' }}><strong>{t('agents.proposal_effect') ?? 'Expected effect'}:</strong> {p.effect}</p>}
+                              {changes.length > 0 && (
+                                <p style={{ margin: '0.2rem 0 0', fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>
+                                  {t('agents.changed') ?? 'Changed'}: {changes.join(', ')}
+                                </p>
+                              )}
+                              {(p.evidence ?? []).length > 0 && (
+                                <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.35rem' }}>
+                                  {(p.evidence ?? []).map((e, i) => <Tag key={i} size="sm" type="gray">{e}</Tag>)}
+                                </div>
+                              )}
+                              {pending && (
+                                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                                  <Button
+                                    size="sm"
+                                    disabled={proposalBusy}
+                                    onClick={() => {
+                                      if (confirm(t('agents.proposal_apply_confirm') ?? 'Apply this proposal? The definition version will increase and a snapshot will be stored.')) void applyProposal(p)
+                                    }}
+                                  >
+                                    {t('agents.proposal_apply') ?? 'Apply'}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    kind="secondary"
+                                    disabled={proposalBusy}
+                                    onClick={() => {
+                                      if (confirm(t('agents.proposal_reject_confirm') ?? 'Reject this proposal? It stays in history and can never be applied.')) void rejectProposal(p)
+                                    }}
+                                  >
+                                    {t('agents.proposal_reject') ?? 'Reject'}
+                                  </Button>
+                                </div>
+                              )}
+                              {!pending && p.decided_by && (
+                                <p style={{ margin: '0.3rem 0 0', fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>
+                                  {t('agents.proposal_decided_by') ?? 'decided by'} {p.decided_by}{p.decided_at ? ` · ${new Date(p.decided_at).toLocaleString()}` : ''}
+                                </p>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
                   {versions.length === 0 && (
                     <p style={{ color: 'var(--tm-text-3)' }}>
                       {t('agents.evolution_empty') ?? 'No definition versions yet. Versions appear when you edit the agent’s definition.'}
@@ -740,6 +892,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     const stats = runsByVersion.get(v.version)
                     const changes = versionChanges(prev, v)
                     const isCurrent = v.version === selected.definition_version
+                    const evalRun = latestEval.get(v.version)
+                    const rate = evalRun ? passRate(evalRun) : null
+                    const regression = regressionBy.get(v.version)
                     return (
                       <div key={v.version} style={{ borderLeft: '2px solid var(--tm-border)', paddingLeft: '0.75rem', marginBottom: '1rem' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -747,6 +902,16 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                           {isCurrent && <Tag type="green" size="sm">{t('agents.version_current') ?? 'current'}</Tag>}
                           <Tag type="gray" size="sm">{v.prompt_source}</Tag>
                           {v.generator_model && <Tag type="blue" size="sm">{v.generator_model}</Tag>}
+                          {rate !== null && (
+                            <Tag size="sm" type={rate >= 0.999 ? 'green' : rate >= 0.5 ? 'cyan' : 'red'}>
+                              {t('agents.eval_pass_rate') ?? 'Pass rate'}: {Math.round(rate * 100)}%
+                            </Tag>
+                          )}
+                          {regression && (
+                            <Tag size="sm" type="red" title={`${Math.round(regression.from * 100)}% → ${Math.round(regression.to * 100)}%`}>
+                              {t('agents.eval_regressed', { prev: String(regression.previousVersion) }) ?? `regression vs v${regression.previousVersion}`}
+                            </Tag>
+                          )}
                           <span style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>
                             {new Date(v.created_at).toLocaleString()}{v.author ? ` · ${v.author}` : ''}
                           </span>
@@ -763,6 +928,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                         <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>
                           {t('agents.runs_total') ?? 'Runs'}: <strong>{stats?.total ?? 0}</strong>
                           {stats && <> · {t('agents.runs_completed') ?? 'completed'}: {stats.completed} · {t('agents.runs_failed') ?? 'failed'}: {stats.failed}</>}
+                          {stats?.avgTurns != null && <> · {t('agents.avg_turns') ?? 'avg turns'}: {stats.avgTurns.toFixed(1)}</>}
                         </p>
                       </div>
                     )
@@ -923,6 +1089,79 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                 </div>
               </>
             )}
+        </AppModal>
+      )}
+
+      {/* Manual evolution proposal (plan §2.2 stage 10): same anatomy as agent-authored ones. */}
+      {proposalModalOpen && selected && (
+        <AppModal onClose={() => setProposalModalOpen(false)} panelStyle={{ width: '560px' }}>
+          <Heading>{t('agents.proposal_modal_title') ?? 'Propose definition change'}</Heading>
+          <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
+            {t('agents.proposal_modal_hint') ?? 'Describe the observed problem and the change; it lands as a pending proposal you can then apply. Capabilities change only in the regular editor — a proposal never grants powers.'}
+          </p>
+          <Stack gap={3}>
+            <TextArea
+              id="agent-proposal-problem"
+              hideLabel
+              labelText=""
+              rows={2}
+              placeholder={t('agents.proposal_problem_ph') ?? 'Observed problem: what kept going wrong or missing…'}
+              value={proposalForm.problem}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setProposalForm({ ...proposalForm, problem: e.target.value })}
+              autoFocus
+            />
+            <TextArea
+              id="agent-proposal-change"
+              hideLabel
+              labelText=""
+              rows={2}
+              placeholder={t('agents.proposal_change_ph') ?? 'Proposed change: what should be different in the definition…'}
+              value={proposalForm.change}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setProposalForm({ ...proposalForm, change: e.target.value })}
+            />
+            <TextArea
+              id="agent-proposal-effect"
+              hideLabel
+              labelText=""
+              rows={2}
+              placeholder={t('agents.proposal_effect_ph') ?? 'Expected effect (optional)…'}
+              value={proposalForm.effect}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setProposalForm({ ...proposalForm, effect: e.target.value })}
+            />
+            <TextArea
+              id="agent-proposal-description"
+              hideLabel
+              labelText=""
+              rows={2}
+              placeholder={t('agents.purpose') ?? 'Purpose'}
+              value={proposalForm.description}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setProposalForm({ ...proposalForm, description: e.target.value })}
+            />
+            <TextArea
+              id="agent-proposal-constraints"
+              hideLabel
+              labelText=""
+              rows={3}
+              placeholder={t('agents.constraints_hint') ?? 'Constraints — what the agent must never do. One per line.'}
+              value={proposalForm.constraints}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setProposalForm({ ...proposalForm, constraints: e.target.value })}
+            />
+            <TextArea
+              id="agent-proposal-completion"
+              hideLabel
+              labelText=""
+              rows={3}
+              placeholder={t('agents.completion_hint') ?? 'Completion checks — what to verify before declaring done. One per line.'}
+              value={proposalForm.completion}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setProposalForm({ ...proposalForm, completion: e.target.value })}
+            />
+          </Stack>
+          <div className="form-actions">
+            <Button kind="secondary" disabled={proposalBusy} onClick={() => setProposalModalOpen(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
+            <Button disabled={proposalBusy || !proposalForm.problem.trim() || !proposalForm.change.trim()} onClick={() => void submitProposal()}>
+              {t('agents.proposal_submit') ?? 'Create proposal'}
+            </Button>
+          </div>
         </AppModal>
       )}
 

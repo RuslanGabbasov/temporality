@@ -195,6 +195,14 @@ func main() {
 		log.Error("migrate workspace v47", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000048_agent_evaluations.up.sql"); err != nil {
+		log.Error("migrate workspace v48", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000049_agent_proposals.up.sql"); err != nil {
+		log.Error("migrate workspace v49", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -1708,6 +1716,204 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"runs": runs})
+	})
+	// Evolution proposals (docs/plan-evaluable-agent.md §2.2 stage 10): agents
+	// and humans propose definition changes with full provenance; only a human
+	// applies, through the regular update path so the version grows normally.
+	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/proposals", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		agentID := r.PathValue("agentID")
+		a, err := ws.GetAgent(r.Context(), agentID)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(a.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		proposals, err := ws.ListAgentProposals(r.Context(), agentID, r.URL.Query().Get("status"), 0)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"proposals": proposals})
+	})
+	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/proposals", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		agentID := r.PathValue("agentID")
+		var req struct {
+			Problem        string                     `json:"problem"`
+			Change         string                     `json:"change"`
+			Effect         string                     `json:"effect"`
+			Description    string                     `json:"description"`
+			Definition     *workspace.AgentDefinition `json:"definition"`
+			Evidence       []string                   `json:"evidence"`
+			Author         string                     `json:"author"`
+			GeneratorModel string                     `json:"generator_model"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Problem) == "" || strings.TrimSpace(req.Change) == "" {
+			writeError(w, 422, errors.New("problem and change are required"))
+			return
+		}
+		a, err := ws.GetAgent(r.Context(), agentID)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(a.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		// The proposal carries the full target definition; omitted parts default
+		// to the agent's current state so a proposal can change only what it
+		// mentions. Capabilities are copied from the current definition — an
+		// agent-authored proposal must never grant itself capabilities.
+		definition := workspace.AgentDefinition{}
+		if a.Definition != nil {
+			definition = *a.Definition
+		}
+		if req.Definition != nil {
+			// Absent field = keep the current value; an explicit empty array
+			// clears it. Partial proposals never wipe what they do not mention.
+			if req.Definition.Constraints != nil {
+				definition.Constraints = req.Definition.Constraints
+			}
+			if req.Definition.Completion != nil {
+				definition.Completion = req.Definition.Completion
+			}
+		}
+		proposal := workspace.AgentProposal{
+			AgentID: a.ID, BaseVersion: a.DefinitionVersion,
+			Definition:  definition,
+			Description: req.Description, Problem: req.Problem, Change: req.Change, Effect: req.Effect,
+			Evidence: req.Evidence, Author: req.Author, GeneratorModel: req.GeneratorModel,
+		}
+		if proposal.Description == "" {
+			proposal.Description = a.Description
+		}
+		// Manual proposals carry the deciding user as author; agent proposals
+		// name their run explicitly.
+		if proposal.Author == "" {
+			proposal.Author = requestSubject(r)
+		}
+		if err := ws.CreateAgentProposal(r.Context(), &proposal); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.proposed", a, proposal, actorFromRequest(r), nil)
+		writeJSON(w, 201, proposal)
+	})
+	// Applying goes through the regular update path: bindings stay frozen,
+	// the version grows only on a real semantic change and the immutable
+	// snapshot is written exactly like a manual edit (docs/living-skills.md §26:
+	// agents propose, people apply).
+	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/proposals/{id}/apply", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		agentID := r.PathValue("agentID")
+		proposalID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, 400, errors.New("invalid proposal id"))
+			return
+		}
+		a, proposal, ok := loadAgentProposal(w, r, ws, agentID, proposalID)
+		if !ok {
+			return
+		}
+		if !workspace.OrgVisible(a.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		if proposal.Status != "pending" {
+			writeError(w, 409, fmt.Errorf("proposal %d is already %s", proposal.ID, proposal.Status))
+			return
+		}
+		next := a
+		next.Description = proposal.Description
+		definition := proposal.Definition
+		next.Definition = &definition
+		// Bindings never change through a proposal (mirror of the PUT freeze).
+		next.OrgUnitID = a.OrgUnitID
+		if agentSemanticsChanged(a, next) {
+			next.DefinitionVersion++
+		}
+		if err := ws.UpdateAgent(r.Context(), next); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if next.Definition != nil && next.DefinitionVersion != a.DefinitionVersion {
+			writeAgentVersion(r.Context(), ws, next, requestSubject(r), "proposal", proposal.GeneratorModel)
+		}
+		decided, err := ws.DecideAgentProposal(r.Context(), proposalID, "applied", requestSubject(r))
+		if err != nil {
+			if errors.Is(err, workspace.ErrConflict) {
+				writeError(w, 409, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.applied", next, decided, actorFromRequest(r),
+			map[string]any{"from_version": a.DefinitionVersion, "to_version": next.DefinitionVersion})
+		writeJSON(w, 200, map[string]any{"agent": next, "proposal": decided})
+	})
+	// Rejecting keeps the proposal in history; a rejected proposal can never
+	// be applied — deciding twice is a conflict.
+	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/proposals/{id}/reject", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		agentID := r.PathValue("agentID")
+		proposalID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, 400, errors.New("invalid proposal id"))
+			return
+		}
+		a, _, ok := loadAgentProposal(w, r, ws, agentID, proposalID)
+		if !ok {
+			return
+		}
+		if !workspace.OrgVisible(a.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		decided, err := ws.DecideAgentProposal(r.Context(), proposalID, "rejected", requestSubject(r))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			if errors.Is(err, workspace.ErrConflict) {
+				writeError(w, 409, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.rejected", a, decided, actorFromRequest(r), nil)
+		writeJSON(w, 200, decided)
 	})
 	// Delegation target resolution (docs/agent-delegation.md §4): returns the
 	// enforced run configuration for launching this agent inside another run.
@@ -4992,6 +5198,31 @@ func agentSemanticsChanged(prev, next workspace.Agent) bool {
 	return !bytes.Equal(prevDef, nextDef)
 }
 
+// loadAgentProposal resolves the agent and one of its proposals for the
+// decide endpoints, writing the error response when resolution fails. Org
+// visibility stays with the caller: it needs the visibleUnits closure.
+func loadAgentProposal(w http.ResponseWriter, r *http.Request, ws *workspace.Store, agentID string, proposalID int64) (workspace.Agent, workspace.AgentProposal, bool) {
+	failure := func(status int, err error) (workspace.Agent, workspace.AgentProposal, bool) {
+		writeError(w, status, err)
+		return workspace.Agent{}, workspace.AgentProposal{}, false
+	}
+	a, err := ws.GetAgent(r.Context(), agentID)
+	if err != nil {
+		if errors.Is(err, workspace.ErrNotFound) {
+			return failure(404, err)
+		}
+		return failure(500, err)
+	}
+	proposal, err := ws.GetAgentProposal(r.Context(), agentID, proposalID)
+	if err != nil {
+		if errors.Is(err, workspace.ErrNotFound) {
+			return failure(404, err)
+		}
+		return failure(500, err)
+	}
+	return a, proposal, true
+}
+
 // writeAgentVersion stores the immutable definition snapshot with the
 // effective prompt compiled by the same deterministic function runs use
 // (docs/plan-evaluable-agent.md, decision 2).
@@ -5560,6 +5791,71 @@ func emitSkillLifecycleEvent(ctx context.Context, observationURL, token, eventTy
 			"change_summary": version.ChangeSummary,
 			"source_runs":    version.SourceRuns,
 		},
+	}
+	if err := event.Validate(); err != nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{"events": []observation.Event{event}})
+	if err != nil {
+		return
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, observationURL+"/v1/observations/events", bytes.NewReader(payload))
+	if err != nil {
+		return
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, response.Body)
+}
+
+// emitAgentDefinitionEvent records agent.definition.proposed/applied/rejected
+// in the journal so proposal decisions stay observable (docs/plan-evaluable-agent.md
+// §2.2 stage 10). Best-effort: the proposal row remains the source of truth.
+func emitAgentDefinitionEvent(ctx context.Context, observationURL, token, eventType string, a workspace.Agent, proposal workspace.AgentProposal, actor observation.Actor, extra map[string]any) {
+	if observationURL == "" {
+		return
+	}
+	digest := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d\x00%d", eventType, a.ID, proposal.ID, time.Now().UnixNano())))
+	data := map[string]any{
+		"agent_id":     a.ID,
+		"agent_name":   a.Name,
+		"proposal_id":  proposal.ID,
+		"base_version": proposal.BaseVersion,
+		"problem":      proposal.Problem,
+		"change":       proposal.Change,
+		"effect":       proposal.Effect,
+		"evidence":     proposal.Evidence,
+		"author":       proposal.Author,
+	}
+	for key, value := range extra {
+		data[key] = value
+	}
+	// The first run-scoped evidence ref becomes the event's run context.
+	runRef := ""
+	for _, ref := range proposal.Evidence {
+		if id, ok := strings.CutPrefix(ref, "run:"); ok {
+			runRef = id
+			break
+		}
+	}
+	event := observation.Event{
+		Schema:     observation.Schema,
+		EventID:    fmt.Sprintf("agent-definition/%s/%s", eventType, hex.EncodeToString(digest[:10])),
+		OccurredAt: time.Now().UTC(),
+		Source:     observation.Source{ID: "workspace", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{
+			Run:   runRef,
+			Actor: actor,
+		},
+		Type: eventType,
+		Data: data,
 	}
 	if err := event.Validate(); err != nil {
 		return

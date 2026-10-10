@@ -94,7 +94,7 @@ Status: shipped.
 ## P0 — Evaluable Agent (agent definition & prompt compiler)
 
 Source spec: `docs/evaluable-agent.md`, work plan: `docs/plan-evaluable-agent.md`.
-Status: Phase 1 **complete** — all original plan items done (2026-10-10 revision synced the plan with the current spec: builtin templates are never auto-created, QA template added, delegation capability and org-unit visibility recorded). Phase 2 planned below.
+Status: Phase 1 **complete** — all original plan items done (2026-10-10 revision synced the plan with the current spec: builtin templates are never auto-created, QA template added, delegation capability and org-unit visibility recorded). Phase 2 complete — see below.
 
 - [x] **Agent definition** — structured `definition` JSONB (purpose, capabilities, constraints, completion) instead of free-form system prompt; immutable `workspace_agent_version` per change
 - [x] **Prompt compiler** — deterministic compile from semantic components (base evidence contract + role + constraints + completion + env policy); no tool/skill duplication, no step-by-step instructions
@@ -105,11 +105,13 @@ Status: Phase 1 **complete** — all original plan items done (2026-10-10 revisi
 - [x] **Built-in agent templates** — Coder/Reviewer/Researcher/QA/DevOps shipped as gallery templates, never auto-created; editable via the same UI
 - [x] **Evolution tab** — version timeline + per-version run stats (runs link `agent_version`)
 
-### Phase 2 (planned) — evaluations & evolution
+### Phase 2 — evaluations & evolution
+
+Status: **complete** (except the optional eval CLI tail).
 
 - [x] Agent evaluations — per-agent suites checked against the compiled prompt of a pinned definition version; synchronous runner, run history, `agent.evaluation.completed` events, «Оценки» section in the Evolution tab (mirror of skill evaluations)
-- [ ] Evolution analytics — per-version eval pass rate + run outcomes with regression highlight
-- [ ] Evolution proposals — proposal anatomy (observed problem / proposed change / expected effect + evidence), `agent_propose` tool, human-only apply through the regular version path
+- [x] Evolution analytics — per-version eval pass rate + run outcomes (avg turns) with regression highlight (pass-rate drop vs previous version on an unchanged suite)
+- [x] Evolution proposals — proposal anatomy (observed problem / proposed change / expected effect + evidence), `agent_propose` tool, `workspace_agent_proposal` storage, `agent.definition.proposed/applied/rejected` events, human-only apply through the regular version path; capabilities are never proposable
 - [ ] Agent eval CLI — `temporality agent evals` / `eval-run` (optional tail of stage 8)
 - Note: agents propose, people apply — mirror of `docs/living-skills.md` §26
 

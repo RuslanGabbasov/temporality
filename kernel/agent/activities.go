@@ -368,6 +368,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleSkillAction(ctx, request)
 	case "skill_propose":
 		return a.handleSkillPropose(ctx, request)
+	case "agent_propose":
+		return a.handleAgentPropose(ctx, request)
 	case "skill_evaluate":
 		return a.handleSkillEvaluate(ctx, request)
 	case "skill_diff":
@@ -826,6 +828,97 @@ func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest
 		"questions": draft.Questions,
 	}
 	encoded, _ := json.Marshal(response)
+	return ToolResult{Content: string(encoded)}, nil
+}
+
+// handleAgentPropose files an evolution proposal for an agent definition
+// (docs/plan-evaluable-agent.md §2.2 stage 10): an observed problem, the
+// proposed change and evidence. It lands as a pending proposal a human
+// applies in the Agents UI — never as a live definition change. Capabilities
+// are deliberately not accepted: an agent must not be able to grant itself
+// powers through a proposal.
+func (a *Activities) handleAgentPropose(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	agentID, _ := request.Arguments["agent_id"].(string)
+	if strings.TrimSpace(agentID) == "" {
+		return ToolResult{Content: "error: agent_id is required"}, nil
+	}
+	problem, _ := request.Arguments["problem"].(string)
+	change, _ := request.Arguments["change"].(string)
+	if strings.TrimSpace(problem) == "" || strings.TrimSpace(change) == "" {
+		return ToolResult{Content: "error: problem and change are required"}, nil
+	}
+	effect, _ := request.Arguments["effect"].(string)
+	description, _ := request.Arguments["description"].(string)
+
+	// Verify the target agent so the failure names the real problem.
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, fmt.Sprintf("%s/v1/workspace/agents/%s", a.WorkspaceURL, agentID), nil)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status == http.StatusNotFound {
+		return ToolResult{Content: fmt.Sprintf("error: agent %q not found", agentID)}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: agent %q not readable (HTTP %d): %s", agentID, status, truncate(body, 300))}, nil
+	}
+	var target struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal([]byte(body), &target)
+
+	// Provenance is added automatically: the run and operation that produced
+	// the proposal, plus any refs the agent supplied (run ids, knowledge ids).
+	evidence := stringList(request.Arguments["evidence"])
+	if request.RunID != "" {
+		evidence = append([]string{"run:" + request.RunID}, evidence...)
+	}
+	if request.OperationID != "" {
+		evidence = append(evidence, "op:"+request.OperationID)
+	}
+	author := "agent-run:" + request.RunID
+	payload := map[string]any{
+		"problem":  problem,
+		"change":   change,
+		"effect":   effect,
+		"evidence": evidence,
+		"author":   author,
+	}
+	if description != "" {
+		payload["description"] = description
+	}
+	// The server copies capabilities from the current definition; the proposal
+	// may only restate constraints, completion and the purpose text.
+	definition := map[string]any{}
+	if constraints := stringList(request.Arguments["constraints"]); constraints != nil {
+		definition["constraints"] = constraints
+	}
+	if completion := stringList(request.Arguments["completion"]); completion != nil {
+		definition["completion"] = completion
+	}
+	if len(definition) > 0 {
+		payload["definition"] = definition
+	}
+	response, status, err := a.workspaceDo(ctx, http.MethodPost, fmt.Sprintf("%s/v1/workspace/agents/%s/proposals", a.WorkspaceURL, agentID), payload)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: propose failed (HTTP %d): %s", status, truncate(response, 600))}, nil
+	}
+	var saved struct {
+		ID          int64 `json:"id"`
+		BaseVersion int   `json:"base_version"`
+	}
+	_ = json.Unmarshal([]byte(response), &saved)
+	result := map[string]any{
+		"agent_id":     agentID,
+		"agent_name":   target.Name,
+		"proposal_id":  saved.ID,
+		"base_version": saved.BaseVersion,
+		"state":        "pending",
+		"next_step":    "a human must review and apply the proposal in the Agents UI (Evolution tab) before the definition changes",
+	}
+	encoded, _ := json.Marshal(result)
 	return ToolResult{Content: string(encoded)}, nil
 }
 

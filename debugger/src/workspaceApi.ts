@@ -172,6 +172,27 @@ export interface AgentEvaluationRun {
   created_at: string
 }
 
+/** Evolution proposal (plan §2.2 stage 10): a pending definition change with
+ * full provenance. Apply is human-only and goes through the regular version
+ * path — capabilities are never part of a proposal. */
+export interface AgentProposal {
+  id: number
+  agent_id: string
+  base_version: number
+  definition: AgentDefinition
+  description: string
+  problem: string
+  change: string
+  effect: string
+  evidence: string[]
+  status: 'pending' | 'applied' | 'rejected' | string
+  author: string
+  generator_model?: string
+  created_at: string
+  decided_at?: string
+  decided_by?: string
+}
+
 export interface BuiltinAgentSpec {
   slug: string
   name: string
@@ -609,6 +630,14 @@ export const workspaceApi = {
     request<AgentEvaluationRun>(`/v1/workspace/agents/${id}/evaluations`, { method: 'POST', body: JSON.stringify(version ? { version } : {}) }),
   listAgentEvaluationRuns: (id: string) =>
     request<{ runs: AgentEvaluationRun[] }>(`/v1/workspace/agents/${id}/evaluations`),
+  listAgentProposals: (id: string) =>
+    request<{ proposals: AgentProposal[] }>(`/v1/workspace/agents/${id}/proposals`),
+  createAgentProposal: (id: string, data: { problem: string; change: string; effect?: string; description?: string; definition?: { constraints?: string[]; completion?: string[] }; evidence?: string[] }) =>
+    request<AgentProposal>(`/v1/workspace/agents/${id}/proposals`, { method: 'POST', body: JSON.stringify(data) }),
+  applyAgentProposal: (id: string, proposalId: number) =>
+    request<{ agent: Agent; proposal: AgentProposal }>(`/v1/workspace/agents/${id}/proposals/${proposalId}/apply`, { method: 'POST' }),
+  rejectAgentProposal: (id: string, proposalId: number) =>
+    request<AgentProposal>(`/v1/workspace/agents/${id}/proposals/${proposalId}/reject`, { method: 'POST' }),
   listBuiltinAgents: () =>
     request<{ builtins: BuiltinAgentSpec[] }>('/v1/workspace/agents/builtins'),
   draftAgent: (description: string, final?: boolean) =>
