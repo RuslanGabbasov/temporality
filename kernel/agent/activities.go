@@ -362,6 +362,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleDeleteTrigger(ctx, request)
 	case "skill_search":
 		return a.handleSkillSearch(ctx, request)
+	case "knowledge_lookup":
+		return a.handleKnowledgeLookupTool(ctx, request)
 	case "skill_inspect", "skill_validate", "skill_history", "skill_executions", "skill_memory":
 		return a.handleSkillAction(ctx, request)
 	case "skill_propose":
@@ -594,6 +596,44 @@ func (a *Activities) handleSkillSearch(ctx context.Context, request ToolRequest)
 	}
 	encoded, _ := json.Marshal(map[string]any{"skills": matches, "count": len(matches)})
 	return ToolResult{Content: string(encoded)}, nil
+}
+
+// handleKnowledgeLookupTool backs the agent-facing knowledge_lookup tool: a
+// priming cue carries only a compact rule + knowledge_id, and this returns the
+// full item — grounds, lifecycle and scope — for cues that matter to the task.
+func (a *Activities) handleKnowledgeLookupTool(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	knowledgeID, _ := request.Arguments["knowledge_id"].(string)
+	if knowledgeID == "" {
+		return ToolResult{Content: "error: knowledge_id is required"}, nil
+	}
+	if request.Project == "" {
+		return ToolResult{Content: "error: project is required"}, nil
+	}
+	url := fmt.Sprintf("%s/v1/observations/knowledge?project=%s&knowledge_id=%s", a.TemporalityURL, url.QueryEscape(request.Project), url.QueryEscape(knowledgeID))
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if a.APIToken != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+a.APIToken)
+	}
+	response, err := a.HTTP.Do(httpRequest)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	status := response.StatusCode
+	if status == 404 {
+		return ToolResult{Content: fmt.Sprintf("error: knowledge %q not found in this project", knowledgeID)}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: knowledge lookup failed (HTTP %d): %s", status, truncate(string(body), 400))}, nil
+	}
+	return ToolResult{Content: compactJSON(string(body), 6000)}, nil
 }
 
 func (a *Activities) handleSkillAction(ctx context.Context, request ToolRequest) (ToolResult, error) {

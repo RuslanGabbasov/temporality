@@ -2091,7 +2091,7 @@ var policySafeTools = map[string]bool{
 	"human_contacts": true, "list_triggers": true,
 	"skill_search": true, "skill_inspect": true, "skill_validate": true,
 	"skill_history": true, "skill_executions": true, "skill_memory": true,
-	"skill_diff": true, "skill_evaluate": true,
+	"skill_diff": true, "skill_evaluate": true, "knowledge_lookup": true,
 }
 
 // policySafeTool reports whether a tool may run without approval when the
@@ -2558,6 +2558,7 @@ func KernelTools() []llm.ToolDef {
 		{Name: "update_trigger", Description: "Update an existing trigger's configuration (enable/disable, change cron, update prompt, etc.)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}, "enabled": map[string]any{"type": "boolean"}, "cron": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},
 		{Name: "delete_trigger", Description: "Delete a trigger by ID", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},
 		{Name: "skill_search", Description: "List living skills in this project: versioned capability packages (SKILL.md instructions + manifest contract) stored in the skill registry, not files in the repo. Returns id, name, version, capabilities, tools", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "Optional space-separated keywords; a skill matches when any keyword occurs in id, name, capability or tool (case-insensitive); results are ranked by keyword coverage"}}}},
+		{Name: "knowledge_lookup", Description: "Fetch the full knowledge item (proposition, state, topics, entities, evidence, history) by its knowledge_id. Priming cues carry a knowledge_id handle; call this when a compact cue matters to your task and you need the grounds, details or lifecycle behind it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"knowledge_id": map[string]any{"type": "string", "description": "The knowledge_id from a priming cue or a prior run"}}, "required": []string{"knowledge_id"}}},
 		{Name: "skill_inspect", Description: "Show a skill's full SKILL.md and manifest contract (capabilities, tools, runtime, preconditions, postconditions, evidence)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_validate", Description: "Validate a skill's manifest and return issues", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_history", Description: "List a skill's versions", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
