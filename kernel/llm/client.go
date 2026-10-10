@@ -21,6 +21,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -87,25 +88,34 @@ type Usage struct {
 
 // Config is resolved from the environment.
 type Config struct {
-	BaseURL         string
-	Model           string
-	APIKey          string
-	Temperature     float64
-	Timeout         time.Duration
-	MaxOutputTokens int
-	Reasoning       string
+	BaseURL     string
+	Model       string
+	APIKey      string
+	Temperature float64
+	// Timeout is the total per-attempt budget for blocking requests. Streaming
+	// requests ignore it: long generations are legal as long as chunks keep
+	// arriving, so streams are bounded by StreamIdleTimeout instead plus the
+	// caller's context (the Temporal activity deadline in the kernel).
+	Timeout time.Duration
+	// StreamIdleTimeout is the maximum allowed silence between streamed
+	// chunks (and to the first chunk). A stalled stream is canceled; a slow
+	// but steady one may run as long as the caller's context allows.
+	StreamIdleTimeout time.Duration
+	MaxOutputTokens   int
+	Reasoning         string
 }
 
 // ConfigFromEnv reads the shared TEMPORALITY_MODEL_* variables.
 func ConfigFromEnv() (Config, error) {
 	cfg := Config{
-		BaseURL:         strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL")),
-		Model:           strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID")),
-		APIKey:          strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_API_KEY")),
-		Temperature:     0,
-		Timeout:         180 * time.Second,
-		MaxOutputTokens: 16384,
-		Reasoning:       strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_REASONING")),
+		BaseURL:           strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL")),
+		Model:             strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID")),
+		APIKey:            strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_API_KEY")),
+		Temperature:       0,
+		Timeout:           180 * time.Second,
+		StreamIdleTimeout: 90 * time.Second,
+		MaxOutputTokens:   16384,
+		Reasoning:         strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_REASONING")),
 	}
 	if cfg.BaseURL == "" || cfg.Model == "" {
 		return cfg, errors.New("TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID are required")
@@ -131,6 +141,13 @@ func ConfigFromEnv() (Config, error) {
 		}
 		cfg.MaxOutputTokens = value
 	}
+	if raw := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_STREAM_IDLE_TIMEOUT")); raw != "" {
+		value, err := time.ParseDuration(raw)
+		if err != nil || value <= 0 {
+			return cfg, fmt.Errorf("invalid TEMPORALITY_MODEL_STREAM_IDLE_TIMEOUT: %s", raw)
+		}
+		cfg.StreamIdleTimeout = value
+	}
 	return cfg, nil
 }
 
@@ -138,6 +155,7 @@ func ConfigFromEnv() (Config, error) {
 type Client struct {
 	cfg          Config
 	http         *http.Client
+	streamHTTP   *http.Client
 	jitter       *rand.Rand
 	providerHost string
 }
@@ -148,7 +166,16 @@ func New(cfg Config) *Client {
 	if parsed, err := url.Parse(cfg.BaseURL); err == nil && parsed.Host != "" {
 		host = parsed.Host
 	}
-	return &Client{cfg: cfg, http: &http.Client{Timeout: cfg.Timeout}, jitter: rand.New(rand.NewSource(time.Now().UnixNano())), providerHost: host}
+	if cfg.StreamIdleTimeout <= 0 {
+		cfg.StreamIdleTimeout = 90 * time.Second
+	}
+	return &Client{
+		cfg:          cfg,
+		http:         &http.Client{Timeout: cfg.Timeout},
+		streamHTTP:   &http.Client{},
+		jitter:       rand.New(rand.NewSource(time.Now().UnixNano())),
+		providerHost: host,
+	}
 }
 
 // Model identifies the configured model in reports.
@@ -446,7 +473,15 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	}
 
 	started := time.Now()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.cfg.BaseURL, "/")+"/chat/completions", bytes.NewReader(payload))
+	// A blanket http.Client.Timeout would cut a long generation mid-flight —
+	// for a stream the budget is silence between chunks, not total duration.
+	// The stream runs on a dedicated client without a total cap; a watchdog
+	// cancels the request when no chunk arrives within StreamIdleTimeout. The
+	// caller's context (the Temporal activity deadline) stays the only total
+	// limit.
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	request, err := http.NewRequestWithContext(streamCtx, http.MethodPost, strings.TrimRight(c.cfg.BaseURL, "/")+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
 		return Completion{}, err
 	}
@@ -455,7 +490,27 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	if c.cfg.APIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	}
-	response, err := c.http.Do(request)
+	idle := c.cfg.StreamIdleTimeout
+	var lastChunk atomic.Int64
+	lastChunk.Store(time.Now().UnixNano())
+	stopWatchdog := make(chan struct{})
+	defer close(stopWatchdog)
+	go func() {
+		ticker := time.NewTicker(idle / 4)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopWatchdog:
+				return
+			case <-ticker.C:
+				if time.Since(time.Unix(0, lastChunk.Load())) >= idle {
+					cancelStream()
+					return
+				}
+			}
+		}
+	}()
+	response, err := c.streamHTTP.Do(request)
 	if err != nil {
 		return Completion{}, &transportError{err: err}
 	}
@@ -477,6 +532,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		lastChunk.Store(time.Now().UnixNano())
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}

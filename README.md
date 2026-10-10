@@ -67,7 +67,9 @@ Kernel вызывает провайдера через OpenAI-compatible Chat C
 | `TEMPORALITY_MODEL_ID` | ID модели у провайдера | — |
 | `TEMPORALITY_MODEL_API_KEY` | Ключ (пустой для Ollama) | — |
 | `TEMPORALITY_MODEL_TEMPERATURE` | `0..2` | `0` |
-| `TEMPORALITY_MODEL_TIMEOUT` | Go duration | `180s` |
+| `TEMPORALITY_MODEL_TIMEOUT` | Go duration — общий лимит одной блокирующей попытки (стриминг его не использует) | `180s` |
+| `TEMPORALITY_MODEL_STREAM_IDLE_TIMEOUT` | Максимум тишины между чанками стрима; медленная, но живая генерация не прерывается | `90s` |
+| `TEMPORALITY_MODEL_ACTIVITY_TIMEOUT` | Потолок одной активности `call_model` в Temporal (общий на стрим-попытку и блокирующий fallback с ретраями) | `20m` |
 | `TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS` | `64..1000000` | `16384` |
 | `TEMPORALITY_MODEL_REASONING` | `off` / `exclude` / `low` / `medium` / `high` | — |
 
