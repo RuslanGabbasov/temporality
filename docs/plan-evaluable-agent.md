@@ -1,7 +1,7 @@
 # План работ: Evaluable Agent — определение агента и компиляция системного промта
 
 Source spec: `docs/evaluable-agent.md`.
-Статус: реализовано (этапы 1–7). Осталось: legacy-конверсия существующих промт-агентов — вручную через Rebuild/визард (решение 3 выполняется с человеком в цикле, автоматический проход при старте отвергнут: LLM-вызов на старте неработоспособен).
+Статус: Фаза 1 (этапы 1–7) реализована; ревизия 2026-10-10 сверила план со спекой и кодом — расхождения устранены в тексте, пост-плановые изменения зафиксированы в §2.1. Legacy-конверсия — осознанно ручная: Rebuild/визард с человеком в цикле (автоматический проход при старте отвергнут: LLM-вызов на старте неработоспособен). Далее — Фаза 2 «Оценки и эволюция» (этапы 8–10, §2.2).
 
 ## 0. Текущее состояние (baseline)
 
@@ -89,17 +89,61 @@ CompileAgentPrompt(def, env) =
 - [x] Эндпоинт `POST /v1/workspace/agents/draft` (gate writer).
 - [x] Тесты: парсинг fenced JSON, fallback имени из purpose, фильтрация пустых вопросов/значений, невалидный JSON.
 
-### Этап 6. Встроенные агенты — S — ✅
+### Этап 6. Встроенные агенты — S — ✅ (пересобран после уточнения спеки)
 
-- [x] `workspace/builtin.go` — курированные определения Coder/Reviewer/Researcher/DevOps (§7, §12, §17); сидинг при `POST /v1/workspace/projects` (id `<project>-<slug>`, метка builtin, version 1 с промпт-снапшотом).
-- [x] `GET /v1/workspace/agents/builtins` — источник шаблонов и кнопки «восстановить встроенное».
+- [x] `workspace/builtin.go` — курированные шаблоны Coder/Reviewer/Researcher/QA/DevOps (§7, §12, §17).
+- [x] Шаблоны никогда не создаются автоматически — ни при установке, ни при создании проекта (§16 в действующей редакции; исходный автосидинг при `POST /v1/workspace/projects` свёрнут в `d189e97`). Пользователь создаёт агента из галереи шаблонов одним действием и получает обычный редактируемый агент.
+- [x] `GET /v1/workspace/agents/builtins` — источник галереи «Создать из шаблона» и кнопки «восстановить встроенное».
 - [x] `TEMPLATES` удалены из `Agents.tsx`.
 
 ### Этап 7. Вкладка «Эволюция» — M — ✅
 
 - [x] Диалог «Эволюция» в карточке агента: версии (дата, автор, источник, модель-генератор), diff семантики с предыдущей версией, статистика запусков по версиям (runs/completed/failed) из `GET /agents/{id}/runs` с группировкой по `agent_version`.
 - [x] Legacy-агенты: промт «как есть», бейдж «ручной промт (legacy)» в превью.
-- Аналитика качества/ошибок/траектории против версий — Phase 2 (после evaluation engine).
+- Аналитика качества/ошибок/траектории против версий — этап 9 (§2.2).
+
+### 2.1. Пост-плановые изменения (ревизия 2026-10-10)
+
+Спека и смежные волны ушли вперёд исходного плана; зафиксировано, чтобы документ соответствовал коду:
+
+* **Шаблоны вместо автосоздания builtin-агентов** (`d189e97`) + курированный QA-шаблон (`385a99a`) — §16 в действующей редакции: «не создаются автоматически… создаются из галереи шаблонов одним действием».
+* **Capability `delegation`** — «Делегировать другим агентам» в форме агента; инвертированный дефолт: nil/false ⇒ запрещено, делегирование выдаётся явно человеком (`51a2e50`, `docs/agent-delegation.md`).
+* **`workspace_agent.org_unit_id`** — видимость агентов наследуется по оргдереву (`docs/org-structure.md` §3.2); empty = вся инсталляция. Агенты остаются кросс-функциональными; опциональный `project_id` в модели сохранён как legacy-скоуп — кандидат на вычистку в волне миграции org-structure.
+
+### 2.2. Фаза 2 — Оценки и эволюция агента (план работ)
+
+Спека §15: «Эволюция» должна сопоставлять изменения определения с результатами работы агента; в перспективе — связь с evaluation и накопленными свидетельствами. Evaluation-инфраструктура уже обкатана на скилах (living-skills Phase 2: suite/run таблицы, синхронный раннер, события, UI-таб, CLI) — фаза зеркалит её для агентов.
+
+Ключевое отличие от скилов: оценка pinned не к «текущему состоянию», а к конкретной `definition_version` — сравниваются версии определения, а не дрейф текущего промта.
+
+#### Этап 8. Оценки агента (suites + runner) — M
+
+- [ ] Миграция: `workspace_agent_evaluation_suite` (agent_id PK, cases JSONB, updated_at) и `workspace_agent_evaluation_run` (id BIGSERIAL, agent_id, agent_version INT, passed, failed, cases JSONB, created_at) — зеркало `000044_skill_evolution_phase2`.
+- [ ] Стор `workspace/agentevals.go`: `Get/SaveEvaluationSuite`, `RecordEvaluationRun`, `ListEvaluationRuns` (лимиты как у скилов).
+- [ ] Эндпоинты: `GET/PUT /v1/workspace/agents/{id}/evaluation-suite` (reader/writer), `POST/GET /v1/workspace/agents/{id}/evaluations` (запуск — writer); 404 на неизвестного агента.
+- [ ] Раннер `kernel/agent/agenteval.go` — `RunAgentEvaluation(agentID, version)`: system-промт = `workspace_agent_version.compiled_prompt` (version=0 → текущая), кейс = user-сообщение, один вызов модели на кейс, проверка `must_contain`/`must_not_contain`; запись run + событие `agent.evaluation.completed` (agent_id, agent_version, passed, failed).
+- [ ] UI: в «Эволюции» секция «Оценки» — редактор сьюта, запуск по версии, история с детализацией кейсов (passed/missed/unexpected), pass rate. Локализация en/ru.
+- [ ] CLI (опционально, зеркало skill CLI): `temporality agent evals <id>` / `eval-run <id> --version N`.
+- [ ] Тесты: стор, раннер (stub workspace+model), эндпоинты (гейт, 404), событие в журнале, пиннинг к версии.
+
+#### Этап 9. Аналитика эволюции — S/M
+
+- [ ] Агрегат на версию: runs (уже сгруппированы по `agent_version`) + eval pass rate + средние токены/ходы; без новых таблиц — соединение `workspace_agent_version` × eval-ранов × run-статистики.
+- [ ] Строка версии в «Эволюции» получает pass rate и подсветку регрессии (падение pass rate против предыдущей версии при неизменном сьюте).
+- [ ] Тесты: агрегация, детект регрессии.
+
+#### Этап 10. Evolution proposals — M/L
+
+- [ ] Анатомия как у скилов: observed problem / proposed change / expected effect + provenance (свидетельства: run ids, knowledge ids).
+- [ ] Хранение: `workspace_agent_proposal` (agent_id, base_version, definition JSONB, problem/change/effect, evidence JSONB, status pending|applied|rejected, author, created_at); события `agent.definition.proposed/applied/rejected`.
+- [ ] Применение — только человеком, через штатный update-путь: версия растёт, снапшот пишется как обычно (зеркало living-skills §26: агенты предлагают — люди применяют).
+- [ ] Источники proposal: вручную из карточки агента; из прогона — инструмент `agent_propose` (зеркало `skill_propose`), пишет pending-proposal со ссылками на свидетельства.
+- [ ] UI: список proposals во вкладке «Эволюция», diff definition к текущей версии, применить/отклонить.
+- [ ] Тесты: CRUD, события, apply поднимает версию, права (writer на apply).
+
+#### Этап 11 (P2, опционально). Trajectory-level оценки
+
+Кейс = полная задача → реальный `AgentRun`; критерии: завершение в бюджете, отсутствие реворков/эскалаций. Дорого; включать только если prompt-level оценки перестанут различать версии.
 
 ## 3. Тестирование и приёмка
 
@@ -112,11 +156,12 @@ CompileAgentPrompt(def, env) =
 
 1. **Enforcement — жёсткий.** Capabilities реально режут инструменты и окружение, а не формулируют политику в промте: `modify_files=false` → read-only + без write-инструментов; `run_commands=false` → без `run_command`; `network=false` → без сети; `skills=false` → без инъекции скилов; `knowledge=false` → без prior knowledge hints. Иначе агент сам себе наделит полномочий через промт.
 2. **Компиляция — при каждом запуске.** Промт всегда свежий; воспроизводимость обеспечивает текст, зафиксированный в `workspace_agent_version.compiled_prompt` (снимок той же детерминированной функции).
-3. **Legacy-миграция — через builder.** Существующие агенты с `system_prompt` без definition прогоняются через agent builder (разовый проход, fallback — сохранить старый промт как `prompt_override`, если builder недоступен).
+3. **Legacy-миграция — ручная, через Rebuild/визард.** Существующие агенты с `system_prompt` без definition конвертируются человеком через «Переформировать» (fallback — оставить старый промт как `prompt_override`). Автоматический проход при старте ядра отвергнут: LLM-вызов на старте неработоспособен. Legacy-агенты до конверсии работают как есть, с бейджем «ручной промт (legacy)».
 4. **`purpose` = существующая колонка `description`.** Отдельного поля в definition нет: «Назначение» в форме и резюме — это `workspace_agent.description`. Definition хранит только capabilities, constraints, completion, prompt_override.
 
-## 5. Не-цели (этой волны)
+## 5. Не-цели
 
-- Evaluation engine и оценка качества версий — Phase 2 (после skills evaluations).
-- Автономная эволюция агента (агент предлагает изменить своё определение) — Phase 2, по аналогии с skill evolution proposals.
+- Автономное применение агентом изменений собственного определения: apply — только человек (этап 10 даёт агенту право предлагать, не применять).
 - Marketplace/шаринг агентов между проектами.
+- Trajectory-level оценки — до обоснования потребностью (этап 11, P2).
+- Автовыбор агента под задачу / semantic routing.

@@ -94,7 +94,7 @@ Status: shipped.
 ## P0 — Evaluable Agent (agent definition & prompt compiler)
 
 Source spec: `docs/evaluable-agent.md`, work plan: `docs/plan-evaluable-agent.md`.
-Status: **complete** — all plan items done.
+Status: Phase 1 **complete** — all original plan items done (2026-10-10 revision synced the plan with the current spec: builtin templates are never auto-created, QA template added, delegation capability and org-unit visibility recorded). Phase 2 planned below.
 
 - [x] **Agent definition** — structured `definition` JSONB (purpose, capabilities, constraints, completion) instead of free-form system prompt; immutable `workspace_agent_version` per change
 - [x] **Prompt compiler** — deterministic compile from semantic components (base evidence contract + role + constraints + completion + env policy); no tool/skill duplication, no step-by-step instructions
@@ -102,8 +102,15 @@ Status: **complete** — all plan items done.
 - [x] **Agent builder** — NL description → structured draft (pattern: skill builder), wizard with provenance badges and questions
 - [x] **Regenerate with diff** — field-level diff vs current definition, manual edits highlighted, accept/cancel
 - [x] **Meaning-first UI** — card shows Purpose/Can/Cannot/Before-done summary; compiled prompt as a secondary view with optional manual override
-- [x] **Built-in agent templates** — Coder/Reviewer/Researcher/DevOps/QA seeded as templates, editable via the same UI
+- [x] **Built-in agent templates** — Coder/Reviewer/Researcher/QA/DevOps shipped as gallery templates, never auto-created; editable via the same UI
 - [x] **Evolution tab** — version timeline + per-version run stats (runs link `agent_version`)
+
+### Phase 2 (planned) — evaluations & evolution
+
+- [ ] Agent evaluations — per-agent suites checked against the compiled prompt of a pinned definition version; synchronous runner, run history, `agent.evaluation.completed` events, «Оценки» section in the Evolution tab (mirror of skill evaluations)
+- [ ] Evolution analytics — per-version eval pass rate + run outcomes with regression highlight
+- [ ] Evolution proposals — proposal anatomy (observed problem / proposed change / expected effect + evidence), `agent_propose` tool, human-only apply through the regular version path
+- Note: agents propose, people apply — mirror of `docs/living-skills.md` §26
 
 ---
 
