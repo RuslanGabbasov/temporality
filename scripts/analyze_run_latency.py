@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
-"""Break down an agent run's wall time into model / tool / platform overhead."""
+"""Break down an agent run's wall time into model / tool / platform overhead.
+
+Dump the run's events into a TSV first (columns are tab-separated):
+
+  docker exec -i temporality-postgres-1 psql -U temporality -At -F$'\t' -c "
+    SELECT type, occurred_at,
+           COALESCE(data->>'latency_ms',''), COALESCE(data->>'turn',''),
+           COALESCE(data->>'tool',''), COALESCE(data->>'total_tokens',''),
+           COALESCE(data->>'error',''), COALESCE(data->>'transport',''),
+           COALESCE(data->>'stream_failed','')
+    FROM observation_events
+    WHERE context->>'run' = 'RUN_ID'
+    ORDER BY occurred_at, source_id, event_id" > /tmp/run-events.tsv
+
+latency_ms is present on model.completed (per-attempt generation time) and on
+tool.completed/tool.failed (end-to-end wall time: scheduling + retries +
+execution). transport/stream_failed mark model turns regenerated through the
+blocking fallback after the SSE stream died mid-flight.
+
+Usage: analyze_run_latency.py /tmp/run-events.tsv
+"""
 import sys
 from datetime import datetime
 
@@ -11,6 +31,8 @@ def parse(path):
             if len(parts) < 7:
                 continue
             typ, ts, lat, turn, tool, tokens, err = parts[:7]
+            transport = parts[7] if len(parts) > 7 else ""
+            stream_failed = (parts[8] if len(parts) > 8 else "") == "true"
             rows.append({
                 "type": typ,
                 "ts": datetime.fromisoformat(ts),
@@ -19,6 +41,8 @@ def parse(path):
                 "tool": tool,
                 "tokens": int(tokens) if tokens.isdigit() else None,
                 "err": err,
+                "transport": transport,
+                "stream_failed": stream_failed,
             })
     return rows
 
@@ -32,23 +56,32 @@ def main(path):
         return
     wall = (rows[-1]["ts"] - rows[0]["ts"]).total_seconds() * 1000
 
-    model_ms = sum(r["lat_ms"] or 0 for r in rows if r["type"] == "model.completed")
     model_calls = [r for r in rows if r["type"] == "model.completed"]
+    model_ms = sum(r["lat_ms"] or 0 for r in model_calls)
+    regens = [r for r in model_calls if r["stream_failed"]]
     tool_done = [r for r in rows if r["type"] in ("tool.completed", "tool.failed")]
     tool_ms = sum(r["lat_ms"] or 0 for r in tool_done)
+    tools_with_latency = [r for r in tool_done if r["lat_ms"] is not None]
 
     print(f"events: {len(rows)}   wall: {fmt_ms(wall)}   "
-          f"turns: {len(model_calls)}   tools: {len(tool_done)}")
+          f"turns: {len(model_calls)}   tools: {len(tool_done)}   "
+          f"stream fallbacks: {len(regens)}")
     print()
     print("=== model calls ===")
     for r in model_calls:
-        print(f"  turn {r['turn']:>3}: {fmt_ms(r['lat_ms'] or 0)}  {r['tokens'] or '?'} tok")
+        mark = "  REGEN(stream died, blocking fallback)" if r["stream_failed"] else ""
+        tr = f"[{r['transport']}]" if r["transport"] else ""
+        print(f"  turn {r['turn']:>3}: {fmt_ms(r['lat_ms'] or 0)}  {r['tokens'] or '?'} tok  {tr}{mark}")
     print(f"  model total: {fmt_ms(model_ms)}  ({100*model_ms/wall:.0f}% of wall)")
 
     print()
     print("=== tool calls ===")
     for r in tool_done:
-        print(f"  {r['tool'] or r['type']:<28} {fmt_ms(r['lat_ms'] or 0)}  {('ERR ' + r['err']) if r['type']=='tool.failed' else ''}")
+        lat = fmt_ms(r["lat_ms"]) if r["lat_ms"] is not None else "    n/a  "
+        print(f"  {r['tool'] or r['type']:<28} {lat}  {('ERR ' + r['err']) if r['type']=='tool.failed' else ''}")
+    if len(tools_with_latency) < len(tool_done):
+        missing = len(tool_done) - len(tools_with_latency)
+        print(f"  ({missing} tool events carry no latency_ms — kernel predates the field)")
     print(f"  tool total: {fmt_ms(tool_ms)}  ({100*tool_ms/wall:.0f}% of wall)")
 
     overhead = wall - model_ms - tool_ms

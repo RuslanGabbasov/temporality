@@ -14,6 +14,7 @@ import (
 
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/observation"
+	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
@@ -984,7 +985,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
 				return result, err
 			}
-			runKnowledgeExtraction(ctx, activityCtx, state, input)
+			startKnowledgeExtraction(ctx, activityCtx, state, input)
 			return result, nil
 		}
 		// Policy budgets are checked after a model call that still wants tools: a
@@ -1491,14 +1492,21 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						return result, err
 					} else if err := startMCP(); err != nil {
 						return result, err
-					} else if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly}).Get(ctx, &toolResult); err != nil {
-						toolFailed = true
-						if eventErr := emit(activityCtx, state, "tool.failed", toolFailureData(operationID, argumentsHash, call.Name, err)); eventErr != nil {
+					} else {
+						// Wall latency from the workflow clock covers scheduling, retries
+						// and execution — the honest end-to-end cost of the operation.
+						toolStarted := workflow.Now(ctx)
+						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly}).Get(ctx, &toolResult); err != nil {
+							toolFailed = true
+							failure := toolFailureData(operationID, argumentsHash, call.Name, err)
+							failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
+							if eventErr := emit(activityCtx, state, "tool.failed", failure); eventErr != nil {
+								return result, eventErr
+							}
+							toolResult.Content = toolFailureMessage(call.Name, err)
+						} else if eventErr := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000), "latency_ms": workflow.Now(ctx).Sub(toolStarted).Milliseconds()}); eventErr != nil {
 							return result, eventErr
 						}
-						toolResult.Content = toolFailureMessage(call.Name, err)
-					} else if eventErr := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "output": compactJSON(toolResult.Content, 1000)}); eventErr != nil {
-						return result, eventErr
 					}
 				} else {
 					rejectionReason := approvalText(approval.Reason)
@@ -1581,14 +1589,19 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := startMCP(); err != nil {
 					return result, err
 				}
+				// Same wall-clock semantics as the approval path: scheduling,
+				// retries and execution in one number.
+				toolStarted := workflow.Now(ctx)
 				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly}).Get(ctx, &toolResult); err != nil {
 					toolFailed = true
-					if eventErr := emit(activityCtx, state, "tool.failed", toolFailureData(operationID, argumentsHash, call.Name, err)); eventErr != nil {
+					failure := toolFailureData(operationID, argumentsHash, call.Name, err)
+					failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
+					if eventErr := emit(activityCtx, state, "tool.failed", failure); eventErr != nil {
 						return result, eventErr
 					}
 					toolResult.Content = toolFailureMessage(call.Name, err)
 				} else {
-					completed := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}
+					completed := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name, "latency_ms": workflow.Now(ctx).Sub(toolStarted).Milliseconds()}
 					// Exit code makes tool completion a first-class trajectory fact:
 					// a command exiting non-zero is a failed attempt even though the
 					// tool activity itself succeeded.
@@ -1681,7 +1694,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if err := emitAgentSummary(activityCtx, state, result.Answer, frames, turn); err != nil {
 				return result, err
 			}
-			runKnowledgeExtraction(ctx, activityCtx, state, input)
+			startKnowledgeExtraction(ctx, activityCtx, state, input)
 			return result, nil
 		}
 	}
@@ -1766,7 +1779,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			return result, err
 		}
 	}
-	runKnowledgeExtraction(ctx, activityCtx, state, input)
+	startKnowledgeExtraction(ctx, activityCtx, state, input)
 	return result, nil
 }
 
@@ -1890,6 +1903,15 @@ func modelObservability(completion llm.Completion) map[string]any {
 	}
 	if completion.Usage.CachedTokens > 0 {
 		data["cached_tokens"] = completion.Usage.CachedTokens
+	}
+	if completion.Transport != "" {
+		data["transport"] = completion.Transport
+	}
+	// A dead stream salvaged by the blocking fallback means the provider
+	// generated the answer twice; the marker makes the hidden regeneration
+	// visible next to the (inflated) latency.
+	if completion.StreamFailed {
+		data["stream_failed"] = true
 	}
 	return data
 }
@@ -2235,6 +2257,100 @@ func emitExecutionObservation(ctx workflow.Context, state *eventState, proposal 
 		return emitKnowledgeEvent(ctx, state, "knowledge.used", data, evidence)
 	}
 	return nil
+}
+
+// KnowledgeExtractionWorkflowName is the detached extraction workflow a
+// finished run hands off to (see startKnowledgeExtraction).
+const KnowledgeExtractionWorkflowName = "KnowledgeExtraction"
+
+// KnowledgeExtractionInput carries the finished run's identity plus the
+// continuation point of its event chain: the child appends to the same journal
+// scope, so it must know the last sequence number and event id the parent used
+// instead of restarting from event/000001.
+type KnowledgeExtractionInput struct {
+	Run             RunInput
+	Scope           string
+	ParentFrame     string
+	Sequence        int
+	PreviousEventID string
+}
+
+// startKnowledgeExtraction hands the finished run over to a detached
+// KnowledgeExtraction child workflow. The run's terminal status must not wait
+// for the extraction model call (measured at 43-84s in live runs): everyone —
+// the run status API, the SSE stream, the chat UI — learns the run is done the
+// moment this workflow completes, so extraction runs asynchronously and
+// continues the run's event chain on its own. Only the child's start is
+// awaited (a scheduling guarantee); its completion is best-effort, exactly as
+// extraction failures were best-effort before. If the child cannot even be
+// started, a knowledge.extraction.failed event records the miss so the journal
+// never shows a silently skipped extraction.
+func startKnowledgeExtraction(ctx workflow.Context, activityCtx workflow.Context, state *eventState, input RunInput) {
+	if input.SkipKnowledge {
+		return
+	}
+	childInput := KnowledgeExtractionInput{
+		Run:             input,
+		Scope:           state.eventScope,
+		ParentFrame:     state.frame,
+		Sequence:        state.sequence,
+		PreviousEventID: state.previousEventID,
+	}
+	childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
+		WorkflowID:            extractionWorkflowID(input.SourceID, input.Project, input.RunID),
+		ParentClosePolicy:     enums.PARENT_CLOSE_POLICY_ABANDON,
+		WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+	})
+	future := workflow.ExecuteChildWorkflow(childCtx, KnowledgeExtractionWorkflowName, childInput)
+	var exec workflow.Execution
+	if startErr := future.GetChildWorkflowExecution().Get(ctx, &exec); startErr != nil {
+		_ = emit(activityCtx, state, extractionFailedEvent, map[string]any{
+			"extraction_id":     extractionIdentity(input.RunID),
+			"extractor_version": ExtractorVersion,
+			"error_type":        "start_failed",
+			"error":             boundedFailureDetail(startErr),
+		})
+	}
+}
+
+// KnowledgeExtractionWorkflow replays a finished run through the knowledge
+// extractor. It is fully detached from the run workflow: the run completed
+// before this started and its result is already with the user. The workflow
+// only produces best-effort knowledge events; every failure is contained and
+// recorded as knowledge.extraction.failed.
+func KnowledgeExtractionWorkflow(ctx workflow.Context, input KnowledgeExtractionInput) error {
+	if input.Run.SkipKnowledge {
+		return nil
+	}
+	// Same default as AgentRun: the handoff always carries the parent's source
+	// id, but a defensive default keeps standalone executions valid.
+	if input.Run.SourceID == "" {
+		input.Run.SourceID = "temporality-agent-kernel"
+	}
+	activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout:    4 * time.Minute,
+		ScheduleToCloseTimeout: 5 * time.Minute,
+		RetryPolicy:            &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3},
+	})
+	state := &eventState{
+		run:             input.Run,
+		frame:           input.Run.RunID + "/extraction",
+		parentFrame:     input.ParentFrame,
+		sequence:        input.Sequence,
+		eventScope:      input.Scope,
+		previousEventID: input.PreviousEventID,
+	}
+	runKnowledgeExtraction(ctx, activityCtx, state, input.Run)
+	return nil
+}
+
+// extractionWorkflowID is deterministic per run and extractor version: a
+// duplicate start (parent workflow replay) is rejected as already exists,
+// while bumping ExtractorVersion deliberately opens a new id so every
+// finished run becomes eligible for re-extraction under the new version.
+func extractionWorkflowID(sourceID, project, runID string) string {
+	digest := sha256.Sum256([]byte(sourceID + "\x00" + project + "\x00" + runID + "\x00" + ExtractorVersion))
+	return fmt.Sprintf("knowledge-extraction/%x", digest[:16])
 }
 
 // runKnowledgeExtraction replays the finished run through the knowledge

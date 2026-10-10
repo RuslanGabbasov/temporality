@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/observation"
@@ -25,6 +26,16 @@ func registerExtraction(env *testsuite.TestWorkflowEnvironment, result Knowledge
 	env.RegisterActivityWithOptions(func(context.Context, KnowledgeExtractRequest) (KnowledgeExtractResult, error) {
 		return result, err
 	}, activity.RegisterOptions{Name: ActivityExtractKnowledge})
+}
+
+// registerExtractionChild wires a no-op KnowledgeExtraction child workflow so
+// finished AgentRun tests can hand off without dragging the extraction
+// pipeline (and its activity mocks) into every environment. Tests that
+// execute KnowledgeExtractionWorkflow top-level must NOT use this helper —
+// the mock would swallow the real execution.
+func registerExtractionChild(env *testsuite.TestWorkflowEnvironment) {
+	env.RegisterWorkflowWithOptions(KnowledgeExtractionWorkflow, workflow.RegisterOptions{Name: KnowledgeExtractionWorkflowName})
+	env.OnWorkflow(KnowledgeExtractionWorkflowName, mock.Anything, mock.Anything).Return(nil)
 }
 
 func TestMCPToolFailureDoesNotExposeRemoteError(t *testing.T) {
@@ -60,6 +71,7 @@ func TestAgentRunRecordsApprovalAndKnowledgeTrajectory(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		if err := event.Validate(); err != nil {
@@ -126,6 +138,7 @@ func TestAgentRunAskHumanDeliversResponseAndRecordsTrajectory(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		if err := event.Validate(); err != nil {
@@ -195,6 +208,7 @@ func TestAgentRunTimesOutAnUnansweredApproval(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error { recorded = append(recorded, event); return nil }, activity.RegisterOptions{Name: ActivityRecordEvent})
 	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
@@ -222,6 +236,7 @@ func TestAgentRunRecordsGeneratedTitle(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error { recorded = append(recorded, event); return nil }, activity.RegisterOptions{Name: ActivityRecordEvent})
 	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
@@ -248,6 +263,7 @@ func TestApprovedToolOperationIsVisibleAndHashBound(t *testing.T) {
 		var suite testsuite.WorkflowTestSuite
 		env := suite.NewTestWorkflowEnvironment()
 		env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+		registerExtractionChild(env)
 		var recorded []observation.Event
 		env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 			require.NoError(t, event.Validate())
@@ -326,6 +342,7 @@ func TestSandboxAutoApprovalIsRecordedAndRunsWithoutHumanSignal(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var events []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error { events = append(events, event); return nil }, activity.RegisterOptions{Name: ActivityRecordEvent})
 	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
@@ -384,6 +401,7 @@ func TestAgentRunForcesFinalAnswerAtTurnLimit(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var events []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -443,6 +461,7 @@ func TestDuplicateToolCallsWithinOneResponseExecuteOnce(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var events []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -503,6 +522,7 @@ func TestSuccessfulVerificationCommandsRecordExecutionKnowledge(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var events []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		if err := event.Validate(); err != nil {
@@ -623,6 +643,7 @@ func TestAgentSummaryIsDerivedDataWithFrameProvenance(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var events []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -654,6 +675,7 @@ func TestModelFailureRecordsBoundedErrorDetail(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var events []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -708,6 +730,7 @@ func TestMCPCallEventsCarryServerAndResultRef(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var events []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -759,6 +782,7 @@ func TestAgentRunDelegatesToAnotherAgent(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -842,6 +866,7 @@ func TestAgentRunDelegationDepthLimit(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -889,6 +914,7 @@ func TestAgentRunDelegationChildFailureClassification(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -984,6 +1010,7 @@ func TestAgentRunParallelDelegation(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -1095,6 +1122,7 @@ func TestAgentRunDelegationWidthLimit(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -1162,6 +1190,7 @@ func TestAgentRunDelegationWithApproval(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -1227,6 +1256,7 @@ func TestAgentRunPlanExecutesDAG(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -1355,6 +1385,7 @@ func TestAgentRunPlanReworkLoop(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -1496,6 +1527,7 @@ func TestAgentRunPlanFailureSkipsDependents(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -1606,6 +1638,7 @@ func TestAgentRunPlanWidthLimit(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -1660,6 +1693,7 @@ func TestAgentRunPlanValidationRejectsCycle(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -1719,6 +1753,7 @@ func TestAgentRunPlanWithApproval(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -1784,6 +1819,7 @@ func TestAgentRunPlanTemplatesAndReplan(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
@@ -1861,22 +1897,114 @@ func TestAgentRunPlanTemplatesAndReplan(t *testing.T) {
 	require.True(t, childRunIDs["run-plan-tmpl/plan2/02-joined"])
 }
 
-func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
+func TestAgentRunStartsDetachedKnowledgeExtraction(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	env.RegisterWorkflowWithOptions(KnowledgeExtractionWorkflow, workflow.RegisterOptions{Name: KnowledgeExtractionWorkflowName})
+	var childInputs []KnowledgeExtractionInput
+	env.OnWorkflow(KnowledgeExtractionWorkflowName, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		childInputs = append(childInputs, args.Get(1).(KnowledgeExtractionInput))
+	}).Return(nil)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())
 		recorded = append(recorded, event)
 		return nil
 	}, activity.RegisterOptions{Name: ActivityRecordEvent})
-	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) {
-		return []Hint{{KnowledgeID: "ext/hint", HintID: "hint-1", Proposition: "The fetch command accepts a -limit flag.", State: "confirmed"}}, nil
-	}, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
 	env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
-		return llm.Completion{Content: "the workspace builds and tests pass"}, nil
+		return llm.Completion{Content: "done"}, nil
 	}, activity.RegisterOptions{Name: ActivityCallModel})
+
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-detach", Project: "repo-a", Prompt: "work"})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "completed", result.Status)
+
+	// The run's own event stream ends with its terminal events: extraction
+	// events come from the detached child, never from the run workflow itself.
+	require.Empty(t, eventsOfType(recorded, "knowledge.extraction.started"))
+	require.Empty(t, eventsOfType(recorded, "knowledge.extraction.failed"))
+
+	// The child is started exactly once and receives the exact continuation
+	// point of the run's event chain.
+	require.Len(t, childInputs, 1)
+	handoff := childInputs[0]
+	require.Equal(t, "run-detach", handoff.Run.RunID)
+	require.Equal(t, "repo-a", handoff.Run.Project)
+	require.Equal(t, eventScope("temporality-agent-kernel", "repo-a", "run-detach"), handoff.Scope)
+	require.NotZero(t, handoff.Sequence, "the sequence must continue after the run's own events")
+	require.NotEmpty(t, handoff.PreviousEventID)
+	// The last parent event is agent.summary; extraction chains onto it.
+	summary := eventsOfType(recorded, "agent.summary")
+	require.NotEmpty(t, summary)
+	require.Equal(t, summary[0].EventID, handoff.PreviousEventID)
+	require.EqualValues(t, summary[0].Data["sequence"], handoff.Sequence)
+	require.Equal(t, "run-detach/turn/01", handoff.ParentFrame)
+}
+
+func TestAgentRunExtractionChildFailureDoesNotFailRun(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	env.RegisterWorkflowWithOptions(KnowledgeExtractionWorkflow, workflow.RegisterOptions{Name: KnowledgeExtractionWorkflowName})
+	// The detached child dies right after start: the run has already handed
+	// off and must complete regardless — extraction is best-effort by design,
+	// and its failures are recorded inside the child, never by the run.
+	env.OnWorkflow(KnowledgeExtractionWorkflowName, mock.Anything, mock.Anything).Return(errors.New("extraction worker crashed"))
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
+		return llm.Completion{Content: "done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-ext-fail", Project: "repo-a", Prompt: "work"})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError(), "extraction child failure must not fail the run")
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "completed", result.Status)
+	require.Equal(t, "done", result.Answer)
+}
+
+// knowledgeExtractionTestEnv builds a test environment for the detached
+// extraction workflow with the standard recording activity mock.
+func knowledgeExtractionTestEnv(t *testing.T) (*testsuite.TestWorkflowEnvironment, *[]observation.Event) {
+	t.Helper()
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(KnowledgeExtractionWorkflow, workflow.RegisterOptions{Name: KnowledgeExtractionWorkflowName})
+	recorded := &[]observation.Event{}
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		*recorded = append(*recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	return env, recorded
+}
+
+// extractionHandoff mimics the continuation point a finished run hands over.
+func extractionHandoff(runID, project string, sequence int) KnowledgeExtractionInput {
+	scope := eventScope("temporality-agent-kernel", project, runID)
+	return KnowledgeExtractionInput{
+		Run:             RunInput{RunID: runID, Project: project, Prompt: "run the build"},
+		Scope:           scope,
+		ParentFrame:     runID + "/turn/01",
+		Sequence:        sequence,
+		PreviousEventID: fmt.Sprintf("%s/event/%06d", scope, sequence),
+	}
+}
+
+func TestKnowledgeExtractionWorkflowProposesAndStrengthens(t *testing.T) {
+	env, recordedPtr := knowledgeExtractionTestEnv(t)
 	newID := extractionKnowledgeID("repo-a", "The build requires a pre-existing out directory.")
 	existingID := extractionKnowledgeID("repo-a", "The fetch command accepts a -limit flag, not --count.")
 	registerExtraction(env, KnowledgeExtractResult{
@@ -1896,15 +2024,13 @@ func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 		return KnowledgeLookupResult{Exists: true, State: "proposed"}, nil
 	}, activity.RegisterOptions{Name: ActivityKnowledgeLookup})
 
-	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-ext", Project: "repo-a", Prompt: "run the build"})
+	const parentSequence = 7
+	env.ExecuteWorkflow(KnowledgeExtractionWorkflowName, extractionHandoff("run-ext", "repo-a", parentSequence))
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
-	var result RunResult
-	require.NoError(t, env.GetWorkflowResult(&result))
-	require.Equal(t, "completed", result.Status)
+	recorded := *recordedPtr
 
 	var proposed, confirmed, started, completed, hintUsed, hintIgnored *observation.Event
-	knowledgeUsedWithHint := false
 	for index := range recorded {
 		event := &recorded[index]
 		switch event.Type {
@@ -1920,10 +2046,6 @@ func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 			if event.Data["extraction_id"] != nil {
 				confirmed = event
 			}
-		case "knowledge.used":
-			if event.Data["hint_id"] != nil {
-				knowledgeUsedWithHint = true
-			}
 		case "hint.used":
 			hintUsed = event
 		case "hint.ignored":
@@ -1934,6 +2056,14 @@ func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 	require.NotNil(t, completed, "knowledge.extraction.completed missing")
 	require.NotNil(t, proposed, "extraction must propose new knowledge")
 	require.NotNil(t, confirmed, "extraction must strengthen existing knowledge")
+
+	// The child continues the run's event chain: first event id continues the
+	// parent's sequence and caused_by points at the parent's last event.
+	handoff := extractionHandoff("run-ext", "repo-a", parentSequence)
+	require.Equal(t, fmt.Sprintf("%s/event/%06d", handoff.Scope, parentSequence+1), started.EventID)
+	require.Equal(t, []any{handoff.PreviousEventID}, started.Data["caused_by"])
+	require.Equal(t, "run-ext/extraction", started.Data["frame_id"])
+	require.Equal(t, "run-ext/turn/01", started.Data["parent_frame_id"])
 
 	require.Equal(t, extractionIdentity("run-ext"), started.Data["extraction_id"])
 	require.Equal(t, ExtractorVersion, started.Data["extractor_version"])
@@ -1961,28 +2091,10 @@ func TestAgentRunExtractsKnowledgeAfterCompletion(t *testing.T) {
 	require.NotNil(t, hintIgnored, "hint.ignored missing")
 	require.Equal(t, "hint-2", hintIgnored.Data["hint_id"])
 	require.Equal(t, "hint-usage-lexical.v1", hintIgnored.Data["matcher"])
-	require.False(t, knowledgeUsedWithHint, "injection-time knowledge.used with hint_id must not be emitted")
-
-	// Extraction runs after the run's own terminal events.
-	require.Greater(t, indexEvent(recorded, "knowledge.extraction.started"), indexEvent(recorded, "agent.summary"))
-	require.Greater(t, indexEvent(recorded, "knowledge.extraction.completed"), indexEvent(recorded, "knowledge.proposed"))
 }
 
-func TestAgentRunChallengesContradictedAndAgedKnowledge(t *testing.T) {
-	var suite testsuite.WorkflowTestSuite
-	env := suite.NewTestWorkflowEnvironment()
-	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
-	var recorded []observation.Event
-	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
-		require.NoError(t, event.Validate())
-		recorded = append(recorded, event)
-		return nil
-	}, activity.RegisterOptions{Name: ActivityRecordEvent})
-	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
-	env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
-		return llm.Completion{Content: "done"}, nil
-	}, activity.RegisterOptions{Name: ActivityCallModel})
-
+func TestKnowledgeExtractionWorkflowChallengesContradictedAndAged(t *testing.T) {
+	env, recordedPtr := knowledgeExtractionTestEnv(t)
 	staleProposition := "The fetch command accepts a -limit flag, not --count."
 	newProposition := "The fetch command accepts a --count flag, not -limit."
 	newID := extractionKnowledgeID("repo-a", newProposition)
@@ -2007,9 +2119,10 @@ func TestAgentRunChallengesContradictedAndAgedKnowledge(t *testing.T) {
 		return KnowledgeLookupResult{}, nil
 	}, activity.RegisterOptions{Name: ActivityKnowledgeLookup})
 
-	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-ch", Project: "repo-a", Prompt: "run the fetch"})
+	env.ExecuteWorkflow(KnowledgeExtractionWorkflowName, extractionHandoff("run-ch", "repo-a", 3))
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
+	recorded := *recordedPtr
 
 	var proposedEvent *observation.Event
 	challenged := map[string]*observation.Event{}
@@ -2050,37 +2163,20 @@ func TestAgentRunChallengesContradictedAndAgedKnowledge(t *testing.T) {
 	require.EqualValues(t, 1, completed.Data["aged"])
 }
 
-func TestAgentRunExtractionFailureDoesNotFailRun(t *testing.T) {
-	var suite testsuite.WorkflowTestSuite
-	env := suite.NewTestWorkflowEnvironment()
-	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
-	var recorded []observation.Event
-	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
-		require.NoError(t, event.Validate())
-		recorded = append(recorded, event)
-		return nil
-	}, activity.RegisterOptions{Name: ActivityRecordEvent})
-	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
-	env.RegisterActivityWithOptions(func(context.Context, ModelRequest) (llm.Completion, error) {
-		return llm.Completion{Content: "done"}, nil
-	}, activity.RegisterOptions{Name: ActivityCallModel})
+func TestKnowledgeExtractionWorkflowFailureIsContained(t *testing.T) {
+	env, recordedPtr := knowledgeExtractionTestEnv(t)
 	registerExtraction(env, KnowledgeExtractResult{}, errors.New("model returned invalid JSON"))
 
-	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-ext-fail", Project: "repo-a", Prompt: "work"})
+	env.ExecuteWorkflow(KnowledgeExtractionWorkflowName, extractionHandoff("run-ext-fail", "repo-a", 5))
 	require.True(t, env.IsWorkflowCompleted())
-	require.NoError(t, env.GetWorkflowError(), "extraction failure must not fail the run")
-	var result RunResult
-	require.NoError(t, env.GetWorkflowResult(&result))
-	require.Equal(t, "completed", result.Status)
-	require.Equal(t, "done", result.Answer)
+	require.NoError(t, env.GetWorkflowError(), "extraction failure must not fail the workflow")
 
-	failed := eventsOfType(recorded, "knowledge.extraction.failed")
+	failed := eventsOfType(*recordedPtr, "knowledge.extraction.failed")
 	require.Len(t, failed, 1)
 	require.Contains(t, failed[0].Data["error"], "invalid JSON")
 	require.Equal(t, extractionIdentity("run-ext-fail"), failed[0].Data["extraction_id"])
-	require.Empty(t, eventsOfType(recorded, "knowledge.extraction.completed"))
+	require.Empty(t, eventsOfType(*recordedPtr, "knowledge.extraction.completed"))
 }
-
 func eventsOfType(events []observation.Event, eventType string) []observation.Event {
 	var matched []observation.Event
 	for _, event := range events {

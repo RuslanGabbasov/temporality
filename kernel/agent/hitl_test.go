@@ -19,6 +19,7 @@ func TestAgentRunAskHumanCancelPolicyStopsRun(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		recorded = append(recorded, event)
@@ -58,6 +59,7 @@ func TestAgentRunAskHumanRetryPolicyWaitsSecondRound(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		recorded = append(recorded, event)

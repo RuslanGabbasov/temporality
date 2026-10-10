@@ -222,6 +222,7 @@ export const en: Record<string, string> = {
     'runs.event.run_failed': 'Run failed',
     'runs.event.model_call': 'Model call',
     'runs.event.model_response': 'Model response',
+    'runs.event.stream_regen': 'regenerated',
     'runs.event.learned': 'Learned',
     'runs.event.recalled': 'Recalled',
     'runs.event.knowledge_used': 'Knowledge applied',

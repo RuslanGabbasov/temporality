@@ -141,6 +141,7 @@ func newTeamRunTestEnv(t *testing.T) *teamRunTestEnv {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	out := &teamRunTestEnv{env: env}
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())

@@ -151,7 +151,10 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       const cached = d.cached_tokens ? `↻ ${d.cached_tokens}` : ''
       const latency = d.latency_ms ? `${(Number(d.latency_ms) / 1000).toFixed(1)}s` : ''
       const calls = d.tool_call_count ? `${d.tool_call_count} tools` : ''
-      const parts = [tokens, cached, latency, calls].filter(Boolean).join(' · ')
+      // The stream died mid-flight and the blocking fallback regenerated the
+      // answer — the latency already includes both generations.
+      const regen = d.stream_failed ? `↻ ${t('runs.event.stream_regen')}` : ''
+      const parts = [tokens, cached, latency, calls, regen].filter(Boolean).join(' · ')
       return { icon: '🧠', label: t('runs.event.model_response'), detail: parts, color: '#bb9af7' }
     }
     case 'model.failed': {

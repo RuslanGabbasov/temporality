@@ -222,6 +222,7 @@ export const ru: Record<string, string> = {
     'runs.event.run_failed': 'Запуск завершился ошибкой',
     'runs.event.model_call': 'Вызов модели',
     'runs.event.model_response': 'Ответ модели',
+    'runs.event.stream_regen': 'повторная генерация',
     'runs.event.learned': 'Изучено',
     'runs.event.recalled': 'Восстановлено',
     'runs.event.knowledge_used': 'Знание применено',

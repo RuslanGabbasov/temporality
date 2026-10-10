@@ -5,9 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/agent"
+	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/observation"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/testsuite"
@@ -19,6 +20,10 @@ func TestWorkflowDelegatesToFourChildRuns(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(agent.AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
 	env.RegisterWorkflowWithOptions(Workflow, workflow.RegisterOptions{Name: WorkflowName})
+	// Delegated AgentRun children hand off to the detached extraction workflow
+	// when they finish; a no-op mock keeps the test focused on delegation.
+	env.RegisterWorkflowWithOptions(agent.KnowledgeExtractionWorkflow, workflow.RegisterOptions{Name: agent.KnowledgeExtractionWorkflowName})
+	env.OnWorkflow(agent.KnowledgeExtractionWorkflowName, mock.Anything, mock.Anything).Return(nil)
 	var recorded []observation.Event
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error { recorded = append(recorded, event); return nil }, activity.RegisterOptions{Name: agent.ActivityRecordEvent})
 	env.RegisterActivityWithOptions(func(context.Context, agent.HintRequest) ([]agent.Hint, error) { return nil, nil }, activity.RegisterOptions{Name: agent.ActivityKnowledgeHints})

@@ -18,6 +18,7 @@ func registerPolicyEnv(t *testing.T, model func(call int, request ModelRequest) 
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
 	recorded := &[]observation.Event{}
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
 		require.NoError(t, event.Validate())

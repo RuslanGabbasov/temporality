@@ -68,6 +68,12 @@ type Completion struct {
 	RequestRef  string `json:"request_ref,omitempty"`
 	ResponseRef string `json:"response_ref,omitempty"`
 	Attempts    int    `json:"attempts,omitempty"`
+	// Transport records how the completion was delivered: "stream" (SSE) or
+	// "blocking" (single JSON response). StreamFailed marks a stream that died
+	// mid-flight and was salvaged by the blocking fallback — the wall latency
+	// and token usage then already include both generations.
+	Transport    string `json:"transport,omitempty"`
+	StreamFailed bool   `json:"stream_failed,omitempty"`
 }
 
 // Truncated reports whether the provider cut the completion off at the token
@@ -400,6 +406,7 @@ func (c *Client) Complete(ctx context.Context, messages []Message, tools []ToolD
 		if err == nil {
 			completion.LatencyMs = time.Since(started).Milliseconds()
 			completion.Attempts = attempt
+			completion.Transport = "blocking"
 			return completion, nil
 		}
 		lastErr = err
@@ -605,6 +612,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		LatencyMs:  time.Since(started).Milliseconds(),
 		Usage:      usage,
 		RequestRef: contentRef(payload),
+		Transport:  "stream",
 	}
 	for _, tc := range toolCallAccum {
 		args := map[string]any{}

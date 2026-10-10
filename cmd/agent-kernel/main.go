@@ -237,6 +237,7 @@ func main() {
 	taskQueue := env("TEMPORAL_TASK_QUEUE", agent.TaskQueue)
 	temporalWorker := worker.New(temporalClient, taskQueue, worker.Options{})
 	temporalWorker.RegisterWorkflowWithOptions(agent.AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	temporalWorker.RegisterWorkflowWithOptions(agent.KnowledgeExtractionWorkflow, workflow.RegisterOptions{Name: agent.KnowledgeExtractionWorkflowName})
 	temporalWorker.RegisterActivityWithOptions(activities.RecordEvent, activity.RegisterOptions{Name: agent.ActivityRecordEvent})
 	temporalWorker.RegisterActivityWithOptions(activities.CallModel, activity.RegisterOptions{Name: agent.ActivityCallModel})
 	temporalWorker.RegisterActivityWithOptions(activities.RunTool, activity.RegisterOptions{Name: agent.ActivityRunTool})

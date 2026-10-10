@@ -263,7 +263,9 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		// Live path: stream tokens to the ephemeral bus for subscribed UIs. A
 		// streaming failure falls through to the blocking call below, which has
 		// its own retries — the live preview is best-effort, the Completion is
-		// the source of truth the workflow records.
+		// the source of truth the workflow records. StreamFailed marks the
+		// salvage so model.completed shows the double generation (stream +
+		// blocking regenerate) instead of hiding it inside an inflated latency.
 		if completion, err := client.StreamComplete(ctx, request.Messages, request.Tools, func(delta llm.StreamDelta) bool {
 			if delta.Text != "" || delta.Reasoning != "" {
 				a.Tokens.Publish(request.RunID, request.Turn, delta.Text, delta.Reasoning)
@@ -272,6 +274,11 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		}, llm.WithPromptCacheKey(request.PromptCacheKey)); err == nil {
 			return completion, nil
 		}
+		completion, err := client.Complete(ctx, request.Messages, request.Tools, llm.WithPromptCacheKey(request.PromptCacheKey))
+		if err == nil {
+			completion.StreamFailed = true
+		}
+		return completion, err
 	}
 	return client.Complete(ctx, request.Messages, request.Tools, llm.WithPromptCacheKey(request.PromptCacheKey))
 }
