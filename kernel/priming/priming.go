@@ -28,7 +28,8 @@ type ExperiencePattern struct {
 	Summary      string   `json:"summary"`
 	Scope        string   `json:"scope"`
 	Score        float64  `json:"score"`
-	Signals      []Signal `json:"signals"`
+	Cues         []string `json:"cues,omitempty"`
+	Signals      []Signal `json:"signals,omitempty"`
 	KnowledgeIDs []string `json:"knowledge_ids"`
 	ActiveCount  int      `json:"active_count"`
 	InvalidCount int      `json:"invalid_count"`
@@ -53,18 +54,22 @@ type PrimingResult struct {
 	Patterns       []ExperiencePattern `json:"patterns"`
 	TotalKnowledge int                 `json:"total_knowledge"`
 	Primed         int                 `json:"primed"`
+	HiddenPatterns int                 `json:"hidden_patterns"`
+	TokensEstimate int                 `json:"tokens_estimate"`
 	GeneratedAt    time.Time           `json:"generated_at"`
 }
 
 // Config controls priming behavior.
 type Config struct {
-	MaxPatterns int     // max patterns to return (default 7)
-	MinScore    float64 // minimum score threshold (default 0.1)
+	MaxPatterns    int     // max patterns to return (default 7)
+	MinScore       float64 // minimum score threshold (default 0.1)
+	MaxTokens      int     // token budget for the rendered patterns (default 600)
+	CuesPerPattern int     // cue lines rendered per pattern (default 3)
 }
 
 // DefaultConfig returns sensible defaults.
 func DefaultConfig() Config {
-	return Config{MaxPatterns: 7, MinScore: 0.1}
+	return Config{MaxPatterns: 7, MinScore: 0.1, MaxTokens: 600, CuesPerPattern: 3}
 }
 
 // Primer generates experience priming.
@@ -93,7 +98,8 @@ func (p *Primer) Prime(ctx context.Context, project, task string) (PrimingResult
 		return PrimingResult{}, fmt.Errorf("retrieve knowledge: %w", err)
 	}
 
-	patterns := rankPatterns(knowledge, task, p.config)
+	ranked := rankPatterns(knowledge, task, p.config)
+	patterns, hidden, tokens := renderBudget(ranked, p.config)
 
 	return PrimingResult{
 		Project:        project,
@@ -101,6 +107,8 @@ func (p *Primer) Prime(ctx context.Context, project, task string) (PrimingResult
 		Patterns:       patterns,
 		TotalKnowledge: len(knowledge),
 		Primed:         len(patterns),
+		HiddenPatterns: hidden,
+		TokensEstimate: tokens,
 		GeneratedAt:    time.Now().UTC(),
 	}, nil
 }
@@ -142,6 +150,88 @@ func sortPatterns(patterns []ExperiencePattern) {
 		}
 		return patterns[i].ID < patterns[j].ID
 	})
+}
+
+// estimateTokens approximates the LLM token count of a string as
+// ceil(runes/4); prompts average roughly four characters per token.
+func estimateTokens(s string) int {
+	return int(math.Ceil(float64(len([]rune(s))) / 4))
+}
+
+// patternBudget is the token cost of rendering a pattern: its title,
+// every cue line and its ID.
+func patternBudget(title string, cues []string, id string) int {
+	total := estimateTokens(title) + estimateTokens(id)
+	for _, cue := range cues {
+		total += estimateTokens(cue)
+	}
+	return total
+}
+
+// patternCues renders the compact cue lines of a pattern: the top
+// CuesPerPattern items by validity weight, then reuse count, then ID.
+func patternCues(pat ExperiencePattern, config Config) []string {
+	items := make([]observation.Knowledge, len(pat.items))
+	copy(items, pat.items)
+	sort.Slice(items, func(i, j int) bool {
+		wi, wj := validityWeight(items[i].State), validityWeight(items[j].State)
+		if wi != wj {
+			return wi > wj
+		}
+		if items[i].ReuseCount != items[j].ReuseCount {
+			return items[i].ReuseCount > items[j].ReuseCount
+		}
+		return items[i].ID < items[j].ID
+	})
+	if len(items) > config.CuesPerPattern {
+		items = items[:config.CuesPerPattern]
+	}
+	cues := make([]string, 0, len(items))
+	for _, k := range items {
+		cues = append(cues, formatCue(k))
+	}
+	return cues
+}
+
+// formatCue renders one knowledge item as a single compact cue line:
+// "<knowledge_id>: <proposition> — <state>, reused <N>"; the reuse
+// suffix is omitted when the item was never reused.
+func formatCue(k observation.Knowledge) string {
+	state := k.State
+	if state == "" {
+		state = "unknown"
+	}
+	cue := fmt.Sprintf("%s: %s — %s", k.ID, truncate(k.Proposition, 80), state)
+	if k.ReuseCount > 0 {
+		cue += fmt.Sprintf(", reused %d", k.ReuseCount)
+	}
+	return cue
+}
+
+// renderBudget selects patterns in rank order until the token budget is
+// exhausted, rendering each as a compact title+cues form. The top-ranked
+// pattern is always rendered with at least one cue, even when it alone
+// exceeds the budget; every pattern left out is counted as hidden. The
+// verbose per-item Signals are dropped here: the compact cues replace
+// them in the external form.
+func renderBudget(ranked []ExperiencePattern, config Config) ([]ExperiencePattern, int, int) {
+	total := 0
+	kept := make([]ExperiencePattern, 0, len(ranked))
+	for i := range ranked {
+		title := truncate(ranked[i].Title, 80)
+		cues := patternCues(ranked[i], config)
+		cost := patternBudget(title, cues, ranked[i].ID)
+		if i > 0 && total+cost > config.MaxTokens {
+			break
+		}
+		out := ranked[i]
+		out.Title = title
+		out.Cues = cues
+		out.Signals = nil
+		kept = append(kept, out)
+		total += cost
+	}
+	return kept, len(ranked) - len(kept), total
 }
 
 func (p *Primer) retrieveKnowledge(ctx context.Context, project string) ([]observation.Knowledge, error) {
