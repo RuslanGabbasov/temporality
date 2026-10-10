@@ -30,6 +30,59 @@ func hintKnowledge(t *testing.T, events []Event) []Knowledge {
 	return knowledge
 }
 
+func TestFindHintsGatesInvalidatedEvenOnStrongMatch(t *testing.T) {
+	// Ported from kernel/priming integration corpus: a lifecycle-gated item
+	// must never surface as an acting rule, however well it matches.
+	base := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		hintProposalEvent("e1", "k-old", "claim", "The gatekeeper CLI accepts basic auth for all endpoints", []string{"gatekeeper"}, base),
+		transitionEvent("e2", "k-old", "knowledge.invalidated", base.Add(time.Minute)),
+		hintProposalEvent("e3", "k-new", "claim", "The gatekeeper CLI requires an oauth token", []string{"gatekeeper"}, base.Add(2*time.Minute)),
+	}
+	hints := FindHints(hintKnowledge(t, events), HintQuery{Text: "authenticate to gatekeeper", Entities: []string{"gatekeeper"}, Limit: 8})
+	if len(hints) != 1 || hints[0].KnowledgeID != "k-new" {
+		t.Fatalf("invalidated knowledge must be gated, got %+v", hints)
+	}
+}
+
+func TestFindHintsGatesSupersededAndCorrected(t *testing.T) {
+	base := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	for _, terminal := range []string{"knowledge.superseded", "knowledge.corrected"} {
+		events := []Event{
+			hintProposalEvent("e1", "k-1", "claim", "Run migrations with the old shell script", []string{"migrations"}, base),
+			transitionEvent("e2", "k-1", terminal, base.Add(time.Minute)),
+		}
+		hints := FindHints(hintKnowledge(t, events), HintQuery{Text: "run the migrations", Entities: []string{"migrations"}, Limit: 8})
+		if len(hints) != 0 {
+			t.Fatalf("%s knowledge must be gated, got %+v", terminal, hints)
+		}
+	}
+}
+
+func TestFindHintsIrrelevantTaskYieldsZeroHints(t *testing.T) {
+	// Ported from kernel/priming integration corpus: an honest zero beats a
+	// stretch — unrelated experience must not leak into the prompt.
+	base := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		hintProposalEvent("e1", "k-1", "claim", "The gatekeeper CLI requires the --out flag to write the report", nil, base),
+		hintProposalEvent("e2", "k-2", "claim", "Integration tests need Docker running before the suite starts", nil, base.Add(time.Minute)),
+	}
+	hints := FindHints(hintKnowledge(t, events), HintQuery{Text: "rename the marketing landing page headline", Limit: 8})
+	if len(hints) != 0 {
+		t.Fatalf("irrelevant task must yield zero hints, got %+v", hints)
+	}
+}
+
+func TestFindHintsEmptyQueryYieldsZeroHints(t *testing.T) {
+	base := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		hintProposalEvent("e1", "k-1", "claim", "The gatekeeper CLI requires the --out flag to write the report", nil, base),
+	}
+	if hints := FindHints(hintKnowledge(t, events), HintQuery{Limit: 8}); len(hints) != 0 {
+		t.Fatalf("empty query must yield zero hints, got %+v", hints)
+	}
+}
+
 func TestFindHintsPrefersClaimsOverObservationsAtEqualMatch(t *testing.T) {
 	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
 	events := []Event{
