@@ -357,8 +357,9 @@ Behavioral impact — важнейшая и самая сложная метри
 * п.5, п.6 — ✅ `observation.RenderHintBlock`: один блок, бюджеты 600/120/8, cue-контракт `правило [статус] (почему сматчилось) knowledge_id`; инъекция одним system-сообщением в `AgentRun`;
 * п.10 (P1) — ✅ тул `knowledge_lookup` (авто-апрув, project-scoped) замыкает контракт `knowledge_id`;
 * п.7 — ✅ retired-знание с матчем и непустой заменой предлагает замену как кандидата (`matched_by=replaces:<oldID>`); manual-invalidate принимает `replacement_id` (эмит `knowledge.superseded`), цепочка lifecycle и trajectory несут ссылку.
+* п.8 (P1) — ✅ diversification в `FindHints` после ранжирования: точные дубли (нормализованная пропозиция), почти-дубли (Jaccard ≥ 0.8 по content-токенам), кап 2 cue на первичный топик; `HintsAlgorithmVersion` → `lexical-entity-topic.v2`; порядок входа не влияет на результат (тест).
 
-Не сделано: P1 п.8–9, 11–13 (дедупликация, учёт Skills, benchmark-корпус, замыкание полезности), P2 целиком. P0 закрыт полностью.
+Не сделано: P1 п.9, 11–13 (учёт Skills, benchmark-корпус, замыкание полезности, Experience Pattern как слой подачи), P2 целиком. P0 закрыт полностью.
 
 ### P0 — базовая семантика (консолидация и контракт)
 

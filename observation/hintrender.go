@@ -5,8 +5,9 @@ import (
 )
 
 // HintsAlgorithmVersion identifies the hint selection algorithm (matching,
-// admission, ranking) so events and runs can be compared across versions.
-const HintsAlgorithmVersion = "lexical-entity-topic.v1"
+// admission, ranking, diversification) so events and runs can be compared
+// across versions. v2 adds exact/Jaccard deduplication and per-topic capping.
+const HintsAlgorithmVersion = "lexical-entity-topic.v2"
 
 // RenderOptions caps the compact prior-knowledge block injected into a prompt.
 type RenderOptions struct {

@@ -30,7 +30,19 @@ type hintCandidate struct {
 	matchTier int
 	kindTier  int
 	stateTier int
+	// topic is the deterministic grouping key for per-topic diversity capping:
+	// the alphabetically first topic, or "" when the item carries none.
+	topic string
 }
+
+// Diversification thresholds (docs/plan-priming-relevance.md §9): after
+// ranking, near-duplicate propositions are dropped so the budget is not spent
+// on repeats, and one topic cannot crowd out everything else. Diversity is
+// not a goal in itself — distinct same-topic rules survive up to the cap.
+const (
+	hintNearDupJaccard = 0.8
+	hintMaxPerTopic    = 2
+)
 
 // FindHints uses explainable exact entity/topic and lexical matching. It does
 // not estimate truth or confidence and returns lifecycle/provenance alongside
@@ -134,6 +146,7 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 		}
 		return candidates[i].hint.KnowledgeID < candidates[j].hint.KnowledgeID
 	})
+	candidates = diversifyCandidates(candidates)
 	if len(candidates) > query.Limit {
 		candidates = candidates[:query.Limit]
 	}
@@ -179,7 +192,78 @@ func makeHintCandidate(item Knowledge, matched []string, matchTier int) (hintCan
 		KnowledgeID: item.ID, Proposition: item.Proposition, State: item.State,
 		MatchedBy: boundedStrings(matched, 8), Caution: caution,
 		Evidence: boundedEvidence(item.Evidence, 8), History: boundedHistory(item.History, 5),
-	}, matchTier: matchTier, kindTier: kindTier, stateTier: stateTier}, true
+	}, matchTier: matchTier, kindTier: kindTier, stateTier: stateTier, topic: primaryTopic(item)}, true
+}
+
+// primaryTopic is the deterministic diversity grouping key.
+func primaryTopic(item Knowledge) string {
+	best := ""
+	for _, topic := range item.Topics {
+		topic = strings.ToLower(strings.TrimSpace(topic))
+		if topic != "" && (best == "" || topic < best) {
+			best = topic
+		}
+	}
+	return best
+}
+
+// diversifyCandidates drops exact and near-duplicate propositions and caps
+// per-topic representation (§9). Candidates arrive in deterministic ranked
+// order, so the strongest variant of each cluster survives and the pass is
+// reproducible.
+func diversifyCandidates(candidates []hintCandidate) []hintCandidate {
+	kept := make([]hintCandidate, 0, len(candidates))
+	seenExact := make(map[string]bool, len(candidates))
+	keptTokens := make([]map[string]bool, 0, len(candidates))
+	topicCount := make(map[string]int)
+	for _, candidate := range candidates {
+		exact := normalizedProposition(candidate.hint.Proposition)
+		if seenExact[exact] {
+			continue
+		}
+		tokens := contentTokens(candidate.hint.Proposition)
+		nearDuplicate := false
+		for _, existing := range keptTokens {
+			if jaccard(tokens, existing) >= hintNearDupJaccard {
+				nearDuplicate = true
+				break
+			}
+		}
+		if nearDuplicate {
+			continue
+		}
+		if candidate.topic != "" && topicCount[candidate.topic] >= hintMaxPerTopic {
+			continue
+		}
+		seenExact[exact] = true
+		keptTokens = append(keptTokens, tokens)
+		if candidate.topic != "" {
+			topicCount[candidate.topic]++
+		}
+		kept = append(kept, candidate)
+	}
+	return kept
+}
+
+// normalizedProposition collapses case and whitespace so trivially reworded
+// copies of one rule compare equal.
+func normalizedProposition(value string) string {
+	return strings.Join(strings.Fields(strings.ToLower(value)), " ")
+}
+
+// jaccard is |A∩B| / |A∪B| over token sets; two empty sets count as identical.
+func jaccard(a, b map[string]bool) float64 {
+	if len(a) == 0 && len(b) == 0 {
+		return 1
+	}
+	intersection := 0
+	for token := range a {
+		if b[token] {
+			intersection++
+		}
+	}
+	union := len(a) + len(b) - intersection
+	return float64(intersection) / float64(union)
 }
 
 func matchKnowledge(item Knowledge, entities, topics, queryTokens map[string]bool, phrase string) ([]string, int) {
