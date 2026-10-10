@@ -346,6 +346,27 @@ func main() {
 		}
 		primer.Handler(w, r)
 	})
+	mux.HandleFunc("GET /v1/agent/priming/knowledge", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if project == "" {
+			writeError(w, 400, errors.New("project is required"))
+			return
+		}
+		ids, err := parseKnowledgeIDs(r.URL.Query().Get("ids"))
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleReader, project) {
+			return
+		}
+		found, missing, err := fetchKnowledgeByIDs(r.Context(), nil, observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), project, ids)
+		if err != nil {
+			writeError(w, 502, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"project": project, "knowledge": found, "count": len(found), "missing": missing})
+	})
 	liveness := &temporalLiveness{client: temporalClient}
 	mux.HandleFunc("GET /v1/agent/operations", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
