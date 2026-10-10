@@ -470,6 +470,11 @@ export const ru: Record<string, string> = {
     'agents.runs_total': 'Запусков',
     'agents.runs_completed': 'успешно',
     'agents.runs_failed': 'с ошибками',
+    'agents.evals_suite': 'Набор проверок',
+    'agents.evals_version_current': 'Текущая версия',
+    'agents.evals_case_input': 'Задача для агента…',
+    'agents.evals_empty': 'Набор проверок пока не настроен',
+    'agents.evals_empty_hint': 'Добавьте случаи: задача плюс ожидаемые фразы, которые ответ должен (или не должен) содержать. Каждый запуск проверяет выбранную версию определения по всем случаям.',
 
     // Skills
     'skills.title': 'Навыки',

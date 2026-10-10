@@ -1598,6 +1598,117 @@ func main() {
 		source, prompt := agentPromptPreview(a)
 		writeJSON(w, 200, map[string]any{"agent_id": a.ID, "version": a.DefinitionVersion, "source": source, "prompt": prompt})
 	})
+	// Agent evaluation suites and runs (docs/plan-evaluable-agent.md §2.2 stage 8).
+	// A run is pinned to a definition version: the runner tests the compiled
+	// prompt snapshot of that exact version (0 = current effective prompt).
+	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/evaluation-suite", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		suite, err := ws.GetAgentEvaluationSuite(r.Context(), r.PathValue("agentID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, suite)
+	})
+	mux.HandleFunc("PUT /v1/workspace/agents/{agentID}/evaluation-suite", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var suite workspace.AgentEvaluationSuite
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&suite); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if len(suite.Cases) > 16 {
+			writeError(w, 422, errors.New("at most 16 evaluation cases are supported"))
+			return
+		}
+		for i, c := range suite.Cases {
+			if strings.TrimSpace(c.Input) == "" {
+				writeError(w, 422, fmt.Errorf("case %d: input is required", i+1))
+				return
+			}
+		}
+		agentID := r.PathValue("agentID")
+		if _, err := ws.GetAgent(r.Context(), agentID); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.SaveAgentEvaluationSuite(r.Context(), agentID, suite.Cases); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		saved, _ := ws.GetAgentEvaluationSuite(r.Context(), agentID)
+		writeJSON(w, 200, saved)
+	})
+	// POST runs the suite synchronously (one grounded model call per case) and
+	// records the run; GET lists run history. The internal record sink lives at
+	// .../evaluation-runs so the evaluator's loopback write cannot recurse into
+	// a fresh evaluation.
+	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/evaluation-runs", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var run workspace.AgentEvaluationRun
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&run); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		run.AgentID = r.PathValue("agentID")
+		if run.AgentVersion <= 0 {
+			writeError(w, 422, errors.New("agent_version is required"))
+			return
+		}
+		if err := ws.RecordAgentEvaluationRun(r.Context(), &run); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 201, run)
+	})
+	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/evaluations", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		agentID := r.PathValue("agentID")
+		var req struct {
+			Version int `json:"version"`
+		}
+		if r.ContentLength > 0 {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+				writeError(w, 400, err)
+				return
+			}
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+		defer cancel()
+		if _, err := activities.RunAgentEvaluation(ctx, agentID, req.Version); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		runs, err := ws.ListAgentEvaluationRuns(r.Context(), agentID, 1)
+		if err != nil || len(runs) == 0 {
+			writeError(w, 500, errors.New("evaluation ran but the result could not be read back"))
+			return
+		}
+		writeJSON(w, 200, runs[0])
+	})
+	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/evaluations", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		runs, err := ws.ListAgentEvaluationRuns(r.Context(), r.PathValue("agentID"), 0)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"runs": runs})
+	})
 	// Delegation target resolution (docs/agent-delegation.md §4): returns the
 	// enforced run configuration for launching this agent inside another run.
 	// Writer role: the response is everything needed to start a run.

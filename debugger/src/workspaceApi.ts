@@ -141,6 +141,37 @@ export interface AgentVersion {
   created_at: string
 }
 
+export interface AgentEvaluationCase {
+  name: string
+  input: string
+  must_contain?: string[]
+  must_not_contain?: string[]
+}
+
+export interface AgentEvaluationSuite {
+  agent_id: string
+  cases: AgentEvaluationCase[]
+  updated_at?: string
+}
+
+export interface AgentEvaluationCaseResult {
+  name: string
+  passed: boolean
+  answer?: string
+  missed?: string[]
+  unexpected?: string[]
+}
+
+export interface AgentEvaluationRun {
+  id: number
+  agent_id: string
+  agent_version: number
+  passed: number
+  failed: number
+  cases: AgentEvaluationCaseResult[]
+  created_at: string
+}
+
 export interface BuiltinAgentSpec {
   slug: string
   name: string
@@ -570,6 +601,14 @@ export const workspaceApi = {
     request<{ runs: Run[] }>(`/v1/workspace/agents/${id}/runs`),
   getAgentPrompt: (id: string) =>
     request<{ agent_id: string; version: number; source: string; prompt: string }>(`/v1/workspace/agents/${id}/prompt`),
+  getAgentEvaluationSuite: (id: string) =>
+    request<AgentEvaluationSuite>(`/v1/workspace/agents/${id}/evaluation-suite`),
+  saveAgentEvaluationSuite: (id: string, cases: AgentEvaluationCase[]) =>
+    request<AgentEvaluationSuite>(`/v1/workspace/agents/${id}/evaluation-suite`, { method: 'PUT', body: JSON.stringify({ cases }) }),
+  runAgentEvaluation: (id: string, version?: number) =>
+    request<AgentEvaluationRun>(`/v1/workspace/agents/${id}/evaluations`, { method: 'POST', body: JSON.stringify(version ? { version } : {}) }),
+  listAgentEvaluationRuns: (id: string) =>
+    request<{ runs: AgentEvaluationRun[] }>(`/v1/workspace/agents/${id}/evaluations`),
   listBuiltinAgents: () =>
     request<{ builtins: BuiltinAgentSpec[] }>('/v1/workspace/agents/builtins'),
   draftAgent: (description: string, final?: boolean) =>

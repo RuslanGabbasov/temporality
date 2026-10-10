@@ -107,9 +107,10 @@ Status: Phase 1 **complete** — all original plan items done (2026-10-10 revisi
 
 ### Phase 2 (planned) — evaluations & evolution
 
-- [ ] Agent evaluations — per-agent suites checked against the compiled prompt of a pinned definition version; synchronous runner, run history, `agent.evaluation.completed` events, «Оценки» section in the Evolution tab (mirror of skill evaluations)
+- [x] Agent evaluations — per-agent suites checked against the compiled prompt of a pinned definition version; synchronous runner, run history, `agent.evaluation.completed` events, «Оценки» section in the Evolution tab (mirror of skill evaluations)
 - [ ] Evolution analytics — per-version eval pass rate + run outcomes with regression highlight
 - [ ] Evolution proposals — proposal anatomy (observed problem / proposed change / expected effect + evidence), `agent_propose` tool, human-only apply through the regular version path
+- [ ] Agent eval CLI — `temporality agent evals` / `eval-run` (optional tail of stage 8)
 - Note: agents propose, people apply — mirror of `docs/living-skills.md` §26
 
 ---

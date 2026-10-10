@@ -28,6 +28,8 @@ import {
   type AgentDefinition,
   type AgentDraft,
   type AgentVersion,
+  type AgentEvaluationCase,
+  type AgentEvaluationRun,
   type BuiltinAgentSpec,
   type Provider,
   type Skill,
@@ -135,6 +137,13 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [versions, setVersions] = useState<AgentVersion[]>([])
   const [agentRuns, setAgentRuns] = useState<Run[]>([])
   const [evoLoadedFor, setEvoLoadedFor] = useState('')
+
+  // Evaluations (plan §2.2 stage 8): suite + run history pinned to definition versions.
+  const [evalSuite, setEvalSuite] = useState<AgentEvaluationCase[]>([])
+  const [evalRuns, setEvalRuns] = useState<AgentEvaluationRun[]>([])
+  const [evalBusy, setEvalBusy] = useState(false)
+  const [evalVersion, setEvalVersion] = useState('') // '' = current definition
+  const [openEvalRun, setOpenEvalRun] = useState<number | null>(null)
 
   // Prompt tab preview (reflects the saved agent).
   const [promptPreview, setPromptPreview] = useState<{ source: string; prompt: string } | null>(null)
@@ -420,17 +429,44 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     setEvoLoadedFor(selectedId)
     setVersions([])
     setAgentRuns([])
+    setEvalSuite([])
+    setEvalRuns([])
     void (async () => {
       try {
-        const [vData, rData] = await Promise.all([
+        const [vData, rData, sData, eData] = await Promise.all([
           workspaceApi.listAgentVersions(selectedId),
           workspaceApi.listAgentRuns(selectedId),
+          workspaceApi.getAgentEvaluationSuite(selectedId),
+          workspaceApi.listAgentEvaluationRuns(selectedId),
         ])
         setVersions(vData.versions ?? [])
         setAgentRuns(rData.runs ?? [])
+        setEvalSuite(sData.cases ?? [])
+        setEvalRuns(eData.runs ?? [])
       } catch (f) { setError(message(f)) }
     })()
   }, [detailTab, selectedId, evoLoadedFor])
+
+  const saveEvalSuite = async () => {
+    if (!selectedId) return
+    setEvalBusy(true); setError('')
+    try {
+      const saved = await workspaceApi.saveAgentEvaluationSuite(selectedId, evalSuite)
+      setEvalSuite(saved.cases ?? [])
+    } catch (f) { setError(message(f)) }
+    finally { setEvalBusy(false) }
+  }
+
+  const runEvaluations = async () => {
+    if (!selectedId) return
+    setEvalBusy(true); setError('')
+    try {
+      await workspaceApi.runAgentEvaluation(selectedId, evalVersion ? Number(evalVersion) : undefined)
+      const eData = await workspaceApi.listAgentEvaluationRuns(selectedId)
+      setEvalRuns(eData.runs ?? [])
+    } catch (f) { setError(message(f)) }
+    finally { setEvalBusy(false) }
+  }
 
   const runsByVersion = new Map<number, { total: number; completed: number; failed: number }>()
   for (const run of agentRuns) {
@@ -731,6 +767,122 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                       </div>
                     )
                   })}
+
+                  {/* Evaluations (plan §2.2 stage 8): suite + run history pinned to definition versions. */}
+                  <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--tm-border)', paddingTop: '1rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <div className="skill-subheading" style={{ margin: 0 }}>{t('agents.evals_suite') ?? 'Evaluation suite'}</div>
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <Select
+                          id="agent-eval-version"
+                          hideLabel
+                          labelText=""
+                          disabled={evalBusy}
+                          style={{ width: '10rem' }}
+                          value={evalVersion}
+                          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEvalVersion(e.target.value)}
+                        >
+                          <SelectItem value="" text={t('agents.evals_version_current') ?? 'Current version'} />
+                          {versions.map((v) => <SelectItem key={v.version} value={String(v.version)} text={`v${v.version}`} />)}
+                        </Select>
+                        <Button size="sm" kind="secondary" disabled={evalBusy} onClick={() => {
+                          setEvalSuite([...evalSuite, { name: '', input: '', must_contain: [], must_not_contain: [] }])
+                        }}>{t('skills.evals_add_case') ?? 'Add case'}</Button>
+                        <Button size="sm" kind="secondary" disabled={evalBusy} onClick={() => void saveEvalSuite()}>{t('skills.evals_save') ?? 'Save suite'}</Button>
+                        <Button size="sm" disabled={evalBusy || evalSuite.length === 0} onClick={() => void runEvaluations()}>{t('skills.evals_run') ?? 'Run evaluations'}</Button>
+                      </div>
+                    </div>
+                    {evalSuite.length === 0 ? (
+                      <div style={{ padding: '1rem 0', textAlign: 'center', color: 'var(--tm-text-3)' }}>
+                        <p>{t('agents.evals_empty') ?? 'Evaluation suite is not configured yet.'}</p>
+                        <p style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>{t('agents.evals_empty_hint') ?? 'Add cases: a task input plus expected phrases the answer must (or must not) contain. Each run checks the selected definition version against every case.'}</p>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                        {evalSuite.map((c, i) => (
+                          <div key={i} style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>
+                            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                              <TextInput
+                                id={`agent-eval-case-name-${i}`}
+                                hideLabel
+                                labelText=""
+                                placeholder={t('skills.evals_case_name') ?? 'Case name'}
+                                value={c.name}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEvalSuite(evalSuite.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                              />
+                              <Button size="sm" kind="ghost" hasIconOnly iconDescription={t('action.delete') ?? 'Delete'} disabled={evalBusy} onClick={() => setEvalSuite(evalSuite.filter((_, j) => j !== i))}>
+                                <TrashCan size={16} />
+                              </Button>
+                            </div>
+                            <TextArea
+                              id={`agent-eval-case-input-${i}`}
+                              hideLabel
+                              labelText=""
+                              rows={2}
+                              placeholder={t('agents.evals_case_input') ?? 'Task for the agent…'}
+                              value={c.input}
+                              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEvalSuite(evalSuite.map((x, j) => j === i ? { ...x, input: e.target.value } : x))}
+                            />
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.4rem' }}>
+                              <TextInput
+                                id={`agent-eval-case-must-${i}`}
+                                hideLabel
+                                labelText=""
+                                placeholder={t('skills.evals_must_contain') ?? 'Answer must contain (comma-separated)'}
+                                value={(c.must_contain ?? []).join(', ')}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEvalSuite(evalSuite.map((x, j) => j === i ? { ...x, must_contain: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) } : x))}
+                              />
+                              <TextInput
+                                id={`agent-eval-case-must-not-${i}`}
+                                hideLabel
+                                labelText=""
+                                placeholder={t('skills.evals_must_not_contain') ?? 'Answer must NOT contain'}
+                                value={(c.must_not_contain ?? []).join(', ')}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEvalSuite(evalSuite.map((x, j) => j === i ? { ...x, must_not_contain: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) } : x))}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="skill-subheading">{t('skills.evals_history') ?? 'Run history'}</div>
+                    {evalBusy && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('skills.evals_running') ?? 'Running evaluations…'}</p>}
+                    {evalRuns.length === 0 && !evalBusy ? (
+                      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('skills.evals_no_runs') ?? 'No evaluation runs yet.'}</p>
+                    ) : (
+                      <div className="skill-evolution-timeline">
+                        {evalRuns.map((run) => {
+                          const ok = run.failed === 0
+                          return (
+                            <div key={run.id} className="skill-version">
+                              <button className="skill-version-head" onClick={() => setOpenEvalRun(openEvalRun === run.id ? null : run.id)}>
+                                <span className="skill-version-dot" />
+                                <Tag size="sm" type={ok ? 'green' : 'red'}>{run.passed}/{run.passed + run.failed}</Tag>
+                                <Tag size="sm">v{run.agent_version}</Tag>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{new Date(run.created_at).toLocaleString()}</span>
+                              </button>
+                              {openEvalRun === run.id && (
+                                <div className="skill-version-body">
+                                  {(run.cases ?? []).map((c, i) => (
+                                    <div key={i} style={{ padding: '0.4rem 0', borderTop: i === 0 ? 'none' : '1px solid var(--tm-border)' }}>
+                                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <span style={{ color: c.passed ? 'var(--tm-success, green)' : 'var(--tm-danger, red)' }}>{c.passed ? '✓' : '✗'}</span>
+                                        <strong style={{ fontSize: '0.8rem' }}>{c.name}</strong>
+                                        {(c.missed?.length ?? 0) > 0 && <Tag size="sm" type="red">{t('skills.evals_missed') ?? 'missed'}: {c.missed!.join(', ')}</Tag>}
+                                        {(c.unexpected?.length ?? 0) > 0 && <Tag size="sm" type="red">{t('skills.evals_unexpected') ?? 'unexpected'}: {c.unexpected!.join(', ')}</Tag>}
+                                      </div>
+                                      {c.answer && <details style={{ marginTop: '0.25rem' }}><summary style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', cursor: 'pointer' }}>{t('skills.evals_answer') ?? 'Answer'}</summary><pre className="skill-manifest-preview">{c.answer}</pre></details>}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </Stack>

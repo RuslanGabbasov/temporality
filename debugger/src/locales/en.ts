@@ -470,6 +470,11 @@ export const en: Record<string, string> = {
     'agents.runs_total': 'Runs',
     'agents.runs_completed': 'completed',
     'agents.runs_failed': 'failed',
+    'agents.evals_suite': 'Evaluation suite',
+    'agents.evals_version_current': 'Current version',
+    'agents.evals_case_input': 'Task for the agent…',
+    'agents.evals_empty': 'Evaluation suite is not configured yet.',
+    'agents.evals_empty_hint': 'Add cases: a task input plus expected phrases the answer must (or must not) contain. Each run checks the selected definition version against every case.',
 
     // Skills
     'skills.title': 'Skills',

@@ -1,7 +1,7 @@
 # План работ: Evaluable Agent — определение агента и компиляция системного промта
 
 Source spec: `docs/evaluable-agent.md`.
-Статус: Фаза 1 (этапы 1–7) реализована; ревизия 2026-10-10 сверила план со спекой и кодом — расхождения устранены в тексте, пост-плановые изменения зафиксированы в §2.1. Legacy-конверсия — осознанно ручная: Rebuild/визард с человеком в цикле (автоматический проход при старте отвергнут: LLM-вызов на старте неработоспособен). Далее — Фаза 2 «Оценки и эволюция» (этапы 8–10, §2.2).
+Статус: Фаза 1 (этапы 1–7) реализована; ревизия 2026-10-10 сверила план со спекой и кодом — расхождения устранены в тексте, пост-плановые изменения зафиксированы в §2.1. Фаза 2: этап 8 (оценки агента) реализован; CLI — опциональный хвост. Legacy-конверсия — осознанно ручная: Rebuild/визард с человеком в цикле (автоматический проход при старте отвергнут: LLM-вызов на старте неработоспособен). Далее — этапы 9–10 (§2.2).
 
 ## 0. Текущее состояние (baseline)
 
@@ -116,15 +116,15 @@ CompileAgentPrompt(def, env) =
 
 Ключевое отличие от скилов: оценка pinned не к «текущему состоянию», а к конкретной `definition_version` — сравниваются версии определения, а не дрейф текущего промта.
 
-#### Этап 8. Оценки агента (suites + runner) — M
+#### Этап 8. Оценки агента (suites + runner) — M — ✅
 
-- [ ] Миграция: `workspace_agent_evaluation_suite` (agent_id PK, cases JSONB, updated_at) и `workspace_agent_evaluation_run` (id BIGSERIAL, agent_id, agent_version INT, passed, failed, cases JSONB, created_at) — зеркало `000044_skill_evolution_phase2`.
-- [ ] Стор `workspace/agentevals.go`: `Get/SaveEvaluationSuite`, `RecordEvaluationRun`, `ListEvaluationRuns` (лимиты как у скилов).
-- [ ] Эндпоинты: `GET/PUT /v1/workspace/agents/{id}/evaluation-suite` (reader/writer), `POST/GET /v1/workspace/agents/{id}/evaluations` (запуск — writer); 404 на неизвестного агента.
-- [ ] Раннер `kernel/agent/agenteval.go` — `RunAgentEvaluation(agentID, version)`: system-промт = `workspace_agent_version.compiled_prompt` (version=0 → текущая), кейс = user-сообщение, один вызов модели на кейс, проверка `must_contain`/`must_not_contain`; запись run + событие `agent.evaluation.completed` (agent_id, agent_version, passed, failed).
-- [ ] UI: в «Эволюции» секция «Оценки» — редактор сьюта, запуск по версии, история с детализацией кейсов (passed/missed/unexpected), pass rate. Локализация en/ru.
+- [x] Миграция `000048_agent_evaluations`: `workspace_agent_evaluation_suite` (agent_id PK, cases JSONB, updated_at) и `workspace_agent_evaluation_run` (id BIGSERIAL, agent_id, agent_version INT, passed, failed, cases JSONB, created_at) — зеркало `000044_skill_evolution_phase2`.
+- [x] Стор `workspace/agentevals.go`: `Get/SaveAgentEvaluationSuite`, `RecordAgentEvaluationRun`, `ListAgentEvaluationRuns` (лимиты как у скилов).
+- [x] Эндпоинты: `GET/PUT /v1/workspace/agents/{id}/evaluation-suite` (reader/writer), `POST/GET /v1/workspace/agents/{id}/evaluations` (запуск — writer) + внутренний sink `POST .../evaluation-runs`; 404 на неизвестного агента.
+- [x] Раннер `kernel/agent/agenteval.go` — `RunAgentEvaluation(agentID, version)`: version=0 → эффективный промт (эндпоинт `/prompt`), version>0 → `workspace_agent_version.compiled_prompt` снапшота; кейс = user-сообщение, один вызов модели на кейс, проверка `must_contain`/`must_not_contain`; запись run + событие `agent.evaluation.completed` (agent_id, agent_name, version, passed, failed).
+- [x] UI: в «Эволюции» секция «Оценки» — редактор сьюта, выбор версии для запуска (текущая / конкретная), история с детализацией кейсов (passed/missed/unexpected). Локализация en/ru.
 - [ ] CLI (опционально, зеркало skill CLI): `temporality agent evals <id>` / `eval-run <id> --version N`.
-- [ ] Тесты: стор, раннер (stub workspace+model), эндпоинты (гейт, 404), событие в журнале, пиннинг к версии.
+- [x] Тесты (`kernel/agent/agenteval_test.go`): текущая версия через эффективный промт, pinned-версия тестирует снапшот (не текущий промт), неизвестная версия/агент, пустой сьют, failed-case с missed/unexpected, запись run и событие.
 
 #### Этап 9. Аналитика эволюции — S/M
 
