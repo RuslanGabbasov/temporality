@@ -120,3 +120,56 @@ export interface RunCost {
 export function runCost(project: string, runID: string): Promise<RunCost> {
   return request(`/v1/agent/cost/run?project=${encodeURIComponent(project)}&run=${encodeURIComponent(runID)}`)
 }
+
+// Task budget spans every run of the task — conversation follow-ups and the
+// full delegation tree — with summed time/tokens/cost (docs: long tasks that
+// cross runs and agents must total their spend at the end).
+export interface TaskRunBreakdown {
+  run_id: string
+  parent_run_id?: string
+  agent_id?: string
+  status: string
+  started_at: string
+  ended_at?: string
+  duration_ms: number
+  model_calls: number
+  prompt_tokens: number
+  cached_tokens?: number
+  completion_tokens: number
+  total_tokens: number
+  cost_usd: number
+}
+
+export interface TaskAgentRollup {
+  agent_id: string
+  runs: number
+  model_calls: number
+  active_ms: number
+  prompt_tokens: number
+  cached_tokens?: number
+  completion_tokens: number
+  total_tokens: number
+  cost_usd: number
+}
+
+export interface TaskCost {
+  project: string
+  task_id: string
+  run_count: number
+  model_calls: number
+  first_started_at?: string
+  last_ended_at?: string
+  elapsed_ms: number
+  active_ms: number
+  total_prompt_tokens: number
+  total_cached_tokens?: number
+  total_completion_tokens: number
+  total_tokens: number
+  total_cost_usd: number
+  runs: TaskRunBreakdown[]
+  agents: TaskAgentRollup[]
+}
+
+export function taskCost(project: string, taskID: string): Promise<TaskCost> {
+  return request(`/v1/agent/cost/task?project=${encodeURIComponent(project)}&task=${encodeURIComponent(taskID)}`)
+}

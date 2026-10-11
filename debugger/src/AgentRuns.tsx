@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react'
 import { API_BASE, authHeaders } from './api'
 import { observationApi, type ObservationEvent } from './observationApi'
 import { workspaceApi, type Agent } from './workspaceApi'
@@ -6,8 +6,8 @@ import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
 import RunDisputes from './RunDisputes'
 import Markdown from './Markdown'
-import { useT } from './i18n'
-import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString } from './eventSummary'
+import { useT, useI18n, pluralT } from './i18n'
+import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString, formatDuration } from './eventSummary'
 import {
   Button,
   TextInput,
@@ -23,7 +23,7 @@ import {
 } from '@carbon/react'
 import { Time, Play, ChevronDown, ChevronRight } from '@carbon/icons-react'
 import ListFilter, { matchesFilter } from './ListFilter'
-import { runCost, type RunCost } from './kernelApi'
+import { runCost, taskCost, type RunCost, type TaskCost } from './kernelApi'
 
 const KERNEL_API = '/kernel-api'
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -214,6 +214,7 @@ function EventDetail({ event, t, project, response, reasoning }: { event: Observ
 
 export default function AgentRuns({ project }: { project: string }) {
   const t = useT()
+  const { locale } = useI18n()
   const [rows, setRows] = useState<RunRow[]>([])
   // Read the run from the URL up front (links from other panels point at
   // /agents?project=…&run=…) — an initializer, not an effect, so the first
@@ -227,6 +228,8 @@ export default function AgentRuns({ project }: { project: string }) {
   const [timeline, setTimeline] = useState<ObservationEvent[]>([])
   const [trajectory, setTrajectory] = useState<any>(null)
   const [runCostData, setRunCostData] = useState<RunCost | null>(null)
+  // Task budget spans every run of the task (follow-ups + delegation tree).
+  const [taskCostData, setTaskCostData] = useState<TaskCost | null>(null)
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
   const [reason, setReason] = useState('Reviewed in Agent Runs UI')
   const [busy, setBusy] = useState(false)
@@ -330,6 +333,7 @@ export default function AgentRuns({ project }: { project: string }) {
     // Drop extras from the previously selected run while loading.
     setTrajectory(null)
     setRunCostData(null)
+    setTaskCostData(null)
     try {
       const page = await observationApi.events(project.trim(), undefined, undefined, undefined, { run, limit: 500 })
       const root = page.events.find((event) => event.type === 'run.started')
@@ -368,6 +372,14 @@ export default function AgentRuns({ project }: { project: string }) {
       try {
         setRunCostData(await runCost(project.trim(), run))
       } catch { /* totals stay hidden */ }
+      // Task-wide budget: every run sharing the selected run's task — the
+      // conversation follow-ups and the whole delegation tree.
+      const taskID = root?.context?.task ?? ''
+      if (taskID) {
+        try {
+          setTaskCostData(await taskCost(project.trim(), taskID))
+        } catch { /* totals stay hidden */ }
+      }
     } catch (failure) { setError(message(failure)) }
     finally { if (!silent) setBusy(false) }
   }, [project])
@@ -719,6 +731,60 @@ export default function AgentRuns({ project }: { project: string }) {
                     </>)}
                   </Tile>
                 )}
+
+                {/* Task budget — totals across every run of the task:
+                    conversation follow-ups and the whole delegation tree. */}
+                {taskCostData && taskCostData.run_count > 0 && (() => {
+                  const running = taskCostData.runs.filter((r) => r.status === 'running').length
+                  const anyCost = taskCostData.agents.some((a) => a.cost_usd > 0)
+                  const agentLabel = (id: string) => {
+                    const name = id !== '-' ? agents.find((a) => a.id === id)?.name : undefined
+                    return name || (id === '-' ? (t('runs.task_unknown_agent') ?? 'unknown agent') : id)
+                  }
+                  return (
+                  <Tile>
+                    <Heading style={{ fontSize: '0.875rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      {t('runs.task_budget') ?? 'Task budget'}
+                      {running > 0 && <Tag type="cool-gray" size="sm">{pluralT(t, locale, 'runs.task_running_n', running)}</Tag>}
+                    </Heading>
+                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.75rem', fontSize: '0.8rem' }}
+                      title={taskCostData.first_started_at ? `${taskCostData.first_started_at} → ${taskCostData.last_ended_at ?? '…'}` : undefined}>
+                      <span><strong>{taskCostData.run_count}</strong> {pluralT(t, locale, 'runs.task_runs_n', taskCostData.run_count)}</span>
+                      <span><strong>{taskCostData.agents.length}</strong> {pluralT(t, locale, 'runs.task_agents_n', taskCostData.agents.length)}</span>
+                      <span>⏱ <strong>{formatDuration(taskCostData.elapsed_ms)}</strong> {t('runs.task_elapsed') ?? 'elapsed'}</span>
+                      <span>⚒ <strong>{formatDuration(taskCostData.active_ms)}</strong> {t('runs.task_active') ?? 'active'}</span>
+                      <span><strong>{taskCostData.total_tokens.toLocaleString()}</strong> {t('runs.tokens') ?? 'tokens'}</span>
+                      {(taskCostData.total_cached_tokens ?? 0) > 0 && (
+                        <span>↻ <strong>{(taskCostData.total_cached_tokens ?? 0).toLocaleString()}</strong> {t('runs.cached') ?? 'cached'}</span>
+                      )}
+                      {taskCostData.total_cost_usd > 0 && (
+                        <span><strong>${taskCostData.total_cost_usd.toFixed(4)}</strong> {t('runs.cost') ?? 'cost'}</span>
+                      )}
+                    </div>
+                    {taskCostData.agents.length > 0 && (
+                      <div>
+                        <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('runs.task_by_agent') ?? 'By agent'}</h5>
+                        <div style={{ display: 'grid', gridTemplateColumns: `minmax(8rem, 1.5fr) repeat(${anyCost ? 4 : 3}, minmax(4rem, 1fr))`, gap: '0.25rem 0.75rem', fontSize: '0.8rem', alignItems: 'baseline' }}>
+                          <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.task_col_agent') ?? 'Agent'}</span>
+                          <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.task_col_runs') ?? 'Runs'}</span>
+                          <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.task_active') ?? 'Active'}</span>
+                          <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.tokens') ?? 'Tokens'}</span>
+                          {anyCost && <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.cost') ?? 'Cost'}</span>}
+                          {taskCostData.agents.map((a) => (
+                            <Fragment key={a.agent_id}>
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.agent_id}>{agentLabel(a.agent_id)}</span>
+                              <span>{a.runs}</span>
+                              <span>{formatDuration(a.active_ms)}</span>
+                              <span>{a.total_tokens.toLocaleString()}{(a.cached_tokens ?? 0) > 0 ? <span style={{ color: 'var(--tm-text-3)' }}> ↻{((a.cached_tokens ?? 0) / a.total_tokens * 100).toFixed(0)}%</span> : null}</span>
+                              {anyCost && <span>{a.cost_usd > 0 ? `$${a.cost_usd.toFixed(4)}` : '—'}</span>}
+                            </Fragment>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </Tile>
+                  )
+                })()}
               </Stack>
             )}
           </Section>

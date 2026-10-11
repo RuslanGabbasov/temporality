@@ -11,14 +11,14 @@ import {
 } from '@carbon/react'
 import { Add, Attachment, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent, type UploadedFile } from './workspaceApi'
-import { runCost } from './kernelApi'
+import { runCost, taskCost } from './kernelApi'
 import Markdown, { linkifyWorkspacePaths } from './Markdown'
 import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
-import { useI18n } from './i18n'
-import { pseudoToolLabel } from './eventSummary'
+import { useI18n, pluralT } from './i18n'
+import { pseudoToolLabel, formatDuration } from './eventSummary'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -48,6 +48,8 @@ interface ChatMessage {
   streamLines?: string[]
   attachments?: UploadedFile[]
   totals?: string
+  /** Whole-task budget (all follow-up runs + delegation tree), docs: cost accounting. */
+  taskTotals?: string
 }
 
 interface Conversation {
@@ -80,21 +82,6 @@ function saveConversations(convs: Conversation[]) {
 }
 
 type Translate = (key: string, vars?: Record<string, string>) => string
-
-/** Pick a plural form for the locale: English one/other, Russian
- * one/few/many. Keys follow the {{key}}_one/_few/_other convention. */
-export function pluralT(t: Translate, locale: string, key: string, count: number, vars?: Record<string, string>): string {
-  const n = Math.abs(count)
-  let suffix: 'one' | 'few' | 'other'
-  if (locale === 'ru') {
-    const mod10 = n % 10, mod100 = n % 100
-    suffix = (mod10 === 1 && mod100 !== 11) ? 'one'
-      : (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) ? 'few' : 'other'
-  } else {
-    suffix = n === 1 ? 'one' : 'other'
-  }
-  return t(`${key}_${suffix}`, { ...vars, count: String(count) })
-}
 
 /** Format a stream event into a human-readable status line. */
 export function formatStreamEvent(type: string, outer: any, t: Translate, locale: string): string | null {
@@ -619,16 +606,34 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
           // Best-effort token/cost totals for the finished run; pricing may be
           // unconfigured, and this must never block the answer itself.
           let totals: string | undefined
+          // Whole-task budget: every run sharing this task (follow-ups and
+          // delegated children) so a long conversation totals its full spend.
+          let taskTotals: string | undefined
+          const [runCostResult, taskCostResult] = await Promise.all([
+            runCost(project, runId).catch(() => null),
+            run.task_id ? taskCost(project, run.task_id).catch(() => null) : Promise.resolve(null),
+          ])
           try {
-            const cost = await runCost(project, runId)
-            const parts: string[] = []
-            const tokens = (cost.total_prompt_tokens ?? 0) + (cost.total_completion_tokens ?? 0)
-            if (tokens > 0) parts.push(t('chat.totals.tokens', { count: tokens.toLocaleString(locale) }))
-            if ((cost.total_cached_tokens ?? 0) > 0) parts.push(t('chat.totals.cached', { count: (cost.total_cached_tokens ?? 0).toLocaleString(locale) }))
-            if (cost.total_cost_usd > 0) parts.push(`$${cost.total_cost_usd.toFixed(4)}`)
-            if (parts.length) totals = parts.join(' · ')
+            const cost = runCostResult
+            if (cost) {
+              const parts: string[] = []
+              const tokens = (cost.total_prompt_tokens ?? 0) + (cost.total_completion_tokens ?? 0)
+              if (tokens > 0) parts.push(t('chat.totals.tokens', { count: tokens.toLocaleString(locale) }))
+              if ((cost.total_cached_tokens ?? 0) > 0) parts.push(t('chat.totals.cached', { count: (cost.total_cached_tokens ?? 0).toLocaleString(locale) }))
+              if (cost.total_cost_usd > 0) parts.push(`$${cost.total_cost_usd.toFixed(4)}`)
+              if (parts.length) totals = parts.join(' · ')
+            }
+            const task = taskCostResult
+            if (task && task.run_count > 1) {
+              const parts: string[] = [pluralT(t, locale, 'chat.task_totals.runs_n', task.run_count), pluralT(t, locale, 'chat.task_totals.agents_n', task.agents.length)]
+              if (task.elapsed_ms > 0) parts.push(`⏱ ${formatDuration(task.elapsed_ms)}`)
+              if (task.total_tokens > 0) parts.push(t('chat.totals.tokens', { count: task.total_tokens.toLocaleString(locale) }))
+              if ((task.total_cached_tokens ?? 0) > 0) parts.push(t('chat.totals.cached', { count: (task.total_cached_tokens ?? 0).toLocaleString(locale) }))
+              if (task.total_cost_usd > 0) parts.push(`$${task.total_cost_usd.toFixed(4)}`)
+              taskTotals = parts.join(' · ')
+            }
           } catch { /* totals stay hidden */ }
-          updateMsg(convId, runId, { content: answer, status: run.status, totals })
+          updateMsg(convId, runId, { content: answer, status: run.status, totals, taskTotals })
           return
         }
       } catch { /* transient — keep polling */ }
@@ -846,6 +851,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                         <Tag type={STATUS_COLORS[msg.status] || 'gray'} size="sm">{msg.status}</Tag>
                         {msg.role === 'assistant' && msg.totals && (
                           <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem' }}>{msg.totals}</span>
+                        )}
+                        {msg.role === 'assistant' && msg.taskTotals && (
+                          <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem' }} title={t('chat.task_totals.title') ?? 'Whole-task budget: every run of this task (follow-ups and delegated agents)'}>Σ {msg.taskTotals}</span>
                         )}
                         {activeConv && (
                           <button

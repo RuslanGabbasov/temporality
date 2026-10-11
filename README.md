@@ -226,6 +226,7 @@ curl -X POST http://localhost:8090/v1/agent/operations/reconcile \
 | `GET /v1/workspace/projects/{id}/chains` | Все цепочки |
 | `GET /v1/workspace/runs/{id}/stream` | SSE-поток событий |
 | `GET /v1/workspace/runs/{id}/stream` | + model.text_delta, model.reasoning |
+| `GET /v1/agent/cost/task?project=P&task=T` | Бюджет задачи: все раны (продолжения чата + дерево делегирования) с суммой времени/токенов/стоимости |
 
 ## Workspace
 

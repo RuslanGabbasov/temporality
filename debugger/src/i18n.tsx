@@ -50,5 +50,20 @@ export function useT() {
   return useI18n().t
 }
 
+/** Pick a plural form for the locale: English one/other, Russian
+ * one/few/many. Keys follow the {{key}}_one/_few/_other convention. */
+export function pluralT(t: (key: string, vars?: Record<string, string>) => string, locale: string, key: string, count: number, vars?: Record<string, string>): string {
+  const n = Math.abs(count)
+  let suffix: 'one' | 'few' | 'other'
+  if (locale === 'ru') {
+    const mod10 = n % 10, mod100 = n % 100
+    suffix = (mod10 === 1 && mod100 !== 11) ? 'one'
+      : (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) ? 'few' : 'other'
+  } else {
+    suffix = n === 1 ? 'one' : 'other'
+  }
+  return t(`${key}_${suffix}`, { ...vars, count: String(count) })
+}
+
 export { LOCALES } from './locales'
 export type { Locale }

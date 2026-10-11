@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { formatStreamEvent, pluralT } from './Workspace'
+import { formatStreamEvent } from './Workspace'
+import { pluralT } from './i18n'
 import { en } from './locales/en'
 import { ru } from './locales/ru'
 
