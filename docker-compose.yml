@@ -64,6 +64,21 @@ services:
       - "7233:7233"
       - "8233:8233"
 
+  # Self-hosted meta-search backing the agents' web_search tool. JSON output
+  # must stay enabled in searxng-settings.yml — the kernel parses format=json.
+  searxng:
+    image: searxng/searxng:latest
+    volumes:
+      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
+    ports:
+      - "127.0.0.1:8889:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
   agent-kernel:
     build:
       context: .
@@ -133,6 +148,11 @@ services:
       KERNEL_WEBHOOK_SECRET: ${KERNEL_WEBHOOK_SECRET:-}
       # Base URL of the debugger UI, used for links inside notifications.
       KERNEL_UI_URL: ${KERNEL_UI_URL:-}
+      # Web research tools: SearXNG backs web_search (empty disables the tool
+      # while web_fetch keeps working); AllowPrivate lets web_fetch reach
+      # internal hosts (docs servers) — off by default, SSRF guard stays strict.
+      KERNEL_SEARXNG_URL: ${KERNEL_SEARXNG_URL:-http://searxng:8080}
+      KERNEL_WEB_FETCH_ALLOW_PRIVATE: ${KERNEL_WEB_FETCH_ALLOW_PRIVATE:-}
     ports:
       - "8090:8090"
     volumes:
@@ -153,6 +173,8 @@ services:
       journal:
         condition: service_healthy
       temporal:
+        condition: service_started
+      searxng:
         condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8090/healthz || exit 1"]

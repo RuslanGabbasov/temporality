@@ -51,7 +51,9 @@ docker compose up --build -d
 ```
 
 This starts PostgreSQL, the Journal (`:8080`), the debugger (`:3000`), the
-Temporal dev server (UI on `:8233`) and the Agent Kernel (`:8090`).
+Temporal dev server (UI on `:8233`), the Agent Kernel (`:8090`) and SearXNG
+(`127.0.0.1:8889`, the meta-search behind the agents' `web_search` tool; disable
+it with an empty `KERNEL_SEARXNG_URL`).
 
 Stop the stack while keeping data:
 

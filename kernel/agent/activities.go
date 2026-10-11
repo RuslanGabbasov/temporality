@@ -59,8 +59,16 @@ type Activities struct {
 	Sandbox  SandboxRunner
 	// Secrets resolves agent-granted secret names into values at the execution
 	// boundary; nil disables secret injection (tests, env-only setups).
-	Secrets       *SecretBroker
+	Secrets *SecretBroker
+	// NetworkAccess mirrors the run's network capability: web tools register
+	// only when the agent is allowed to reach the internet (PrepareRun).
 	NetworkAccess bool
+	// SearXNGURL is the base URL of the self-hosted SearXNG instance backing
+	// the web_search tool; empty disables the tool.
+	SearXNGURL string
+	// WebFetchAllowPrivate permits web_fetch to reach private/loopback targets
+	// (e.g. an internal docs server); off by default — SSRF guard stays strict.
+	WebFetchAllowPrivate bool
 	// Tokens is the ephemeral live-token bus feeding the /runs/{id}/tokens SSE
 	// endpoint; nil disables streaming (tests run the blocking path).
 	Tokens *TokenBus
@@ -163,6 +171,18 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 			return err
 		}
 		input.WorkspacePath = workspace
+	}
+	// Web research tools (docs/web-research.md): registered only for agents
+	// with the network capability. With network on, the sandbox can already
+	// curl the same endpoints — the tools are the safe, capped, observable
+	// version of that, so they ride the sandbox auto-approve policy.
+	if input.NetworkAccess {
+		input.AutoApproveTools = append(input.AutoApproveTools, "web_fetch")
+		input.Tools = append(input.Tools, webFetchTool)
+		if a.SearXNGURL != "" {
+			input.AutoApproveTools = append(input.AutoApproveTools, "web_search")
+			input.Tools = append(input.Tools, webSearchTool)
+		}
 	}
 	return nil
 }
@@ -360,6 +380,10 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleWriteFile(request)
 	case "edit_file":
 		return a.handleEditFile(request)
+	case "web_fetch":
+		return a.handleWebFetch(ctx, request)
+	case "web_search":
+		return a.handleWebSearch(ctx, request)
 	case "list_triggers":
 		return a.handleListTriggers(ctx, request)
 	case "human_contacts":

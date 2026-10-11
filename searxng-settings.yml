@@ -1,0 +1,11 @@
+# SearXNG settings for the Temporality dev stack.
+# use_default_settings keeps engine lists maintained upstream; we only enable
+# the JSON output format (off by default) that the kernel's web_search parses.
+use_default_settings: true
+server:
+  secret_key: "temporality-dev-secret" # replace for anything beyond local dev
+  limiter: false # dev stack runs behind the compose network
+search:
+  formats:
+    - html
+    - json

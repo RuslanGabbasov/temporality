@@ -325,6 +325,10 @@ func main() {
 	// run_command of an agent with granted secrets fails closed.
 	activities.Secrets.WorkspaceURL = activities.WorkspaceURL
 	activities.Secrets.WorkspaceToken = activities.WorkspaceToken
+	// Web research tools (docs/web-research.md): SearXNG backs web_search —
+	// empty URL leaves the tool unregistered while web_fetch still works.
+	activities.SearXNGURL = strings.TrimRight(strings.TrimSpace(os.Getenv("KERNEL_SEARXNG_URL")), "/")
+	activities.WebFetchAllowPrivate = strings.EqualFold(strings.TrimSpace(os.Getenv("KERNEL_WEB_FETCH_ALLOW_PRIVATE")), "true")
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]bool{"ok": true}) })
 	mux.HandleFunc("GET /v1/agent/whoami", func(w http.ResponseWriter, r *http.Request) {

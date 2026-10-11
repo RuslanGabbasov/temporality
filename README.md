@@ -51,7 +51,8 @@ docker compose up --build -d
 ```
 
 Поднимаются: PostgreSQL, Journal (`:8080`), debugger (`:3000`), dev-сервер
-Temporal (UI на `:8233`) и Agent Kernel (`:8090`).
+Temporal (UI на `:8233`), Agent Kernel (`:8090`) и SearXNG (`127.0.0.1:8889`, метапоиск
+для тула агентов `web_search`; отключается пустым `KERNEL_SEARXNG_URL`).
 
 Остановить стек, сохранив данные:
 
