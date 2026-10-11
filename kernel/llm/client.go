@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -35,10 +36,23 @@ type ToolDef struct {
 // Message is one chat message. ToolCallID links assistant tool calls to the
 // tool-role replies.
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	// Images attach vision blocks to a user message (docs/web-research.md §3);
+	// on the wire they become image_url content parts next to the text. Tools
+	// cannot return images directly — OpenAI-compatible providers only accept
+	// them in user messages — so tool results carry blocks that the workflow
+	// injects as a follow-up user message.
+	Images     []ImageBlock `json:"images,omitempty"`
+	ToolCalls  []ToolCall   `json:"tool_calls,omitempty"`
+	ToolCallID string       `json:"tool_call_id,omitempty"`
+}
+
+// ImageBlock is one image payload for a user message: raw bytes plus the
+// MIME type. The wire form is a base64 data URI inside an image_url part.
+type ImageBlock struct {
+	MIMEType string `json:"mime_type"`
+	Data     []byte `json:"data,omitempty"`
 }
 
 // ToolCall is a model-requested tool invocation. Args are already decoded
@@ -205,10 +219,36 @@ type toolCallWire struct {
 }
 
 type requestMessage struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	// Images are folded into content by MarshalJSON (multimodal parts form);
+	// never serialized as a separate field.
+	Images     []ImageBlock   `json:"-"`
 	ToolCalls  []toolCallWire `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
+}
+
+// MarshalJSON renders image-bearing messages in the multimodal content form
+// OpenAI-compatible providers require — an array of typed parts (text plus
+// one image_url data-URI part per image). Messages without images keep the
+// plain string form: many gateways only accept that for ordinary turns.
+func (rm requestMessage) MarshalJSON() ([]byte, error) {
+	if len(rm.Images) == 0 {
+		type plain requestMessage
+		return json.Marshal(plain(rm))
+	}
+	blocks := make([]map[string]any, 0, len(rm.Images)+1)
+	blocks = append(blocks, map[string]any{"type": "text", "text": rm.Content})
+	for _, image := range rm.Images {
+		uri := "data:" + image.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)
+		blocks = append(blocks, map[string]any{"type": "image_url", "image_url": map[string]any{"url": uri}})
+	}
+	return json.Marshal(struct {
+		Role       string           `json:"role"`
+		Content    []map[string]any `json:"content"`
+		ToolCalls  []toolCallWire   `json:"tool_calls,omitempty"`
+		ToolCallID string           `json:"tool_call_id,omitempty"`
+	}{Role: rm.Role, Content: blocks, ToolCalls: rm.ToolCalls, ToolCallID: rm.ToolCallID})
 }
 
 type chatRequest struct {
@@ -347,7 +387,7 @@ func reasoningRequest(preset string) map[string]any {
 func toRequestMessages(messages []Message) []requestMessage {
 	out := make([]requestMessage, 0, len(messages))
 	for _, m := range messages {
-		rm := requestMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+		rm := requestMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID, Images: m.Images}
 		for _, call := range m.ToolCalls {
 			var tc toolCallWire
 			tc.ID = call.ID

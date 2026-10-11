@@ -81,8 +81,10 @@ func approvalOperation(operationID, tool string, args map[string]any, readOnly b
 		operationType, risk = "workspace.write", "medium"
 	case strings.HasPrefix(tool, "mcp__"):
 		operationType, risk = "mcp.call", "high"
-	case tool == "web_fetch" || tool == "web_search":
+	case tool == "web_fetch" || tool == "web_search" || tool == "fetch_image":
 		operationType, risk = "web.research", "low"
+	case tool == "view_image":
+		operationType, risk = "workspace.read", "low"
 	}
 	summary := "Call tool " + tool
 	if tool == "run_command" {
@@ -120,6 +122,21 @@ func approvalOperation(operationID, tool string, args map[string]any, readOnly b
 					summary = "Fetch page: " + target
 				} else {
 					summary = "Search web: " + target
+				}
+			}
+		}
+	}
+	if tool == "fetch_image" || tool == "view_image" {
+		if displayedArgs, ok := display.(map[string]any); ok {
+			target, _ := displayedArgs["url"].(string)
+			if target == "" {
+				target, _ = displayedArgs["path"].(string)
+			}
+			if target != "" {
+				if tool == "fetch_image" {
+					summary = "Fetch image: " + target
+				} else {
+					summary = "View image: " + target
 				}
 			}
 		}

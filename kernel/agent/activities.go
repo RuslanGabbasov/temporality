@@ -192,6 +192,8 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 			input.AutoApproveTools = append(input.AutoApproveTools, "web_search")
 			input.Tools = append(input.Tools, webSearchTool)
 		}
+		input.AutoApproveTools = append(input.AutoApproveTools, "fetch_image")
+		input.Tools = append(input.Tools, fetchImageTool)
 	}
 	return nil
 }
@@ -393,6 +395,10 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleWebFetch(ctx, request)
 	case "web_search":
 		return a.handleWebSearch(ctx, request)
+	case "view_image":
+		return a.handleViewImage(request)
+	case "fetch_image":
+		return a.handleFetchImage(ctx, request)
 	case "list_triggers":
 		return a.handleListTriggers(ctx, request)
 	case "human_contacts":

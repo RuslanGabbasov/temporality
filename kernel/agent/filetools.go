@@ -29,6 +29,7 @@ const (
 )
 
 var fileToolDefs = []llm.ToolDef{
+	viewImageTool,
 	{
 		Name:        "read_file",
 		Description: "Read a text file from the workspace. Returns the content directly, with no shell quoting hazards. Prefer this over cat for reading files.",

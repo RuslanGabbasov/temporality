@@ -241,6 +241,11 @@ type ToolResult struct {
 	Content  string                 `json:"content"`
 	Evidence []observation.Evidence `json:"evidence,omitempty"`
 	ExitCode *int                   `json:"exit_code,omitempty"`
+	// Images carries vision blocks produced by image tools (view_image,
+	// fetch_image). OpenAI-compatible APIs accept image parts only in user
+	// messages, so the workflow re-injects them as one follow-up user message
+	// after the turn's tool replies; the tool content stays metadata-only.
+	Images []llm.ImageBlock `json:"images,omitempty"`
 }
 
 type Approval struct {
@@ -1179,6 +1184,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			executed[callKey] = executedCall{operationID: operationID, pending: pending}
 			return "", true, nil
 		}
+		// Vision blocks (view_image / fetch_image) produced by this turn's tool
+		// calls. OpenAI-compatible APIs accept image parts only in user messages,
+		// never in tool results, so after every tool reply of the turn has landed
+		// they are re-injected as one follow-up user message (append-only history:
+		// prompt-cache compatible, dedup replays already carry the blocks).
+		var turnImages []llm.ImageBlock
 		for _, call := range completion.ToolCalls {
 			operationID := fmt.Sprintf("%s/%s", frame, call.ID)
 			argumentsHash := operationArgumentsHash(call.Args)
@@ -1657,6 +1668,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					}
 				}
 				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: toolResult.Content})
+				turnImages = append(turnImages, toolResult.Images...)
 				for _, evidence := range toolResult.Evidence {
 					if err := emit(activityCtx, state, "evidence.observed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool_call_id": call.ID, "ref": evidence.Ref, "type": evidence.Type}); err != nil {
 						return result, err
@@ -1671,6 +1683,17 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if err := awaitDelegation(pending); err != nil {
 				return result, err
 			}
+		}
+		// Vision injection point: all tool replies of the turn (delegated ones
+		// included) have landed, so the image blocks ride one trailing user
+		// message — inserting them between tool messages would break the
+		// tool-replies-must-stay-contiguous contract of the API.
+		if len(turnImages) > 0 {
+			messages = append(messages, llm.Message{
+				Role:    "user",
+				Content: "Image(s) produced by this turn's tool calls are attached below as vision blocks; their metadata is in the tool results above.",
+				Images:  turnImages,
+			})
 		}
 		if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "tool_calls": len(completion.ToolCalls)}); err != nil {
 			return result, err
@@ -2007,6 +2030,7 @@ var readOnlyTools = map[string]bool{
 	"search": true, "mcp__search": true,
 	"glob": true, "mcp__glob": true,
 	"grep": true, "mcp__grep": true,
+	"view_image": true, "mcp__view_image": true,
 }
 
 // isReadOnlyTool classifies a tool as side-effect free. Namespaced MCP tools
@@ -2086,6 +2110,7 @@ func runCompletedTotals(turns, totalTokens int, costUSD float64) map[string]any 
 // precedence over auto-approval.
 var sandboxAutoApprovedTools = map[string]bool{
 	"run_command": true, "write_file": true, "edit_file": true,
+	"web_fetch": true, "web_search": true, "fetch_image": true,
 }
 
 // policySafeTools are exempt from policy-mandated tool approval

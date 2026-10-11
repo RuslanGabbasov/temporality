@@ -1,10 +1,11 @@
 package llm
 
 import (
-	"fmt"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -325,5 +326,57 @@ func TestStreamCompleteParsesUsageOnlyChunk(t *testing.T) {
 	}
 	if completion.Usage.TotalTokens != 10 || completion.Usage.CachedTokens != 4 {
 		t.Errorf("usage = %+v, want total 10 cached 4", completion.Usage)
+	}
+}
+
+func TestImageMessagesMarshalAsMultimodalParts(t *testing.T) {
+	var lastRequest map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		lastRequest = body
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(okResponse))
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 10 * time.Second})
+	pngHeader := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+	messages := []Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "look", Images: []ImageBlock{{MIMEType: "image/png", Data: pngHeader}}},
+	}
+	if _, err := client.Complete(context.Background(), messages, nil); err != nil {
+		t.Fatalf("Complete with images: %v", err)
+	}
+	raw, _ := lastRequest["messages"].([]any)
+	if len(raw) != 2 {
+		t.Fatalf("messages = %d, want 2", len(raw))
+	}
+	// Plain messages must stay plain strings.
+	if got := raw[0].(map[string]any)["content"]; got != "sys" {
+		t.Errorf("system content = %T(%v), want plain string", got, got)
+	}
+	// Image-bearing messages render as typed content parts.
+	parts, ok := raw[1].(map[string]any)["content"].([]any)
+	if !ok {
+		t.Fatalf("user content is not a parts array: %T", raw[1].(map[string]any)["content"])
+	}
+	if len(parts) != 2 {
+		t.Fatalf("parts = %d, want text+image", len(parts))
+	}
+	if typ := parts[0].(map[string]any)["type"]; typ != "text" {
+		t.Errorf("first part type = %v, want text", typ)
+	}
+	imagePart, ok := parts[1].(map[string]any)["image_url"].(map[string]any)
+	if !ok {
+		t.Fatalf("second part is not image_url: %v", parts[1])
+	}
+	uri, _ := imagePart["url"].(string)
+	want := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngHeader)
+	if uri != want {
+		t.Errorf("image url = %q, want data URI", uri[:min(30, len(uri))])
 	}
 }
