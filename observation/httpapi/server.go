@@ -115,6 +115,10 @@ func (s *Server) appendObservations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range input.Events {
+		// Second line of defense (docs/secrets-management.md §4.3): recognized
+		// secret patterns are rewritten before validation and storage, so a
+		// leaked token in a tool output never lands in the journal.
+		observation.RedactEvent(&input.Events[i])
 		if err := input.Events[i].Validate(); err != nil {
 			writeError(w, http.StatusUnprocessableEntity, errors.New("events["+strconv.Itoa(i)+"]: "+err.Error()))
 			return

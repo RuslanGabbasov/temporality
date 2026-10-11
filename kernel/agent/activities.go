@@ -53,10 +53,13 @@ type Activities struct {
 	// APIToken authenticates direct journal calls (hints, knowledge lookup)
 	// when the journal requires bearer auth; it mirrors TEMPORALITY_API_TOKEN
 	// used by the event outbox publisher.
-	APIToken      string
-	MCP           *mcpclient.Registry
-	SourceID      string
-	Sandbox       SandboxRunner
+	APIToken string
+	MCP      *mcpclient.Registry
+	SourceID string
+	Sandbox  SandboxRunner
+	// Secrets resolves agent-granted secret names into values at the execution
+	// boundary; nil disables secret injection (tests, env-only setups).
+	Secrets       *SecretBroker
 	NetworkAccess bool
 	// Tokens is the ephemeral live-token bus feeding the /runs/{id}/tokens SSE
 	// endpoint; nil disables streaming (tests run the blocking path).
@@ -319,6 +322,15 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		if value, ok := request.Arguments["timeout_sec"].(float64); ok {
 			timeout = int(value)
 		}
+		// Secrets resolve here — at the execution boundary: values go straight
+		// into the container environment and never enter the model context.
+		secretEnv, deniedSecrets, sErr := a.sandboxSecretEnv(ctx, request)
+		if sErr != nil {
+			return ToolResult{}, sErr
+		}
+		if len(deniedSecrets) > 0 {
+			return ToolResult{Content: fmt.Sprintf("error: secrets not available for this agent: %s", strings.Join(deniedSecrets, ", "))}, nil
+		}
 		if faultAfterEffect(request.RunID, "run_command", request.OperationID) {
 			// Fault injection for live reconciliation drills: run the command for
 			// real (the effect lands), then report a worker-style crash so the
@@ -327,7 +339,7 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 			if a.NetworkAccess {
 				net = "bridge"
 			}
-			if _, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.ReadOnly || request.Role == "reviewer" || request.Role == "qa", Network: net}); err != nil {
+			if _, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.ReadOnly || request.Role == "reviewer" || request.Role == "qa", Network: net, Env: secretEnv}); err != nil {
 				return ToolResult{}, err
 			}
 			return ToolResult{}, fmt.Errorf("injected worker crash after effect (operation %s)", request.OperationID)
@@ -336,7 +348,7 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		if a.NetworkAccess {
 			net = "bridge"
 		}
-		result, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.ReadOnly || request.Role == "reviewer" || request.Role == "qa", Network: net})
+		result, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.ReadOnly || request.Role == "reviewer" || request.Role == "qa", Network: net, Env: secretEnv})
 		if err != nil {
 			return ToolResult{}, err
 		}
@@ -362,6 +374,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleDeleteTrigger(ctx, request)
 	case "skill_search":
 		return a.handleSkillSearch(ctx, request)
+	case "secret_list":
+		return a.handleSecretList(ctx, request)
 	case "knowledge_lookup":
 		return a.handleKnowledgeLookupTool(ctx, request)
 	case "skill_inspect", "skill_validate", "skill_history", "skill_executions", "skill_memory":

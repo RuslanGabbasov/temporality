@@ -37,6 +37,11 @@ type Request struct {
 	TimeoutSeconds int
 	ReadOnly       bool
 	Network        string // "" (use Docker default), "none", "bridge"
+	// Env carries injected environment variables (KEY=VALUE) for this command —
+	// e.g. agent-granted secrets resolved at the execution boundary. They pass
+	// through exec argv (no shell), but keys still get validated to keep docker
+	// CLI argument parsing unambiguous.
+	Env []string
 }
 
 type Result struct {
@@ -165,6 +170,9 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 	if err := validateCommand(request.Command); err != nil {
 		return Result{}, err
 	}
+	if err := validateEnv(request.Env); err != nil {
+		return Result{}, err
+	}
 	workspace, err := d.ResolveWorkspace(request.Workspace)
 	if err != nil {
 		return Result{}, err
@@ -253,6 +261,9 @@ func (d *Docker) arguments(workspace string, request Request, name string) []str
 			"--env", "GOMODCACHE=/cache/go-mod",
 			"--env", "GOTMPDIR=/scratch")
 	}
+	for _, entry := range request.Env {
+		args = append(args, "--env", entry)
+	}
 	args = append(args, d.Image)
 	return append(args, request.Command...)
 }
@@ -300,6 +311,33 @@ func (d *Docker) removeContainer(name string) error {
 		return nil
 	}
 	return fmt.Errorf("remove sandbox container: %w: %s", err, strings.TrimSpace(string(output)))
+}
+
+// validateEnv keeps injected variables within docker --env expectations: a
+// non-empty KEY of [A-Za-z_][A-Za-z0-9_]* followed by = and any value. The
+// total size is capped like command arguments so a huge secret cannot blow up
+// argv limits.
+func validateEnv(entries []string) error {
+	total := 0
+	for _, entry := range entries {
+		equals := strings.IndexByte(entry, '=')
+		if equals <= 0 {
+			return fmt.Errorf("env entry %q must be KEY=VALUE", entry)
+		}
+		key := entry[:equals]
+		for i := 0; i < len(key); i++ {
+			c := key[i]
+			alpha := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_'
+			if i == 0 && !alpha || i > 0 && !(alpha || c >= '0' && c <= '9') {
+				return fmt.Errorf("env key %q has invalid characters", key)
+			}
+		}
+		total += len(entry)
+	}
+	if total > maxTotalArgs {
+		return errors.New("env exceeds total size limit")
+	}
+	return nil
 }
 
 func validateCommand(args []string) error {

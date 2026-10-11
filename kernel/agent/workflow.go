@@ -76,6 +76,11 @@ type RunInput struct {
 	// MCPServers selects registry servers for this run; empty keeps the
 	// legacy env server (docs: MCP server registry).
 	MCPServers []string `json:"mcp_servers,omitempty"`
+	// Secrets are the workspace secret names granted to this run's agent
+	// (docs/secrets-management.md §8): resolved to SECRET_<NAME> sandbox env
+	// vars at the execution boundary. Names only — values never enter the
+	// workflow or the model context.
+	Secrets []string `json:"secrets,omitempty"`
 	// ToolAllowlist restricts the tools offered to (and executed for) this
 	// run across kernel and MCP tools; empty allows everything configured.
 	ToolAllowlist []string `json:"tool_allowlist,omitempty"`
@@ -222,6 +227,9 @@ type ToolRequest struct {
 	// AllowedTools mirrors RunInput.ToolAllowlist so the activity also
 	// rejects calls to tools that were never advertised to the model.
 	AllowedTools []string `json:"allowed_tools,omitempty"`
+	// Secrets mirrors RunInput.Secrets: the names resolvable into sandbox env
+	// for this run (docs/secrets-management.md §8).
+	Secrets []string `json:"secrets,omitempty"`
 	// DeniedTools mirrors RunInput.DenyTools so the activity also rejects
 	// calls to tools removed by capability enforcement.
 	DeniedTools []string `json:"denied_tools,omitempty"`
@@ -1501,7 +1509,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						// Wall latency from the workflow clock covers scheduling, retries
 						// and execution — the honest end-to-end cost of the operation.
 						toolStarted := workflow.Now(ctx)
-						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly}).Get(ctx, &toolResult); err != nil {
+						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets}).Get(ctx, &toolResult); err != nil {
 							toolFailed = true
 							failure := toolFailureData(operationID, argumentsHash, call.Name, err)
 							failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
@@ -1597,7 +1605,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				// Same wall-clock semantics as the approval path: scheduling,
 				// retries and execution in one number.
 				toolStarted := workflow.Now(ctx)
-				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly}).Get(ctx, &toolResult); err != nil {
+				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets}).Get(ctx, &toolResult); err != nil {
 					toolFailed = true
 					failure := toolFailureData(operationID, argumentsHash, call.Name, err)
 					failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
@@ -2567,6 +2575,7 @@ func KernelTools() []llm.ToolDef {
 		{Name: "update_trigger", Description: "Update an existing trigger's configuration (enable/disable, change cron, update prompt, etc.)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}, "enabled": map[string]any{"type": "boolean"}, "cron": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},
 		{Name: "delete_trigger", Description: "Delete a trigger by ID", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},
 		{Name: "skill_search", Description: "List living skills in this project: versioned capability packages (SKILL.md instructions + manifest contract) stored in the skill registry, not files in the repo. Returns id, name, version, capabilities, tools", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "Optional space-separated keywords; a skill matches when any keyword occurs in id, name, capability or tool (case-insensitive); results are ranked by keyword coverage"}}}},
+		{Name: "secret_list", Description: "List the secrets granted to this agent: names and descriptions only, never values. Granted secrets are injected automatically as SECRET_<NAME> environment variables into every run_command call — reference them from env, do not paste literals", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
 		{Name: "knowledge_lookup", Description: "Fetch the full knowledge item (proposition, state, topics, entities, evidence, history) by its knowledge_id. Priming cues carry a knowledge_id handle; call this when a compact cue matters to your task and you need the grounds, details or lifecycle behind it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"knowledge_id": map[string]any{"type": "string", "description": "The knowledge_id from a priming cue or a prior run"}}, "required": []string{"knowledge_id"}}},
 		{Name: "skill_inspect", Description: "Show a skill's full SKILL.md and manifest contract (capabilities, tools, runtime, preconditions, postconditions, evidence)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_validate", Description: "Validate a skill's manifest and return issues", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},

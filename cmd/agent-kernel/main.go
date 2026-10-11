@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,7 +44,7 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := controlplane.LoadFileSecrets("DATABASE_URL", "TEMPORALITY_MODEL_API_KEY", "TEMPORALITY_API_TOKEN", "KERNEL_AUTH_TOKENS"); err != nil {
+	if err := controlplane.LoadFileSecrets("DATABASE_URL", "TEMPORALITY_MODEL_API_KEY", "TEMPORALITY_API_TOKEN", "KERNEL_AUTH_TOKENS", "KERNEL_SECRET_MASTER_KEY"); err != nil {
 		log.Error("load file secrets", "error", err)
 		os.Exit(1)
 	}
@@ -203,6 +204,10 @@ func main() {
 		log.Error("migrate workspace v49", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000050_secrets.up.sql"); err != nil {
+		log.Error("migrate workspace v50 (secrets)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -232,7 +237,15 @@ func main() {
 			UIURL:             row.UIURL,
 		}, nil
 	}
-	loadMCPServers(ctx, log, ws, activities.MCP)
+	// Secrets (docs/secrets-management.md Phase 1): the broker resolves
+	// agent-granted secrets over the loopback workspace API with a TTL cache;
+	// the master key stays in this process and never reaches activities.
+	secretMasterKey := loadSecretMasterKey(log)
+	activities.Secrets = &agent.SecretBroker{
+		HTTP: &http.Client{Timeout: 10 * time.Second},
+		TTL:  secretCacheTTL(),
+	}
+	loadMCPServers(ctx, log, ws, activities.MCP, secretMasterKey)
 	temporalClient, err := client.Dial(client.Options{HostPort: env("TEMPORAL_ADDRESS", client.DefaultHostPort)})
 	if err != nil {
 		log.Error("connect Temporal", "error", err)
@@ -1443,7 +1456,7 @@ func main() {
 			ID: req.ID, ProjectID: req.ProjectID, Name: req.Name, Description: req.Description,
 			Model: req.Model, Provider: req.Provider, SystemPrompt: req.SystemPrompt,
 			Temperature: req.Temperature, MaxTokens: req.MaxTokens,
-			Skills: req.Skills, MCPServers: req.MCPServers, Tools: req.Tools,
+			Skills: req.Skills, MCPServers: req.MCPServers, Secrets: req.Secrets, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
 			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels,
 			Definition: req.Definition, OrgUnitID: req.OrgUnitID,
@@ -1492,7 +1505,7 @@ func main() {
 			ID: r.PathValue("agentID"), ProjectID: req.ProjectID, Name: req.Name, Description: req.Description,
 			Model: req.Model, Provider: req.Provider, SystemPrompt: req.SystemPrompt,
 			Temperature: req.Temperature, MaxTokens: req.MaxTokens,
-			Skills: req.Skills, MCPServers: req.MCPServers, Tools: req.Tools,
+			Skills: req.Skills, MCPServers: req.MCPServers, Secrets: req.Secrets, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
 			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels,
 			Definition: req.Definition, OrgUnitID: req.OrgUnitID,
@@ -1541,6 +1554,20 @@ func main() {
 				}
 				if !workspace.OrgVisible(server.OrgUnitID, units) {
 					writeError(w, 403, fmt.Errorf("MCP server %q is not available in your org scope", serverID))
+					return
+				}
+			}
+			for _, secretName := range a.Secrets {
+				secret, sErr := ws.GetSecretByName(r.Context(), secretName)
+				if errors.Is(sErr, workspace.ErrNotFound) {
+					continue
+				}
+				if sErr != nil {
+					writeError(w, 500, sErr)
+					return
+				}
+				if !workspace.OrgVisible(secret.OrgUnitID, units) {
+					writeError(w, 403, fmt.Errorf("secret %q is not available in your org scope", secretName))
 					return
 				}
 			}
@@ -3628,7 +3655,11 @@ func main() {
 			req.ID = slugify(req.Name)
 		}
 		server := req.toServer("")
-		cfg := mcpConfig(server)
+		cfg, rErr := resolveMCPConfigSecrets(r.Context(), ws, mcpConfig(server), secretMasterKey)
+		if rErr != nil {
+			writeError(w, 422, rErr)
+			return
+		}
 		if err := cfg.Validate(); err != nil {
 			writeError(w, 422, err)
 			return
@@ -3687,7 +3718,11 @@ func main() {
 		// through the admin binding endpoint, so the payload value is ignored
 		// entirely and the previous binding is preserved.
 		server.OrgUnitID = current.OrgUnitID
-		cfg := mcpConfig(server)
+		cfg, rErr := resolveMCPConfigSecrets(r.Context(), ws, mcpConfig(server), secretMasterKey)
+		if rErr != nil {
+			writeError(w, 422, rErr)
+			return
+		}
 		if err := cfg.Validate(); err != nil {
 			writeError(w, 422, err)
 			return
@@ -3732,7 +3767,11 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
-		cfg := mcpConfig(req.toServer(""))
+		cfg, rErr := resolveMCPConfigSecrets(r.Context(), ws, mcpConfig(req.toServer("")), secretMasterKey)
+		if rErr != nil {
+			writeError(w, 422, rErr)
+			return
+		}
 		if err := cfg.Validate(); err != nil {
 			writeError(w, 422, err)
 			return
@@ -3753,6 +3792,251 @@ func main() {
 			"servers":  activities.MCP.ServerTools(),
 			"builtins": builtinToolInfo(activities),
 		})
+	})
+
+	// Secrets registry (docs/secrets-management.md Phase 1): metadata CRUD for
+	// humans, values write-only, resolution service-only. The plaintext value
+	// never appears in any response — HasValue is the only observable signal.
+	mux.HandleFunc("GET /v1/workspace/secrets", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		list, err := ws.ListSecretsVisible(r.Context(), visibleUnits(r))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"secrets": list, "count": len(list)})
+	})
+	mux.HandleFunc("POST /v1/workspace/secrets", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req secretRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Name) == "" {
+			writeError(w, 422, errors.New("name is required"))
+			return
+		}
+		req.Name = strings.TrimSpace(req.Name)
+		if req.ID == "" {
+			req.ID = slugify(req.Name)
+		}
+		if req.Provider == "" {
+			req.Provider = "builtin"
+		}
+		if req.Provider != "builtin" && req.Provider != "env" {
+			writeError(w, 422, fmt.Errorf("provider must be builtin or env (got %q)", req.Provider))
+			return
+		}
+		if existing, err := ws.GetSecretByName(r.Context(), req.Name); err == nil && existing.ID != req.ID {
+			writeError(w, 409, fmt.Errorf("secret name %q is already taken by %q", req.Name, existing.ID))
+			return
+		}
+		if req.Provider == "builtin" && req.Value == "" {
+			writeError(w, 422, errors.New("value is required for builtin secrets"))
+			return
+		}
+		if req.Provider == "builtin" && len(req.Value) > 64<<10 {
+			writeError(w, 422, errors.New("value exceeds 64 KiB"))
+			return
+		}
+		secret := workspace.Secret{ID: req.ID, Name: req.Name, Provider: req.Provider, ExternalRef: strings.TrimSpace(req.ExternalRef), Description: req.Description, OrgUnitID: req.OrgUnitID}
+		if err := ws.CreateSecret(r.Context(), &secret); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		if req.Provider == "builtin" {
+			if err := storeSecretValue(r.Context(), ws, secretMasterKey, secret.ID, req.Value); err != nil {
+				_ = ws.DeleteSecret(r.Context(), secret.ID)
+				writeError(w, 422, err)
+				return
+			}
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditSecretCreated, "secret", secret.ID, map[string]any{"name": secret.Name, "provider": secret.Provider})
+		secret.HasValue = req.Provider == "builtin"
+		writeJSON(w, 201, secret)
+	})
+	mux.HandleFunc("GET /v1/workspace/secrets/{secretID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		secret, err := ws.GetSecret(r.Context(), r.PathValue("secretID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(secret.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		writeJSON(w, 200, secret)
+	})
+	mux.HandleFunc("PUT /v1/workspace/secrets/{secretID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req secretRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		current, err := ws.GetSecret(r.Context(), r.PathValue("secretID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		// Editing must not re-scope a secret: bindings change only through the
+		// admin binding endpoint (same contract as agents and MCP servers).
+		secret := workspace.Secret{ID: current.ID, Name: strings.TrimSpace(req.Name), Provider: req.Provider, ExternalRef: strings.TrimSpace(req.ExternalRef), Description: req.Description, OrgUnitID: current.OrgUnitID}
+		if secret.Name == "" {
+			secret.Name = current.Name
+		}
+		if secret.Provider == "" {
+			secret.Provider = current.Provider
+		}
+		if secret.Provider != "builtin" && secret.Provider != "env" {
+			writeError(w, 422, fmt.Errorf("provider must be builtin or env (got %q)", secret.Provider))
+			return
+		}
+		if other, gErr := ws.GetSecretByName(r.Context(), secret.Name); gErr == nil && other.ID != secret.ID {
+			writeError(w, 409, fmt.Errorf("secret name %q is already taken by %q", secret.Name, other.ID))
+			return
+		}
+		if req.Value != "" {
+			if secret.Provider != "builtin" {
+				writeError(w, 422, errors.New("values can only be stored for builtin secrets"))
+				return
+			}
+			if len(req.Value) > 64<<10 {
+				writeError(w, 422, errors.New("value exceeds 64 KiB"))
+				return
+			}
+			if err := storeSecretValue(r.Context(), ws, secretMasterKey, secret.ID, req.Value); err != nil {
+				writeError(w, 422, err)
+				return
+			}
+			_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditSecretValueSet, "secret", secret.ID, nil)
+		}
+		if err := ws.UpdateSecret(r.Context(), secret); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditSecretUpdated, "secret", secret.ID, map[string]any{"name": secret.Name})
+		updated, _ := ws.GetSecret(r.Context(), secret.ID)
+		writeJSON(w, 200, updated)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/secrets/{secretID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		id := r.PathValue("secretID")
+		if err := ws.DeleteSecret(r.Context(), id); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditSecretDeleted, "secret", id, nil)
+		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
+	// Value rotation without touching metadata: write-only by design.
+	mux.HandleFunc("POST /v1/workspace/secrets/{secretID}/value", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req struct {
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if req.Value == "" {
+			writeError(w, 422, errors.New("value is required"))
+			return
+		}
+		if len(req.Value) > 64<<10 {
+			writeError(w, 422, errors.New("value exceeds 64 KiB"))
+			return
+		}
+		secret, err := ws.GetSecret(r.Context(), r.PathValue("secretID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if secret.Provider != "builtin" {
+			writeError(w, 422, errors.New("values can only be stored for builtin secrets"))
+			return
+		}
+		if err := storeSecretValue(r.Context(), ws, secretMasterKey, secret.ID, req.Value); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditSecretValueSet, "secret", secret.ID, nil)
+		writeJSON(w, 200, map[string]bool{"stored": true})
+	})
+	// resolve turns a secret name into plaintext for the execution boundary.
+	// Service-principal-only: the kernel-internal loopback identity may call it,
+	// human tokens — any role — may not (docs/secrets-management.md §4.1).
+	mux.HandleFunc("GET /v1/workspace/secrets/{secretID}/resolve", func(w http.ResponseWriter, r *http.Request) {
+		if principal, ok := controlplane.FromContext(r.Context()); !ok || principal.Subject != "kernel-internal" {
+			writeError(w, http.StatusForbidden, errors.New("secret resolution is reserved for the agent kernel"))
+			return
+		}
+		if secretMasterKey == nil {
+			writeError(w, http.StatusServiceUnavailable, errors.New("KERNEL_SECRET_MASTER_KEY is not configured"))
+			return
+		}
+		name := r.PathValue("secretID")
+		secret, err := ws.GetSecretByName(r.Context(), name)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		var value string
+		switch secret.Provider {
+		case "env":
+			value = strings.TrimSpace(os.Getenv("SECRET_" + strings.ToUpper(strings.ReplaceAll(secret.Name, "-", "_"))))
+			if value == "" {
+				writeError(w, 404, fmt.Errorf("env secret %q is not set", secret.Name))
+				return
+			}
+		default:
+			ciphertext, nonce, vErr := ws.GetSecretValue(r.Context(), secret.ID)
+			if vErr != nil {
+				writeError(w, 404, fmt.Errorf("secret %q has no stored value", secret.Name))
+				return
+			}
+			plaintext, dErr := workspace.OpenSecret(secretMasterKey, ciphertext, nonce)
+			if dErr != nil {
+				writeError(w, 500, fmt.Errorf("decrypt secret %q: %w", secret.Name, dErr))
+				return
+			}
+			value = string(plaintext)
+		}
+		writeJSON(w, 200, map[string]string{"name": secret.Name, "value": value})
 	})
 
 	// Webhook triggers: POST /v1/workspace/webhook/{projectID}/{path}
@@ -5329,6 +5613,10 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 		resolveAgentSkills(ctx, ws, a, input)
 	}
 	resolveAgentMCP(a, input)
+	// Granted secret names ride the run config (docs/secrets-management.md §8):
+	// values are resolved per tool call at the execution boundary, so a rotated
+	// value applies mid-run and nothing secret persists in the workflow.
+	input.Secrets = a.Secrets
 }
 
 // applyProjectModel fills input.Model from the project default model when the
@@ -5454,6 +5742,30 @@ func (req mcpServerRequest) toServer(id string) workspace.MCPServer {
 	}
 }
 
+// secretRequest is the API payload for secret create/update. Value is
+// write-only: it is accepted on create/update/rotation and never returned.
+type secretRequest struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Provider    string `json:"provider"` // builtin (default) | env
+	ExternalRef string `json:"external_ref"`
+	Description string `json:"description"`
+	OrgUnitID   string `json:"org_unit_id"` // only set on create; updates keep the stored binding
+	Value       string `json:"value"`
+}
+
+// storeSecretValue encrypts and persists one secret value.
+func storeSecretValue(ctx context.Context, ws *workspace.Store, masterKey []byte, secretID, value string) error {
+	if masterKey == nil {
+		return errors.New("KERNEL_SECRET_MASTER_KEY is not configured: values cannot be stored")
+	}
+	ciphertext, nonce, err := workspace.SealSecret(masterKey, []byte(value))
+	if err != nil {
+		return err
+	}
+	return ws.SetSecretValue(ctx, secretID, ciphertext, nonce)
+}
+
 // builtinToolInfo lists kernel tools (plus run_command when the sandbox is
 // configured) in the registry ToolInfo shape, so the agent tools panel shows
 // the exact tool surface the kernel would advertise.
@@ -5468,7 +5780,10 @@ func builtinToolInfo(a *agent.Activities) []mcpclient.ToolInfo {
 
 // loadMCPServers applies every stored MCP server to the registry and starts a
 // periodic refresher so restarted servers and changed tool sets stay current.
-func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, registry *mcpclient.Registry) {
+// secret:// references in env and headers are resolved here, at apply time:
+// the registry only ever sees plaintext connection credentials, while the
+// stored config keeps the references.
+func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, registry *mcpclient.Registry, masterKey []byte) {
 	apply := func() {
 		servers, err := ws.ListAllMCPServers(context.Background())
 		if err != nil {
@@ -5476,7 +5791,12 @@ func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, 
 			return
 		}
 		for _, server := range servers {
-			if err := registry.Apply(context.Background(), mcpConfig(server)); err != nil {
+			cfg, rErr := resolveMCPConfigSecrets(context.Background(), ws, mcpConfig(server), masterKey)
+			if rErr != nil {
+				log.Error("resolve mcp server secrets", "server", server.ID, "error", rErr)
+				continue
+			}
+			if err := registry.Apply(context.Background(), cfg); err != nil {
 				log.Error("apply mcp server", "server", server.ID, "error", err)
 			}
 		}
@@ -5494,6 +5814,180 @@ func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, 
 			}
 		}
 	}()
+}
+
+// loadSecretMasterKey reads the envelope-encryption key (32 bytes, hex or
+// base64). Absent key = secrets disabled: the log line explains the runtime
+// consequence instead of failing startup, so env-only setups keep working.
+func loadSecretMasterKey(log *slog.Logger) []byte {
+	if err := controlplane.LoadFileSecrets("KERNEL_SECRET_MASTER_KEY"); err != nil {
+		log.Error("load KERNEL_SECRET_MASTER_KEY_FILE", "error", err)
+		return nil
+	}
+	raw := strings.TrimSpace(os.Getenv("KERNEL_SECRET_MASTER_KEY"))
+	if raw == "" {
+		log.Warn("KERNEL_SECRET_MASTER_KEY is not set: workspace secrets with encrypted values will not resolve")
+		return nil
+	}
+	key, err := decodeSecretKey(raw)
+	if err != nil {
+		log.Error("KERNEL_SECRET_MASTER_KEY must be 32 bytes of hex or base64", "error", err)
+		return nil
+	}
+	return key
+}
+
+func decodeSecretKey(raw string) ([]byte, error) {
+	if decoded, err := hex.DecodeString(raw); err == nil && len(decoded) == 32 {
+		return decoded, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil || len(decoded) != 32 {
+		return nil, errors.New("key must decode to exactly 32 bytes")
+	}
+	return decoded, nil
+}
+
+func secretCacheTTL() time.Duration {
+	if seconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv("KERNEL_SECRET_CACHE_TTL_SECONDS"))); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	return time.Minute
+}
+
+// resolveMCPConfigSecrets substitutes secret://<name>[#key] references in env
+// entries and header values with plaintext, decrypting builtin values with the
+// master key. The returned config is for live connections only — it must never
+// be written back to storage or API responses.
+func resolveMCPConfigSecrets(ctx context.Context, ws *workspace.Store, cfg mcpclient.ServerConfig, masterKey []byte) (mcpclient.ServerConfig, error) {
+	if !configHasSecretRefs(cfg) {
+		return cfg, nil
+	}
+	if masterKey == nil {
+		return cfg, errors.New("KERNEL_SECRET_MASTER_KEY is not configured")
+	}
+	env := make([]string, len(cfg.Env))
+	for i, entry := range cfg.Env {
+		resolved, err := resolveSecretEnvEntry(ctx, ws, entry, masterKey)
+		if err != nil {
+			return cfg, err
+		}
+		env[i] = resolved
+	}
+	cfg.Env = env
+	if len(cfg.Headers) > 0 {
+		headers := make(map[string]string, len(cfg.Headers))
+		for name, value := range cfg.Headers {
+			if ref, ok := workspace.ParseSecretReference(value); ok {
+				resolved, err := resolveSecretValue(ctx, ws, ref, masterKey)
+				if err != nil {
+					return cfg, fmt.Errorf("header %q: %w", name, err)
+				}
+				value = resolved
+			}
+			headers[name] = value
+		}
+		cfg.Headers = headers
+	}
+	return cfg, nil
+}
+
+func configHasSecretRefs(cfg mcpclient.ServerConfig) bool {
+	for _, entry := range cfg.Env {
+		if _, ok := workspace.ParseSecretReference(envEntryValue(entry)); ok {
+			return true
+		}
+	}
+	for _, value := range cfg.Headers {
+		if _, ok := workspace.ParseSecretReference(value); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// envEntryValue returns the VALUE part of KEY=VALUE; secret references are
+// recognized there (KEY=secret://name).
+func envEntryValue(entry string) string {
+	if idx := strings.IndexByte(entry, '='); idx >= 0 {
+		return entry[idx+1:]
+	}
+	return entry
+}
+
+func resolveSecretEnvEntry(ctx context.Context, ws *workspace.Store, entry string, masterKey []byte) (string, error) {
+	idx := strings.IndexByte(entry, '=')
+	if idx < 0 {
+		return entry, nil
+	}
+	key, value := entry[:idx], entry[idx+1:]
+	ref, ok := workspace.ParseSecretReference(value)
+	if !ok {
+		return entry, nil
+	}
+	resolved, err := resolveSecretValue(ctx, ws, ref, masterKey)
+	if err != nil {
+		return "", fmt.Errorf("env %q: %w", key, err)
+	}
+	return key + "=" + resolved, nil
+}
+
+// resolveSecretValue decrypts a builtin secret by name. Sub-keys (#key) select
+// a field of a JSON-valued secret.
+func resolveSecretValue(ctx context.Context, ws *workspace.Store, ref workspace.SecretReference, masterKey []byte) (string, error) {
+	secret, err := ws.GetSecretByName(ctx, ref.Name)
+	if err != nil {
+		if errors.Is(err, workspace.ErrNotFound) {
+			return "", fmt.Errorf("secret %q is not configured", ref.Name)
+		}
+		return "", err
+	}
+	var value string
+	switch secret.Provider {
+	case "env":
+		value = strings.TrimSpace(os.Getenv("SECRET_" + strings.ToUpper(strings.ReplaceAll(ref.Name, "-", "_"))))
+		if value == "" {
+			return "", fmt.Errorf("env secret %q is not set", "SECRET_"+strings.ToUpper(strings.ReplaceAll(ref.Name, "-", "_")))
+		}
+	default:
+		ciphertext, nonce, vErr := ws.GetSecretValue(ctx, secret.ID)
+		if vErr != nil {
+			return "", fmt.Errorf("secret %q has no stored value", ref.Name)
+		}
+		plaintext, dErr := workspace.OpenSecret(masterKey, ciphertext, nonce)
+		if dErr != nil {
+			return "", fmt.Errorf("decrypt secret %q: %w", ref.Name, dErr)
+		}
+		value = string(plaintext)
+	}
+	if ref.Key == "" {
+		return value, nil
+	}
+	var structured map[string]any
+	if jErr := json.Unmarshal([]byte(value), &structured); jErr != nil {
+		return "", fmt.Errorf("secret %q is not a JSON object, cannot extract key %q", ref.Name, ref.Key)
+	}
+	parts := strings.Split(ref.Key, ":")
+	current := any(structured)
+	for _, part := range parts {
+		mapping, ok := current.(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("secret %q: key path %q not found", ref.Name, ref.Key)
+		}
+		current, ok = mapping[part]
+		if !ok {
+			return "", fmt.Errorf("secret %q: key path %q not found", ref.Name, ref.Key)
+		}
+	}
+	switch typed := current.(type) {
+	case string:
+		return typed, nil
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64), nil
+	default:
+		encoded, _ := json.Marshal(typed)
+		return string(encoded), nil
+	}
 }
 
 // skillRequest is the API shape for skill create/update: manifest arrives as

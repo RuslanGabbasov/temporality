@@ -201,6 +201,7 @@ const (
 	OrgResourceProvider  = "provider"
 	OrgResourceTrigger   = "trigger"
 	OrgResourceTeam      = "team"
+	OrgResourceSecret    = "secret"
 )
 
 var orgResourceTables = map[string]string{
@@ -210,6 +211,7 @@ var orgResourceTables = map[string]string{
 	OrgResourceProvider:  "workspace_provider",
 	OrgResourceTrigger:   "workspace_trigger",
 	OrgResourceTeam:      "workspace_team",
+	OrgResourceSecret:    "workspace_secret",
 }
 
 // SetResourceOrgUnit binds a resource to an org unit; unitID empty clears the
@@ -217,7 +219,7 @@ var orgResourceTables = map[string]string{
 func (s *Store) SetResourceOrgUnit(ctx context.Context, kind, resourceID, unitID string) error {
 	table, ok := orgResourceTables[kind]
 	if !ok {
-		return fmt.Errorf("unknown resource kind %q (supported: agent, skill, mcp-server, provider, trigger)", kind)
+		return fmt.Errorf("unknown resource kind %q (supported: agent, skill, mcp-server, provider, trigger, team, secret)", kind)
 	}
 	if unitID != "" {
 		if _, err := s.GetOrgUnit(ctx, unitID); err != nil {

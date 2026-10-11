@@ -271,6 +271,10 @@ type Agent struct {
 	Skills     []string `json:"skills,omitempty"`
 	MCPServers []string `json:"mcp_servers,omitempty"`
 	Tools      []string `json:"tools,omitempty"` // model tool names; empty = all available tools
+	// Secrets granted to this agent (docs/secrets-management.md §8): names of
+	// workspace secrets resolved into SECRET_<NAME> sandbox env vars at the
+	// execution boundary. The model never sees the values.
+	Secrets []string `json:"secrets,omitempty"`
 	// Structured definition (docs/evaluable-agent.md); nil ⇒ legacy prompt-only agent
 	Definition        *AgentDefinition `json:"definition,omitempty"`
 	DefinitionVersion int              `json:"definition_version,omitempty"`
@@ -468,6 +472,7 @@ type CreateAgentRequest struct {
 	MaxTokens      *int              `json:"max_tokens,omitempty"`
 	Skills         []string          `json:"skills,omitempty"`
 	MCPServers     []string          `json:"mcp_servers,omitempty"`
+	Secrets        []string          `json:"secrets,omitempty"`
 	Tools          []string          `json:"tools,omitempty"`
 	SandboxProfile string            `json:"sandbox_profile,omitempty"`
 	NetworkAccess  *bool             `json:"network_access,omitempty"`

@@ -56,7 +56,11 @@ const (
 	AuditTeamVersionProposed  = "team_version.proposed"
 	AuditTeamVersionApplied   = "team_version.applied"
 	AuditTeamVersionRejected  = "team_version.rejected"
-	AuditTeamRunStarted      = "team.run_started"
+	AuditTeamRunStarted       = "team.run_started"
+	AuditSecretCreated        = "secret.created"
+	AuditSecretUpdated        = "secret.updated"
+	AuditSecretDeleted        = "secret.deleted"
+	AuditSecretValueSet       = "secret.value_set"
 )
 
 // RecordAccessAudit appends one event. Nil details is stored as {}.
