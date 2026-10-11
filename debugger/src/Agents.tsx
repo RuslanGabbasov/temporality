@@ -37,6 +37,7 @@ import {
   type MCPServer,
   type MCPServerTools,
   type MCPToolInfo,
+  type Secret,
   type Run,
 } from './workspaceApi'
 import { detectRegressions, latestEvalByVersion, passRate, runsByVersion as aggregateRunsByVersion } from './agentEvolution'
@@ -110,6 +111,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([])
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
   const [mcpTools, setMcpTools] = useState<MCPServerTools[]>([])
+  const [secretsList, setSecretsList] = useState<Secret[]>([])
   const [builtinTools, setBuiltinTools] = useState<MCPToolInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -164,13 +166,14 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [agentsData, providersData, skillsData, mcpData, toolsData, builtinsData] = await Promise.all([
+      const [agentsData, providersData, skillsData, mcpData, toolsData, builtinsData, secretsData] = await Promise.all([
         workspaceApi.listAllAgents(),
         workspaceApi.listProviders(),
         workspaceApi.listSkills(),
         workspaceApi.listMCPServers(),
         workspaceApi.listMCPTools(),
         workspaceApi.listBuiltinAgents(),
+        workspaceApi.listSecrets(),
       ])
       setAgents(agentsData.agents ?? [])
       setProviders(providersData.providers ?? [])
@@ -179,6 +182,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       setMcpTools(Object.values(toolsData.servers ?? {}))
       setBuiltinTools(toolsData.builtins ?? [])
       setBuiltins(builtinsData.builtins ?? [])
+      setSecretsList(secretsData.secrets ?? [])
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }, [project])
@@ -217,7 +221,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     setProvenance({})
     setDraftQuestions([])
     setPromptPreview(null)
-    setForm({ name: '', model: '', skills: [], mcp_servers: [], tools: [], definition: {} })
+    setForm({ name: '', model: '', skills: [], mcp_servers: [], secrets: [], tools: [], definition: {} })
     setShowForm(true)
     setWizardOpen(false)
   }
@@ -419,6 +423,13 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     ...(form.mcp_servers ?? [])
       .filter((id) => !mcpServers.some((s) => s.id === id))
       .map((id) => ({ id, label: `${id} — ${missing}` })),
+  ]
+
+  const secretOptions = [
+    ...secretsList.map((s) => ({ id: s.name, label: s.description ? `${s.name} — ${s.description}` : s.name, description: s.description ?? '' })),
+    ...(form.secrets ?? [])
+      .filter((name) => !secretsList.some((s) => s.name === name))
+      .map((name) => ({ id: name, label: `${name} — ${missing}`, description: '' })),
   ]
 
   // Auto-select the first visible agent once the list is loaded.
@@ -1400,6 +1411,25 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                           checked={form.mcp_servers?.includes(s.id) ?? false}
                           onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) =>
                             setForm({ ...form, mcp_servers: checked ? [...(form.mcp_servers ?? []), s.id] : (form.mcp_servers ?? []).filter((x) => x !== s.id) })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {secretOptions.length > 0 && (
+                  <div>
+                    <p className="cds--label" style={{ marginBottom: '0.5rem' }}>{t('agents.secrets') ?? 'Secrets'}</p>
+                    <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>{t('agents.secrets_hint') ?? 'Granted secrets are injected as SECRET_<NAME> environment variables into run_command. The model never sees the values.'}</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 1rem', maxHeight: '10rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
+                      {secretOptions.map((s) => (
+                        <Checkbox
+                          key={s.id}
+                          id={`agent-secret-${s.id}`}
+                          labelText={s.label}
+                          title={s.description || s.id}
+                          checked={form.secrets?.includes(s.id) ?? false}
+                          onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) =>
+                            setForm({ ...form, secrets: checked ? [...(form.secrets ?? []), s.id] : (form.secrets ?? []).filter((x) => x !== s.id) })}
                         />
                       ))}
                     </div>

@@ -55,6 +55,7 @@ const CONFIG_ITEMS = [
   { path: '/agent-config', label: 'nav.agents' },
   { path: '/skills', label: 'nav.skills' },
   { path: '/mcp', label: 'nav.mcp' },
+  { path: '/secrets', label: 'nav.secrets' },
   { path: '/providers', label: 'nav.providers' },
   { path: '/users', label: 'nav.users' },
   { path: '/org', label: 'nav.org', adminOnly: true },

@@ -390,6 +390,10 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
         .filter(Boolean).join(' · ')
       return { icon: '⎇', label: t('runs.event.plan_completed'), detail, color: '#9ece6a' }
     }
+    case 'secret.issued':
+      return { icon: '🔑', label: t('runs.event.secret_issued'), detail: String(d.secret ?? ''), color: '#9ece6a' }
+    case 'secret.denied':
+      return { icon: '🚫', label: t('runs.event.secret_denied'), detail: [String(d.secret ?? ''), String(d.reason ?? '')].filter(Boolean).join(' · '), color: '#f7768e' }
     default:
       return { icon: '•', label: event.type, detail: '', color: 'var(--tm-text-3)' }
   }

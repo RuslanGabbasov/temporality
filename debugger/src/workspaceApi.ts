@@ -60,7 +60,7 @@ export interface OrgUnitRoleGrant {
   granted_at: string
 }
 
-export type OrgResourceKind = 'agent' | 'skill' | 'mcp-server' | 'provider' | 'trigger'
+export type OrgResourceKind = 'agent' | 'skill' | 'mcp-server' | 'provider' | 'trigger' | 'team' | 'secret'
 
 export interface Project {
   id: string
@@ -115,6 +115,7 @@ export interface Agent {
   max_tokens?: number
   skills: string[]
   mcp_servers: string[]
+  secrets?: string[]
   tools?: string[]
   definition?: AgentDefinition
   definition_version?: number
@@ -387,6 +388,18 @@ export interface SkillInput {
   markdown: string
   manifest_yaml: string
   org_unit_id?: string // honored on create; updates keep the stored binding
+}
+
+export interface Secret {
+  id: string
+  name: string
+  provider: 'builtin' | 'env'
+  external_ref?: string
+  description?: string
+  has_value: boolean
+  org_unit_id?: string
+  created_at: string
+  updated_at: string
 }
 
 export interface MCPServer {
@@ -745,6 +758,18 @@ export const workspaceApi = {
     request<MCPDiscoverResult>('/v1/workspace/mcp-servers/discover', { method: 'POST', body: JSON.stringify(data) }),
   listMCPTools: () =>
     request<{ servers: Record<string, MCPServerTools>; builtins: MCPToolInfo[] }>('/v1/workspace/mcp-tools'),
+
+  // Secrets (docs/secrets-management.md Phase 1): values are write-only.
+  listSecrets: () =>
+    request<{ secrets: Secret[]; count: number }>('/v1/workspace/secrets'),
+  createSecret: (data: Partial<Secret> & { name: string; value?: string }) =>
+    request<Secret>('/v1/workspace/secrets', { method: 'POST', body: JSON.stringify(data) }),
+  updateSecret: (id: string, data: Partial<Secret> & { value?: string }) =>
+    request<Secret>(`/v1/workspace/secrets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSecret: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/workspace/secrets/${id}`, { method: 'DELETE' }),
+  setSecretValue: (id: string, value: string) =>
+    request<{ stored: boolean }>(`/v1/workspace/secrets/${id}/value`, { method: 'POST', body: JSON.stringify({ value }) }),
 
   // Users
   listUsers: () => request<{ users: User[] }>('/v1/workspace/users'),

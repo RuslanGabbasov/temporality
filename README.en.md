@@ -122,6 +122,25 @@ TEMPORALITY_API_TOKEN=token2   # kernel → journal
 In the UI the token is entered via Login in the header (stored in
 localStorage).
 
+## Secrets
+
+A secret is a first-class workspace resource (`docs/secrets-management.md`):
+metadata in `workspace_secret`, the value envelope-encrypted with AES-256-GCM
+in `workspace_secret_value`, decrypted only inside the kernel process. Agents
+never see values: `secret://<name>` references in MCP server env/headers and
+grants on the agent card are resolved at the execution boundary.
+
+- `KERNEL_SECRET_MASTER_KEY` — 32 bytes hex/base64 (`openssl rand -hex 32`),
+  `_FILE` suffix supported. Without it the kernel still starts, but
+  builtin secrets fail to resolve.
+- Providers: `builtin` (encrypted in the database) and `env` (the kernel
+  process's `SECRET_<NAME>` variable — for local development).
+- Secrets granted to an agent arrive in `run_command` as `SECRET_<NAME>`;
+  the `secret_list` tool shows names and descriptions only.
+- `secret.issued` / `secret.denied` events record grants; the journal
+  additionally redacts well-known token patterns on ingest (ghp_*, AKIA*,
+  xoxb-*, sk-*, Bearer, PRIVATE KEY) as the second line of defense.
+
 ## Notification channels
 
 When an agent calls `ask_human`, the kernel delivers the question to the
