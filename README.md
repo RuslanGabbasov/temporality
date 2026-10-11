@@ -287,4 +287,5 @@ Dev-сервер debugger (`npm --prefix debugger run dev`) проксирует
 - Модель знаний: [`docs/knowledge-model.md`](docs/knowledge-model.md)
 - Модель событий: [`docs/event-model.md`](docs/event-model.md)
 - Архитектура: [`docs/architecture.md`](docs/architecture.md)
+- Управление секретами: [`docs/secrets-management.md`](docs/secrets-management.md)
 - Роадмап: [`docs/ROADMAP.md`](docs/ROADMAP.md)

@@ -286,4 +286,5 @@ The debugger dev server (`npm --prefix debugger run dev`) proxies `/api` to
 - Knowledge model: [`docs/knowledge-model.md`](docs/knowledge-model.md)
 - Event model: [`docs/event-model.md`](docs/event-model.md)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
+- Secrets management: [`docs/secrets-management.md`](docs/secrets-management.md)
 - Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
