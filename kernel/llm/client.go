@@ -85,9 +85,14 @@ type Completion struct {
 	// Transport records how the completion was delivered: "stream" (SSE) or
 	// "blocking" (single JSON response). StreamFailed marks a stream that died
 	// mid-flight and was salvaged by the blocking fallback — the wall latency
-	// and token usage then already include both generations.
+	// and token usage then already include both generations. StreamMs and
+	// StreamError carry how long the dead stream lived and why it died: without
+	// them a salvaged completion hides a multi-minute stall behind a healthy-
+	// looking latency.
 	Transport    string `json:"transport,omitempty"`
 	StreamFailed bool   `json:"stream_failed,omitempty"`
+	StreamMs     int64  `json:"stream_ms,omitempty"`
+	StreamError  string `json:"stream_error,omitempty"`
 }
 
 // Truncated reports whether the provider cut the completion off at the token
@@ -118,24 +123,37 @@ type Config struct {
 	// caller's context (the Temporal activity deadline in the kernel).
 	Timeout time.Duration
 	// StreamIdleTimeout is the maximum allowed silence between streamed
-	// chunks (and to the first chunk). A stalled stream is canceled; a slow
-	// but steady one may run as long as the caller's context allows.
+	// chunks (and to the first chunk). Only parseable "data:" lines count as
+	// traffic: SSE keepalive comments (": ping") hold the connection open but
+	// say nothing about generation, so they must not defeat the watchdog — a
+	// gateway that parks a queued request behind periodic pings gets canceled
+	// here instead of squatting on the activity budget until it drops hours
+	// later. A stalled stream is canceled; a slow but steady one may run as
+	// long as the caller's context allows (the Temporal activity deadline in
+	// the kernel).
 	StreamIdleTimeout time.Duration
-	MaxOutputTokens   int
-	Reasoning         string
+	// StreamNoProgressTimeout is the maximum allowed silence between chunks
+	// that actually carry generated tokens (answer text, reasoning or tool
+	// arguments). Some gateways keep data lines flowing with empty payloads
+	// while the request sits in a server-side queue; those lines reset the
+	// idle timer but not this one. Zero disables the check.
+	StreamNoProgressTimeout time.Duration
+	MaxOutputTokens         int
+	Reasoning               string
 }
 
 // ConfigFromEnv reads the shared TEMPORALITY_MODEL_* variables.
 func ConfigFromEnv() (Config, error) {
 	cfg := Config{
-		BaseURL:           strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL")),
-		Model:             strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID")),
-		APIKey:            strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_API_KEY")),
-		Temperature:       0,
-		Timeout:           180 * time.Second,
-		StreamIdleTimeout: 90 * time.Second,
-		MaxOutputTokens:   16384,
-		Reasoning:         strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_REASONING")),
+		BaseURL:                 strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL")),
+		Model:                   strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID")),
+		APIKey:                  strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_API_KEY")),
+		Temperature:             0,
+		Timeout:                 180 * time.Second,
+		StreamIdleTimeout:       90 * time.Second,
+		StreamNoProgressTimeout: 4 * time.Minute,
+		MaxOutputTokens:         16384,
+		Reasoning:               strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_REASONING")),
 	}
 	if cfg.BaseURL == "" || cfg.Model == "" {
 		return cfg, errors.New("TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID are required")
@@ -167,6 +185,14 @@ func ConfigFromEnv() (Config, error) {
 			return cfg, fmt.Errorf("invalid TEMPORALITY_MODEL_STREAM_IDLE_TIMEOUT: %s", raw)
 		}
 		cfg.StreamIdleTimeout = value
+	}
+	if raw := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_STREAM_NO_PROGRESS_TIMEOUT")); raw != "" {
+		value, err := time.ParseDuration(raw)
+		if err != nil || value < 0 {
+			return cfg, fmt.Errorf("invalid TEMPORALITY_MODEL_STREAM_NO_PROGRESS_TIMEOUT: %s", raw)
+		}
+		// 0 is a valid explicit "disable the no-progress watchdog".
+		cfg.StreamNoProgressTimeout = value
 	}
 	return cfg, nil
 }
@@ -538,19 +564,42 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		request.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	}
 	idle := c.cfg.StreamIdleTimeout
-	var lastChunk atomic.Int64
-	lastChunk.Store(time.Now().UnixNano())
+	noProgress := c.cfg.StreamNoProgressTimeout
+	var lastTraffic atomic.Int64  // last parseable data line (any payload)
+	var lastProgress atomic.Int64 // last chunk that carried generated tokens
+	var cancelReason atomic.Value // string: which watchdog fired, for the error
+	start := time.Now().UnixNano()
+	lastTraffic.Store(start)
+	lastProgress.Store(start)
 	stopWatchdog := make(chan struct{})
 	defer close(stopWatchdog)
 	go func() {
-		ticker := time.NewTicker(idle / 4)
+		// Two budgets share one watchdog: idle (no data lines at all — the
+		// connection is dead or parked behind keepalive comments) and no-progress
+		// (data lines flow but carry no generated tokens — the request sits in a
+		// server-side queue). Tick at the finer granularity of the two.
+		tick := idle / 4
+		if noProgress > 0 && noProgress/4 < tick {
+			tick = noProgress / 4
+		}
+		if tick <= 0 {
+			tick = time.Second
+		}
+		ticker := time.NewTicker(tick)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-stopWatchdog:
 				return
 			case <-ticker.C:
-				if time.Since(time.Unix(0, lastChunk.Load())) >= idle {
+				now := time.Now()
+				if now.Sub(time.Unix(0, lastTraffic.Load())) >= idle {
+					cancelReason.Store(fmt.Sprintf("idle timeout: no data lines for %s", idle))
+					cancelStream()
+					return
+				}
+				if noProgress > 0 && now.Sub(time.Unix(0, lastProgress.Load())) >= noProgress {
+					cancelReason.Store(fmt.Sprintf("stalled stream: no generated tokens for %s", noProgress))
 					cancelStream()
 					return
 				}
@@ -579,8 +628,10 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		lastChunk.Store(time.Now().UnixNano())
 		if !strings.HasPrefix(line, "data: ") {
+			// Keepalive comments and blank lines are connection liveness, not
+			// generation traffic: they must not reset the idle watchdog, or a
+			// gateway parking a queued request behind pings defeats it.
 			continue
 		}
 		data := strings.TrimPrefix(line, "data: ")
@@ -589,8 +640,10 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		}
 		var chunk chatStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			// Unparsable data lines are protocol noise, not traffic either.
 			continue
 		}
+		lastTraffic.Store(time.Now().UnixNano())
 		// Usage may ride either a usage-only chunk (empty choices) or the final
 		// finish_reason chunk depending on the gateway — accept both.
 		if chunk.Usage != nil {
@@ -602,6 +655,12 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		choice := chunk.Choices[0]
 		if choice.FinishReason != "" {
 			finish = choice.FinishReason
+		}
+		// Generated tokens (answer text, reasoning or tool arguments) are the
+		// only proof the stream is making progress; usage-only and empty-choice
+		// chunks keep the connection alive but say nothing about generation.
+		if choice.Delta.Content != "" || choice.Delta.ReasoningContent != "" || len(choice.Delta.ToolCalls) > 0 {
+			lastProgress.Store(time.Now().UnixNano())
 		}
 		// Accumulate content
 		if choice.Delta.Content != "" {
@@ -640,6 +699,11 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		if reason, ok := cancelReason.Load().(string); ok {
+			// The watchdog canceled the request context; name the budget that
+			// fired so the fallback path can log a diagnosable cause.
+			return Completion{}, fmt.Errorf("stream read (%s): %w", reason, err)
+		}
 		return Completion{}, fmt.Errorf("stream read: %w", err)
 	}
 

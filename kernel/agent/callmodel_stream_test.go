@@ -95,4 +95,10 @@ func TestCallModelFallsBackWhenStreamingFails(t *testing.T) {
 	if !strings.Contains(completion.Content, "blocking answer") {
 		t.Fatalf("content = %q", completion.Content)
 	}
+	if !completion.StreamFailed {
+		t.Fatal("salvaged completion must be marked StreamFailed")
+	}
+	if completion.StreamError == "" {
+		t.Fatal("salvaged completion must carry the stream error for model.completed")
+	}
 }

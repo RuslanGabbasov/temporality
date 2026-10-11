@@ -20,6 +20,7 @@ import (
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/sandbox"
 	"github.com/temporality-project/temporality/observation"
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 )
 
@@ -324,18 +325,35 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		// its own retries — the live preview is best-effort, the Completion is
 		// the source of truth the workflow records. StreamFailed marks the
 		// salvage so model.completed shows the double generation (stream +
-		// blocking regenerate) instead of hiding it inside an inflated latency.
-		if completion, err := client.StreamComplete(ctx, request.Messages, request.Tools, func(delta llm.StreamDelta) bool {
+		// blocking regenerate) instead of hiding it inside an inflated latency;
+		// StreamMs/StreamError record how long the dead stream lived and why.
+		streamStarted := time.Now()
+		completion, streamErr := client.StreamComplete(ctx, request.Messages, request.Tools, func(delta llm.StreamDelta) bool {
 			if delta.Text != "" || delta.Reasoning != "" {
 				a.Tokens.Publish(request.RunID, request.Turn, delta.Text, delta.Reasoning)
 			}
 			return false
-		}, llm.WithPromptCacheKey(request.PromptCacheKey)); err == nil {
+		}, llm.WithPromptCacheKey(request.PromptCacheKey))
+		if streamErr == nil {
 			return completion, nil
+		}
+		streamMs := time.Since(streamStarted).Milliseconds()
+		// A stream that stalls behind gateway keepalives can burn most of the
+		// activity budget before dying; the fallback then looks suspiciously
+		// fast. Log the failure where operators triage live runs. GetLogger
+		// panics outside a real activity context, hence the IsActivity guard.
+		if activity.IsActivity(ctx) {
+			if logger := activity.GetLogger(ctx); logger != nil {
+				logger.Error("model stream failed, falling back to blocking",
+					"run_id", request.RunID, "turn", request.Turn,
+					"stream_ms", streamMs, "error", streamErr.Error())
+			}
 		}
 		completion, err := client.Complete(ctx, request.Messages, request.Tools, llm.WithPromptCacheKey(request.PromptCacheKey))
 		if err == nil {
 			completion.StreamFailed = true
+			completion.StreamMs = streamMs
+			completion.StreamError = streamErr.Error()
 		}
 		return completion, err
 	}

@@ -72,6 +72,7 @@ make stack-stop
 | `TEMPORALITY_MODEL_TEMPERATURE` | `0..2` | `0` |
 | `TEMPORALITY_MODEL_TIMEOUT` | Go duration — общий лимит одной блокирующей попытки (стриминг его не использует) | `180s` |
 | `TEMPORALITY_MODEL_STREAM_IDLE_TIMEOUT` | Максимум тишины между чанками стрима; медленная, но живая генерация не прерывается | `90s` |
+| `TEMPORALITY_MODEL_STREAM_NO_PROGRESS_TIMEOUT` | Максимум тишины между чанками, несущими сгенерированные токены; защищает от шлюзов, которые держат соединение пустыми пингами (0 — отключить) | `4m` |
 | `TEMPORALITY_MODEL_ACTIVITY_TIMEOUT` | Потолок одной активности `call_model` в Temporal (общий для стрим-попытки и блокирующего fallback с ретраями) | `20m` |
 | `TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS` | `64..1000000` | `16384` |
 | `TEMPORALITY_MODEL_REASONING` | `off` / `exclude` / `low` / `medium` / `high` | — |

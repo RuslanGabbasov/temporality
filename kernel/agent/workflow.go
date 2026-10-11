@@ -1945,9 +1945,21 @@ func modelObservability(completion llm.Completion) map[string]any {
 	}
 	// A dead stream salvaged by the blocking fallback means the provider
 	// generated the answer twice; the marker makes the hidden regeneration
-	// visible next to the (inflated) latency.
+	// visible next to the (inflated) latency. StreamMs/StreamError say how long
+	// the dead stream lived and why it died — a multi-minute stall behind
+	// gateway keepalives otherwise hides behind a healthy-looking completion.
 	if completion.StreamFailed {
 		data["stream_failed"] = true
+		if completion.StreamMs > 0 {
+			data["stream_ms"] = completion.StreamMs
+		}
+		if completion.StreamError != "" {
+			if len(completion.StreamError) > 300 {
+				data["stream_error"] = completion.StreamError[:300]
+			} else {
+				data["stream_error"] = completion.StreamError
+			}
+		}
 	}
 	return data
 }
