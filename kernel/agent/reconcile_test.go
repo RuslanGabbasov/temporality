@@ -161,6 +161,46 @@ func TestUncertainOperationsCrashWindow(t *testing.T) {
 	require.Equal(t, "context deadline exceeded", ids["op-failed"].ErrorDetail)
 }
 
+// Read-only calls (a fetch that died mid-transfer, an observing browser
+// action) must never surface as operator reconciliation questions — including
+// legacy events recorded before the effect classification existed.
+func TestUncertainOperationsSkipsReadOnlyCalls(t *testing.T) {
+	stamp := time.Now().UTC()
+
+	fetchStarted := toolEvent("repo", "run-1", "op-fetch", "tool.started", stamp)
+	fetchStarted.Data["tool"] = "web_fetch"
+	fetchFailed := toolEvent("repo", "run-1", "op-fetch", "tool.failed", stamp)
+	fetchFailed.Data["tool"] = "web_fetch"
+
+	shotStarted := toolEvent("repo", "run-1", "op-shot", "tool.started", stamp)
+	shotStarted.Data["tool"] = "browser"
+	shotStarted.Data["arguments"] = `{"action":"screenshot"}`
+	shotFailed := toolEvent("repo", "run-1", "op-shot", "tool.failed", stamp)
+	shotFailed.Data["tool"] = "browser"
+	shotFailed.Data["arguments"] = `{"action":"screenshot"}`
+
+	clickStarted := toolEvent("repo", "run-1", "op-click", "tool.started", stamp)
+	clickStarted.Data["tool"] = "browser"
+	clickStarted.Data["arguments"] = `{"action":"click","selector":"#submit"}`
+	clickFailed := toolEvent("repo", "run-1", "op-click", "tool.failed", stamp)
+	clickFailed.Data["tool"] = "browser"
+	clickFailed.Data["arguments"] = `{"action":"click","selector":"#submit"}`
+
+	server := journalStub(t, fetchStarted, fetchFailed, shotStarted, shotFailed, clickStarted, clickFailed)
+	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "operator"}
+
+	operations, err := activities.UncertainOperations(context.Background(), "repo", stubLiveness{})
+	require.NoError(t, err)
+
+	ids := map[string]UncertainOperation{}
+	for _, operation := range operations {
+		ids[operation.OperationID] = operation
+	}
+	require.NotContains(t, ids, "op-fetch", "a dead fetch leaves nothing to reconcile")
+	require.NotContains(t, ids, "op-shot", "an observing browser action has no external effect")
+	require.Contains(t, ids, "op-click", "a mutating browser action may still have landed")
+}
+
 func TestUncertainOperationsCarryRunHeader(t *testing.T) {
 	stamp := time.Now().UTC()
 	failed := toolEvent("repo", "run-child", "op-x", "tool.failed", stamp)

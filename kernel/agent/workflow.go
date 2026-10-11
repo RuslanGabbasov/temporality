@@ -1522,7 +1522,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						toolStarted := workflow.Now(ctx)
 						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets}).Get(ctx, &toolResult); err != nil {
 							toolFailed = true
-							failure := toolFailureData(operationID, argumentsHash, call.Name, err)
+							failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 							failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
 							if eventErr := emit(activityCtx, state, "tool.failed", failure); eventErr != nil {
 								return result, eventErr
@@ -1618,7 +1618,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				toolStarted := workflow.Now(ctx)
 				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets}).Get(ctx, &toolResult); err != nil {
 					toolFailed = true
-					failure := toolFailureData(operationID, argumentsHash, call.Name, err)
+					failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 					failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
 					if eventErr := emit(activityCtx, state, "tool.failed", failure); eventErr != nil {
 						return result, eventErr
@@ -2035,7 +2035,9 @@ func mcpServerForTool(name, legacy string) string {
 const prefix = "mcp__"
 
 // readOnlyTools are tools that never produce side effects — they only
-// observe state. If they fail, there's nothing to reconcile.
+// observe. web_fetch/web_search/fetch_image are plain reads of external
+// content: a fetch that died mid-flight cannot have changed anything out
+// there, so it must not become an operator reconciliation question.
 var readOnlyTools = map[string]bool{
 	"read_file": true, "mcp__read_file": true,
 	"list_directory": true, "mcp__list_directory": true,
@@ -2043,6 +2045,18 @@ var readOnlyTools = map[string]bool{
 	"glob": true, "mcp__glob": true,
 	"grep": true, "mcp__grep": true,
 	"view_image": true, "mcp__view_image": true,
+	"web_fetch": true, "mcp__web_fetch": true,
+	"web_search": true, "mcp__web_search": true,
+	"fetch_image": true, "mcp__fetch_image": true,
+	"skill_search": true, "mcp__skill_search": true,
+	"skill_inspect": true, "mcp__skill_inspect": true,
+}
+
+// browserReadOnlyActions are browser actions that only observe the page.
+// click/fill/evaluate can navigate, submit forms or run arbitrary JS — a
+// failure there may have landed, so those stay effect-uncertain.
+var browserReadOnlyActions = map[string]bool{
+	"open": true, "content": true, "screenshot": true, "close": true,
 }
 
 // isReadOnlyTool classifies a tool as side-effect free. Namespaced MCP tools
@@ -2051,14 +2065,34 @@ func isReadOnlyTool(tool string) bool {
 	if readOnlyTools[tool] {
 		return true
 	}
+	bare, _ := bareToolName(tool)
+	return readOnlyTools[prefix+bare]
+}
+
+// bareToolName splits a tool name into (bare, namespaced): mcp__srv__read_file
+// → (read_file, true), run_command → (run_command, false).
+func bareToolName(tool string) (string, bool) {
 	rest, ok := strings.CutPrefix(tool, prefix)
 	if !ok {
-		return false
+		return tool, false
 	}
 	if _, bare, found := strings.Cut(rest, "__"); found {
-		return readOnlyTools[prefix+bare]
+		return bare, true
 	}
-	return false
+	return tool, false
+}
+
+// isReadOnlyCall is the effect-classification entry point: read-only tool
+// names, plus per-action classification for the browser tool.
+func isReadOnlyCall(tool string, args map[string]any) bool {
+	if isReadOnlyTool(tool) {
+		return true
+	}
+	if bare, _ := bareToolName(tool); bare != "browser" {
+		return false
+	}
+	action, _ := args["action"].(string)
+	return browserReadOnlyActions[action]
 }
 
 // Policy stop reasons (docs/org-structure.md §24): resolved from the org
@@ -2146,10 +2180,11 @@ func policySafeTool(name string) bool {
 	return policySafeTools[name] || isReadOnlyTool(name)
 }
 
-func toolFailureData(operationID, argumentsHash, tool string, err error) map[string]any {
+func toolFailureData(operationID, argumentsHash, tool string, args map[string]any, err error) map[string]any {
 	data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": tool, "error_type": "activity_failed", "error": boundedFailureDetail(err)}
-	if isReadOnlyTool(tool) {
-		// Read-only tools have no side effect regardless of where they fail.
+	if isReadOnlyCall(tool, args) {
+		// Read-only calls (plain fetches, file reads, observing browser
+		// actions) have no side effect regardless of where they fail.
 		data["effect"] = "none"
 	} else {
 		var application *temporal.ApplicationError

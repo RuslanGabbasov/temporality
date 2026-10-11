@@ -698,17 +698,39 @@ func TestModelFailureRecordsBoundedErrorDetail(t *testing.T) {
 
 func TestToolFailureDataEffectSemantics(t *testing.T) {
 	rejected := temporal.NewNonRetryableApplicationError("command must be an array of strings", "InvalidToolArguments", nil)
-	data := toolFailureData("op-1", "sha256:x", "run_command", rejected)
+	data := toolFailureData("op-1", "sha256:x", "run_command", nil, rejected)
 	require.Equal(t, "none", data["effect"], "argument rejection happens before execution")
 
 	crashed := errors.New("docker daemon gone")
-	data = toolFailureData("op-2", "sha256:y", "run_command", crashed)
+	data = toolFailureData("op-2", "sha256:y", "run_command", nil, crashed)
 	require.Equal(t, "uncertain", data["effect"], "execution-boundary failures leave the effect unknown")
 	require.Equal(t, "activity_failed", data["error_type"])
 
 	timeout := temporal.NewTimeoutError(enums.TIMEOUT_TYPE_START_TO_CLOSE, nil)
-	data = toolFailureData("op-3", "sha256:z", "mcp__github__create_issue", timeout)
+	data = toolFailureData("op-3", "sha256:z", "mcp__github__create_issue", nil, timeout)
 	require.Equal(t, "uncertain", data["effect"], "timeouts after dispatch leave the effect unknown")
+}
+
+func TestToolFailureDataReadOnlyEffects(t *testing.T) {
+	crashed := errors.New("connection reset by peer")
+
+	// Plain reads: no side effect regardless of where they die.
+	for _, tool := range []string{"web_fetch", "web_search", "fetch_image", "skill_search", "skill_inspect", "mcp__docs__search"} {
+		data := toolFailureData("op-1", "sha256:x", tool, nil, crashed)
+		require.Equal(t, "none", data["effect"], "%s is a read-only call", tool)
+	}
+
+	// Observing browser actions never mutate anything outside the tab.
+	for _, action := range []string{"open", "content", "screenshot", "close"} {
+		data := toolFailureData("op-2", "sha256:y", "browser", map[string]any{"action": action}, crashed)
+		require.Equal(t, "none", data["effect"], "browser %s is read-only", action)
+	}
+
+	// Mutating browser actions can leave effects behind.
+	for _, action := range []string{"click", "fill", "evaluate"} {
+		data := toolFailureData("op-3", "sha256:z", "browser", map[string]any{"action": action}, crashed)
+		require.Equal(t, "uncertain", data["effect"], "browser %s may submit or navigate", action)
+	}
 }
 
 func TestMCPServerNameEnvResolution(t *testing.T) {

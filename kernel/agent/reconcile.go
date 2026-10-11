@@ -144,6 +144,11 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 			operation.ParentRunID = header.ParentRunID
 			operation.Title = header.Title
 		}
+		// A read that died at the boundary leaves nothing behind — never an
+		// operator question, regardless of what a legacy terminal event claimed.
+		if isReadOnlyEventCall(operation.Tool, operation.Arguments) {
+			continue
+		}
 		if terminal, settled := terminals[eventKey(event)]; settled {
 			// A failed activity does not settle the effect question: the failure
 			// happened at or after the execution boundary (effect=uncertain; legacy
@@ -284,6 +289,25 @@ func failedUncertain(event observation.Event) bool {
 		return true
 	}
 	return dataString(event.Data, "error_type") == "activity_failed"
+}
+
+// isReadOnlyEventCall classifies a journal operation (tool + arguments JSON
+// string) the same way toolFailureData classifies a live call, so legacy
+// events recorded before the effect classification existed are filtered too.
+func isReadOnlyEventCall(tool, argsJSON string) bool {
+	if isReadOnlyTool(tool) {
+		return true
+	}
+	if bare, _ := bareToolName(tool); bare != "browser" {
+		return false
+	}
+	var args struct {
+		Action string `json:"action"`
+	}
+	if json.Unmarshal([]byte(argsJSON), &args) != nil {
+		return false
+	}
+	return browserReadOnlyActions[args.Action]
 }
 
 // ChildRunSummaryRequest asks for the operation summary of one delegated
