@@ -1,6 +1,20 @@
 # SearXNG settings for the Temporality dev stack.
 # use_default_settings keeps engine lists maintained upstream; we only enable
 # the JSON output format (off by default) that the kernel's web_search parses.
+#
+# Engine bans: SearXNG queries every enabled engine in parallel and merges
+# results, so the default engine set (duckduckgo, brave, qwant, bing, mojeek,
+# wikipedia, ...) already spreads per-engine load; an engine that starts
+# answering with captchas is auto-suspended and results keep flowing from the
+# rest. The kernel adds a process-global rate limit on top
+# (KERNEL_WEB_SEARCH_PER_MIN) so agent fleets cannot hammer the instance.
+# For heavier fleets, route engine traffic through rotating proxies:
+#
+# outgoing:
+#   proxies:
+#     all://:
+#       - http://proxy-1:8080
+#       - http://proxy-2:8080
 use_default_settings: true
 server:
   secret_key: "temporality-dev-secret" # replace for anything beyond local dev

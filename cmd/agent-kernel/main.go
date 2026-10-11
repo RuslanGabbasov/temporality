@@ -329,6 +329,15 @@ func main() {
 	// empty URL leaves the tool unregistered while web_fetch still works.
 	activities.SearXNGURL = strings.TrimRight(strings.TrimSpace(os.Getenv("KERNEL_SEARXNG_URL")), "/")
 	activities.WebFetchAllowPrivate = strings.EqualFold(strings.TrimSpace(os.Getenv("KERNEL_WEB_FETCH_ALLOW_PRIVATE")), "true")
+	// Global web_search budget: engines ban the server IP, and each query
+	// fans out into dozens of engine requests, so the cap is per kernel.
+	webSearchPerMin := 30
+	if raw := strings.TrimSpace(os.Getenv("KERNEL_WEB_SEARCH_PER_MIN")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			webSearchPerMin = n
+		}
+	}
+	activities.WebSearchPerMin = webSearchPerMin
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]bool{"ok": true}) })
 	mux.HandleFunc("GET /v1/agent/whoami", func(w http.ResponseWriter, r *http.Request) {
@@ -406,6 +415,25 @@ func main() {
 				return
 			}
 			writeError(w, 500, aErr)
+			return
+		}
+		// Agent-card defaults for direct API runs: the caller's explicit fields
+		// (model, prompt, turn budget, skills, MCP) win, everything else —
+		// including capability enforcement — comes from the agent card, then the
+		// project default model and the org policy. Same resolution order as the
+		// task/trigger paths, so every entrypoint produces equivalent runs.
+		applyAgentDefaults(r.Context(), ws, resolvedAgent, &input)
+		applyProjectModel(r.Context(), ws, input.Project, &input)
+		actorUnit := ""
+		if principal, ok := controlplane.FromContext(r.Context()); ok {
+			actorUnit = principal.OrgUnitID
+		} else if token, _ := controlplane.BearerToken(r); token != "" {
+			if user, uErr := ws.GetUserByToken(r.Context(), token); uErr == nil {
+				actorUnit = user.OrgUnitID
+			}
+		}
+		if pErr := applyRunPolicy(r.Context(), ws, costPrices, input.Project, actorUnit, "", &input); pErr != nil {
+			writeError(w, 403, pErr)
 			return
 		}
 		if _, err := authorizeRunUse(r.Context(), ws, r, &input, resolvedAgentID, resolvedAgent); err != nil {
@@ -5653,6 +5681,121 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	// values are resolved per tool call at the execution boundary, so a rotated
 	// value applies mid-run and nothing secret persists in the workflow.
 	input.Secrets = a.Secrets
+}
+
+// applyAgentDefaults merges an agent card into a run input coming from a
+// direct API caller (POST /v1/agent/runs). Unlike applyAgentConfig — used by
+// paths that build the input server-side and therefore own every field —
+// it treats the caller's explicit fields as overrides: model, turn budget,
+// system prompt, skills and MCP servers only fill in what the caller left
+// unset. Capability enforcement (read-only, denied tools, network off
+// without the capability, knowledge skip, delegation deny, granted secrets)
+// always applies — those are policy, not defaults. One deliberate
+// limitation, matching every other run path: the caller cannot force
+// network off for an agent whose card grants it.
+func applyAgentDefaults(ctx context.Context, ws *workspace.Store, a *workspace.Agent, input *agent.RunInput) {
+	if a == nil {
+		return
+	}
+	if input.Model == "" {
+		input.Model = a.Model
+	}
+	if input.MaxTurns == 0 && a.MaxTurns != nil && *a.MaxTurns > 0 {
+		input.MaxTurns = *a.MaxTurns
+	}
+	// Card-granted network rides in as a default: the caller's bare false
+	// (zero value) means "unset", and — matching every other run path —
+	// there is no way to force network off for a network agent via this API.
+	// The caps check below can still clamp it off.
+	if a.NetworkAccess != nil && *a.NetworkAccess {
+		input.NetworkAccess = true
+	}
+	callerPrompt := input.SystemPrompt
+	input.AgentID = a.ID
+	input.AgentVersion = a.DefinitionVersion
+	useSkills := true
+	if a.Definition != nil {
+		// A caller-provided prompt wins verbatim; otherwise the compiled
+		// effective prompt (definition + card prompt) applies as-is.
+		if callerPrompt == "" {
+			input.SystemPrompt = agent.EffectiveSystemPrompt(agent.AgentPromptInput{
+				Name: a.Name, Description: a.Description, Definition: *a.Definition, Sandbox: a.SandboxProfile,
+			}, input.Role, a.SystemPrompt)
+		}
+		caps := a.Definition.Capabilities
+		if !caps.Cap(caps.ModifyFiles) {
+			input.ReadOnly = true
+			// The native file tools bypass the sandbox container mount, so
+			// read-only runs must deny them here too (defense-in-depth beside
+			// the activity-side read-only check).
+			input.DenyTools = append(input.DenyTools, "write_file", "edit_file")
+		}
+		if !caps.Cap(caps.RunCommands) {
+			input.DenyTools = append(input.DenyTools, "run_command")
+		}
+		if !caps.Cap(caps.Network) {
+			input.NetworkAccess = false
+		}
+		useSkills = caps.Cap(caps.Skills)
+		if !caps.Cap(caps.Knowledge) {
+			input.SkipKnowledge = true
+		}
+	} else if callerPrompt == "" && a.SystemPrompt != "" {
+		input.SystemPrompt = a.SystemPrompt
+	}
+	// Delegation is an explicitly granted capability (docs/agent-delegation.md):
+	// nil or false denies the delegate tool, and agents without a structured
+	// definition never get it by default.
+	if a.Definition == nil || a.Definition.Capabilities.Delegation == nil || !*a.Definition.Capabilities.Delegation {
+		input.DenyTools = append(input.DenyTools, "delegate", "plan")
+	}
+	if a.ReadOnly != nil && *a.ReadOnly {
+		input.ReadOnly = true
+	}
+	if useSkills {
+		resolveAgentSkills(ctx, ws, a, input)
+		input.Skills = dedupeSkillRefs(input.Skills)
+	}
+	if len(input.MCPServers) == 0 {
+		input.MCPServers = a.MCPServers
+	}
+	if len(input.ToolAllowlist) == 0 {
+		input.ToolAllowlist = a.Tools
+	}
+	input.DenyTools = dedupeStrings(input.DenyTools)
+	input.Secrets = a.Secrets
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := values[:0]
+	for _, v := range values {
+		if _, dup := seen[v]; dup {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+func dedupeSkillRefs(refs []agent.SkillRef) []agent.SkillRef {
+	if len(refs) < 2 {
+		return refs
+	}
+	seen := make(map[string]struct{}, len(refs))
+	out := refs[:0]
+	for _, ref := range refs {
+		if _, dup := seen[ref.ID]; dup {
+			continue
+		}
+		seen[ref.ID] = struct{}{}
+		out = append(out, ref)
+	}
+	return out
 }
 
 // applyProjectModel fills input.Model from the project default model when the

@@ -8,14 +8,19 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
-// webCacheReset clears the global fetch cache so tests are order-independent.
+// webCacheReset clears the global fetch/search caches so tests are
+// order-independent.
 func webCacheReset(t *testing.T) {
 	t.Helper()
 	webCacheMu.Lock()
 	webCache = map[string]webCacheEntry{}
 	webCacheMu.Unlock()
+	webSearchCacheMu.Lock()
+	webSearchCache = map[string]webSearchCacheEntry{}
+	webSearchCacheMu.Unlock()
 }
 
 func articleHTML(title string, paragraphs int) string {
@@ -290,6 +295,7 @@ func TestWebSearchReachesInternalSearXNG(t *testing.T) {
 }
 
 func TestWebSearchNoResults(t *testing.T) {
+	webCacheReset(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"query": "zzz nothing", "results": []}`)
@@ -305,5 +311,107 @@ func TestWebSearchNoResults(t *testing.T) {
 	}
 	if !strings.Contains(result.Content, "no results") {
 		t.Errorf("expected no-results hint:\n%s", result.Content)
+	}
+}
+
+func searxngStub(queries chan<- string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if queries != nil {
+			queries <- r.URL.Query().Get("q")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"query": "stub", "results": [{"title": "T", "url": "https://example.com", "content": "c"}]}`)
+	}))
+}
+
+func TestWebSearchCachesIdenticalQueries(t *testing.T) {
+	webCacheReset(t)
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"query": "q", "results": [{"title": "T", "url": "https://example.com", "content": "c"}]}`)
+	}))
+	defer server.Close()
+
+	a := &Activities{NetworkAccess: true, SearXNGURL: server.URL}
+	request := ToolRequest{Arguments: map[string]any{"query": "same query"}}
+	for i := 0; i < 2; i++ {
+		if _, err := a.handleWebSearch(context.Background(), request); err != nil {
+			t.Fatalf("call %d: %v", i+1, err)
+		}
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("expected 1 SearXNG hit, got %d", got)
+	}
+}
+
+func TestWebSearchRateLimit(t *testing.T) {
+	webCacheReset(t)
+	server := searxngStub(nil)
+	defer server.Close()
+
+	a := &Activities{NetworkAccess: true, SearXNGURL: server.URL, WebSearchPerMin: 2}
+	for i := 0; i < 2; i++ {
+		if _, err := a.handleWebSearch(context.Background(), ToolRequest{
+			Arguments: map[string]any{"query": fmt.Sprintf("query %d", i)},
+		}); err != nil {
+			t.Fatalf("call %d within budget: %v", i+1, err)
+		}
+	}
+	_, err := a.handleWebSearch(context.Background(), ToolRequest{
+		Arguments: map[string]any{"query": "query 2"},
+	})
+	kind, _ := nonRetryableType(t, err)
+	if kind != "SearchRateLimited" {
+		t.Fatalf("expected SearchRateLimited, got %q (%v)", kind, err)
+	}
+	if !strings.Contains(err.Error(), "retry in") {
+		t.Errorf("error must tell the model how long to back off: %v", err)
+	}
+}
+
+func TestWebSearchCacheHitDoesNotBurnBudget(t *testing.T) {
+	webCacheReset(t)
+	server := searxngStub(nil)
+	defer server.Close()
+
+	// Budget of one: the first call spends it, the cached replay must not
+	// fail — and a third distinct query is over budget.
+	a := &Activities{NetworkAccess: true, SearXNGURL: server.URL, WebSearchPerMin: 1}
+	first := ToolRequest{Arguments: map[string]any{"query": "cached query"}}
+	if _, err := a.handleWebSearch(context.Background(), first); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if _, err := a.handleWebSearch(context.Background(), first); err != nil {
+		t.Fatalf("cached replay must not hit the limiter: %v", err)
+	}
+	_, err := a.handleWebSearch(context.Background(), ToolRequest{
+		Arguments: map[string]any{"query": "another query"},
+	})
+	kind, _ := nonRetryableType(t, err)
+	if kind != "SearchRateLimited" {
+		t.Fatalf("expected SearchRateLimited, got %q (%v)", kind, err)
+	}
+}
+
+func TestWebSearchLimiter(t *testing.T) {
+	l := newWebSearchLimiter(2, 50*time.Millisecond)
+	for i := 0; i < 2; i++ {
+		ok, _ := l.allow()
+		if !ok {
+			t.Fatalf("request %d must pass", i+1)
+		}
+	}
+	ok, retryIn := l.allow()
+	if ok || retryIn <= 0 {
+		t.Fatalf("third request must be rejected with a wait hint, ok=%v retryIn=%v", ok, retryIn)
+	}
+	time.Sleep(60 * time.Millisecond)
+	if ok, _ := l.allow(); !ok {
+		t.Fatal("budget must recover after the window passes")
+	}
+	if ok, _ := (&webSearchLimiter{}).allow(); !ok {
+		t.Fatal("zero-value limiter must be unlimited")
 	}
 }

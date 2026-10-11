@@ -69,6 +69,15 @@ type Activities struct {
 	// WebFetchAllowPrivate permits web_fetch to reach private/loopback targets
 	// (e.g. an internal docs server); off by default — SSRF guard stays strict.
 	WebFetchAllowPrivate bool
+	// WebSearchPerMin caps web_search calls per minute for the whole kernel
+	// process (0 disables the cap). One SearXNG query fans out into dozens of
+	// engine requests and search engines ban the server IP, so the budget is
+	// global, not per run or per project.
+	WebSearchPerMin int
+	// searchLimiter materializes WebSearchPerMin lazily so directly-constructed
+	// Activities (tests) need no init step.
+	searchLimiterOnce sync.Once
+	searchLimiter     *webSearchLimiter
 	// Tokens is the ephemeral live-token bus feeding the /runs/{id}/tokens SSE
 	// endpoint; nil disables streaming (tests run the blocking path).
 	Tokens *TokenBus

@@ -153,6 +153,9 @@ services:
       # internal hosts (docs servers) — off by default, SSRF guard stays strict.
       KERNEL_SEARXNG_URL: ${KERNEL_SEARXNG_URL:-http://searxng:8080}
       KERNEL_WEB_FETCH_ALLOW_PRIVATE: ${KERNEL_WEB_FETCH_ALLOW_PRIVATE:-}
+      # Process-global web_search budget: search engines ban the server IP,
+      # and each SearXNG query fans out into dozens of engine requests.
+      KERNEL_WEB_SEARCH_PER_MIN: ${KERNEL_WEB_SEARCH_PER_MIN:-30}
     ports:
       - "8090:8090"
     volumes:

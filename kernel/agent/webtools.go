@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,10 @@ const (
 	// process cheap; the cache is keyed by URL and evicts everything when full.
 	webCacheTTL = 10 * time.Minute
 	webCacheCap = 64
+	// webSearchCacheTTL serves repeated identical queries without touching
+	// SearXNG (agents in one fleet often ask the same thing).
+	webSearchCacheTTL = 5 * time.Minute
+	webSearchCacheCap = 64
 )
 
 var webFetchTool = llm.ToolDef{
@@ -319,6 +324,74 @@ func webCacheStore(key string, entry webCacheEntry) {
 	webCache[key] = entry
 }
 
+// webSearchLimiter is a sliding-window rate limiter shared by every run in
+// this kernel process. Search engines ban the server IP, not the individual
+// agent, and one SearXNG query fans out into dozens of engine requests, so
+// the budget must be process-global. max <= 0 disables limiting.
+type webSearchLimiter struct {
+	mu     sync.Mutex
+	max    int
+	window time.Duration
+	stamps []time.Time
+}
+
+func newWebSearchLimiter(max int, window time.Duration) *webSearchLimiter {
+	return &webSearchLimiter{max: max, window: window}
+}
+
+// allow records a request when budget remains; otherwise it reports how long
+// until the oldest request leaves the window.
+func (l *webSearchLimiter) allow() (bool, time.Duration) {
+	if l == nil || l.max <= 0 {
+		return true, 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	kept := l.stamps[:0]
+	for _, at := range l.stamps {
+		if now.Sub(at) < l.window {
+			kept = append(kept, at)
+		}
+	}
+	l.stamps = kept
+	if len(l.stamps) >= l.max {
+		return false, l.window - now.Sub(l.stamps[0])
+	}
+	l.stamps = append(l.stamps, now)
+	return true, 0
+}
+
+// webSearchCacheEntry stores the formatted response for one (query, cap).
+type webSearchCacheEntry struct {
+	at      time.Time
+	content string
+}
+
+var (
+	webSearchCacheMu sync.Mutex
+	webSearchCache   = map[string]webSearchCacheEntry{}
+)
+
+func webSearchCacheLookup(key string) (string, bool) {
+	webSearchCacheMu.Lock()
+	defer webSearchCacheMu.Unlock()
+	entry, ok := webSearchCache[key]
+	if !ok || time.Since(entry.at) > webSearchCacheTTL {
+		return "", false
+	}
+	return entry.content, true
+}
+
+func webSearchCacheStore(key, content string) {
+	webSearchCacheMu.Lock()
+	defer webSearchCacheMu.Unlock()
+	if len(webSearchCache) >= webSearchCacheCap {
+		webSearchCache = map[string]webSearchCacheEntry{}
+	}
+	webSearchCache[key] = webSearchCacheEntry{at: time.Now(), content: content}
+}
+
 func (a *Activities) handleWebSearch(ctx context.Context, request ToolRequest) (ToolResult, error) {
 	if !a.NetworkAccess {
 		return ToolResult{}, temporal.NewNonRetryableApplicationError("network access is disabled for this agent", "NetworkDisabled", nil)
@@ -337,6 +410,22 @@ func (a *Activities) handleWebSearch(ctx context.Context, request ToolRequest) (
 		if maxResults > 20 {
 			maxResults = 20
 		}
+	}
+
+	// Cached answers must not burn the shared rate budget: lookup precedes
+	// the limiter, and identical in-flight patterns converge on one entry.
+	cacheKey := query + "\x00" + strconv.Itoa(maxResults)
+	if content, ok := webSearchCacheLookup(cacheKey); ok {
+		return ToolResult{Content: content}, nil
+	}
+	// Process-global budget (see webSearchLimiter): search engines ban IPs,
+	// so every run shares one allowance.
+	a.searchLimiterOnce.Do(func() {
+		a.searchLimiter = newWebSearchLimiter(a.WebSearchPerMin, time.Minute)
+	})
+	if ok, retryIn := a.searchLimiter.allow(); !ok {
+		return ToolResult{}, temporal.NewNonRetryableApplicationError(
+			fmt.Sprintf("web search rate limit reached (%d/min for the whole kernel) — retry in %d seconds or refine the query offline", a.WebSearchPerMin, int(retryIn.Seconds())+1), "SearchRateLimited", nil)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, webSearchTimeout)
@@ -400,6 +489,7 @@ func (a *Activities) handleWebSearch(ctx context.Context, request ToolRequest) (
 			fmt.Fprintf(&b, "  %s\n", snippet)
 		}
 	}
+	webSearchCacheStore(cacheKey, b.String())
 	return ToolResult{Content: b.String()}, nil
 }
 
