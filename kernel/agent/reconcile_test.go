@@ -62,13 +62,14 @@ func journalStub(t *testing.T, events ...observation.Event) *httptest.Server {
 }
 
 func toolEvent(project, run, operationID, eventType string, occurredAt time.Time) observation.Event {
-	data := map[string]any{"operation_id": operationID, "tool": "run_command", "arguments_hash": "sha256:abc"}
+	data := map[string]any{"operation_id": operationID, "tool": "run_command", "arguments_hash": "sha256:abc", "arguments": `{"command":"go test ./..."}`}
 	if eventType == "tool.started" {
 		data["server"] = ""
 	}
 	if eventType == "tool.failed" {
 		data["error_type"] = "activity_failed"
 		data["effect"] = "uncertain"
+		data["error"] = "context deadline exceeded"
 	}
 	if eventType == "operation.reconciled" {
 		data["effect"] = "unknown"
@@ -80,6 +81,27 @@ func toolEvent(project, run, operationID, eventType string, occurredAt time.Time
 		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel"},
 		Context: observation.Context{Project: project, Run: run},
 		Type:    eventType, Data: data,
+	}
+}
+
+// runStartedEvent builds a run.started event carrying the run header fields
+// the operations listing joins in: agent, parent run and task title.
+func runStartedEvent(project, run, agentID, parentRunID, title string, occurredAt time.Time) observation.Event {
+	data := map[string]any{"task_id": "task-1", "role": "executor"}
+	if agentID != "" {
+		data["agent_id"] = agentID
+	}
+	if parentRunID != "" {
+		data["parent_run_id"] = parentRunID
+	}
+	if title != "" {
+		data["title"] = title
+	}
+	return observation.Event{
+		Schema: "temporality.event/1", EventID: "run.started/" + run, OccurredAt: occurredAt,
+		Source:  observation.Source{ID: "kernel", Integration: "agent-kernel"},
+		Context: observation.Context{Project: project, Run: run},
+		Type:    "run.started", Data: data,
 	}
 }
 
@@ -131,6 +153,32 @@ func TestUncertainOperationsCrashWindow(t *testing.T) {
 	require.Equal(t, "run-2", ids["op-crashed"].RunID)
 	require.Equal(t, "tool.started/op-crashed", ids["op-crashed"].StartedEvent)
 	require.Equal(t, "kernel", ids["op-crashed"].SourceID)
+	// Investigation context: the literal arguments from tool.started must be
+	// carried so the operator sees what ran, not just a hash.
+	require.Equal(t, `{"command":"go test ./..."}`, ids["op-crashed"].Arguments)
+	require.Equal(t, `{"command":"go test ./..."}`, ids["op-failed"].Arguments)
+	// The failure text from the terminal tool.failed is the "why".
+	require.Equal(t, "context deadline exceeded", ids["op-failed"].ErrorDetail)
+}
+
+func TestUncertainOperationsCarryRunHeader(t *testing.T) {
+	stamp := time.Now().UTC()
+	failed := toolEvent("repo", "run-child", "op-x", "tool.failed", stamp)
+	server := journalStub(t,
+		runStartedEvent("repo", "run-child", "qa", "run-root", "Проверить релиз", stamp),
+		runStartedEvent("repo", "run-root", "analyst", "", "Анализ рынка", stamp),
+		toolEvent("repo", "run-child", "op-x", "tool.started", stamp),
+		failed,
+	)
+	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "operator"}
+
+	operations, err := activities.UncertainOperations(context.Background(), "repo", stubLiveness{})
+	require.NoError(t, err)
+	require.Len(t, operations, 1)
+	operation := operations[0]
+	require.Equal(t, "qa", operation.AgentID)
+	require.Equal(t, "run-root", operation.ParentRunID)
+	require.Equal(t, "Проверить релиз", operation.Title)
 }
 
 func TestRecordReconciliationWritesDerivedEvent(t *testing.T) {

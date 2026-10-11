@@ -45,6 +45,16 @@ type UncertainOperation struct {
 	SourceID      string    `json:"source_id"`
 	State         string    `json:"state"`
 	Reason        string    `json:"reason"`
+	// Investigation context: everything an operator needs to answer "who
+	// called whom, with what parameters, and why is this unresolved" without
+	// opening the run trace. Arguments come from tool.started (bounded at emit
+	// time); ErrorDetail from the terminal tool.failed; AgentID/ParentRunID/
+	// Title from the run's run.started.
+	Arguments   string `json:"arguments,omitempty"`
+	ErrorDetail string `json:"error_detail,omitempty"`
+	AgentID     string `json:"agent_id,omitempty"`
+	ParentRunID string `json:"parent_run_id,omitempty"`
+	Title       string `json:"title,omitempty"`
 	// Delegation context: when the failed tool is a delegate call, the terminal
 	// tool.failed event carries the child run identity and a journal-derived
 	// summary of the child's operations, so the UI can point the operator at
@@ -91,6 +101,25 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 	if err != nil {
 		return nil, err
 	}
+	// Run headers give each operation its "who": the agent that executed the
+	// call, the parent run for delegated work, and the human-readable task
+	// title. One extra scan per listing call; the journal is the source of
+	// truth and nothing is stored.
+	runStarted, err := a.toolEvents(ctx, project, "run.started")
+	if err != nil {
+		return nil, err
+	}
+	runHeaders := make(map[string]runHeader, len(runStarted))
+	for _, event := range runStarted {
+		if event.Context.Run == "" {
+			continue
+		}
+		runHeaders[event.Source.ID+"\x00"+event.Context.Run] = runHeader{
+			AgentID:     dataString(event.Data, "agent_id"),
+			ParentRunID: dataString(event.Data, "parent_run_id"),
+			Title:       dataString(event.Data, "title"),
+		}
+	}
 	terminals := map[string]observation.Event{}
 	// operation.reconciled is terminal too: once an operator recorded a
 	// verdict (including effect=unknown), the operation is settled and must
@@ -110,6 +139,11 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 		if !ok {
 			continue
 		}
+		if header, found := runHeaders[event.Source.ID+"\x00"+event.Context.Run]; found {
+			operation.AgentID = header.AgentID
+			operation.ParentRunID = header.ParentRunID
+			operation.Title = header.Title
+		}
 		if terminal, settled := terminals[eventKey(event)]; settled {
 			// A failed activity does not settle the effect question: the failure
 			// happened at or after the execution boundary (effect=uncertain; legacy
@@ -119,6 +153,13 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 				operation.State = OperationStateUncertain
 				operation.Reason = "failed_uncertain"
 				operation.ErrorType = dataString(terminal.Data, "error_type")
+				// The actual failure text — the "why is this question asked"
+				// behind the listing. Newer events carry "error", some paths only
+				// "detail"; both beat a bare error_type code.
+				operation.ErrorDetail = dataString(terminal.Data, "error")
+				if operation.ErrorDetail == "" {
+					operation.ErrorDetail = dataString(terminal.Data, "detail")
+				}
 				operation.ChildRunID = dataString(terminal.Data, "child_run_id")
 				if total, ok := terminal.Data["child_ops_total"].(float64); ok {
 					operation.ChildOpsTotal = int(total)
@@ -211,10 +252,20 @@ func operationFromEvent(event observation.Event) (UncertainOperation, bool) {
 		Tool:          dataString(event.Data, "tool"),
 		Server:        dataString(event.Data, "server"),
 		ArgumentsHash: dataString(event.Data, "arguments_hash"),
-		StartedAt:     event.OccurredAt,
-		StartedEvent:  event.EventID,
-		SourceID:      event.Source.ID,
+		// The literal call arguments (bounded at emit time), not the hash: the
+		// operator must see the command/query that may have landed downstream.
+		Arguments:    dataString(event.Data, "arguments"),
+		StartedAt:    event.OccurredAt,
+		StartedEvent: event.EventID,
+		SourceID:     event.Source.ID,
 	}, true
+}
+
+// runHeader is the run-level context attached to every operation.
+type runHeader struct {
+	AgentID     string
+	ParentRunID string
+	Title       string
 }
 
 func dataString(data map[string]any, key string) string {

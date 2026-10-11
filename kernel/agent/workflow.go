@@ -2147,7 +2147,7 @@ func policySafeTool(name string) bool {
 }
 
 func toolFailureData(operationID, argumentsHash, tool string, err error) map[string]any {
-	data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": tool, "error_type": "activity_failed"}
+	data := map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": tool, "error_type": "activity_failed", "error": boundedFailureDetail(err)}
 	if isReadOnlyTool(tool) {
 		// Read-only tools have no side effect regardless of where they fail.
 		data["effect"] = "none"

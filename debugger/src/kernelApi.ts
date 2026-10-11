@@ -14,6 +14,14 @@ export interface UncertainOperation {
   source_id: string
   state: string
   reason: string
+  // Investigation context: what was called, with which arguments, by which
+  // agent, and why the effect is unresolved. Lets the operator answer without
+  // opening the run trace (docs/failure-reconciliation.md).
+  arguments?: string
+  error_detail?: string
+  agent_id?: string
+  parent_run_id?: string
+  title?: string
   // Delegation context (docs/failure-reconciliation.md): set when the failed
   // tool is a delegate call, so the UI can point at the child trajectory.
   error_type?: string

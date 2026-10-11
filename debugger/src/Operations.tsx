@@ -69,6 +69,17 @@ function turnOf(opId: string): string | null {
   return m ? m[1] : null
 }
 
+/** Tool-specific hint: where to verify whether the effect landed. */
+function whereToLook(op: UncertainOperation, t: (key: string) => string): { icon: string; text: string } {
+  if (op.tool === 'run_command')
+    return { icon: '⚡', text: t('operations.look.sandbox') }
+  if (op.tool === 'write_file' || op.tool === 'read_file' || op.tool === 'search')
+    return { icon: '📝', text: t('operations.look.files') }
+  if (op.tool.startsWith('mcp__'))
+    return { icon: '🔌', text: t('operations.look.mcp') }
+  return { icon: '🔎', text: t('operations.look.default') }
+}
+
 export default function Operations({ project }: { project: string }) {
   const t = useT()
   const [ops, setOps] = useState<UncertainOperation[]>([])
@@ -82,7 +93,7 @@ export default function Operations({ project }: { project: string }) {
   const [error, setError] = useState('')
   const [receipt, setReceipt] = useState<ReconcileReceipt | null>(null)
   const [filter, setFilter] = useState('')
-  const visibleOps = ops.filter((op) => matchesFilter(filter, op.tool, op.server, op.operation_id))
+  const visibleOps = ops.filter((op) => matchesFilter(filter, op.tool, op.server, op.operation_id, op.agent_id, op.arguments))
 
   const load = useCallback(async (target = project, silent = false) => {
     if (!target.trim()) return
@@ -250,8 +261,17 @@ export default function Operations({ project }: { project: string }) {
                     </div>
                     <div style={{ marginTop: '0.35rem', display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
                       <Tag type="warm-gray" size="sm">{t(`operations.reason.${op.reason}`) ?? REASON_SHORT[op.reason] ?? op.reason}</Tag>
+                      {op.agent_id && <Tag type="cool-gray" size="sm">🤖 {op.agent_id}</Tag>}
                       <Tag type="gray" size="sm">{new Date(op.started_at).toLocaleString()}</Tag>
                     </div>
+                    {op.arguments && (
+                      <div
+                        style={{ marginTop: '0.35rem', fontSize: '0.7rem', color: 'var(--tm-muted)', fontFamily: 'var(--tm-mono, monospace)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                        title={op.arguments}
+                      >
+                        {op.arguments}
+                      </div>
+                    )}
                   </Tile>
                 )
               })}
@@ -271,12 +291,20 @@ export default function Operations({ project }: { project: string }) {
               <Stack gap={3}>
                 {/* What happened */}
                 <Tile>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.75rem' }}>
                     <span style={{ fontSize: '1.5rem' }}>{toolInfo(selected.tool, selected.server).icon}</span>
-                    <div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <Heading style={{ fontSize: '1.1rem' }}>{toolInfo(selected.tool, selected.server).label}</Heading>
                       <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{toolInfo(selected.tool, selected.server).category}</div>
+                      {selected.title && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }} title={selected.title}>
+                          {t('operations.task') ?? 'Task'}: {selected.title}
+                        </div>
+                      )}
                     </div>
+                    {selected.agent_id && (
+                      <Tag type="cool-gray" size="sm" style={{ flexShrink: 0 }}>🤖 {selected.agent_id}</Tag>
+                    )}
                   </div>
 
                   <div style={{
@@ -305,6 +333,27 @@ export default function Operations({ project }: { project: string }) {
                     ) : (
                       <>
                         <p style={{ fontSize: '0.875rem', color: '#c0caf5' }}>{reasonText(selected.reason)}</p>
+                        {selected.error_detail && (
+                          <pre
+                            style={{
+                              marginTop: '0.5rem',
+                              padding: '0.5rem 0.75rem',
+                              background: 'rgba(247,118,142,0.08)',
+                              border: '1px solid rgba(247,118,142,0.25)',
+                              borderRadius: '6px',
+                              color: '#f7768e',
+                              fontSize: '0.75rem',
+                              lineHeight: 1.5,
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                              margin: 0,
+                              maxHeight: '10rem',
+                              overflowY: 'auto',
+                            }}
+                          >
+                            {selected.error_detail}
+                          </pre>
+                        )}
                         <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.5rem' }}>
                           {t('operations.agent_notice') ?? 'The agent executed this tool but the system couldn\'t confirm whether the side effect actually happened.'}
                           {' '}{t('operations.check_tell') ?? 'You need to check the external system and tell Temporality the outcome.'}
@@ -319,6 +368,16 @@ export default function Operations({ project }: { project: string }) {
                   <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{t('operations.context') ?? 'Context'}</Heading>
                   <dl style={{ fontSize: '0.875rem' }}>
                     <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                      <dt style={{ color: 'var(--tm-text-3)', minWidth: '100px' }}>{t('operations.project') ?? 'Project'}</dt>
+                      <dd><code style={{ fontSize: '0.8rem' }}>{selected.project}</code></dd>
+                    </div>
+                    {selected.agent_id && (
+                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                        <dt style={{ color: 'var(--tm-text-3)', minWidth: '100px' }}>{t('operations.agent') ?? 'Agent'}</dt>
+                        <dd><code style={{ fontSize: '0.8rem' }}>{selected.agent_id}</code></dd>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.35rem' }}>
                       <dt style={{ color: 'var(--tm-text-3)', minWidth: '100px' }}>{t('operations.run') ?? 'Run'}</dt>
                       <dd>
                         <a
@@ -329,6 +388,19 @@ export default function Operations({ project }: { project: string }) {
                         </a>
                       </dd>
                     </div>
+                    {selected.parent_run_id && (
+                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                        <dt style={{ color: 'var(--tm-text-3)', minWidth: '100px' }}>{t('operations.parent_run') ?? 'Parent run'}</dt>
+                        <dd>
+                          <a
+                            href={`/agents?project=${encodeURIComponent(selected.project)}&run=${encodeURIComponent(selected.parent_run_id)}`}
+                            style={{ color: 'var(--tm-teal)' }}
+                          >
+                            {selected.parent_run_id}
+                          </a>
+                        </dd>
+                      </div>
+                    )}
                     {turnOf(selected.operation_id) && (
                       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.35rem' }}>
                         <dt style={{ color: 'var(--tm-text-3)', minWidth: '100px' }}>{t('operations.turn') ?? 'Turn'}</dt>
@@ -343,12 +415,55 @@ export default function Operations({ project }: { project: string }) {
                       <dt style={{ color: 'var(--tm-text-3)', minWidth: '100px' }}>{t('operations.tool') ?? 'Tool'}</dt>
                       <dd><code style={{ fontSize: '0.8rem' }}>{selected.tool}{selected.server ? ` @ ${selected.server}` : ''}</code></dd>
                     </div>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <dt style={{ color: 'var(--tm-text-3)', minWidth: '100px' }}>{t('operations.args_hash') ?? 'Args hash'}</dt>
-                      <dd><code style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{selected.arguments_hash ?? '—'}</code></dd>
-                    </div>
                   </dl>
+                  {(selected.arguments || selected.arguments_hash) && (
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginBottom: '0.25rem' }}>
+                        {t('operations.arguments') ?? 'Call arguments'}
+                      </div>
+                      {selected.arguments ? (
+                        <pre
+                          style={{
+                            padding: '0.5rem 0.75rem',
+                            background: 'var(--tm-elevated)',
+                            border: '1px solid var(--tm-border)',
+                            borderRadius: '6px',
+                            fontSize: '0.75rem',
+                            lineHeight: 1.5,
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            margin: 0,
+                            maxHeight: '10rem',
+                            overflowY: 'auto',
+                          }}
+                        >
+                          {selected.arguments}
+                        </pre>
+                      ) : (
+                        <code style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{selected.arguments_hash}</code>
+                      )}
+                    </div>
+                  )}
                 </Tile>
+
+                {/* Where to look */}
+                {!selected.child_run_id && (
+                  <Tile>
+                    <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>💡 {t('operations.where_to_look') ?? 'Where to look'}</Heading>
+                    <p style={{ fontSize: '0.8125rem', color: 'var(--tm-text-2, var(--tm-text))' }}>
+                      {whereToLook(selected, t).icon}{' '}{whereToLook(selected, t).text}
+                    </p>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.5rem' }}>
+                      {t('operations.trace_hint') ?? 'The full call trajectory — prompt, tool calls and outputs — is in the run trace.'}{' '}
+                      <a
+                        href={`/agents?project=${encodeURIComponent(selected.project)}&run=${encodeURIComponent(selected.run_id)}`}
+                        style={{ color: 'var(--tm-teal)' }}
+                      >
+                        {t('operations.open_run_trace') ?? 'Open run trace'}
+                      </a>
+                    </p>
+                  </Tile>
+                )}
 
                 {/* Verdict */}
                 {!operator ? (
