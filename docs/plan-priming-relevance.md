@@ -349,6 +349,8 @@ Behavioral impact — важнейшая и самая сложная метри
 
 ### Статус реализации (2026-10-10)
 
+> Происхождение реализации: P0 доставлена в main веткой `feat/priming-relevance-budget` (merge `b061771`); P1 — последующими коммитами `46bcbfc` (diversification), `56baebb` (replacement), `c268a9e` (usefulness loop + benchmark corpus).
+
 Сделано в рамках P0:
 
 * п.1 консолидация — ✅ `kernel/priming` и эндпоинты `/v1/agent/priming*` удалены; единственный движок — `observation.FindHints`;
