@@ -2111,6 +2111,7 @@ func runCompletedTotals(turns, totalTokens int, costUSD float64) map[string]any 
 var sandboxAutoApprovedTools = map[string]bool{
 	"run_command": true, "write_file": true, "edit_file": true,
 	"web_fetch": true, "web_search": true, "fetch_image": true,
+	"browser": true,
 }
 
 // policySafeTools are exempt from policy-mandated tool approval

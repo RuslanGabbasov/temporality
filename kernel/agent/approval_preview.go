@@ -85,6 +85,10 @@ func approvalOperation(operationID, tool string, args map[string]any, readOnly b
 		operationType, risk = "web.research", "low"
 	case tool == "view_image":
 		operationType, risk = "workspace.read", "low"
+	case tool == "browser":
+		// Clicks and fills can mutate external state, so the browser is a
+		// class above passive research even inside the isolated container.
+		operationType, risk = "browser.action", "medium"
 	}
 	summary := "Call tool " + tool
 	if tool == "run_command" {
@@ -138,6 +142,26 @@ func approvalOperation(operationID, tool string, args map[string]any, readOnly b
 				} else {
 					summary = "View image: " + target
 				}
+			}
+		}
+	}
+	if tool == "browser" {
+		if displayedArgs, ok := display.(map[string]any); ok {
+			action, _ := displayedArgs["action"].(string)
+			target, _ := displayedArgs["url"].(string)
+			if target == "" {
+				target, _ = displayedArgs["selector"].(string)
+			}
+			if target == "" {
+				target, _ = displayedArgs["expression"].(string)
+			}
+			if target == "" {
+				target, _ = displayedArgs["path"].(string)
+			}
+			if target != "" {
+				summary = "Browser " + action + ": " + target
+			} else {
+				summary = "Browser " + action
 			}
 		}
 	}

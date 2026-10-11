@@ -78,6 +78,22 @@ type Activities struct {
 	// Activities (tests) need no init step.
 	searchLimiterOnce sync.Once
 	searchLimiter     *webSearchLimiter
+	// BrowserCDPURL is the base URL of the CDP-compatible headless browser
+	// backing the browser tool (Lightpanda by default); empty disables the
+	// tool. The endpoint is operator-configured like SearXNG, so the SSRF
+	// guard does not apply — the browser container sits on an isolated
+	// network without access to internal services.
+	BrowserCDPURL string
+	// BrowserPerMin caps browser actions per minute for the whole kernel
+	// process (0 means the default of 60; a negative value disables the cap).
+	BrowserPerMin int
+	// browserOnce materializes the engine and the action budget lazily.
+	browserOnce    sync.Once
+	browser        *browserEngine
+	browserLimiter *webSearchLimiter
+	// browserTabs tracks one tab per run; idle tabs are swept on every call.
+	browserTabsMu sync.Mutex
+	browserTabs   map[string]*browserTab
 	// Tokens is the ephemeral live-token bus feeding the /runs/{id}/tokens SSE
 	// endpoint; nil disables streaming (tests run the blocking path).
 	Tokens *TokenBus
@@ -194,6 +210,14 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 		}
 		input.AutoApproveTools = append(input.AutoApproveTools, "fetch_image")
 		input.Tools = append(input.Tools, fetchImageTool)
+		// Headless browser (docs/web-research.md §4): registered when a CDP
+		// backend is configured; rides the sandbox auto-approve like the other
+		// web tools — the isolated browser container reaches exactly the
+		// internet the sandbox could curl anyway, with no credentials inside.
+		if a.BrowserCDPURL != "" {
+			input.AutoApproveTools = append(input.AutoApproveTools, "browser")
+			input.Tools = append(input.Tools, browserTool)
+		}
 	}
 	return nil
 }
@@ -399,6 +423,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleViewImage(request)
 	case "fetch_image":
 		return a.handleFetchImage(ctx, request)
+	case "browser":
+		return a.handleBrowser(ctx, request)
 	case "list_triggers":
 		return a.handleListTriggers(ctx, request)
 	case "human_contacts":

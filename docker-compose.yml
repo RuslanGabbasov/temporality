@@ -79,6 +79,23 @@ services:
       retries: 12
     restart: unless-stopped
 
+  # Headless browser backing the agents' browser tool (docs/web-research.md
+  # §4). Isolated on the browser network: it reaches the internet but not the
+  # kernel, journal or database — the network-level SSRF answer for a browser
+  # that fetches URLs on its own. The kernel joins both networks.
+  lightpanda:
+    image: lightpanda/browser:latest
+    # advertise-host whitelists the docker-dns name for the CDP websocket
+    # Host check (DNS-rebinding protection): the kernel dials lightpanda:9222.
+    command: ["/bin/lightpanda", "serve", "--host", "0.0.0.0", "--port", "9222", "--advertise-host", "lightpanda", "--log_level", "info"]
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - browser
+    restart: unless-stopped
+
   agent-kernel:
     build:
       context: .
@@ -156,6 +173,12 @@ services:
       # Process-global web_search budget: search engines ban the server IP,
       # and each SearXNG query fans out into dozens of engine requests.
       KERNEL_WEB_SEARCH_PER_MIN: ${KERNEL_WEB_SEARCH_PER_MIN:-30}
+      # Headless browser backend (CDP) for the browser tool: empty disables
+      # the tool. The endpoint is operator-configured (like SearXNG) and sits
+      # on the isolated browser network.
+      KERNEL_BROWSER_CDP_URL: ${KERNEL_BROWSER_CDP_URL:-http://lightpanda:9222}
+      # Process-global browser action budget (default 60/min).
+      KERNEL_BROWSER_PER_MIN: ${KERNEL_BROWSER_PER_MIN:-60}
     ports:
       - "8090:8090"
     volumes:
@@ -170,6 +193,9 @@ services:
       - type: bind
         source: ${TEMPORALITY_SANDBOX_ROOT:-/tmp}
         target: ${TEMPORALITY_SANDBOX_ROOT:-/tmp}
+    networks:
+      - default
+      - browser
     depends_on:
       postgres:
         condition: service_healthy
@@ -188,3 +214,8 @@ services:
 
 volumes:
   temporality-postgres:
+
+networks:
+  # The browser backend must not see the internal services (journal, postgres,
+  # temporal): only the kernel joins this network alongside the default one.
+  browser: {}

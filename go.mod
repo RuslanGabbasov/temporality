@@ -18,6 +18,7 @@ require (
 	github.com/JohannesKaufmann/dom v0.3.1 // indirect
 	github.com/andybalholm/cascadia v1.3.4 // indirect
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de // indirect
+	github.com/coder/websocket v1.8.15 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a // indirect
 	github.com/go-shiori/dom v0.0.0-20230515143342-73569d674e1c // indirect

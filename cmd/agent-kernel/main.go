@@ -338,6 +338,15 @@ func main() {
 		}
 	}
 	activities.WebSearchPerMin = webSearchPerMin
+	// Headless browser backend (docs/web-research.md §4): empty URL leaves
+	// the browser tool unregistered. The CDP endpoint is operator-configured
+	// like SearXNG and lives on the isolated browser network.
+	activities.BrowserCDPURL = strings.TrimRight(strings.TrimSpace(os.Getenv("KERNEL_BROWSER_CDP_URL")), "/")
+	if raw := strings.TrimSpace(os.Getenv("KERNEL_BROWSER_PER_MIN")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n != 0 {
+			activities.BrowserPerMin = n
+		}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]bool{"ok": true}) })
 	mux.HandleFunc("GET /v1/agent/whoami", func(w http.ResponseWriter, r *http.Request) {
