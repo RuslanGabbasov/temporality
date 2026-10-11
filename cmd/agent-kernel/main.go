@@ -318,6 +318,13 @@ func main() {
 	if os.Getenv("KERNEL_WORKSPACE_URL") == "" {
 		activities.WorkspaceURL = "http://localhost" + address
 	}
+	// The secret broker resolves at the same execution boundary as the other
+	// agent tools: same loopback workspace API, same startup-random internal
+	// credential. Wiring it here (after the gate and address are settled) keeps
+	// KERNEL_WORKSPACE_URL overrides working for secrets too — without it every
+	// run_command of an agent with granted secrets fails closed.
+	activities.Secrets.WorkspaceURL = activities.WorkspaceURL
+	activities.Secrets.WorkspaceToken = activities.WorkspaceToken
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]bool{"ok": true}) })
 	mux.HandleFunc("GET /v1/agent/whoami", func(w http.ResponseWriter, r *http.Request) {
