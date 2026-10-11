@@ -235,6 +235,9 @@ func ExtractTrajectory(events []EventLike) Trajectory {
 		case "run.failed":
 			trajectory.Summary.RunStatus = "failed"
 
+		case "run.cancelled":
+			trajectory.Summary.RunStatus = "cancelled"
+
 		case "agent.summary":
 			trajectory.Summary.Answer = stringField(d, "answer")
 		}

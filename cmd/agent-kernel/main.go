@@ -625,7 +625,7 @@ func main() {
 		}
 		var status string
 		if response.WorkflowExecutionInfo != nil {
-			status = response.WorkflowExecutionInfo.Status.String()
+			status = workflowStatusName(response.WorkflowExecutionInfo.Status)
 		}
 		reply := map[string]any{"run_id": r.PathValue("runID"), "project": project, "status": status}
 		if response.WorkflowExecutionInfo != nil && response.WorkflowExecutionInfo.Status == enums.WORKFLOW_EXECUTION_STATUS_COMPLETED {
@@ -2265,7 +2265,7 @@ func main() {
 		// Enrich with live Temporal status
 		response, tErr := temporalClient.DescribeWorkflowExecution(r.Context(), workflowIDFor(activities.SourceID, run.ProjectID, run.RunID), "")
 		if tErr == nil && response.WorkflowExecutionInfo != nil {
-			run.Status = strings.ToLower(response.WorkflowExecutionInfo.Status.String())
+			run.Status = workflowStatusName(response.WorkflowExecutionInfo.Status)
 			if response.WorkflowExecutionInfo.Status == enums.WORKFLOW_EXECUTION_STATUS_COMPLETED {
 				var result agent.RunResult
 				if gErr := temporalClient.GetWorkflow(r.Context(), workflowIDFor(activities.SourceID, run.ProjectID, run.RunID), "").Get(r.Context(), &result); gErr == nil {
@@ -2338,7 +2338,9 @@ func main() {
 					data, _ := json.Marshal(ev)
 					fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, data)
 					flusher.Flush()
-					if ev.Type == "run.completed" || ev.Type == "run.failed" {
+					// run.cancelled is terminal too: without it a cancelled run's
+					// stream never sends `done` and the chat spinner never stops.
+					if ev.Type == "run.completed" || ev.Type == "run.failed" || ev.Type == "run.cancelled" {
 						done = true
 					}
 				}
@@ -5012,6 +5014,29 @@ func querySourceID(r *http.Request, fallback string) string {
 
 func workflowIDFor(sourceID, project, runID string) string {
 	return agent.WorkflowID(sourceID, project, runID)
+}
+
+// workflowStatusName maps a Temporal execution status onto the project's
+// canonical run status vocabulary. The journal (run.cancelled events),
+// workspace_run.status and every UI terminal list use British "cancelled",
+// while Temporal reports American "Canceled" — leaking the raw enum name
+// broke terminal-state detection in the chat (the spinner never stopped for
+// cancelled runs).
+func workflowStatusName(status enums.WorkflowExecutionStatus) string {
+	switch status {
+	case enums.WORKFLOW_EXECUTION_STATUS_COMPLETED:
+		return "completed"
+	case enums.WORKFLOW_EXECUTION_STATUS_FAILED:
+		return "failed"
+	case enums.WORKFLOW_EXECUTION_STATUS_CANCELED, enums.WORKFLOW_EXECUTION_STATUS_TERMINATED:
+		return "cancelled"
+	case enums.WORKFLOW_EXECUTION_STATUS_TIMED_OUT:
+		return "failed"
+	case enums.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW:
+		return "running"
+	default:
+		return strings.ToLower(status.String())
+	}
 }
 
 // firstNonEmpty returns the first non-blank value (webhook event ids / actors

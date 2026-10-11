@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/temporality-project/temporality/kernel/agent"
+	"go.temporal.io/api/enums/v1"
 )
 
 func TestWorkflowIDForScopesByProjectAndRun(t *testing.T) {
@@ -37,5 +38,22 @@ func TestApprovalRequiresCanonicalArgumentsHash(t *testing.T) {
 	malformed.ArgumentsHash = "sha256:not-a-digest"
 	if err := validateApproval(malformed); err == nil {
 		t.Fatal("malformed arguments hash accepted")
+	}
+}
+
+func TestWorkflowStatusNameMatchesCanonicalVocabulary(t *testing.T) {
+	cases := map[enums.WorkflowExecutionStatus]string{
+		enums.WORKFLOW_EXECUTION_STATUS_RUNNING:          "running",
+		enums.WORKFLOW_EXECUTION_STATUS_COMPLETED:        "completed",
+		enums.WORKFLOW_EXECUTION_STATUS_FAILED:           "failed",
+		enums.WORKFLOW_EXECUTION_STATUS_CANCELED:         "cancelled",
+		enums.WORKFLOW_EXECUTION_STATUS_TERMINATED:       "cancelled",
+		enums.WORKFLOW_EXECUTION_STATUS_TIMED_OUT:        "failed",
+		enums.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW: "running",
+	}
+	for status, want := range cases {
+		if got := workflowStatusName(status); got != want {
+			t.Fatalf("status %v: got %q, want %q", status, got, want)
+		}
 	}
 }

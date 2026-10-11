@@ -10,7 +10,7 @@ export interface DelegationNodeInfo {
   childRunId: string
   agentId: string
   ordinal: number
-  status: 'completed' | 'failed' | 'running'
+  status: 'completed' | 'failed' | 'running' | 'cancelled'
   turns?: number
   error?: string
   taskId?: string
@@ -109,7 +109,10 @@ async function fetchChildPayload(project: string, childRunId: string, terminal?:
   const events = page.events
   const failed = events.find((e) => e.type === 'run.failed')
   const completed = events.find((e) => e.type === 'run.completed')
-  const ownStatus: DelegationNodeInfo['status'] = failed ? 'failed' : completed ? 'completed' : 'running'
+  const cancelled = events.find((e) => e.type === 'run.cancelled')
+  // run.cancelled is terminal: without it a cancelled child run renders as
+  // "running" forever.
+  const ownStatus: DelegationNodeInfo['status'] = failed ? 'failed' : cancelled ? 'cancelled' : completed ? 'completed' : 'running'
   const status = ownStatus !== 'running' ? ownStatus : (terminal ?? 'running')
   let summary = events.find((e) => e.type === 'agent.summary')?.data as Record<string, any> | undefined
   if (!summary && status !== 'running') {
@@ -184,7 +187,9 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
     ? <Tag type="green" size="sm">{t('chat.delegation.completed')}</Tag>
     : status === 'failed'
       ? <Tag type="red" size="sm">{t('chat.delegation.failed')}</Tag>
-      : <Tag type="blue" size="sm">{t('chat.delegation.running')}</Tag>
+      : status === 'cancelled'
+        ? <Tag type="warm-gray" size="sm">{t('status.cancelled')}</Tag>
+        : <Tag type="blue" size="sm">{t('chat.delegation.running')}</Tag>
 
   const openRun = (e: React.MouseEvent) => {
     e.stopPropagation()

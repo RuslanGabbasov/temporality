@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatStreamEvent } from './Workspace'
+import { formatStreamEvent, normalizeRunStatus } from './Workspace'
 import { pluralT } from './i18n'
 import { en } from './locales/en'
 import { ru } from './locales/ru'
@@ -63,5 +63,14 @@ describe('formatStreamEvent', () => {
 
   it('returns null for unknown events', () => {
     expect(formatStreamEvent('mystery', { data: {} }, enT, 'en')).toBeNull()
+  })
+})
+
+describe('normalizeRunStatus', () => {
+  it('maps Temporal "canceled" onto the canonical "cancelled"', () => {
+    expect(normalizeRunStatus('canceled')).toBe('cancelled')
+    expect(normalizeRunStatus('cancelled')).toBe('cancelled')
+    expect(normalizeRunStatus('completed')).toBe('completed')
+    expect(normalizeRunStatus(undefined)).toBe('')
   })
 })

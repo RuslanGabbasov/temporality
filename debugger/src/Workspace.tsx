@@ -34,8 +34,15 @@ function shortTime(iso: string) {
 
 const STATUS_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'red'> = {
   completed: 'green', failed: 'red', running: 'blue', turn_limit: 'warm-gray', pending: 'gray',
-  started: 'blue', cancelled: 'warm-gray',
+  started: 'blue', cancelled: 'warm-gray', canceled: 'warm-gray',
   time_limit: 'warm-gray', token_limit: 'warm-gray', budget_limit: 'warm-gray',
+}
+
+/** Normalize a run status from the backend into the canonical vocabulary.
+ * Temporal-derived statuses used to arrive as American "canceled" while the
+ * whole UI (terminal lists, tags, colors) speaks British "cancelled". */
+export function normalizeRunStatus(status: string | undefined | null): string {
+  return status === 'canceled' ? 'cancelled' : (status ?? '')
 }
 
 interface ChatMessage {
@@ -431,6 +438,15 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
     es.addEventListener('run.completed', handleEvent('run.completed'))
 
+    // A cancelled run never emits run.completed/run.failed — without this the
+    // message spinner runs forever (the server stream also used to never send
+    // `done` for cancelled runs).
+    es.addEventListener('run.cancelled', () => {
+      es.close(); streamRef.current.delete(convId)
+      closeTokenStream()
+      void fetchFinalAnswer(runId, convId)
+    })
+
     // Delegation events — surface child agent activity in the stream
     const delegationAgentName = (id: unknown) => {
       const s = typeof id === 'string' ? id : ''
@@ -601,7 +617,8 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     for (const delay of delays) {
       try {
         const run = await workspaceApi.getRun(runId)
-        if (terminal.includes(run.status)) {
+        const status = normalizeRunStatus(run.status)
+        if (terminal.includes(status)) {
           const answer = run.answer || run.error || 'No answer received'
           // Best-effort token/cost totals for the finished run; pricing may be
           // unconfigured, and this must never block the answer itself.
@@ -633,7 +650,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
               taskTotals = parts.join(' · ')
             }
           } catch { /* totals stay hidden */ }
-          updateMsg(convId, runId, { content: answer, status: run.status, totals, taskTotals })
+          updateMsg(convId, runId, { content: answer, status, totals, taskTotals })
           return
         }
       } catch { /* transient — keep polling */ }

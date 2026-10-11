@@ -34,7 +34,7 @@ function pendingApprovals(events: ObservationEvent[]) {
   return events.filter((event) => (event.type === 'approval.requested' || event.type === 'human.requested') && !ended.has(event.data?.operation_id))
 }
 
-type RunStatus = 'completed' | 'failed' | 'running'
+type RunStatus = 'completed' | 'failed' | 'running' | 'cancelled'
 
 interface RunRow {
   id: string
@@ -291,13 +291,16 @@ export default function AgentRuns({ project }: { project: string }) {
     try {
       const startedPage = await observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.started', limit: 500 })
       // Terminal events give every list row (roots and delegated children
-      // alike) its status tag without opening each run.
-      const [completedPage, failedPage] = await Promise.all([
+      // alike) its status tag without opening each run. run.cancelled matters
+      // as much: without it a cancelled run shows "running" forever.
+      const [completedPage, failedPage, cancelledPage] = await Promise.all([
         observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.completed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
         observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.failed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
+        observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.cancelled', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
       ])
       const statuses = new Map<string, RunStatus>()
       for (const event of failedPage.events) statuses.set(runID(event), 'failed')
+      for (const event of cancelledPage.events) statuses.set(runID(event), 'cancelled')
       for (const event of completedPage.events) statuses.set(runID(event), 'completed')
       const allRows = buildRunRows(startedPage.events, statuses)
       setRows(allRows)
@@ -488,6 +491,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     {row.status === 'completed' && <Tag type="green" size="sm">{t('chat.delegation.completed')}</Tag>}
                     {row.status === 'failed' && <Tag type="red" size="sm">{t('chat.delegation.failed')}</Tag>}
                     {row.status === 'running' && <Tag type="blue" size="sm">{t('chat.delegation.running')}</Tag>}
+                    {row.status === 'cancelled' && <Tag type="warm-gray" size="sm">{t('status.cancelled')}</Tag>}
                     {questionRuns.has(row.id) && <Tag type="warm-gray" size="sm" title={t('runs.asks_human') ?? 'This run is waiting for a human answer'}>❓ {t('runs.asks_human') ?? 'asks you'}</Tag>}
                   </div>
                   {(row.title || agentName) && (
@@ -523,7 +527,7 @@ export default function AgentRuns({ project }: { project: string }) {
                   <Tile>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
                       <Heading style={{ fontSize: '0.875rem' }}>{t('runs.answer') ?? 'Agent Answer'}</Heading>
-                      <Tag type={result?.status === 'completed' ? 'green' : 'red'} size="sm">{String(result?.status ?? '')}</Tag>
+                      <Tag type={result?.status === 'completed' ? 'green' : result?.status === 'cancelled' ? 'warm-gray' : 'red'} size="sm">{String(result?.status ?? '')}</Tag>
                     </div>
                     <Markdown content={answer} />
                   </Tile>
