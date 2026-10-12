@@ -7,6 +7,74 @@ import (
 	"github.com/temporality-project/temporality/controlplane"
 )
 
+// PrincipalForUser resolves the effective principal of one workspace user —
+// the same projection LoadTokenPrincipals builds for token auth: role, org
+// visibility chain, unit role grants and visible projects. The intake
+// pipeline uses it to authorize start_task as the identified sender instead
+// of as the kernel's internal token (docs/inbound-messages.md §9): the task
+// lands with the sender's rights, never wider ones.
+func (s *Store) PrincipalForUser(ctx context.Context, log *slog.Logger, userID string) (controlplane.Principal, bool) {
+	u, err := s.GetUser(ctx, userID)
+	if err != nil || !u.Active {
+		return controlplane.Principal{}, false
+	}
+	role, err := controlplane.ParseRole(u.Role)
+	if err != nil {
+		log.Error("skip principal: unknown role", "user", u.ID, "role", u.Role)
+		return controlplane.Principal{}, false
+	}
+	units, err := s.ListOrgUnits(ctx)
+	if err != nil {
+		log.Error("principal org units", "user", u.ID, "error", err)
+		return controlplane.Principal{}, false
+	}
+	unitByID := make(map[string]OrgUnit, len(units))
+	for _, unit := range units {
+		unitByID[unit.ID] = unit
+	}
+	var visible []string
+	if u.OrgUnitID != "" {
+		if unit, ok := unitByID[u.OrgUnitID]; ok {
+			visible = unit.Ancestors()
+		} else {
+			log.Error("skip org visibility for user: unknown unit", "user", u.ID, "unit", u.OrgUnitID)
+		}
+	}
+	grants, err := s.ListAllOrgUnitRoleGrants(ctx)
+	if err != nil {
+		log.Error("principal role grants", "user", u.ID, "error", err)
+		return controlplane.Principal{}, false
+	}
+	orgRoles := []controlplane.OrgRoleGrant{}
+	for _, g := range grants {
+		if g.UserID != userID {
+			continue
+		}
+		grantRole, rErr := controlplane.ParseRole(g.Role)
+		if rErr != nil {
+			log.Error("skip org unit role grant: unknown role", "user", g.UserID, "role", g.Role)
+			continue
+		}
+		path := ""
+		if unit, ok := unitByID[g.OrgUnitID]; ok {
+			path = unit.SelfPath()
+		}
+		orgRoles = append(orgRoles, controlplane.OrgRoleGrant{UnitID: g.OrgUnitID, Path: path, Role: grantRole})
+	}
+	projects := []string{"*"}
+	if role < controlplane.RoleAdmin && u.OrgUnitID != "" && visible != nil {
+		if ids, pErr := s.VisibleProjectIDs(ctx, u.ID, false, visible); pErr != nil {
+			log.Error("resolve visible projects for user", "user", u.ID, "error", pErr)
+		} else {
+			projects = ids
+		}
+	}
+	return controlplane.Principal{
+		Subject: u.Name, Role: role, Projects: projects, UserID: u.ID,
+		OrgUnitID: u.OrgUnitID, VisibleUnits: visible, OrgRoles: orgRoles,
+	}, true
+}
+
 // LoadTokenPrincipals builds the auth gate's bearer-token → principal map
 // from the workspace store: active users with tokens, their org visibility
 // chains, org role grants and visible projects (docs/org-structure.md §13-15).

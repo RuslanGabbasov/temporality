@@ -5051,6 +5051,10 @@ func main() {
 		costPrices: costPrices,
 	}
 	intakeEmitter := intakeEventEnqueuer(events.Enqueue, activities.SourceID)
+	// Internal intake endpoints (docs/inbound-messages.md §7): the intake
+	// agent's tools call them loopback with the kernel token; every identity
+	// decision inside resolves back to the message sender.
+	registerIntakeRoutes(mux, gate, intake, quotas, intakeEmitter)
 	// Inbound channel loops (docs/channels.md §5): every two-way driver —
 	// one with a pull poller — gets its own loop; replies in a chat route back
 	// into paused runs through the same approval signal the web inbox uses,
@@ -5320,11 +5324,21 @@ func resolveRunAgent(ctx context.Context, ws *workspace.Store, projectID, agentI
 // context snapshot can record it (§35).
 func authorizeRunUse(ctx context.Context, ws *workspace.Store, r *http.Request, input *agent.RunInput, agentID string, agentCfg *workspace.Agent) (controlplane.Role, error) {
 	principal, ok := controlplane.FromContext(r.Context())
-	if !ok || principal.Role >= controlplane.RoleAdmin || principal.VisibleUnits == nil {
+	if !ok {
+		return controlplane.RoleAdmin, nil
+	}
+	return authorizeRunUseFor(ctx, ws, &principal, input, agentID, agentCfg)
+}
+
+// authorizeRunUseFor is authorizeRunUse against an explicit principal: the
+// intake pipeline authorizes the task it starts as the identified sender
+// (docs/inbound-messages.md §9), not as the kernel's internal token.
+func authorizeRunUseFor(ctx context.Context, ws *workspace.Store, principal *controlplane.Principal, input *agent.RunInput, agentID string, agentCfg *workspace.Agent) (controlplane.Role, error) {
+	if principal == nil || principal.Role >= controlplane.RoleAdmin || principal.VisibleUnits == nil {
 		return controlplane.RoleAdmin, nil
 	}
 	// Project: org visibility or explicit membership (§15-16).
-	effective, err := projectAccessRole(ctx, ws, &principal, input.Project)
+	effective, err := projectAccessRole(ctx, ws, principal, input.Project)
 	if err != nil {
 		return controlplane.RoleNone, err
 	}
@@ -5520,6 +5534,14 @@ func authorizeTriggerRun(ctx context.Context, ws *workspace.Store, t *workspace.
 // resource copies. authorizedAs is the effective role authorizeRunUse
 // returned; RoleNone falls back to the flat principal role.
 func runExecContext(ctx context.Context, input *agent.RunInput, agentID string, authorizedAs controlplane.Role) map[string]any {
+	principal, _ := controlplane.FromContext(ctx)
+	return runExecContextFor(principal, input, agentID, authorizedAs)
+}
+
+// runExecContextFor is runExecContext with an explicit authorizing principal:
+// the intake start-task path attributes the run to the message sender, while
+// the request context carries the kernel's internal token.
+func runExecContextFor(principal controlplane.Principal, input *agent.RunInput, agentID string, authorizedAs controlplane.Role) map[string]any {
 	skillIDs := make([]string, 0, len(input.Skills))
 	for _, s := range input.Skills {
 		skillIDs = append(skillIDs, s.ID)
@@ -5529,7 +5551,7 @@ func runExecContext(ctx context.Context, input *agent.RunInput, agentID string, 
 		mcpIDs = []string{}
 	}
 	authorizedBy := map[string]any{"user_id": input.ActorID, "role": "", "org_unit_id": ""}
-	if principal, ok := controlplane.FromContext(ctx); ok {
+	if principal.UserID != "" || principal.Subject != "" {
 		who := principal.UserID
 		if who == "" {
 			who = principal.Subject

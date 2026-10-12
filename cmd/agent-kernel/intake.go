@@ -2,14 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/cost"
+	"github.com/temporality-project/temporality/kernel/quota"
 	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/workspace"
 
@@ -257,3 +262,250 @@ func intakeEnabledFromEnv() bool {
 	}
 	return true
 }
+
+// registerIntakeRoutes exposes the internal intake endpoints the intake
+// agent's tools call loopback with the kernel token (docs/inbound-messages.md
+// §7, §9). The flat gate keeps them kernel-internal (operator); the identity
+// for every authorization decision comes from the message row — the sender —
+// never from the calling token, so a task lands with the sender's rights.
+func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intakeRunner, quotas *quota.Limiter, emit intakeEmitFunc) {
+	// Projects visible to the message sender: search_projects behind the
+	// intake dialog. Query is a case-insensitive substring over id and name.
+	mux.HandleFunc("GET /v1/intake/projects", func(w http.ResponseWriter, req *http.Request) {
+		if !gate.Allow(w, req, controlplane.RoleOperator) {
+			return
+		}
+		sender := strings.TrimSpace(req.URL.Query().Get("sender"))
+		if sender == "" {
+			writeError(w, 422, errors.New("sender is required"))
+			return
+		}
+		principal, ok := r.ws.PrincipalForUser(req.Context(), r.log, sender)
+		if !ok {
+			writeError(w, 404, fmt.Errorf("sender %q is not an active user", sender))
+			return
+		}
+		projects, err := r.ws.ListProjectsForUser(req.Context(), sender, principal.Role >= controlplane.RoleAdmin, principal.VisibleUnits)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		query := strings.ToLower(strings.TrimSpace(req.URL.Query().Get("query")))
+		matched := []map[string]any{}
+		for _, project := range projects {
+			if project.Archived || project.ID == IntakeProjectID {
+				continue
+			}
+			if query != "" && !strings.Contains(strings.ToLower(project.ID+" "+project.Name), query) {
+				continue
+			}
+			entry := map[string]any{"id": project.ID, "name": project.Name}
+			if project.DefaultAgentID != "" {
+				entry["default_agent_id"] = project.DefaultAgentID
+			}
+			matched = append(matched, entry)
+			if len(matched) >= 10 {
+				break
+			}
+		}
+		writeJSON(w, 200, map[string]any{"projects": matched})
+	})
+	// Classification decision: intake_decide journals the chosen class on the
+	// message row. Status only advances received → classified; a row already
+	// clarifying or routed keeps its lifecycle position.
+	mux.HandleFunc("POST /v1/intake/runs/{runID}/decision", func(w http.ResponseWriter, req *http.Request) {
+		if !gate.Allow(w, req, controlplane.RoleOperator) {
+			return
+		}
+		var body struct {
+			Classification string `json:"classification"`
+			Note           string `json:"note"`
+		}
+		if err := decodeJSON(w, req, &body); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if !workspace.ValidInboundClassification(body.Classification) {
+			writeError(w, 422, fmt.Errorf("classification must be one of task, amendment, status, cancel, chatter, reply"))
+			return
+		}
+		row, err := r.ws.GetInboundMessageByIntakeRun(req.Context(), req.PathValue("runID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("no inbound message for this run"))
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		update := workspace.InboundMessageUpdate{Classification: body.Classification}
+		if row.Status == workspace.InboundStatusReceived {
+			update.Status = workspace.InboundStatusClassified
+		}
+		if err := r.ws.UpdateInboundMessage(req.Context(), row.ID, update); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if emit != nil {
+			data := map[string]any{"classification": body.Classification}
+			if body.Note != "" {
+				data["note"] = body.Note
+			}
+			emit(req.Context(), "intake.classified", inboundMessageToAgent(row), row.SenderUserID, data)
+		}
+		writeJSON(w, 200, map[string]any{"classified": body.Classification})
+	})
+	// Task creation: start_task resolves the message row from the intake run,
+	// rebuilds the sender's principal and runs the full task-start cycle —
+	// agent resolution, card defaults, model policy, operation-level
+	// authorization (§22), quota — exactly as POST /v1/workspace/tasks/{id}/runs
+	// does, but attributed to the sender (ActorID, audit, exec context).
+	mux.HandleFunc("POST /v1/intake/runs/{runID}/start-task", func(w http.ResponseWriter, req *http.Request) {
+		if !gate.Allow(w, req, controlplane.RoleOperator) {
+			return
+		}
+		var body struct {
+			ProjectID string `json:"project_id"`
+			AgentID   string `json:"agent_id"`
+			Title     string `json:"title"`
+			Prompt    string `json:"prompt"`
+		}
+		if err := decodeJSON(w, req, &body); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(body.ProjectID) == "" || strings.TrimSpace(body.Title) == "" || strings.TrimSpace(body.Prompt) == "" {
+			writeError(w, 422, errors.New("project_id, title and prompt are required"))
+			return
+		}
+		row, err := r.ws.GetInboundMessageByIntakeRun(req.Context(), req.PathValue("runID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("no inbound message for this run"))
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if row.SenderUserID == "" {
+			writeError(w, 409, errors.New("message has no identified sender"))
+			return
+		}
+		if row.Status == workspace.InboundStatusRouted {
+			writeError(w, 409, fmt.Errorf("message already routed to task %s", row.ProjectID))
+			return
+		}
+		if row.Status == workspace.InboundStatusRejected || row.Status == workspace.InboundStatusExpired {
+			writeError(w, 409, fmt.Errorf("message is %s and cannot start tasks", row.Status))
+			return
+		}
+		sender, err := senderUser(req.Context(), r.ws, row.SenderUserID)
+		if err != nil {
+			writeError(w, 404, err)
+			return
+		}
+		principal, ok := r.ws.PrincipalForUser(req.Context(), r.log, sender.ID)
+		if !ok {
+			writeError(w, 404, fmt.Errorf("sender %q has no resolvable principal", sender.ID))
+			return
+		}
+		// Deterministic task id from the message: a replayed start_task for the
+		// same message fails cleanly on the task primary key instead of
+		// duplicating work.
+		taskID := intakeTaskID(row)
+		if err := r.ws.CreateTask(req.Context(), &workspace.Task{ID: taskID, ProjectID: body.ProjectID, Title: body.Title, Prompt: body.Prompt}); err != nil {
+			writeError(w, 409, fmt.Errorf("task %s already exists (message already routed)", taskID))
+			return
+		}
+		agentID, agentCfg, aErr := resolveRunAgent(req.Context(), r.ws, body.ProjectID, body.AgentID)
+		if aErr != nil {
+			if errors.Is(aErr, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("agent not found"))
+				return
+			}
+			writeError(w, 500, aErr)
+			return
+		}
+		runID := taskID + "-" + time.Now().UTC().Format("20060102-150405")
+		input := agent.RunInput{
+			RunID: runID, Project: body.ProjectID, TaskID: taskID,
+			Prompt: body.Prompt, ActorID: sender.ID,
+		}
+		applyAgentConfig(req.Context(), r.ws, agentCfg, &input)
+		applyProjectModel(req.Context(), r.ws, body.ProjectID, &input)
+		if pErr := applyRunPolicy(req.Context(), r.ws, r.costPrices, body.ProjectID, sender.OrgUnitID, "", &input); pErr != nil {
+			writeError(w, 403, pErr)
+			return
+		}
+		effectiveRole, err := authorizeRunUseFor(req.Context(), r.ws, &principal, &input, agentID, agentCfg)
+		if err != nil {
+			writeError(w, 403, err)
+			return
+		}
+		if err := r.activities.PrepareRun(&input); err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		if quotas.Enabled() {
+			verdict, qErr := quotas.Allow(req.Context(), body.ProjectID)
+			if qErr != nil {
+				writeError(w, 500, qErr)
+				return
+			}
+			if !verdict.Allowed {
+				writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "daily run quota exceeded for project " + body.ProjectID, "quota": verdict})
+				return
+			}
+		}
+		options := client.StartWorkflowOptions{ID: workflowIDFor(r.sourceID, body.ProjectID, runID), TaskQueue: r.taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
+		run, wfErr := r.temporal.ExecuteWorkflow(req.Context(), options, "AgentRun", input)
+		if wfErr != nil {
+			writeError(w, 409, wfErr)
+			return
+		}
+		_ = r.ws.CreateRun(req.Context(), &workspace.Run{
+			ID: runID, TaskID: taskID, ProjectID: body.ProjectID,
+			AgentID: agentID, AgentVersion: input.AgentVersion, RunID: runID, Status: "started", Model: input.Model,
+			ExecContext: runExecContextFor(principal, &input, agentID, effectiveRole),
+		})
+		_ = r.ws.UpdateInboundMessage(req.Context(), row.ID, workspace.InboundMessageUpdate{
+			ProjectID: body.ProjectID, TargetRunID: runID, Status: workspace.InboundStatusRouted,
+		})
+		if emit != nil {
+			// The event lands in the intake scope; the target project sees the
+			// routing through the run row and its own run events — dual visibility
+			// without a second journal entry.
+			emit(req.Context(), "intake.routed", inboundMessageToAgent(row), sender.ID, map[string]any{
+				"project_id": body.ProjectID, "task_id": taskID, "run_id": runID,
+			})
+		}
+		_ = r.ws.RecordAccessAudit(req.Context(), sender.ID, workspace.AuditIntakeRouted, "task", taskID, map[string]any{
+			"project": body.ProjectID, "run_id": runID, "message": row.ID,
+			"channel": row.Channel, "workflow_id": run.GetID(),
+		})
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"run_id": runID, "task_id": taskID, "project": body.ProjectID, "status": "started",
+		})
+	})
+}
+
+// decodeJSON is the intake routes' small body reader (mirrors the inline
+// handlers' MaxBytesReader pattern).
+func decodeJSON(w http.ResponseWriter, r *http.Request, dest any) error {
+	return json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(dest)
+}
+
+// intakeTaskID derives the deterministic target task id from the message row:
+// one message → one task, replays collide on the primary key.
+func intakeTaskID(row workspace.InboundMessage) string {
+	return "inbound-" + slugify(translit(row.Channel+"-"+row.MessageID))
+}
+
+// inboundMessageToAgent rebuilds the channel-neutral message projection the
+// event enqueuer logs from a stored row.
+func inboundMessageToAgent(row workspace.InboundMessage) agent.InboundMessage {
+	return agent.InboundMessage{ID: row.MessageID, Channel: row.Channel, ChatID: row.Room, Sender: row.SenderRaw, Text: row.Body}
+}
+
+// intakeEmitFunc is the loop's event enqueuer type, reused by the routes.
+type intakeEmitFunc = func(context.Context, string, agent.InboundMessage, string, map[string]any)

@@ -76,6 +76,22 @@ func (s *Store) GetInboundMessage(ctx context.Context, id string) (InboundMessag
 	return m, nil
 }
 
+// GetInboundMessageByIntakeRun resolves the intake row behind a running
+// intake run: the tool surface resolves the message from the run id, never
+// from model arguments (docs/inbound-messages.md §7).
+func (s *Store) GetInboundMessageByIntakeRun(ctx context.Context, runID string) (InboundMessage, error) {
+	row := s.pool.QueryRow(ctx,
+		`SELECT `+inboundMessageColumns+` FROM workspace_inbound_message WHERE intake_run_id = $1`, runID)
+	m, err := scanInboundMessage(row.Scan)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return m, ErrNotFound
+		}
+		return m, err
+	}
+	return m, nil
+}
+
 // InboundMessageUpdate is a partial update of the intake state machine. Zero
 // fields are left untouched; empty-string status/classification mean "not
 // changed" — use the typed setters below for lifecycle transitions.

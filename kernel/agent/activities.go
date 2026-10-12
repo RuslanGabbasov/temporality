@@ -486,6 +486,14 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleSkillEvaluate(ctx, request)
 	case "skill_diff":
 		return a.handleSkillDiff(ctx, request)
+	case "search_projects":
+		return a.handleIntakeSearchProjects(ctx, request)
+	case "search_org_units":
+		return a.handleIntakeSearchOrgUnits(ctx, request)
+	case "start_task":
+		return a.handleIntakeStartTask(ctx, request)
+	case "intake_decide":
+		return a.handleIntakeDecide(ctx, request)
 	default:
 		if a.MCP != nil && a.MCP.HasTool(request.Name) {
 			if faultAfterEffect(request.RunID, request.Name, request.OperationID) {
@@ -649,6 +657,88 @@ func (a *Activities) workspaceDo(ctx context.Context, method, url string, body a
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return string(b), resp.StatusCode, nil
+}
+
+// Intake tool handlers (docs/inbound-messages.md §7). The closed tool surface
+// of the intake agent: search, classification and task creation. Identity
+// never comes from model arguments — the activity supplies the sender
+// (request.ActorID) and the message (resolved by intake run id on the API
+// side), so the dialog cannot misattribute a task.
+func (a *Activities) handleIntakeSearchProjects(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	if request.ActorID == "" {
+		return ToolResult{Content: "error: sender is not set for this run"}, nil
+	}
+	query, _ := request.Arguments["query"].(string)
+	endpoint := fmt.Sprintf("%s/v1/intake/projects?sender=%s&query=%s", a.WorkspaceURL, url.QueryEscape(request.ActorID), url.QueryEscape(query))
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: project search failed (HTTP %d): %s", status, truncate(body, 400))}, nil
+	}
+	return ToolResult{Content: body}, nil
+}
+
+func (a *Activities) handleIntakeSearchOrgUnits(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, a.WorkspaceURL+"/v1/org/units", nil)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: org unit search failed (HTTP %d): %s", status, truncate(body, 400))}, nil
+	}
+	return ToolResult{Content: compactJSON(body, 4000)}, nil
+}
+
+func (a *Activities) handleIntakeStartTask(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	if request.RunID == "" {
+		return ToolResult{Content: "error: run id is not set"}, nil
+	}
+	projectID, _ := request.Arguments["project_id"].(string)
+	title, _ := request.Arguments["title"].(string)
+	prompt, _ := request.Arguments["prompt"].(string)
+	if projectID == "" || title == "" || prompt == "" {
+		return ToolResult{Content: "error: project_id, title and prompt are required"}, nil
+	}
+	payload := map[string]any{"project_id": projectID, "title": title, "prompt": prompt}
+	if agentID, ok := request.Arguments["agent_id"].(string); ok && agentID != "" {
+		payload["agent_id"] = agentID
+	}
+	endpoint := fmt.Sprintf("%s/v1/intake/runs/%s/start-task", a.WorkspaceURL, url.PathEscape(request.RunID))
+	body, status, err := a.workspaceDo(ctx, http.MethodPost, endpoint, payload)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: start_task failed (HTTP %d): %s", status, truncate(body, 400))}, nil
+	}
+	return ToolResult{Content: "Task started: " + body}, nil
+}
+
+func (a *Activities) handleIntakeDecide(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	if request.RunID == "" {
+		return ToolResult{Content: "error: run id is not set"}, nil
+	}
+	classification, _ := request.Arguments["classification"].(string)
+	switch classification {
+	case "task", "amendment", "status", "cancel", "chatter", "reply":
+	default:
+		return ToolResult{Content: "error: classification must be one of task, amendment, status, cancel, chatter, reply"}, nil
+	}
+	payload := map[string]any{"classification": classification}
+	if note, ok := request.Arguments["note"].(string); ok && note != "" {
+		payload["note"] = note
+	}
+	endpoint := fmt.Sprintf("%s/v1/intake/runs/%s/decision", a.WorkspaceURL, url.PathEscape(request.RunID))
+	body, status, err := a.workspaceDo(ctx, http.MethodPost, endpoint, payload)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: intake_decide failed (HTTP %d): %s", status, truncate(body, 400))}, nil
+	}
+	return ToolResult{Content: "Classification recorded: " + classification}, nil
 }
 
 // Skill tool handlers — read-only navigation over the skill registry. Skills
