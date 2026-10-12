@@ -215,7 +215,8 @@ If this exists, we can invite a small team and stop relying only on fixtures.
 Source spec: `docs/channels.md`.
 
 - [x] **Phase 0 — extract the layer** — ChannelDriver contract (spec/capabilities, settings schema, SendText/SendFile, pull Poller); matrix/telegram/slack/generic-webhook became drivers (`kernel/agent/driver_*.go`, one registration line); settings → JSONB payload (000051) + `KERNEL_CHANNEL__*` env aliases with legacy names kept, generic admin form from the driver schema; matrixInboundLoop → generic channelInboundLoop over every driver with a Poller, channel-neutral `MatchChannelReplies`, cursors + settings fingerprint persisted (000052). Dedup table and sender-identity verification land with the intake pipeline (phase 1, `docs/inbound-messages.md`). Push Webhook drivers and interactive options remain future work.
-- [ ] **New inbound channels as drivers** — Telegram inbound (getUpdates, persistent offset), Mattermost (push), Slack bot (push, threads) — each a driver file, zero core edits
+- [x] **Telegram inbound driver** — two-way telegram (`kernel/agent/driver_telegram_inbound.go`): getUpdates poller with a persisted offset cursor, private-chat identity (chat.id = from.id), document/photo attachments via getFile; zero edits outside the driver file beyond capabilities/settings declaration
+- [ ] **New inbound channels as drivers** — Mattermost (push), Slack bot (push, threads) — each a driver file, zero core edits
 - [ ] **Interactivity** — options as buttons where the channel supports them (Telegram inline keyboards, Slack blocks), text fallback everywhere
 
 ---
@@ -226,7 +227,7 @@ Source spec: `docs/inbound-messages.md`.
 
 - [x] **Intake MVP (Matrix)** — `workspace_inbound_message` + dedup by event id (000053), sender identification (closed world: room = registered address, sender = registered identity), system `intake` project with a create-if-absent intake agent (`KERNEL_INTAKE_ENABLED` kill switch), intake tools `search_projects` / `search_org_units` / `intake_decide` / `start_task` over internal `/v1/intake/*` endpoints (identity from the run, authorization as the sender's principal, deterministic task id per message), events `intake.received|rejected|classified|routed`, «Входящие» page with the state machine and run links
 - [x] **Org unit head & team requests** — `org_unit.head_user_id` + effective head (bottom-up), `escalate_for` prefers the head, `org:` recipients fan out to all active members (first answer wins), head field in the org tree UI, `run_status` / `cancel_run` for status queries and cancellation from the channel
-- [ ] **Dialog & Telegram** — amendments as follow-up runs with conversation context, Telegram inbound polling (getUpdates, chat id = identity), attachments in initiative messages
+- [x] **Dialog & Telegram** — amendments: `start_task` accepts `amend_run_id` (run from the sender's own routed messages, 422 on project mismatch), follow-up run on the same task with prior outcome in the prompt and `amends_run` in the ExecContext; Telegram became a two-way driver — `telegramPoller` (getUpdates long-poll 25s, persisted offset cursor = max update_id+1, `api_base` setting for self-hosted Bot API, getFile downloads ≤100MB, photos take the largest size), capabilities TwoWay+FilesIn; initiative attachments land in `{sandbox}/inbound/{hash}/` staging, `start_task` copies them into the project inbox and appends `/workspace/inbox/...` paths to the run prompt; intake prompt upgraded in place via `prompt_version` label (admin edits preserved)
 - [ ] **Intake policy** — per-project/org-unit enablement (default off), sender rate limits, message body retention (PII), audit chain message → intake run → task run
 
 ---
