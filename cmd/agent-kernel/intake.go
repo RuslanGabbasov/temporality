@@ -35,6 +35,11 @@ const IntakeProjectID = "intake"
 // IntakeAgentID is the create-if-absent system agent for intake runs.
 const IntakeAgentID = "intake"
 
+// inboundExpiryTTL bounds how long a message may sit in received/clarifying
+// before the lazy sweep expires it (docs/inbound-messages.md §6.1): longer
+// than any reasonable clarification dialog, shorter than forever.
+const inboundExpiryTTL = 48 * time.Hour
+
 // intakeSystemPrompt instructs the classification/clarification dialog
 // (docs/inbound-messages.md §4.3, §6). Tunable: the row is created once and
 // never overwritten, so an admin may refine it in the agent editor.

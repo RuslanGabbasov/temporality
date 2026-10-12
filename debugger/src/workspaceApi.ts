@@ -471,6 +471,27 @@ export interface ChannelTypeSpec {
   not_configured_hint?: string
 }
 
+// One recorded channel-initiated message and its intake state machine
+// (docs/inbound-messages.md §4.1): received → classified/clarifying → routed,
+// or rejected/expired.
+export interface InboundMessage {
+  id: string
+  channel: string
+  message_id: string
+  sender_raw: string
+  sender_user_id?: string
+  room: string
+  body: string
+  attachments?: string[]
+  status: 'received' | 'classified' | 'clarifying' | 'routed' | 'rejected' | 'expired'
+  classification?: 'task' | 'amendment' | 'status' | 'cancel' | 'chatter' | 'reply'
+  intake_run_id?: string
+  target_run_id?: string
+  project_id?: string
+  created_at: string
+  updated_at: string
+}
+
 /** Admin channel settings (channel_transport payload over env), rendered
  * generically from the driver registry schema. Non-secrets come back as
  * {value, source}, secrets as {set, hint, source} — the value itself never
@@ -814,6 +835,17 @@ export const workspaceApi = {
     if (params?.onlyOpen) query.set('open', '1')
     const suffix = query.size > 0 ? `?${query.toString()}` : ''
     return request<{ requests: HumanRequest[] }>(`/v1/workspace/human-requests${suffix}`)
+  },
+
+  // Intake inbox (docs/inbound-messages.md §11): channel-initiated messages
+  // and where the intake pipeline routed them.
+  listInboundMessages: (params?: { status?: string; channel?: string; limit?: number }) => {
+    const query = new URLSearchParams()
+    if (params?.status) query.set('status', params.status)
+    if (params?.channel) query.set('channel', params.channel)
+    if (params?.limit) query.set('limit', String(params.limit))
+    const suffix = query.size > 0 ? `?${query.toString()}` : ''
+    return request<{ messages: InboundMessage[] }>(`/v1/workspace/inbound-messages${suffix}`)
   },
 
   // Org structure (docs/org-structure.md §38-39)

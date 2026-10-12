@@ -45,6 +45,7 @@ const NAV_ITEMS = [
   { path: '/workspace', label: 'nav.workspace' },
   { path: '/agents', label: 'nav.runs' },
   { path: '/operations', label: 'nav.operations' },
+  { path: '/inbound', label: 'nav.inbound' },
   { path: '/observability', label: 'nav.knowledge' },
   { path: '/experience', label: 'nav.timeline' },
   { path: '/triggers', label: 'nav.triggers' },

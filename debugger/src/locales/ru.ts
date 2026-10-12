@@ -17,6 +17,7 @@ export const ru: Record<string, string> = {
     'nav.settings': 'Настройки',
     'nav.org': 'Организация',
     'nav.channels': 'Каналы доставки',
+    'nav.inbound': 'Входящие',
 
     // Common actions
     'action.create': 'Создать',
@@ -760,6 +761,23 @@ export const ru: Record<string, string> = {
     'users.no_users_hint': 'Создайте первого пользователя для начала работы.',
 
     // Channels (user communication transports)
+    'inbound.title': 'Входящие',
+    'inbound.intro': 'Инициативные сообщения из каналов коммуникации и то, куда конвейер intake их направил: классификация, уточнение и созданная задача.',
+    'inbound.empty': 'Сообщений пока нет. Здесь появятся сообщения, отправленные пользователями в зарегистрированных каналах.',
+    'inbound.filter_all': 'Все',
+    'inbound.open_task': 'Ран задачи',
+    'inbound.status_received': 'получено',
+    'inbound.status_classified': 'классифицировано',
+    'inbound.status_clarifying': 'уточнение',
+    'inbound.status_routed': 'направлено',
+    'inbound.status_rejected': 'отклонено',
+    'inbound.status_expired': 'истекло',
+    'inbound.class_task': 'задача',
+    'inbound.class_amendment': 'дополнение',
+    'inbound.class_status': 'статус',
+    'inbound.class_cancel': 'отмена',
+    'inbound.class_chatter': 'разговор',
+    'inbound.class_reply': 'ответ',
     'channels.menu': 'Каналы уведомлений',
     'channels.title': 'Каналы уведомлений',
     'channels.description': 'Куда доставлять вопросы агентов. Встроенный почтовый ящик в приложении работает всегда.',

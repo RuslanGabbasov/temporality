@@ -17,6 +17,7 @@ export const en: Record<string, string> = {
     'nav.settings': 'Settings',
     'nav.org': 'Organization',
     'nav.channels': 'Delivery channels',
+    'nav.inbound': 'Inbox',
 
     // Common actions
     'action.create': 'Create',
@@ -760,6 +761,23 @@ export const en: Record<string, string> = {
     'users.no_users_hint': 'Create your first user to get started.',
 
     // Channels (user communication transports)
+    'inbound.title': 'Inbox',
+    'inbound.intro': 'Initiative messages from communication channels and where the intake pipeline routed them: classification, clarification and the created task.',
+    'inbound.empty': 'No messages yet. Messages sent by users in registered channels appear here.',
+    'inbound.filter_all': 'All',
+    'inbound.open_task': 'Task run',
+    'inbound.status_received': 'received',
+    'inbound.status_classified': 'classified',
+    'inbound.status_clarifying': 'clarifying',
+    'inbound.status_routed': 'routed',
+    'inbound.status_rejected': 'rejected',
+    'inbound.status_expired': 'expired',
+    'inbound.class_task': 'task',
+    'inbound.class_amendment': 'amendment',
+    'inbound.class_status': 'status',
+    'inbound.class_cancel': 'cancel',
+    'inbound.class_chatter': 'chatter',
+    'inbound.class_reply': 'reply',
     'channels.menu': 'Notification channels',
     'channels.title': 'Notification channels',
     'channels.description': 'Where agents should reach you when they ask a question. The in-app inbox always works.',

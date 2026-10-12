@@ -4517,6 +4517,30 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]any{"requests": requests})
 	})
+	// Inbound messages (docs/inbound-messages.md §11): the intake pipeline's
+	// durable state machine — the UI inbox of channel-initiated messages. The
+	// lazy expiry sweep ends clarification dialogs that outlived any reasonable
+	// wait (kernel down, user gone) so the list never shows eternal "received".
+	mux.HandleFunc("GET /v1/workspace/inbound-messages", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		if err := ws.ExpireStaleInboundMessages(r.Context(), inboundExpiryTTL); err != nil {
+			log.Warn("sweep inbound messages", "error", err)
+		}
+		limit := 0
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			if parsed, pErr := strconv.Atoi(raw); pErr == nil {
+				limit = parsed
+			}
+		}
+		messages, err := ws.ListInboundMessages(r.Context(), r.URL.Query().Get("status"), r.URL.Query().Get("channel"), limit)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"messages": messages})
+	})
 	mux.HandleFunc("POST /v1/workspace/human-requests", func(w http.ResponseWriter, r *http.Request) {
 		// Upsert from the notification activity (internal token): creates the
 		// pending row and records resolution + delivery outcome in one call.
