@@ -225,7 +225,7 @@ Source spec: `docs/channels.md`.
 Source spec: `docs/inbound-messages.md`.
 
 - [x] **Intake MVP (Matrix)** — `workspace_inbound_message` + dedup by event id (000053), sender identification (closed world: room = registered address, sender = registered identity), system `intake` project with a create-if-absent intake agent (`KERNEL_INTAKE_ENABLED` kill switch), intake tools `search_projects` / `search_org_units` / `intake_decide` / `start_task` over internal `/v1/intake/*` endpoints (identity from the run, authorization as the sender's principal, deterministic task id per message), events `intake.received|rejected|classified|routed`, «Входящие» page with the state machine and run links
-- [ ] **Org unit head & team requests** — `org_unit.head_user_id` + effective head (bottom-up), `escalate_for` prefers the head, `org:` recipients fan out to all active members (first answer wins), head field in the org tree UI, `run_status` / `cancel_run` for status queries and cancellation from the channel
+- [x] **Org unit head & team requests** — `org_unit.head_user_id` + effective head (bottom-up), `escalate_for` prefers the head, `org:` recipients fan out to all active members (first answer wins), head field in the org tree UI, `run_status` / `cancel_run` for status queries and cancellation from the channel
 - [ ] **Dialog & Telegram** — amendments as follow-up runs with conversation context, Telegram inbound polling (getUpdates, chat id = identity), attachments in initiative messages
 - [ ] **Intake policy** — per-project/org-unit enablement (default off), sender rate limits, message body retention (PII), audit chain message → intake run → task run
 
