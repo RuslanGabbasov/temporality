@@ -391,6 +391,13 @@ type UserChannel struct {
 	Type    string `json:"type"`    // matrix, telegram, slack, webhook, …
 	Address string `json:"address"` // room id, chat id, webhook URL, …
 	Enabled bool   `json:"enabled"`
+	// SenderID is the owner's own identity inside the channel (mxid for
+	// matrix, chat id for telegram) — the closed-world check of the intake
+	// pipeline (docs/inbound-messages.md §5): an initiative message must come
+	// from exactly this identity to create work in the owner's name. Empty
+	// means unregistered: the channel delivers to the address but cannot
+	// originate tasks. Replies to open questions stay on the room rule.
+	SenderID string `json:"sender_id,omitempty"`
 }
 
 // User is an operator who can log in and use the platform.
@@ -417,6 +424,61 @@ type User struct {
 	UpdatedAt        time.Time     `json:"updated_at"`
 }
 
+// InboundMessage is one user-authored channel message recorded for the
+// intake pipeline (docs/inbound-messages.md §4.1). Same pattern as
+// HumanRequest: a durable workspace row, journal events, state derived from
+// the row. The ID is deterministic — inbound/{channel}/{message_id} — and
+// (channel, message_id) is unique, so redeliveries (matrix /sync replay,
+// kernel restart) never reprocess a message.
+type InboundMessage struct {
+	ID             string    `json:"id"` // inbound/{channel}/{message_id}
+	Channel        string    `json:"channel"`
+	MessageID      string    `json:"message_id"` // matrix event_id, telegram update_id
+	SenderRaw      string    `json:"sender_raw"` // mxid / chat id as seen by the channel
+	SenderUserID   string    `json:"sender_user_id,omitempty"`
+	Room           string    `json:"room"` // room/chat the message arrived in
+	Body           string    `json:"body"`
+	Attachments    []string  `json:"attachments,omitempty"`    // saved inbox paths
+	Status         string    `json:"status"`                   // received|classified|clarifying|routed|rejected|expired
+	Classification string    `json:"classification,omitempty"` // task|amendment|status|cancel|chatter|reply
+	IntakeRunID    string    `json:"intake_run_id,omitempty"`
+	TargetRunID    string    `json:"target_run_id,omitempty"` // run spawned by the message
+	ProjectID      string    `json:"project_id,omitempty"`    // resolved target project
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// Inbound message statuses (docs/inbound-messages.md §4.1).
+const (
+	InboundStatusReceived   = "received"
+	InboundStatusClassified = "classified"
+	InboundStatusClarifying = "clarifying"
+	InboundStatusRouted     = "routed"
+	InboundStatusRejected   = "rejected"
+	InboundStatusExpired    = "expired"
+)
+
+// Inbound message classifications (docs/inbound-messages.md §4.3).
+const (
+	InboundClassTask      = "task"
+	InboundClassAmendment = "amendment"
+	InboundClassStatus    = "status"
+	InboundClassCancel    = "cancel"
+	InboundClassChatter   = "chatter"
+	InboundClassReply     = "reply"
+)
+
+// ValidInboundClassification reports whether s is one of the known intake
+// classifications.
+func ValidInboundClassification(s string) bool {
+	switch s {
+	case InboundClassTask, InboundClassAmendment, InboundClassStatus,
+		InboundClassCancel, InboundClassChatter, InboundClassReply:
+		return true
+	}
+	return false
+}
+
 // channelTypePattern is the shape every channel type slug must have. Which
 // slugs actually deliver is the kernel registry's business; storage only
 // refuses nonsense.
@@ -432,6 +494,11 @@ func ValidateChannels(channels []UserChannel) error {
 		}
 		if strings.TrimSpace(channel.Address) == "" {
 			return fmt.Errorf("channel %q needs an address", channel.Type)
+		}
+		// The sender identity is optional but must not be whitespace and is
+		// stored trimmed: the closed-world intake check compares it exactly.
+		if len(strings.TrimSpace(channel.SenderID)) != len(channel.SenderID) {
+			return fmt.Errorf("channel %q sender id must not have surrounding whitespace", channel.Type)
 		}
 		if seen[channel.Type] {
 			return fmt.Errorf("channel %q is configured twice", channel.Type)

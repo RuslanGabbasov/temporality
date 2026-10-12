@@ -783,6 +783,8 @@ export const ru: Record<string, string> = {
     'channels_admin.ui_url_hint': 'Базовый адрес этого UI — для ссылок ответа в уведомлениях.',
     'channels.type': 'Тип',
     'channels.address': 'Адрес',
+    'channels.sender_id': 'Ваш идентификатор в канале',
+    'channels.sender_id_hint': 'Кто вы в этом канале (mxid, id чата). Сообщения, отправленные оттуда, могут создавать задачи от вашего имени — оставьте пустым, чтобы только получать.',
     'channels.address_matrix': 'ID комнаты Matrix, в которую приглашён бот ядра',
     'channels.address_telegram': 'ID чата Telegram, куда бот может писать',
     'channels.address_slack': 'URL входящего вебхука Slack — создайте его в своём воркспейсе',

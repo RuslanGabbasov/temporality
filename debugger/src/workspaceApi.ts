@@ -455,6 +455,10 @@ export interface UserChannel {
   type: string
   address: string
   enabled: boolean
+  // The owner's identity inside the channel (mxid, chat id): initiative
+  // messages are accepted only from exactly this identity (closed world,
+  // docs/inbound-messages.md §5). Empty = receive only.
+  sender_id?: string
 }
 
 /** One transport from the kernel's channel registry: what it is, what the

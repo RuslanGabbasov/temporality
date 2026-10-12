@@ -43,6 +43,16 @@ function addressPlaceholder(spec: ChannelTypeSpec | undefined): string {
   }
 }
 
+/** Sender identity placeholder per type: what the closed-world intake check
+ * compares against the message author (docs/inbound-messages.md §5). */
+function senderPlaceholder(type: string): string {
+  switch (type) {
+    case 'matrix': return '@you:matrix.org'
+    case 'telegram': return '123456789'
+    default: return '@you'
+  }
+}
+
 /**
  * Self-service communication channels (docs/triggers-and-escalations.md §6):
  * the user owns their delivery transports and the preferred one. The web
@@ -105,7 +115,7 @@ export default function ChannelsDialog({ userId, userName, onClose }: { userId: 
 
   const save = async () => {
     setError('')
-    const normalized = channels.map((c) => ({ ...c, address: c.address.trim() }))
+    const normalized = channels.map((c) => ({ ...c, address: c.address.trim(), sender_id: c.sender_id?.trim() ?? '' }))
     if (normalized.some((c) => !c.address)) {
       setError(t('channels.error_address') ?? 'Every channel needs an address.')
       return
@@ -185,6 +195,15 @@ export default function ChannelsDialog({ userId, userName, onClose }: { userId: 
                   helperText={addressHelper(spec, t)}
                   value={channel.address}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateChannel(index, { address: e.target.value })}
+                  size="sm"
+                />
+                <TextInput
+                  id={`channel-sender-${index}`}
+                  labelText={t('channels.sender_id') ?? 'Your channel identity'}
+                  placeholder={senderPlaceholder(channel.type)}
+                  helperText={t('channels.sender_id_hint') ?? 'Who you are in this channel (mxid, chat id). Messages you send there can create tasks in your name — leave empty to only receive.'}
+                  value={channel.sender_id ?? ''}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateChannel(index, { sender_id: e.target.value })}
                   size="sm"
                 />
                 {spec && !spec.configured && (

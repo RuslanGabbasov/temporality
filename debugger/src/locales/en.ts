@@ -783,6 +783,8 @@ export const en: Record<string, string> = {
     'channels_admin.ui_url_hint': 'Base URL of this UI — used for answer links inside notifications.',
     'channels.type': 'Type',
     'channels.address': 'Address',
+    'channels.sender_id': 'Your channel identity',
+    'channels.sender_id_hint': 'Who you are in this channel (mxid, chat id). Messages you send there can create tasks in your name — leave empty to only receive.',
     'channels.address_matrix': 'Matrix room ID the kernel bot has joined',
     'channels.address_telegram': 'Telegram chat ID the bot can message',
     'channels.address_slack': 'Slack incoming webhook URL — create one in your Slack workspace',
