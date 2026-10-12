@@ -210,6 +210,17 @@ If this exists, we can invite a small team and stop relying only on fixtures.
 
 ---
 
+## P1 — Inbound messages (channel-initiated tasks)
+
+Source spec: `docs/inbound-messages.md`.
+
+- [ ] **Intake MVP (Matrix)** — `workspace_inbound_message` + dedup by event id, sender identification (closed world: registered mxid only), system `intake` project with an intake agent, `search_projects` / `search_org_units` / `start_task` tools, project resolution with clarification via `ask_human` (reply routing already works), events `intake.*`, minimal «Входящие» page
+- [ ] **Org unit head & team requests** — `org_unit.head_user_id` + effective head (bottom-up), `escalate_for` prefers the head, `org:` recipients fan out to all active members (first answer wins), head field in the org tree UI, `run_status` / `cancel_run` for status queries and cancellation from the channel
+- [ ] **Dialog & Telegram** — amendments as follow-up runs with conversation context, Telegram inbound polling (getUpdates, chat id = identity), attachments in initiative messages
+- [ ] **Intake policy** — per-project/org-unit enablement (default off), sender rate limits, message body retention (PII), audit chain message → intake run → task run
+
+---
+
 ## P2 — Advanced
 
 - [ ] **Read-after-write probes** — operation → observable trace → probe → hint to operator. Probe gives a hint, does NOT automatically issue authoritative verdict.
