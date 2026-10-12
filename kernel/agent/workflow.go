@@ -430,8 +430,10 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		}
 		// Resolve every task up front: an unknown agent rejects the whole plan
 		// before any child starts (effect=none) — no partial fan-out on a typo.
+		// The result is validation-only: every launch re-resolves, because a plan
+		// can run for hours (gated tasks, rework rounds) and agent config changed
+		// in between must reach the launches that still run.
 		resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
-		resolved := map[string]RunInput{}
 		for index := range spec.Tasks {
 			task := spec.Tasks[index]
 			childRunID := planTaskRunID(index, task.ID, 1)
@@ -443,7 +445,6 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 				return "Plan rejected before execution, no effect: agent \"" + task.AgentID + "\" for task \"" + task.ID + "\" could not be resolved (" + boundedFailureDetail(resolveErr) + "). Check the agent_id and re-issue the plan.", nil, nil
 			}
-			resolved[task.ID] = childInput
 		}
 		// Acceptance-gate budget (docs/agent-delegation.md): a task may be
 		// sent back at most maxRework times, so one plan launches at most
@@ -675,8 +676,26 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					}
 					continue
 				}
+
 				childRunID := planTaskRunID(index, task.ID, launches[task.ID]+1)
-				child := resolved[task.ID]
+				// Resolve at launch time, not from the plan-start snapshot: gated
+				// tasks and rework rounds can launch hours after validation, and a
+				// config change in between (a raised turn budget, a different model,
+				// rotated policies) must reach them. Existence was validated up
+				// front; a failure here fails only this task — nothing started for
+				// it, so the effect is none — and dependents are skipped honestly.
+				var child RunInput
+				if resolveErr := workflow.ExecuteActivity(resolveCtx, ActivityResolveAgent, ResolveAgentRequest{Project: input.Project, AgentID: task.AgentID, RunID: childRunID, TaskID: input.TaskID, Prompt: task.Prompt, ActorID: input.ActorID, MaxTurns: task.MaxTurns, DelegationDepth: input.DelegationDepth + 1}).Get(ctx, &child); resolveErr != nil {
+					statuses[task.ID] = planStatusFailed
+					outcomesByTask[task.ID] = planTaskOutcome{TaskID: task.ID, AgentID: task.AgentID, ChildRunID: childRunID, Status: planStatusFailed, Error: boundedFailureDetail(resolveErr)}
+					if err := emit(activityCtx, state, "plan.task.failed", map[string]any{"operation_id": operationID, "task_id": task.ID, "child_run_id": childRunID, "agent_id": task.AgentID, "error_type": "agent_resolution_failed", "error": boundedFailureDetail(resolveErr), "effect": "none"}); err != nil {
+						return "", nil, err
+					}
+					if err := skipBranch(task.ID); err != nil {
+						return "", nil, err
+					}
+					continue
+				}
 				child.RunID = childRunID
 				child.Prompt = planTaskPrompt(task, answers, planAnswers)
 				if feedback := reworkFeedback[task.ID]; feedback != "" {
@@ -707,7 +726,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if taskDeps == nil {
 					taskDeps = []string{}
 				}
-				startedData := map[string]any{"operation_id": operationID, "task_id": task.ID, "child_run_id": childRunID, "agent_id": task.AgentID, "depends_on": taskDeps, "round": launches[task.ID] + 1}
+				startedData := map[string]any{"operation_id": operationID, "task_id": task.ID, "child_run_id": childRunID, "agent_id": task.AgentID, "depends_on": taskDeps, "round": launches[task.ID] + 1, "max_turns": child.MaxTurns}
 				if len(task.ReviewOf) > 0 {
 					startedData["review_of"] = append([]string{}, task.ReviewOf...)
 				}

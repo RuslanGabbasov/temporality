@@ -1545,6 +1545,76 @@ func TestAgentRunPlanReworkLoop(t *testing.T) {
 	require.Less(t, gateAcceptAt, shipStartedAt)
 }
 
+// TestAgentRunPlanResolvesFreshConfigAtLaunch encodes the stale-snapshot
+// incident: a plan resolves all agents up front, but gated tasks and rework
+// rounds launch much later — config changed in between (a raised turn budget,
+// a different model) must reach the launch, not the plan-start snapshot. The
+// resolve mock answers the validation pass with one budget and every launch
+// with another; the launched run and its plan.task.started event must carry
+// the launch-time value.
+func TestAgentRunPlanResolvesFreshConfigAtLaunch(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	const taskCount = 2 // build + gate; the gate launches only after build completes
+	resolveCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		resolveCalls++
+		budget := 11
+		if resolveCalls <= taskCount { // the up-front validation pass
+			budget = 4
+		}
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: budget}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			return llm.Completion{Content: "DONE"}, nil
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
+				"goal": "fresh config at launch",
+				"tasks": []any{
+					map[string]any{"id": "build", "agent_id": "repo-a-coder", "prompt": "work"},
+					map[string]any{"id": "gate", "agent_id": "repo-a-reviewer", "prompt": "review", "depends_on": []any{"build"}},
+				},
+			}}}}, nil
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		t.Fatalf("plan must not reach the tool activity")
+		return ToolResult{}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-fresh-config", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "run the plan", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	startedBudgets := map[string]any{}
+	for index := range recorded {
+		event := recorded[index]
+		if event.Type == "plan.task.started" {
+			startedBudgets[event.Data["task_id"].(string)] = event.Data["max_turns"]
+		}
+	}
+	// Both launches carry the launch-time budget, not the validation snapshot —
+	// build launches immediately after validation, gate launches only after
+	// build completes, and both must see the same fresh value.
+	require.Equal(t, 2, resolveCalls-taskCount, "every launch re-resolves")
+	require.Equal(t, "11", fmt.Sprint(startedBudgets["build"]))
+	require.Equal(t, "11", fmt.Sprint(startedBudgets["gate"]))
+}
+
 func TestAgentRunPlanFailureSkipsDependents(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
@@ -1611,7 +1681,7 @@ func TestAgentRunPlanFailureSkipsDependents(t *testing.T) {
 	require.NoError(t, env.GetWorkflowResult(&parentResult))
 	require.Equal(t, "completed", parentResult.Status)
 	require.Equal(t, "parent done", parentResult.Answer)
-	require.Equal(t, 4, resolveCalls, "every task resolves up front, even the one that will be skipped")
+	require.Equal(t, 7, resolveCalls, "every task resolves up front (4), and every launched task re-resolves at launch time (a, b, c) to pick up fresh config; the skipped one never launches")
 	require.True(t, sawSummary, "the summary must carry completed, failed and skipped outcomes")
 
 	var failed, skipped, planDone *observation.Event

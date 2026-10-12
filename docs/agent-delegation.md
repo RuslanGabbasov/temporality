@@ -235,6 +235,15 @@ skills, MCP) + `applyProjectModel`. Требуется роль writer и при
 отклоняет `delegate` в конфигурации ребёнка, находящегося на предельной
 глубине.
 
+**Резолв на запуске, а не снапшот на старте плана.** Валидация разрешает всех
+агентов up front (эффект `none` для опечатки), но результат — только проверка.
+Каждый запуск задачи — в том числе отложенный (после зависимостей) и раунд
+доработки — резолвит конфиг заново: план живёт часами, и изменение конфига
+агента в середине (поднятый бюджет ходов, другая модель, ротация политик)
+должно доходить до запусков, которые ещё впереди. Провал резолва на запуске
+валит только эту задачу (`plan.task.failed`, `error_type=
+agent_resolution_failed`, `effect=none`) и честно скипает зависимых.
+
 ---
 
 ## 5. События
@@ -246,7 +255,7 @@ skills, MCP) + `applyProjectModel`. Требуется роль writer и при
 | `delegation.completed` | родитель | `child_run_id`, `agent_id`, `child_status`, `turns` |
 | `delegation.failed` | родитель | `child_run_id`, `agent_id`, `error_type` |
 | `plan.started` | родитель | `operation_id`, `goal`, `tasks: [{id, agent_id, depends_on}]` |
-| `plan.task.started` | родитель | `task_id`, `child_run_id`, `agent_id`, `depends_on` |
+| `plan.task.started` | родитель | `task_id`, `child_run_id`, `agent_id`, `depends_on`, `round`, `max_turns` |
 | `plan.task.completed` | родитель | `task_id`, `child_run_id`, `child_status`, `turns` |
 | `plan.task.failed` | родитель | `task_id`, `child_run_id`, `error_type`, `effect` (+ `child_ops_*`) |
 | `plan.task.skipped` | родитель | `task_id`, `reason` (`upstream_failed` / `run_time_limit`), `blocked_by` |
