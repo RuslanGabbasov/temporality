@@ -12,16 +12,16 @@ import (
 )
 
 // telegramDriver delivers text and documents through the Telegram Bot API
-// using the kernel's shared bot. Inbound replies are a future capability
-// (docs/channels.md §11 phase 2: pull getUpdates with a persisted offset) —
-// until then deliveries carry no reply hint and the answer happens in the UI.
+// using the kernel's shared bot, and receives initiative messages and replies
+// through getUpdates (docs/inbound-messages.md §12 phase 3). Chat id is the
+// user's channel address; for private chats it doubles as the sender identity
+// (chat.id == from.id), in groups the registered SenderID is the member's own
+// telegram id.
 type telegramDriver struct{}
 
 func (telegramDriver) Type() string { return "telegram" }
 
-// Poller: inbound telegram (getUpdates, persisted offset) is future work
-// (docs/channels.md phase 2) — outbound-only today.
-func (telegramDriver) Poller() ChannelPoller { return nil }
+func (telegramDriver) Poller() ChannelPoller { return telegramPoller{} }
 
 func (telegramDriver) Spec() ChannelSpec {
 	return ChannelSpec{
@@ -30,10 +30,13 @@ func (telegramDriver) Spec() ChannelSpec {
 		NotConfiguredHint: "Telegram bot token",
 		Capabilities: ChannelCapabilities{
 			Text:     true,
+			TwoWay:   true,
 			FilesOut: true,
+			FilesIn:  true,
 		},
 		Settings: []SettingField{
 			{Name: "bot_token", Label: "Bot token", Secret: true},
+			{Name: "api_base", Label: "API base URL (optional; default https://api.telegram.org, set for a self-hosted Bot API server)"},
 		},
 	}
 }
