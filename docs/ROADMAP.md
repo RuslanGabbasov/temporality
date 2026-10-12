@@ -210,6 +210,16 @@ If this exists, we can invite a small team and stop relying only on fixtures.
 
 ---
 
+## P1 — Channel driver layer
+
+Source spec: `docs/channels.md`.
+
+- [ ] **Phase 0 — extract the layer** — ChannelDriver contract (spec/capabilities, settings schema, SendText/SendFile, pull Poller + push Webhook, sender identity); matrix/telegram/slack/generic-webhook become drivers; settings → JSONB payload + env aliases with a generic admin form; matrixInboundLoop → generic poll loop + shared inbound pipeline (dedup, sender identification, reply matching); channel cursors persisted
+- [ ] **New inbound channels as drivers** — Telegram inbound (getUpdates, persistent offset), Mattermost (push), Slack bot (push, threads) — each a driver file, zero core edits
+- [ ] **Interactivity** — options as buttons where the channel supports them (Telegram inline keyboards, Slack blocks), text fallback everywhere
+
+---
+
 ## P1 — Inbound messages (channel-initiated tasks)
 
 Source spec: `docs/inbound-messages.md`.
