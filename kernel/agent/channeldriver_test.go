@@ -16,7 +16,7 @@ func TestChannelDriverRegistryOrder(t *testing.T) {
 	for _, driver := range channelDrivers {
 		order = append(order, driver.Type())
 	}
-	require.Equal(t, []string{"matrix", "telegram", "slack", "webhook"}, order)
+	require.Equal(t, []string{"matrix", "telegram", "slack", "slackbot", "mattermost", "webhook"}, order)
 }
 
 // TestChannelDriversTolerateAbsentSettings: the generic settings store only

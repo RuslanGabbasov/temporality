@@ -26,6 +26,9 @@ func (matrixDriver) Type() string { return "matrix" }
 // paused runs (driver_matrix_inbound.go).
 func (matrixDriver) Poller() ChannelPoller { return matrixPoller{} }
 
+// Webhook: matrix inbound is pull — /sync long-poll (driver_matrix_inbound.go).
+func (matrixDriver) Webhook() ChannelWebhook { return nil }
+
 func (matrixDriver) Spec() ChannelSpec {
 	return ChannelSpec{
 		Label:             "Matrix",

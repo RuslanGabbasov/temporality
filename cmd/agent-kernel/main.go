@@ -5208,13 +5208,44 @@ func main() {
 	// agent's tools call them loopback with the kernel token; every identity
 	// decision inside resolves back to the message sender.
 	registerIntakeRoutes(mux, gate, intake, quotas, intakeEmitter)
-	// Inbound channel loops (docs/channels.md §5): every two-way driver —
-	// one with a pull poller — gets its own loop; replies in a chat route back
-	// into paused runs through the same approval signal the web inbox uses,
-	// and everything else enters the intake pipeline. Idles (30s re-check)
-	// while the channel is not configured; cursors and account identity
-	// survive restarts in workspace_channel_cursor.
+	// Inbound channel loops (docs/channels.md §5): every two-way driver gets
+	// its inbound feed — pull drivers a poll loop, push drivers a webhook
+	// route on the kernel's own mux. Replies in a chat route back into paused
+	// runs through the same approval signal the web inbox uses, and everything
+	// else enters the intake pipeline. Poll loops idle (30s re-check) while
+	// the channel is not configured; cursors and account identity survive
+	// restarts in workspace_channel_cursor.
 	for _, driver := range agent.ChannelDrivers() {
+		if hook := driver.Webhook(); hook != nil {
+			receiver := &channelWebhookReceiver{
+				loop: &channelInboundLoop{
+					driver:     driver,
+					httpClient: activities.HTTP,
+					settings:   activities.ChannelSettings,
+					store:      ws,
+					sourceID:   activities.SourceID,
+					log:        log,
+					signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
+						return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
+					},
+					intake: func(ctx context.Context, message agent.InboundMessage, senderUserID string) (string, error) {
+						user, err := senderUser(ctx, ws, senderUserID)
+						if err != nil {
+							return "", err
+						}
+						return intake.start(ctx, message, user)
+					},
+					emit:          intakeEmitter,
+					intakeEnabled: intakeEnabled,
+					ratePerHour:   intakeRatePerHour,
+				},
+				hook: hook,
+				log:  log,
+			}
+			mux.HandleFunc(hook.Route(), receiver.handle)
+			log.Info("channel webhook registered", "channel", driver.Type(), "route", hook.Route())
+			continue
+		}
 		poller := driver.Poller()
 		if poller == nil {
 			continue // outbound-only channel

@@ -32,9 +32,15 @@ type ChannelDriver interface {
 	// reaching that error means a capability/spec mismatch (a bug).
 	SendFile(ctx context.Context, client *http.Client, settings map[string]string, address string, file OutboundFile) error
 	// Poller returns the pull-model inbound adapter, or nil when the channel
-	// is outbound-only (slack/webhook today). One loop per poller runs in the
-	// kernel binary; the adapter is stateless — the loop owns the cursor.
+	// does not poll (push channels and outbound-only transports). One loop per
+	// poller runs in the kernel binary; the adapter is stateless — the loop
+	// owns the cursor.
 	Poller() ChannelPoller
+	// Webhook returns the push-model inbound adapter, or nil for pull and
+	// outbound-only channels (docs/channels.md §3). A driver implements
+	// exactly one inbound model; the kernel registers the webhook's route and
+	// feeds parsed messages into the shared inbound pipeline.
+	Webhook() ChannelWebhook
 }
 
 // ErrChannelFilesUnsupported is returned by drivers whose channels cannot
@@ -119,6 +125,8 @@ var channelDrivers = []ChannelDriver{
 	&matrixDriver{},
 	&telegramDriver{},
 	&slackDriver{},
+	&slackBotDriver{},
+	&mattermostDriver{},
 	&webhookDriver{},
 }
 

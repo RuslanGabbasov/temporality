@@ -18,6 +18,10 @@ func (slackDriver) Type() string { return "slack" }
 // bot is a separate future driver.
 func (slackDriver) Poller() ChannelPoller { return nil }
 
+// Webhook: the incoming-webhook channel is outbound-only; the two-way Slack
+// bot (Events API) is the separate slackBotDriver.
+func (slackDriver) Webhook() ChannelWebhook { return nil }
+
 func (slackDriver) Spec() ChannelSpec {
 	return ChannelSpec{
 		Label:        "Slack",

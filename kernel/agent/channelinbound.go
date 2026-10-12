@@ -180,6 +180,35 @@ type ChannelPoller interface {
 	Self(ctx context.Context, client *http.Client, settings map[string]string) (string, error)
 }
 
+// ChannelWebhook is the push model of a two-way channel (docs/channels.md §3,
+// §10): the channel calls the kernel over HTTP. Verification is not optional
+// — every push driver must authenticate the request (signature or shared
+// token) before its messages enter the inbound pipeline.
+type ChannelWebhook interface {
+	// Route is the mux pattern the kernel registers for this channel
+	// ("POST /v1/channels/<type>/…").
+	Route() string
+	// VerifyRequest authenticates the request against the channel's secret
+	// from the settings map; an error rejects the request with 403.
+	VerifyRequest(r *http.Request, body []byte, settings map[string]string) error
+	// Parse turns a verified request body into normalized messages; zero
+	// messages means the payload carried nothing to route (handshakes,
+	// acknowledgements, foreign event types).
+	Parse(r *http.Request, body []byte) []InboundMessage
+	// Respond writes the HTTP answer after the pipeline accepted the
+	// payload — slack's url_verification echoes the challenge, everything
+	// else acknowledges plainly.
+	Respond(w http.ResponseWriter, r *http.Request, body []byte)
+}
+
+// ChannelSelfResolver resolves the channel account's own sender identity —
+// pollers carry the method on themselves (ChannelPoller.Self); push drivers
+// implement this separately so the inbound router can exclude the account's
+// own outbound questions from reply matching.
+type ChannelSelfResolver interface {
+	Self(ctx context.Context, client *http.Client, settings map[string]string) (string, error)
+}
+
 // ChannelFileFetcher downloads one inbound attachment; pollers whose
 // channels carry files (capabilities.FilesIn) implement it. The bytes move
 // through the driver because only it can resolve the opaque Ref.

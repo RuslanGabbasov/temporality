@@ -135,13 +135,27 @@ func (l *channelInboundLoop) cycle(ctx context.Context) (time.Duration, error) {
 		l.selfID = selfID
 		l.log.Info("channel inbound listening", "channel", l.driver.Type(), "self", selfID)
 	}
-	asks, users, senders, err := l.openAsks(ctx)
-	if err != nil {
-		return 15 * time.Second, fmt.Errorf("load open asks: %w", err)
-	}
 	messages, next, err := l.poller.Poll(ctx, l.httpClient, channelSettings, l.cursor)
 	if err != nil {
 		return 5 * time.Second, fmt.Errorf("%s poll: %w", l.driver.Type(), err)
+	}
+	l.routeMessages(ctx, messages, channelSettings)
+	if next != l.cursor {
+		l.cursor = next
+		l.saveCursor(ctx)
+	}
+	return 0, nil
+}
+
+// routeMessages sends one batch of normalized inbound messages through the
+// shared pipeline: replies match open asks first, everything else enters the
+// intake pipeline (docs/channels.md §5). The poll cycle and the webhook
+// receiver both land here — one routing core, two feeds.
+func (l *channelInboundLoop) routeMessages(ctx context.Context, messages []agent.InboundMessage, channelSettings map[string]string) {
+	asks, users, senders, err := l.openAsks(ctx)
+	if err != nil {
+		l.log.Warn("load open asks", "channel", l.driver.Type(), "error", err)
+		return
 	}
 	// Route first, persist after: a crash between the two re-delivers the
 	// batch (at-least-once) — the workflow side already tolerates duplicate
@@ -161,11 +175,6 @@ func (l *channelInboundLoop) cycle(ctx context.Context) (time.Duration, error) {
 		}
 		l.handleIntake(ctx, message, channelSettings, senders)
 	}
-	if next != l.cursor {
-		l.cursor = next
-		l.saveCursor(ctx)
-	}
-	return 0, nil
 }
 
 // saveCursor persists the loop state best-effort: a failed save costs a

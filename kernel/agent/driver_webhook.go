@@ -23,6 +23,9 @@ func (webhookDriver) Type() string { return "webhook" }
 // Poller: the generic webhook is outbound-only — answers happen in the UI.
 func (webhookDriver) Poller() ChannelPoller { return nil }
 
+// Webhook: outbound-only transport; inbound is the product UI.
+func (webhookDriver) Webhook() ChannelWebhook { return nil }
+
 func (webhookDriver) Spec() ChannelSpec {
 	return ChannelSpec{
 		Label:        "Webhook",
