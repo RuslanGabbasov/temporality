@@ -78,7 +78,7 @@ export default function InboundMessages() {
           type="button"
           data-active={status === '' ? 'true' : 'false'}
           onClick={() => { setStatus(''); void load('') }}
-          style={{ background: 'none', border: '1px solid var(--tm-border)', borderRadius: '999px', padding: '0.2rem 0.75rem', cursor: 'pointer', color: status === '' ? 'var(--tm-bg)' : 'var(--tm-text-2)', background: status === '' ? 'var(--tm-accent)' : 'transparent', fontSize: '0.75rem' }}
+          style={{ border: '1px solid var(--tm-border)', borderRadius: '999px', padding: '0.2rem 0.75rem', cursor: 'pointer', color: status === '' ? 'var(--tm-bg)' : 'var(--tm-text-2)', background: status === '' ? 'var(--tm-accent)' : 'transparent', fontSize: '0.75rem' }}
         >
           {t('inbound.filter_all') ?? 'All'}
         </button>

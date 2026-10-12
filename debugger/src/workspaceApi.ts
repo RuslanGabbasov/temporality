@@ -13,6 +13,8 @@ export interface OrgUnit {
   kind: OrgUnitKind | string
   name: string
   path?: string
+  /** Explicit manager edge: escalation target and team-ask priority. */
+  head_user_id?: string
   created_at: string
   updated_at: string
 }
@@ -852,7 +854,7 @@ export const workspaceApi = {
   listOrgUnits: () => request<{ units: OrgUnit[] }>('/v1/org/units'),
   createOrgUnit: (data: { kind: string; name: string; parent_id?: string }) =>
     request<OrgUnit>('/v1/org/units', { method: 'POST', body: JSON.stringify(data) }),
-  updateOrgUnit: (id: string, data: { name: string; kind?: string; parent_id?: string }) =>
+  updateOrgUnit: (id: string, data: { name: string; kind?: string; parent_id?: string; head_user_id?: string }) =>
     request<OrgUnit>(`/v1/org/units/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteOrgUnit: (id: string) =>
     request<{ deleted: boolean }>(`/v1/org/units/${id}`, { method: 'DELETE' }),

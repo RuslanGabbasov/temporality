@@ -185,6 +185,7 @@ export default function Org() {
   const [creatingParent, setCreatingParent] = useState<string | null>(null) // '' = new root
   const [formName, setFormName] = useState('')
   const [formKind, setFormKind] = useState<OrgUnitKind | string>('department')
+  const [formHead, setFormHead] = useState('')
 
   // Move dialog
   const [moving, setMoving] = useState<OrgUnit | null>(null)
@@ -269,6 +270,7 @@ export default function Org() {
     setEditing(unit)
     setFormName(unit.name)
     setFormKind(unit.kind)
+    setFormHead(unit.head_user_id ?? '')
   }
 
   const saveUnit = async () => {
@@ -277,11 +279,11 @@ export default function Org() {
     setLoading(true); setError('')
     try {
       if (editing) {
-        await workspaceApi.updateOrgUnit(editing.id, { name, kind: formKind })
+        await workspaceApi.updateOrgUnit(editing.id, { name, kind: formKind, head_user_id: formHead })
       } else {
         await workspaceApi.createOrgUnit({ kind: formKind, name, parent_id: creatingParent || undefined })
       }
-      setEditing(null); setCreatingParent(null); setFormName('')
+      setEditing(null); setCreatingParent(null); setFormName(''); setFormHead('')
       void load()
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
@@ -566,6 +568,14 @@ export default function Org() {
                   <strong style={{ fontSize: '1rem' }}>{selectedUnit.name}</strong>
                   <div style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.15rem' }}>
                     {kindLabel(t, selectedUnit.kind)} · {selectedUnit.id}
+                    {selectedUnit.head_user_id && (
+                      <>
+                        {' · '}
+                        <span title={t('org.head_hint') ?? ''}>
+                          {t('org.head_badge', { name: users.find((u) => u.id === selectedUnit.head_user_id)?.name || selectedUnit.head_user_id })}
+                        </span>
+                      </>
+                    )}
                     {isAdmin && (
                       <>
                         {' · '}
@@ -861,6 +871,24 @@ export default function Org() {
                   <SelectItem value="department" text={kindLabel(t, 'department')} />
                   <SelectItem value="team" text={kindLabel(t, 'team')} />
                 </Select>
+              )}
+              {editing && (
+                <Select
+                  id="org-unit-head"
+                  labelText={t('org.head_label') ?? 'Head'}
+                  value={formHead}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFormHead(e.target.value)}
+                >
+                  <SelectItem value="" text={t('org.head_none') ?? '— not assigned —'} />
+                  {users.filter((u) => u.active).map((u) => (
+                    <SelectItem key={u.id} value={u.id} text={u.name || u.id} />
+                  ))}
+                </Select>
+              )}
+              {editing && formHead && (
+                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>
+                  {t('org.head_hint') ?? 'Escalations for this subtree go to the head first; team questions (org:…) list the head first.'}
+                </p>
               )}
               <div className="form-actions">
                 <Button kind="secondary" onClick={() => { setEditing(null); setCreatingParent(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
