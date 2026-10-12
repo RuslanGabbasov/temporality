@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -373,6 +375,19 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 	if l.emit != nil {
 		l.emit(ctx, "intake.received", message, senderUserID, nil)
 	}
+	// Attachments of an initiative message are saved before the intake run
+	// starts (docs/inbound-messages.md §12 phase 3): the staging paths land on
+	// the row, start_task copies them into the target project's inbox. A fetch
+	// failure degrades to a text-only intake — the files are named in the prompt
+	// either way, so the dialog can tell the user what could not be received.
+	if len(message.Files) > 0 {
+		if paths, err := l.saveInitiativeFiles(ctx, row.ID, message.Files); err != nil {
+			l.log.Warn("intake attachment", "channel", l.driver.Type(), "message", message.ID, "error", err)
+		} else {
+			row.Attachments = paths
+			_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{Attachments: paths})
+		}
+	}
 	if l.intake == nil || !l.intakeEnabled {
 		l.log.Info("intake recorded without processing (pipeline disabled)", "channel", l.driver.Type(), "message", message.ID)
 		return
@@ -414,13 +429,67 @@ func truncateForLog(s string, limit int) string {
 // attachments land as comma-joined paths; names are transliterated like chat
 // uploads, collisions get a timestamp prefix.
 func (l *channelInboundLoop) saveInboundFiles(ctx context.Context, reply agent.ChannelReply) (string, error) {
-	fetcher, ok := l.poller.(agent.ChannelFileFetcher)
-	if !ok {
-		return "", fmt.Errorf("channel %s cannot receive files", l.driver.Type())
+	root, err := sandboxRoot()
+	if err != nil {
+		return "", err
 	}
+	dir := filepath.Join(root, "projects", reply.Ask.ProjectID, "inbox")
+	saved, err := l.saveChannelFiles(ctx, reply.Message.Files, dir)
+	if err != nil {
+		return "", err
+	}
+	for i, name := range saved {
+		saved[i] = "/workspace/inbox/" + name
+	}
+	return strings.Join(saved, ", "), nil
+}
+
+// saveInitiativeFiles stores the attachments of an initiative message in a
+// message-scoped staging dir ({root}/inbound/{key}/) and returns the absolute
+// host paths for the row. The intake project is not used as the store: files
+// move into the real project's inbox only when start_task resolves where the
+// task lands — until then nothing clutters a project workspace.
+func (l *channelInboundLoop) saveInitiativeFiles(ctx context.Context, rowID string, files []agent.InboundFile) ([]string, error) {
+	root, err := sandboxRoot()
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(root, "inbound", inboundStagingKey(rowID))
+	names, err := l.saveChannelFiles(ctx, files, dir)
+	if err != nil {
+		return nil, err
+	}
+	// Absolute host paths: the row outlives the loop cycle, and start_task
+	// resolves them into the target project's inbox later.
+	paths := make([]string, 0, len(names))
+	for _, name := range names {
+		paths = append(paths, filepath.Join(dir, name))
+	}
+	return paths, nil
+}
+
+// sandboxRoot resolves the persistent workspace root inbound files live under.
+func sandboxRoot() (string, error) {
 	root := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_ROOT"))
 	if root == "" {
 		return "", errors.New("KERNEL_SANDBOX_ROOT is not configured")
+	}
+	return root, nil
+}
+
+// inboundStagingKey derives a filesystem-safe, deterministic dir name from the
+// inbound row id (inbound/{channel}/{message_id}).
+func inboundStagingKey(rowID string) string {
+	digest := sha256.Sum256([]byte(rowID))
+	return hex.EncodeToString(digest[:])[:16]
+}
+
+// saveChannelFiles downloads attachments through the driver (only it can
+// resolve the opaque references) into dir and returns the stored file names.
+func (l *channelInboundLoop) saveChannelFiles(ctx context.Context, files []agent.InboundFile, dir string) ([]string, error) {
+	fetcher, ok := l.poller.(agent.ChannelFileFetcher)
+	if !ok {
+		return nil, fmt.Errorf("channel %s cannot receive files", l.driver.Type())
 	}
 	settings := agent.ChannelSettingsFromEnv()
 	if l.settings != nil {
@@ -429,15 +498,14 @@ func (l *channelInboundLoop) saveInboundFiles(ctx context.Context, reply agent.C
 		}
 	}
 	channelSettings := settings.Channels[l.driver.Type()]
-	dir := filepath.Join(root, "projects", reply.Ask.ProjectID, "inbox")
 	if err := os.MkdirAll(dir, 0o777); err != nil {
-		return "", err
+		return nil, err
 	}
-	saved := make([]string, 0, len(reply.Message.Files))
-	for _, file := range reply.Message.Files {
+	saved := make([]string, 0, len(files))
+	for _, file := range files {
 		payload, err := fetcher.FetchFile(ctx, l.httpClient, channelSettings, file)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		name := safeFileName(file.Name)
 		target := filepath.Join(dir, name)
@@ -446,11 +514,11 @@ func (l *channelInboundLoop) saveInboundFiles(ctx context.Context, reply agent.C
 			target = filepath.Join(dir, name)
 		}
 		if err := os.WriteFile(target, payload, 0o666); err != nil {
-			return "", err
+			return nil, err
 		}
-		saved = append(saved, "/workspace/inbox/"+name)
+		saved = append(saved, name)
 	}
-	return strings.Join(saved, ", "), nil
+	return saved, nil
 }
 
 // safeFileName normalizes an inbound attachment name the same way chat

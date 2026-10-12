@@ -102,6 +102,9 @@ type InboundMessageUpdate struct {
 	IntakeRunID    string
 	TargetRunID    string
 	ProjectID      string
+	// Attachments records the saved staging paths of the message's files;
+	// nil leaves the column untouched.
+	Attachments []string
 	// ClearProject removes a resolved project (not used today, but the
 	// clarifying state may reset a wrong guess).
 	ClearProject bool
@@ -129,6 +132,11 @@ func (s *Store) UpdateInboundMessage(ctx context.Context, id string, u InboundMe
 	}
 	if u.TargetRunID != "" {
 		add("target_run_id", u.TargetRunID)
+	}
+	if u.Attachments != nil {
+		attachments, _ := json.Marshal(u.Attachments)
+		args = append(args, string(attachments))
+		set = append(set, "attachments = $"+itoa(len(args)))
 	}
 	if u.ClearProject {
 		set = append(set, "project_id = NULL")

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,11 @@ const IntakeAgentID = "intake"
 // than any reasonable clarification dialog, shorter than forever.
 const inboundExpiryTTL = 48 * time.Hour
 
+// intakePromptVersion marks the built-in prompt generation on the agent row
+// (label prompt_version). bootstrapIntake upgrades in place while the label
+// matches; an admin edit (label removed or changed) is never overwritten.
+const intakePromptVersion = "2"
+
 // intakeSystemPrompt instructs the classification/clarification dialog
 // (docs/inbound-messages.md §4.3, §6). Tunable: the row is created once and
 // never overwritten, so an admin may refine it in the agent editor.
@@ -63,13 +69,15 @@ Always follow this order:
 
 3. Then call start_task with a self-contained title and prompt: the executing agent sees only what you write. Translate natural instructions into explicit steps and checkpoints (e.g. "after approval from <person> pass the result to <team>"). Preserve the original wording of the request inside the prompt.
 
-4. For status: call run_status and summarize the sender's tasks (status and latest answer per run) — never start new work for a progress question. For cancel: list the sender's runs via run_status when unclear which one is meant, then cancel_run with the exact run_id; confirm with the user via ask_human only when several runs are plausible. For chatter: a short friendly reply, no run.
+4. For an amendment: run_status lists the sender's earlier runs (run_id, project, status, latest answer). Pick the run the user is amending — one they name, or the only plausible one; when several are plausible, ask_human with the run list as options. Then call start_task with amend_run_id set to that run and prompt = the amendment as a self-contained instruction for the executing agent (what to change or add; reference the earlier result only through what run_status showed you). Never invent run ids. If the sender has no earlier runs, treat the message as a new task (step 2).
+
+5. For status: call run_status and summarize the sender's tasks (status and latest answer per run) — never start new work for a progress question. For cancel: list the sender's runs via run_status when unclear which one is meant, then cancel_run with the exact run_id; confirm with the user via ask_human only when several runs are plausible. For chatter: a short friendly reply, no run.
 
 Rules:
-- The message body in the prompt is the only source of user intent; never invent project names, people or deadlines.
+- The message body in the prompt is the only source of user intent; never invent project names, people, deadlines or run ids.
 - Start at most one task per message.
 - Answer in the language of the user's message.
-- After start_task succeeds, tell the user which project the task landed in and its title, briefly.`
+- After start_task succeeds, tell the user which project the task landed in and its title (or, for an amendment, that the follow-up started on the same task), briefly.`
 
 // intakeTools is the closed tool surface of the intake agent: classification,
 // search, clarification, task creation and the sender's own run lifecycle.
@@ -96,7 +104,23 @@ func bootstrapIntake(ctx context.Context, log *slog.Logger, ws *workspace.Store)
 		}
 		log.Info("intake project created", "project", IntakeProjectID)
 	}
-	if _, err := ws.GetAgent(ctx, IntakeAgentID); err == nil {
+	if existing, err := ws.GetAgent(ctx, IntakeAgentID); err == nil {
+		// The built-in prompt evolves with the intake flow; installations must
+		// get the update without a reinstall. A prompt_version label marks rows
+		// still on a built-in prompt — those upgrade in place. An admin who
+		// edited the prompt bumps nothing and is never overwritten.
+		if existing.Labels["system"] == "intake" && existing.Labels["prompt_version"] != intakePromptVersion {
+			existing.SystemPrompt = intakeSystemPrompt
+			if existing.Labels == nil {
+				existing.Labels = map[string]string{}
+			}
+			existing.Labels["prompt_version"] = intakePromptVersion
+			if err := ws.UpdateAgent(ctx, existing); err != nil {
+				log.Warn("intake agent prompt upgrade", "error", err)
+			} else {
+				log.Info("intake agent prompt upgraded", "agent", IntakeAgentID, "version", intakePromptVersion)
+			}
+		}
 		return
 	} else if !isNotFound(err) {
 		log.Warn("intake agent lookup", "error", err)
@@ -108,13 +132,13 @@ func bootstrapIntake(ctx context.Context, log *slog.Logger, ws *workspace.Store)
 	intakeAgent := &workspace.Agent{
 		ID: IntakeAgentID, ProjectID: IntakeProjectID,
 		Name:          "Intake",
-		Description:   "Turns initiative channel messages into routed tasks: classification, clarification, project resolution (docs/inbound-messages.md).",
+		Description:   "Turns initiative channel messages into routed tasks: classification, clarification, project resolution, amendments (docs/inbound-messages.md).",
 		SystemPrompt:  intakeSystemPrompt,
 		Tools:         intakeTools,
 		MaxTurns:      &maxTurns,
 		ReadOnly:      &readOnly,
 		NetworkAccess: &network,
-		Labels:        map[string]string{"system": "intake"},
+		Labels:        map[string]string{"system": "intake", "prompt_version": intakePromptVersion},
 	}
 	if err := ws.CreateAgent(ctx, intakeAgent); err != nil {
 		log.Warn("intake agent create", "error", err)
@@ -214,7 +238,7 @@ func intakePrompt(message agent.InboundMessage, sender workspace.User) string {
 		for _, file := range message.Files {
 			names = append(names, file.Name)
 		}
-		builder.WriteString("\nThe message carried attachments: " + strings.Join(names, ", ") + ".\n")
+		builder.WriteString("\nThe message carried attachments: " + strings.Join(names, ", ") + ". They are saved and will be attached to the started task automatically; mention them by name when composing the task prompt.\n")
 	}
 	builder.WriteString("\nClassify it (intake_decide), resolve the project if it is a task (search_projects, ask_human to clarify), then start_task — or close it per your instructions.")
 	return builder.String()
@@ -484,17 +508,19 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			return
 		}
 		var body struct {
-			ProjectID string `json:"project_id"`
-			AgentID   string `json:"agent_id"`
-			Title     string `json:"title"`
-			Prompt    string `json:"prompt"`
+			ProjectID  string `json:"project_id"`
+			AgentID    string `json:"agent_id"`
+			Title      string `json:"title"`
+			Prompt     string `json:"prompt"`
+			AmendRunID string `json:"amend_run_id"`
 		}
 		if err := decodeJSON(w, req, &body); err != nil {
 			writeError(w, 400, err)
 			return
 		}
-		if strings.TrimSpace(body.ProjectID) == "" || strings.TrimSpace(body.Title) == "" || strings.TrimSpace(body.Prompt) == "" {
-			writeError(w, 422, errors.New("project_id, title and prompt are required"))
+		if strings.TrimSpace(body.ProjectID) == "" && strings.TrimSpace(body.AmendRunID) == "" ||
+			strings.TrimSpace(body.AmendRunID) == "" && (strings.TrimSpace(body.Title) == "" || strings.TrimSpace(body.Prompt) == "") {
+			writeError(w, 422, errors.New("project_id, title and prompt are required (amend_run_id replaces them for amendments)"))
 			return
 		}
 		row, err := r.ws.GetInboundMessageByIntakeRun(req.Context(), req.PathValue("runID"))
@@ -528,15 +554,79 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			writeError(w, 404, fmt.Errorf("sender %q has no resolvable principal", sender.ID))
 			return
 		}
+		// Amendment (docs/inbound-messages.md §12 phase 3): a follow-up run on the
+		// sender's earlier task with the dialog context — original task, prior
+		// outcome, amendment. The target run must be one the sender's own routed
+		// messages produced (the same ownership rule as cancel).
+		amendRunID := strings.TrimSpace(body.AmendRunID)
+		amendAgentID := body.AgentID
+		prompt := body.Prompt
+		amendTaskID := ""
+		if amendRunID != "" {
+			prevRun, gErr := r.ws.GetRun(req.Context(), amendRunID)
+			if gErr != nil {
+				writeError(w, 404, fmt.Errorf("run %q not found", amendRunID))
+				return
+			}
+			owned, oErr := r.ws.ListRoutedInboundMessages(req.Context(), row.SenderUserID, 100)
+			if oErr != nil {
+				writeError(w, 500, oErr)
+				return
+			}
+			ownedRun := false
+			for _, candidate := range owned {
+				if candidate.TargetRunID == amendRunID {
+					ownedRun = true
+					break
+				}
+			}
+			if !ownedRun {
+				writeError(w, 403, fmt.Errorf("run %q was not started from this sender's messages", amendRunID))
+				return
+			}
+			if body.ProjectID != "" && body.ProjectID != prevRun.ProjectID {
+				writeError(w, 422, fmt.Errorf("amendment project mismatch: run %q lives in project %q", amendRunID, prevRun.ProjectID))
+				return
+			}
+			task, tErr := r.ws.GetTask(req.Context(), prevRun.TaskID)
+			if tErr != nil {
+				writeError(w, 404, fmt.Errorf("task %q of run %q not found", prevRun.TaskID, amendRunID))
+				return
+			}
+			body.ProjectID = prevRun.ProjectID
+			body.Title = task.Title
+			if amendAgentID == "" {
+				// The agent that produced the earlier result continues the task —
+				// same context, same sandbox, no surprise switch.
+				amendAgentID = prevRun.AgentID
+			}
+			prompt = amendmentPrompt(task, prevRun, body.Prompt)
+			amendTaskID = prevRun.TaskID
+		}
 		// Deterministic task id from the message: a replayed start_task for the
 		// same message fails cleanly on the task primary key instead of
-		// duplicating work.
-		taskID := intakeTaskID(row)
-		if err := r.ws.CreateTask(req.Context(), &workspace.Task{ID: taskID, ProjectID: body.ProjectID, Title: body.Title, Prompt: body.Prompt}); err != nil {
-			writeError(w, 409, fmt.Errorf("task %s already exists (message already routed)", taskID))
-			return
+		// duplicating work. Amendments reuse the amended run's task — no new row.
+		taskID := ""
+		if amendRunID == "" {
+			taskID = intakeTaskID(row)
+			if err := r.ws.CreateTask(req.Context(), &workspace.Task{ID: taskID, ProjectID: body.ProjectID, Title: body.Title, Prompt: body.Prompt}); err != nil {
+				writeError(w, 409, fmt.Errorf("task %s already exists (message already routed)", taskID))
+				return
+			}
+		} else {
+			taskID = amendTaskID
 		}
-		agentID, agentCfg, aErr := resolveRunAgent(req.Context(), r.ws, body.ProjectID, body.AgentID)
+		// Attachments staged by the inbound loop move into the target project's
+		// inbox now that the project is resolved; the run prompt names the
+		// workspace paths the executing agent reads them from.
+		if len(row.Attachments) > 0 {
+			if copied, cErr := copyInboundAttachments(row.Attachments, body.ProjectID); cErr != nil {
+				r.log.Warn("intake attachments", "message", row.ID, "error", cErr)
+			} else if len(copied) > 0 {
+				prompt += "\n\nFiles attached by the user (read them from the workspace):\n" + strings.Join(copied, "\n")
+			}
+		}
+		agentID, agentCfg, aErr := resolveRunAgent(req.Context(), r.ws, body.ProjectID, amendAgentID)
 		if aErr != nil {
 			if errors.Is(aErr, workspace.ErrNotFound) {
 				writeError(w, 404, errors.New("agent not found"))
@@ -548,7 +638,7 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 		runID := taskID + "-" + time.Now().UTC().Format("20060102-150405")
 		input := agent.RunInput{
 			RunID: runID, Project: body.ProjectID, TaskID: taskID,
-			Prompt: body.Prompt, ActorID: sender.ID,
+			Prompt: prompt, ActorID: sender.ID,
 		}
 		applyAgentConfig(req.Context(), r.ws, agentCfg, &input)
 		applyProjectModel(req.Context(), r.ws, body.ProjectID, &input)
@@ -582,10 +672,16 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			writeError(w, 409, wfErr)
 			return
 		}
+		execContext := runExecContextFor(principal, &input, agentID, effectiveRole)
+		if amendRunID != "" {
+			// The Runs tree shows the follow-up chain: message → intake → task run,
+			// and each amendment points at the run it amends.
+			execContext["amends_run"] = amendRunID
+		}
 		_ = r.ws.CreateRun(req.Context(), &workspace.Run{
 			ID: runID, TaskID: taskID, ProjectID: body.ProjectID,
 			AgentID: agentID, AgentVersion: input.AgentVersion, RunID: runID, Status: "started", Model: input.Model,
-			ExecContext: runExecContextFor(principal, &input, agentID, effectiveRole),
+			ExecContext: execContext,
 		})
 		_ = r.ws.UpdateInboundMessage(req.Context(), row.ID, workspace.InboundMessageUpdate{
 			ProjectID: body.ProjectID, TargetRunID: runID, Status: workspace.InboundStatusRouted,
@@ -594,9 +690,14 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			// The event lands in the intake scope; the target project sees the
 			// routing through the run row and its own run events — dual visibility
 			// without a second journal entry.
-			emit(req.Context(), "intake.routed", inboundMessageToAgent(row), sender.ID, map[string]any{
+			routeData := map[string]any{
 				"project_id": body.ProjectID, "task_id": taskID, "run_id": runID,
-			})
+			}
+			if amendRunID != "" {
+				routeData["amendment"] = true
+				routeData["amends_run_id"] = amendRunID
+			}
+			emit(req.Context(), "intake.routed", inboundMessageToAgent(row), sender.ID, routeData)
 		}
 		_ = r.ws.RecordAccessAudit(req.Context(), sender.ID, workspace.AuditIntakeRouted, "task", taskID, map[string]any{
 			"project": body.ProjectID, "run_id": runID, "message": row.ID,
@@ -618,6 +719,59 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dest any) error {
 // one message → one task, replays collide on the primary key.
 func intakeTaskID(row workspace.InboundMessage) string {
 	return "inbound-" + slugify(translit(row.Channel+"-"+row.MessageID))
+}
+
+// amendmentPrompt composes the follow-up run prompt from the dialog context:
+// the original task, the previous run's recorded outcome and the amendment as
+// a self-contained instruction. The amendment text is what the intake agent
+// wrote — the user's wording is preserved inside it.
+func amendmentPrompt(task workspace.Task, prev workspace.Run, amendment string) string {
+	var b strings.Builder
+	b.WriteString("Follow-up on an earlier task, requested by the task author through the channel.\n\n")
+	b.WriteString("Original task — " + task.Title + ":\n---\n" + strings.TrimSpace(task.Prompt) + "\n---\n")
+	outcome := strings.TrimSpace(prev.Answer)
+	if outcome == "" && prev.Error != "" {
+		outcome = "run failed: " + prev.Error
+	}
+	if outcome == "" {
+		outcome = "(no recorded answer; run status: " + prev.Status + ")"
+	}
+	b.WriteString("\nResult of run " + prev.ID + " (" + prev.Status + "):\n---\n" + truncateForLog(outcome, 4000) + "\n---\n")
+	b.WriteString("\nAmendment (verbatim):\n---\n" + strings.TrimSpace(amendment) + "\n---\n")
+	b.WriteString("\nApply the amendment on top of the earlier result: same task, the follow-up narrows or extends it. Do not redo untouched parts from scratch.")
+	return b.String()
+}
+
+// copyInboundAttachments moves the staged files of one inbound message into
+// the target project's inbox and returns the container-side paths the run
+// reads them from. Staged originals stay for the audit trail.
+func copyInboundAttachments(staged []string, projectID string) ([]string, error) {
+	root, err := sandboxRoot()
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(root, "projects", projectID, "inbox")
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		return nil, err
+	}
+	copied := make([]string, 0, len(staged))
+	for _, path := range staged {
+		payload, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		name := safeFileName(filepath.Base(path))
+		target := filepath.Join(dir, name)
+		if _, err := os.Stat(target); err == nil {
+			name = time.Now().UTC().Format("20060102-150405") + "-" + name
+			target = filepath.Join(dir, name)
+		}
+		if err := os.WriteFile(target, payload, 0o666); err != nil {
+			return nil, err
+		}
+		copied = append(copied, "/workspace/inbox/"+name)
+	}
+	return copied, nil
 }
 
 // inboundMessageToAgent rebuilds the channel-neutral message projection the

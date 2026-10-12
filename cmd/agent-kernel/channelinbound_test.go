@@ -730,3 +730,69 @@ func TestChannelInboundRoutesFileReplyIntoInbox(t *testing.T) {
 		t.Fatalf("row not answered with file note: %+v", store.answered)
 	}
 }
+
+// TestChannelInboundIntakeSavesInitiativeAttachments: a file-bearing initiative
+// message from an identified sender lands its attachments in the staging dir
+// and the saved paths are recorded on the row (docs/inbound-messages.md §12
+// phase 3). A stranger's files are never fetched.
+func TestChannelInboundIntakeSavesInitiativeAttachments(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KERNEL_SANDBOX_ROOT", root)
+	askedAt := time.Now()
+	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/account/whoami"):
+			_ = json.NewEncoder(w).Encode(map[string]string{"user_id": "@bot:hs"})
+		case strings.HasSuffix(r.URL.Path, "/sync"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"next_batch": "batch-1",
+				"rooms": map[string]any{"join": map[string]any{
+					"!r1:hs": map[string]any{"timeline": map[string]any{"events": []any{
+						map[string]any{"type": "m.room.message", "event_id": "$m9", "sender": "@human:hs", "origin_server_ts": askedAt.UnixMilli(), "content": map[string]any{"msgtype": "m.file", "body": "вот шаблон", "filename": "Смета.xlsx", "url": "mxc://hs/media2"}},
+					}}},
+				}},
+			})
+		case strings.Contains(r.URL.Path, "/download/"):
+			_, _ = w.Write([]byte("XLSXDATA"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(fileServer.Close)
+	store := &fakeInboundStore{
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+	}
+	intake := &recordedIntake{runID: "intake-m9"}
+	loop := newInboundLoop(t, fileServer, store, &recordedSignal{})
+	loop.intake = intake.record
+	loop.emit = func(context.Context, string, agent.InboundMessage, string, map[string]any) {}
+	loop.intakeEnabled = true
+
+	if _, err := loop.cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The staged file exists under the message-scoped key and the row recorded it.
+	var latest workspace.InboundMessageUpdate
+	var found bool
+	for _, record := range store.updates {
+		if record.update.Attachments != nil {
+			latest, found = record.update, true
+		}
+	}
+	if !found {
+		t.Fatal("attachments update not recorded")
+	}
+	if len(latest.Attachments) != 1 || !strings.HasSuffix(latest.Attachments[0], "/smeta.xlsx") {
+		t.Fatalf("attachments = %v", latest.Attachments)
+	}
+	payload, err := os.ReadFile(latest.Attachments[0])
+	if err != nil || string(payload) != "XLSXDATA" {
+		t.Fatalf("staged file wrong: %v %q", err, payload)
+	}
+	if !strings.Contains(latest.Attachments[0], filepath.Join("inbound")) {
+		t.Fatalf("staging path must live under the inbound dir: %q", latest.Attachments[0])
+	}
+}
