@@ -28,6 +28,14 @@ type fakeInboundStore struct {
 	cancelled []string
 	audits    []string
 	cursor    workspace.ChannelCursor
+	inbound   []workspace.InboundMessage
+	updates   []inboundUpdateRecord
+}
+
+// inboundUpdateRecord is one observed UpdateInboundMessage call.
+type inboundUpdateRecord struct {
+	id     string
+	update workspace.InboundMessageUpdate
 }
 
 func (s *fakeInboundStore) ListHumanRequests(context.Context, string, string, string, bool) ([]workspace.HumanRequest, error) {
@@ -77,6 +85,52 @@ func (s *fakeInboundStore) SaveChannelCursor(_ context.Context, _ string, cursor
 	defer s.mu.Unlock()
 	s.cursor = cursor
 	return nil
+}
+
+func (s *fakeInboundStore) InsertInboundMessage(_ context.Context, m *workspace.InboundMessage) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, existing := range s.inbound {
+		if existing.Channel == m.Channel && existing.MessageID == m.MessageID {
+			return false, nil
+		}
+	}
+	s.inbound = append(s.inbound, *m)
+	return true, nil
+}
+
+func (s *fakeInboundStore) UpdateInboundMessage(_ context.Context, id string, u workspace.InboundMessageUpdate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.updates = append(s.updates, inboundUpdateRecord{id: id, update: u})
+	return nil
+}
+
+// lastUpdate returns the newest recorded update for one inbound row.
+func (s *fakeInboundStore) lastUpdate(id string) (workspace.InboundMessageUpdate, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var latest workspace.InboundMessageUpdate
+	found := false
+	for _, record := range s.updates {
+		if record.id == id {
+			latest = record.update
+			found = true
+		}
+	}
+	return latest, found
+}
+
+// inboundRow returns the stored inbound message by message id.
+func (s *fakeInboundStore) inboundRow(id string) (workspace.InboundMessage, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, row := range s.inbound {
+		if row.MessageID == id {
+			return row, true
+		}
+	}
+	return workspace.InboundMessage{}, false
 }
 
 type recordedSignal struct {
@@ -292,6 +346,268 @@ func TestSafeFileName(t *testing.T) {
 		if got := safeFileName(input); got != want {
 			t.Fatalf("safeFileName(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+// recordedIntake captures intake callback invocations.
+type recordedIntake struct {
+	mu       sync.Mutex
+	messages []agent.InboundMessage
+	senders  []string
+	runID    string
+	err      error
+}
+
+func (r *recordedIntake) record(_ context.Context, message agent.InboundMessage, senderUserID string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.messages = append(r.messages, message)
+	r.senders = append(r.senders, senderUserID)
+	return r.runID, r.err
+}
+
+func (r *recordedIntake) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.messages)
+}
+
+// recordedEmit captures intake.* events the loop journals.
+type recordedEmit struct {
+	mu      sync.Mutex
+	types   []string
+	senders []string
+	rawData []map[string]any
+}
+
+func (r *recordedEmit) record(_ context.Context, eventType string, _ agent.InboundMessage, senderUserID string, data map[string]any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.types = append(r.types, eventType)
+	r.senders = append(r.senders, senderUserID)
+	// Copy: the enqueuer mutates the map after the callback returns.
+	copyData := make(map[string]any, len(data))
+	for key, value := range data {
+		copyData[key] = value
+	}
+	r.rawData = append(r.rawData, copyData)
+}
+
+func (r *recordedEmit) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.types)
+}
+
+// matrixTextEvent builds one m.room.message sync event.
+func matrixTextEvent(eventID, room, sender, body string) map[string]any {
+	return map[string]any{
+		"type": "m.room.message", "event_id": eventID, "sender": sender,
+		"origin_server_ts": time.Now().UnixMilli(),
+		"content":          map[string]any{"msgtype": "m.text", "body": body},
+	}
+}
+
+// matrixIntakeHomeServer fakes whoami + a sync that replays the same room
+// events on every poll (the redelivery model) and records notices sent through
+// the room message route.
+func matrixIntakeHomeServer(t *testing.T, room string, events []any, sent *[]string) *httptest.Server {
+	t.Helper()
+	batch := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/account/whoami"):
+			_ = json.NewEncoder(w).Encode(map[string]string{"user_id": "@bot:hs"})
+		case strings.HasSuffix(r.URL.Path, "/sync"):
+			batch++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"next_batch": fmt.Sprintf("batch-%d", batch),
+				"rooms": map[string]any{"join": map[string]any{
+					room: map[string]any{"timeline": map[string]any{"events": events}},
+				}},
+			})
+		case strings.Contains(r.URL.Path, "/send/"):
+			var payload struct {
+				Body string `json:"body"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			*sent = append(*sent, payload.Body)
+			_ = json.NewEncoder(w).Encode(map[string]any{"event_id": "$notice"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestChannelInboundIntakeRejectsUnknownSenderInRegisteredRoom: a registered
+// room with a stranger's sender identity records the message as rejected,
+// journals intake.rejected(unknown_sender) and answers with one polite notice
+// pointing at the app. No run starts.
+func TestChannelInboundIntakeRejectsUnknownSenderInRegisteredRoom(t *testing.T) {
+	var sent []string
+	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
+		matrixTextEvent("$m1", "!r1:hs", "@stranger:hs", "подготовь смету на разработку"),
+	}, &sent)
+	store := &fakeInboundStore{
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+	}
+	intake := &recordedIntake{}
+	emit := &recordedEmit{}
+	loop := newInboundLoop(t, server, store, &recordedSignal{})
+	loop.intake = func(context.Context, agent.InboundMessage, string) (string, error) {
+		t.Fatal("intake must not start for an unknown sender")
+		return "", nil
+	}
+	loop.emit = emit.record
+	loop.intakeEnabled = true
+
+	if _, err := loop.cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if intake.count() != 0 {
+		t.Fatalf("intake called %d times", intake.count())
+	}
+	row, ok := store.inboundRow("$m1")
+	if !ok {
+		t.Fatal("message not recorded")
+	}
+	if row.Status != workspace.InboundStatusReceived {
+		t.Fatalf("inserted status %q, want received", row.Status)
+	}
+	if latest, _ := store.lastUpdate(row.ID); latest.Status != workspace.InboundStatusRejected {
+		t.Fatalf("row not rejected: %+v", latest)
+	}
+	if emit.count() != 1 || emit.types[0] != "intake.rejected" || emit.rawData[0]["reason"] != "unknown_sender" {
+		t.Fatalf("unexpected events: %v %+v", emit.types, emit.rawData)
+	}
+	if len(sent) != 1 || !strings.Contains(sent[0], "Temporality") {
+		t.Fatalf("expected one rejection notice, got %v", sent)
+	}
+}
+
+// TestChannelInboundIntakeRejectsUnregisteredRoomSilently: a message in a room
+// no user channel is bound to is recorded as rejected with reason
+// unregistered_room — and never answered, so the bot does not spam every room
+// it sits in.
+func TestChannelInboundIntakeRejectsUnregisteredRoomSilently(t *testing.T) {
+	var sent []string
+	server := matrixIntakeHomeServer(t, "!r2:hs", []any{
+		matrixTextEvent("$m2", "!r2:hs", "@human:hs", "сделай отчёт по проекту"),
+	}, &sent)
+	store := &fakeInboundStore{
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+	}
+	emit := &recordedEmit{}
+	loop := newInboundLoop(t, server, store, &recordedSignal{})
+	loop.intake = func(context.Context, agent.InboundMessage, string) (string, error) {
+		t.Fatal("intake must not start in an unregistered room")
+		return "", nil
+	}
+	loop.emit = emit.record
+	loop.intakeEnabled = true
+
+	if _, err := loop.cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	row, ok := store.inboundRow("$m2")
+	if !ok {
+		t.Fatal("message not recorded")
+	}
+	if latest, _ := store.lastUpdate(row.ID); latest.Status != workspace.InboundStatusRejected {
+		t.Fatalf("row not rejected: %+v", latest)
+	}
+	if emit.count() != 1 || emit.rawData[0]["reason"] != "unregistered_room" {
+		t.Fatalf("unexpected events: %v %+v", emit.types, emit.rawData)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("unregistered room must stay silent, sent %v", sent)
+	}
+}
+
+// TestChannelInboundIntakeStartsRunForKnownSender: a message authored by the
+// registered sender identity of the room owner identifies the user, journals
+// intake.received, starts the intake run and records its id on the row.
+func TestChannelInboundIntakeStartsRunForKnownSender(t *testing.T) {
+	var sent []string
+	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
+		matrixTextEvent("$m3", "!r1:hs", "@human:hs", "Подготовь проект документа «Смета на разработку»"),
+	}, &sent)
+	store := &fakeInboundStore{
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+	}
+	intake := &recordedIntake{runID: "intake-m3"}
+	emit := &recordedEmit{}
+	loop := newInboundLoop(t, server, store, &recordedSignal{})
+	loop.intake = intake.record
+	loop.emit = emit.record
+	loop.intakeEnabled = true
+
+	if _, err := loop.cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if intake.count() != 1 || intake.messages[0].ID != "$m3" || intake.senders[0] != "u1" {
+		t.Fatalf("intake calls: %v senders %v", intake.messages, intake.senders)
+	}
+	row, ok := store.inboundRow("$m3")
+	if !ok {
+		t.Fatal("message not recorded")
+	}
+	if latest, _ := store.lastUpdate(row.ID); latest.IntakeRunID != "intake-m3" {
+		t.Fatalf("intake run id not recorded: %+v", latest)
+	}
+	if emit.count() != 1 || emit.types[0] != "intake.received" || emit.senders[0] != "u1" {
+		t.Fatalf("unexpected events: %v %v", emit.types, emit.senders)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("known sender must not get a rejection notice, sent %v", sent)
+	}
+}
+
+// TestChannelInboundIntakeDeduplicatesRedelivery: the fake homeserver replays
+// the same event on every poll (the crash-redelivery model); only the first
+// delivery starts an intake run.
+func TestChannelInboundIntakeDeduplicatesRedelivery(t *testing.T) {
+	var sent []string
+	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
+		matrixTextEvent("$m4", "!r1:hs", "@human:hs", "отчёт ещё раз"),
+	}, &sent)
+	store := &fakeInboundStore{
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+	}
+	intake := &recordedIntake{runID: "intake-m4"}
+	emit := &recordedEmit{}
+	loop := newInboundLoop(t, server, store, &recordedSignal{})
+	loop.intake = intake.record
+	loop.emit = emit.record
+	loop.intakeEnabled = true
+
+	for i := 0; i < 2; i++ {
+		if _, err := loop.cycle(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if intake.count() != 1 {
+		t.Fatalf("redelivery must not start a second intake run, got %d", intake.count())
+	}
+	if emit.count() != 1 {
+		t.Fatalf("redelivery must not journal twice, got %d events", emit.count())
+	}
+	if rows := len(store.inbound); rows != 1 {
+		t.Fatalf("expected one recorded row, got %d", rows)
 	}
 }
 

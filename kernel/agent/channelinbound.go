@@ -62,6 +62,43 @@ type UserChats struct {
 	Chats  []string
 }
 
+// SenderChannel is one enabled user channel of the loop's channel type with
+// its registered sender identity — the closed-world check input
+// (docs/inbound-messages.md §5).
+type SenderChannel struct {
+	Address  string
+	SenderID string
+}
+
+// UserSenderChannels maps a workspace user to their enabled channels (with
+// sender identities) of one channel type.
+type UserSenderChannels struct {
+	UserID   string
+	Channels []SenderChannel
+}
+
+// IdentifyInboundSender resolves who may author initiative messages in a
+// chat (docs/inbound-messages.md §5 — closed world): the chat must be an
+// enabled channel address of some user, and the message sender must equal
+// that channel's registered sender identity exactly. The second return says
+// whether the chat is a registered channel address at all: a mismatch in a
+// registered room deserves a polite rejection reply, an unregistered room
+// must be recorded silently (anti-spam).
+func IdentifyInboundSender(msg InboundMessage, users []UserSenderChannels) (userID string, roomRegistered bool) {
+	for _, user := range users {
+		for _, channel := range user.Channels {
+			if channel.Address != msg.ChatID {
+				continue
+			}
+			roomRegistered = true
+			if channel.SenderID != "" && channel.SenderID == msg.Sender {
+				return user.UserID, true
+			}
+		}
+	}
+	return "", roomRegistered
+}
+
 // ChannelReply is one matched reply: the message answers the ask.
 type ChannelReply struct {
 	Ask       PendingAsk

@@ -216,6 +216,10 @@ func main() {
 		log.Error("migrate workspace v52 (channel cursor)", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000053_inbound_message.up.sql"); err != nil {
+		log.Error("migrate workspace v53 (inbound message)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -5035,11 +5039,24 @@ func main() {
 	})
 
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
+	// Intake pipeline (docs/inbound-messages.md): the system project + agent
+	// exist before the first message arrives; create-if-absent, never
+	// overwritten. The kill switch records and rejects messages without
+	// starting runs when intake is administratively disabled.
+	bootstrapIntake(ctx, log, ws)
+	intakeEnabled := intakeEnabledFromEnv()
+	intake := &intakeRunner{
+		log: log, ws: ws, temporal: temporalClient, taskQueue: taskQueue,
+		sourceID: activities.SourceID, activities: activities,
+		costPrices: costPrices,
+	}
+	intakeEmitter := intakeEventEnqueuer(events.Enqueue, activities.SourceID)
 	// Inbound channel loops (docs/channels.md §5): every two-way driver —
 	// one with a pull poller — gets its own loop; replies in a chat route back
-	// into paused runs through the same approval signal the web inbox uses.
-	// Idles (30s re-check) while the channel is not configured; cursors and
-	// account identity survive restarts in workspace_channel_cursor.
+	// into paused runs through the same approval signal the web inbox uses,
+	// and everything else enters the intake pipeline. Idles (30s re-check)
+	// while the channel is not configured; cursors and account identity
+	// survive restarts in workspace_channel_cursor.
 	for _, driver := range agent.ChannelDrivers() {
 		poller := driver.Poller()
 		if poller == nil {
@@ -5056,6 +5073,15 @@ func main() {
 			signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
 				return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
 			},
+			intake: func(ctx context.Context, message agent.InboundMessage, senderUserID string) (string, error) {
+				user, err := senderUser(ctx, ws, senderUserID)
+				if err != nil {
+					return "", err
+				}
+				return intake.start(ctx, message, user)
+			},
+			emit:          intakeEmitter,
+			intakeEnabled: intakeEnabled,
 		}
 		go loop.run(ctx)
 	}

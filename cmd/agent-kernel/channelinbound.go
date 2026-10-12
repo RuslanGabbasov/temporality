@@ -38,6 +38,16 @@ type channelInboundLoop struct {
 	// signal routes one approval into a waiting workflow; production wraps
 	// temporal SignalWorkflow, tests record calls.
 	signal func(ctx context.Context, workflowID string, approval agent.Approval) error
+	// intake starts the intake run for a fresh initiative message from an
+	// identified sender and returns its run id; nil disables the intake
+	// pipeline (messages are still recorded and rejected, never lost).
+	intake func(ctx context.Context, message agent.InboundMessage, senderUserID string) (string, error)
+	// emit journals one intake.* event (docs/inbound-messages.md §11); nil
+	// drops events (tests).
+	emit func(ctx context.Context, eventType string, message agent.InboundMessage, senderUserID string, data map[string]any)
+	// intakeEnabled gates the pipeline: messages are still deduplicated and
+	// recorded when off, but no run starts and no rejection is delivered.
+	intakeEnabled bool
 
 	cursor      string // opaque driver cursor; "" → fresh start (bounded history)
 	identityKey string // settings fingerprint the cursor and selfID belong to
@@ -54,6 +64,8 @@ type channelInboundStore interface {
 	RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error
 	ChannelCursor(ctx context.Context, channel string) (workspace.ChannelCursor, error)
 	SaveChannelCursor(ctx context.Context, channel string, cursor workspace.ChannelCursor) error
+	InsertInboundMessage(ctx context.Context, m *workspace.InboundMessage) (bool, error)
+	UpdateInboundMessage(ctx context.Context, id string, u workspace.InboundMessageUpdate) error
 }
 
 // run cycles until the context is cancelled. A cycle error is logged and the
@@ -116,7 +128,7 @@ func (l *channelInboundLoop) cycle(ctx context.Context) (time.Duration, error) {
 		l.selfID = selfID
 		l.log.Info("channel inbound listening", "channel", l.driver.Type(), "self", selfID)
 	}
-	asks, users, err := l.openAsks(ctx)
+	asks, users, senders, err := l.openAsks(ctx)
 	if err != nil {
 		return 15 * time.Second, fmt.Errorf("load open asks: %w", err)
 	}
@@ -127,8 +139,20 @@ func (l *channelInboundLoop) cycle(ctx context.Context) (time.Duration, error) {
 	// Route first, persist after: a crash between the two re-delivers the
 	// batch (at-least-once) — the workflow side already tolerates duplicate
 	// answers.
-	for _, reply := range agent.MatchChannelReplies(messages, asks, users, l.selfID) {
+	replies := agent.MatchChannelReplies(messages, asks, users, l.selfID)
+	answered := make(map[string]bool, len(replies))
+	for _, reply := range replies {
+		answered[reply.Message.ID] = true
 		l.routeReply(ctx, reply)
+	}
+	// Everything else is an initiative message: the intake pipeline records
+	// it durably, identifies the sender (closed world) and either starts the
+	// intake run or rejects politely (docs/inbound-messages.md §4–5).
+	for _, message := range messages {
+		if answered[message.ID] || message.Sender == "" || message.Sender == l.selfID {
+			continue
+		}
+		l.handleIntake(ctx, message, channelSettings, senders)
 	}
 	if next != l.cursor {
 		l.cursor = next
@@ -145,27 +169,32 @@ func (l *channelInboundLoop) saveCursor(ctx context.Context) {
 	}
 }
 
-// openAsks loads open human requests delivered through this channel and the
-// chat sets of their recipients. Only asks delivered through the channel
+// openAsks loads open human requests delivered through this channel, the
+// chat sets of their recipients and the sender-identity registry of every
+// enabled channel of this type. Only asks delivered through the channel
 // match: a reply in a chat answers the question that was asked there.
-func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, []agent.UserChats, error) {
+func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, []agent.UserChats, []agent.UserSenderChannels, error) {
 	rows, err := l.store.ListHumanRequests(ctx, "", "", "", true)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	users, err := l.store.ListUsers(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	chatsByUser := make(map[string]agent.UserChats, len(users))
+	senders := make([]agent.UserSenderChannels, 0, len(users))
 	for _, user := range users {
 		entry := agent.UserChats{UserID: user.ID}
+		senderEntry := agent.UserSenderChannels{UserID: user.ID}
 		for _, channel := range user.Channels {
 			if channel.Type == l.driver.Type() && channel.Enabled && strings.TrimSpace(channel.Address) != "" {
 				entry.Chats = append(entry.Chats, channel.Address)
+				senderEntry.Channels = append(senderEntry.Channels, agent.SenderChannel{Address: channel.Address, SenderID: channel.SenderID})
 			}
 		}
 		chatsByUser[user.ID] = entry
+		senders = append(senders, senderEntry)
 	}
 	asks := make([]agent.PendingAsk, 0, len(rows))
 	chats := make([]agent.UserChats, 0, len(rows))
@@ -190,7 +219,7 @@ func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, 
 			chats = append(chats, entry)
 		}
 	}
-	return asks, chats, nil
+	return asks, chats, senders, nil
 }
 
 // routeReply signals the waiting workflow and closes the human request row.
@@ -250,6 +279,82 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, reply agent.Channel
 		l.log.Warn("channel reply audit", "operation", reply.Ask.RequestID, "error", err)
 	}
 	l.log.Info("channel reply routed", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "run", reply.Ask.RunID, "sender", reply.Message.Sender, "cancelled", reply.Cancelled)
+}
+
+// handleIntake is the intake pipeline entry (docs/inbound-messages.md §4–5):
+// dedup → closed-world sender identification → intake run or polite
+// rejection. The row is durable before anything side-effecting happens, so a
+// crash between here and the workflow start leaves a recorded message the
+// operator can replay instead of a silently lost task.
+func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.InboundMessage, channelSettings map[string]string, senders []agent.UserSenderChannels) {
+	row := &workspace.InboundMessage{
+		ID:        workspace.InboundMessageID(message.Channel, message.ID),
+		Channel:   message.Channel,
+		MessageID: message.ID,
+		SenderRaw: message.Sender,
+		Room:      message.ChatID,
+		Body:      truncateForLog(message.Text, 8000),
+		Status:    workspace.InboundStatusReceived,
+	}
+	inserted, err := l.store.InsertInboundMessage(ctx, row)
+	if err != nil {
+		// A storage failure must not block the cursor: log and skip. The
+		// message redelivers only if the channel replays it; losing it to a
+		// DB outage is the same tradeoff replies already make.
+		l.log.Warn("intake insert", "channel", l.driver.Type(), "message", message.ID, "error", err)
+		return
+	}
+	if !inserted {
+		return // duplicate delivery — already processed or being processed
+	}
+	senderUserID, roomRegistered := agent.IdentifyInboundSender(message, senders)
+	if senderUserID == "" {
+		// Closed world: an initiative message from anyone but the registered
+		// identity of the room owner never creates work. A registered room
+		// gets a polite pointer to the app; an unregistered room stays silent
+		// (recording replies to every room the bot sits in would be spam).
+		reason := "unknown_sender"
+		if !roomRegistered {
+			reason = "unregistered_room"
+		}
+		_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{Status: workspace.InboundStatusRejected})
+		if l.emit != nil {
+			l.emit(ctx, "intake.rejected", message, "", map[string]any{"reason": reason})
+		}
+		if roomRegistered && l.intakeEnabled {
+			l.sendRoomNotice(ctx, channelSettings, message.ChatID,
+				"Temporality: this room accepts answers to agent questions, but new tasks are only accepted from the registered account of the room owner. Open the app to create a task, or register this channel identity in your profile.")
+		}
+		l.log.Info("intake rejected", "channel", l.driver.Type(), "message", message.ID, "reason", reason, "sender", message.Sender)
+		return
+	}
+	_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{SenderUserID: senderUserID})
+	if l.emit != nil {
+		l.emit(ctx, "intake.received", message, senderUserID, nil)
+	}
+	if l.intake == nil || !l.intakeEnabled {
+		l.log.Info("intake recorded without processing (pipeline disabled)", "channel", l.driver.Type(), "message", message.ID)
+		return
+	}
+	runID, err := l.intake(ctx, message, senderUserID)
+	if err != nil {
+		// The row stays received — visible in the Входящие list as stuck; the
+		// deterministic run id makes a manual retry idempotent.
+		l.log.Warn("intake run start", "channel", l.driver.Type(), "message", message.ID, "error", err)
+		return
+	}
+	_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{IntakeRunID: runID})
+	l.log.Info("intake run started", "channel", l.driver.Type(), "message", message.ID, "run", runID, "sender", senderUserID)
+}
+
+// sendRoomNotice delivers a channel-neutral service notice to a chat.
+// Best-effort by design: a failed notice costs nothing downstream.
+func (l *channelInboundLoop) sendRoomNotice(ctx context.Context, channelSettings map[string]string, address, body string) {
+	noticeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := l.driver.SendText(noticeCtx, l.httpClient, channelSettings, address, agent.OutboundText{Body: body}); err != nil {
+		l.log.Warn("intake notice", "channel", l.driver.Type(), "chat", address, "error", err)
+	}
 }
 
 // truncateForLog bounds a string by runes for logs, errors and signal payloads.
