@@ -212,6 +212,10 @@ func main() {
 		log.Error("migrate workspace v51 (channel transport payload)", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000052_channel_cursor.up.sql"); err != nil {
+		log.Error("migrate workspace v52 (channel cursor)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -5031,20 +5035,30 @@ func main() {
 	})
 
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
-	// Inbound matrix replies: the delivery transport is two-way — room replies
-	// route back into paused runs through the same approval signal the web
-	// inbox uses. Idles (30s re-check) while matrix is not configured.
-	matrixInbound := &matrixInboundLoop{
-		httpClient: activities.HTTP,
-		settings:   activities.ChannelSettings,
-		store:      ws,
-		sourceID:   activities.SourceID,
-		log:        log,
-		signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
-			return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
-		},
+	// Inbound channel loops (docs/channels.md §5): every two-way driver —
+	// one with a pull poller — gets its own loop; replies in a chat route back
+	// into paused runs through the same approval signal the web inbox uses.
+	// Idles (30s re-check) while the channel is not configured; cursors and
+	// account identity survive restarts in workspace_channel_cursor.
+	for _, driver := range agent.ChannelDrivers() {
+		poller := driver.Poller()
+		if poller == nil {
+			continue // outbound-only channel
+		}
+		loop := &channelInboundLoop{
+			driver:     driver,
+			poller:     poller,
+			httpClient: activities.HTTP,
+			settings:   activities.ChannelSettings,
+			store:      ws,
+			sourceID:   activities.SourceID,
+			log:        log,
+			signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
+				return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
+			},
+		}
+		go loop.run(ctx)
 	}
-	go matrixInbound.run(ctx)
 	// The gate wraps everything except the password-login route: an
 	// unauthenticated caller may reach exactly POST /v1/auth/login, every other
 	// path still requires a bearer token (or the anonymous pass-through when

@@ -20,6 +20,9 @@ type webhookDriver struct{}
 
 func (webhookDriver) Type() string { return "webhook" }
 
+// Poller: the generic webhook is outbound-only — answers happen in the UI.
+func (webhookDriver) Poller() ChannelPoller { return nil }
+
 func (webhookDriver) Spec() ChannelSpec {
 	return ChannelSpec{
 		Label:        "Webhook",

@@ -31,6 +31,10 @@ type ChannelDriver interface {
 	// ErrChannelFilesUnsupported. The kernel checks capabilities first, so
 	// reaching that error means a capability/spec mismatch (a bug).
 	SendFile(ctx context.Context, client *http.Client, settings map[string]string, address string, file OutboundFile) error
+	// Poller returns the pull-model inbound adapter, or nil when the channel
+	// is outbound-only (slack/webhook today). One loop per poller runs in the
+	// kernel binary; the adapter is stateless — the loop owns the cursor.
+	Poller() ChannelPoller
 }
 
 // ErrChannelFilesUnsupported is returned by drivers whose channels cannot

@@ -27,6 +27,7 @@ type fakeInboundStore struct {
 	answered  map[string]string
 	cancelled []string
 	audits    []string
+	cursor    workspace.ChannelCursor
 }
 
 func (s *fakeInboundStore) ListHumanRequests(context.Context, string, string, string, bool) ([]workspace.HumanRequest, error) {
@@ -62,6 +63,19 @@ func (s *fakeInboundStore) RecordAccessAudit(_ context.Context, _, action, _, _ 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.audits = append(s.audits, action)
+	return nil
+}
+
+func (s *fakeInboundStore) ChannelCursor(context.Context, string) (workspace.ChannelCursor, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cursor, nil
+}
+
+func (s *fakeInboundStore) SaveChannelCursor(_ context.Context, _ string, cursor workspace.ChannelCursor) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cursor = cursor
 	return nil
 }
 
@@ -121,9 +135,25 @@ func matrixHomeServer(t *testing.T, sinceParam *string) *httptest.Server {
 	return server
 }
 
-func newInboundLoop(t *testing.T, homeServer *httptest.Server, store *fakeInboundStore, sig *recordedSignal) *matrixInboundLoop {
+// matrixTestDriver finds the registered matrix driver — the loop is generic,
+// the scenarios stay matrix-shaped.
+func matrixTestDriver(t *testing.T) agent.ChannelDriver {
 	t.Helper()
-	return &matrixInboundLoop{
+	for _, driver := range agent.ChannelDrivers() {
+		if driver.Type() == "matrix" {
+			return driver
+		}
+	}
+	t.Fatal("matrix driver not registered")
+	return nil
+}
+
+func newInboundLoop(t *testing.T, homeServer *httptest.Server, store *fakeInboundStore, sig *recordedSignal) *channelInboundLoop {
+	t.Helper()
+	driver := matrixTestDriver(t)
+	return &channelInboundLoop{
+		driver:     driver,
+		poller:     driver.Poller(),
 		httpClient: homeServer.Client(),
 		settings: func(context.Context) (agent.ChannelSettings, error) {
 			return agent.ChannelSettings{Channels: map[string]map[string]string{
@@ -137,7 +167,7 @@ func newInboundLoop(t *testing.T, homeServer *httptest.Server, store *fakeInboun
 	}
 }
 
-func TestMatrixInboundCycleRoutesReplyIntoRun(t *testing.T) {
+func TestChannelInboundCycleRoutesReplyIntoRun(t *testing.T) {
 	store := &fakeInboundStore{
 		requests: []workspace.HumanRequest{{
 			ID: "run/turn/02/call_x", RunID: "run", ProjectID: "proj", ResolvedUser: "u1",
@@ -175,8 +205,8 @@ func TestMatrixInboundCycleRoutesReplyIntoRun(t *testing.T) {
 	if len(store.audits) != 1 || store.audits[0] != workspace.AuditHumanAnswered {
 		t.Fatalf("audit missing: %+v", store.audits)
 	}
-	if loop.since != "batch-1" || loop.botUserID != "@bot:hs" {
-		t.Fatalf("loop state: since=%q bot=%q", loop.since, loop.botUserID)
+	if loop.cursor != "batch-1" || loop.selfID != "@bot:hs" {
+		t.Fatalf("loop state: cursor=%q self=%q", loop.cursor, loop.selfID)
 	}
 
 	// Second cycle: incremental sync carries the cursor; nothing new arrives.
@@ -191,8 +221,10 @@ func TestMatrixInboundCycleRoutesReplyIntoRun(t *testing.T) {
 	}
 }
 
-func TestMatrixInboundCycleIdlesWhenUnconfigured(t *testing.T) {
-	loop := &matrixInboundLoop{
+func TestChannelInboundCycleIdlesWhenUnconfigured(t *testing.T) {
+	loop := &channelInboundLoop{
+		driver:     matrixTestDriver(t),
+		poller:     matrixTestDriver(t).Poller(),
 		httpClient: http.DefaultClient,
 		settings:   func(context.Context) (agent.ChannelSettings, error) { return agent.ChannelSettings{}, nil },
 		store:      &fakeInboundStore{},
@@ -211,7 +243,7 @@ func TestMatrixInboundCycleIdlesWhenUnconfigured(t *testing.T) {
 	}
 }
 
-func TestMatrixInboundSkipsWebDeliveredAsks(t *testing.T) {
+func TestChannelInboundSkipsWebDeliveredAsks(t *testing.T) {
 	store := &fakeInboundStore{
 		requests: []workspace.HumanRequest{{
 			ID: "op", RunID: "run", ProjectID: "proj", ResolvedUser: "u1",
@@ -229,7 +261,7 @@ func TestMatrixInboundSkipsWebDeliveredAsks(t *testing.T) {
 	}
 }
 
-func TestMatrixInboundKeepsRowOpenWhenSignalFails(t *testing.T) {
+func TestChannelInboundKeepsRowOpenWhenSignalFails(t *testing.T) {
 	store := &fakeInboundStore{
 		requests: []workspace.HumanRequest{{
 			ID: "op", RunID: "run", ProjectID: "proj", ResolvedUser: "u1",
@@ -244,18 +276,6 @@ func TestMatrixInboundKeepsRowOpenWhenSignalFails(t *testing.T) {
 	}
 	if len(store.answered) != 0 || len(store.cancelled) != 0 {
 		t.Fatalf("row closed despite signal failure: %+v", store.answered)
-	}
-}
-
-func TestParseMxcURL(t *testing.T) {
-	server, media, err := parseMxcURL("mxc://hs.example/AbCdEf123")
-	if err != nil || server != "hs.example" || media != "AbCdEf123" {
-		t.Fatalf("unexpected parse: %q %q %v", server, media, err)
-	}
-	for _, bad := range []string{"", "https://hs/x", "mxc://hs", "mxc:///onlymedia", "mxc://"} {
-		if _, _, err := parseMxcURL(bad); err == nil {
-			t.Fatalf("%q must be rejected", bad)
-		}
 	}
 }
 
@@ -307,7 +327,7 @@ func matrixFileHomeServer(t *testing.T, payload string) *httptest.Server {
 	return server
 }
 
-func TestMatrixInboundRoutesFileReplyIntoInbox(t *testing.T) {
+func TestChannelInboundRoutesFileReplyIntoInbox(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KERNEL_SANDBOX_ROOT", root)
 	store := &fakeInboundStore{

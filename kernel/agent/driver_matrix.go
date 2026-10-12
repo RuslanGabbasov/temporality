@@ -22,6 +22,10 @@ type matrixDriver struct{}
 
 func (matrixDriver) Type() string { return "matrix" }
 
+// Poller: matrix is two-way — /sync long-poll with reply routing back into
+// paused runs (driver_matrix_inbound.go).
+func (matrixDriver) Poller() ChannelPoller { return matrixPoller{} }
+
 func (matrixDriver) Spec() ChannelSpec {
 	return ChannelSpec{
 		Label:             "Matrix",

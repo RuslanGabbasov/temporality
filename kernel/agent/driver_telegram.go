@@ -19,6 +19,10 @@ type telegramDriver struct{}
 
 func (telegramDriver) Type() string { return "telegram" }
 
+// Poller: inbound telegram (getUpdates, persisted offset) is future work
+// (docs/channels.md phase 2) — outbound-only today.
+func (telegramDriver) Poller() ChannelPoller { return nil }
+
 func (telegramDriver) Spec() ChannelSpec {
 	return ChannelSpec{
 		Label:             "Telegram",

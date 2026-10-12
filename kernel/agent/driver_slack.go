@@ -14,6 +14,10 @@ type slackDriver struct{}
 
 func (slackDriver) Type() string { return "slack" }
 
+// Poller: the incoming-webhook channel is outbound-only; the two-way Slack
+// bot is a separate future driver.
+func (slackDriver) Poller() ChannelPoller { return nil }
+
 func (slackDriver) Spec() ChannelSpec {
 	return ChannelSpec{
 		Label:        "Slack",

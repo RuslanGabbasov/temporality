@@ -214,7 +214,7 @@ If this exists, we can invite a small team and stop relying only on fixtures.
 
 Source spec: `docs/channels.md`.
 
-- [ ] **Phase 0 — extract the layer** — ChannelDriver contract (spec/capabilities, settings schema, SendText/SendFile, pull Poller + push Webhook, sender identity); matrix/telegram/slack/generic-webhook become drivers; settings → JSONB payload + env aliases with a generic admin form; matrixInboundLoop → generic poll loop + shared inbound pipeline (dedup, sender identification, reply matching); channel cursors persisted
+- [x] **Phase 0 — extract the layer** — ChannelDriver contract (spec/capabilities, settings schema, SendText/SendFile, pull Poller); matrix/telegram/slack/generic-webhook became drivers (`kernel/agent/driver_*.go`, one registration line); settings → JSONB payload (000051) + `KERNEL_CHANNEL__*` env aliases with legacy names kept, generic admin form from the driver schema; matrixInboundLoop → generic channelInboundLoop over every driver with a Poller, channel-neutral `MatchChannelReplies`, cursors + settings fingerprint persisted (000052). Dedup table and sender-identity verification land with the intake pipeline (phase 1, `docs/inbound-messages.md`). Push Webhook drivers and interactive options remain future work.
 - [ ] **New inbound channels as drivers** — Telegram inbound (getUpdates, persistent offset), Mattermost (push), Slack bot (push, threads) — each a driver file, zero core edits
 - [ ] **Interactivity** — options as buttons where the channel supports them (Telegram inline keyboards, Slack blocks), text fallback everywhere
 
