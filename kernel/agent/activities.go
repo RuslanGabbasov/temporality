@@ -98,12 +98,30 @@ type Activities struct {
 	// Tokens is the ephemeral live-token bus feeding the /runs/{id}/tokens SSE
 	// endpoint; nil disables streaming (tests run the blocking path).
 	Tokens *TokenBus
+	// providerCacheMu + providerCache hold recent model→provider resolutions
+	// (see modelConfigFor). call_model fires every turn; providers change
+	// rarely — a short TTL keeps the hot path free of workspace round trips.
+	providerCacheMu sync.Mutex
+	providerCache   map[string]providerCacheEntry
 	// ChannelSettings loads the admin-editable channel settings overlay
 	// (workspace channel_transport row: per-channel payload + UI URL). Nil —
 	// or a load error — degrades to the KERNEL_CHANNEL__* environment
 	// variables, preserving env-only deployments.
 	ChannelSettings func(context.Context) (ChannelSettings, error)
 }
+
+// providerCacheEntry is one cached model-config resolution; ok=false is the
+// cached negative "no provider serves this model" answer.
+type providerCacheEntry struct {
+	config    llm.Config
+	ok        bool
+	fetchedAt time.Time
+}
+
+// providerCacheTTL bounds how stale a resolution may be: long enough to keep
+// the per-turn hot path cheap, short enough that a provider edit applies to
+// running agents within a minute.
+const providerCacheTTL = 60 * time.Second
 
 func NewActivities(events EventOutbox) (*Activities, error) {
 	config, err := llm.ConfigFromEnv()
@@ -321,15 +339,39 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		}
 	}
 	client := a.Model
-	if request.Model != "" {
+	if request.Model != "" && (a.Model == nil || request.Model != a.Model.Model()) {
 		// The existing client config is immutable; constructing a provider client
 		// per run keeps model selection out of deterministic Workflow code.
-		config, err := llm.ConfigFromEnv()
-		if err != nil {
-			return llm.Completion{}, err
+		//
+		// A non-default model is routed to the workspace provider that serves
+		// it (workspace_provider.models, scoped by the project's org units);
+		// only when no provider claims the model do we fall back to the env
+		// config with the model name swapped in — the pre-routing behavior.
+		routed := false
+		if a.WorkspaceURL != "" {
+			config, ok, err := a.modelConfigFor(ctx, request.Project, request.Model)
+			if err != nil {
+				// Transient lookup failure (workspace unreachable, 5xx): do not
+				// fail the turn — fall back to env and keep going.
+				if activity.IsActivity(ctx) {
+					if logger := activity.GetLogger(ctx); logger != nil {
+						logger.Warn("model-config lookup failed, falling back to env provider",
+							"run_id", request.RunID, "model", request.Model, "error", err.Error())
+					}
+				}
+			} else if ok {
+				client = llm.New(config)
+				routed = true
+			}
 		}
-		config.Model = request.Model
-		client = llm.New(config)
+		if !routed {
+			config, err := llm.ConfigFromEnv()
+			if err != nil {
+				return llm.Completion{}, err
+			}
+			config.Model = request.Model
+			client = llm.New(config)
+		}
 	}
 	if client == nil {
 		return llm.Completion{}, errors.New("model client is not configured")
@@ -630,6 +672,82 @@ func (a *Activities) handleDeleteTrigger(ctx context.Context, request ToolReques
 		return ToolResult{Content: fmt.Sprintf("error: delete trigger failed (HTTP %d): %s", status, truncate(body, 400))}, nil
 	}
 	return ToolResult{Content: fmt.Sprintf("deleted trigger %s", triggerID)}, nil
+}
+
+// modelConfigFor resolves which provider serves a model for a project: it
+// asks the workspace which of the project's visible providers lists the model
+// and returns a ready llm.Config pointed at that provider. ok=false with a
+// nil error is the clean negative "no provider serves this model" answer
+// (cached); a non-nil error is a transport/server failure the caller may
+// retry or fall back from.
+func (a *Activities) modelConfigFor(ctx context.Context, project, model string) (config llm.Config, ok bool, err error) {
+	key := project + "|" + model
+	a.providerCacheMu.Lock()
+	if a.providerCache == nil {
+		a.providerCache = map[string]providerCacheEntry{}
+	}
+	if hit, seen := a.providerCache[key]; seen && time.Since(hit.fetchedAt) < providerCacheTTL {
+		a.providerCacheMu.Unlock()
+		return hit.config, hit.ok, nil
+	}
+	a.providerCacheMu.Unlock()
+
+	endpoint := fmt.Sprintf("%s/v1/workspace/model-config?model=%s&project=%s", a.WorkspaceURL, url.QueryEscape(model), url.QueryEscape(project))
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return llm.Config{}, false, err
+	}
+	if status == http.StatusNotFound {
+		// Definitive negative: no visible provider lists this model. Cache it —
+		// the fallback path below still works, and hammering the endpoint every
+		// turn would only burn a round trip.
+		a.providerCachePut(key, llm.Config{}, false)
+		return llm.Config{}, false, nil
+	}
+	if status >= 400 {
+		return llm.Config{}, false, fmt.Errorf("model-config lookup failed (HTTP %d): %s", status, truncate(body, 200))
+	}
+	var answer struct {
+		ProviderID string `json:"provider_id"`
+		BaseURL    string `json:"base_url"`
+		APIKey     string `json:"api_key"`
+		Model      string `json:"model"`
+	}
+	if err := json.Unmarshal([]byte(body), &answer); err != nil {
+		return llm.Config{}, false, fmt.Errorf("model-config decode: %w", err)
+	}
+	if answer.BaseURL == "" || answer.APIKey == "" || answer.Model == "" {
+		return llm.Config{}, false, fmt.Errorf("model-config response incomplete for model %q", model)
+	}
+	// The endpoint carries routing only (base URL, key, model); timeouts and
+	// caps come from the env config when it parses, else the same hard defaults
+	// ConfigFromEnv would apply.
+	config = llm.Config{BaseURL: answer.BaseURL, APIKey: answer.APIKey, Model: answer.Model}
+	if envConfig, err := llm.ConfigFromEnv(); err == nil {
+		config.Temperature = envConfig.Temperature
+		config.Timeout = envConfig.Timeout
+		config.StreamIdleTimeout = envConfig.StreamIdleTimeout
+		config.StreamNoProgressTimeout = envConfig.StreamNoProgressTimeout
+		config.MaxOutputTokens = envConfig.MaxOutputTokens
+		config.Reasoning = envConfig.Reasoning
+	} else {
+		config.Timeout = 180 * time.Second
+		config.StreamIdleTimeout = 90 * time.Second
+		config.StreamNoProgressTimeout = 4 * time.Minute
+		config.MaxOutputTokens = 16384
+	}
+	a.providerCachePut(key, config, true)
+	return config, true, nil
+}
+
+// providerCachePut stores one resolution under the mutex.
+func (a *Activities) providerCachePut(key string, config llm.Config, ok bool) {
+	a.providerCacheMu.Lock()
+	defer a.providerCacheMu.Unlock()
+	if a.providerCache == nil {
+		a.providerCache = map[string]providerCacheEntry{}
+	}
+	a.providerCache[key] = providerCacheEntry{config: config, ok: ok, fetchedAt: time.Now()}
 }
 
 // workspaceDo performs an authenticated request against the kernel's own

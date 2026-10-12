@@ -207,6 +207,10 @@ type ModelRequest struct {
 	// empty RunID keeps the blocking non-streaming path (tests, helpers).
 	RunID string `json:"run_id,omitempty"`
 	Turn  int    `json:"turn,omitempty"`
+	// Project scopes provider resolution: a model name may be served by a
+	// provider bound to an org unit, and only the project's visible providers
+	// are candidate routes.
+	Project string `json:"project,omitempty"`
 	// PromptCacheKey routes same-key requests to one provider prompt cache
 	// entry. Empty disables the hint. See the append-only invariant on the
 	// conversation history below.
@@ -957,7 +961,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// rewrite or drop earlier entries. Provider prompt caching (keyed by
 		// PromptCacheKey) relies on the prefix being byte-stable across turns;
 		// mutating history would silently invalidate the cache and reset billing.
-		modelReq := ModelRequest{Model: input.Model, Messages: turnMessages, Tools: advertisedTools(&input), RunID: input.RunID, Turn: turn, PromptCacheKey: input.TaskID}
+		modelReq := ModelRequest{Model: input.Model, Messages: turnMessages, Tools: advertisedTools(&input), RunID: input.RunID, Turn: turn, Project: input.Project, PromptCacheKey: input.TaskID}
 		if err := emit(activityCtx, state, "model.started", map[string]any{"turn": turn, "model": input.Model}); err != nil {
 			return result, err
 		}
@@ -1815,7 +1819,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// same frozen-host recovery (fresh Temporal attempt after the machine
 	// wakes up instead of a dead run).
 	modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}})
-	if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, PromptCacheKey: input.TaskID}).Get(ctx, &finale); err != nil {
+	if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, Project: input.Project, PromptCacheKey: input.TaskID}).Get(ctx, &finale); err != nil {
 		failureDetail := boundedFailureDetail(err)
 		if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "forced_finale": true, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
 			return result, eventErr

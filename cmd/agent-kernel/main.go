@@ -2916,6 +2916,49 @@ func main() {
 		writeJSON(w, 200, map[string]any{"deleted": true})
 	})
 
+	// Model routing: which provider serves a model for a project. The kernel's
+	// call_model activity hits this on the hot path (60s TTL cache on the
+	// caller side) to route non-default models to the right provider instead
+	// of falling back to the env provider with a swapped model name.
+	mux.HandleFunc("GET /v1/workspace/model-config", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		model := strings.TrimSpace(r.URL.Query().Get("model"))
+		if model == "" {
+			writeError(w, 422, errors.New("model is required"))
+			return
+		}
+		project := strings.TrimSpace(r.URL.Query().Get("project"))
+		// Scope routing to the project's org units; an empty (non-nil) slice
+		// keeps ListProvidersVisible filtering to global providers only — a
+		// project without org links must not borrow providers from random
+		// departments.
+		units := []string{}
+		if project != "" {
+			linked, err := ws.ProjectOrgUnits(r.Context(), project)
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			units = linked
+		}
+		providers, err := ws.ListProvidersVisible(r.Context(), units)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		for _, p := range providers {
+			for _, m := range p.Models {
+				if m == model {
+					writeJSON(w, 200, map[string]any{"provider_id": p.ID, "base_url": p.BaseURL, "api_key": p.APIKeyRef, "model": m})
+					return
+				}
+			}
+		}
+		writeError(w, 404, fmt.Errorf("no provider serves model %q", model))
+	})
+
 	// Triggers (docs/org-structure.md §18, §21): org-scoped, optionally bound
 	// to an execution identity whose allowed-lists are re-checked at every
 	// automated run start.
