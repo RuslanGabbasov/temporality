@@ -305,6 +305,20 @@ func (a *Activities) RecordEvent(ctx context.Context, event observation.Event) e
 }
 
 func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.Completion, error) {
+	// A retried attempt is the frozen-host recovery path (see the workflow
+	// comment on call_model options): after a sleeping machine burns the
+	// StartToClose ceiling, this is a fresh start. The journal cannot show it
+	// — model.started is emitted once per turn by the workflow — so log it
+	// where operators triage live runs. GetLogger panics outside a real
+	// activity context, hence the IsActivity guard.
+	if activity.IsActivity(ctx) {
+		if info := activity.GetInfo(ctx); info.Attempt > 1 {
+			if logger := activity.GetLogger(ctx); logger != nil {
+				logger.Info("model call retrying after attempt failure",
+					"run_id", request.RunID, "turn", request.Turn, "attempt", info.Attempt)
+			}
+		}
+	}
 	client := a.Model
 	if request.Model != "" {
 		// The existing client config is immutable; constructing a provider client

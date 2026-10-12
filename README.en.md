@@ -74,13 +74,27 @@ The kernel calls the provider through an OpenAI-compatible Chat Completions API.
 | `TEMPORALITY_MODEL_TIMEOUT` | Go duration — total limit for one blocking attempt (streaming does not use it) | `180s` |
 | `TEMPORALITY_MODEL_STREAM_IDLE_TIMEOUT` | Maximum silence between stream chunks; slow but alive generation is not interrupted | `90s` |
 | `TEMPORALITY_MODEL_STREAM_NO_PROGRESS_TIMEOUT` | Maximum silence between chunks carrying generated tokens; guards against gateways that hold the connection open with empty pings (0 disables) | `4m` |
-| `TEMPORALITY_MODEL_ACTIVITY_TIMEOUT` | Ceiling of one `call_model` Temporal activity (shared by the streaming attempt and the blocking fallback with retries) | `20m` |
+| `TEMPORALITY_MODEL_ACTIVITY_TIMEOUT` | Ceiling of one `call_model` Temporal activity (shared by the streaming attempt and the blocking fallback with retries); up to 3 attempts within the overall budget (3× timeout + 5 minutes) | `20m` |
 | `TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS` | `64..1000000` | `16384` |
 | `TEMPORALITY_MODEL_REASONING` | `off` / `exclude` / `low` / `medium` / `high` | — |
 
 For reasoning models, CoT is counted within the same budget — set it with
 headroom (e.g. `16384` or more), otherwise the answer may end up empty with
 `finish_reason=length`. The default is already `16384`.
+
+### Long runs on a laptop
+
+When the host falls asleep mid-run, both the worker and Temporal freeze. On
+wake the model call recovers automatically: the stream watchdog cuts the dead
+connection and Temporal retries the activity with a fresh attempt (up to 3
+attempts; a model call has no side effects and the prompt prefix is cached
+via `prompt_cache_key`). Sleep longer than the overall budget still kills the
+run. To keep the laptop awake during long agent runs (macOS), keep this in a
+spare terminal:
+
+```sh
+caffeinate -dims
+```
 
 Examples:
 

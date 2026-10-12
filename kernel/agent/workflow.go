@@ -943,15 +943,23 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			return result, err
 		}
 		var completion llm.Completion
-		// Model endpoints fail transiently (hangs, EOFs, empty bodies). Retries
-		// with backoff live inside the llm client; the activity therefore runs
-		// exactly once and its timeout must cover the client's worst case: a
-		// streaming attempt bounded only by chunk silence (StreamIdleTimeout) plus
-		// the blocking fallback (3 attempts × request timeout + backoff ≈ 9m15s).
-		// Long generations are expected, hence the configurable ceiling — see
-		// ModelCallActivityTimeout. Non-retryable model errors (bad request, auth)
-		// fail fast on the first client attempt.
-		modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout + time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+		// Model endpoints fail transiently (hangs, EOFs, empty bodies); retries
+		// with backoff live inside the llm client, so one activity attempt must
+		// cover the client's worst case: a streaming attempt bounded only by
+		// chunk silence (StreamIdleTimeout) plus the blocking fallback (3 attempts
+		// × request timeout + backoff ≈ 9m15s). Long generations are expected,
+		// hence the configurable ceiling — see ModelCallActivityTimeout.
+		// Non-retryable model errors (bad request, auth) fail fast on the first
+		// client attempt.
+		//
+		// The one failure the in-client retries cannot absorb is a frozen host:
+		// when the machine sleeps mid-stream, the worker and the Temporal server
+		// freeze together, and on wake the StartToClose deadline has already
+		// passed — the attempt dies having done no work. Model calls are pure
+		// (no side effects, prompt prefix cached via PromptCacheKey), so Temporal
+		// retries the whole activity: a fresh attempt after wake recovers the
+		// run instead of killing it. ScheduleToClose bounds the total patience.
+		modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}})
 		if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, modelReq).Get(ctx, &completion); err != nil {
 			failureDetail := boundedFailureDetail(err)
 			if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": turn, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
@@ -1775,9 +1783,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		return result, err
 	}
 	var finale llm.Completion
-	// Same ceiling as the per-turn model call: the forced finale can be as
-	// long a generation as any other turn.
-	modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout + time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+	// Same ceiling and retry shape as the per-turn model call: the forced
+	// finale can be as long a generation as any other turn, and deserves the
+	// same frozen-host recovery (fresh Temporal attempt after the machine
+	// wakes up instead of a dead run).
+	modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}})
 	if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, PromptCacheKey: input.TaskID}).Get(ctx, &finale); err != nil {
 		failureDetail := boundedFailureDetail(err)
 		if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "forced_finale": true, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
