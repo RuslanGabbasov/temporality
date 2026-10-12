@@ -19,20 +19,15 @@ func TestChannelDriverRegistryOrder(t *testing.T) {
 	require.Equal(t, []string{"matrix", "telegram", "slack", "webhook"}, order)
 }
 
-// TestChannelDriverSettingsCoverage: every registered driver must find its
-// settings map — a type missing from channelMaps would silently deliver with
-// a nil map and then report "not configured". The probe uses an empty
-// address: drivers must reject it as a configuration error, not panic.
-func TestChannelDriverSettingsCoverage(t *testing.T) {
-	maps := (TransportSettings{
-		MatrixHomeserver: "https://m.org", MatrixAccessToken: "t",
-		TelegramBotToken: "tg", WebhookSecret: "wh",
-	}).channelMaps()
+// TestChannelDriversTolerateAbsentSettings: the generic settings store only
+// materializes channels with at least one value set — drivers regularly see
+// a nil or partial map and must report configuration errors, never panic.
+func TestChannelDriversTolerateAbsentSettings(t *testing.T) {
 	for _, driver := range channelDrivers {
-		require.Contains(t, maps, driver.Type(), "channelMaps must cover %q", driver.Type())
 		require.NotPanics(t, func() {
-			_ = driver.SendText(context.Background(), http.DefaultClient, maps[driver.Type()], "", OutboundText{})
-		}, "%s must reject an empty address without panicking", driver.Type())
+			_ = driver.SendText(context.Background(), http.DefaultClient, nil, "", OutboundText{})
+			_ = driver.SendFile(context.Background(), http.DefaultClient, nil, "addr", OutboundFile{Name: "f.txt"})
+		}, "%s must tolerate missing settings", driver.Type())
 	}
 }
 

@@ -30,7 +30,7 @@ import (
 // to workspace users) is future work.
 type matrixInboundLoop struct {
 	httpClient *http.Client
-	settings   func(context.Context) (agent.TransportSettings, error)
+	settings   func(context.Context) (agent.ChannelSettings, error)
 	store      matrixInboundStore
 	sourceID   string
 	log        *slog.Logger
@@ -76,14 +76,15 @@ func (m *matrixInboundLoop) run(ctx context.Context) {
 func (m *matrixInboundLoop) cycle(ctx context.Context) (time.Duration, error) {
 	// Same precedence as delivery (Activities.transports): database overlay
 	// over env; a loader error degrades to env rather than silencing replies.
-	settings := agent.TransportSettingsFromEnv()
+	settings := agent.ChannelSettingsFromEnv()
 	if m.settings != nil {
 		if stored, err := m.settings(ctx); err == nil {
 			settings = stored.OverlayEnv()
 		}
 	}
-	homeserver := strings.TrimRight(strings.TrimSpace(settings.MatrixHomeserver), "/")
-	token := agent.TrimBearerPrefix(settings.MatrixAccessToken)
+	matrix := settings.Channels["matrix"]
+	homeserver := strings.TrimRight(strings.TrimSpace(matrix["homeserver"]), "/")
+	token := agent.TrimBearerPrefix(matrix["access_token"])
 	if homeserver == "" || token == "" {
 		return 30 * time.Second, nil // matrix not configured; the admin may enable it live
 	}
@@ -309,14 +310,15 @@ func (m *matrixInboundLoop) saveInboundFile(ctx context.Context, reply agent.Mat
 	if root == "" {
 		return "", errors.New("KERNEL_SANDBOX_ROOT is not configured")
 	}
-	settings := agent.TransportSettingsFromEnv()
+	settings := agent.ChannelSettingsFromEnv()
 	if m.settings != nil {
 		if stored, err := m.settings(ctx); err == nil {
 			settings = stored.OverlayEnv()
 		}
 	}
-	homeserver := strings.TrimRight(strings.TrimSpace(settings.MatrixHomeserver), "/")
-	token := agent.TrimBearerPrefix(settings.MatrixAccessToken)
+	matrix := settings.Channels["matrix"]
+	homeserver := strings.TrimRight(strings.TrimSpace(matrix["homeserver"]), "/")
+	token := agent.TrimBearerPrefix(matrix["access_token"])
 	if homeserver == "" || token == "" {
 		return "", errors.New("matrix transport is not configured")
 	}

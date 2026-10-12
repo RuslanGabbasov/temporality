@@ -165,12 +165,20 @@ MCP-серверов и гранты на карточке агента разр
 приложении (Runs → вопросы); внешние транспорты включаются переменными ядра:
 
 ```sh
-# .env
-KERNEL_MATRIX_HOMESERVER=https://matrix.org       # homeserver бота ядра
-KERNEL_MATRIX_ACCESS_TOKEN=syt_...                # токен бота (состоит в комнатах пользователей)
-KERNEL_TELEGRAM_BOT_TOKEN=123456:ABC...           # токен бота для Bot API
-KERNEL_UI_URL=http://localhost:3000               # для ссылок в уведомлениях
+# .env — канонические имена (KERNEL_CHANNEL__<КАНАЛ>__<ПОЛЕ>)
+KERNEL_CHANNEL__MATRIX__HOMESERVER=https://matrix.org   # homeserver бота ядра
+KERNEL_CHANNEL__MATRIX__ACCESS_TOKEN=syt_...            # токен бота (состоит в комнатах пользователей)
+KERNEL_CHANNEL__TELEGRAM__BOT_TOKEN=123456:ABC...       # токен бота для Bot API
+KERNEL_UI_URL=http://localhost:3000                     # для ссылок в уведомлениях
+
+# Легаси-имена работают как алиасы (одно и то же поле):
+# KERNEL_MATRIX_HOMESERVER, KERNEL_MATRIX_ACCESS_TOKEN,
+# KERNEL_TELEGRAM_BOT_TOKEN, KERNEL_WEBHOOK_SECRET
 ```
+
+Тот же набор настроек редактируется в UI (Настройки → Каналы доставки) без
+перезапуска: значения из БД перекрывают env по-польному. Секреты обратно не
+возвращаются — только признак «установлен» и хвост из 4 символов.
 
 Адрес канала: для Matrix — ID комнаты (`!room:matrix.org`), для Telegram —
 chat ID. Доставка не блокирует выполнение: сбой транспорта фиксируется

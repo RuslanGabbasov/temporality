@@ -125,8 +125,10 @@ func newInboundLoop(t *testing.T, homeServer *httptest.Server, store *fakeInboun
 	t.Helper()
 	return &matrixInboundLoop{
 		httpClient: homeServer.Client(),
-		settings: func(context.Context) (agent.TransportSettings, error) {
-			return agent.TransportSettings{MatrixHomeserver: homeServer.URL, MatrixAccessToken: "tok"}, nil
+		settings: func(context.Context) (agent.ChannelSettings, error) {
+			return agent.ChannelSettings{Channels: map[string]map[string]string{
+				"matrix": {"homeserver": homeServer.URL, "access_token": "tok"},
+			}}, nil
 		},
 		store:    store,
 		sourceID: "src",
@@ -192,7 +194,7 @@ func TestMatrixInboundCycleRoutesReplyIntoRun(t *testing.T) {
 func TestMatrixInboundCycleIdlesWhenUnconfigured(t *testing.T) {
 	loop := &matrixInboundLoop{
 		httpClient: http.DefaultClient,
-		settings:   func(context.Context) (agent.TransportSettings, error) { return agent.TransportSettings{}, nil },
+		settings:   func(context.Context) (agent.ChannelSettings, error) { return agent.ChannelSettings{}, nil },
 		store:      &fakeInboundStore{},
 		log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		signal: func(context.Context, string, agent.Approval) error {

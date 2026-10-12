@@ -128,6 +128,11 @@ func channelDriverByType(channelType string) ChannelDriver {
 	return nil
 }
 
+// ChannelDrivers exposes the ordered registry — the admin settings API walks
+// it to render the per-channel schema, the same list delivery dispatches
+// through.
+func ChannelDrivers() []ChannelDriver { return channelDrivers }
+
 // setting reads one trimmed value from a channel settings map.
 func setting(settings map[string]string, key string) string {
 	return strings.TrimSpace(settings[key])

@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Button, TextInput, InlineNotification, Tag, Stack } from '@carbon/react'
 import { TrashCan, Save, Renew } from '@carbon/icons-react'
-import { workspaceApi, type ChannelSettings, type ChannelSettingsField, type ChannelTypeSpec, type ChannelSettingsUpdate } from './workspaceApi'
+import {
+  workspaceApi,
+  type ChannelSettings,
+  type ChannelSettingsField,
+  type ChannelSettingsGroupSchema,
+  type ChannelTypeSpec,
+  type ChannelSettingsUpdate,
+} from './workspaceApi'
 import { useT } from './i18n'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -14,17 +21,22 @@ interface SecretFieldState {
 }
 
 /**
- * Admin transport settings (docs/triggers-and-escalations.md §7): bot
- * credentials for the delivery channels, edited in the UI instead of
- * redeploying with new env vars. The stored row overlays the KERNEL_* env
- * vars per field; secrets never travel back from the kernel — only a
- * set-flag and a non-reversible hint.
+ * Admin channel settings (docs/channels.md §6): per-channel driver
+ * credentials, edited in the UI instead of redeploying with new env vars.
+ * The form renders from the driver registry schema — adding a channel needs
+ * no UI work. The stored payload overlays the KERNEL_CHANNEL__* env vars per
+ * field; secrets never travel back from the kernel — only a set-flag and a
+ * non-reversible hint.
  */
 export default function ChannelSettingsPage() {
   const t = useT()
   const [settings, setSettings] = useState<ChannelSettings | null>(null)
   const [types, setTypes] = useState<ChannelTypeSpec[]>([])
-  const [homeserver, setHomeserver] = useState('')
+  // Plain (non-secret) field inputs, keyed "type.field". Inputs edit the
+  // database overlay; env-sourced fields show empty with the env value as
+  // placeholder — saving an empty input keeps the env fallback instead of
+  // silently copying env into the database.
+  const [values, setValues] = useState<Record<string, string>>({})
   const [uiUrl, setUiUrl] = useState('')
   const [secrets, setSecrets] = useState<Record<string, SecretFieldState>>({})
   const [loading, setLoading] = useState(true)
@@ -32,18 +44,23 @@ export default function ChannelSettingsPage() {
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
 
-  const SECRET_FIELDS = ['matrix_access_token', 'telegram_bot_token', 'webhook_secret'] as const
-
   const secretState = (key: string): SecretFieldState => secrets[key] ?? { typed: '', clear: false }
   const setSecret = (key: string, patch: Partial<SecretFieldState>) =>
     setSecrets((current) => ({ ...current, [key]: { ...(current[key] ?? { typed: '', clear: false }), ...patch } }))
 
+  const fieldKey = (type: string, name: string) => `${type}.${name}`
+
   const apply = (data: ChannelSettings) => {
     setSettings(data)
-    // Inputs edit the database overlay. An env-sourced field shows empty with
-    // the env value as placeholder — saving an empty input keeps the env
-    // fallback instead of silently copying env into the database.
-    setHomeserver(data.matrix_homeserver.source === 'database' ? (data.matrix_homeserver.value ?? '') : '')
+    const next: Record<string, string> = {}
+    for (const group of data.schema) {
+      for (const field of group.fields) {
+        if (field.secret) continue
+        const view = data.channels[group.type]?.[field.name]
+        next[fieldKey(group.type, field.name)] = view?.source === 'database' ? (view.value ?? '') : ''
+      }
+    }
+    setValues(next)
     setUiUrl(data.ui_url.source === 'database' ? (data.ui_url.value ?? '') : '')
     setSecrets({})
   }
@@ -70,17 +87,26 @@ export default function ChannelSettingsPage() {
   const save = async () => {
     setError('')
     setSaved(false)
-    const update: ChannelSettingsUpdate = {
-      matrix_homeserver: homeserver,
-      ui_url: uiUrl,
-    }
+    const update: ChannelSettingsUpdate = { ui_url: uiUrl }
+    const channels: Record<string, Record<string, string>> = {}
     const clear: string[] = []
-    for (const key of SECRET_FIELDS) {
-      const state = secretState(key)
-      const typed = state.typed.trim()
-      if (typed) (update as Record<string, unknown>)[key] = typed
-      if (state.clear) clear.push(key)
+    const addValue = (type: string, name: string, value: string) => {
+      if (!channels[type]) channels[type] = {}
+      channels[type][name] = value
     }
+    for (const group of settings?.schema ?? []) {
+      for (const field of group.fields) {
+        const key = fieldKey(group.type, field.name)
+        if (!field.secret) {
+          addValue(group.type, field.name, values[key] ?? '')
+          continue
+        }
+        const state = secretState(key)
+        if (state.typed.trim()) addValue(group.type, field.name, state.typed.trim())
+        if (state.clear) clear.push(key)
+      }
+    }
+    if (Object.keys(channels).length > 0) update.channels = channels
     if (clear.length > 0) update.clear = clear
     setSaving(true)
     try {
@@ -103,8 +129,9 @@ export default function ChannelSettingsPage() {
 
   /** Row for a secret field: current state (set + hint + source), an input
    * that replaces the value when non-empty, and a clear action. */
-  const secretRow = (key: typeof SECRET_FIELDS[number], label: string, placeholder: string) => {
-    const field: ChannelSettingsField | undefined = settings ? settings[key] : undefined
+  const secretRow = (group: ChannelSettingsGroupSchema, name: string, label: string) => {
+    const key = fieldKey(group.type, name)
+    const field: ChannelSettingsField | undefined = settings ? settings.channels[group.type]?.[name] : undefined
     const state = secretState(key)
     const willClear = state.clear
     const willSet = state.typed.trim() !== ''
@@ -132,10 +159,32 @@ export default function ChannelSettingsPage() {
           id={`channel-${key}`}
           type="password"
           labelText=""
-          placeholder={willClear ? (t('channels_admin.cleared_placeholder') ?? 'will be cleared') : placeholder}
+          placeholder={willClear ? (t('channels_admin.cleared_placeholder') ?? 'will be cleared') : (t('channels_admin.replace_hint') ?? 'leave empty to keep the stored value')}
           value={state.typed}
           disabled={willClear}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSecret(key, { typed: e.target.value, clear: false })}
+        />
+      </div>
+    )
+  }
+
+  /** Row for a plain field: editable input; the env value rides as the
+   * placeholder so the admin sees what applies without copying it. */
+  const plainRow = (group: ChannelSettingsGroupSchema, name: string, label: string, placeholder: string) => {
+    const key = fieldKey(group.type, name)
+    const field: ChannelSettingsField | undefined = settings ? settings.channels[group.type]?.[name] : undefined
+    return (
+      <div key={key} style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+          <span className="cds--label" style={{ marginBottom: 0 }}>{label}</span>
+          {field && field.source !== 'none' && <Tag size="sm" type="gray">{sourceLabel(field.source)}</Tag>}
+        </div>
+        <TextInput
+          id={`channel-${key}`}
+          labelText=""
+          placeholder={field?.source === 'env' ? field.value : placeholder}
+          value={values[key] ?? ''}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setValues((current) => ({ ...current, [key]: e.target.value }))}
         />
       </div>
     )
@@ -165,23 +214,16 @@ export default function ChannelSettingsPage() {
 
       <div style={{ maxWidth: '34rem' }}>
         <Stack gap={4}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-              <span className="cds--label" style={{ marginBottom: 0 }}>Matrix homeserver</span>
-              {settings && settings.matrix_homeserver.source !== 'none' && <Tag size="sm" type="gray">{sourceLabel(settings.matrix_homeserver.source)}</Tag>}
+          {(settings?.schema ?? []).map((group) => (
+            <div key={group.type}>
+              <h3 style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{group.label}</h3>
+              {group.fields.map((field) =>
+                field.secret
+                  ? secretRow(group, field.name, field.label)
+                  : plainRow(group, field.name, field.label, field.name === 'homeserver' ? 'https://matrix.org' : ''),
+              )}
             </div>
-            <TextInput
-              id="channel-homeserver"
-              labelText=""
-              placeholder={settings && settings.matrix_homeserver.source === 'env' ? settings.matrix_homeserver.value : 'https://matrix.org'}
-              value={homeserver}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHomeserver(e.target.value)}
-            />
-          </div>
-
-          {secretRow('matrix_access_token', 'Matrix bot access token', settings?.matrix_access_token.set ? (t('channels_admin.replace_hint') ?? 'leave empty to keep the stored token') : 'sy&t_…')}
-          {secretRow('telegram_bot_token', 'Telegram bot token', settings?.telegram_bot_token.set ? (t('channels_admin.replace_hint') ?? 'leave empty to keep the stored token') : '123456:ABC-…')}
-          {secretRow('webhook_secret', 'Webhook signing secret', settings?.webhook_secret.set ? (t('channels_admin.replace_hint') ?? 'leave empty to keep the stored secret') : 'shared HMAC secret')}
+          ))}
 
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>

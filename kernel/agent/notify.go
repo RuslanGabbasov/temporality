@@ -333,12 +333,12 @@ func pickChannel(profile recipientChannels, configured func(string) bool) (recip
 // sendToChannel dispatches one delivery to its channel driver
 // (channeldriver.go). Unknown types fall back to the web inbox via the
 // caller's failed status.
-func (a *Activities) sendToChannel(ctx context.Context, channelType, address string, request NotifyChannelRequest, settings TransportSettings) error {
+func (a *Activities) sendToChannel(ctx context.Context, channelType, address string, request NotifyChannelRequest, settings ChannelSettings) error {
 	driver := channelDriverByType(channelType)
 	if driver == nil {
 		return fmt.Errorf("no transport for channel %q", channelType)
 	}
-	return driver.SendText(ctx, a.HTTP, settings.channelMaps()[channelType], address, outboundText(request, settings.UIURL))
+	return driver.SendText(ctx, a.HTTP, settings.Channels[channelType], address, outboundText(request, settings.UIURL))
 }
 
 // outboundText renders the channel-neutral payload: Body is what text

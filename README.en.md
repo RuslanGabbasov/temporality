@@ -168,12 +168,20 @@ channels". The built-in channel is the in-app inbox (Runs → questions);
 external transports are enabled with kernel variables:
 
 ```sh
-# .env
-KERNEL_MATRIX_HOMESERVER=https://matrix.org       # homeserver of the kernel bot
-KERNEL_MATRIX_ACCESS_TOKEN=syt_...                # bot token (member of user rooms)
-KERNEL_TELEGRAM_BOT_TOKEN=123456:ABC...           # bot token for the Bot API
-KERNEL_UI_URL=http://localhost:3000               # for links in notifications
+# .env — canonical names (KERNEL_CHANNEL__<CHANNEL>__<FIELD>)
+KERNEL_CHANNEL__MATRIX__HOMESERVER=https://matrix.org   # homeserver of the kernel bot
+KERNEL_CHANNEL__MATRIX__ACCESS_TOKEN=syt_...            # bot token (member of user rooms)
+KERNEL_CHANNEL__TELEGRAM__BOT_TOKEN=123456:ABC...       # bot token for the Bot API
+KERNEL_UI_URL=http://localhost:3000                     # for links in notifications
+
+# Legacy names keep working as aliases (same fields):
+# KERNEL_MATRIX_HOMESERVER, KERNEL_MATRIX_ACCESS_TOKEN,
+# KERNEL_TELEGRAM_BOT_TOKEN, KERNEL_WEBHOOK_SECRET
 ```
+
+The same settings are editable in the UI (Settings → Delivery channels)
+without a restart: database values override env per field. Secrets never
+come back from the API — only a set flag and a 4-character tail.
 
 Channel address: for Matrix — room ID (`!room:matrix.org`), for Telegram —
 chat ID. Delivery does not block execution: a transport failure is recorded

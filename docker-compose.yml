@@ -156,8 +156,14 @@ services:
       KERNEL_FAULT_AFTER_EFFECT: ${KERNEL_FAULT_AFTER_EFFECT:-}
       KERNEL_SANDBOX_ROOT: ${TEMPORALITY_SANDBOX_ROOT:-}
       KERNEL_SANDBOX_IMAGE: ${KERNEL_SANDBOX_IMAGE:-${TEMPORALITY_SANDBOX_IMAGE:-}}
-      # Outbound notification channels (docs/triggers-and-escalations.md §7):
-      # transports the kernel uses to deliver ask_human questions to users.
+      # Outbound notification channels (docs/triggers-and-escalations.md §7,
+      # docs/channels.md §6): transports the kernel uses to deliver ask_human
+      # questions to users. Canonical names first (KERNEL_CHANNEL__<TYPE>__<FIELD>),
+      # legacy names below keep working as aliases of the same fields.
+      KERNEL_CHANNEL__MATRIX__HOMESERVER: ${KERNEL_CHANNEL__MATRIX__HOMESERVER:-}
+      KERNEL_CHANNEL__MATRIX__ACCESS_TOKEN: ${KERNEL_CHANNEL__MATRIX__ACCESS_TOKEN:-}
+      KERNEL_CHANNEL__TELEGRAM__BOT_TOKEN: ${KERNEL_CHANNEL__TELEGRAM__BOT_TOKEN:-}
+      KERNEL_CHANNEL__WEBHOOK__SECRET: ${KERNEL_CHANNEL__WEBHOOK__SECRET:-}
       KERNEL_MATRIX_HOMESERVER: ${KERNEL_MATRIX_HOMESERVER:-}
       KERNEL_MATRIX_ACCESS_TOKEN: ${KERNEL_MATRIX_ACCESS_TOKEN:-}
       KERNEL_TELEGRAM_BOT_TOKEN: ${KERNEL_TELEGRAM_BOT_TOKEN:-}

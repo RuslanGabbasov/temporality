@@ -467,9 +467,10 @@ export interface ChannelTypeSpec {
   not_configured_hint?: string
 }
 
-/** Admin transport settings (channel_transport row over env): non-secrets
- * come back as {value, source}, secrets as {set, hint, source} — the value
- * itself never leaves the kernel. Source says who wins: database | env | none. */
+/** Admin channel settings (channel_transport payload over env), rendered
+ * generically from the driver registry schema. Non-secrets come back as
+ * {value, source}, secrets as {set, hint, source} — the value itself never
+ * leaves the kernel. Source says who wins: database | env | none. */
 export interface ChannelSettingsField {
   value?: string
   set?: boolean
@@ -477,22 +478,31 @@ export interface ChannelSettingsField {
   source: 'database' | 'env' | 'none'
 }
 
+/** One channel's settings schema entry — the admin form renders from this,
+ * so a new channel needs no UI work. */
+export interface ChannelSettingsFieldSchema {
+  name: string
+  label: string
+  secret: boolean
+}
+
+export interface ChannelSettingsGroupSchema {
+  type: string
+  label: string
+  fields: ChannelSettingsFieldSchema[]
+}
+
 export interface ChannelSettings {
-  matrix_homeserver: ChannelSettingsField
-  matrix_access_token: ChannelSettingsField
-  telegram_bot_token: ChannelSettingsField
-  webhook_secret: ChannelSettingsField
+  schema: ChannelSettingsGroupSchema[]
+  channels: Record<string, Record<string, ChannelSettingsField>>
   ui_url: ChannelSettingsField
   updated_at?: string
 }
 
 export interface ChannelSettingsUpdate {
-  matrix_homeserver?: string // present (even "") sets/clears the plain field
-  ui_url?: string
-  matrix_access_token?: string // non-empty sets the secret; absent keeps
-  telegram_bot_token?: string
-  webhook_secret?: string
-  clear?: string[] // field names to wipe (secrets and plain alike)
+  ui_url?: string // present (even "") sets/clears the plain field
+  channels?: Record<string, Record<string, string>> // plain fields always sent; secrets only when non-empty
+  clear?: string[] // "type.field" names (or "ui_url") to wipe
 }
 
 // Human-in-the-loop request (docs/org-structure.md §28): a question an agent

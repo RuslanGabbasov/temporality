@@ -208,6 +208,10 @@ func main() {
 		log.Error("migrate workspace v50 (secrets)", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000051_channel_transport_payload.up.sql"); err != nil {
+		log.Error("migrate workspace v51 (channel transport payload)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -221,21 +225,15 @@ func main() {
 	// Ephemeral live-token streaming: the activity worker and the HTTP server
 	// share one process, so an in-memory bus connects them without a broker.
 	activities.Tokens = agent.NewTokenBus()
-	// Admin-editable transport credentials (channel_transport row) overlay the
-	// KERNEL_* env vars: delivery reads the database per send, so saving the
-	// settings screen takes effect without a restart.
-	activities.ChannelSettings = func(ctx context.Context) (agent.TransportSettings, error) {
+	// Admin-editable channel settings (channel_transport row) overlay the
+	// KERNEL_CHANNEL__* env vars: delivery reads the database per send, so
+	// saving the settings screen takes effect without a restart.
+	activities.ChannelSettings = func(ctx context.Context) (agent.ChannelSettings, error) {
 		row, err := ws.ChannelTransport(ctx)
 		if err != nil {
-			return agent.TransportSettings{}, err
+			return agent.ChannelSettings{}, err
 		}
-		return agent.TransportSettings{
-			MatrixHomeserver:  row.MatrixHomeserver,
-			MatrixAccessToken: row.MatrixAccessToken,
-			TelegramBotToken:  row.TelegramBotToken,
-			WebhookSecret:     row.WebhookSecret,
-			UIURL:             row.UIURL,
-		}, nil
+		return agent.ChannelSettings{Channels: row.Payload, UIURL: row.UIURL}, nil
 	}
 	// Secrets (docs/secrets-management.md Phase 1): the broker resolves
 	// agent-granted secrets over the loopback workspace API with a TTL cache;
@@ -4820,16 +4818,15 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
-		effective := agent.TransportSettings{
-			MatrixHomeserver: stored.MatrixHomeserver, MatrixAccessToken: stored.MatrixAccessToken,
-			TelegramBotToken: stored.TelegramBotToken, WebhookSecret: stored.WebhookSecret, UIURL: stored.UIURL,
-		}.OverlayEnv()
+		effective := agent.ChannelSettings{Channels: stored.Payload, UIURL: stored.UIURL}.OverlayEnv()
 		writeJSON(w, 200, map[string]any{"types": agent.ChannelTypesWith(effective)})
 	})
-	// channelSettingsView is the masked admin view of the transport overlay:
-	// plain values for non-secrets, set+hint for secrets, and the winning
-	// source per field so precedence is never a mystery.
-	channelSettingsView := func(stored workspace.ChannelTransport, envSettings agent.TransportSettings, err error) (map[string]any, error) {
+	// channelSettingsView is the masked admin view of the channel settings
+	// overlay, rendered generically from the driver registry: plain values for
+	// non-secrets, set+hint for secrets, and the winning source per field so
+	// precedence is never a mystery. The schema section tells the UI which
+	// channels and fields exist — adding a channel needs no UI work.
+	channelSettingsView := func(stored workspace.ChannelTransport, envSettings agent.ChannelSettings, err error) (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
@@ -4858,13 +4855,33 @@ func main() {
 			}
 			return field
 		}
+		schema := []map[string]any{}
+		channels := map[string]any{}
+		for _, driver := range agent.ChannelDrivers() {
+			spec := driver.Spec()
+			if len(spec.Settings) == 0 {
+				continue // self-contained channels have nothing to configure
+			}
+			fields := []map[string]any{}
+			values := map[string]any{}
+			for _, field := range spec.Settings {
+				storedValue := stored.Payload[driver.Type()][field.Name]
+				envValue := envSettings.Channels[driver.Type()][field.Name]
+				if field.Secret {
+					values[field.Name] = secret(storedValue, envValue)
+				} else {
+					values[field.Name] = plain(storedValue, envValue)
+				}
+				fields = append(fields, map[string]any{"name": field.Name, "label": field.Label, "secret": field.Secret})
+			}
+			channels[driver.Type()] = values
+			schema = append(schema, map[string]any{"type": driver.Type(), "label": spec.Label, "fields": fields})
+		}
 		return map[string]any{
-			"matrix_homeserver":   plain(stored.MatrixHomeserver, envSettings.MatrixHomeserver),
-			"matrix_access_token": secret(stored.MatrixAccessToken, envSettings.MatrixAccessToken),
-			"telegram_bot_token":  secret(stored.TelegramBotToken, envSettings.TelegramBotToken),
-			"webhook_secret":      secret(stored.WebhookSecret, envSettings.WebhookSecret),
-			"ui_url":              plain(stored.UIURL, envSettings.UIURL),
-			"updated_at":          stored.UpdatedAt,
+			"schema":     schema,
+			"channels":   channels,
+			"ui_url":     plain(stored.UIURL, envSettings.UIURL),
+			"updated_at": stored.UpdatedAt,
 		}, nil
 	}
 	// Transport settings (admin): read masked, write upsert. Secrets never
@@ -4875,77 +4892,104 @@ func main() {
 			return
 		}
 		stored, err := ws.ChannelTransport(r.Context())
-		view, viewErr := channelSettingsView(stored, agent.TransportSettingsFromEnv(), err)
+		view, viewErr := channelSettingsView(stored, agent.ChannelSettingsFromEnv(), err)
 		if viewErr != nil {
 			writeError(w, 500, viewErr)
 			return
 		}
 		writeJSON(w, 200, view)
 	})
+	// Transport settings (admin): read masked, write upsert. Secrets never
+	// travel back — GET reports set+hint only; PUT sets a secret when a
+	// non-empty value is posted and clears fields via "clear" ("type.field"
+	// names, or "ui_url"). The writable surface is the driver registry:
+	// unknown channels/fields are rejected, not silently stored.
 	mux.HandleFunc("PUT /v1/workspace/channel-settings", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleAdmin) {
 			return
 		}
 		var req struct {
-			MatrixHomeserver  *string  `json:"matrix_homeserver"`
-			UIURL             *string  `json:"ui_url"`
-			MatrixAccessToken string   `json:"matrix_access_token"`
-			TelegramBotToken  string   `json:"telegram_bot_token"`
-			WebhookSecret     string   `json:"webhook_secret"`
-			Clear             []string `json:"clear"`
+			UIURL    *string                       `json:"ui_url"`
+			Channels map[string]map[string]*string `json:"channels"`
+			Clear    []string                      `json:"clear"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 			writeError(w, 400, err)
 			return
 		}
-		clear := map[string]bool{}
-		for _, name := range req.Clear {
-			clear[name] = true
+		known := map[string]map[string]bool{} // channel type → field name → secret
+		for _, driver := range agent.ChannelDrivers() {
+			fields := map[string]bool{}
+			for _, field := range driver.Spec().Settings {
+				fields[field.Name] = field.Secret
+			}
+			known[driver.Type()] = fields
+		}
+		for channelType, fields := range req.Channels {
+			if _, ok := known[channelType]; !ok {
+				writeError(w, 422, fmt.Errorf("unknown channel type %q", channelType))
+				return
+			}
+			for name := range fields {
+				if _, ok := known[channelType][name]; !ok {
+					writeError(w, 422, fmt.Errorf("unknown setting %q for channel %q", name, channelType))
+					return
+				}
+			}
 		}
 		current, err := ws.ChannelTransport(r.Context())
 		if err != nil {
 			writeError(w, 500, err)
 			return
 		}
-		if req.MatrixHomeserver != nil {
-			current.MatrixHomeserver = strings.TrimSpace(*req.MatrixHomeserver)
+		if current.Payload == nil {
+			current.Payload = map[string]map[string]string{}
 		}
 		if req.UIURL != nil {
 			current.UIURL = strings.TrimSpace(*req.UIURL)
 		}
-		if value := strings.TrimSpace(req.MatrixAccessToken); value != "" {
-			// Tolerate a pasted "Authorization: Bearer …" value: the homeserver
-			// wants the bare token, and a double prefix reads as M_MISSING_TOKEN.
-			current.MatrixAccessToken = agent.TrimBearerPrefix(value)
-		}
-		if value := strings.TrimSpace(req.TelegramBotToken); value != "" {
-			current.TelegramBotToken = value
-		}
-		if value := strings.TrimSpace(req.WebhookSecret); value != "" {
-			current.WebhookSecret = value
-		}
-		for _, name := range []string{"matrix_homeserver", "matrix_access_token", "telegram_bot_token", "webhook_secret", "ui_url"} {
-			if clear[name] {
-				switch name {
-				case "matrix_homeserver":
-					current.MatrixHomeserver = ""
-				case "matrix_access_token":
-					current.MatrixAccessToken = ""
-				case "telegram_bot_token":
-					current.TelegramBotToken = ""
-				case "webhook_secret":
-					current.WebhookSecret = ""
-				case "ui_url":
-					current.UIURL = ""
-				}
+		for channelType, fields := range req.Channels {
+			stored := current.Payload[channelType]
+			if stored == nil {
+				stored = map[string]string{}
+				current.Payload[channelType] = stored
 			}
+			for name, value := range fields {
+				if value == nil {
+					continue
+				}
+				trimmed := strings.TrimSpace(*value)
+				// Secrets: an empty post means "not changing" — the form never
+				// echoes values back, so only a non-empty input replaces one.
+				// Plain fields: presence sets, even to empty (clears the overlay).
+				if known[channelType][name] && trimmed == "" {
+					continue
+				}
+				stored[name] = trimmed
+			}
+		}
+		for _, name := range req.Clear {
+			if name == "ui_url" {
+				current.UIURL = ""
+				continue
+			}
+			channelType, field, ok := strings.Cut(name, ".")
+			if !ok {
+				writeError(w, 422, fmt.Errorf("clear entry %q must be a channel.field name", name))
+				return
+			}
+			if _, isKnown := known[channelType][field]; !isKnown {
+				writeError(w, 422, fmt.Errorf("unknown setting %q", name))
+				return
+			}
+			delete(current.Payload[channelType], field)
 		}
 		if err := ws.SaveChannelTransport(r.Context(), current); err != nil {
 			writeError(w, 500, err)
 			return
 		}
 		stored, err := ws.ChannelTransport(r.Context())
-		view, viewErr := channelSettingsView(stored, agent.TransportSettingsFromEnv(), err)
+		view, viewErr := channelSettingsView(stored, agent.ChannelSettingsFromEnv(), err)
 		if viewErr != nil {
 			writeError(w, 500, viewErr)
 			return

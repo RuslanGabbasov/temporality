@@ -98,10 +98,11 @@ type Activities struct {
 	// Tokens is the ephemeral live-token bus feeding the /runs/{id}/tokens SSE
 	// endpoint; nil disables streaming (tests run the blocking path).
 	Tokens *TokenBus
-	// ChannelSettings loads the admin-editable transport credential overlay
-	// (workspace channel_transport row). Nil — or a load error — degrades to
-	// the KERNEL_* environment variables, preserving env-only deployments.
-	ChannelSettings func(context.Context) (TransportSettings, error)
+	// ChannelSettings loads the admin-editable channel settings overlay
+	// (workspace channel_transport row: per-channel payload + UI URL). Nil —
+	// or a load error — degrades to the KERNEL_CHANNEL__* environment
+	// variables, preserving env-only deployments.
+	ChannelSettings func(context.Context) (ChannelSettings, error)
 }
 
 func NewActivities(events EventOutbox) (*Activities, error) {

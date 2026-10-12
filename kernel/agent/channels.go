@@ -17,8 +17,9 @@ import (
 // ever pick from what the kernel can actually deliver.
 //
 // Transport credentials live in two layers: the admin-editable overlay in the
-// workspace database (channel_transport row, edited in the UI) with the
-// KERNEL_* environment variables as fallback. Either source alone works; the
+// workspace database (channel_transport payload, edited in the UI) with the
+// KERNEL_CHANNEL__<TYPE>__<FIELD> environment variables as fallback (legacy
+// KERNEL_MATRIX_* & co remain aliases). Either source alone works; the
 // database wins per field. Drivers receive the effective values as a
 // map[string]string and own their field names.
 
@@ -39,15 +40,14 @@ type ChannelTypeSpec struct {
 	NotConfiguredHint string `json:"not_configured_hint,omitempty"`
 }
 
-// TransportSettings is the effective credential set of the delivery
-// transports: database overlay merged over the environment. The zero value
-// means "env only" — which is exactly the pre-database behavior.
-type TransportSettings struct {
-	MatrixHomeserver  string
-	MatrixAccessToken string
-	TelegramBotToken  string
-	WebhookSecret     string
-	UIURL             string
+// ChannelSettings is the effective channel configuration: per-channel
+// settings maps (database payload over env) plus the global UI base URL.
+// Drivers own their field names — the kernel only routes whole maps by
+// channel type, so a new channel needs no kernel changes. A missing channel
+// key means "no settings stored", which drivers read as not configured.
+type ChannelSettings struct {
+	Channels map[string]map[string]string
+	UIURL    string
 }
 
 // TrimBearerPrefix normalizes a pasted access token: admins routinely copy
@@ -62,62 +62,91 @@ func TrimBearerPrefix(value string) string {
 	return value
 }
 
-// TransportSettingsFromEnv reads the legacy credential environment. It stays
-// the source of truth when no database overlay exists and the fallback per
-// field when the overlay is partial.
-func TransportSettingsFromEnv() TransportSettings {
-	return TransportSettings{
-		MatrixHomeserver:  strings.TrimSpace(os.Getenv("KERNEL_MATRIX_HOMESERVER")),
-		MatrixAccessToken: strings.TrimSpace(os.Getenv("KERNEL_MATRIX_ACCESS_TOKEN")),
-		TelegramBotToken:  strings.TrimSpace(os.Getenv("KERNEL_TELEGRAM_BOT_TOKEN")),
-		WebhookSecret:     strings.TrimSpace(os.Getenv("KERNEL_WEBHOOK_SECRET")),
-		UIURL:             strings.TrimSpace(os.Getenv("KERNEL_UI_URL")),
+// channelEnvAliases maps the legacy credential environment onto (channel,
+// field) pairs, so env-only deployments keep working unchanged. Canonical
+// names (KERNEL_CHANNEL__<TYPE>__<FIELD>) win when both are set.
+var channelEnvAliases = map[string][2]string{
+	"KERNEL_MATRIX_HOMESERVER":   {"matrix", "homeserver"},
+	"KERNEL_MATRIX_ACCESS_TOKEN": {"matrix", "access_token"},
+	"KERNEL_TELEGRAM_BOT_TOKEN":  {"telegram", "bot_token"},
+	"KERNEL_WEBHOOK_SECRET":      {"webhook", "secret"},
+}
+
+// channelEnvName builds the canonical env var of one driver setting.
+func channelEnvName(channelType, field string) string {
+	return fmt.Sprintf("KERNEL_CHANNEL__%s__%s", strings.ToUpper(channelType), strings.ToUpper(field))
+}
+
+// ChannelSettingsFromEnv reads the credential environment: canonical
+// KERNEL_CHANNEL__<TYPE>__<FIELD> variables for every registered driver
+// setting, plus the legacy aliases, plus the global UI URL. It stays the
+// source of truth when no database overlay exists and the fallback per field
+// when the overlay is partial.
+func ChannelSettingsFromEnv() ChannelSettings {
+	channels := map[string]map[string]string{}
+	set := func(channelType, field, value string) {
+		if value == "" {
+			return
+		}
+		if channels[channelType] == nil {
+			channels[channelType] = map[string]string{}
+		}
+		channels[channelType][field] = value
 	}
+	for envName, target := range channelEnvAliases {
+		set(target[0], target[1], strings.TrimSpace(os.Getenv(envName)))
+	}
+	for _, driver := range channelDrivers {
+		for _, field := range driver.Spec().Settings {
+			set(driver.Type(), field.Name, strings.TrimSpace(os.Getenv(channelEnvName(driver.Type(), field.Name))))
+		}
+	}
+	return ChannelSettings{Channels: channels, UIURL: strings.TrimSpace(os.Getenv("KERNEL_UI_URL"))}
 }
 
 // OverlayEnv fills every empty field from the environment: the database
-// overlay wins per field, env covers the rest.
-func (s TransportSettings) OverlayEnv() TransportSettings {
-	env := TransportSettingsFromEnv()
-	if s.MatrixHomeserver == "" {
-		s.MatrixHomeserver = env.MatrixHomeserver
+// overlay wins per field, env covers the rest. An empty stored value does
+// not clear an env value — clearing is an explicit delete in the payload.
+func (s ChannelSettings) OverlayEnv() ChannelSettings {
+	env := ChannelSettingsFromEnv()
+	types := map[string]bool{}
+	for channelType := range s.Channels {
+		types[channelType] = true
 	}
-	if s.MatrixAccessToken == "" {
-		s.MatrixAccessToken = env.MatrixAccessToken
+	for channelType := range env.Channels {
+		types[channelType] = true
 	}
-	if s.TelegramBotToken == "" {
-		s.TelegramBotToken = env.TelegramBotToken
+	channels := make(map[string]map[string]string, len(types))
+	for channelType := range types {
+		merged := map[string]string{}
+		for field, value := range env.Channels[channelType] {
+			merged[field] = value
+		}
+		for field, value := range s.Channels[channelType] {
+			if value != "" {
+				merged[field] = value
+			}
+		}
+		channels[channelType] = merged
 	}
-	if s.WebhookSecret == "" {
-		s.WebhookSecret = env.WebhookSecret
+	merged := ChannelSettings{Channels: channels}
+	if s.UIURL != "" {
+		merged.UIURL = s.UIURL
+	} else {
+		merged.UIURL = env.UIURL
 	}
-	if s.UIURL == "" {
-		s.UIURL = env.UIURL
-	}
-	return s
-}
-
-// channelMaps splits the typed overlay into per-channel settings maps the
-// drivers consume. UIURL is deliberately absent: it is a global link builder
-// input, not a channel credential — it travels inside OutboundText.
-func (s TransportSettings) channelMaps() map[string]map[string]string {
-	return map[string]map[string]string{
-		"matrix":   {"homeserver": s.MatrixHomeserver, "access_token": s.MatrixAccessToken},
-		"telegram": {"bot_token": s.TelegramBotToken},
-		"slack":    {},
-		"webhook":  {"secret": s.WebhookSecret},
-	}
+	return merged
 }
 
 // Configured reports whether the kernel holds the credentials a transport
 // needs. The answer comes from the channel's driver — the kernel does not
 // know which fields matter. Self-contained transports are always configured.
-func (s TransportSettings) Configured(channelType string) bool {
+func (s ChannelSettings) Configured(channelType string) bool {
 	driver := channelDriverByType(channelType)
 	if driver == nil {
 		return false
 	}
-	return driver.IsConfigured(s.channelMaps()[channelType])
+	return driver.IsConfigured(s.Channels[channelType])
 }
 
 // SecretHint renders a non-reversible display form of a secret for admin
@@ -136,8 +165,7 @@ func SecretHint(secret string) string {
 // channelRegistry projects the driver list into the UI shape, computing the
 // configured flag from the effective settings. The order is the registry's
 // preference order — the recipient's channel picker falls back through it.
-func channelRegistry(settings TransportSettings) []ChannelTypeSpec {
-	perChannel := settings.channelMaps()
+func channelRegistry(settings ChannelSettings) []ChannelTypeSpec {
 	specs := make([]ChannelTypeSpec, 0, len(channelDrivers))
 	for _, driver := range channelDrivers {
 		spec := driver.Spec()
@@ -145,7 +173,7 @@ func channelRegistry(settings TransportSettings) []ChannelTypeSpec {
 			Type:              driver.Type(),
 			Label:             spec.Label,
 			AddressHint:       spec.AddressHint,
-			Configured:        driver.IsConfigured(perChannel[driver.Type()]),
+			Configured:        driver.IsConfigured(settings.Channels[driver.Type()]),
 			NotConfiguredHint: spec.NotConfiguredHint,
 		})
 	}
@@ -153,24 +181,24 @@ func channelRegistry(settings TransportSettings) []ChannelTypeSpec {
 }
 
 // ChannelTypes returns the registry for the env-only configuration surface.
-func ChannelTypes() []ChannelTypeSpec { return channelRegistry(TransportSettingsFromEnv()) }
+func ChannelTypes() []ChannelTypeSpec { return channelRegistry(ChannelSettingsFromEnv()) }
 
 // ChannelTypesWith returns the registry computed from the effective settings
 // (database overlay over env) — the live view the API serves.
-func ChannelTypesWith(settings TransportSettings) []ChannelTypeSpec {
+func ChannelTypesWith(settings ChannelSettings) []ChannelTypeSpec {
 	return channelRegistry(settings.OverlayEnv())
 }
 
-// transports resolves the effective transport settings for one delivery: the
+// transports resolves the effective channel settings for one delivery: the
 // database overlay injected by main when available, env as the fallback. A
 // broken loader degrades to env rather than silencing delivery.
-func (a *Activities) transports(ctx context.Context) TransportSettings {
+func (a *Activities) transports(ctx context.Context) ChannelSettings {
 	if a.ChannelSettings != nil {
 		if stored, err := a.ChannelSettings(ctx); err == nil {
 			return stored.OverlayEnv()
 		}
 	}
-	return TransportSettingsFromEnv()
+	return ChannelSettingsFromEnv()
 }
 
 // parseHTTPURL accepts only full http(s) URLs — user-provided webhook targets

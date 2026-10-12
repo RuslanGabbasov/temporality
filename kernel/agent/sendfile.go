@@ -82,7 +82,6 @@ func (a *Activities) handleSendFile(ctx context.Context, request ToolRequest) (T
 		return ToolResult{}, nonRetryable(fmt.Errorf("recipient %q could not be resolved", recipientArg))
 	}
 	settings := a.transports(ctx)
-	perChannel := settings.channelMaps()
 	deliveries := []sendFileDelivery{}
 	for _, channel := range recipient.Channels {
 		if !channel.Enabled || strings.TrimSpace(channel.Address) == "" {
@@ -94,11 +93,11 @@ func (a *Activities) handleSendFile(ctx context.Context, request ToolRequest) (T
 		if driver == nil || !driver.Spec().Capabilities.FilesOut {
 			continue
 		}
-		if !driver.IsConfigured(perChannel[channel.Type]) {
+		if !driver.IsConfigured(settings.Channels[channel.Type]) {
 			deliveries = append(deliveries, sendFileDelivery{Channel: channel.Type, Status: "unavailable", Detail: channelSettingUnconfiguredDetail(channel.Type)})
 			continue
 		}
-		sendErr := driver.SendFile(ctx, a.HTTP, perChannel[channel.Type], channel.Address, OutboundFile{Name: name, Note: note, Payload: payload})
+		sendErr := driver.SendFile(ctx, a.HTTP, settings.Channels[channel.Type], channel.Address, OutboundFile{Name: name, Note: note, Payload: payload})
 		if sendErr != nil {
 			deliveries = append(deliveries, sendFileDelivery{Channel: channel.Type, Status: "failed", Detail: sendErr.Error()})
 			continue
