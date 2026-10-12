@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -2951,7 +2952,25 @@ func main() {
 		for _, p := range providers {
 			for _, m := range p.Models {
 				if m == model {
-					writeJSON(w, 200, map[string]any{"provider_id": p.ID, "base_url": p.BaseURL, "api_key": p.APIKeyRef, "model": m})
+					apiKey, kErr := resolveProviderAPIKey(r.Context(), ws, p.APIKeyRef, secretMasterKey)
+					if kErr != nil {
+						// Routing found a provider but its credential did not resolve —
+						// a misconfigured secret must surface as an error, not as a
+						// silent fallback to the env provider.
+						writeError(w, 502, fmt.Errorf("provider %q credential: %w", p.ID, kErr))
+						return
+					}
+					payload := map[string]any{"provider_id": p.ID, "base_url": p.BaseURL, "model": m}
+					// Plaintext credentials leave the process only for the kernel's
+					// service principal (the call_model hot path). Human callers get
+					// the routing answer with the reference, not the key — the same
+					// boundary the secret resolve endpoint enforces.
+					if principal, ok := controlplane.FromContext(r.Context()); ok && principal.Subject == "kernel-internal" {
+						payload["api_key"] = apiKey
+					} else {
+						payload["api_key_ref"] = p.APIKeyRef
+					}
+					writeJSON(w, 200, payload)
 					return
 				}
 			}
@@ -6329,6 +6348,35 @@ func resolveSecretEnvEntry(ctx context.Context, ws *workspace.Store, entry strin
 		return "", fmt.Errorf("env %q: %w", key, err)
 	}
 	return key + "=" + resolved, nil
+}
+
+// providerEnvNameRe matches UPPER_SNAKE identifiers — the env-var name shape
+// api_key_ref may carry (e.g. XIAOMI_API_KEY). A literal provider key (sk-…,
+// ghp_…) never matches, so the env lookup cannot shadow a legacy literal.
+var providerEnvNameRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
+// resolveProviderAPIKey turns a provider's api_key_ref into the bearer key for
+// model calls. Three shapes, in order:
+//   - secret://name[#key] — a workspace secret (builtin envelope or env-backed);
+//   - an UPPER_SNAKE env var name that is set in this process;
+//   - a legacy literal key stored in the column as-is.
+//
+// Resolution happens here, at the routing boundary, so plaintext keys live
+// only in memory and never in the database (docs/secrets-management.md §4).
+func resolveProviderAPIKey(ctx context.Context, ws *workspace.Store, ref string, masterKey []byte) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", nil
+	}
+	if secretRef, ok := workspace.ParseSecretReference(ref); ok {
+		return resolveSecretValue(ctx, ws, secretRef, masterKey)
+	}
+	if providerEnvNameRe.MatchString(ref) {
+		if value := strings.TrimSpace(os.Getenv(ref)); value != "" {
+			return value, nil
+		}
+	}
+	return ref, nil
 }
 
 // resolveSecretValue decrypts a builtin secret by name. Sub-keys (#key) select

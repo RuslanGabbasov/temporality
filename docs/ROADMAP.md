@@ -206,7 +206,7 @@ If this exists, we can invite a small team and stop relying only on fixtures.
 ## Open — org structure deferred tails
 
 - [ ] **External users** — `user_type` / `expires_at` on workspace users
-- [ ] **Provider credentials** — `api_key_ref` secret references (blocked on a real secret store)
+- [x] **Provider credentials** — `api_key_ref` resolves through the secret store: `secret://name[#key]` refs decrypt at the routing boundary (`resolveProviderAPIKey`), UPPER_SNAKE names read the process env, legacy literals still pass through; the model-config answer carries plaintext keys only to the kernel's service principal — human callers get `api_key_ref`; keyless providers (empty key) route fine now
 
 ---
 

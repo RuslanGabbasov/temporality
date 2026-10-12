@@ -716,9 +716,11 @@ func (a *Activities) modelConfigFor(ctx context.Context, project, model string) 
 	if err := json.Unmarshal([]byte(body), &answer); err != nil {
 		return llm.Config{}, false, fmt.Errorf("model-config decode: %w", err)
 	}
-	if answer.BaseURL == "" || answer.APIKey == "" || answer.Model == "" {
+	if answer.BaseURL == "" || answer.Model == "" {
 		return llm.Config{}, false, fmt.Errorf("model-config response incomplete for model %q", model)
 	}
+	// An empty api_key is a legitimate keyless provider (ollama, lmstudio);
+	// llm.Config sends no Authorization header for those.
 	// The endpoint carries routing only (base URL, key, model); timeouts and
 	// caps come from the env config when it parses, else the same hard defaults
 	// ConfigFromEnv would apply.

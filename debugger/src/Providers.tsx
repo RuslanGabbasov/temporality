@@ -12,7 +12,7 @@ import {
   Heading,
 } from '@carbon/react'
 import { Add, Edit, TrashCan } from '@carbon/icons-react'
-import { workspaceApi, type Provider } from './workspaceApi'
+import { workspaceApi, type Provider, type Secret } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
@@ -30,6 +30,9 @@ export default function Providers() {
   const [editing, setEditing] = useState<Provider | null>(null)
   const [form, setForm] = useState<Partial<Provider>>({})
   const [filter, setFilter] = useState('')
+  // Secrets list for the api_key_ref picker: a provider credential is a
+  // secret://name reference first, an env name or literal second.
+  const [secrets, setSecrets] = useState<Secret[]>([])
 
   const visibleProviders = providers.filter((p) => matchesFilter(filter, p.name, p.base_url, p.id, ...(p.models ?? [])))
 
@@ -47,13 +50,21 @@ export default function Providers() {
   const startCreate = () => {
     setEditing(null)
     setForm({ name: '', base_url: '', api_key_ref: '', models: [] })
+    loadSecretOptions()
     setShowForm(true)
   }
 
   const startEdit = (p: Provider) => {
     setEditing(p)
     setForm({ ...p })
+    loadSecretOptions()
     setShowForm(true)
+  }
+
+  const loadSecretOptions = () => {
+    workspaceApi.listSecrets()
+      .then((data) => setSecrets(data.secrets ?? []))
+      .catch(() => setSecrets([])) // picker is optional; the field works without it
   }
 
   const save = async () => {
@@ -109,7 +120,11 @@ export default function Providers() {
                     <OrgBadge orgUnitID={p.org_unit_id} org={org} />
                   </div>
                   <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem', wordBreak: 'break-all' }}>{p.base_url}</p>
-                  {p.api_key_ref && <Tag type="gray" size="sm" style={{ marginTop: '0.25rem' }}>key: {'••••••••'}</Tag>}
+                  {p.api_key_ref && (
+                    <Tag type="gray" size="sm" style={{ marginTop: '0.25rem' }}>
+                      {p.api_key_ref.startsWith('secret://') ? `secret: ${p.api_key_ref.slice('secret://'.length)}` : 'key: ••••••••'}
+                    </Tag>
+                  )}
                   {p.models?.length ? (
                     <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                       {p.models.map((m) => <Tag key={m} type="blue" size="sm">{m}</Tag>)}
@@ -132,7 +147,16 @@ export default function Providers() {
             <Stack gap={3}>
               <TextInput id="prov-name" labelText={t('providers.name_label') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="z.ai" autoFocus />
               <TextInput id="prov-url" labelText={t('providers.url_label') ?? 'Base URL'} value={form.base_url ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, base_url: e.target.value })} placeholder="https://api.z-ai.com/v1" />
-              <TextInput id="prov-key" labelText={t('providers.key_label') ?? 'API Key / Env Var'} value={form.api_key_ref ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key_ref: e.target.value })} placeholder="Z_AI_API_KEY or actual key" helperText={t('providers.key_helper') ?? 'Env var name (e.g. Z_AI_API_KEY) or the actual key'} />
+              <TextInput id="prov-key" labelText={t('providers.key_label') ?? 'API Key'} value={form.api_key_ref ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, api_key_ref: e.target.value })} placeholder="secret://my-api-key, Z_AI_API_KEY or the key itself" helperText={t('providers.key_helper') ?? 'secret://name (recommended), an env var name, or the key itself'} />
+              {secrets.length > 0 && (
+                <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '-0.75rem' }}>
+                  {secrets.map((s) => (
+                    <Tag key={s.id} size="sm" type={form.api_key_ref === `secret://${s.name}` ? 'green' : 'outline'} style={{ cursor: 'pointer' }} onClick={() => setForm({ ...form, api_key_ref: `secret://${s.name}` })}>
+                      secret://{s.name}
+                    </Tag>
+                  ))}
+                </div>
+              )}
               <TextInput id="prov-models" labelText={t('providers.models_label') ?? 'Models (comma-separated)'} value={form.models?.join(', ') ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, models: e.target.value.split(',').map((m) => m.trim()).filter(Boolean) })} placeholder="z-ai-turbo, z-ai-pro" />
               {org.units.length > 0 && (
                 <>

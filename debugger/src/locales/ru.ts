@@ -730,8 +730,8 @@ export const ru: Record<string, string> = {
     'providers.no_models': 'Модели не указаны',
     'providers.name_label': 'Название',
     'providers.url_label': 'Базовый URL',
-    'providers.key_label': 'API-ключ / Переменная окружения',
-    'providers.key_helper': 'Имя переменной окружения (напр. Z_AI_API_KEY) или сам ключ',
+    'providers.key_label': 'API-ключ',
+    'providers.key_helper': 'secret://имя (рекомендуется), имя переменной окружения или сам ключ',
     'providers.models_label': 'Модели (через запятую)',
 
     // Users

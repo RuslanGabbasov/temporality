@@ -730,8 +730,8 @@ export const en: Record<string, string> = {
     'providers.no_models': 'No models listed',
     'providers.name_label': 'Name',
     'providers.url_label': 'Base URL',
-    'providers.key_label': 'API Key / Env Var',
-    'providers.key_helper': 'Env var name (e.g. Z_AI_API_KEY) or the actual key',
+    'providers.key_label': 'API Key',
+    'providers.key_helper': 'secret://name (recommended), an env var name, or the key itself',
     'providers.models_label': 'Models (comma-separated)',
 
     // Users
