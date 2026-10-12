@@ -103,3 +103,50 @@ func TestWorkflowStatusNameMatchesCanonicalVocabulary(t *testing.T) {
 		}
 	}
 }
+
+// TestIntakeEnvParsers pins the defaults and degenerate values of the intake
+// knobs (docs/inbound-messages.md §12): unset falls back to the safe default,
+// 0 is an explicit off/forever choice (not an error), garbage falls back
+// rather than disabling a protection silently.
+func TestIntakeEnvParsers(t *testing.T) {
+	t.Run("rate default", func(t *testing.T) {
+		if got := intakeRatePerHourFromEnv(); got != 10 {
+			t.Fatalf("default rate: got %d, want 10", got)
+		}
+	})
+	t.Run("rate zero disables", func(t *testing.T) {
+		t.Setenv("KERNEL_INTAKE_MAX_PER_HOUR", "0")
+		if got := intakeRatePerHourFromEnv(); got != 0 {
+			t.Fatalf("zero rate: got %d, want 0", got)
+		}
+	})
+	t.Run("rate garbage falls back", func(t *testing.T) {
+		t.Setenv("KERNEL_INTAKE_MAX_PER_HOUR", "many")
+		if got := intakeRatePerHourFromEnv(); got != 10 {
+			t.Fatalf("garbage rate: got %d, want 10", got)
+		}
+	})
+	t.Run("rate negative falls back", func(t *testing.T) {
+		t.Setenv("KERNEL_INTAKE_MAX_PER_HOUR", "-5")
+		if got := intakeRatePerHourFromEnv(); got != 10 {
+			t.Fatalf("negative rate: got %d, want 10", got)
+		}
+	})
+	t.Run("retention default", func(t *testing.T) {
+		if got := intakeRetentionDaysFromEnv(); got != 30 {
+			t.Fatalf("default retention: got %d, want 30", got)
+		}
+	})
+	t.Run("retention zero keeps forever", func(t *testing.T) {
+		t.Setenv("KERNEL_INTAKE_RETENTION_DAYS", "0")
+		if got := intakeRetentionDaysFromEnv(); got != 0 {
+			t.Fatalf("zero retention: got %d, want 0", got)
+		}
+	})
+	t.Run("retention garbage falls back", func(t *testing.T) {
+		t.Setenv("KERNEL_INTAKE_RETENTION_DAYS", "a month")
+		if got := intakeRetentionDaysFromEnv(); got != 30 {
+			t.Fatalf("garbage retention: got %d, want 30", got)
+		}
+	})
+}

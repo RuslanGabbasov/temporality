@@ -133,9 +133,15 @@ export default function InboundMessages() {
                 </a>
               )}
             </div>
-            <div style={{ fontSize: '0.85rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {row.body.length > 500 ? row.body.slice(0, 500) + '…' : row.body}
-            </div>
+            {row.retired_at ? (
+              <div style={{ fontSize: '0.8rem', color: 'var(--tm-text-3)', fontStyle: 'italic' }}>
+                {t('inbound.retired') ?? 'Message body removed by retention policy'}
+              </div>
+            ) : (
+              <div style={{ fontSize: '0.85rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {row.body.length > 500 ? row.body.slice(0, 500) + '…' : row.body}
+              </div>
+            )}
             {(row.attachments?.length ?? 0) > 0 && (
               <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
                 {row.attachments!.map((path) => <Tag key={path} size="sm" type="outline">{path.split('/').pop()}</Tag>)}

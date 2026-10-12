@@ -38,6 +38,7 @@ export interface Policy {
   network_mode?: string // '' | 'deny'
   sandbox_mode?: string // '' | 'standard' | 'read_only'
   approval_mode?: string // '' | 'auto' | 'tools'
+  intake_mode?: string // '' | 'deny' — overlay that can only narrow, never widen (docs/inbound-messages.md §12)
   enabled: boolean
   created_at: string
   updated_at: string
@@ -490,6 +491,9 @@ export interface InboundMessage {
   intake_run_id?: string
   target_run_id?: string
   project_id?: string
+  // Retention (docs/inbound-messages.md §12): set when the body was wiped
+  // after KERNEL_INTAKE_RETENTION_DAYS; only the audit shell remains.
+  retired_at?: string
   created_at: string
   updated_at: string
 }

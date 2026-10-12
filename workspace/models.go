@@ -16,6 +16,11 @@ type Project struct {
 	DefaultAgentID string `json:"default_agent_id,omitempty"`
 	DefaultModel   string `json:"default_model,omitempty"`
 	Archived       bool   `json:"archived,omitempty"`
+	// IntakeEnabled opts the project into channel-initiated tasks
+	// (docs/inbound-messages.md §12 phase 4): start_task refuses to route
+	// here until an admin flips it. Default false — a new project must not
+	// silently become a channel target.
+	IntakeEnabled bool `json:"intake_enabled,omitempty"`
 	// Org bindings (docs/org-structure.md §3.4): a project spans several org
 	// units; it is visible where the project's units intersect the viewer's
 	// ancestor chain. Empty = org-neutral, visible everywhere (transition).
@@ -201,12 +206,16 @@ type Policy struct {
 	TimeoutSeconds *int     `json:"timeout_seconds,omitempty"`
 	// Modes: '' keeps the inherited/default behavior, the listed restrictive
 	// value wins during the merge.
-	NetworkMode  string    `json:"network_mode,omitempty"`  // 'deny' restricts
-	SandboxMode  string    `json:"sandbox_mode,omitempty"`  // 'read_only' restricts
-	ApprovalMode string    `json:"approval_mode,omitempty"` // 'tools' restricts
-	Enabled      bool      `json:"enabled"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	NetworkMode  string `json:"network_mode,omitempty"`  // 'deny' restricts
+	SandboxMode  string `json:"sandbox_mode,omitempty"`  // 'read_only' restricts
+	ApprovalMode string `json:"approval_mode,omitempty"` // 'tools' restricts
+	// IntakeMode denies channel-initiated tasks for the subtree
+	// (docs/inbound-messages.md §12 phase 4); enabling is per project —
+	// there is no 'allow' overlay, a child cannot loosen an ancestor's deny.
+	IntakeMode string    `json:"intake_mode,omitempty"` // 'deny' restricts
+	Enabled    bool      `json:"enabled"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // Restrictive merge helpers. PolicyAllowsList distinguishes nil (the
@@ -449,21 +458,24 @@ type User struct {
 // (channel, message_id) is unique, so redeliveries (matrix /sync replay,
 // kernel restart) never reprocess a message.
 type InboundMessage struct {
-	ID             string    `json:"id"` // inbound/{channel}/{message_id}
-	Channel        string    `json:"channel"`
-	MessageID      string    `json:"message_id"` // matrix event_id, telegram update_id
-	SenderRaw      string    `json:"sender_raw"` // mxid / chat id as seen by the channel
-	SenderUserID   string    `json:"sender_user_id,omitempty"`
-	Room           string    `json:"room"` // room/chat the message arrived in
-	Body           string    `json:"body"`
-	Attachments    []string  `json:"attachments,omitempty"`    // saved inbox paths
-	Status         string    `json:"status"`                   // received|classified|clarifying|routed|rejected|expired
-	Classification string    `json:"classification,omitempty"` // task|amendment|status|cancel|chatter|reply
-	IntakeRunID    string    `json:"intake_run_id,omitempty"`
-	TargetRunID    string    `json:"target_run_id,omitempty"` // run spawned by the message
-	ProjectID      string    `json:"project_id,omitempty"`    // resolved target project
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string   `json:"id"` // inbound/{channel}/{message_id}
+	Channel        string   `json:"channel"`
+	MessageID      string   `json:"message_id"` // matrix event_id, telegram update_id
+	SenderRaw      string   `json:"sender_raw"` // mxid / chat id as seen by the channel
+	SenderUserID   string   `json:"sender_user_id,omitempty"`
+	Room           string   `json:"room"` // room/chat the message arrived in
+	Body           string   `json:"body"`
+	Attachments    []string `json:"attachments,omitempty"`    // saved inbox paths
+	Status         string   `json:"status"`                   // received|classified|clarifying|routed|rejected|expired
+	Classification string   `json:"classification,omitempty"` // task|amendment|status|cancel|chatter|reply
+	IntakeRunID    string   `json:"intake_run_id,omitempty"`
+	TargetRunID    string   `json:"target_run_id,omitempty"` // run spawned by the message
+	ProjectID      string   `json:"project_id,omitempty"`    // resolved target project
+	// RetiredAt marks a body scrubbed by the retention policy (PII): the row
+	// survives as the audit chain link, the payload does not.
+	RetiredAt *time.Time `json:"retired_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 // Inbound message statuses (docs/inbound-messages.md §4.1).
@@ -534,6 +546,9 @@ type CreateProjectRequest struct {
 	DefaultAgentID string   `json:"default_agent_id"`
 	DefaultModel   string   `json:"default_model"`
 	OrgUnits       []string `json:"org_units,omitempty"` // org unit ids the project spans
+	// IntakeEnabled opts into channel-initiated tasks; a pointer so a PUT
+	// without the field keeps the stored value (same convention as OrgUnits).
+	IntakeEnabled *bool `json:"intake_enabled,omitempty"`
 }
 
 // CreateOrgUnitRequest is the payload for creating or updating an org unit.

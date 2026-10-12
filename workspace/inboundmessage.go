@@ -48,12 +48,12 @@ func (s *Store) InsertInboundMessage(ctx context.Context, m *InboundMessage) (bo
 }
 
 // inboundMessageColumns is the shared projection for scan/scan helpers.
-const inboundMessageColumns = `id, channel, message_id, sender_raw, COALESCE(sender_user_id, ''), room, body, attachments, status, COALESCE(classification, ''), COALESCE(intake_run_id, ''), COALESCE(target_run_id, ''), COALESCE(project_id, ''), created_at, updated_at`
+const inboundMessageColumns = `id, channel, message_id, sender_raw, COALESCE(sender_user_id, ''), room, body, attachments, status, COALESCE(classification, ''), COALESCE(intake_run_id, ''), COALESCE(target_run_id, ''), COALESCE(project_id, ''), retired_at, created_at, updated_at`
 
 func scanInboundMessage(scan func(dest ...any) error) (InboundMessage, error) {
 	var m InboundMessage
 	var attachments []byte
-	if err := scan(&m.ID, &m.Channel, &m.MessageID, &m.SenderRaw, &m.SenderUserID, &m.Room, &m.Body, &attachments, &m.Status, &m.Classification, &m.IntakeRunID, &m.TargetRunID, &m.ProjectID, &m.CreatedAt, &m.UpdatedAt); err != nil {
+	if err := scan(&m.ID, &m.Channel, &m.MessageID, &m.SenderRaw, &m.SenderUserID, &m.Room, &m.Body, &attachments, &m.Status, &m.Classification, &m.IntakeRunID, &m.TargetRunID, &m.ProjectID, &m.RetiredAt, &m.CreatedAt, &m.UpdatedAt); err != nil {
 		return m, err
 	}
 	if len(attachments) > 0 {
@@ -238,4 +238,42 @@ func (s *Store) ExpireStaleInboundMessages(ctx context.Context, ttl time.Duratio
 		 WHERE status IN ($2, $3) AND created_at < now() - $4::interval`,
 		InboundStatusExpired, InboundStatusReceived, InboundStatusClarifying, int(ttl.Seconds()))
 	return err
+}
+
+// CountInboundMessagesSince counts a sender's messages inside a window — the
+// intake rate limit input (docs/inbound-messages.md §12 phase 4). Every status
+// counts: rejected and expired traffic still proves the channel is being
+// hammered.
+func (s *Store) CountInboundMessagesSince(ctx context.Context, senderUserID string, since time.Time) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM workspace_inbound_message
+		  WHERE sender_user_id = $1 AND created_at >= $2`, senderUserID, since).Scan(&count)
+	return count, err
+}
+
+// RetireInboundMessages scrubs bodies and attachment lists of messages older
+// than the retention cutoff (docs/inbound-messages.md §12 phase 4, PII): the
+// row survives as the audit chain link (ids, statuses, run pointers), the
+// payload does not. Returns the retired row ids so the caller can drop the
+// staged attachment files on disk.
+func (s *Store) RetireInboundMessages(ctx context.Context, before time.Time) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`UPDATE workspace_inbound_message
+		   SET body = '', attachments = '[]'::jsonb, retired_at = now(), updated_at = now()
+		 WHERE retired_at IS NULL AND created_at < $1
+		 RETURNING id`, before)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

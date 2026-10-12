@@ -12,6 +12,7 @@ import {
   SelectItem,
   Heading,
   InlineNotification,
+  Toggle,
 } from '@carbon/react'
 import { User, Settings, Add, Edit, TrashCan, Folder, ChevronDown } from '@carbon/icons-react'
 import { Menu } from '@carbon/icons-react'
@@ -70,6 +71,7 @@ interface Project {
   default_agent_id?: string
   default_model?: string
   org_units?: string[]
+  intake_enabled?: boolean
 }
 
 interface ProjectMember {
@@ -395,6 +397,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
       default_agent_id: editProject?.default_agent_id ?? '',
       default_model: editProject?.default_model ?? '',
       org_units: editProject ? (editProject.org_units ?? []) : newProjectOrgUnits,
+      intake_enabled: editProject ? !!editProject.intake_enabled : false,
     }
     const url = editProject ? `/kernel-api/v1/workspace/projects/${id}` : '/kernel-api/v1/workspace/projects'
     const method = editProject ? 'PUT' : 'POST'
@@ -748,6 +751,15 @@ export default function Layout({ children, activePage }: LayoutProps) {
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditProject({ ...editProject, default_model: e.target.value })}
                   placeholder={t('projects.default_model_placeholder') ?? 'Leave empty to use agent\'s model'}
                 />
+                <Toggle
+                  id="project-intake"
+                  labelText={t('projects.intake_label') ?? 'Accept channel-initiated tasks'}
+                  toggled={!!editProject.intake_enabled}
+                  onToggle={(checked: boolean) => setEditProject({ ...editProject, intake_enabled: checked })}
+                />
+                <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', margin: '-0.25rem 0 0' }}>
+                  {t('projects.intake_helper') ?? 'When off, start_task refuses to route channel messages to this project (docs/inbound-messages.md §12).'}
+                </p>
                 <fieldset style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.75rem', marginTop: '0.5rem' }}>
                   <legend style={{ fontSize: '0.75rem', color: 'var(--tm-text-2)', padding: '0 0.25rem' }}>{t('projects.members') ?? 'Members'}</legend>
                   <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>

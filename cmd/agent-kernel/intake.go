@@ -295,12 +295,81 @@ func intakeEnabledFromEnv() bool {
 	return true
 }
 
+// intakeRatePerHourFromEnv caps a sender's initiative messages per hour
+// (docs/inbound-messages.md §12 phase 4); 0 disables the check.
+func intakeRatePerHourFromEnv() int {
+	raw := strings.TrimSpace(os.Getenv("KERNEL_INTAKE_MAX_PER_HOUR"))
+	if raw == "" {
+		return 10
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed < 0 {
+		return 10
+	}
+	return parsed
+}
+
+// intakeRetentionDaysFromEnv is how long message bodies live before the
+// retention sweep scrubs them (PII); 0 = keep forever.
+func intakeRetentionDaysFromEnv() int {
+	raw := strings.TrimSpace(os.Getenv("KERNEL_INTAKE_RETENTION_DAYS"))
+	if raw == "" {
+		return 30
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed < 0 {
+		return 30
+	}
+	return parsed
+}
+
 // registerIntakeRoutes exposes the internal intake endpoints the intake
 // agent's tools call loopback with the kernel token (docs/inbound-messages.md
 // §7, §9). The flat gate keeps them kernel-internal (operator); the identity
 // for every authorization decision comes from the message row — the sender —
 // never from the calling token, so a task lands with the sender's rights.
 func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intakeRunner, quotas *quota.Limiter, emit intakeEmitFunc) {
+	// Audit chain (docs/inbound-messages.md §12 phase 4): message → intake
+	// run → task run with outcomes, exportable for compliance. Bodies are
+	// never included — the chain is the point, not the PII.
+	mux.HandleFunc("GET /v1/intake/audit", func(w http.ResponseWriter, req *http.Request) {
+		if !gate.Allow(w, req, controlplane.RoleOperator) {
+			return
+		}
+		messages, err := r.ws.ListInboundMessages(req.Context(), "", "", 500)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if sender := strings.TrimSpace(req.URL.Query().Get("sender")); sender != "" {
+			filtered := make([]workspace.InboundMessage, 0, len(messages))
+			for _, m := range messages {
+				if m.SenderUserID == sender {
+					filtered = append(filtered, m)
+				}
+			}
+			messages = filtered
+		}
+		entries := make([]map[string]any, 0, len(messages))
+		for _, m := range messages {
+			entry := map[string]any{
+				"message_id": m.ID, "channel": m.Channel, "sender": m.SenderUserID,
+				"status": m.Status, "classification": m.Classification,
+				"intake_run_id": m.IntakeRunID, "target_run_id": m.TargetRunID,
+				"project_id": m.ProjectID, "created_at": m.CreatedAt,
+				"retired": m.RetiredAt != nil,
+			}
+			if m.TargetRunID != "" {
+				if run, gErr := r.ws.GetRun(req.Context(), m.TargetRunID); gErr == nil {
+					entry["run_status"] = run.Status
+					entry["run_agent"] = run.AgentID
+					entry["run_answered"] = run.Answer != ""
+				}
+			}
+			entries = append(entries, entry)
+		}
+		writeJSON(w, 200, map[string]any{"chain": entries, "count": len(entries)})
+	})
 	// Status of the sender's earlier work (docs/inbound-messages.md §4.2):
 	// every routed message with its target run. run_status behind the intake
 	// dialog — "what happened to my estimate?" must not spawn a new run.
@@ -602,6 +671,34 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			}
 			prompt = amendmentPrompt(task, prevRun, body.Prompt)
 			amendTaskID = prevRun.TaskID
+		}
+		// Intake policy gates (docs/inbound-messages.md §12 phase 4): a project
+		// accepts channel-initiated tasks only when explicitly enabled, and an
+		// org policy may deny them for the whole subtree. The refusal is a normal
+		// error answer — the intake agent relays it to the sender politely.
+		project, pErr := r.ws.GetProject(req.Context(), body.ProjectID)
+		if pErr != nil {
+			if errors.Is(pErr, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("project not found"))
+				return
+			}
+			writeError(w, 500, pErr)
+			return
+		}
+		if !project.IntakeEnabled {
+			writeError(w, 422, fmt.Errorf("project %q does not accept channel-initiated tasks (enable intake in the project settings)", project.Name))
+			return
+		}
+		// Effective policy over the sender's unit + the project's units: any
+		// subtree veto (intake deny) wins, mirroring how run authorization folds
+		// actor and project positions.
+		policyUnits := []string{sender.OrgUnitID}
+		if links, lErr := r.ws.ProjectOrgUnits(req.Context(), body.ProjectID); lErr == nil {
+			policyUnits = append(policyUnits, links...)
+		}
+		if effective, _, eErr := r.ws.EffectivePolicy(req.Context(), policyUnits...); eErr == nil && effective.IntakeMode == "deny" {
+			writeError(w, 403, errors.New("channel-initiated tasks are denied by an org policy for this project's org units"))
+			return
 		}
 		// Deterministic task id from the message: a replayed start_task for the
 		// same message fails cleanly on the task primary key instead of

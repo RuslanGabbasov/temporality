@@ -44,13 +44,14 @@ type PolicyForm = {
   network_mode: string
   sandbox_mode: string
   approval_mode: string
+  intake_mode: string
   enabled: boolean
 }
 
 const emptyPolicyForm = (): PolicyForm => ({
   name: '', org_unit_id: '', allowed_models: '', allowed_mcp: '',
   max_tokens: '', max_budget_usd: '', timeout_seconds: '',
-  network_mode: '', sandbox_mode: '', approval_mode: '', enabled: true,
+  network_mode: '', sandbox_mode: '', approval_mode: '', intake_mode: '', enabled: true,
 })
 
 const policyFormOf = (p: Policy): PolicyForm => ({
@@ -64,6 +65,7 @@ const policyFormOf = (p: Policy): PolicyForm => ({
   network_mode: p.network_mode ?? '',
   sandbox_mode: p.sandbox_mode ?? '',
   approval_mode: p.approval_mode ?? '',
+  intake_mode: p.intake_mode ?? '',
   enabled: p.enabled,
 })
 
@@ -85,6 +87,7 @@ function policySummaryTags(p: Policy, t: (k: string, v?: Record<string, string>)
   if (p.network_mode === 'deny') tags.push({ key: 'net', text: t('org.policy_network.deny') ?? 'network denied' })
   if (p.sandbox_mode === 'read_only') tags.push({ key: 'ro', text: t('org.policy_sandbox.read_only') ?? 'read-only' })
   if (p.approval_mode === 'tools') tags.push({ key: 'approval', text: t('org.policy_approval.tools') ?? 'approval required' })
+  if (p.intake_mode === 'deny') tags.push({ key: 'intake', text: t('org.policy_intake.deny') ?? 'channel intake denied' })
   return tags
 }
 
@@ -342,6 +345,7 @@ export default function Org() {
       network_mode: policyForm.network_mode,
       sandbox_mode: policyForm.sandbox_mode,
       approval_mode: policyForm.approval_mode,
+      intake_mode: policyForm.intake_mode,
       enabled: policyForm.enabled,
     }
     setLoading(true); setError('')
@@ -1000,7 +1004,7 @@ export default function Org() {
                   placeholder="1800"
                 />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                 <Select
                   id="policy-network"
                   labelText={t('org.policy_network_label') ?? 'Network'}
@@ -1027,6 +1031,15 @@ export default function Org() {
                 >
                   <SelectItem value="" text={t('org.policy_approval.default') ?? 'no approval'} />
                   <SelectItem value="tools" text={t('org.policy_approval.tools') ?? 'require approval'} />
+                </Select>
+                <Select
+                  id="policy-intake"
+                  labelText={t('org.policy_intake_label') ?? 'Channel intake'}
+                  value={policyForm.intake_mode}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPolicyForm({ ...policyForm, intake_mode: e.target.value })}
+                >
+                  <SelectItem value="" text={t('org.policy_intake.default') ?? 'governed by projects'} />
+                  <SelectItem value="deny" text={t('org.policy_intake.deny') ?? 'denied'} />
                 </Select>
               </div>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: 'var(--tm-text-1)' }}>

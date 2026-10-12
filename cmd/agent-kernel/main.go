@@ -1213,7 +1213,7 @@ func main() {
 		if req.ID == "" {
 			req.ID = slugify(req.Name)
 		}
-		project := &workspace.Project{ID: req.ID, Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel, OrgUnitIDs: req.OrgUnits}
+		project := &workspace.Project{ID: req.ID, Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel, OrgUnitIDs: req.OrgUnits, IntakeEnabled: req.IntakeEnabled != nil && *req.IntakeEnabled}
 		if err := ws.CreateProject(r.Context(), project); err != nil {
 			writeError(w, 409, err)
 			return
@@ -1253,6 +1253,14 @@ func main() {
 			return
 		}
 		project := workspace.Project{ID: r.PathValue("projectID"), Name: req.Name, Description: req.Description, DefaultAgentID: req.DefaultAgentID, DefaultModel: req.DefaultModel}
+		// Intake opt-in changes only when the payload carries it; otherwise the
+		// stored flag survives (the store's UPDATE always writes the struct
+		// field, so pre-read the current value first).
+		if req.IntakeEnabled != nil {
+			project.IntakeEnabled = *req.IntakeEnabled
+		} else if current, gErr := ws.GetProject(r.Context(), project.ID); gErr == nil {
+			project.IntakeEnabled = current.IntakeEnabled
+		}
 		if err := ws.UpdateProject(r.Context(), project); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)
@@ -4621,6 +4629,26 @@ func main() {
 		if err := ws.ExpireStaleInboundMessages(r.Context(), inboundExpiryTTL); err != nil {
 			log.Warn("sweep inbound messages", "error", err)
 		}
+		// Retention scrub (docs/inbound-messages.md §12 phase 4, PII): bodies
+		// older than the window are blanked, the rows stay as the audit chain.
+		// The same lazy trigger as expiry — an unvisited inbox retires slowly,
+		// which is fine: nothing reads those rows either.
+		if days := intakeRetentionDaysFromEnv(); days > 0 {
+			retired, rErr := ws.RetireInboundMessages(r.Context(), time.Now().UTC().AddDate(0, 0, -days))
+			if rErr != nil {
+				log.Warn("retire inbound messages", "error", rErr)
+			} else if len(retired) > 0 {
+				// Staged attachments were kept for the audit trail; with the body
+				// gone they are PII without a purpose. Inbox copies inside projects
+				// are work artifacts and stay.
+				if root, sErr := sandboxRoot(); sErr == nil {
+					for _, id := range retired {
+						_ = os.RemoveAll(filepath.Join(root, "inbound", inboundStagingKey(id)))
+					}
+				}
+				log.Info("retired inbound messages", "count", len(retired))
+			}
+		}
 		limit := 0
 		if raw := r.URL.Query().Get("limit"); raw != "" {
 			if parsed, pErr := strconv.Atoi(raw); pErr == nil {
@@ -5169,6 +5197,7 @@ func main() {
 	// starting runs when intake is administratively disabled.
 	bootstrapIntake(ctx, log, ws)
 	intakeEnabled := intakeEnabledFromEnv()
+	intakeRatePerHour := intakeRatePerHourFromEnv()
 	intake := &intakeRunner{
 		log: log, ws: ws, temporal: temporalClient, taskQueue: taskQueue,
 		sourceID: activities.SourceID, activities: activities,
@@ -5210,6 +5239,7 @@ func main() {
 			},
 			emit:          intakeEmitter,
 			intakeEnabled: intakeEnabled,
+			ratePerHour:   intakeRatePerHour,
 		}
 		go loop.run(ctx)
 	}

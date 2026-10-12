@@ -113,6 +113,18 @@ func (s *fakeInboundStore) UpdateInboundMessage(_ context.Context, id string, u 
 	return nil
 }
 
+func (s *fakeInboundStore) CountInboundMessagesSince(_ context.Context, sender string, since time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for _, m := range s.inbound {
+		if m.SenderUserID == sender && !m.CreatedAt.Before(since) {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // lastUpdate returns the newest recorded update for one inbound row.
 func (s *fakeInboundStore) lastUpdate(id string) (workspace.InboundMessageUpdate, bool) {
 	s.mu.Lock()
@@ -664,6 +676,63 @@ func TestChannelInboundIntakeDeduplicatesRedelivery(t *testing.T) {
 	}
 	if rows := len(store.inbound); rows != 1 {
 		t.Fatalf("expected one recorded row, got %d", rows)
+	}
+}
+
+// TestChannelInboundIntakeRateLimitsFloodingSender: the per-sender cap
+// (docs/inbound-messages.md §12 phase 4) rejects the message that crosses the
+// hourly limit — with the audit trail and a room notice — instead of spawning
+// another intake run. The pre-populated rows stand for messages already routed
+// in the past hour; the loop under test carries ratePerHour = 2.
+func TestChannelInboundIntakeRateLimitsFloodingSender(t *testing.T) {
+	var sent []string
+	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
+		matrixTextEvent("$m5", "!r1:hs", "@human:hs", "и ещё одна задача"),
+	}, &sent)
+	recent := time.Now().UTC().Add(-time.Minute)
+	store := &fakeInboundStore{
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+		inbound: []workspace.InboundMessage{
+			{ID: "inbound/matrix/$r1", Channel: "matrix", MessageID: "$r1", SenderUserID: "u1", CreatedAt: recent},
+			{ID: "inbound/matrix/$r2", Channel: "matrix", MessageID: "$r2", SenderUserID: "u1", CreatedAt: recent},
+			{ID: "inbound/matrix/$r3", Channel: "matrix", MessageID: "$r3", SenderUserID: "u1", CreatedAt: recent},
+		},
+	}
+	intake := &recordedIntake{runID: "intake-m5"}
+	emit := &recordedEmit{}
+	loop := newInboundLoop(t, server, store, &recordedSignal{})
+	loop.intake = func(context.Context, agent.InboundMessage, string) (string, error) {
+		t.Fatal("intake must not start for a rate-limited sender")
+		return "", nil
+	}
+	loop.emit = emit.record
+	loop.intakeEnabled = true
+	loop.ratePerHour = 2
+
+	if _, err := loop.cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	row, ok := store.inboundRow("$m5")
+	if !ok {
+		t.Fatal("message not recorded")
+	}
+	if latest, _ := store.lastUpdate(row.ID); latest.Status != workspace.InboundStatusRejected {
+		t.Fatalf("row not rejected: %+v", latest)
+	}
+	if emit.count() != 1 || emit.types[0] != "intake.rejected" || emit.rawData[0]["reason"] != "rate_limited" {
+		t.Fatalf("unexpected events: %v %+v", emit.types, emit.rawData)
+	}
+	if len(store.audits) != 1 || store.audits[0] != workspace.AuditIntakeRejected {
+		t.Fatalf("expected one rejection audit, got %v", store.audits)
+	}
+	if len(sent) != 1 || !strings.Contains(sent[0], "rate limit") {
+		t.Fatalf("expected one rate-limit notice, got %v", sent)
+	}
+	if intake.count() != 0 {
+		t.Fatalf("intake must not run, got %d calls", intake.count())
 	}
 }
 

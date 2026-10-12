@@ -19,6 +19,7 @@ import (
 var ValidPolicyNetworkModes = map[string]bool{"": true, "allow": true, "deny": true}
 var ValidPolicySandboxModes = map[string]bool{"": true, "standard": true, "read_only": true}
 var ValidPolicyApprovalModes = map[string]bool{"": true, "auto": true, "tools": true}
+var ValidPolicyIntakeModes = map[string]bool{"": true, "deny": true}
 
 // ValidatePolicy checks the enum dimensions; the numeric CHECKs live in the
 // migration and surface as query errors.
@@ -35,12 +36,15 @@ func ValidatePolicy(p Policy) error {
 	if !ValidPolicyApprovalModes[p.ApprovalMode] {
 		return fmt.Errorf("unknown approval_mode %q (supported: auto, tools)", p.ApprovalMode)
 	}
+	if !ValidPolicyIntakeModes[p.IntakeMode] {
+		return fmt.Errorf("unknown intake_mode %q (supported: deny)", p.IntakeMode)
+	}
 	return nil
 }
 
 const policyColumns = `id, org_unit_id, name, allowed_models, allowed_mcp,
 max_tokens, max_budget_usd, timeout_seconds, network_mode, sandbox_mode, approval_mode,
-enabled, created_at, updated_at`
+intake_mode, enabled, created_at, updated_at`
 
 func scanPolicy(scanner interface{ Scan(dest ...any) error }) (Policy, error) {
 	var p Policy
@@ -49,7 +53,7 @@ func scanPolicy(scanner interface{ Scan(dest ...any) error }) (Policy, error) {
 	var maxTokens, timeout *int
 	var budget *float64
 	err := scanner.Scan(&p.ID, &orgUnitID, &p.Name, &models, &mcp,
-		&maxTokens, &budget, &timeout, &p.NetworkMode, &p.SandboxMode, &p.ApprovalMode,
+		&maxTokens, &budget, &timeout, &p.NetworkMode, &p.SandboxMode, &p.ApprovalMode, &p.IntakeMode,
 		&p.Enabled, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return p, err
@@ -79,10 +83,10 @@ func (s *Store) CreatePolicy(ctx context.Context, p *Policy) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO org_policy
 		 (id, org_unit_id, name, allowed_models, allowed_mcp, max_tokens, max_budget_usd,
-		  timeout_seconds, network_mode, sandbox_mode, approval_mode, enabled, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+		  timeout_seconds, network_mode, sandbox_mode, approval_mode, intake_mode, enabled, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		p.ID, nullString(p.OrgUnitID), p.Name, marshalStrings(p.AllowedModels), marshalStrings(p.AllowedMCP),
-		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
+		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode, p.IntakeMode,
 		p.Enabled, p.CreatedAt, p.UpdatedAt)
 	return err
 }
@@ -132,10 +136,10 @@ func (s *Store) UpdatePolicy(ctx context.Context, p Policy) error {
 		 SET org_unit_id = $2, name = $3, allowed_models = $4, allowed_mcp = $5,
 		     max_tokens = $6, max_budget_usd = $7, timeout_seconds = $8,
 		     network_mode = $9, sandbox_mode = $10, approval_mode = $11,
-		     enabled = $12, updated_at = $13
+		     intake_mode = $12, enabled = $13, updated_at = $14
 		 WHERE id = $1`,
 		p.ID, nullString(p.OrgUnitID), p.Name, marshalStrings(p.AllowedModels), marshalStrings(p.AllowedMCP),
-		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode,
+		p.MaxTokens, p.MaxBudgetUSD, p.TimeoutSeconds, p.NetworkMode, p.SandboxMode, p.ApprovalMode, p.IntakeMode,
 		p.Enabled, p.UpdatedAt)
 	if err != nil {
 		return err
@@ -215,6 +219,9 @@ func MergePolicies(rows []Policy) (effective Policy, sources []Policy) {
 		}
 		if p.ApprovalMode == "tools" {
 			effective.ApprovalMode = "tools"
+		}
+		if p.IntakeMode == "deny" {
+			effective.IntakeMode = "deny"
 		}
 	}
 	return effective, sources

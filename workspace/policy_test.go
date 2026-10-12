@@ -24,6 +24,7 @@ func TestMergePolicies(t *testing.T) {
 		require.Empty(t, effective.NetworkMode)
 		require.Empty(t, effective.SandboxMode)
 		require.Empty(t, effective.ApprovalMode)
+		require.Empty(t, effective.IntakeMode)
 	})
 
 	t.Run("disabled rows are skipped", func(t *testing.T) {
@@ -91,6 +92,23 @@ func TestMergePolicies(t *testing.T) {
 		require.Equal(t, "read_only", effective.SandboxMode)
 		require.Equal(t, "tools", effective.ApprovalMode)
 	})
+
+	// Intake is deny-only overlay (docs/inbound-messages.md §12): there is no
+	// "allow" — a unit policy can only switch intake off for its subtree, the
+	// opt-in itself lives on the project. A child cannot cancel an ancestor's deny.
+	t.Run("intake deny is sticky across the chain", func(t *testing.T) {
+		effective, _ := MergePolicies([]Policy{
+			{ID: "root", Name: "root", Enabled: true, IntakeMode: "deny"},
+			{ID: "child", Name: "child", Enabled: true},
+		})
+		require.Equal(t, "deny", effective.IntakeMode)
+
+		effective, _ = MergePolicies([]Policy{
+			{ID: "child", Name: "child", Enabled: true},
+			{ID: "root", Name: "root", Enabled: true, IntakeMode: "deny"},
+		})
+		require.Equal(t, "deny", effective.IntakeMode)
+	})
 }
 
 func TestPolicyAllowsList(t *testing.T) {
@@ -107,4 +125,6 @@ func TestValidatePolicy(t *testing.T) {
 	require.Error(t, ValidatePolicy(Policy{Name: "x", NetworkMode: "off"}))
 	require.Error(t, ValidatePolicy(Policy{Name: "x", SandboxMode: "strict"}))
 	require.Error(t, ValidatePolicy(Policy{Name: "x", ApprovalMode: "always"}))
+	require.NoError(t, ValidatePolicy(Policy{Name: "x", IntakeMode: "deny"}))
+	require.Error(t, ValidatePolicy(Policy{Name: "x", IntakeMode: "allow"}))
 }

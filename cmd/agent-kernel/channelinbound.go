@@ -50,6 +50,9 @@ type channelInboundLoop struct {
 	// intakeEnabled gates the pipeline: messages are still deduplicated and
 	// recorded when off, but no run starts and no rejection is delivered.
 	intakeEnabled bool
+	// ratePerHour caps how many initiative messages one sender may push per
+	// hour (docs/inbound-messages.md §12 phase 4); 0 disables the check.
+	ratePerHour int
 
 	cursor      string // opaque driver cursor; "" → fresh start (bounded history)
 	identityKey string // settings fingerprint the cursor and selfID belong to
@@ -69,6 +72,7 @@ type channelInboundStore interface {
 	SaveChannelCursor(ctx context.Context, channel string, cursor workspace.ChannelCursor) error
 	InsertInboundMessage(ctx context.Context, m *workspace.InboundMessage) (bool, error)
 	UpdateInboundMessage(ctx context.Context, id string, u workspace.InboundMessageUpdate) error
+	CountInboundMessagesSince(ctx context.Context, senderUserID string, since time.Time) (int, error)
 }
 
 // run cycles until the context is cancelled. A cycle error is logged and the
@@ -372,6 +376,25 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 		return
 	}
 	_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{SenderUserID: senderUserID})
+	// Sender rate limit (docs/inbound-messages.md §12 phase 4): a flooding
+	// sender gets a polite refusal instead of a queue of intake runs — every
+	// message burns an agent turn and a model call. The count includes this
+	// row, so the limit is "messages per hour", not "messages plus one".
+	if l.ratePerHour > 0 {
+		if sent, cErr := l.store.CountInboundMessagesSince(ctx, senderUserID, time.Now().UTC().Add(-time.Hour)); cErr == nil && sent > l.ratePerHour {
+			_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{Status: workspace.InboundStatusRejected})
+			if l.emit != nil {
+				l.emit(ctx, "intake.rejected", message, senderUserID, map[string]any{"reason": "rate_limited"})
+			}
+			_ = l.store.RecordAccessAudit(ctx, senderUserID, workspace.AuditIntakeRejected, "inbound_message", row.ID, map[string]any{
+				"reason": "rate_limited", "messages_last_hour": sent, "limit": l.ratePerHour,
+			})
+			l.sendRoomNotice(ctx, channelSettings, message.ChatID,
+				fmt.Sprintf("Temporality: rate limit reached (%d messages per hour). Please retry later; urgent tasks can be created in the app.", l.ratePerHour))
+			l.log.Info("intake rate limited", "channel", l.driver.Type(), "message", message.ID, "sender", senderUserID, "sent", sent)
+			return
+		}
+	}
 	if l.emit != nil {
 		l.emit(ctx, "intake.received", message, senderUserID, nil)
 	}
