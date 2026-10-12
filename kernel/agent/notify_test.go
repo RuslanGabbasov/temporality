@@ -139,6 +139,103 @@ func TestNotifyChannelDeliversViaSlack(t *testing.T) {
 	require.Contains(t, seenBody["text"], "Release today?")
 }
 
+// TestNotifyChannelFansOutToOrgUnit covers the team request path
+// (docs/inbound-messages.md §8): org:<unit> delivers to every active member
+// (own unit's head first), web-only members get their inbox copy, and the
+// human_request upsert carries one deliveries entry per member.
+func TestNotifyChannelFansOutToOrgUnit(t *testing.T) {
+	homeserver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Every matrix send succeeds; the address distinguishes members.
+		_ = json.NewEncoder(w).Encode(map[string]any{"event_id": "$1"})
+	}))
+	defer homeserver.Close()
+	t.Setenv("KERNEL_MATRIX_HOMESERVER", homeserver.URL)
+	t.Setenv("KERNEL_MATRIX_ACCESS_TOKEN", "bot-token")
+
+	var upsert string
+	usersJSON := `{"users":[
+		{"id":"head","name":"Head","role":"operator","active":true,"org_unit_id":"core","channels":[{"type":"matrix","address":"!head:hs","enabled":true}],"preferred_channel":"matrix"},
+		{"id":"dev1","name":"Dev One","role":"writer","active":true,"org_unit_id":"core","channels":[{"type":"matrix","address":"!dev1:hs","enabled":true}],"preferred_channel":"matrix"},
+		{"id":"webby","name":"Web Only","role":"reader","active":true,"org_unit_id":"core"},
+		{"id":"other","name":"Other Team","role":"writer","active":true,"org_unit_id":"karma"},
+		{"id":"gone","name":"Gone","role":"writer","active":false,"org_unit_id":"core"}
+	]}`
+	unitsJSON := `{"units":[{"id":"core","kind":"team","name":"Core","path":"acme","head_user_id":"head"}]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/workspace/users" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(usersJSON))
+		case r.URL.Path == "/v1/org/units" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(unitsJSON))
+		case r.URL.Path == "/v1/workspace/human-requests" && r.Method == http.MethodPost:
+			raw, _ := io.ReadAll(r.Body)
+			upsert = string(raw)
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+	delivery, err := activities.NotifyChannel(context.Background(), NotifyChannelRequest{
+		Recipient: "org:core", Question: "Approve the release?", OperationID: "run-2/turn/01/ask-1",
+		Options: []string{"yes", "no"}, Project: "repo-a", RunID: "run-2", TimeoutSeconds: 300,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "multi", delivery.Channel)
+	require.Equal(t, "delivered", delivery.Status)
+	require.Equal(t, "core", delivery.Recipient)
+	require.Contains(t, delivery.Detail, "3/3")
+
+	// Fan-out order: the unit's head leads, then role seniority; inactive and
+	// out-of-unit users never appear.
+	require.Len(t, delivery.DeliveredTo, 3)
+	require.Equal(t, "head", delivery.DeliveredTo[0].UserID)
+	require.Equal(t, "matrix", delivery.DeliveredTo[0].Channel)
+	require.Equal(t, "dev1", delivery.DeliveredTo[1].UserID)
+	require.Equal(t, "webby", delivery.DeliveredTo[2].UserID)
+	require.Equal(t, "web", delivery.DeliveredTo[2].Channel)
+
+	// The upsert carries the per-member delivery rows; resolved_user mirrors the
+	// first reached member (the head) for backward-compatible display.
+	var row map[string]any
+	require.NoError(t, json.Unmarshal([]byte(upsert), &row))
+	require.Equal(t, "org:core", row["recipient"])
+	require.Equal(t, "head", row["resolved_user"])
+	require.Equal(t, "matrix", row["channel"])
+	entries, ok := row["deliveries"].([]any)
+	require.True(t, ok, "deliveries must be present")
+	require.Len(t, entries, 3)
+	first, _ := entries[0].(map[string]any)
+	require.Equal(t, "head", first["user_id"])
+	require.Equal(t, "delivered", first["status"])
+}
+
+// TestNotifyChannelRejectsEmptyOrgUnit: org: pointing at a unit without
+// active members is a rejection — there is nobody to ask, the run must know.
+func TestNotifyChannelRejectsEmptyOrgUnit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/workspace/users":
+			_, _ = w.Write([]byte(`{"users":[{"id":"other","name":"Other","active":false,"org_unit_id":"karma"}]}`))
+		case r.URL.Path == "/v1/workspace/human-requests":
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+	delivery, err := activities.NotifyChannel(context.Background(), NotifyChannelRequest{
+		Recipient: "org:karma", Question: "Q?", OperationID: "op-2", RunID: "run-2", Project: "p",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "rejected", delivery.Status)
+	require.Contains(t, delivery.Detail, "no active members")
+}
+
 // workspaceStub serves the user list plus the human-request upsert endpoint
 // the notification activity records through.
 func workspaceStub(t *testing.T, usersJSON string, seenUpsert *string) *httptest.Server {

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +50,17 @@ type NotificationDelivery struct {
 	Channel   string `json:"channel"`
 	Status    string `json:"status"` // delivered | skipped | failed
 	Detail    string `json:"detail,omitempty"`
+	// DeliveredTo is the team fan-out breakdown (docs/inbound-messages.md §8):
+	// one entry per unit member. Empty for single-recipient requests.
+	DeliveredTo []DeliveryTarget `json:"delivered_to,omitempty"`
+}
+
+// DeliveryTarget is one member's outcome inside an org: fan-out.
+type DeliveryTarget struct {
+	UserID  string `json:"user_id"`
+	Channel string `json:"channel"`
+	Status  string `json:"status"` // delivered | skipped | failed
+	Detail  string `json:"detail,omitempty"`
 }
 
 // recipientChannels is the profile slice the delivery resolution needs.
@@ -117,6 +129,8 @@ func (a *Activities) deliverNotification(ctx context.Context, request NotifyChan
 }
 
 // resolveAndDeliver runs recipient resolution (§26) and channel delivery.
+// Team recipients (org:<unit>, docs/inbound-messages.md §8) take the fan-out
+// path: every active member gets their own copy, any member may answer.
 func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChannelRequest) NotificationDelivery {
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
@@ -126,6 +140,9 @@ func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChanne
 	users, ok := a.fetchWorkspaceUsers(ctx)
 	if !ok {
 		return denied("workspace user list unavailable")
+	}
+	if strings.HasPrefix(request.Recipient, "org:") {
+		return a.deliverToUnit(ctx, request, users, strings.TrimSpace(strings.TrimPrefix(request.Recipient, "org:")))
 	}
 	target, found := ResolveRecipient(request.Recipient, request.ActorID, users)
 	if !found {
@@ -154,6 +171,95 @@ func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChanne
 	return NotificationDelivery{Recipient: target.ID, Channel: "web", Status: "delivered", Detail: detail}
 }
 
+// deliverToUnit fans one ask_human out to every active member of the unit
+// (docs/inbound-messages.md §8). Direct members only — the subtree inherits
+// visibility, not team membership. The unit's own head leads the delivery
+// order (nearest explicit manager first), then role seniority, then name —
+// deterministic for a given directory snapshot. "Head first" is priority in
+// the list, not authority over the answer: whoever replies first closes the
+// request.
+func (a *Activities) deliverToUnit(ctx context.Context, request NotifyChannelRequest, users []WorkspaceUser, unitID string) NotificationDelivery {
+	if unitID == "" {
+		return NotificationDelivery{Recipient: unitID, Channel: "web", Status: "rejected", Detail: "empty org unit in recipient"}
+	}
+	settings := a.transports(ctx)
+	// Members: active users placed directly in the unit.
+	members := make([]WorkspaceUser, 0, len(users))
+	unitKnown := false
+	for _, u := range users {
+		if u.OrgUnitID == unitID {
+			unitKnown = true
+			if u.Active {
+				members = append(members, u)
+			}
+		}
+	}
+	if !unitKnown {
+		return NotificationDelivery{Recipient: unitID, Channel: "web", Status: "rejected", Detail: fmt.Sprintf("org unit %q not found", unitID)}
+	}
+	if len(members) == 0 {
+		return NotificationDelivery{Recipient: unitID, Channel: "web", Status: "rejected", Detail: fmt.Sprintf("org unit %q has no active members", unitID)}
+	}
+	// Head first: the unit's own head when they are a member, else nothing —
+	// an ancestor's head is not part of this team's delivery list.
+	headFirst := ""
+	if units, ok := a.fetchOrgUnits(ctx); ok {
+		for _, unit := range units {
+			if unit.ID == unitID {
+				headFirst = unit.HeadUserID
+				break
+			}
+		}
+	}
+	sort.SliceStable(members, func(i, j int) bool {
+		if (members[i].ID == headFirst) != (members[j].ID == headFirst) {
+			return members[i].ID == headFirst
+		}
+		pi, pj := rolePriority(members[i].Role), rolePriority(members[j].Role)
+		if pi != pj {
+			return pi < pj
+		}
+		return members[i].Name < members[j].Name
+	})
+
+	targets := make([]DeliveryTarget, 0, len(members))
+	delivered := 0
+	for _, member := range members {
+		if request.ExecutionIdentityID != "" {
+			// §30 applies per member: an identity may not address someone → their
+			// copy is skipped, the rest of the team still gets asked.
+			allowed, detail := a.identityAllowsHuman(ctx, request.ExecutionIdentityID, member.ID)
+			if !allowed {
+				targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: "web", Status: "skipped", Detail: detail})
+				continue
+			}
+		}
+		channel, mode := pickChannel(recipientChannels{Channels: member.Channels, Preferred: member.Preferred}, settings.Configured)
+		if mode != "web" {
+			if err := a.sendToChannel(ctx, channel.Type, channel.Address, request, settings); err != nil {
+				targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "failed", Detail: truncate(err.Error(), 200)})
+				continue
+			}
+			targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "delivered"})
+			delivered++
+			continue
+		}
+		targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: "web", Status: "delivered", Detail: "web inbox"})
+		delivered++
+	}
+	status := "failed"
+	if delivered > 0 {
+		status = "delivered"
+	}
+	return NotificationDelivery{
+		Recipient:   unitID,
+		Channel:     "multi",
+		Status:      status,
+		Detail:      fmt.Sprintf("%d/%d unit members reached", delivered, len(members)),
+		DeliveredTo: targets,
+	}
+}
+
 // recordHumanRequest upserts the human_request row with the delivery
 // outcome. Best-effort: storage problems surface in logs but never break the
 // paused run — the entity tracks the question, not the delivery logistics.
@@ -165,26 +271,53 @@ func (a *Activities) recordHumanRequest(ctx context.Context, request NotifyChann
 	if request.Options == nil {
 		request.Options = []string{}
 	}
+	// Team fan-out: resolved_user/channel mirror the first reached member for
+	// backward-compatible display, while the delivery rows carry every member.
+	resolvedUser, channel := delivery.Recipient, delivery.Channel
+	var deliveries []map[string]any
+	firstPicked := false
+	for _, target := range delivery.DeliveredTo {
+		if target.Status == "delivered" && !firstPicked {
+			resolvedUser, channel = target.UserID, target.Channel
+			firstPicked = true
+		}
+		status := target.Status
+		if status == "skipped" {
+			status = "failed" // no copy was sent — nothing to answer
+		}
+		entry := map[string]any{"user_id": target.UserID, "channel": target.Channel, "status": status}
+		if target.Detail != "" && status == "failed" {
+			entry["detail"] = target.Detail
+		}
+		deliveries = append(deliveries, entry)
+	}
 	body := map[string]any{
 		"id":                    request.OperationID,
 		"run_id":                request.RunID,
 		"project_id":            request.Project,
 		"agent_id":              request.AgentID,
 		"recipient":             request.Recipient,
-		"resolved_user":         delivery.Recipient,
+		"resolved_user":         resolvedUser,
 		"question":              request.Question,
 		"context":               request.Context,
 		"options":               request.Options,
 		"status":                delivery.Status,
-		"channel":               delivery.Channel,
+		"channel":               channel,
 		"timeout_seconds":       request.TimeoutSeconds,
 		"timeout_policy":        request.TimeoutPolicy,
 		"execution_identity_id": request.ExecutionIdentityID,
 		"expires_at":            expiresAt,
 	}
+	if deliveries != nil {
+		body["deliveries"] = deliveries
+	}
+	a.postHumanRequest(ctx, body)
+}
+
+func (a *Activities) postHumanRequest(ctx context.Context, body map[string]any) {
 	endpoint := fmt.Sprintf("%s/v1/workspace/human-requests", a.WorkspaceURL)
 	if _, _, err := a.workspaceDo(ctx, http.MethodPost, endpoint, body); err != nil {
-		slog.Error("record human request", "operation", request.OperationID, "error", err)
+		slog.Error("record human request", "operation", body["id"], "error", err)
 	}
 }
 

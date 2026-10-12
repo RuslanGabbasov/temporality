@@ -120,6 +120,93 @@ func TestHumanContactsSearchFiltersAndHidesAddresses(t *testing.T) {
 	require.Contains(t, payload["hint"], "no active users match")
 }
 
+// Heads take precedence over proximity (docs/inbound-messages.md §7): the
+// nearest explicit head up the chain (own unit included) is the escalation
+// target; the proximity walk remains the fallback for head-less trees.
+func TestHumanContactsEscalationPrefersUnitHead(t *testing.T) {
+	unitsWithHeads := `{"units":[
+		{"id":"acme","kind":"organization","name":"Acme","path":""},
+		{"id":"dev","kind":"department","name":"Development","path":"acme","head_user_id":"u-lead"},
+		{"id":"platform","kind":"team","name":"Platform","path":"acme.dev"}
+	]}`
+	server := contactsStub(t, contactsUsers(), unitsWithHeads)
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+
+	// The team has no head of its own; the department head is the effective
+	// manager — even though the team holds active peers closer by proximity.
+	result, err := activities.handleHumanContacts(context.Background(), ToolRequest{
+		Name: "human_contacts", Arguments: map[string]any{"escalate_for": "u-dev"},
+	})
+	require.NoError(t, err)
+	payload := decodeContacts(t, result.Content)
+	require.Equal(t, []string{"u-lead"}, contactIDs(payload))
+	unit := payload["escalation_unit"].(map[string]any)
+	require.Equal(t, "dev", unit["id"])
+	require.Contains(t, payload["reason"], "head of")
+
+	// Escalating the department head themselves skips their own head slot and
+	// keeps walking up: the organization level has no head, so proximity finds
+	// the org admin.
+	result, _ = activities.handleHumanContacts(context.Background(), ToolRequest{
+		Name: "human_contacts", Arguments: map[string]any{"escalate_for": "u-lead"},
+	})
+	payload = decodeContacts(t, result.Content)
+	require.Equal(t, []string{"u-admin"}, contactIDs(payload))
+
+	// A head who is inactive does not count: fall back to proximity.
+	inactiveHeadUnits := `{"units":[
+		{"id":"acme","kind":"organization","name":"Acme","path":""},
+		{"id":"dev","kind":"department","name":"Development","path":"acme","head_user_id":"u-gone"},
+		{"id":"platform","kind":"team","name":"Platform","path":"acme.dev"}
+	]}`
+	server = contactsStub(t, contactsUsers(), inactiveHeadUnits)
+	activities = &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+	result, _ = activities.handleHumanContacts(context.Background(), ToolRequest{
+		Name: "human_contacts", Arguments: map[string]any{"escalate_for": "u-dev"},
+	})
+	payload = decodeContacts(t, result.Content)
+	require.Equal(t, []string{"u-lead"}, contactIDs(payload))
+	require.Equal(t, "dev", payload["escalation_unit"].(map[string]any)["id"])
+	require.Contains(t, payload["reason"], "nearest org level")
+}
+
+// effectiveHead walks the chain bottom-up: own head first, then the nearest
+// ancestor with a head; absent heads resolve to nothing.
+func TestEffectiveHead(t *testing.T) {
+	units := []orgUnitLite{
+		{ID: "acme", Kind: "organization", Name: "Acme", Path: ""},
+		{ID: "dev", Kind: "department", Name: "Development", Path: "acme", HeadUserID: "u-lead"},
+		{ID: "platform", Kind: "team", Name: "Platform", Path: "acme.dev"},
+	}
+	head, unitID, ok := effectiveHead(units, "platform")
+	require.True(t, ok)
+	require.Equal(t, "u-lead", head)
+	require.Equal(t, "dev", unitID)
+
+	head, unitID, ok = effectiveHead(units, "dev")
+	require.True(t, ok)
+	require.Equal(t, "u-lead", head)
+	require.Equal(t, "dev", unitID)
+
+	// The own unit's head wins over an ancestor's.
+	units = append(units, orgUnitLite{ID: "sre", Kind: "team", Name: "SRE", Path: "acme.dev", HeadUserID: "u-oncall"})
+	head, unitID, ok = effectiveHead(units, "sre")
+	require.True(t, ok)
+	require.Equal(t, "u-oncall", head)
+	require.Equal(t, "sre", unitID)
+
+	// No head anywhere in the chain.
+	headless := []orgUnitLite{{ID: "solo", Kind: "team", Name: "Solo", Path: ""}}
+	head, unitID, ok = effectiveHead(headless, "solo")
+	require.False(t, ok)
+	require.Empty(t, head)
+	require.Empty(t, unitID)
+
+	// Unknown unit resolves to nothing.
+	_, _, ok = effectiveHead(units, "ghost")
+	require.False(t, ok)
+}
+
 func TestHumanContactsEscalationWalksAncestors(t *testing.T) {
 	server := contactsStub(t, contactsUsers(), contactsUnits())
 	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}

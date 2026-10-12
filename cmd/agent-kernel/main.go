@@ -224,6 +224,10 @@ func main() {
 		log.Error("migrate workspace v54 (org unit head)", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000055_human_request_delivery.up.sql"); err != nil {
+		log.Error("migrate workspace v55 (human request delivery)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -4593,6 +4597,13 @@ func main() {
 		if req.Status == workspace.HumanStatusDelivered {
 			if err := ws.DeliverHumanRequest(r.Context(), req.ID, req.ResolvedUser, req.Status, req.Channel, ""); err != nil && !errors.Is(err, workspace.ErrNotFound) {
 				log.Warn("mark human request delivered", "id", req.ID, "error", err)
+			}
+		}
+		// Team fan-out rows (docs/inbound-messages.md §8): upsert after the main
+		// row so the delivery list always references an existing request.
+		if len(req.Deliveries) > 0 {
+			if err := ws.AddHumanRequestDeliveries(r.Context(), req.ID, req.Deliveries); err != nil {
+				log.Warn("record human request deliveries", "id", req.ID, "error", err)
 			}
 		}
 		action := workspace.AuditHumanCreated

@@ -12,7 +12,9 @@ import (
 
 // Human request storage (docs/org-structure.md §28). Rows are created by the
 // notification activity at ask_human time, closed by the approval endpoint
-// (answered/cancelled) or by the expiry sweep/activity (expired).
+// (answered/cancelled) or by the expiry sweep/activity (expired). Team
+// requests (recipient org:<unit>, docs/inbound-messages.md §8) carry one
+// delivery row per member; the first answer wins and supersedes the rest.
 
 const humanRequestColumns = `id, run_id, project_id, agent_id, recipient, resolved_user, question, context,
 options, status, channel, response, answered_by, timeout_seconds, timeout_policy,
@@ -85,9 +87,74 @@ func (s *Store) DeliverHumanRequest(ctx context.Context, id, resolvedUser, statu
 	return nil
 }
 
+// Delivery row statuses: delivered while answerable, failed when the
+// transport rejected it, superseded once another member answered first.
+const (
+	HumanDeliveryDelivered  = "delivered"
+	HumanDeliveryFailed     = "failed"
+	HumanDeliverySuperseded = "superseded"
+)
+
+// AddHumanRequestDeliveries records the team fan-out (one row per member,
+// upsert so an activity retry refreshes rather than duplicates).
+func (s *Store) AddHumanRequestDeliveries(ctx context.Context, requestID string, deliveries []HumanRequestDelivery) error {
+	if len(deliveries) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for _, d := range deliveries {
+		if d.Status == "" {
+			d.Status = HumanDeliveryDelivered
+		}
+		batch.Queue(`INSERT INTO human_request_delivery (request_id, user_id, channel, status)
+			 VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (request_id, user_id) DO UPDATE SET channel = EXCLUDED.channel, status = EXCLUDED.status`,
+			requestID, d.UserID, d.Channel, d.Status)
+	}
+	return s.pool.SendBatch(ctx, batch).Close()
+}
+
+// ListOpenHumanRequestDeliveries returns the delivery rows of still-open
+// requests: the channel inbound loop maps each row to a member whose chat may
+// answer the request.
+func (s *Store) ListOpenHumanRequestDeliveries(ctx context.Context) ([]HumanRequestDelivery, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT d.request_id, d.user_id, d.channel, d.status, d.created_at
+		 FROM human_request_delivery d
+		 JOIN human_request h ON h.id = d.request_id
+		 WHERE h.status IN ('pending','delivered')
+		 ORDER BY d.created_at, d.user_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []HumanRequestDelivery{}
+	for rows.Next() {
+		var d HumanRequestDelivery
+		if err := rows.Scan(&d.RequestID, &d.UserID, &d.Channel, &d.Status, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, d)
+	}
+	return result, rows.Err()
+}
+
+// supersedeDeliveries is the fan-out counterpart of closing a request: the
+// copies that nobody answered stop being answerable. Observability only —
+// open-request matching already excludes closed requests.
+func (s *Store) supersedeDeliveries(ctx context.Context, requestIDs ...string) {
+	if len(requestIDs) == 0 {
+		return
+	}
+	_, _ = s.pool.Exec(ctx,
+		`UPDATE human_request_delivery SET status = $2 WHERE request_id = ANY($1) AND status = 'delivered'`,
+		requestIDs, HumanDeliverySuperseded)
+}
+
 // AnswerHumanRequest closes a request with the human's response. Only
 // pending/delivered rows can be answered — a late answer after expiry is
-// recorded but does not resurrect the wait.
+// recorded but does not resurrect the wait. For team requests the first
+// answer wins: later answers find the row closed and change nothing.
 func (s *Store) AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (HumanRequest, error) {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE human_request
@@ -96,6 +163,10 @@ func (s *Store) AnswerHumanRequest(ctx context.Context, id, response, answeredBy
 		id, response, answeredBy)
 	if err != nil {
 		return HumanRequest{}, err
+	}
+	if tag.RowsAffected() > 0 {
+		// Team fan-out: the first answer wins, the other members' copies close.
+		s.supersedeDeliveries(ctx, id)
 	}
 	if tag.RowsAffected() == 0 {
 		// Either unknown id or already closed; distinguish for the caller.
@@ -116,6 +187,9 @@ func (s *Store) CancelHumanRequest(ctx context.Context, id, actor string) error 
 		id, actor)
 	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() > 0 {
+		s.supersedeDeliveries(ctx, id)
 	}
 	if tag.RowsAffected() == 0 {
 		if _, err := s.GetHumanRequest(ctx, id); err != nil {
@@ -146,7 +220,11 @@ func (s *Store) ExpireHumanRequests(ctx context.Context) ([]string, error) {
 		}
 		ids = append(ids, id)
 	}
-	return ids, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.supersedeDeliveries(ctx, ids...)
+	return ids, nil
 }
 
 // ExpireHumanRequestByID expires one request if it is still open. Used by
@@ -159,13 +237,14 @@ func (s *Store) ExpireHumanRequestByID(ctx context.Context, id string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	if tag.RowsAffected() == 0 {
-		if _, err := s.GetHumanRequest(ctx, id); err != nil {
-			return false, err
-		}
-		return false, nil // already closed by someone else
+	if tag.RowsAffected() > 0 {
+		s.supersedeDeliveries(ctx, id)
+		return true, nil
 	}
-	return true, nil
+	if _, err := s.GetHumanRequest(ctx, id); err != nil {
+		return false, err
+	}
+	return false, nil // already closed by someone else
 }
 
 // GetHumanRequest fetches one row by id (= ask operation id).

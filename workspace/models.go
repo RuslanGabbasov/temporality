@@ -108,6 +108,19 @@ type HumanRequest struct {
 	DeliveredAt         *time.Time `json:"delivered_at,omitempty"`
 	AnsweredAt          *time.Time `json:"answered_at,omitempty"`
 	ExpiresAt           *time.Time `json:"expires_at,omitempty"`
+	// Deliveries is the team fan-out (docs/inbound-messages.md §8): when the
+	// recipient is org:<unit-id>, one entry per active unit member the question
+	// was delivered to. Empty for single-recipient requests (resolved_user).
+	Deliveries []HumanRequestDelivery `json:"deliveries,omitempty"`
+}
+
+// HumanRequestDelivery is one member's copy of a team human request.
+type HumanRequestDelivery struct {
+	RequestID string    `json:"request_id"`
+	UserID    string    `json:"user_id"`
+	Channel   string    `json:"channel"`
+	Status    string    `json:"status"` // delivered | failed | superseded
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Valid timeout policies (docs/org-structure.md §33): what happens when a

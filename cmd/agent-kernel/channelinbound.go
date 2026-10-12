@@ -58,6 +58,7 @@ type channelInboundLoop struct {
 // satisfies it, tests provide fakes.
 type channelInboundStore interface {
 	ListHumanRequests(ctx context.Context, project, status, resolvedUser string, onlyOpen bool) ([]workspace.HumanRequest, error)
+	ListOpenHumanRequestDeliveries(ctx context.Context) ([]workspace.HumanRequestDelivery, error)
 	AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (workspace.HumanRequest, error)
 	CancelHumanRequest(ctx context.Context, id, actor string) error
 	ListUsers(ctx context.Context) ([]workspace.User, error)
@@ -173,8 +174,15 @@ func (l *channelInboundLoop) saveCursor(ctx context.Context) {
 // chat sets of their recipients and the sender-identity registry of every
 // enabled channel of this type. Only asks delivered through the channel
 // match: a reply in a chat answers the question that was asked there.
+// Team requests (org:<unit>, docs/inbound-messages.md §8) match through their
+// delivery rows: every member whose copy went out through this channel may
+// answer from their own chat — the first reply wins.
 func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, []agent.UserChats, []agent.UserSenderChannels, error) {
 	rows, err := l.store.ListHumanRequests(ctx, "", "", "", true)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	deliveryRows, err := l.store.ListOpenHumanRequestDeliveries(ctx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -196,10 +204,43 @@ func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, 
 		chatsByUser[user.ID] = entry
 		senders = append(senders, senderEntry)
 	}
+	// Team fan-out index: which requests have delivery rows at all, and which
+	// members received a copy through THIS channel (only their chats answer).
+	isTeamAsk := make(map[string]bool, len(deliveryRows))
+	membersOnChannel := make(map[string][]string, len(deliveryRows))
+	for _, delivery := range deliveryRows {
+		isTeamAsk[delivery.RequestID] = true
+		if delivery.Channel == l.driver.Type() && delivery.Status == workspace.HumanDeliveryDelivered {
+			membersOnChannel[delivery.RequestID] = append(membersOnChannel[delivery.RequestID], delivery.UserID)
+		}
+	}
 	asks := make([]agent.PendingAsk, 0, len(rows))
 	chats := make([]agent.UserChats, 0, len(rows))
 	seen := map[string]bool{}
 	for _, row := range rows {
+		if isTeamAsk[row.ID] {
+			// One ask per member copy: a reply from any member's chat answers the
+			// shared RequestID; MatchChannelReplies pairs messages oldest-first and
+			// stops at the first answer.
+			for _, member := range membersOnChannel[row.ID] {
+				entry, ok := chatsByUser[member]
+				if !ok || len(entry.Chats) == 0 {
+					continue
+				}
+				asks = append(asks, agent.PendingAsk{
+					RequestID: row.ID,
+					RunID:     row.RunID,
+					ProjectID: row.ProjectID,
+					UserID:    member,
+					CreatedAt: row.CreatedAt,
+				})
+				if !seen[member] {
+					seen[member] = true
+					chats = append(chats, entry)
+				}
+			}
+			continue
+		}
 		if row.Channel != l.driver.Type() || row.ResolvedUser == "" {
 			continue
 		}

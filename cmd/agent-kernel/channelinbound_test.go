@@ -21,15 +21,16 @@ import (
 
 // fakeInboundStore records what the loop routed.
 type fakeInboundStore struct {
-	mu        sync.Mutex
-	requests  []workspace.HumanRequest
-	users     []workspace.User
-	answered  map[string]string
-	cancelled []string
-	audits    []string
-	cursor    workspace.ChannelCursor
-	inbound   []workspace.InboundMessage
-	updates   []inboundUpdateRecord
+	mu         sync.Mutex
+	requests   []workspace.HumanRequest
+	deliveries []workspace.HumanRequestDelivery
+	users      []workspace.User
+	answered   map[string]string
+	cancelled  []string
+	audits     []string
+	cursor     workspace.ChannelCursor
+	inbound    []workspace.InboundMessage
+	updates    []inboundUpdateRecord
 }
 
 // inboundUpdateRecord is one observed UpdateInboundMessage call.
@@ -42,6 +43,12 @@ func (s *fakeInboundStore) ListHumanRequests(context.Context, string, string, st
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.requests, nil
+}
+
+func (s *fakeInboundStore) ListOpenHumanRequestDeliveries(context.Context) ([]workspace.HumanRequestDelivery, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.deliveries, nil
 }
 
 func (s *fakeInboundStore) AnswerHumanRequest(_ context.Context, id, response, _ string) (workspace.HumanRequest, error) {
@@ -330,6 +337,55 @@ func TestChannelInboundKeepsRowOpenWhenSignalFails(t *testing.T) {
 	}
 	if len(store.answered) != 0 || len(store.cancelled) != 0 {
 		t.Fatalf("row closed despite signal failure: %+v", store.answered)
+	}
+}
+
+// TestChannelInboundTeamAskMatchesAnyMember: a request with org: recipient and
+// delivery rows (docs/inbound-messages.md §8) is answerable from every
+// member's chat — including a member who is not resolved_user. Exactly one
+// answer routes (first wins, MatchChannelReplies pairs by request id).
+func TestChannelInboundTeamAskMatchesAnyMember(t *testing.T) {
+	askedAt := time.Now()
+	store := &fakeInboundStore{
+		requests: []workspace.HumanRequest{{
+			ID: "team-op", RunID: "run", ProjectID: "proj", Recipient: "org:core",
+			ResolvedUser: "u-head", Channel: "multi", Status: "delivered", Question: "Approve?",
+			CreatedAt: askedAt.Add(-time.Minute),
+		}},
+		deliveries: []workspace.HumanRequestDelivery{
+			{RequestID: "team-op", UserID: "u-head", Channel: "matrix", Status: "delivered", CreatedAt: askedAt.Add(-time.Minute)},
+			{RequestID: "team-op", UserID: "u-qa", Channel: "matrix", Status: "delivered", CreatedAt: askedAt.Add(-time.Minute)},
+			{RequestID: "team-op", UserID: "u-web", Channel: "web", Status: "delivered", CreatedAt: askedAt.Add(-time.Minute)},
+		},
+		users: []workspace.User{
+			{ID: "u-head", Name: "Head", Channels: []workspace.UserChannel{{Type: "matrix", Address: "!rhead:hs", Enabled: true}}},
+			{ID: "u-qa", Name: "QA", Channels: []workspace.UserChannel{{Type: "matrix", Address: "!rqa:hs", Enabled: true}}},
+			{ID: "u-web", Name: "WebOnly"},
+		},
+	}
+	// Only the QA member replies, from their own room: the question never went
+	// to resolved_user's chat in this scenario's sync, yet the team ask must
+	// match — that is the fan-out contract.
+	var sent []string
+	server := matrixIntakeHomeServer(t, "!rqa:hs", []any{
+		map[string]any{"type": "m.room.message", "sender": "@bot:hs", "origin_server_ts": askedAt.Add(-2 * time.Minute).UnixMilli(), "content": map[string]any{"msgtype": "m.text", "body": "Temporality: an agent is waiting"}},
+		matrixTextEvent("$q1", "!rqa:hs", "@qa:hs", "approved by qa"),
+	}, &sent)
+	sig := &recordedSignal{}
+	loop := newInboundLoop(t, server, store, sig)
+
+	if _, err := loop.cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if sig.count() != 1 {
+		t.Fatalf("exactly one answer must route, got %d", sig.count())
+	}
+	approval := sig.calls[0]
+	if approval.OperationID != "team-op" || approval.ActorID != "u-qa" || approval.Response != "approved by qa" {
+		t.Fatalf("unexpected approval: %+v", approval)
+	}
+	if store.answered["team-op"] != "approved by qa" {
+		t.Fatalf("row not answered: %+v", store.answered)
 	}
 }
 

@@ -19,11 +19,12 @@ import (
 // orgUnitLite is the org tree slice the tool needs: identity and placement.
 // The full policy surface of a unit stays in the workspace API.
 type orgUnitLite struct {
-	ID       string `json:"id"`
-	ParentID string `json:"parent_id"`
-	Kind     string `json:"kind"`
-	Name     string `json:"name"`
-	Path     string `json:"path"`
+	ID         string `json:"id"`
+	ParentID   string `json:"parent_id"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	HeadUserID string `json:"head_user_id"`
 }
 
 // ancestors mirrors workspace.OrgUnit.Ancestors: the unit itself plus every
@@ -173,9 +174,14 @@ func renderEscalation(users []WorkspaceUser, units []orgUnitLite, forUser string
 }
 
 // resolveEscalation is the pure escalation walk, unit-testable without HTTP:
-// find the user (by id or name), walk ancestor levels bottom-up skipping the
-// user's own unit, and return the first level with active users. Admins are
-// the installation-wide fallback; an empty result means nobody is reachable.
+// find the user (by id or name), then walk the chain bottom-up. Two passes:
+//  1. explicit heads (docs/inbound-messages.md §7) — the nearest unit (own
+//     included) with an active, non-self head is the manager;
+//  2. fallback: the nearest ancestor level with active users (proximity —
+//     the pre-head heuristic, still the truth for trees without heads).
+//
+// Admins are the installation-wide fallback; an empty result means nobody is
+// reachable.
 func resolveEscalation(users []WorkspaceUser, units []orgUnitLite, forUser string) ([]WorkspaceUser, string, string) {
 	forUser = strings.TrimSpace(forUser)
 	byID := map[string]WorkspaceUser{}
@@ -215,11 +221,23 @@ func resolveEscalation(users []WorkspaceUser, units []orgUnitLite, forUser strin
 		return nil, "", "user's org unit no longer exists and no active admins to escalate to"
 	}
 
-	// Bottom-up: the closest ancestor level with active people is the
-	// "manager" — org trees do not always encode an explicit manager edge,
-	// so proximity is the honest proxy. The candidate pool is computed once.
-	candidates := activeExcept(users, target.ID, rolePriority)
 	chain := unit.ancestors()
+	// Pass 1: the nearest explicit head up the chain (own unit included). A
+	// head that is the target themselves (a head escalating) or inactive does
+	// not count — keep walking up.
+	for i := len(chain) - 1; i >= 0; i-- {
+		level := byUnit[chain[i]]
+		if level.HeadUserID == "" || level.HeadUserID == target.ID {
+			continue
+		}
+		if head, ok := byID[level.HeadUserID]; ok && head.Active {
+			return []WorkspaceUser{head}, level.ID, "head of " + level.Name + " (nearest explicit manager up the org tree)"
+		}
+	}
+	// Pass 2: proximity — the closest ancestor level (excluding the user's
+	// own) with active people. Org trees without heads still get an honest
+	// proxy; the candidate pool is computed once.
+	candidates := activeExcept(users, target.ID, rolePriority)
 	for i := len(chain) - 2; i >= 0; i-- {
 		level := chain[i]
 		if inUnit := filterUnit(candidates, level); len(inUnit) > 0 {
@@ -230,6 +248,27 @@ func resolveEscalation(users []WorkspaceUser, units []orgUnitLite, forUser strin
 		return admins, "", "no active users in org ancestors; installation admins are the escalation target"
 	}
 	return nil, "", "no active users above the user's unit and no active admins"
+}
+
+// effectiveHead resolves the unit's effective head (docs/inbound-messages.md
+// §7): the nearest unit in the chain with a head assigned, walking bottom-up
+// (own unit first). Pure: the same units slice always yields the same answer.
+func effectiveHead(units []orgUnitLite, unitID string) (headUserID, headUnitID string, ok bool) {
+	byUnit := map[string]orgUnitLite{}
+	for _, unit := range units {
+		byUnit[unit.ID] = unit
+	}
+	unit, exists := byUnit[unitID]
+	if !exists {
+		return "", "", false
+	}
+	chain := unit.ancestors()
+	for i := len(chain) - 1; i >= 0; i-- {
+		if level, exists := byUnit[chain[i]]; exists && level.HeadUserID != "" {
+			return level.HeadUserID, level.ID, true
+		}
+	}
+	return "", "", false
 }
 
 // rolePriority orders escalation candidates: admin, operator, writer, reader,

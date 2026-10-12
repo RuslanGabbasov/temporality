@@ -1302,7 +1302,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := workflow.ExecuteActivity(notifyCtx, ActivityNotifyChannel, notifyReq).Get(ctx, &delivery); err != nil {
 					delivery = NotificationDelivery{Recipient: recipient, Channel: "web", Status: "failed", Detail: boundedFailureDetail(err)}
 				}
-				if err := emit(activityCtx, state, "notification.sent", map[string]any{"operation_id": operationID, "recipient": delivery.Recipient, "channel": delivery.Channel, "status": delivery.Status, "detail": delivery.Detail}); err != nil {
+				notificationSent := map[string]any{"operation_id": operationID, "recipient": delivery.Recipient, "channel": delivery.Channel, "status": delivery.Status, "detail": delivery.Detail}
+				if len(delivery.DeliveredTo) > 0 {
+					notificationSent["delivered_to"] = delivery.DeliveredTo
+				}
+				if err := emit(activityCtx, state, "notification.sent", notificationSent); err != nil {
 					return result, err
 				}
 				// §30: the execution identity may not address this user. The tool
@@ -1344,7 +1348,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						if err := workflow.ExecuteActivity(notifyCtx, ActivityNotifyChannel, reask).Get(ctx, &redelivery); err != nil {
 							redelivery = NotificationDelivery{Recipient: roundRecipient, Channel: "web", Status: "failed", Detail: boundedFailureDetail(err)}
 						}
-						if err := emit(activityCtx, state, "notification.sent", map[string]any{"operation_id": operationID, "recipient": redelivery.Recipient, "channel": redelivery.Channel, "status": redelivery.Status, "detail": redelivery.Detail, "round": round + 1}); err != nil {
+						reaskSent := map[string]any{"operation_id": operationID, "recipient": redelivery.Recipient, "channel": redelivery.Channel, "status": redelivery.Status, "detail": redelivery.Detail, "round": round + 1}
+						if len(redelivery.DeliveredTo) > 0 {
+							reaskSent["delivered_to"] = redelivery.DeliveredTo
+						}
+						if err := emit(activityCtx, state, "notification.sent", reaskSent); err != nil {
 							return result, err
 						}
 					}
