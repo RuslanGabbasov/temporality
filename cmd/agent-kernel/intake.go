@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,7 +63,7 @@ Always follow this order:
 
 3. Then call start_task with a self-contained title and prompt: the executing agent sees only what you write. Translate natural instructions into explicit steps and checkpoints (e.g. "after approval from <person> pass the result to <team>"). Preserve the original wording of the request inside the prompt.
 
-4. For status or cancel: explain politely what is and is not possible from the channel yet (no tool exists for it today); for chatter: a short friendly reply, no run.
+4. For status: call run_status and summarize the sender's tasks (status and latest answer per run) — never start new work for a progress question. For cancel: list the sender's runs via run_status when unclear which one is meant, then cancel_run with the exact run_id; confirm with the user via ask_human only when several runs are plausible. For chatter: a short friendly reply, no run.
 
 Rules:
 - The message body in the prompt is the only source of user intent; never invent project names, people or deadlines.
@@ -71,11 +72,13 @@ Rules:
 - After start_task succeeds, tell the user which project the task landed in and its title, briefly.`
 
 // intakeTools is the closed tool surface of the intake agent: classification,
-// search, clarification and task creation. No sandbox, no delegation, no
-// generic tools — the intake dialog never needs them.
+// search, clarification, task creation and the sender's own run lifecycle.
+// No sandbox, no delegation, no generic tools — the intake dialog never needs
+// them.
 var intakeTools = []string{
 	"ask_human", "human_contacts", "intake_decide",
 	"search_projects", "search_org_units", "start_task",
+	"run_status", "cancel_run",
 }
 
 // bootstrapIntake creates the system project and agent once per installation.
@@ -274,6 +277,117 @@ func intakeEnabledFromEnv() bool {
 // for every authorization decision comes from the message row — the sender —
 // never from the calling token, so a task lands with the sender's rights.
 func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intakeRunner, quotas *quota.Limiter, emit intakeEmitFunc) {
+	// Status of the sender's earlier work (docs/inbound-messages.md §4.2):
+	// every routed message with its target run. run_status behind the intake
+	// dialog — "what happened to my estimate?" must not spawn a new run.
+	mux.HandleFunc("GET /v1/intake/runs", func(w http.ResponseWriter, req *http.Request) {
+		if !gate.Allow(w, req, controlplane.RoleOperator) {
+			return
+		}
+		sender := strings.TrimSpace(req.URL.Query().Get("sender"))
+		if sender == "" {
+			writeError(w, 422, errors.New("sender is required"))
+			return
+		}
+		limit := 0
+		if raw := req.URL.Query().Get("limit"); raw != "" {
+			if parsed, pErr := strconv.Atoi(raw); pErr == nil {
+				limit = parsed
+			}
+		}
+		messages, err := r.ws.ListRoutedInboundMessages(req.Context(), sender, limit)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		entries := make([]map[string]any, 0, len(messages))
+		for _, row := range messages {
+			entry := map[string]any{
+				"message_id": row.ID,
+				"run_id":     row.TargetRunID,
+				"project_id": row.ProjectID,
+				"task_id":    intakeTaskID(row),
+				"asked_at":   row.CreatedAt,
+			}
+			if run, gErr := r.ws.GetRun(req.Context(), row.TargetRunID); gErr == nil {
+				entry["run_status"] = run.Status
+				if run.Answer != "" {
+					entry["answer"] = truncateForLog(run.Answer, 500)
+				}
+				if run.Error != "" {
+					entry["error"] = truncateForLog(run.Error, 300)
+				}
+			} else {
+				entry["run_status"] = "unknown"
+			}
+			entries = append(entries, entry)
+		}
+		writeJSON(w, 200, map[string]any{"runs": entries})
+	})
+	// Cancel a run the sender's message produced (docs/inbound-messages.md §10):
+	// the target run must belong to one of the sender's routed messages — the
+	// channel may cancel own work, not somebody else's.
+	mux.HandleFunc("POST /v1/intake/runs/{runID}/cancel", func(w http.ResponseWriter, req *http.Request) {
+		if !gate.Allow(w, req, controlplane.RoleOperator) {
+			return
+		}
+		var body struct {
+			RunID string `json:"run_id"`
+		}
+		if err := decodeJSON(w, req, &body); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		targetRun := strings.TrimSpace(body.RunID)
+		if targetRun == "" {
+			writeError(w, 422, errors.New("run_id is required"))
+			return
+		}
+		row, err := r.ws.GetInboundMessageByIntakeRun(req.Context(), req.PathValue("runID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("no inbound message for this run"))
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if row.SenderUserID == "" {
+			writeError(w, 409, errors.New("message has no identified sender"))
+			return
+		}
+		// Ownership: the run must be what one of the sender's messages produced.
+		owned, err := r.ws.ListRoutedInboundMessages(req.Context(), row.SenderUserID, 100)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		projectID := ""
+		for _, candidate := range owned {
+			if candidate.TargetRunID == targetRun {
+				projectID = candidate.ProjectID
+				break
+			}
+		}
+		if projectID == "" {
+			writeError(w, 403, fmt.Errorf("run %q was not started from this sender's messages", targetRun))
+			return
+		}
+		if err := r.temporal.CancelWorkflow(req.Context(), workflowIDFor(r.sourceID, projectID, targetRun), ""); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		_ = r.ws.UpdateRunStatus(req.Context(), targetRun, "cancelled", "", 0, "cancelled by sender from channel")
+		if emit != nil {
+			emit(req.Context(), "intake.cancelled", inboundMessageToAgent(row), row.SenderUserID, map[string]any{
+				"target_run_id": targetRun, "project_id": projectID,
+			})
+		}
+		_ = r.ws.RecordAccessAudit(req.Context(), row.SenderUserID, workspace.AuditIntakeCancelled, "run", targetRun, map[string]any{
+			"project": projectID, "message": row.ID,
+		})
+		writeJSON(w, 200, map[string]string{"run_id": targetRun, "status": "cancel_requested"})
+	})
 	// Projects visible to the message sender: search_projects behind the
 	// intake dialog. Query is a case-insensitive substring over id and name.
 	mux.HandleFunc("GET /v1/intake/projects", func(w http.ResponseWriter, req *http.Request) {

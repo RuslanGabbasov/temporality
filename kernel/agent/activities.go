@@ -494,6 +494,10 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleIntakeStartTask(ctx, request)
 	case "intake_decide":
 		return a.handleIntakeDecide(ctx, request)
+	case "run_status":
+		return a.handleIntakeRunStatus(ctx, request)
+	case "cancel_run":
+		return a.handleIntakeCancelRun(ctx, request)
 	default:
 		if a.MCP != nil && a.MCP.HasTool(request.Name) {
 			if faultAfterEffect(request.RunID, request.Name, request.OperationID) {
@@ -714,6 +718,49 @@ func (a *Activities) handleIntakeStartTask(ctx context.Context, request ToolRequ
 		return ToolResult{Content: fmt.Sprintf("error: start_task failed (HTTP %d): %s", status, truncate(body, 400))}, nil
 	}
 	return ToolResult{Content: "Task started: " + body}, nil
+}
+
+// handleIntakeRunStatus answers progress questions: the sender's earlier
+// routed messages with their run outcomes. The sender is the run actor —
+// the intake run always runs as the identified sender (docs §10).
+func (a *Activities) handleIntakeRunStatus(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	if request.ActorID == "" {
+		return ToolResult{Content: "error: sender is not set for this run"}, nil
+	}
+	limit := 10
+	if requested, ok := numericArg(request.Arguments["limit"]); ok && requested > 0 && requested <= 50 {
+		limit = int(requested)
+	}
+	endpoint := fmt.Sprintf("%s/v1/intake/runs?sender=%s&limit=%d", a.WorkspaceURL, url.QueryEscape(request.ActorID), limit)
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: run_status failed (HTTP %d): %s", status, truncate(body, 400))}, nil
+	}
+	return ToolResult{Content: compactJSON(body, 6000)}, nil
+}
+
+// handleIntakeCancelRun stops a sender-owned run; the endpoint re-checks
+// ownership against the sender's routed messages (docs §10).
+func (a *Activities) handleIntakeCancelRun(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	if request.RunID == "" {
+		return ToolResult{Content: "error: run id is not set"}, nil
+	}
+	targetRun, _ := request.Arguments["run_id"].(string)
+	if strings.TrimSpace(targetRun) == "" {
+		return ToolResult{Content: "error: run_id is required (take it from run_status)"}, nil
+	}
+	endpoint := fmt.Sprintf("%s/v1/intake/runs/%s/cancel", a.WorkspaceURL, url.PathEscape(request.RunID))
+	body, status, err := a.workspaceDo(ctx, http.MethodPost, endpoint, map[string]any{"run_id": targetRun})
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: cancel_run failed (HTTP %d): %s", status, truncate(body, 400))}, nil
+	}
+	return ToolResult{Content: "Cancel requested: " + body}, nil
 }
 
 func (a *Activities) handleIntakeDecide(ctx context.Context, request ToolRequest) (ToolResult, error) {

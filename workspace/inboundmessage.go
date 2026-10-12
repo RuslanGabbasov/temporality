@@ -191,6 +191,35 @@ func itoa(n int) string {
 	return itoa(n/10) + string(rune('0'+n%10))
 }
 
+// ListRoutedInboundMessages returns the messages of one sender that produced
+// runs, newest first (docs/inbound-messages.md §4.2: run_status answers "what
+// happened to my tasks" — only routed rows have a target run to report).
+func (s *Store) ListRoutedInboundMessages(ctx context.Context, senderUserID string, limit int) ([]InboundMessage, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+inboundMessageColumns+` FROM workspace_inbound_message
+		 WHERE sender_user_id = $1 AND target_run_id <> '' AND status = 'routed'
+		 ORDER BY created_at DESC LIMIT $2`, senderUserID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []InboundMessage{}
+	for rows.Next() {
+		m, err := scanInboundMessage(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, m)
+	}
+	return result, rows.Err()
+}
+
 // ExpireStaleInboundMessages marks still-unrouted messages older than ttl as
 // expired (docs/inbound-messages.md §6.1: the clarification timeout ends the
 // intake politely). Called lazily from the list endpoint.

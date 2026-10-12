@@ -131,3 +131,110 @@ func TestIntakeStartTaskPostsPayloadAndReportsAPIErrors(t *testing.T) {
 		t.Fatalf("expected API error surfaced, got %q", result.Content)
 	}
 }
+
+func TestIntakeRunStatusSendsSenderAndCapsLimit(t *testing.T) {
+	var gotSender, gotLimit, gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotSender = r.URL.Query().Get("sender")
+		gotLimit = r.URL.Query().Get("limit")
+		_ = json.NewEncoder(w).Encode(map[string]any{"runs": []any{
+			map[string]any{"run_id": "inbound-1-20260101", "run_status": "completed", "answer": "готово"},
+		}})
+	}))
+	defer server.Close()
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+
+	result, err := activities.RunTool(context.Background(), ToolRequest{
+		RunID: "intake-m1", Project: "intake", ActorID: "u1", Name: "run_status",
+		Arguments: map[string]any{"limit": float64(5)},
+	})
+	if err != nil {
+		t.Fatalf("run_status: %v", err)
+	}
+	if gotPath != "/v1/intake/runs" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotSender != "u1" || gotLimit != "5" {
+		t.Fatalf("sender=%q limit=%q", gotSender, gotLimit)
+	}
+	if !strings.Contains(result.Content, "inbound-1-20260101") {
+		t.Fatalf("unexpected content: %q", result.Content)
+	}
+
+	// No actor → error, never a sender-less listing of someone else's runs.
+	result, err = activities.RunTool(context.Background(), ToolRequest{
+		RunID: "r", Name: "run_status", Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("run_status without actor: %v", err)
+	}
+	if !strings.Contains(result.Content, "error:") {
+		t.Fatalf("expected error without actor, got %q", result.Content)
+	}
+}
+
+func TestIntakeCancelRunPostsRunIDAndSurfacesOwnershipError(t *testing.T) {
+	var posted map[string]any
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s", r.Method)
+		}
+		if strings.HasSuffix(r.URL.Path, "/cancel") {
+			_ = json.NewDecoder(r.Body).Decode(&posted)
+			_ = json.NewEncoder(w).Encode(map[string]any{"run_id": "inbound-1-20260101", "status": "cancel_requested"})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+
+	result, err := activities.RunTool(context.Background(), ToolRequest{
+		RunID: "intake-m1", Project: "intake", ActorID: "u1", Name: "cancel_run",
+		Arguments: map[string]any{"run_id": "inbound-1-20260101"},
+	})
+	if err != nil {
+		t.Fatalf("cancel_run: %v", err)
+	}
+	if want := "/v1/intake/runs/intake-m1/cancel"; gotPath != want {
+		t.Fatalf("path = %q, want %q", gotPath, want)
+	}
+	if posted["run_id"] != "inbound-1-20260101" {
+		t.Fatalf("payload: %+v", posted)
+	}
+	if !strings.Contains(result.Content, "cancel_requested") {
+		t.Fatalf("unexpected content: %q", result.Content)
+	}
+
+	// A 403 ownership rejection must reach the model — it changes the reply.
+	errorServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"run was not started from this sender's messages"}`, http.StatusForbidden)
+	}))
+	defer errorServer.Close()
+	activities.WorkspaceURL = errorServer.URL
+	activities.HTTP = errorServer.Client()
+	result, err = activities.RunTool(context.Background(), ToolRequest{
+		RunID: "intake-m1", Name: "cancel_run",
+		Arguments: map[string]any{"run_id": "someone-elses-run"},
+	})
+	if err != nil {
+		t.Fatalf("cancel_run error case: %v", err)
+	}
+	if !strings.Contains(result.Content, "error:") || !strings.Contains(result.Content, "403") {
+		t.Fatalf("expected API error surfaced, got %q", result.Content)
+	}
+
+	// Missing run_id fails locally before any HTTP call.
+	result, err = activities.RunTool(context.Background(), ToolRequest{
+		RunID: "intake-m1", Name: "cancel_run", Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("cancel_run missing arg: %v", err)
+	}
+	if !strings.Contains(result.Content, "error:") {
+		t.Fatalf("expected local validation error, got %q", result.Content)
+	}
+}

@@ -63,6 +63,7 @@ const (
 	AuditSecretValueSet       = "secret.value_set"
 	AuditIntakeRouted         = "intake.routed"
 	AuditIntakeRejected       = "intake.rejected"
+	AuditIntakeCancelled      = "intake.cancelled"
 )
 
 // RecordAccessAudit appends one event. Nil details is stored as {}.
