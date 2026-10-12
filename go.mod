@@ -8,6 +8,8 @@ require (
 	github.com/stretchr/testify v1.10.0
 	go.temporal.io/api v1.63.0
 	go.temporal.io/sdk v1.46.0
+	golang.org/x/crypto v0.51.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -30,7 +32,6 @@ require (
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
@@ -41,5 +42,4 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
 	google.golang.org/grpc v1.79.3 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

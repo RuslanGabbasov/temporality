@@ -15,12 +15,26 @@ import (
 // and must not contain — so evaluation stays reproducible and cheap. Richer
 // assertions (scripts, trajectory checks) are later phases.
 
-// EvaluationCase is one suite case: a task input plus expected answer patterns.
+// EvaluationCase is one suite case: a task input plus expected answer
+// patterns. The judge extension (specs/quality-loop.md §6, M4) adds a third
+// check class next to the patterns: Check selects the verification mode,
+// JudgePrompt carries the scoring instruction (empty = system default) and
+// JudgeThreshold (0-100) gates judge-scored cases. An absent Check means
+// "patterns", so pre-judge suites keep their exact behaviour.
 type EvaluationCase struct {
 	Name           string   `json:"name"`
 	Input          string   `json:"input"`
 	MustContain    []string `json:"must_contain,omitempty"`
 	MustNotContain []string `json:"must_not_contain,omitempty"`
+	Check          string   `json:"check,omitempty"`           // patterns (default) | judge | patterns+judge
+	JudgePrompt    string   `json:"judge_prompt,omitempty"`    // scoring instruction; empty = system default
+	JudgeThreshold *int     `json:"judge_threshold,omitempty"` // 0-100, required for judge checks
+	// ExpectedOutput is the golden answer (specs/quality-loop.md §4.4): the
+	// harvested run answer or the human's correction, stored when a candidate
+	// is accepted; empty for pattern-only cases. Round-trips through the
+	// existing PUT suite endpoint (§13A: owners edit it by hand); the
+	// patterns runner ignores it.
+	ExpectedOutput string `json:"expected_output,omitempty"`
 }
 
 // EvaluationSuite is the stored suite of a skill (one per skill, MVP).
@@ -30,13 +44,22 @@ type EvaluationSuite struct {
 	UpdatedAt time.Time        `json:"updated_at"`
 }
 
-// EvaluationCaseResult is the outcome of one case in one run.
+// EvaluationCaseResult is the outcome of one case in one run. The judge
+// fields (specs/quality-loop.md §6, M4) are populated for judge-scored
+// cases; Error/Cause mark a case that ended in a model or judge failure —
+// the run-level verdict algorithm treats any such case as run error, never
+// pass (§5.2).
 type EvaluationCaseResult struct {
-	Name       string   `json:"name"`
-	Passed     bool     `json:"passed"`
-	Answer     string   `json:"answer,omitempty"`
-	Missed     []string `json:"missed,omitempty"`     // must_contain entries absent from the answer
-	Unexpected []string `json:"unexpected,omitempty"` // must_not_contain entries found in the answer
+	Name           string   `json:"name"`
+	Passed         bool     `json:"passed"`
+	Answer         string   `json:"answer,omitempty"`
+	Missed         []string `json:"missed,omitempty"`          // must_contain entries absent from the answer
+	Unexpected     []string `json:"unexpected,omitempty"`      // must_not_contain entries found in the answer
+	Check          string   `json:"check,omitempty"`           // the check class that decided Passed
+	JudgeScore     *int     `json:"judge_score,omitempty"`     // judge verdict 0-100, when the judge ran
+	JudgeRationale string   `json:"judge_rationale,omitempty"` // judge explanation, <=500 chars
+	Error          string   `json:"error,omitempty"`           // failure text (model call or judge)
+	Cause          string   `json:"cause,omitempty"`           // machine cause: model_timeout | model_error | judge_invalid_json | judge_error | judge_not_configured
 }
 
 // EvaluationRun is one executed suite pass over a skill version.

@@ -203,6 +203,10 @@ func main() {
 		log.Error("migrate workspace v49", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000050_human_request_agent_version.up.sql"); err != nil {
+		log.Error("migrate workspace v50", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -667,7 +671,13 @@ func main() {
 				response = approval.Reason
 			}
 			if closeStatus == "answered" {
-				_, closeErr = ws.AnswerHumanRequest(r.Context(), approval.OperationID, response, actor)
+				row, cerr := ws.AnswerHumanRequest(r.Context(), approval.OperationID, response, actor)
+				closeErr = cerr
+				if cerr == nil {
+					// Terminal transition with a verdict → hitl.verdict.recorded
+					// (specs/quality-loop.md §9) through the durable outbox.
+					emitHitlVerdict(r.Context(), events, row)
+				}
 			} else {
 				closeErr = ws.CancelHumanRequest(r.Context(), approval.OperationID, actor)
 			}
@@ -1716,6 +1726,53 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"runs": runs})
+	})
+	// HITL verdicts of one run (specs/quality-loop.md §3, §8.1): every human
+	// decision on the run — ask_human answers plus human approvals and manual
+	// reconciliations — projected with a type, an author and the agent version
+	// pinned at ask time. Reader role, like the evaluation endpoints.
+	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/runs/{runID}/verdicts", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		agentID, runID := r.PathValue("agentID"), r.PathValue("runID")
+		a, err := ws.GetAgent(r.Context(), agentID)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("agent not found"))
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(a.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		run, err := ws.GetRun(r.Context(), runID)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("run not found"))
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if run.AgentID != "" && run.AgentID != agentID {
+			writeError(w, 404, errors.New("run not found"))
+			return
+		}
+		verdicts, err := ws.RunVerdicts(r.Context(), run.ProjectID, run.RunID)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{
+			"run_id":        runID,
+			"agent_version": run.AgentVersion,
+			"outcome":       workspace.ClassifyRunOutcome(run.Status, verdicts),
+			"verdicts":      verdicts,
+		})
 	})
 	// Evolution proposals (docs/plan-evaluable-agent.md §2.2 stage 10): agents
 	// and humans propose definition changes with full provenance; only a human
@@ -4188,10 +4245,21 @@ func main() {
 		if req.Status == "" {
 			req.Status = workspace.HumanStatusPending
 		}
+		// Pin the agent definition version at ask time (specs/quality-loop.md
+		// §3.1): the verdict attributes to the snapshot that produced the
+		// question. A client-supplied value is never trusted; an unresolvable
+		// agent keeps 0 = unknown and stays out of per-version metrics.
+		req.AgentVersion = 0
+		if req.AgentID != "" {
+			if a, aErr := ws.GetAgent(r.Context(), req.AgentID); aErr == nil {
+				req.AgentVersion = a.DefinitionVersion
+			}
+		}
 		if err := ws.CreateHumanRequest(r.Context(), &req); err != nil {
 			writeError(w, 500, err)
 			return
 		}
+		emitHitlVerdict(r.Context(), events, req)
 		if req.Status == workspace.HumanStatusDelivered {
 			if err := ws.DeliverHumanRequest(r.Context(), req.ID, req.ResolvedUser, req.Status, req.Channel, ""); err != nil && !errors.Is(err, workspace.ErrNotFound) {
 				log.Warn("mark human request delivered", "id", req.ID, "error", err)
@@ -4228,9 +4296,14 @@ func main() {
 		var err error
 		switch body.Status {
 		case "answered":
-			_, err = ws.AnswerHumanRequest(r.Context(), id, body.Response, body.ActorID)
-			if err == nil {
+			row, aErr := ws.AnswerHumanRequest(r.Context(), id, body.Response, body.ActorID)
+			if aErr == nil {
+				// Terminal transition with a verdict → hitl.verdict.recorded
+				// (specs/quality-loop.md §9) through the durable outbox.
+				emitHitlVerdict(r.Context(), events, row)
 				err = ws.RecordAccessAudit(r.Context(), body.ActorID, workspace.AuditHumanAnswered, "human_request", id, map[string]any{"response": body.Response})
+			} else {
+				err = aErr
 			}
 		case "cancelled":
 			err = ws.CancelHumanRequest(r.Context(), id, body.ActorID)
@@ -4645,7 +4718,12 @@ func main() {
 		writeJSON(w, 200, map[string]any{"deleted": true})
 	})
 
+	// Quality dashboard and version diffs (specs/quality-loop.md §7, M5).
+	RegisterM5Routes(mux, gate, ws, events, visibleUnits)
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
+	// M2 golden eval-case candidates (specs/quality-loop.md §4): review
+	// endpoints, candidate events and the harvesting/reaping background job.
+	RegisterM2Routes(ctx, mux, ws, gate, events, temporalClient, activities.SourceID, log)
 	// Inbound matrix replies: the delivery transport is two-way — room replies
 	// route back into paused runs through the same approval signal the web
 	// inbox uses. Idles (30s re-check) while matrix is not configured.
@@ -4658,6 +4736,7 @@ func main() {
 		signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
 			return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
 		},
+		events: events,
 	}
 	go matrixInbound.run(ctx)
 	// The gate wraps everything except the password-login route: an
@@ -5878,6 +5957,45 @@ func emitAgentDefinitionEvent(ctx context.Context, observationURL, token, eventT
 	}
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, response.Body)
+}
+
+// hitlOutbox is the durable-outbox surface the verdict emission needs;
+// *outbox.Outbox satisfies it and tests provide fakes.
+type hitlOutbox interface {
+	Enqueue(context.Context, observation.Event) error
+}
+
+// emitHitlVerdict records hitl.verdict.recorded (specs/quality-loop.md §9)
+// on every terminal human_request transition that carries a verdict.
+// Best-effort: the human_request row stays the source of truth. Event ids
+// include UnixNano (§8 idempotency note), so journal duplicates are impossible.
+func emitHitlVerdict(ctx context.Context, events hitlOutbox, req workspace.HumanRequest) {
+	verdictType := workspace.Verdict(req)
+	if verdictType == "" || events == nil {
+		return
+	}
+	item := observation.Event{
+		Schema:     observation.Schema,
+		EventID:    fmt.Sprintf("hitl-verdict/%s/%d", req.ID, time.Now().UnixNano()),
+		OccurredAt: time.Now().UTC(),
+		Source:     observation.Source{ID: "workspace", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{
+			Project: req.ProjectID, Run: req.RunID,
+			Actor: observation.Actor{ID: req.AnsweredBy, Type: "human"},
+		},
+		Type: "hitl.verdict.recorded",
+		Data: map[string]any{
+			"run_id":        req.RunID,
+			"agent_id":      req.AgentID,
+			"agent_version": req.AgentVersion,
+			"type":          verdictType,
+			"source":        workspace.VerdictSourceHumanRequest,
+			"answered_by":   req.AnsweredBy,
+		},
+	}
+	if err := events.Enqueue(ctx, item); err != nil {
+		slog.Warn("emit hitl verdict", "operation", req.ID, "error", err)
+	}
 }
 
 func env(name, fallback string) string {

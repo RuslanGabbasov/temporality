@@ -37,6 +37,9 @@ type matrixInboundLoop struct {
 	// signal routes one approval into a waiting workflow; production wraps
 	// temporal SignalWorkflow, tests record calls.
 	signal func(ctx context.Context, workflowID string, approval agent.Approval) error
+	// events receives hitl.verdict.recorded emissions; nil disables them
+	// (tests run without an outbox).
+	events hitlOutbox
 
 	since     string // sync cursor; empty → initial sync (bounded history replay)
 	botKey    string // settings fingerprint the cached botUserID belongs to
@@ -267,7 +270,11 @@ func (m *matrixInboundLoop) routeReply(ctx context.Context, reply agent.MatrixRe
 		if err := m.store.CancelHumanRequest(ctx, reply.Ask.RequestID, actor); err != nil && !errors.Is(err, workspace.ErrNotFound) {
 			m.log.Warn("matrix reply cancel request", "operation", reply.Ask.RequestID, "error", err)
 		}
-	} else if _, err := m.store.AnswerHumanRequest(ctx, reply.Ask.RequestID, response, actor); err != nil && !errors.Is(err, workspace.ErrNotFound) {
+	} else if row, err := m.store.AnswerHumanRequest(ctx, reply.Ask.RequestID, response, actor); err == nil {
+		// Terminal transition with a verdict → hitl.verdict.recorded
+		// (specs/quality-loop.md §9) through the durable outbox.
+		emitHitlVerdict(ctx, m.events, row)
+	} else if !errors.Is(err, workspace.ErrNotFound) {
 		m.log.Warn("matrix reply answer request", "operation", reply.Ask.RequestID, "error", err)
 	}
 	action := workspace.AuditHumanAnswered

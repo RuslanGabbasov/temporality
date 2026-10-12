@@ -88,10 +88,15 @@ const (
 // back into the run. The id is the ask operation id, so the approval
 // endpoint closes the row atomically.
 type HumanRequest struct {
-	ID                  string     `json:"id"`
-	RunID               string     `json:"run_id"`
-	ProjectID           string     `json:"project_id"`
-	AgentID             string     `json:"agent_id,omitempty"`
+	ID        string `json:"id"`
+	RunID     string `json:"run_id"`
+	ProjectID string `json:"project_id"`
+	AgentID   string `json:"agent_id,omitempty"`
+	// AgentVersion pins the agent definition snapshot the ask was created
+	// under (specs/quality-loop.md §3): filled from workspace_agent.
+	// definition_version at creation, immutable afterwards. 0 = unknown
+	// (rows predating the column); such rows never enter per-version metrics.
+	AgentVersion        int        `json:"agent_version,omitempty"`
 	Recipient           string     `json:"recipient,omitempty"`
 	ResolvedUser        string     `json:"resolved_user,omitempty"`
 	Question            string     `json:"question"`

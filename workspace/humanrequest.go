@@ -14,7 +14,7 @@ import (
 // notification activity at ask_human time, closed by the approval endpoint
 // (answered/cancelled) or by the expiry sweep/activity (expired).
 
-const humanRequestColumns = `id, run_id, project_id, agent_id, recipient, resolved_user, question, context,
+const humanRequestColumns = `id, run_id, project_id, agent_id, agent_version, recipient, resolved_user, question, context,
 options, status, channel, response, answered_by, timeout_seconds, timeout_policy,
 execution_identity_id, created_at, delivered_at, answered_at, expires_at`
 
@@ -22,7 +22,7 @@ func scanHumanRequest(scanner interface{ Scan(dest ...any) error }) (HumanReques
 	var r HumanRequest
 	var options []byte
 	var deliveredAt, answeredAt, expiresAt *time.Time
-	err := scanner.Scan(&r.ID, &r.RunID, &r.ProjectID, &r.AgentID, &r.Recipient, &r.ResolvedUser,
+	err := scanner.Scan(&r.ID, &r.RunID, &r.ProjectID, &r.AgentID, &r.AgentVersion, &r.Recipient, &r.ResolvedUser,
 		&r.Question, &r.Context, &options, &r.Status, &r.Channel, &r.Response, &r.AnsweredBy,
 		&r.TimeoutSeconds, &r.TimeoutPolicy, &r.ExecutionIdentityID,
 		&r.CreatedAt, &deliveredAt, &answeredAt, &expiresAt)
@@ -56,11 +56,11 @@ func (s *Store) CreateHumanRequest(ctx context.Context, r *HumanRequest) error {
 	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO human_request
-		 (id, run_id, project_id, agent_id, recipient, resolved_user, question, context, options,
+		 (id, run_id, project_id, agent_id, agent_version, recipient, resolved_user, question, context, options,
 		  status, channel, timeout_seconds, timeout_policy, execution_identity_id, created_at, expires_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),$15)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now(),$16)
 		 ON CONFLICT (id) DO NOTHING`,
-		r.ID, r.RunID, r.ProjectID, r.AgentID, r.Recipient, r.ResolvedUser, r.Question, r.Context,
+		r.ID, r.RunID, r.ProjectID, r.AgentID, r.AgentVersion, r.Recipient, r.ResolvedUser, r.Question, r.Context,
 		marshalStrings(r.Options), r.Status, r.Channel, r.TimeoutSeconds, r.TimeoutPolicy,
 		r.ExecutionIdentityID, expiresAt)
 	return err
@@ -201,6 +201,27 @@ func (s *Store) ListHumanRequests(ctx context.Context, project, status, resolved
 	}
 	query += ` ORDER BY created_at DESC LIMIT 200`
 	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []HumanRequest{}
+	for rows.Next() {
+		r, err := scanHumanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// ListHumanRequestsByRun returns every request of one run, oldest first —
+// the verdict projection reads the whole ask history of the run
+// (specs/quality-loop.md §3; served by idx_human_request_run).
+func (s *Store) ListHumanRequestsByRun(ctx context.Context, runID string) ([]HumanRequest, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+humanRequestColumns+` FROM human_request WHERE run_id = $1 ORDER BY created_at, id`, runID)
 	if err != nil {
 		return nil, err
 	}
