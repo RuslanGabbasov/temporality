@@ -1,16 +1,11 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"mime"
-	"mime/multipart"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,33 +82,28 @@ func (a *Activities) handleSendFile(ctx context.Context, request ToolRequest) (T
 		return ToolResult{}, nonRetryable(fmt.Errorf("recipient %q could not be resolved", recipientArg))
 	}
 	settings := a.transports(ctx)
+	perChannel := settings.channelMaps()
 	deliveries := []sendFileDelivery{}
 	for _, channel := range recipient.Channels {
 		if !channel.Enabled || strings.TrimSpace(channel.Address) == "" {
 			continue
 		}
-		switch channel.Type {
-		case "matrix":
-			if !settings.Configured("matrix") {
-				deliveries = append(deliveries, sendFileDelivery{Channel: "matrix", Status: "unavailable", Detail: "matrix transport is not configured"})
-				continue
-			}
-			if sendErr := a.sendMatrixFile(ctx, channel.Address, name, note, payload, settings); sendErr != nil {
-				deliveries = append(deliveries, sendFileDelivery{Channel: "matrix", Status: "failed", Detail: sendErr.Error()})
-				continue
-			}
-			deliveries = append(deliveries, sendFileDelivery{Channel: "matrix", Status: "sent"})
-		case "telegram":
-			if !settings.Configured("telegram") {
-				deliveries = append(deliveries, sendFileDelivery{Channel: "telegram", Status: "unavailable", Detail: "telegram transport is not configured"})
-				continue
-			}
-			if sendErr := a.sendTelegramFile(ctx, channel.Address, name, note, payload); sendErr != nil {
-				deliveries = append(deliveries, sendFileDelivery{Channel: "telegram", Status: "failed", Detail: sendErr.Error()})
-				continue
-			}
-			deliveries = append(deliveries, sendFileDelivery{Channel: "telegram", Status: "sent"})
+		driver := channelDriverByType(channel.Type)
+		// Text-only and unknown transports never carry attachments — the web
+		// inbox (the shared path in the tool result) covers the user.
+		if driver == nil || !driver.Spec().Capabilities.FilesOut {
+			continue
 		}
+		if !driver.IsConfigured(perChannel[channel.Type]) {
+			deliveries = append(deliveries, sendFileDelivery{Channel: channel.Type, Status: "unavailable", Detail: channelSettingUnconfiguredDetail(channel.Type)})
+			continue
+		}
+		sendErr := driver.SendFile(ctx, a.HTTP, perChannel[channel.Type], channel.Address, OutboundFile{Name: name, Note: note, Payload: payload})
+		if sendErr != nil {
+			deliveries = append(deliveries, sendFileDelivery{Channel: channel.Type, Status: "failed", Detail: sendErr.Error()})
+			continue
+		}
+		deliveries = append(deliveries, sendFileDelivery{Channel: channel.Type, Status: "sent"})
 	}
 	summary := map[string]any{
 		"file":      name,
@@ -139,112 +129,4 @@ func fileContentType(name string) string {
 		return detected
 	}
 	return "application/octet-stream"
-}
-
-// sendMatrixFile uploads the bytes to the homeserver media store, then sends
-// an m.file room message referencing the returned content URI. The note, when
-// present, rides along as the message body so the recipient gets context.
-func (a *Activities) sendMatrixFile(ctx context.Context, roomID, name, note string, payload []byte, settings TransportSettings) error {
-	homeserver := strings.TrimRight(strings.TrimSpace(settings.MatrixHomeserver), "/")
-	accessToken := TrimBearerPrefix(settings.MatrixAccessToken)
-	if homeserver == "" || accessToken == "" || roomID == "" {
-		return errors.New("matrix transport is not configured")
-	}
-	uploadURL := fmt.Sprintf("%s/_matrix/media/v3/upload?filename=%s", homeserver, url.QueryEscape(name))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", fileContentType(name))
-	resp, err := a.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("matrix upload returned %d: %s", resp.StatusCode, truncate(string(body), 200))
-	}
-	var uploaded struct {
-		ContentURI string `json:"content_uri"`
-	}
-	if err := json.Unmarshal(body, &uploaded); err != nil || uploaded.ContentURI == "" {
-		return errors.New("matrix upload returned no content_uri")
-	}
-	messageBody := note
-	if strings.TrimSpace(messageBody) == "" {
-		messageBody = name
-	}
-	txnID := "temporality-file-" + transactionFingerprint(roomID, name+uploaded.ContentURI)
-	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)
-	message := map[string]any{
-		"msgtype":  "m.file",
-		"body":     messageBody,
-		"filename": name,
-		"url":      uploaded.ContentURI,
-	}
-	encoded, err := json.Marshal(message)
-	if err != nil {
-		return err
-	}
-	sendReq, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint, strings.NewReader(string(encoded)))
-	if err != nil {
-		return err
-	}
-	sendReq.Header.Set("Authorization", "Bearer "+accessToken)
-	sendReq.Header.Set("Content-Type", "application/json")
-	sendResp, err := a.HTTP.Do(sendReq)
-	if err != nil {
-		return err
-	}
-	defer sendResp.Body.Close()
-	sendBody, _ := io.ReadAll(io.LimitReader(sendResp.Body, 4096))
-	if sendResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("matrix returned %d: %s", sendResp.StatusCode, truncate(string(sendBody), 200))
-	}
-	return nil
-}
-
-// sendTelegramFile posts the document through the Bot API multipart endpoint.
-func (a *Activities) sendTelegramFile(ctx context.Context, chatID, name, note string, payload []byte) error {
-	botToken := strings.TrimSpace(a.transports(ctx).TelegramBotToken)
-	if botToken == "" || chatID == "" {
-		return errors.New("telegram transport is not configured")
-	}
-	var form bytes.Buffer
-	writer := multipart.NewWriter(&form)
-	if err := writer.WriteField("chat_id", chatID); err != nil {
-		return err
-	}
-	if strings.TrimSpace(note) != "" {
-		if err := writer.WriteField("caption", note); err != nil {
-			return err
-		}
-	}
-	part, err := writer.CreateFormFile("document", name)
-	if err != nil {
-		return err
-	}
-	if _, err := part.Write(payload); err != nil {
-		return err
-	}
-	if err := writer.Close(); err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://api.telegram.org/bot%s/sendDocument", botToken), bytes.NewReader(form.Bytes()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	resp, err := a.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("telegram returned %d: %s", resp.StatusCode, truncate(string(body), 200))
-	}
-	return nil
 }

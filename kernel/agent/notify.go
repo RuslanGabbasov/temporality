@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -332,22 +330,36 @@ func pickChannel(profile recipientChannels, configured func(string) bool) (recip
 	return recipientChannel{}, "web"
 }
 
-// sendToChannel dispatches one delivery to its transport adapter. The set of
-// types mirrors the channel registry (channels.go); unknown types fall back
-// to the web inbox via the caller's failed status.
+// sendToChannel dispatches one delivery to its channel driver
+// (channeldriver.go). Unknown types fall back to the web inbox via the
+// caller's failed status.
 func (a *Activities) sendToChannel(ctx context.Context, channelType, address string, request NotifyChannelRequest, settings TransportSettings) error {
-	text := notificationText(request, settings.UIURL)
-	switch channelType {
-	case "matrix":
-		return a.sendMatrix(ctx, address, text, settings)
-	case "telegram":
-		return a.sendTelegram(ctx, address, text, settings)
-	case "slack":
-		return a.sendSlack(ctx, address, text)
-	case "webhook":
-		return a.sendWebhook(ctx, address, request, settings)
+	driver := channelDriverByType(channelType)
+	if driver == nil {
+		return fmt.Errorf("no transport for channel %q", channelType)
 	}
-	return fmt.Errorf("no transport for channel %q", channelType)
+	return driver.SendText(ctx, a.HTTP, settings.channelMaps()[channelType], address, outboundText(request, settings.UIURL))
+}
+
+// outboundText renders the channel-neutral payload: Body is what text
+// transports deliver, the envelope fields feed structured ones (webhook).
+func outboundText(request NotifyChannelRequest, uiURL string) OutboundText {
+	msg := OutboundText{
+		Body:           notificationText(request, uiURL),
+		Question:       request.Question,
+		Context:        request.Context,
+		Options:        request.Options,
+		Project:        request.Project,
+		RunID:          request.RunID,
+		OperationID:    request.OperationID,
+		AgentID:        request.AgentID,
+		TimeoutSeconds: request.TimeoutSeconds,
+		TimeoutPolicy:  request.TimeoutPolicy,
+	}
+	if trimmed := strings.TrimSpace(uiURL); trimmed != "" {
+		msg.AnswerURL = strings.TrimRight(trimmed, "/") + "/agents?project=" + url.QueryEscape(request.Project)
+	}
+	return msg
 }
 
 // notificationText renders the human-facing message for external transports.
@@ -381,78 +393,4 @@ func notificationText(request NotifyChannelRequest, uiURL string) string {
 		builder.WriteString(url.QueryEscape(request.Project))
 	}
 	return builder.String()
-}
-
-// sendMatrix posts a text message to a room via the client-server API using
-// the kernel's shared bot account.
-func (a *Activities) sendMatrix(ctx context.Context, roomID, text string, settings TransportSettings) error {
-	homeserver := strings.TrimRight(strings.TrimSpace(settings.MatrixHomeserver), "/")
-	// TrimBearerPrefix guards against a token saved with its "Bearer " header
-	// prefix (database or env) — homeservers reject the doubled prefix.
-	accessToken := TrimBearerPrefix(settings.MatrixAccessToken)
-	if homeserver == "" || accessToken == "" || roomID == "" {
-		return fmt.Errorf("matrix transport is not configured")
-	}
-	txnID := "temporality-" + transactionFingerprint(roomID, text)
-	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)
-	// The transport is two-way (matrixinbound.go): replying in the room routes
-	// the answer back into the paused run, so say so next to the question.
-	payload := map[string]any{"msgtype": "m.text", "body": text + "\n\nReply in this room to answer."}
-	body, status, err := a.postJSON(ctx, http.MethodPut, endpoint, payload, map[string]string{"Authorization": "Bearer " + accessToken})
-	if err != nil {
-		return err
-	}
-	if status != http.StatusOK {
-		return fmt.Errorf("matrix returned %d: %s", status, truncate(body, 200))
-	}
-	return nil
-}
-
-// sendTelegram posts a text message through the Bot API.
-func (a *Activities) sendTelegram(ctx context.Context, chatID, text string, settings TransportSettings) error {
-	botToken := strings.TrimSpace(settings.TelegramBotToken)
-	if botToken == "" || chatID == "" {
-		return fmt.Errorf("telegram transport is not configured")
-	}
-	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
-	payload := map[string]any{"chat_id": chatID, "text": text, "disable_web_page_preview": true}
-	body, status, err := a.postJSON(ctx, http.MethodPost, endpoint, payload, nil)
-	if err != nil {
-		return err
-	}
-	if status != http.StatusOK {
-		return fmt.Errorf("telegram returned %d: %s", status, truncate(body, 200))
-	}
-	return nil
-}
-
-// postJSON issues a JSON request and returns the body with its status.
-func (a *Activities) postJSON(ctx context.Context, method, endpoint string, payload any, headers map[string]string) (string, int, error) {
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return "", 0, err
-	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, strings.NewReader(string(encoded)))
-	if err != nil {
-		return "", 0, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-	resp, err := a.HTTP.Do(req)
-	if err != nil {
-		return "", 0, err
-	}
-	defer resp.Body.Close()
-	raw := make([]byte, 4096)
-	n, _ := resp.Body.Read(raw)
-	return string(raw[:n]), resp.StatusCode, nil
-}
-
-// transactionFingerprint derives a stable-but-unique Matrix txn id so retries
-// of the same notification deduplicate server-side.
-func transactionFingerprint(roomID, text string) string {
-	digest := sha256.Sum256([]byte(roomID + "\x00" + text))
-	return hex.EncodeToString(digest[:])[:16]
 }
