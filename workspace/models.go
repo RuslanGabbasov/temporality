@@ -133,13 +133,18 @@ var ValidOrgKinds = map[string]bool{
 // part of its own path. Resources bound to a unit are visible to the unit and
 // its whole subtree.
 type OrgUnit struct {
-	ID        string    `json:"id"`
-	ParentID  string    `json:"parent_id,omitempty"`
-	Kind      string    `json:"kind"`
-	Name      string    `json:"name"`
-	Path      string    `json:"path,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID       string `json:"id"`
+	ParentID string `json:"parent_id,omitempty"`
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
+	Path     string `json:"path,omitempty"`
+	// HeadUserID is the explicit manager edge (docs/inbound-messages.md §7):
+	// the escalation target and the default addressee for team requests. The
+	// effective head resolves bottom-up — a unit without a head inherits the
+	// nearest ancestor's head. Empty = none assigned (legacy proximity rules).
+	HeadUserID string    `json:"head_user_id,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // SelfPath returns the unit's own materialized path prefix: the path its
@@ -524,6 +529,9 @@ type CreateOrgUnitRequest struct {
 	ParentID string `json:"parent_id,omitempty"` // empty = new root
 	Kind     string `json:"kind"`                // organization | department | team
 	Name     string `json:"name"`
+	// HeadUserID is a pointer so PUT can tell "absent" (keep the current
+	// head, e.g. a move-only request) from "" (clear the head).
+	HeadUserID *string `json:"head_user_id,omitempty"`
 }
 
 // CreateAgentRequest is the payload for creating an agent.

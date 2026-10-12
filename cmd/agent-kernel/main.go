@@ -220,6 +220,10 @@ func main() {
 		log.Error("migrate workspace v53 (inbound message)", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000054_org_unit_head.up.sql"); err != nil {
+		log.Error("migrate workspace v54 (org unit head)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -893,12 +897,19 @@ func main() {
 		if req.ID == "" {
 			req.ID = slugify(req.Name)
 		}
-		unit := &workspace.OrgUnit{ID: req.ID, ParentID: req.ParentID, Kind: req.Kind, Name: req.Name}
+		headID := derefString(req.HeadUserID)
+		if headID != "" {
+			if head, err := ws.GetUser(r.Context(), headID); err != nil || !head.Active {
+				writeError(w, 422, fmt.Errorf("head_user_id %q is not an active user", headID))
+				return
+			}
+		}
+		unit := &workspace.OrgUnit{ID: req.ID, ParentID: req.ParentID, Kind: req.Kind, Name: req.Name, HeadUserID: headID}
 		if err := ws.CreateOrgUnit(r.Context(), unit); err != nil {
 			writeError(w, 409, err)
 			return
 		}
-		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditOrgUnitCreated, "org_unit", unit.ID, map[string]any{"name": unit.Name, "parent_id": unit.ParentID}); err != nil {
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditOrgUnitCreated, "org_unit", unit.ID, map[string]any{"name": unit.Name, "parent_id": unit.ParentID, "head_user_id": unit.HeadUserID}); err != nil {
 			log.Warn("audit org unit create", "error", err)
 		}
 		refreshUserTokens()
@@ -920,7 +931,28 @@ func main() {
 		if req.Kind == "" {
 			req.Kind = workspace.OrgKindDepartment
 		}
-		unit := workspace.OrgUnit{ID: r.PathValue("unitID"), Kind: req.Kind, Name: req.Name}
+		current, err := ws.GetOrgUnit(r.Context(), r.PathValue("unitID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		// Absent head_user_id keeps the current head (move-only or rename-only
+		// requests); an explicit value — including "" — sets or clears it.
+		headID := current.HeadUserID
+		if req.HeadUserID != nil {
+			headID = derefString(req.HeadUserID)
+		}
+		if headID != "" {
+			if head, gErr := ws.GetUser(r.Context(), headID); gErr != nil || !head.Active {
+				writeError(w, 422, fmt.Errorf("head_user_id %q is not an active user", headID))
+				return
+			}
+		}
+		unit := workspace.OrgUnit{ID: current.ID, Kind: req.Kind, Name: req.Name, HeadUserID: headID}
 		if err := ws.UpdateOrgUnit(r.Context(), unit); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)
@@ -929,16 +961,11 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
-		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditOrgUnitUpdated, "org_unit", unit.ID, map[string]any{"name": unit.Name, "kind": unit.Kind}); err != nil {
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditOrgUnitUpdated, "org_unit", unit.ID, map[string]any{"name": unit.Name, "kind": unit.Kind, "head_user_id": unit.HeadUserID}); err != nil {
 			log.Warn("audit org unit update", "error", err)
 		}
 		// Optional re-parenting: parent_id present and different triggers a move.
 		if req.ParentID != "" {
-			current, err := ws.GetOrgUnit(r.Context(), unit.ID)
-			if err != nil {
-				writeError(w, 500, err)
-				return
-			}
 			if current.ParentID != req.ParentID {
 				if err := ws.MoveOrgUnit(r.Context(), unit.ID, req.ParentID); err != nil {
 					if errors.Is(err, workspace.ErrCycle) {
@@ -6803,6 +6830,14 @@ var translitMap = map[rune]string{
 	'н': "n", 'о': "o", 'п': "p", 'р': "r", 'с': "s", 'т': "t", 'у': "u",
 	'ф': "f", 'х': "kh", 'ц': "ts", 'ч': "ch", 'ш': "sh", 'щ': "shch",
 	'ъ': "", 'ы': "y", 'ь': "", 'э': "e", 'ю': "yu", 'я': "ya",
+}
+
+// derefString unwraps an optional request field (nil → "").
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
 }
 
 func slugify(name string) string {

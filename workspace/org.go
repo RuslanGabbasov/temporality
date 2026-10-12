@@ -41,17 +41,17 @@ func (s *Store) CreateOrgUnit(ctx context.Context, u *OrgUnit) error {
 	u.CreatedAt = now
 	u.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO org_unit (id, parent_id, kind, name, path, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		u.ID, nullString(u.ParentID), u.Kind, u.Name, u.Path, u.CreatedAt, u.UpdatedAt)
+		`INSERT INTO org_unit (id, parent_id, kind, name, path, head_user_id, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, $8)`,
+		u.ID, nullString(u.ParentID), u.Kind, u.Name, u.Path, u.HeadUserID, u.CreatedAt, u.UpdatedAt)
 	return err
 }
 
 func (s *Store) GetOrgUnit(ctx context.Context, id string) (OrgUnit, error) {
 	var u OrgUnit
-	var parent *string
+	var parent, head *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, parent_id, kind, name, path, created_at, updated_at FROM org_unit WHERE id = $1`, id).
-		Scan(&u.ID, &parent, &u.Kind, &u.Name, &u.Path, &u.CreatedAt, &u.UpdatedAt)
+		`SELECT id, parent_id, kind, name, path, head_user_id, created_at, updated_at FROM org_unit WHERE id = $1`, id).
+		Scan(&u.ID, &parent, &u.Kind, &u.Name, &u.Path, &head, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return u, ErrNotFound
 	}
@@ -59,6 +59,7 @@ func (s *Store) GetOrgUnit(ctx context.Context, id string) (OrgUnit, error) {
 		return u, err
 	}
 	u.ParentID = derefPtr(parent)
+	u.HeadUserID = derefPtr(head)
 	return u, nil
 }
 
@@ -66,7 +67,7 @@ func (s *Store) GetOrgUnit(ctx context.Context, id string) (OrgUnit, error) {
 // before children (by path length, then path, then id).
 func (s *Store) ListOrgUnits(ctx context.Context) ([]OrgUnit, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, parent_id, kind, name, path, created_at, updated_at
+		`SELECT id, parent_id, kind, name, path, head_user_id, created_at, updated_at
 		 FROM org_unit
 		 ORDER BY char_length(path), path, id`)
 	if err != nil {
@@ -76,25 +77,26 @@ func (s *Store) ListOrgUnits(ctx context.Context) ([]OrgUnit, error) {
 	result := []OrgUnit{}
 	for rows.Next() {
 		var u OrgUnit
-		var parent *string
-		if err := rows.Scan(&u.ID, &parent, &u.Kind, &u.Name, &u.Path, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		var parent, head *string
+		if err := rows.Scan(&u.ID, &parent, &u.Kind, &u.Name, &u.Path, &head, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		u.ParentID = derefPtr(parent)
+		u.HeadUserID = derefPtr(head)
 		result = append(result, u)
 	}
 	return result, rows.Err()
 }
 
-// UpdateOrgUnit renames a node or changes its kind. Moving is a separate
-// operation because it rewrites the subtree's paths.
+// UpdateOrgUnit renames a node, changes its kind or reassigns its head.
+// Moving is a separate operation because it rewrites the subtree's paths.
 func (s *Store) UpdateOrgUnit(ctx context.Context, u OrgUnit) error {
 	if !ValidOrgKinds[u.Kind] {
 		return fmt.Errorf("unknown org unit kind %q (supported: organization, department, team)", u.Kind)
 	}
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE org_unit SET kind = $2, name = $3, updated_at = now() WHERE id = $1`,
-		u.ID, u.Kind, u.Name)
+		`UPDATE org_unit SET kind = $2, name = $3, head_user_id = NULLIF($4, ''), updated_at = now() WHERE id = $1`,
+		u.ID, u.Kind, u.Name, u.HeadUserID)
 	if err != nil {
 		return err
 	}
