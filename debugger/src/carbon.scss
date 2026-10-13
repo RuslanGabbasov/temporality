@@ -603,6 +603,11 @@ body, #root, #main-content {
   background-color: var(--tm-danger) !important;
   border-color: var(--tm-danger) !important;
   color: var(--tm-white) !important;
+  border-radius: var(--tm-radius-md) !important;
+}
+
+.cds--btn--tertiary {
+  border-radius: var(--tm-radius-md) !important;
 }
 
 .cds--btn--danger--ghost {
