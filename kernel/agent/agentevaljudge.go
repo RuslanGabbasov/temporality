@@ -96,14 +96,14 @@ func parseJudgeScore(content string) (judgeVerdict, error) {
 
 // judgeMessages builds the scoring conversation: the case's instruction (or
 // the system default) as system turn, the task and the candidate answer as
-// the user turn. PII-safe by construction: judge inputs are the same texts
-// the suite stores (§10.3).
+// the user turn. Every text that leaves for the external judge model passes
+// redactProse first (§10.3): suite texts may carry secrets (CWE-200).
 func judgeMessages(judgePrompt, input, answer string) []llm.Message {
-	system := strings.TrimSpace(judgePrompt)
+	system := redactProse(strings.TrimSpace(judgePrompt))
 	if system == "" {
 		system = defaultJudgePrompt
 	}
-	user := fmt.Sprintf("Task input:\n%s\n\nCandidate answer:\n%s", input, answer)
+	user := fmt.Sprintf("Task input:\n%s\n\nCandidate answer:\n%s", redactProse(input), redactProse(answer))
 	return []llm.Message{
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},
