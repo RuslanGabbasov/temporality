@@ -49,7 +49,7 @@ type evalGateStore interface {
 	GetAgentProposal(ctx context.Context, agentID string, id int64) (workspace.AgentProposal, error)
 	GetAgentEvaluationSuite(ctx context.Context, agentID string) (workspace.AgentEvaluationSuite, error)
 	EvalGateStatus(ctx context.Context, agentID string, proposalID int64, baseVersion int, now time.Time) (workspace.EvalGateDecision, error)
-	CreateGateRun(ctx context.Context, agentID string, version int, proposalID int64) (workspace.AgentEvaluationRun, error)
+	CreateGateRun(ctx context.Context, agentID string, version int, proposalID int64) (workspace.AgentEvaluationRun, bool, error)
 	AbandonGateRun(ctx context.Context, runID int64, cause string) error
 	RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error
 }
@@ -254,12 +254,19 @@ func RegisterM3Routes(mux *http.ServeMux, gate *controlplane.Gate, store evalGat
 			})
 		case workspace.EvalGateNone:
 			// Nothing usable: pre-create the gate run and answer 202 (§5.3).
-			run, createErr := store.CreateGateRun(r.Context(), agentID, proposal.BaseVersion, proposalID)
+			// Only the apply that actually inserted the row starts the
+			// runner — a concurrent apply that also resolved the gate to
+			// 'none' gets the very same run with created=false and waits on
+			// it instead of launching a second evaluation over one row
+			// (§8.3 idempotency, CWE-362).
+			run, created, createErr := store.CreateGateRun(r.Context(), agentID, proposal.BaseVersion, proposalID)
 			if createErr != nil {
 				writeError(w, 500, createErr)
 				return
 			}
-			startGateRun(r.Context(), store, runner, log, agentID, proposal, run)
+			if created {
+				startGateRun(r.Context(), store, runner, log, agentID, proposal, run)
+			}
 			writeJSON(w, 202, map[string]any{
 				"evaluation_run_id": run.ID,
 				"status":            "running",

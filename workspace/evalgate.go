@@ -281,17 +281,19 @@ func (s *Store) latestDecisiveRun(ctx context.Context, agentID string, version i
 // linked to the proposal through migration 000054. The advisory lock plus a
 // running check inside it make creation idempotent — two concurrent applies
 // of one proposal share a single run instead of racing a second one in
-// (§8.3).
-func (s *Store) CreateGateRun(ctx context.Context, agentID string, version int, proposalID int64) (AgentEvaluationRun, error) {
+// (§8.3). created reports whether this call inserted the row: only the
+// creator may launch the runner, otherwise two applies that both resolved
+// the gate to 'none' would start two evaluations over one run row (CWE-362).
+func (s *Store) CreateGateRun(ctx context.Context, agentID string, version int, proposalID int64) (AgentEvaluationRun, bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return AgentEvaluationRun{}, err
+		return AgentEvaluationRun{}, false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`,
 		fmt.Sprintf("eval-gate-proposal:%d", proposalID)); err != nil {
-		return AgentEvaluationRun{}, err
+		return AgentEvaluationRun{}, false, err
 	}
 	row := tx.QueryRow(ctx,
 		`SELECT `+evalGateRunColumns+` FROM workspace_agent_evaluation_run
@@ -299,9 +301,9 @@ func (s *Store) CreateGateRun(ctx context.Context, agentID string, version int, 
 		 ORDER BY created_at DESC LIMIT 1`,
 		agentID, proposalID)
 	if existing, scanErr := scanEvalGateRun(row); scanErr == nil {
-		return existing, nil // already started: the same 202, no second run
+		return existing, false, nil // already started: the same 202, no second run
 	} else if !errors.Is(scanErr, pgx.ErrNoRows) {
-		return AgentEvaluationRun{}, scanErr
+		return AgentEvaluationRun{}, false, scanErr
 	}
 
 	run, err := scanEvalGateRun(tx.QueryRow(ctx,
@@ -311,12 +313,12 @@ func (s *Store) CreateGateRun(ctx context.Context, agentID string, version int, 
 		           judge_degraded, trigger, proposal_id, created_at`,
 		agentID, version, proposalID))
 	if err != nil {
-		return AgentEvaluationRun{}, err
+		return AgentEvaluationRun{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return AgentEvaluationRun{}, err
+		return AgentEvaluationRun{}, false, err
 	}
-	return run, nil
+	return run, true, nil
 }
 
 // AbandonGateRun fails a gate run that never produced a verdict (§10.4):

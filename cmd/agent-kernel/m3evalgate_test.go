@@ -71,12 +71,19 @@ func (f *fakeEvalGateStore) EvalGateStatus(_ context.Context, _ string, _ int64,
 	return f.decision, f.decisionErr
 }
 
-func (f *fakeEvalGateStore) CreateGateRun(_ context.Context, _ string, _ int, proposalID int64) (workspace.AgentEvaluationRun, error) {
+// CreateGateRun mimics the store contract: creation is idempotent — the
+// first call inserts the row (created=true), later calls hand back that
+// exact run with created=false (§8.3), so tests can assert only one runner
+// is ever started.
+func (f *fakeEvalGateStore) CreateGateRun(_ context.Context, _ string, _ int, proposalID int64) (workspace.AgentEvaluationRun, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createCalls++
 	if f.createErr != nil {
-		return workspace.AgentEvaluationRun{}, f.createErr
+		return workspace.AgentEvaluationRun{}, false, f.createErr
+	}
+	if len(f.createRuns) > 0 {
+		return f.createRuns[0], false, nil
 	}
 	f.nextRunID++
 	run := workspace.AgentEvaluationRun{
@@ -84,7 +91,7 @@ func (f *fakeEvalGateStore) CreateGateRun(_ context.Context, _ string, _ int, pr
 		Trigger: agent.EvalTriggerGate, ProposalID: proposalID, CreatedAt: time.Now().UTC(),
 	}
 	f.createRuns = append(f.createRuns, run)
-	return run, nil
+	return run, true, nil
 }
 
 func (f *fakeEvalGateStore) AbandonGateRun(_ context.Context, runID int64, _ string) error {
@@ -261,6 +268,41 @@ func TestEvalGateRepeatApplyIsIdempotent202(t *testing.T) {
 	require.Equal(t, first.EvaluationRunID, second.EvaluationRunID)
 	require.Equal(t, 1, store.createCalls) // no second run
 	require.Equal(t, 1, runner.calls)      // no second evaluation
+}
+
+// Two applies that both resolve the gate to 'none' (the §10.1 race: the
+// decision lookup ran before either create finished) share one run: the
+// store hands the same evaluation_run_id back with created=false and only
+// the creator starts the runner — never two evaluations over one row
+// (§8.3 idempotency, CWE-362).
+func TestEvalGateDoubleNoneStartsOneRun(t *testing.T) {
+	store, runner, outbox := defaultEvalGateFixture()
+	store.decision = workspace.EvalGateDecision{State: workspace.EvalGateNone}
+	runner.done = make(chan struct{})
+	server := newEvalGateServer(t, store, runner, outbox, nil)
+	defer server.Close()
+
+	status, body := evalGatePost(t, server, "writertoken", "")
+	require.Equal(t, 202, status)
+	<-runner.done
+	var first struct {
+		EvaluationRunID int64 `json:"evaluation_run_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &first))
+
+	// The gate state stays 'none' for the second apply (its lookup raced
+	// ahead of the create): CreateGateRun returns the existing run.
+	status, body = evalGatePost(t, server, "writertoken", "")
+	require.Equal(t, 202, status)
+	var second struct {
+		EvaluationRunID int64 `json:"evaluation_run_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &second))
+
+	require.Equal(t, first.EvaluationRunID, second.EvaluationRunID)
+	require.Equal(t, 2, store.createCalls) // both applies asked the store
+	require.Len(t, store.createRuns, 1)    // one row was ever inserted
+	require.Equal(t, 1, runner.calls)      // one evaluation, not two
 }
 
 // A red run blocks the apply with 409 and names the failed cases; the
