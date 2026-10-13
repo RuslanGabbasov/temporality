@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -279,13 +280,27 @@ func decodeAgentDefinition(raw []byte) *AgentDefinition {
 }
 
 func (s *Store) UpdateAgent(ctx context.Context, a Agent) error {
+	return updateAgentRow(ctx, s.pool, a)
+}
+
+// agentExecer is the statement executor the agent row update runs against:
+// the pool directly, or the transaction of the atomic proposal apply
+// (specs/quality-loop.md §10.1a). *pgxpool.Pool and pgx.Tx both satisfy it.
+type agentExecer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// updateAgentRow is the single agent UPDATE statement, shared by the plain
+// UpdateAgent path and the transactional proposal apply so the two can never
+// drift apart.
+func updateAgentRow(ctx context.Context, ex agentExecer, a Agent) error {
 	a.UpdatedAt = time.Now().UTC()
 	skills, _ := json.Marshal(a.Skills)
 	mcp, _ := json.Marshal(a.MCPServers)
 	tools, _ := json.Marshal(a.Tools)
 	labels, _ := json.Marshal(a.Labels)
 	definition, _ := json.Marshal(a.Definition)
-	tag, err := s.pool.Exec(ctx,
+	tag, err := ex.Exec(ctx,
 		`UPDATE workspace_agent
 		 SET project_id=$2, name=$3, description=$4, model=$5, provider=$6, system_prompt=$7,
 		     skills=$8, mcp_servers=$9, tools=$10, sandbox_profile=$11, temperature=$12, max_tokens=$13,
@@ -309,8 +324,15 @@ func (s *Store) UpdateAgent(ctx context.Context, a Agent) error {
 // prompt is recorded for reproducibility even though runs recompile it fresh
 // (docs/plan-evaluable-agent.md, decision 2).
 func (s *Store) InsertAgentVersion(ctx context.Context, v AgentVersion) error {
+	return insertAgentVersionRow(ctx, s.pool, v)
+}
+
+// insertAgentVersionRow writes the snapshot against the given executor —
+// the pool for standalone writes, the apply transaction for proposals
+// (specs/quality-loop.md §10.1a: agent mutation and snapshot land together).
+func insertAgentVersionRow(ctx context.Context, ex agentExecer, v AgentVersion) error {
 	definition, _ := json.Marshal(v.Definition)
-	_, err := s.pool.Exec(ctx,
+	_, err := ex.Exec(ctx,
 		`INSERT INTO workspace_agent_version
 		 (agent_id, version, definition, description, compiled_prompt, prompt_source, generator_model, author, created_at)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)

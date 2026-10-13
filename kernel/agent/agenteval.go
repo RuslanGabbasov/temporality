@@ -39,10 +39,34 @@ type workspaceAgentVersion struct {
 	CompiledPrompt string `json:"compiled_prompt"`
 }
 
+// EvalRunMeta pins an evaluation-run row the caller already created (M3 eval
+// gate, specs/quality-loop.md §10.4): the gate pre-creates the row so its 202
+// answer can name a concrete evaluation_run_id, and the runner finalises that
+// exact row instead of inserting a new one. The zero value means "record a new
+// run", keeping the plain RunAgentEvaluation contract unchanged.
+type EvalRunMeta struct {
+	RunID      int64
+	ProposalID int64
+	Trigger    string
+}
+
+// EvalTriggerGate is the trigger string of gate-started runs (§5.1),
+// shared with the apply endpoint that pre-creates the run row.
+const EvalTriggerGate = "gate"
+
 // RunAgentEvaluation loads the suite, runs every case against the requested
 // definition version (0 = current) and records the run. Returns a compact
 // summary for the caller (HTTP or a future agent tool).
 func (a *Activities) RunAgentEvaluation(ctx context.Context, agentID string, version int) (string, error) {
+	return a.RunAgentEvaluationMeta(ctx, agentID, version, EvalRunMeta{})
+}
+
+// RunAgentEvaluationMeta is RunAgentEvaluation against a pre-created run row:
+// held-out cases are excluded when the run decides the gate (§4.5), the
+// record payload carries the row identity, and a failed record of a gate run
+// is an error — the caller fails the row instead of leaving it 'unknown'
+// forever (§10.4).
+func (a *Activities) RunAgentEvaluationMeta(ctx context.Context, agentID string, version int, meta EvalRunMeta) (string, error) {
 	if a.Model == nil {
 		return "", fmt.Errorf("model client is not configured")
 	}
@@ -129,6 +153,7 @@ func (a *Activities) RunAgentEvaluation(ctx context.Context, agentID string, ver
 			Input          string   `json:"input"`
 			MustContain    []string `json:"must_contain"`
 			MustNotContain []string `json:"must_not_contain"`
+			HeldOut        bool     `json:"held_out"`
 		} `json:"cases"`
 	}
 	if err := json.Unmarshal([]byte(suiteBody), &suite); err != nil {
@@ -143,8 +168,16 @@ func (a *Activities) RunAgentEvaluation(ctx context.Context, agentID string, ver
 
 	results := make([]evaluationCaseResult, 0, len(suite.Cases))
 	passed, failed := 0, 0
+	// §10.5: per-run token accounting rides agent.evaluation.completed as
+	// data.tokens_in / data.tokens_out — the unit economics of the loop.
+	tokensIn, tokensOut := 0, 0
 	for _, c := range suite.Cases {
-		result := a.runAgentEvaluationCase(ctx, prompt, c.Input, c.MustContain, c.MustNotContain)
+		if meta.Trigger == EvalTriggerGate && c.HeldOut {
+			continue // §4.5: held-out cases never decide the gate
+		}
+		result, usage := a.runAgentEvaluationCase(ctx, prompt, c.Input, c.MustContain, c.MustNotContain)
+		tokensIn += usage.PromptTokens
+		tokensOut += usage.CompletionTokens
 		result.Name = c.Name
 		if result.Passed {
 			passed++
@@ -160,12 +193,26 @@ func (a *Activities) RunAgentEvaluation(ctx context.Context, agentID string, ver
 		"failed":        failed,
 		"cases":         results,
 	}
+	if meta.RunID > 0 {
+		// Gate runs finalise the pre-created row (§10.4): identity rides along.
+		recordPayload["id"] = meta.RunID
+		recordPayload["proposal_id"] = meta.ProposalID
+		if meta.Trigger != "" {
+			recordPayload["trigger"] = meta.Trigger
+		}
+	}
 	recordBody, rStatus, rErr := a.workspaceDo(ctx, http.MethodPost, fmt.Sprintf("%s/v1/workspace/agents/%s/evaluation-runs", a.WorkspaceURL, agentID), recordPayload)
-	if rErr != nil || rStatus >= 400 {
+	recordFailed := rErr != nil || rStatus >= 400
+	if recordFailed {
 		// The run executed; a recording failure degrades observability only.
 		recordBody = fmt.Sprintf(`{"recorded":false,"status":%d}`, rStatus)
 	}
-	a.emitAgentEvaluation(ctx, agentID, header.Name, testedVersion, passed, failed)
+	a.emitAgentEvaluation(ctx, agentID, header.Name, testedVersion, passed, failed, tokensIn, tokensOut)
+	if meta.RunID > 0 && recordFailed {
+		// A gate run must never stay 'unknown': surface the failure so the
+		// apply endpoint can fail the row and let a retry start anew (§10.4).
+		return "", fmt.Errorf("recording gate evaluation run %d failed: %s", meta.RunID, truncate(recordBody, 300))
+	}
 	var summary strings.Builder
 	fmt.Fprintf(&summary, "%s v%d: %d passed, %d failed\n", agentID, testedVersion, passed, failed)
 	for _, r := range results {
@@ -188,8 +235,9 @@ func (a *Activities) RunAgentEvaluation(ctx context.Context, agentID string, ver
 // as-is — the evaluation measures whether the definition produces the
 // expected behaviour, not whether the model follows extra instructions. A
 // model failure fails the case (never the whole run) with the error as the
-// answer, so suite history stays comparable.
-func (a *Activities) runAgentEvaluationCase(ctx context.Context, system, input string, mustContain, mustNotContain []string) evaluationCaseResult {
+// answer, so suite history stays comparable. The returned usage feeds the
+// run's token accounting (§10.5); a failed call reports zero usage.
+func (a *Activities) runAgentEvaluationCase(ctx context.Context, system, input string, mustContain, mustNotContain []string) (evaluationCaseResult, llm.Usage) {
 	messages := []llm.Message{
 		{Role: "system", Content: system},
 		{Role: "user", Content: input},
@@ -200,6 +248,7 @@ func (a *Activities) runAgentEvaluationCase(ctx context.Context, system, input s
 	answer := completion.Content
 	if err != nil {
 		answer = "evaluation error: " + err.Error()
+		return evaluationCaseResult{Answer: answer, Passed: false}, llm.Usage{}
 	}
 	if len(answer) > agentEvalMaxAnswer {
 		answer = answer[:agentEvalMaxAnswer]
@@ -218,12 +267,13 @@ func (a *Activities) runAgentEvaluationCase(ctx context.Context, system, input s
 			result.Unexpected = append(result.Unexpected, forbidden)
 		}
 	}
-	return result
+	return result, completion.Usage
 }
 
 // emitAgentEvaluation records agent.evaluation.completed in the journal via
 // the durable outbox. Best-effort: the recorded run row is the source of truth.
-func (a *Activities) emitAgentEvaluation(ctx context.Context, agentID, agentName string, version, passed, failed int) {
+// tokens_in/tokens_out carry the run's token accounting (§10.5).
+func (a *Activities) emitAgentEvaluation(ctx context.Context, agentID, agentName string, version, passed, failed, tokensIn, tokensOut int) {
 	if a.Events == nil {
 		return
 	}
@@ -237,6 +287,7 @@ func (a *Activities) emitAgentEvaluation(ctx context.Context, agentID, agentName
 		Data: map[string]any{
 			"agent_id": agentID, "agent_name": agentName,
 			"version": version, "passed": passed, "failed": failed,
+			"tokens_in": tokensIn, "tokens_out": tokensOut,
 		},
 	}
 	_ = a.Events.Enqueue(ctx, event)

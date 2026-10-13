@@ -35,6 +35,10 @@ type EvaluationCase struct {
 	// existing PUT suite endpoint (§13A: owners edit it by hand); the
 	// patterns runner ignores it.
 	ExpectedOutput string `json:"expected_output,omitempty"`
+	// HeldOut marks a §4.5 hold-out case: it stays visible in the suite but
+	// is excluded from every run started by the eval gate (M3), so it can
+	// never decide an apply.
+	HeldOut bool `json:"held_out,omitempty"`
 }
 
 // EvaluationSuite is the stored suite of a skill (one per skill, MVP).

@@ -40,7 +40,8 @@ type AgentEvaluationRun struct {
 	Verdict string `json:"verdict,omitempty"`
 	// Cause explains an error/fail verdict: judge_not_configured |
 	// judge_invalid_json | judge_error | model_timeout | model_error |
-	// suite_empty | suite_too_small | pass_rate_below_min | pass_regression.
+	// suite_empty | suite_too_small | pass_rate_below_min | pass_regression |
+	// gate_run_aborted (a gate run the runner never finalised, §10.4).
 	Cause string `json:"cause,omitempty"`
 	// Threshold is the snapshot of the thresholds that governed the verdict
 	// (§5.1): min pass rate, regression tolerance, per-case judge thresholds.
@@ -53,6 +54,10 @@ type AgentEvaluationRun struct {
 	JudgeDegraded  bool   `json:"judge_degraded,omitempty"`
 	// Trigger records what started the run: manual | gate | schedule (§5.1).
 	Trigger string `json:"trigger,omitempty"`
+	// ProposalID links a gate-triggered run to the proposal it gates (§5.3,
+	// migration 000054). Creation-time metadata: the record path never
+	// rewrites it, so a repeated apply can find the run it started.
+	ProposalID int64 `json:"proposal_id,omitempty"`
 	// TestedModel is request-only provenance: the model whose answers the
 	// cases carry. The server compares it with the judge model; it is never
 	// stored (runs already pin agent_version, the definition under test).
@@ -125,15 +130,66 @@ func (s *Store) RecordAgentEvaluationRun(ctx context.Context, run *AgentEvaluati
 	if err != nil {
 		return err
 	}
+	// Gate runs (§10.4): the apply endpoint pre-created the row so its 202
+	// answer could carry a concrete evaluation_run_id — finalise that exact
+	// row instead of inserting a second one, and never overwrite a run that
+	// is already finalised (idempotent record retries, §8).
+	if run.ID > 0 {
+		return s.finalizeExistingAgentEvaluationRun(ctx, run, raw, threshold)
+	}
+	var proposalID any
+	if run.ProposalID > 0 {
+		proposalID = run.ProposalID
+	}
 	return s.pool.QueryRow(ctx,
 		`INSERT INTO workspace_agent_evaluation_run
 		   (agent_id, agent_version, passed, failed, cases,
-		    verdict, cause, threshold, judge_model, judge_same_model, judge_degraded, trigger)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		    verdict, cause, threshold, judge_model, judge_same_model, judge_degraded, trigger, proposal_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		 RETURNING id, created_at`,
 		run.AgentID, run.AgentVersion, run.Passed, run.Failed, raw,
-		run.Verdict, run.Cause, threshold, run.JudgeModel, run.JudgeSameModel, run.JudgeDegraded, run.Trigger).
+		run.Verdict, run.Cause, threshold, run.JudgeModel, run.JudgeSameModel, run.JudgeDegraded, run.Trigger,
+		proposalID).
 		Scan(&run.ID, &run.CreatedAt)
+}
+
+// finalizeExistingAgentEvaluationRun writes the computed outcomes onto a run
+// row that already exists (the M3 gate pre-creates its rows before the
+// evaluation starts). Only outcome columns are written — identity (agent,
+// version, trigger, proposal link) is creation-time metadata — and only while
+// the row is still 'unknown': a repeat record call finds the finalised row
+// and succeeds without touching it, so no request can overwrite a completed
+// run (§8 idempotency).
+func (s *Store) finalizeExistingAgentEvaluationRun(ctx context.Context, run *AgentEvaluationRun, casesJSON, thresholdJSON []byte) error {
+	err := s.pool.QueryRow(ctx,
+		`UPDATE workspace_agent_evaluation_run
+		 SET passed=$3, failed=$4, cases=$5, verdict=$6, cause=$7, threshold=$8,
+		     judge_model=$9, judge_same_model=$10, judge_degraded=$11
+		 WHERE id=$1 AND agent_id=$2 AND verdict='unknown'
+		 RETURNING created_at`,
+		run.ID, run.AgentID, run.Passed, run.Failed, casesJSON,
+		run.Verdict, run.Cause, thresholdJSON,
+		run.JudgeModel, run.JudgeSameModel, run.JudgeDegraded).
+		Scan(&run.CreatedAt)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	// Distinguish "already finalised" (idempotent no-op) from "no such run".
+	var verdict string
+	scanErr := s.pool.QueryRow(ctx,
+		`SELECT verdict FROM workspace_agent_evaluation_run WHERE id = $1 AND agent_id = $2`,
+		run.ID, run.AgentID).Scan(&verdict)
+	if errors.Is(scanErr, pgx.ErrNoRows) {
+		return fmt.Errorf("%w: evaluation run %d", ErrNotFound, run.ID)
+	}
+	if scanErr != nil {
+		return scanErr
+	}
+	run.Verdict = verdict
+	return nil
 }
 
 // ListAgentEvaluationRuns returns recent runs for an agent.

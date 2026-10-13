@@ -143,6 +143,82 @@ func (s *Store) DecideAgentProposal(ctx context.Context, id int64, status, decid
 	return *p, nil
 }
 
+// ErrBaseVersionStale reports specs/quality-loop.md §5.5/§10.1b: the agent's
+// definition version moved past the proposal's base version, so the proposal
+// must be rebased instead of applied over a stale base.
+var ErrBaseVersionStale = errors.New("base_version_stale")
+
+// ApplyAgentProposal claims a pending proposal and applies its target
+// definition to the agent in one transaction — the TOCTOU fix of §10.1a.
+// The conditional claim (status 'pending' → 'applied') is the transaction's
+// first statement: of two concurrent applies exactly one wins, the loser
+// blocks on the proposal row lock, re-reads it after the winner commits,
+// fails the predicate and rolls back with ErrConflict before a single agent
+// column is touched — UpdateAgent + version++ can never run twice. The agent
+// row is then locked and its definition_version checked against the
+// proposal's base (§5.5): a version bump that raced the handler's load
+// surfaces as ErrBaseVersionStale, never as a silent apply over a stale base.
+// The immutable version snapshot rides the same transaction, so the apply
+// lands whole (proposal decided + agent updated + snapshot written) or not
+// at all.
+func (s *Store) ApplyAgentProposal(ctx context.Context, next Agent, proposalID int64, decidedBy string, snapshot *AgentVersion) (AgentProposal, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return AgentProposal{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	row := tx.QueryRow(ctx,
+		`UPDATE workspace_agent_proposal
+		 SET status = 'applied', decided_at = now(), decided_by = $3
+		 WHERE id = $1 AND agent_id = $2 AND status = 'pending'
+		 RETURNING id, agent_id, base_version, definition, description, problem, change, effect,
+		           evidence, status, author, generator_model, created_at, decided_at, decided_by`,
+		proposalID, next.ID, decidedBy)
+	decided, err := scanAgentProposal(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The claim missed: the row is gone (404) or already decided (409).
+		var status string
+		scanErr := tx.QueryRow(ctx,
+			`SELECT status FROM workspace_agent_proposal WHERE id = $1 AND agent_id = $2`,
+			proposalID, next.ID).Scan(&status)
+		if errors.Is(scanErr, pgx.ErrNoRows) {
+			return AgentProposal{}, ErrNotFound
+		}
+		if scanErr != nil {
+			return AgentProposal{}, scanErr
+		}
+		return AgentProposal{}, fmt.Errorf("%w: proposal %d is already %s", ErrConflict, proposalID, status)
+	}
+	if err != nil {
+		return AgentProposal{}, err
+	}
+
+	var base int
+	if err := tx.QueryRow(ctx,
+		`SELECT definition_version FROM workspace_agent WHERE id = $1 FOR UPDATE`, next.ID).Scan(&base); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return AgentProposal{}, ErrNotFound
+		}
+		return AgentProposal{}, err
+	}
+	if base != decided.BaseVersion {
+		return AgentProposal{}, fmt.Errorf("%w: proposal base is %d, agent is at %d", ErrBaseVersionStale, decided.BaseVersion, base)
+	}
+	if err := updateAgentRow(ctx, tx, next); err != nil {
+		return AgentProposal{}, err
+	}
+	if snapshot != nil {
+		if err := insertAgentVersionRow(ctx, tx, *snapshot); err != nil {
+			return AgentProposal{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return AgentProposal{}, err
+	}
+	return *decided, nil
+}
+
 func scanAgentProposal(row interface{ Scan(dest ...any) error }) (*AgentProposal, error) {
 	var p AgentProposal
 	var definition, evidence []byte
