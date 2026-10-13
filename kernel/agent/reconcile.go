@@ -90,6 +90,20 @@ type ReconcileRequest struct {
 // means the workflow is stuck or the worker died without the timeout firing.
 const staleInFlightAfter = 10 * time.Minute
 
+// isOrchestrationTool marks tools that never run as a tool activity: plan
+// and delegate orchestrate child workflows from workflow code (durable,
+// replayed by Temporal) and routinely stay open for the whole DAG — rework
+// rounds included — far past the tool-activity timeout the staleness
+// heuristic is built on. Their effect is the child runs themselves, fully
+// visible in the journal with their own tool operations, so an open
+// plan/delegate call inside a running workflow is progress, not a stuck
+// activity — the operator question it would raise ("verify the external
+// system") has no external system to check.
+func isOrchestrationTool(tool string) bool {
+	bare, prefixed := bareToolName(tool)
+	return !prefixed && (bare == "plan" || bare == "delegate")
+}
+
 // UncertainOperations projects tool lifecycle events from the journal into
 // operations whose effect state is unresolved. The event stream stays the
 // source of truth — nothing is stored here.
@@ -182,7 +196,7 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 		}
 		operation.State = OperationStateInFlight
 		operation.Reason = "workflow_running"
-		if running && time.Since(event.OccurredAt) > staleInFlightAfter {
+		if running && time.Since(event.OccurredAt) > staleInFlightAfter && !isOrchestrationTool(operation.Tool) {
 			operation.State = OperationStateUncertain
 			operation.Reason = "stale_in_flight"
 		} else if !running {

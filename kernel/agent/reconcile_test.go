@@ -161,6 +161,46 @@ func TestUncertainOperationsCrashWindow(t *testing.T) {
 	require.Equal(t, "context deadline exceeded", ids["op-failed"].ErrorDetail)
 }
 
+// A long-running plan/delegate call is orchestration, not a stuck tool
+// activity: the DAG (rework rounds, review gates) legitimately outlives the
+// tool-activity timeout the staleness heuristic assumes, and its effect —
+// the child runs — is fully visible in the journal. While the workflow
+// runs it must stay in flight; only a dead workflow without a terminal
+// event is a real crash-window question.
+func TestUncertainOperationsOrchestrationToolsAreNotStale(t *testing.T) {
+	old := time.Now().Add(-time.Hour)
+	planStarted := toolEvent("repo", "run-1", "op-plan", "tool.started", old)
+	planStarted.Data["tool"] = "plan"
+	planStarted.Data["arguments"] = `{"goal":"patch audit","tasks":[]}`
+	delegateStarted := toolEvent("repo", "run-1", "op-delegate", "tool.started", old)
+	delegateStarted.Data["tool"] = "delegate"
+	// An MCP tool that happens to be named "plan" is NOT kernel orchestration
+	// and must keep the regular staleness classification.
+	mcpPlanStarted := toolEvent("repo", "run-4", "op-mcp-plan", "tool.started", old)
+	mcpPlanStarted.Data["tool"] = "mcp__server__plan"
+	// The same plan call inside a dead workflow stays a crash-window question.
+	deadPlanStarted := toolEvent("repo", "run-5", "op-plan-dead", "tool.started", old)
+	deadPlanStarted.Data["tool"] = "plan"
+
+	server := journalStub(t, planStarted, delegateStarted, mcpPlanStarted, deadPlanStarted)
+	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "operator"}
+	liveness := stubLiveness{running: map[string]bool{"run-1": true, "run-4": true}}
+
+	operations, err := activities.UncertainOperations(context.Background(), "repo", liveness)
+	require.NoError(t, err)
+
+	ids := map[string]UncertainOperation{}
+	for _, operation := range operations {
+		ids[operation.OperationID] = operation
+	}
+	require.NotContains(t, ids, "op-plan", "an open plan call inside a running workflow is DAG progress, not an operator question")
+	require.NotContains(t, ids, "op-delegate", "an open delegate call inside a running workflow is a live child run")
+	require.Contains(t, ids, "op-mcp-plan", "a same-named MCP tool keeps the staleness classification")
+	require.Equal(t, "stale_in_flight", ids["op-mcp-plan"].Reason)
+	require.Contains(t, ids, "op-plan-dead", "a plan call in a dead workflow without a terminal event is the crash window")
+	require.Equal(t, "crash_window", ids["op-plan-dead"].Reason)
+}
+
 // Read-only calls (a fetch that died mid-transfer, an observing browser
 // action) must never surface as operator reconciliation questions — including
 // legacy events recorded before the effect classification existed.
