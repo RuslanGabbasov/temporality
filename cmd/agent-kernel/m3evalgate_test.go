@@ -359,8 +359,10 @@ func TestEvalGateReaderForbidden(t *testing.T) {
 	require.Zero(t, store.createCalls)
 }
 
-// gate:false skips the gate decision entirely — no lookup, no run, no event
-// (§8.3: writer/owner right).
+// gate:false skips the gate decision entirely — no lookup, no run (§8.3:
+// writer/owner right) — but the skip stays attributable: it writes an
+// audit record and the agent.evaluation.gate.skipped event, exactly like
+// an override (CWE-778).
 func TestEvalGateFalseSkipsGate(t *testing.T) {
 	store, runner, outbox := defaultEvalGateFixture()
 	store.decision = workspace.EvalGateDecision{State: workspace.EvalGateRed,
@@ -373,8 +375,24 @@ func TestEvalGateFalseSkipsGate(t *testing.T) {
 	require.Contains(t, body, `"applied":true`)
 	require.Zero(t, store.statusCalls)
 	require.Zero(t, store.createCalls)
+
+	require.Len(t, store.audits, 1)
+	audit := store.audits[0]
+	require.Equal(t, workspace.AuditEvalGateSkipped, audit.action)
+	require.Equal(t, "agent_proposal", audit.entityKind)
+	require.Equal(t, "7", audit.entityID)
+	require.Equal(t, "writer", audit.actor)
+	require.EqualValues(t, 4, audit.details["base_version"])
+	require.Equal(t, "agent-a", audit.details["agent_id"])
+
+	skipped := outbox.byType("agent.evaluation.gate.skipped")
+	require.Len(t, skipped, 1)
+	require.EqualValues(t, 7, skipped[0].Data["proposal_id"])
+	require.EqualValues(t, 4, skipped[0].Data["base_version"])
+	require.Equal(t, "gate_skipped", skipped[0].Data["cause"])
 	require.Empty(t, outbox.byType("agent.evaluation.gate.passed"))
 	require.Empty(t, outbox.byType("agent.evaluation.gate.blocked"))
+	require.Empty(t, outbox.byType("agent.evaluation.gate.overridden"))
 }
 
 // A proposal whose base version moved past the agent is refused with 409

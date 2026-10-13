@@ -56,8 +56,9 @@ const (
 	AuditTeamVersionProposed  = "team_version.proposed"
 	AuditTeamVersionApplied   = "team_version.applied"
 	AuditTeamVersionRejected  = "team_version.rejected"
-	AuditTeamRunStarted      = "team.run_started"
-	AuditEvalGateOverridden  = "agent.evaluation.gate.overridden"
+	AuditTeamRunStarted       = "team.run_started"
+	AuditEvalGateOverridden   = "agent.evaluation.gate.overridden"
+	AuditEvalGateSkipped      = "agent.evaluation.gate.skipped"
 )
 
 // RecordAccessAudit appends one event. Nil details is stored as {}.

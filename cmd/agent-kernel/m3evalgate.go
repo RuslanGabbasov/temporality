@@ -32,7 +32,10 @@ import (
 // §11.2): writer is a full service administrator, below-writer roles are
 // refused by the RBAC gate before any of this is read. An override writes
 // an audit record and the agent.evaluation.gate.overridden event
-// (override-rate < 5 % is a loop-health metric, §12).
+// (override-rate < 5 % is a loop-health metric, §12). The silent-looking
+// gate:false path is not silent either: it writes an audit record and the
+// agent.evaluation.gate.skipped event, so every apply without a green gate
+// stays attributable (CWE-778, §12 override-rate would otherwise miss it).
 
 // evalGateRunTimeout bounds the background gate run; it matches
 // workspace.evalGateRunningWindow, so a run that dies with the deadline is
@@ -166,8 +169,13 @@ func RegisterM3Routes(mux *http.ServeMux, gate *controlplane.Gate, store evalGat
 			return
 		}
 		// gate:false (writer right, §8.3): the gate is skipped entirely —
-		// no decision lookup, no run, no gate event.
+		// no decision lookup, no run. The skip itself is never silent: an
+		// audit record and the agent.evaluation.gate.skipped event mark who
+		// bypassed the gate and on which base version (CWE-778).
 		if request.Gate != nil && !*request.Gate {
+			recordEvalGateSkip(r.Context(), store, log, a, proposal, requestSubject(r))
+			emitEvalGateEvent(r.Context(), events, "agent.evaluation.gate.skipped", a, proposal, nil,
+				map[string]any{"cause": "gate_skipped"}, actorFromRequest(r))
 			apply(w, r, a, proposal)
 			return
 		}
@@ -281,6 +289,23 @@ func recordEvalGateOverride(ctx context.Context, store evalGateStore, log *slog.
 	}
 }
 
+// recordEvalGateSkip writes the audit entry of a gate-less apply (§8.3,
+// gate:false): the who (applying writer), the what (proposal, base version)
+// and the fact that no gate decision was consulted. Best-effort, exactly
+// like the override record — the apply already happened; an audit failure
+// is logged, never silently dropped.
+func recordEvalGateSkip(ctx context.Context, store evalGateStore, log *slog.Logger, a workspace.Agent, proposal workspace.AgentProposal, subject string) {
+	err := store.RecordAccessAudit(ctx, subject, workspace.AuditEvalGateSkipped, "agent_proposal",
+		strconv.FormatInt(proposal.ID, 10), map[string]any{
+			"agent_id":     a.ID,
+			"base_version": proposal.BaseVersion,
+			"gate":         false,
+		})
+	if err != nil && log != nil {
+		log.Warn("record eval gate skip audit", "proposal", proposal.ID, "error", err)
+	}
+}
+
 // startGateRun launches the gate evaluation in the background: the HTTP
 // response is the 202 above, the run finalises the pre-created row. A failed
 // run fails that row (verdict=error, §10.4) so the next apply starts anew
@@ -324,7 +349,7 @@ func evalFailedCaseNames(run *workspace.AgentEvaluationRun) []string {
 }
 
 // emitEvalGateEvent records agent.evaluation.gate.passed | .blocked |
-// .overridden (§9) through the durable outbox. Best-effort: the run row and
+// .overridden | .skipped (§9) through the durable outbox. Best-effort: the run row and
 // the apply answer stay the source of truth. Event ids include UnixNano
 // (§8), so repeated emissions never collide in the journal.
 func emitEvalGateEvent(ctx context.Context, events evalGateOutbox, eventType string, a workspace.Agent, proposal workspace.AgentProposal, run *workspace.AgentEvaluationRun, extra map[string]any, actor observation.Actor) {
