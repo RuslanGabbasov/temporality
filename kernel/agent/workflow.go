@@ -2326,11 +2326,27 @@ func awaitApproval(ctx workflow.Context, operationID string, timeout time.Durati
 // ran) are drained and ignored via the turn check; each applied nudge emits a
 // model.nudged event for the audit trail. The returned nudged count feeds
 // observability.
+//
+// A nudge retry re-executes the activity with FRESH timeout options, which
+// would silently reset the whole patience ladder — an operator nudging every
+// few minutes could keep a dead provider on life support forever. The loop
+// therefore anchors to the ORIGINAL ScheduleToClose deadline: every retry
+// gets only the remaining budget, so the total patience per model call is
+// bounded by configuration no matter how many nudges land.
 func executeModelWithNudge(ctx workflow.Context, activityCtx workflow.Context, state *eventState, opts workflow.ActivityOptions, request ModelRequest, turn int, out *llm.Completion) error {
 	nudgeChannel := workflow.GetSignalChannel(ctx, NudgeSignal)
+	deadline := workflow.Now(ctx).Add(opts.ScheduleToCloseTimeout)
 	for {
+		callOpts := opts
+		if remaining := deadline.Sub(workflow.Now(ctx)); remaining > 0 {
+			if remaining < callOpts.ScheduleToCloseTimeout {
+				callOpts.ScheduleToCloseTimeout = remaining
+			}
+		} else {
+			return fmt.Errorf("model call budget exhausted (schedule-to-close %s) after nudge", opts.ScheduleToCloseTimeout)
+		}
 		callCtx, cancelCall := workflow.WithCancel(ctx)
-		callCtx = workflow.WithActivityOptions(callCtx, opts)
+		callCtx = workflow.WithActivityOptions(callCtx, callOpts)
 		future := workflow.ExecuteActivity(callCtx, ActivityCallModel, request)
 		applyNudge := false
 		nudgeActor := ""

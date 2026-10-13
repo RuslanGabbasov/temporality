@@ -181,6 +181,63 @@ func TestAgentRunNudgeCancelsStuckModelCallAndRetries(t *testing.T) {
 	require.Equal(t, "human-1", nudged[0].Data["actor_id"])
 }
 
+// budgetProbeWorkflow drives executeModelWithNudge directly with tiny
+// timeouts so the nudge budget semantics can be asserted without the full
+// AgentRun ladder (the fixed +5m schedule-to-close padding makes the real
+// options far too slow for a wall-clock-paced test environment).
+func budgetProbeWorkflow(ctx workflow.Context, opts workflow.ActivityOptions) error {
+	recordCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 2 * time.Second, ScheduleToCloseTimeout: 2 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+	state := &eventState{run: RunInput{RunID: "probe-run", Project: "repo-a", ActorID: "lead", SourceID: "probe-src"}, eventScope: eventScope("probe-src", "repo-a", "probe-run")}
+	var completion llm.Completion
+	return executeModelWithNudge(ctx, recordCtx, state, opts, ModelRequest{RunID: "probe-run", Turn: 1, Project: "repo-a"}, 1, &completion)
+}
+
+// Nudging must not extend the total patience of a model call: every retry
+// gets only the remaining ScheduleToClose budget, so two nudges cannot turn a
+// 6s budget into 6+6+6s of life support for a dead provider. The parked
+// provider never answers; the probe measures the mock-clock time the whole
+// ladder was allowed to run — with the budget honored it dies by the original
+// deadline, with a per-retry reset it would run past it.
+func TestNudgeDoesNotResetScheduleToCloseBudget(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(budgetProbeWorkflow, workflow.RegisterOptions{Name: "budgetProbeWorkflow"})
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		return event.Validate()
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	modelCalls := 0
+	var scheduleToClose []time.Duration
+	env.RegisterActivityWithOptions(func(ctx context.Context, request ModelRequest) (llm.Completion, error) {
+		modelCalls++
+		if activity.IsActivity(ctx) {
+			scheduleToClose = append(scheduleToClose, activity.GetInfo(ctx).ScheduleToCloseTimeout)
+		}
+		// A provider that never answers: every attempt parks until cancelled.
+		<-ctx.Done()
+		return llm.Completion{}, ctx.Err()
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(NudgeSignal, Nudge{Turn: 1, ActorID: "human-1"})
+	}, 2*time.Second)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(NudgeSignal, Nudge{Turn: 1, ActorID: "human-2"})
+	}, 3*time.Second)
+
+	const budget = 6 * time.Second
+	opts := workflow.ActivityOptions{StartToCloseTimeout: 2 * time.Second, ScheduleToCloseTimeout: budget, RetryPolicy: &temporal.RetryPolicy{InitialInterval: 100 * time.Millisecond, MaximumInterval: time.Second, MaximumAttempts: 5}}
+	env.ExecuteWorkflow("budgetProbeWorkflow", opts)
+	require.True(t, env.IsWorkflowCompleted())
+	require.Error(t, env.GetWorkflowError(), "a provider that never answers must fail the model call")
+	require.Equal(t, 3, modelCalls, "first call + two nudged retries")
+	require.Len(t, scheduleToClose, 3)
+	// The first call gets the whole budget; every nudge retry must get only
+	// the REMAINING budget (second retry at mock t=3s: 6s-3s=3s left), never
+	// a fresh full-budget window.
+	require.Equal(t, budget, scheduleToClose[0])
+	require.LessOrEqual(t, scheduleToClose[1], budget-2*time.Second, "first nudge retry must inherit the remaining budget, not a fresh one")
+	require.LessOrEqual(t, scheduleToClose[2], budget-3*time.Second, "second nudge retry must inherit the remaining budget, not a fresh one")
+}
+
 func TestAgentRunAskHumanDeliversResponseAndRecordsTrajectory(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

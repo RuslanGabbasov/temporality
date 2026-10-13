@@ -347,16 +347,24 @@ func (a *Activities) RecordEvent(ctx context.Context, event observation.Event) e
 func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.Completion, error) {
 	// A retried attempt is the frozen-host recovery path (see the workflow
 	// comment on call_model options): after a sleeping machine burns the
-	// StartToClose ceiling, this is a fresh start. The journal cannot show it
-	// — model.started is emitted once per turn by the workflow — so log it
-	// where operators triage live runs. GetLogger panics outside a real
-	// activity context, hence the IsActivity guard.
+	// StartToClose ceiling, this is a fresh start. The journal cannot rely on
+	// model.started (emitted once per turn by the deterministic workflow), so
+	// retried attempts and stream fallbacks are journaled directly through the
+	// outbox under non-colliding ids — without them a dead provider looks like
+	// a dead run for the whole silent retry ladder. GetLogger panics outside a
+	// real activity context, hence the IsActivity guard.
+	attempt := 1
+	activityID := ""
 	if activity.IsActivity(ctx) {
-		if info := activity.GetInfo(ctx); info.Attempt > 1 {
+		info := activity.GetInfo(ctx)
+		attempt = int(info.Attempt)
+		activityID = info.ActivityID
+		if info.Attempt > 1 {
 			if logger := activity.GetLogger(ctx); logger != nil {
 				logger.Info("model call retrying after attempt failure",
 					"run_id", request.RunID, "turn", request.Turn, "attempt", info.Attempt)
 			}
+			a.emitModelAttempt(ctx, request, attempt, activityID, "activity_retry", 0, "")
 		}
 	}
 	client := a.Model
@@ -418,8 +426,10 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		streamMs := time.Since(streamStarted).Milliseconds()
 		// A stream that stalls behind gateway keepalives can burn most of the
 		// activity budget before dying; the fallback then looks suspiciously
-		// fast. Log the failure where operators triage live runs. GetLogger
-		// panics outside a real activity context, hence the IsActivity guard.
+		// fast. Log the failure where operators triage live runs and journal it
+		// as a model.attempt marker so the trace shows the internal transition
+		// instead of a silent multi-minute gap. GetLogger panics outside a real
+		// activity context, hence the IsActivity guard.
 		if activity.IsActivity(ctx) {
 			if logger := activity.GetLogger(ctx); logger != nil {
 				logger.Error("model stream failed, falling back to blocking",
@@ -427,6 +437,7 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 					"stream_ms", streamMs, "error", streamErr.Error())
 			}
 		}
+		a.emitModelAttempt(ctx, request, attempt, activityID, "stream_fallback", streamMs, boundedAttemptError(streamErr))
 		completion, err := client.Complete(ctx, request.Messages, request.Tools, llm.WithPromptCacheKey(request.PromptCacheKey))
 		if err == nil {
 			completion.StreamFailed = true
@@ -436,6 +447,55 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		return completion, err
 	}
 	return client.Complete(ctx, request.Messages, request.Tools, llm.WithPromptCacheKey(request.PromptCacheKey))
+}
+
+// boundedAttemptError clips a transport error for the journal marker; the
+// full diagnostics live in the kernel log, the event only needs the cause.
+func boundedAttemptError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	if len(message) > 200 {
+		return message[:200]
+	}
+	return message
+}
+
+// emitModelAttempt journals one model.attempt marker straight through the
+// event outbox. The deterministic workflow numbers its own events
+// sequentially (scope/event/NNNNNN); these activity-side markers live under a
+// separate namespace keyed by the Temporal scheduled event id + attempt, so
+// they never collide with the workflow sequence and stay idempotent across
+// outbox redeliveries (the journal dedups by event_id). Best-effort by
+// design: an outbox failure must not fail the model call itself.
+func (a *Activities) emitModelAttempt(ctx context.Context, request ModelRequest, attempt int, activityID string, reason string, streamMs int64, streamErr string) {
+	if a.Events == nil || request.RunID == "" {
+		return
+	}
+	eventID := fmt.Sprintf("%s/model-attempt/%s/%d", eventScope(a.SourceID, request.Project, request.RunID), activityID, attempt)
+	if reason == "stream_fallback" {
+		eventID += "/fallback"
+	}
+	data := map[string]any{"turn": request.Turn, "attempt": attempt, "reason": reason}
+	if streamMs > 0 {
+		data["stream_ms"] = streamMs
+	}
+	if streamErr != "" {
+		data["error"] = streamErr
+	}
+	event := observation.Event{
+		Schema: observation.Schema, EventID: eventID, OccurredAt: time.Now().UTC(),
+		Source:  observation.Source{ID: a.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
+		Context: observation.Context{Project: request.Project, Run: request.RunID, Actor: observation.Actor{ID: "system", Type: "agent"}},
+		Type:    "model.attempt", Data: data,
+	}
+	if err := event.Validate(); err != nil {
+		return
+	}
+	// Enqueue is a local buffer write, not a network call; a failure only
+	// costs the marker, never the attempt.
+	_ = a.Events.Enqueue(ctx, event)
 }
 
 func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResult, error) {

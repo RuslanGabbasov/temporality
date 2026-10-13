@@ -194,6 +194,18 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       // Manual unstick: a human cancelled a hanging provider call and the
       // kernel retried the turn (see kernel.nudge / POST .../nudge).
       return { icon: '↻', label: t('runs.event.model_nudged'), detail: t('runs.event.model_nudged_detail', { turn: String(d.turn ?? '?') }), color: 'var(--tm-teal)' }
+    case 'model.attempt': {
+      // Internal recovery marker journaled by the activity itself, outside the
+      // deterministic workflow sequence: either Temporal retried a dead model
+      // call (activity_retry) or the stream died mid-flight and the blocking
+      // API salvaged the turn (stream_fallback). Without it a hanging provider
+      // looks like a silent multi-minute gap inside one model.started…completed.
+      const reasonKey = d.reason === 'stream_fallback' ? 'runs.event.model_attempt_fallback' : 'runs.event.model_attempt_retry'
+      const attempt = t('runs.event.model_attempt_n', { n: String(d.attempt ?? '?') })
+      const ms = d.stream_ms ? `${(Number(d.stream_ms) / 1000).toFixed(1)}s` : ''
+      const err = d.error ? String(d.error).slice(0, 60) : ''
+      return { icon: '↻', label: t('runs.event.model_attempt'), detail: [t(reasonKey), attempt, ms, err].filter(Boolean).join(' · '), color: '#e0af68' }
+    }
     case 'tool.started': {
       const args = d.arguments
       let preview = ''

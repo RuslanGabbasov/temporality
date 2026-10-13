@@ -63,6 +63,23 @@ describe('model.nudged summary', () => {
   })
 })
 
+describe('model.attempt summary', () => {
+  it('surfaces a Temporal retry of the model call', () => {
+    const info = eventSummary(event('model.attempt', { turn: 3, attempt: 2, reason: 'activity_retry' }), t)
+    expect(info.icon).toBe('↻')
+    expect(info.label).toBe('runs.event.model_attempt')
+    expect(info.detail).toContain('runs.event.model_attempt_retry')
+    expect(info.detail).toContain('runs.event.model_attempt_n')
+  })
+
+  it('surfaces the stream fallback with its lifetime and error', () => {
+    const info = eventSummary(event('model.attempt', { turn: 3, attempt: 1, reason: 'stream_fallback', stream_ms: 91200, error: 'context deadline exceeded' }), t)
+    expect(info.detail).toContain('runs.event.model_attempt_fallback')
+    expect(info.detail).toContain('91.2s')
+    expect(info.detail).toContain('context deadline exceeded')
+  })
+})
+
 describe('knowledge, hint and skill lifecycle summaries', () => {
   it('localizes knowledge lifecycle events', () => {
     expect(eventSummary(event('knowledge.used', { knowledge_id: 'K1', hint_id: 'h1' }), t).label).toBe('runs.event.knowledge_used')
