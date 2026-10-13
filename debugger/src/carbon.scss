@@ -2366,6 +2366,27 @@ button.header-nav-link {
   animation: spin 0.7s linear infinite;
 }
 
+// Page-level loading marker (PageLoading.tsx): centered on the screen,
+// never in the layout flow — content does not jump while a tab refetches —
+// and never blocking: no backdrop, clicks pass through.
+.page-loading {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1000;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: var(--tm-elevated);
+  border: 1px solid var(--tm-border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
 .spinner-lg {
   width: 26px;
   height: 26px;

@@ -7,7 +7,6 @@ import {
   SelectItem,
   Toggle,
   InlineNotification,
-  Loading,
   Tag,
   Tile,
   Grid,
@@ -15,6 +14,7 @@ import {
   Stack,
   Heading,
 } from '@carbon/react'
+import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Trigger, type Agent, type ExecutionIdentity } from './workspaceApi'
 import { useT } from './i18n'
@@ -190,7 +190,7 @@ export default function Triggers({ project }: { project: string }) {
         })}
       </Grid>
 
-      {loading && <Loading withOverlay={false} small />}
+      {loading && <PageLoading />}
 
       {/* Create/Edit modal */}
       {showForm && (

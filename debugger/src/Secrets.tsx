@@ -4,7 +4,6 @@ import {
   TextInput,
   TextArea,
   InlineNotification,
-  Loading,
   Tag,
   Tile,
   Grid,
@@ -14,6 +13,7 @@ import {
   Select,
   SelectItem,
 } from '@carbon/react'
+import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Secret } from './workspaceApi'
 import { useT } from './i18n'
@@ -212,7 +212,7 @@ export default function Secrets() {
         </AppModal>
       )}
 
-      {loading && <Loading withOverlay={false} small />}
+      {loading && <PageLoading />}
     </div>
   )
 }

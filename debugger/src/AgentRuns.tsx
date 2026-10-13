@@ -13,7 +13,6 @@ import {
   Button,
   TextInput,
   InlineNotification,
-  Loading,
   Tag,
   Tile,
   Grid,
@@ -22,6 +21,7 @@ import {
   Section,
   Heading,
 } from '@carbon/react'
+import PageLoading from './PageLoading'
 import { Time, Play, ChevronDown, ChevronRight } from '@carbon/icons-react'
 import ListFilter, { matchesFilter } from './ListFilter'
 import { runCost, taskCost, type RunCost, type TaskCost } from './kernelApi'
@@ -833,7 +833,7 @@ export default function AgentRuns({ project }: { project: string }) {
         </Column>
       </Grid>
 
-      {busy && <Loading withOverlay={false} small />}
+      {busy && <PageLoading />}
     </div>
   )
 }

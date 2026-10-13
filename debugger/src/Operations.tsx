@@ -6,7 +6,6 @@ import {
   Select,
   SelectItem,
   InlineNotification,
-  Loading,
   Tag,
   Tile,
   Grid,
@@ -15,6 +14,7 @@ import {
   Section,
   Heading,
 } from '@carbon/react'
+import PageLoading from './PageLoading'
 import {
   canReconcile,
   isReconcileEffect,
@@ -527,7 +527,7 @@ export default function Operations({ project }: { project: string }) {
         </Column>
       </Grid>
 
-      {busy && <Loading withOverlay={false} small />}
+      {busy && <PageLoading />}
     </div>
   )
 }

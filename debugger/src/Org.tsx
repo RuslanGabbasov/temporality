@@ -5,10 +5,10 @@ import {
   Select,
   SelectItem,
   InlineNotification,
-  Loading,
   Tag,
   Heading,
 } from '@carbon/react'
+import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, ChevronRight, ChevronDown, Building, Enterprise } from '@carbon/icons-react'
 import { workspaceApi, type OrgUnit, type UnitResources, type OrgUnitKind, type Policy, type OrgUnitRoleGrant, type ExecutionIdentity, type User } from './workspaceApi'
 import { useT } from './i18n'
@@ -537,7 +537,7 @@ export default function Org() {
           )}
         </div>
         {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginTop: '0.75rem' }} />}
-        {loading && <Loading withOverlay={false} small />}
+        {loading && <PageLoading />}
       </div>
     )
   }
@@ -623,7 +623,7 @@ export default function Org() {
                   })}
                 </div>
               ) : (
-                <Loading withOverlay={false} small />
+                <PageLoading />
               )}
 
               {/* Roles granted on this unit (docs/org-structure.md §13): each
@@ -1174,7 +1174,7 @@ export default function Org() {
         </AppModal>
       )}
 
-      {loading && <Loading withOverlay={false} small />}
+      {loading && <PageLoading />}
     </div>
   )
 }

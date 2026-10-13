@@ -5,7 +5,6 @@ import {
   Select,
   SelectItem,
   InlineNotification,
-  Loading,
   Tag,
   Tile,
   Grid,
@@ -13,6 +12,7 @@ import {
   Stack,
   Heading,
 } from '@carbon/react'
+import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, Key, Chat } from '@carbon/icons-react'
 import { workspaceApi, type User } from './workspaceApi'
 import { useT } from './i18n'
@@ -244,7 +244,7 @@ export default function Users() {
         />
       )}
 
-      {loading && <Loading withOverlay={false} small />}
+      {loading && <PageLoading />}
     </div>
   )
 }

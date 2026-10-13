@@ -4,12 +4,12 @@ import {
   TextInput,
   TextArea,
   InlineNotification,
-  Loading,
   Tag,
   Tile,
   Stack,
   Heading,
 } from '@carbon/react'
+import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
 import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion, type SkillEvaluationCase, type SkillEvaluationRun } from './workspaceApi'
@@ -861,7 +861,7 @@ export default function Skills() {
         </AppModal>
       )}
 
-      {loading && <Loading withOverlay={false} small />}
+      {loading && <PageLoading />}
     </div>
   )
 }

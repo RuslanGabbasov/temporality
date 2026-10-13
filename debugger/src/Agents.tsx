@@ -6,7 +6,6 @@ import {
   Select,
   SelectItem,
   InlineNotification,
-  Loading,
   Tag,
   Tile,
   Grid,
@@ -17,6 +16,7 @@ import {
   NumberInput,
   Checkbox,
 } from '@carbon/react'
+import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, Copy, Star, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
 import ListFilter, { matchesFilter } from './ListFilter'
@@ -1537,7 +1537,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         </AppModal>
       )}
 
-      {loading && <Loading withOverlay={false} small />}
+      {loading && <PageLoading />}
 
       {/* Template selection modal: curated builtin definitions from the server */}
       {showTemplates && (

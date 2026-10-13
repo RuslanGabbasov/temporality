@@ -3,7 +3,6 @@ import {
   Button,
   TextInput,
   InlineNotification,
-  Loading,
   Tag,
   Tile,
   Grid,
@@ -11,6 +10,7 @@ import {
   Stack,
   Heading,
 } from '@carbon/react'
+import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Provider, type Secret } from './workspaceApi'
 import { useT } from './i18n'
@@ -180,7 +180,7 @@ export default function Providers() {
         </AppModal>
       )}
 
-      {loading && <Loading withOverlay={false} small />}
+      {loading && <PageLoading />}
     </div>
   )
 }
