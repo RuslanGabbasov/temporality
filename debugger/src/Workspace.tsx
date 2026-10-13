@@ -103,6 +103,14 @@ export function formatStreamEvent(type: string, outer: any, t: Translate, locale
     }
     case 'turn.completed':
       return t('chat.stream.turn_done', { turn: String(d.turn ?? '') }) + (d.tool_calls ? t('chat.stream.tool_calls_suffix', { count: pluralT(t, locale, 'chat.stream.tool_calls_n', Number(d.tool_calls)) }) : '')
+    case 'model.attempt': {
+      // Silent-recovery markers: without a line the user sees the chat freeze
+      // for minutes while the kernel quietly retries a stalled provider.
+      const attempt = String(d.attempt ?? '?')
+      if (d.reason === 'stream_timeout') return t('chat.stream.model_attempt_timeout', { attempt })
+      if (d.reason === 'stream_fallback') return t('chat.stream.model_attempt_fallback', { attempt })
+      return t('chat.stream.model_attempt_retry', { attempt })
+    }
     case 'tool.completed':
       return t('chat.stream.tool_line', { name: pseudoToolLabel(d.name ?? d.tool, t) })
     case 'knowledge.proposed':
@@ -346,6 +354,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     }
 
     es.addEventListener('model.completed', handleEvent('model.completed'))
+    es.addEventListener('model.attempt', handleEvent('model.attempt'))
     es.addEventListener('turn.completed', handleEvent('turn.completed'))
     es.addEventListener('tool.completed', handleEvent('tool.completed'))
     es.addEventListener('knowledge.proposed', handleEvent('knowledge.proposed'))

@@ -61,6 +61,23 @@ describe('formatStreamEvent', () => {
       .toBe('Усвоено: ' + 'x'.repeat(60))
   })
 
+  it('localizes silent-recovery markers for a stalled provider', () => {
+    expect(formatStreamEvent('model.attempt', { data: { turn: 3, attempt: 2, reason: 'stream_timeout' } }, ruT, 'ru'))
+      .toBe('Провайдер молчит до первого токена — повтор на новом соединении (попытка 2)')
+    expect(formatStreamEvent('model.attempt', { data: { turn: 3, attempt: 2, reason: 'stream_timeout' } }, enT, 'en'))
+      .toBe('Provider silent before the first token — retrying on a fresh connection (attempt 2)')
+
+    expect(formatStreamEvent('model.attempt', { data: { turn: 3, attempt: 1, reason: 'stream_fallback' } }, ruT, 'ru'))
+      .toBe('Стрим оборвался — повтор без потоковой передачи (попытка 1)')
+    expect(formatStreamEvent('model.attempt', { data: { turn: 3, attempt: 1, reason: 'stream_fallback' } }, enT, 'en'))
+      .toBe('Stream broke — retrying without streaming (attempt 1)')
+
+    expect(formatStreamEvent('model.attempt', { data: { turn: 3, attempt: 4, reason: 'activity_retry' } }, ruT, 'ru'))
+      .toBe('Повтор вызова модели (попытка 4)')
+    expect(formatStreamEvent('model.attempt', { data: { turn: 3, attempt: 4, reason: 'activity_retry' } }, enT, 'en'))
+      .toBe('Retrying the model call (attempt 4)')
+  })
+
   it('returns null for unknown events', () => {
     expect(formatStreamEvent('mystery', { data: {} }, enT, 'en')).toBeNull()
   })

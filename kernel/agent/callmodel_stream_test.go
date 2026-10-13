@@ -155,3 +155,62 @@ func TestCallModelFallsBackWhenStreamingFails(t *testing.T) {
 		t.Fatal("salvaged completion must carry the stream error for model.completed")
 	}
 }
+
+// A provider that accepts the request and then goes silent is queueing the
+// request server-side: the blocking salvage would join the same queue and add
+// minutes of silence. CallModel must fail the attempt instead (one HTTP
+// request total) and journal a stream_timeout marker — the activity retry
+// opens a fresh connection, which is the automatic version of a manual nudge.
+func TestCallModelStreamTimeoutSkipsBlockingSalvage(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		// Empty-choice pings keep data lines flowing — the request looks alive
+		// to the idle watchdog, only the first-token budget can catch it.
+		for {
+			if _, err := fmt.Fprint(w, "data: {\"choices\":[]}\n\n"); err != nil {
+				return // the watchdog cancelled the stream — let server.Close() finish
+			}
+			flusher.Flush()
+			time.Sleep(20 * time.Millisecond)
+		}
+	}))
+	defer server.Close()
+	activities := &Activities{
+		Model: llm.New(llm.Config{
+			BaseURL: server.URL, Model: "test", APIKey: "k", Timeout: 10 * time.Second,
+			StreamIdleTimeout:       time.Minute,     // pings reset it — isolate the first-token budget
+			StreamNoProgressTimeout: 5 * time.Minute, // would fire far later
+			StreamFirstTokenTimeout: 150 * time.Millisecond,
+		}),
+		Tokens:   NewTokenBus(),
+		Events:   &capturedOutbox{},
+		SourceID: "kernel", // markers validate source.id — NewActivities always sets one
+	}
+
+	_, err := activities.CallModel(context.Background(), ModelRequest{
+		RunID: "run-queued", Turn: 2, Project: "p",
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("expected the watchdog timeout to fail the attempt")
+	}
+	if !llm.StreamTimedOut(err) {
+		t.Fatalf("error should classify as a stream timeout, got: %v", err)
+	}
+	if got := atomic.LoadInt32(&requests); got != 1 {
+		t.Fatalf("HTTP requests = %d, want 1 — no blocking salvage after a watchdog timeout", got)
+	}
+	outbox, ok := activities.Events.(*capturedOutbox)
+	if !ok || len(outbox.events) != 1 {
+		t.Fatalf("enqueued events = %d, want exactly the stream_timeout marker", len(outbox.events))
+	}
+	if outbox.events[0].Type != "model.attempt" || outbox.events[0].Data["reason"] != "stream_timeout" {
+		t.Fatalf("marker = %v, want model.attempt/stream_timeout", outbox.events[0])
+	}
+	if outbox.events[0].Data["error"] == nil || !strings.Contains(fmt.Sprint(outbox.events[0].Data["error"]), "first token timeout") {
+		t.Fatalf("marker error should name the fired budget, got: %v", outbox.events[0].Data["error"])
+	}
+}

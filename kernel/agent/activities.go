@@ -464,6 +464,25 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 			return llm.Completion{}, streamErr
 		}
 		streamMs := time.Since(streamStarted).Milliseconds()
+		// A stream that dies of a watchdog timeout means the provider accepted
+		// the request and then went silent — it is queueing us server-side. A
+		// blocking retry of the same request joins the same queue and only adds
+		// minutes of silent waiting (3 attempts × request timeout); failing the
+		// attempt here lets the activity retry open a fresh connection, which is
+		// exactly the recovery a manual nudge provides — but automatic and
+		// sooner. Protocol/status failures keep the blocking fallback: those can
+		// be a gateway that simply cannot stream this request.
+		if llm.StreamTimedOut(streamErr) {
+			if activity.IsActivity(ctx) {
+				if logger := activity.GetLogger(ctx); logger != nil {
+					logger.Warn("model stream timed out, retrying on a fresh connection",
+						"run_id", request.RunID, "turn", request.Turn,
+						"stream_ms", streamMs, "error", streamErr.Error())
+				}
+			}
+			a.emitModelAttempt(ctx, request, attempt, activityID, "stream_timeout", streamMs, boundedAttemptError(streamErr))
+			return llm.Completion{}, streamErr
+		}
 		// A stream that stalls behind gateway keepalives can burn most of the
 		// activity budget before dying; the fallback then looks suspiciously
 		// fast. Log the failure where operators triage live runs and journal it
@@ -851,12 +870,14 @@ func (a *Activities) modelConfigFor(ctx context.Context, project, model string) 
 		config.Timeout = envConfig.Timeout
 		config.StreamIdleTimeout = envConfig.StreamIdleTimeout
 		config.StreamNoProgressTimeout = envConfig.StreamNoProgressTimeout
+		config.StreamFirstTokenTimeout = envConfig.StreamFirstTokenTimeout
 		config.MaxOutputTokens = envConfig.MaxOutputTokens
 		config.Reasoning = envConfig.Reasoning
 	} else {
 		config.Timeout = 180 * time.Second
 		config.StreamIdleTimeout = 90 * time.Second
 		config.StreamNoProgressTimeout = 4 * time.Minute
+		config.StreamFirstTokenTimeout = 2 * time.Minute
 		config.MaxOutputTokens = 16384
 	}
 	a.providerCachePut(key, config, true)

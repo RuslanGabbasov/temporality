@@ -138,6 +138,15 @@ type Config struct {
 	// while the request sits in a server-side queue; those lines reset the
 	// idle timer but not this one. Zero disables the check.
 	StreamNoProgressTimeout time.Duration
+	// StreamFirstTokenTimeout is the maximum allowed wait for the FIRST chunk
+	// that carries generated tokens. It bounds the queueing case end to end:
+	// when a provider accepts the request and then sends nothing (or only
+	// empty deltas), this fires before the caller's whole retry ladder burns
+	// down, and a fresh connection — which often lands on a healthy backend —
+	// gets a chance instead. Zero means "unset" and is replaced by the 2m
+	// default in New; a negative value disables the check (the env form
+	// TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT=0 maps to that disabled state).
+	StreamFirstTokenTimeout time.Duration
 	MaxOutputTokens         int
 	Reasoning               string
 }
@@ -152,6 +161,7 @@ func ConfigFromEnv() (Config, error) {
 		Timeout:                 180 * time.Second,
 		StreamIdleTimeout:       90 * time.Second,
 		StreamNoProgressTimeout: 4 * time.Minute,
+		StreamFirstTokenTimeout: 2 * time.Minute,
 		MaxOutputTokens:         16384,
 		Reasoning:               strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_REASONING")),
 	}
@@ -194,6 +204,19 @@ func ConfigFromEnv() (Config, error) {
 		// 0 is a valid explicit "disable the no-progress watchdog".
 		cfg.StreamNoProgressTimeout = value
 	}
+	if raw := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT")); raw != "" {
+		value, err := time.ParseDuration(raw)
+		if err != nil || value < 0 {
+			return cfg, fmt.Errorf("invalid TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT: %s", raw)
+		}
+		// 0 is a valid explicit "disable the first-token watchdog"; store it as
+		// a negative sentinel so New's zero-means-unset defaulting cannot
+		// revive an intentionally disabled check.
+		if value == 0 {
+			value = -1
+		}
+		cfg.StreamFirstTokenTimeout = value
+	}
 	return cfg, nil
 }
 
@@ -214,6 +237,13 @@ func New(cfg Config) *Client {
 	}
 	if cfg.StreamIdleTimeout <= 0 {
 		cfg.StreamIdleTimeout = 90 * time.Second
+	}
+	// Zero means "not configured by the caller" rather than "disabled": the
+	// watchdog must protect every construction path (env config, provider
+	// routing, direct callers) unless it was turned off explicitly via the
+	// negative sentinel produced by ConfigFromEnv.
+	if cfg.StreamFirstTokenTimeout == 0 {
+		cfg.StreamFirstTokenTimeout = 2 * time.Minute
 	}
 	return &Client{
 		cfg:          cfg,
@@ -565,8 +595,18 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	}
 	idle := c.cfg.StreamIdleTimeout
 	noProgress := c.cfg.StreamNoProgressTimeout
+	firstToken := c.cfg.StreamFirstTokenTimeout
+	if firstToken > 0 {
+		// Prefill scales with prompt size: a legitimately processing provider
+		// can sit silent for minutes on an uncached ~250k-token context before
+		// the first token. Scale the budget with the payload (~1MB ≈ 250k
+		// tokens ≈ +60s) so the watchdog stays tight for typical contexts yet
+		// does not execute a lawful big-prompt prefill.
+		firstToken += time.Duration(float64(len(payload)) / 1_000_000 * float64(60*time.Second))
+	}
 	var lastTraffic atomic.Int64  // last parseable data line (any payload)
 	var lastProgress atomic.Int64 // last chunk that carried generated tokens
+	var anyProgress atomic.Bool   // first generated token seen at all
 	var cancelReason atomic.Value // string: which watchdog fired, for the error
 	start := time.Now().UnixNano()
 	lastTraffic.Store(start)
@@ -574,13 +614,17 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	stopWatchdog := make(chan struct{})
 	defer close(stopWatchdog)
 	go func() {
-		// Two budgets share one watchdog: idle (no data lines at all — the
-		// connection is dead or parked behind keepalive comments) and no-progress
+		// Three budgets share one watchdog: idle (no data lines at all — the
+		// connection is dead or parked behind keepalive comments), no-progress
 		// (data lines flow but carry no generated tokens — the request sits in a
-		// server-side queue). Tick at the finer granularity of the two.
+		// server-side queue) and first-token (no generated token ever — the
+		// request never left the queue). Tick at the finest granularity.
 		tick := idle / 4
 		if noProgress > 0 && noProgress/4 < tick {
 			tick = noProgress / 4
+		}
+		if firstToken > 0 && firstToken/4 < tick {
+			tick = firstToken / 4
 		}
 		if tick <= 0 {
 			tick = time.Second
@@ -600,6 +644,11 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 				}
 				if noProgress > 0 && now.Sub(time.Unix(0, lastProgress.Load())) >= noProgress {
 					cancelReason.Store(fmt.Sprintf("stalled stream: no generated tokens for %s", noProgress))
+					cancelStream()
+					return
+				}
+				if firstToken > 0 && !anyProgress.Load() && now.Sub(time.Unix(0, start)) >= firstToken {
+					cancelReason.Store(fmt.Sprintf("first token timeout: no generated tokens for %s", firstToken))
 					cancelStream()
 					return
 				}
@@ -661,6 +710,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		// chunks keep the connection alive but say nothing about generation.
 		if choice.Delta.Content != "" || choice.Delta.ReasoningContent != "" || len(choice.Delta.ToolCalls) > 0 {
 			lastProgress.Store(time.Now().UnixNano())
+			anyProgress.Store(true)
 		}
 		// Accumulate content
 		if choice.Delta.Content != "" {
@@ -701,8 +751,9 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	if err := scanner.Err(); err != nil {
 		if reason, ok := cancelReason.Load().(string); ok {
 			// The watchdog canceled the request context; name the budget that
-			// fired so the fallback path can log a diagnosable cause.
-			return Completion{}, fmt.Errorf("stream read (%s): %w", reason, err)
+			// fired so the fallback path can log a diagnosable cause and decide
+			// whether a blocking retry can help at all.
+			return Completion{}, &watchdogError{reason: reason, cause: err}
 		}
 		return Completion{}, fmt.Errorf("stream read: %w", err)
 	}
@@ -764,6 +815,29 @@ type statusError struct {
 
 func (e *statusError) Error() string {
 	return fmt.Sprintf("provider status %d: %s", e.code, e.body)
+}
+
+// watchdogError marks a stream canceled by one of the silence budgets (idle,
+// no-progress, first-token): the provider accepted the request and then went
+// quiet. Callers use StreamTimedOut to distinguish this from protocol
+// failures — a blocking retry cannot fix a server-side queue, so the sane
+// reaction is a fresh connection, not the same request without streaming.
+type watchdogError struct {
+	reason string
+	cause  error
+}
+
+func (e *watchdogError) Error() string {
+	return fmt.Sprintf("stream read (%s): %s", e.reason, e.cause)
+}
+
+func (e *watchdogError) Unwrap() error { return e.cause }
+
+// StreamTimedOut reports whether the stream failed because the provider went
+// silent (any watchdog budget), as opposed to a protocol or status error.
+func StreamTimedOut(err error) bool {
+	var watchdogErr *watchdogError
+	return errors.As(err, &watchdogErr)
 }
 
 func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {

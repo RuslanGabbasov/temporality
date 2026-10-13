@@ -78,6 +78,13 @@ describe('model.attempt summary', () => {
     expect(info.detail).toContain('91.2s')
     expect(info.detail).toContain('context deadline exceeded')
   })
+
+  it('surfaces the first-token watchdog timeout as a fresh-connection retry', () => {
+    const info = eventSummary(event('model.attempt', { turn: 3, attempt: 1, reason: 'stream_timeout', stream_ms: 120400, error: 'first token timeout: no generated tokens for 2m0s' }), t)
+    expect(info.detail).toContain('runs.event.model_attempt_timeout')
+    expect(info.detail).toContain('120.4s')
+    expect(info.detail).toContain('first token timeout')
+  })
 })
 
 describe('knowledge, hint and skill lifecycle summaries', () => {

@@ -73,6 +73,7 @@ The kernel calls the provider through an OpenAI-compatible Chat Completions API.
 | `TEMPORALITY_MODEL_TIMEOUT` | Go duration — total limit for one blocking attempt (streaming does not use it) | `180s` |
 | `TEMPORALITY_MODEL_STREAM_IDLE_TIMEOUT` | Maximum silence between stream chunks; slow but alive generation is not interrupted | `90s` |
 | `TEMPORALITY_MODEL_STREAM_NO_PROGRESS_TIMEOUT` | Maximum silence between chunks carrying generated tokens; guards against gateways that hold the connection open with empty pings (0 disables) | `4m` |
+| `TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT` | Maximum wait for the first token: the provider accepted the request but stays silent (server-side queueing). The watchdog fails the attempt and the Temporal retry opens a fresh connection — the automatic version of a manual nudge. Adaptive budget: +60s per megabyte of prompt, so a legitimate large-context prefill is not cut down (0 disables) | `2m` |
 | `TEMPORALITY_MODEL_ACTIVITY_TIMEOUT` | Ceiling of one `call_model` Temporal activity (shared by the streaming attempt and the blocking fallback with retries); up to 3 attempts within the overall budget (3× timeout + 5 minutes) | `20m` |
 | `TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS` | `64..1000000` | `16384` |
 | `TEMPORALITY_MODEL_REASONING` | `off` / `exclude` / `low` / `medium` / `high` | — |
@@ -211,6 +212,13 @@ a manual nudge is available: `POST /v1/agent/runs/{runID}/nudge?project=…`
 immediately (model calls are pure, the prompt prefix is stable via
 `prompt_cache_key`, so a retry is safe). The intervention is journaled as a
 `model.nudged` event.
+
+The same scenario is automated by the first-token watchdog
+(`TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT`, 2m by default): when the provider
+stays silent past the budget, the attempt is failed without the blocking
+fallback and the Temporal retry opens a fresh connection. Every recovery is
+surfaced in the trace and the chat as a `model.attempt` marker (reason
+`stream_timeout`) — long silence no longer looks like a hang.
 
 ### Sandbox
 

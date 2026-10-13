@@ -129,6 +129,150 @@ func TestStreamSlowGenerationNotCanceled(t *testing.T) {
 	}
 }
 
+// A queued request that never produces its first token must die at the
+// first-token deadline even while the gateway keeps data lines (empty pings)
+// flowing — and earlier than the generic no-progress budget would fire.
+func TestStreamFirstTokenTimeoutCancelsQueuedStream(t *testing.T) {
+	server := sseHandler([]string{`data: {"choices":[]}`, `data: {"choices":[]}`, `data: {"choices":[]}`}, 40*time.Millisecond)
+	defer server.Close()
+	client := New(Config{
+		BaseURL:                 server.URL,
+		Model:                   "test",
+		StreamIdleTimeout:       2 * time.Second, // pings reset it
+		StreamNoProgressTimeout: 5 * time.Second, // would fire much later
+		StreamFirstTokenTimeout: 300 * time.Millisecond,
+	})
+
+	started := time.Now()
+	_, err := client.StreamComplete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err == nil {
+		t.Fatal("expected the first-token watchdog to cancel a queued stream")
+	}
+	if !strings.Contains(err.Error(), "first token timeout") {
+		t.Fatalf("error should name the fired budget, got: %v", err)
+	}
+	if !StreamTimedOut(err) {
+		t.Fatal("StreamTimedOut must classify watchdog errors")
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("watchdog fired too late: %s", elapsed)
+	}
+}
+
+// Once the first generated token arrived the first-token budget is spent:
+// a stream that generated and then idles is bounded by the idle/no-progress
+// watchdogs, not by the first-token one.
+func TestStreamFirstTokenTimeoutSatisfiedByFirstChunk(t *testing.T) {
+	server := sseFinishingServer([]string{contentChunk("hello")}, 150*time.Millisecond)
+	defer server.Close()
+	client := New(Config{
+		BaseURL:                 server.URL,
+		Model:                   "test",
+		StreamIdleTimeout:       2 * time.Second,
+		StreamNoProgressTimeout: 0,
+		StreamFirstTokenTimeout: 250 * time.Millisecond, // the chunk lands well inside it
+	})
+
+	completion, err := client.StreamComplete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("a stream that produced its first token in budget must complete, got: %v", err)
+	}
+	if completion.Content != "hello" {
+		t.Fatalf("content = %q", completion.Content)
+	}
+}
+
+// The first-token budget scales with prompt size: a large uncached context
+// legitimately spends minutes in prefill before any token, and the watchdog
+// must not execute a lawful big-prompt request. The server stays silent for
+// 600ms — past the 300ms base budget — so only the payload scaling can save
+// the stream.
+func TestStreamFirstTokenTimeoutScalesWithPromptSize(t *testing.T) {
+	bigPrompt := strings.Repeat("a", 4_000_000)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher := w.(http.Flusher)
+		w.Header().Set("Content-Type", "text/event-stream")
+		time.Sleep(600 * time.Millisecond) // silent prefill, no data lines
+		fmt.Fprintf(w, "%s\n\n", contentChunk("late"))
+		flusher.Flush()
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+	client := New(Config{
+		BaseURL:                 server.URL,
+		Model:                   "test",
+		StreamIdleTimeout:       2 * time.Second,
+		StreamNoProgressTimeout: 0,
+		StreamFirstTokenTimeout: 300 * time.Millisecond,
+	})
+
+	started := time.Now()
+	completion, err := client.StreamComplete(context.Background(), []Message{{Role: "user", Content: bigPrompt}}, nil, nil)
+	if err != nil {
+		t.Fatalf("big-prompt prefill must outlive the base first-token budget, got: %v", err)
+	}
+	if !strings.Contains(completion.Content, "late") {
+		t.Fatalf("content = %q", completion.Content)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("elapsed = %s, test stream should finish quickly", elapsed)
+	}
+}
+
+// Protocol failures are not watchdog timeouts: the blocking fallback may
+// still help there, so the classifier must tell them apart.
+func TestStreamTimedOutRejectsNonWatchdogErrors(t *testing.T) {
+	if StreamTimedOut(context.Canceled) {
+		t.Fatal("context cancellation is not a watchdog timeout")
+	}
+	if StreamTimedOut(&statusError{code: 500, body: "boom"}) {
+		t.Fatal("a status error is not a watchdog timeout")
+	}
+	if StreamTimedOut(nil) {
+		t.Fatal("nil is not a watchdog timeout")
+	}
+}
+
+func TestConfigFromEnvFirstTokenTimeout(t *testing.T) {
+	t.Setenv("TEMPORALITY_MODEL_BASE_URL", "http://localhost:1")
+	t.Setenv("TEMPORALITY_MODEL_ID", "m")
+	t.Setenv("TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT", "90s")
+	cfg, err := ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("ConfigFromEnv: %v", err)
+	}
+	if cfg.StreamFirstTokenTimeout != 90*time.Second {
+		t.Fatalf("StreamFirstTokenTimeout = %v, want 90s", cfg.StreamFirstTokenTimeout)
+	}
+	t.Setenv("TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT", "nope")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("ConfigFromEnv accepted a malformed first-token timeout")
+	}
+
+	// Explicit env "0" disables the watchdog and must survive New's
+	// zero-means-unset defaulting.
+	t.Setenv("TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT", "0s")
+	cfg, err = ConfigFromEnv()
+	if err != nil {
+		t.Fatalf("ConfigFromEnv: %v", err)
+	}
+	if cfg.StreamFirstTokenTimeout >= 0 {
+		t.Fatalf("env 0s should disable, got %v", cfg.StreamFirstTokenTimeout)
+	}
+	client := New(cfg)
+	if client.cfg.StreamFirstTokenTimeout >= 0 {
+		t.Fatalf("New revived an explicitly disabled watchdog: %v", client.cfg.StreamFirstTokenTimeout)
+	}
+}
+
+func TestNewDefaultsFirstTokenTimeout(t *testing.T) {
+	client := New(Config{BaseURL: "http://localhost:1", Model: "m"})
+	if client.cfg.StreamFirstTokenTimeout != 2*time.Minute {
+		t.Fatalf("StreamFirstTokenTimeout = %v, want the 2m default", client.cfg.StreamFirstTokenTimeout)
+	}
+}
+
 func TestConfigFromEnvNoProgressTimeout(t *testing.T) {
 	t.Setenv("TEMPORALITY_MODEL_BASE_URL", "http://localhost:1")
 	t.Setenv("TEMPORALITY_MODEL_ID", "m")

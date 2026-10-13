@@ -197,10 +197,17 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
     case 'model.attempt': {
       // Internal recovery marker journaled by the activity itself, outside the
       // deterministic workflow sequence: either Temporal retried a dead model
-      // call (activity_retry) or the stream died mid-flight and the blocking
-      // API salvaged the turn (stream_fallback). Without it a hanging provider
-      // looks like a silent multi-minute gap inside one model.started…completed.
-      const reasonKey = d.reason === 'stream_fallback' ? 'runs.event.model_attempt_fallback' : 'runs.event.model_attempt_retry'
+      // call (activity_retry), the stream died mid-flight and the blocking
+      // API salvaged the turn (stream_fallback), or the first-token watchdog
+      // caught a queueing provider and failed the attempt so the Temporal
+      // retry opens a fresh connection (stream_timeout). Without it a hanging
+      // provider looks like a silent multi-minute gap inside one
+      // model.started…completed.
+      const reasonKey = d.reason === 'stream_fallback'
+        ? 'runs.event.model_attempt_fallback'
+        : d.reason === 'stream_timeout'
+          ? 'runs.event.model_attempt_timeout'
+          : 'runs.event.model_attempt_retry'
       const attempt = t('runs.event.model_attempt_n', { n: String(d.attempt ?? '?') })
       const ms = d.stream_ms ? `${(Number(d.stream_ms) / 1000).toFixed(1)}s` : ''
       const err = d.error ? String(d.error).slice(0, 60) : ''
