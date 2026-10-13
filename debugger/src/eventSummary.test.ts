@@ -124,6 +124,85 @@ describe('knowledge, hint and skill lifecycle summaries', () => {
   })
 })
 
+describe('trace row informativeness', () => {
+  const resolve = (id: string) => {
+    if (id === 'ext/k1') return 'При изменении API нужна миграция клиента'
+    if (id === 'ext/k2') return 'Для интеграционных тестов нужен Docker'
+    return undefined
+  }
+
+  it('shows the agent and short child path on delegation rows', () => {
+    const started = eventSummary(event('delegation.started', { agent_id: 'qa', child_run_id: 'root-20261013/delegate/01', ordinal: 1, depth: 1 }), t)
+    expect(started.detail).toBe('→ qa · delegate/01')
+    const completed = eventSummary(event('delegation.completed', { agent_id: 'qa', child_run_id: 'root-20261013/delegate/01', child_status: 'completed', turns: 7 }), t)
+    expect(completed.detail).toBe('qa · 7 runs.turns')
+    const failedChild = eventSummary(event('delegation.completed', { agent_id: 'qa', child_run_id: 'x/delegate/02', child_status: 'failed', turns: 2 }), t)
+    expect(failedChild.detail).toContain('failed')
+  })
+
+  it('resolves replacement knowledge on corrected and superseded rows', () => {
+    const corrected = eventSummary(event('knowledge.corrected', { knowledge_id: 'ext/k1', replacement_id: 'ext/k2' }), t, resolve)
+    expect(corrected.detail).toContain('При изменении API нужна миграция клиента')
+    expect(corrected.detail).toContain('→ Для интеграционных тестов нужен Docker')
+    const superseded = eventSummary(event('knowledge.superseded', { knowledge_id: 'ext/k1', replacement_id: 'ext/k2' }), t, resolve)
+    expect(superseded.icon).toBe('⇄')
+    expect(superseded.detail).toContain('→ Для интеграционных тестов нужен Docker')
+  })
+
+  it('shortens unresolvable ids instead of showing full guids', () => {
+    const corrected = eventSummary(event('knowledge.corrected', { knowledge_id: 'ext/aaaaaaaaaaaaaaaaaaaaaaaa', replacement_id: 'ext/bbbbbbbbbbbbbbbbbbbbbbbb' }), t)
+    expect(corrected.detail).toContain('ext/aaaa…')
+    expect(corrected.detail).toContain('→ ext/bbbb…')
+  })
+
+  it('shows proposition and scope on promoted knowledge', () => {
+    const promoted = eventSummary(event('knowledge.promoted', { knowledge_id: 'ext/k1', scope_kind: 'organization' }), t, resolve)
+    expect(promoted.detail).toContain('При изменении API нужна миграция клиента')
+    expect(promoted.detail).toContain('→ runs.event.scope_organization')
+  })
+
+  it('resolves both endpoints of a knowledge link', () => {
+    const linked = eventSummary(event('knowledge.linked', { knowledge_id: 'ext/k1', target_id: 'ext/k2', relation: 'complements' }), t, resolve)
+    expect(linked.detail).toBe('complements · При изменении API нужна миграция клиента → Для интеграционных тестов нужен Docker')
+  })
+
+  it('shows the judged proposition on hint outcomes', () => {
+    const helpful = eventSummary(event('hint.outcome', { hint_id: 'h1', knowledge_id: 'ext/k1', outcome: 'helpful' }), t, resolve)
+    expect(helpful.detail).toContain('runs.event.hint_outcome_helpful')
+    expect(helpful.detail).toContain('При изменении API нужна миграция клиента')
+  })
+
+  it('shows the answer preview on agent summary rows', () => {
+    const summary = eventSummary(event('agent.summary', { kind: 'narrative', answer: 'Проверка завершена:  covering  все тесты зелёные,  два замечания отправлены на доработку.' }), t)
+    expect(summary.detail).toContain('Проверка завершена')
+    expect(summary.detail).not.toContain('narrative')
+  })
+
+  it('falls back to the kind when the summary has no answer', () => {
+    const summary = eventSummary(event('agent.summary', { kind: 'narrative' }), t)
+    expect(summary.detail).toBe('narrative')
+  })
+
+  it('shows result size on completed MCP calls', () => {
+    const small = eventSummary(event('mcp.call.completed', { tool: 'graphmap__connect', server: 'graphmap', result_bytes: 512 }), t)
+    expect(small.detail).toContain('512 B')
+    const large = eventSummary(event('mcp.call.completed', { tool: 'fetch', server: 'web', result_bytes: 250_000 }), t)
+    expect(large.detail).toContain('244.1 KB')
+  })
+
+  it('shows the agent on plan task rows', () => {
+    const started = eventSummary(event('plan.task.started', { task_id: 't1', agent_id: 'coder', round: 1 }), t)
+    expect(started.detail).toBe('t1 · coder')
+    const rework = eventSummary(event('plan.task.started', { task_id: 't2', agent_id: 'reviewer', round: 2, review_of: ['t1'] }), t)
+    expect(rework.detail).toBe('t2 · reviewer · ×2 · ⌾ t1')
+  })
+
+  it('previews delegate tool calls with the target agent and prompt gist', () => {
+    const started = eventSummary(event('tool.started', { tool: 'delegate', arguments: JSON.stringify({ agent_id: 'qa', prompt: 'Проверь миграции  в отдельной  ветке и\nверни отчёт' }) }), t)
+    expect(started.detail).toBe('→ qa · Проверь миграции в отдельной ветке и верни отчёт')
+  })
+})
+
 describe('team run summaries', () => {
   it('localizes team lifecycle events', () => {
     const started = eventSummary(event('team.started', { team_id: 'code-delivery', team_name: 'Code Delivery', version: '1.0.0', goal: 'ship the feature', bindings: { coder: 'coder' } }), t)

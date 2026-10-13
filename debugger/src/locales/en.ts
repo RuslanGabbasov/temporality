@@ -317,6 +317,11 @@ export const en: Record<string, string> = {
     'runs.event.started': 'started',
     'runs.event.completed': 'completed',
 
+    // Live model-call progress (Runs trace)
+    'runs.live.alive': 'streaming',
+    'runs.live.stalled': 'no data for {{seconds}}s',
+    'runs.live.waiting_first_token': 'waiting for first token',
+
     // Operations
     'operations.title': 'Operations',
     'operations.no_ops': 'No unresolved operations',

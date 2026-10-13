@@ -8,6 +8,7 @@ import RunDisputes from './RunDisputes'
 import Markdown from './Markdown'
 import { useT, useI18n, pluralT } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString, formatDuration } from './eventSummary'
+import { useRunTokenMetrics } from './tokenStream'
 import {
   Button,
   TextInput,
@@ -264,8 +265,19 @@ export default function AgentRuns({ project }: { project: string }) {
   }, [rows, filter])
   const selectedLive = useMemo(() =>
     timeline.some((event) => event.type === 'run.started' && runID(event) === selected)
-      && !timeline.some((event) => (event.type === 'run.completed' || event.type === 'run.failed') && runID(event) === selected),
+      && !timeline.some((event) => (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') && runID(event) === selected),
     [timeline, selected])
+  // Live model-call progress: the journal only records the call when it
+  // completes, so an in-flight "Вызов модели" row would sit silent for minutes.
+  // The ephemeral token stream (same SSE the chat preview uses) fills the gap:
+  // ~tokens, tok/s and a liveness marker refreshed at 1Hz.
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  useEffect(() => {
+    if (!selectedLive) return
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [selectedLive])
+  const tokenMetrics = useRunTokenMetrics(selected, selectedLive)
   // model.text_delta/model.reasoning carry each turn's response text. They are
   // joined into their model.completed row instead of polluting the trace with
   // duplicate per-turn entries.
@@ -626,9 +638,35 @@ export default function AgentRuns({ project }: { project: string }) {
                 <Tile>
                   <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{t('runs.trace') ?? 'Trace'} ({t('runs.events_count', { count: String(trace.visible.length) })})</Heading>
                   <Stack gap={0}>
-                    {[...trace.visible].reverse().map((event) => {
+                    {[...trace.visible].reverse().map((event, index) => {
                       const info = eventSummary(event, t, (id) => knowledgeById.get(id))
                       const turnKey = event.type === 'model.completed' ? `${runID(event)}:${event.data?.turn}` : undefined
+                      // The newest trace row being model.started of the selected
+                      // run means the call is in flight right now — render it as a
+                      // live progress row (elapsed time always; tokens/rate when
+                      // the provider streams). Event timestamps come from the
+                      // journal clock, same as every other row on the page.
+                      const isLiveModelCall = index === 0 && selectedLive && event.type === 'model.started' && runID(event) === selected
+                      const liveParts: string[] = []
+                      if (isLiveModelCall) {
+                        const elapsedMs = Math.max(0, nowTick - Date.parse(event.occurred_at))
+                        liveParts.push(formatDuration(elapsedMs))
+                        if (tokenMetrics) {
+                          if (tokenMetrics.approxTokens > 0) liveParts.push(`~${tokenMetrics.approxTokens} tok`)
+                          if (tokenMetrics.tps > 0) liveParts.push(`${tokenMetrics.tps} tok/s`)
+                          const stalled = tokenMetrics.lastChunkAgoMs > 15_000
+                          if (tokenMetrics.streaming) {
+                            liveParts.push(stalled
+                              ? t('runs.live.stalled', { seconds: String(Math.floor(tokenMetrics.lastChunkAgoMs / 1000)) })
+                              : t('runs.live.alive'))
+                          } else if (tokenMetrics.approxTokens === 0) {
+                            // No chunks yet: either the thinking phase before
+                            // the first token or a non-streaming transport.
+                            liveParts.push(t('runs.live.waiting_first_token'))
+                          }
+                        }
+                      }
+                      const detail = isLiveModelCall ? liveParts.join(' · ') || info.detail : info.detail
                       return (
                         <div
                           key={`${event.source.id}:${event.event_id}`}
@@ -646,9 +684,9 @@ export default function AgentRuns({ project }: { project: string }) {
                           }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
-                            <span style={{ color: info.color, width: '1.2rem', textAlign: 'center', flexShrink: 0 }}>{info.icon}</span>
+                            <span style={{ color: info.color, width: '1.2rem', textAlign: 'center', flexShrink: 0 }} className={isLiveModelCall ? 'live-dot' : undefined}>{info.icon}</span>
                             <strong style={{ color: info.color, minWidth: '100px' }}>{info.label}</strong>
-                            <span style={{ color: 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{info.detail}</span>
+                            <span style={{ color: isLiveModelCall ? 'var(--tm-teal)' : 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</span>
                             <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{shortTime(event.occurred_at)}</span>
                           </div>
                           <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>

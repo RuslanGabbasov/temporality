@@ -317,6 +317,11 @@ export const ru: Record<string, string> = {
     'runs.event.started': 'начато',
     'runs.event.completed': 'завершено',
 
+    // Live model-call progress (Runs trace)
+    'runs.live.alive': 'стрим идёт',
+    'runs.live.stalled': 'нет данных {{seconds}} с',
+    'runs.live.waiting_first_token': 'ждём первый токен',
+
     // Operations
     'operations.title': 'Операции',
     'operations.no_ops': 'Нет нерешённых операций',

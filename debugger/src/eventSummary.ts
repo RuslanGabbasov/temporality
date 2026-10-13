@@ -122,6 +122,21 @@ function cleanMatchTerms(matched: unknown): string[] {
   return list.map((m) => String(m).replace(/^(term|entity|topic):/, '')).filter(Boolean)
 }
 
+/** Compact form of an id that no resolver could turn into text: a bare guid
+ * says nothing, the first 8 chars are enough to eyeball-match other rows. */
+function shortId(id: unknown): string {
+  const s = String(id ?? '')
+  return s.length <= 16 ? s : `${s.slice(0, 8)}…`
+}
+
+/** Human byte size for MCP result markers: 512 B / 1.2 KB / 3.4 MB. */
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return ''
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 /** The team runtime executes the compiled program as a pseudo tool call named
  * "team", and DAG execution reports the "plan" tool — those two are product
  * concepts, not real tools, so they get localized labels. Real tool ids
@@ -185,6 +200,9 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
           else if (parsed.path) preview = parsed.path
           else if (parsed.query) preview = String(parsed.query).slice(0, 60)
           else if (parsed.proposition) preview = String(parsed.proposition).slice(0, 60)
+          // delegate: who got the subtask and its gist — the prompt hash says
+          // nothing about intent.
+          else if (parsed.agent_id) preview = `→ ${parsed.agent_id}${parsed.prompt ? ` · ${String(parsed.prompt).replace(/\s+/g, ' ').slice(0, 60)}` : ''}`
           else preview = args.slice(0, 60)
         } catch { preview = String(args).slice(0, 60) }
       }
@@ -221,6 +239,7 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
           const parsed = JSON.parse(args)
           if (Array.isArray(parsed.command)) preview = parsed.command.join(' ')
           else if (parsed.path) preview = parsed.path
+          else if (parsed.agent_id) preview = `→ ${parsed.agent_id}`
         } catch { /* ignore */ }
       }
       return { icon: '✗', label: pseudoToolLabel(d.tool, t), detail: preview ? `${preview} → ${errDetail}` : errDetail, color: '#f7768e' }
@@ -248,17 +267,43 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       return { icon: '⚠', label: t('runs.event.knowledge_challenged'), detail: text.slice(0, 90), color: '#e6b85c' }
     }
     case 'knowledge.corrected':
-      return { icon: '✎', label: t('runs.event.knowledge_corrected'), detail: String(d.knowledge_id ?? ''), color: '#e6b85c' }
+    case 'knowledge.superseded': {
+      // Terminal lifecycle events carry ids only; resolve both sides to
+      // propositions so the row reads as a rule, not as two guids. The
+      // replacement is the part the reader usually wants (what to use now).
+      // Unlike knowledgeText(), no bare-id fallback — a guid gets shortId'd.
+      const resolveText = (id: unknown) => {
+        const s = String(id ?? '')
+        if (s && s === String(d.knowledge_id ?? '') && d.proposition) return String(d.proposition)
+        return s ? propositionOf?.(s) ?? '' : ''
+      }
+      const replacementId = String(d.replacement_id ?? '')
+      const replacement = resolveText(d.replacement_id).slice(0, 60) || (replacementId ? shortId(replacementId) : '')
+      const self = resolveText(d.knowledge_id).slice(0, 60) || shortId(d.knowledge_id)
+      return {
+        icon: event.type === 'knowledge.corrected' ? '✎' : '⇄',
+        label: event.type === 'knowledge.corrected' ? t('runs.event.knowledge_corrected') : t('runs.event.knowledge_superseded'),
+        detail: [self, replacement ? `→ ${replacement}` : ''].filter(Boolean).join(' '),
+        color: '#e6b85c',
+      }
+    }
+    case 'knowledge.promoted': {
+      const scope = d.scope_kind === 'organization' ? t('runs.event.scope_organization') : String(d.scope_id ?? d.scope_kind ?? '')
+      const self = (String(d.proposition ?? '') || (d.knowledge_id != null ? propositionOf?.(String(d.knowledge_id)) ?? '' : '')).slice(0, 60) || shortId(d.knowledge_id)
+      return { icon: '⤴', label: t('runs.event.knowledge_promoted'), detail: [self, scope ? `→ ${scope}` : ''].filter(Boolean).join(' '), color: '#9d7cd8' }
+    }
     case 'knowledge.invalidated':
-      return { icon: '✗', label: t('runs.event.knowledge_invalidated'), detail: String(d.reason ?? d.knowledge_id ?? '').slice(0, 80), color: '#f7768e' }
-    case 'knowledge.promoted':
-      return { icon: '⤴', label: t('runs.event.knowledge_promoted'), detail: `${String(d.knowledge_id ?? '')} → ${d.scope_kind === 'organization' ? (t('runs.event.scope_organization') ?? 'organization') : String(d.scope_id ?? '')}`, color: '#9d7cd8' }
-    case 'knowledge.superseded':
-      return { icon: '⇄', label: t('runs.event.knowledge_superseded'), detail: String(d.knowledge_id ?? ''), color: 'var(--tm-text-3)' }
+      return { icon: '✗', label: t('runs.event.knowledge_invalidated'), detail: String(d.reason ?? shortId(d.knowledge_id)).slice(0, 80), color: '#f7768e' }
     case 'knowledge.disproved':
       return { icon: '✗', label: t('runs.event.knowledge_disproved'), detail: String(d.reason ?? '').slice(0, 80), color: '#f7768e' }
-    case 'knowledge.linked':
-      return { icon: '🔗', label: t('runs.event.knowledge_linked'), detail: [String(d.relation ?? ''), `${d.knowledge_id ?? ''} → ${d.target_id ?? ''}`].filter(Boolean).join(' · '), color: 'var(--tm-text-3)' }
+    case 'knowledge.linked': {
+      // Resolve both endpoints through the resolver: a relation between two
+      // readable rules beats a relation between two guids. Each side is capped
+      // so one long proposition cannot swallow the other.
+      const from = (propositionOf?.(String(d.knowledge_id ?? '')) ?? '').slice(0, 40) || shortId(d.knowledge_id)
+      const to = (propositionOf?.(String(d.target_id ?? '')) ?? '').slice(0, 40) || shortId(d.target_id)
+      return { icon: '🔗', label: t('runs.event.knowledge_linked'), detail: [String(d.relation ?? ''), `${from} → ${to}`].filter(Boolean).join(' · '), color: 'var(--tm-text-3)' }
+    }
     case 'hint.offered': {
       const proposition = String(d.proposition ?? '') || propositionOf?.(String(d.knowledge_id ?? '')) || ''
       const terms = cleanMatchTerms(d.matched_by)
@@ -272,8 +317,11 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
     case 'hint.ignored':
       return { icon: '○', label: t('runs.event.hint_ignored'), detail: knowledgeText().slice(0, 90), color: 'var(--tm-text-3)' }
     case 'hint.outcome': {
+      // The outcome alone says "something was judged"; the proposition says
+      // what was judged — without it the row is uninterpretable.
       const outcome = d.outcome === 'helpful' ? t('runs.event.hint_outcome_helpful') : d.outcome === 'harmful' ? t('runs.event.hint_outcome_harmful') : String(d.outcome ?? '')
-      return { icon: '⌾', label: t('runs.event.hint_outcome'), detail: outcome, color: 'var(--tm-text-3)' }
+      const proposition = propositionOf?.(String(d.knowledge_id ?? '')) ?? ''
+      return { icon: '⌾', label: t('runs.event.hint_outcome'), detail: [outcome, proposition ? proposition.slice(0, 60) : ''].filter(Boolean).join(' · '), color: 'var(--tm-text-3)' }
     }
     case 'skill.proposed':
       return { icon: '🎯', label: t('runs.event.skill_proposed'), detail: [d.version ? `${d.skill_name ?? d.skill_id ?? ''} v${d.version}` : String(d.skill_name ?? d.skill_id ?? ''), String(d.change_summary ?? '').slice(0, 60)].filter(Boolean).join(' · '), color: '#7aa2f7' }
@@ -285,8 +333,13 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       return { icon: '📖', label: t('runs.event.memory_read'), detail: t('runs.hints_loaded', { count: String(d.hint_count ?? 0) }), color: 'var(--tm-text-3)' }
     case 'mcp.call.started':
       return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: `→ ${d.server ?? ''}`, color: '#bb9af7' }
-    case 'mcp.call.completed':
-      return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: t('runs.event.completed'), color: '#9ece6a' }
+    case 'mcp.call.completed': {
+      // The result is content-addressed (result_ref) with only its size in the
+      // event; the byte count tells the reader whether the answer is a one-liner
+      // or a payload worth opening in the operation log.
+      const bytes = d.result_bytes != null ? formatBytes(Number(d.result_bytes)) : ''
+      return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: [bytes, t('runs.event.completed')].filter(Boolean).join(' · '), color: '#9ece6a' }
+    }
     case 'mcp.call.failed':
       return { icon: '🔌', label: String(d.tool ?? 'MCP'), detail: String(d.error_type ?? 'failed'), color: '#f7768e' }
     case 'approval.requested': {
@@ -301,8 +354,12 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
     }
     case 'tool.blocked':
       return { icon: '🚫', label: t('runs.event.blocked'), detail: String(d.reason ?? ''), color: '#f7768e' }
-    case 'agent.summary':
-      return { icon: '📋', label: t('runs.event.summary'), detail: String(d.kind ?? ''), color: 'var(--tm-teal)' }
+    case 'agent.summary': {
+      // The answer preview is the row's whole value; a bare "narrative" kind
+      // tag carries no information.
+      const answer = String(d.answer ?? '').replace(/\s+/g, ' ').trim()
+      return { icon: '📋', label: t('runs.event.summary'), detail: answer ? answer.slice(0, 80) : String(d.kind ?? ''), color: 'var(--tm-teal)' }
+    }
     case 'approval.rejected':
       return { icon: '✗', label: t('runs.event.rejected'), detail: String(d.reason ?? ''), color: '#f7768e' }
     case 'human.requested':
@@ -319,10 +376,19 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       return { icon: '⚡', label: t('runs.event.trigger_accepted'), detail: String(d.trigger_name ?? ''), color: '#7aa2f7' }
     case 'notification.sent':
       return { icon: '🔔', label: t('runs.event.notification_sent'), detail: `${d.channel ?? 'web'} · ${d.status ?? ''}${d.recipient ? ' · ' + d.recipient : ''}`, color: '#bb9af7' }
-    case 'delegation.started':
-      return { icon: '↗', label: t('runs.event.delegation'), detail: `→ ${d.child_run_id ?? '?'}`, color: '#7aa2f7' }
-    case 'delegation.completed':
-      return { icon: '↗', label: t('runs.event.delegation_completed'), detail: d.turns != null ? `${d.turns} ${t('runs.turns')}` : '', color: '#9ece6a' }
+    case 'delegation.started': {
+      // The raw child_run_id is a long path; the agent id answers "who was
+      // spawned", the last two path segments answer "which delegation".
+      const child = typeof d.child_run_id === 'string' ? d.child_run_id.split('/').slice(-2).join('/') : ''
+      return { icon: '↗', label: t('runs.event.delegation'), detail: ['→ ' + String(d.agent_id ?? '?'), child].filter(Boolean).join(' · '), color: '#7aa2f7' }
+    }
+    case 'delegation.completed': {
+      // agent_id ties the completion to its started row; child_status matters
+      // only when it differs from the happy path.
+      const status = String(d.child_status ?? '')
+      const parts = [String(d.agent_id ?? ''), d.turns != null ? `${d.turns} ${t('runs.turns')}` : '', status && status !== 'completed' ? status : ''].filter(Boolean)
+      return { icon: '↗', label: t('runs.event.delegation_completed'), detail: parts.join(' · '), color: '#9ece6a' }
+    }
     case 'delegation.failed': {
       const info = explainKernelError(String(d.error ?? ''))
       const suffix = info.timeout ? ` · ${t('errors.timeout_short')}` : ''
@@ -356,7 +422,7 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
     }
     case 'plan.task.started': {
       const round = Number(d.round ?? 1)
-      const parts = [String(d.task_id ?? ''), round > 1 ? `×${round}` : '', Array.isArray(d.review_of) && d.review_of.length ? `⌾ ${d.review_of.join(', ')}` : ''].filter(Boolean)
+      const parts = [String(d.task_id ?? ''), String(d.agent_id ?? ''), round > 1 ? `×${round}` : '', Array.isArray(d.review_of) && d.review_of.length ? `⌾ ${d.review_of.join(', ')}` : ''].filter(Boolean)
       return { icon: '⎇', label: t('runs.event.plan_task_started'), detail: parts.join(' · '), color: '#7aa2f7' }
     }
     case 'plan.task.completed': {

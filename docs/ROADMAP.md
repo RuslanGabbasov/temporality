@@ -21,6 +21,8 @@
 - [x] **Task reuse** — follow-up chat messages reuse same task, not creating new ones
 - [x] **Tool arguments in traces** — tool.started has arguments, tool.completed has output
 - [x] **Cost accounting v1** — model prices, per-call costs (per-run/project aggregation pending)
+- [x] **Trace informativeness pass** — delegation/knowledge/hint/plan rows resolve propositions and agent ids instead of guids; delegate tool previews target agent + prompt gist; MCP completions show result size; agent summaries show the answer
+- [x] **Live model-call progress in Runs** — in-flight «Вызов модели» row shows elapsed time, ~tokens, tok/s and stream liveness (alive/stalled/waiting first token) from the ephemeral token SSE at 1Hz
 
 ### Done (Platform wave, Sept–Oct 2026)
 

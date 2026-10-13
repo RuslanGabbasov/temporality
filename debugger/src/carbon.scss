@@ -2400,6 +2400,11 @@ button.header-nav-link {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Live in-flight model call: the icon breathes at a slow 1.6s pace — visible
+ * liveness without competing with the ticking elapsed seconds. */
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.live-dot { animation: live-pulse 1.6s ease-in-out infinite; }
+
 // ═══════════════════════════════════════════════════════════════
 // Experience Timeline
 // ═══════════════════════════════════════════════════════════════
