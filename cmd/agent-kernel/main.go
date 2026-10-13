@@ -1655,9 +1655,37 @@ func main() {
 			writeError(w, 422, errors.New("at most 16 evaluation cases are supported"))
 			return
 		}
+		// Judge-case validation (specs/quality-loop.md §6.1-§6.2, M4): the
+		// check class must be known, judge checks need a 0-100 threshold and
+		// a configured installation judge model — otherwise saving would
+		// produce a suite whose runs can only end in error.
+		judgeCases := false
 		for i, c := range suite.Cases {
 			if strings.TrimSpace(c.Input) == "" {
 				writeError(w, 422, fmt.Errorf("case %d: input is required", i+1))
+				return
+			}
+			switch workspace.NormalizeEvalCheck(c.Check) {
+			case workspace.EvalCheckPatterns:
+			case workspace.EvalCheckJudge, workspace.EvalCheckPatternsJudge:
+				judgeCases = true
+				if c.JudgeThreshold == nil || *c.JudgeThreshold < 0 || *c.JudgeThreshold > 100 {
+					writeError(w, 422, fmt.Errorf("case %d: judge_threshold (0-100) is required for judge checks", i+1))
+					return
+				}
+			default:
+				writeError(w, 422, fmt.Errorf("case %d: unknown check %q (use patterns, judge or patterns+judge)", i+1, c.Check))
+				return
+			}
+		}
+		if judgeCases {
+			judgeConfig, cfgErr := ws.JudgeConfig(r.Context())
+			if cfgErr != nil {
+				writeError(w, 500, cfgErr)
+				return
+			}
+			if !judgeConfig.Configured {
+				writeError(w, 422, errors.New("judge_not_configured: set EVAL_JUDGE_MODEL to a configured provider model before saving judge cases"))
 				return
 			}
 		}
@@ -4719,6 +4747,8 @@ func main() {
 
 	// Quality dashboard and version diffs (specs/quality-loop.md §7, M5).
 	RegisterM5Routes(mux, gate, ws, events, visibleUnits)
+	// LLM-judge configuration and calibration (specs/quality-loop.md §6, M4).
+	RegisterM4Routes(mux, gate, ws, activities, events, visibleUnits, log)
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
 	// M2 golden eval-case candidates (specs/quality-loop.md §4): review
 	// endpoints, candidate events and the harvesting/reaping background job.

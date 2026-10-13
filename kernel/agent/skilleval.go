@@ -39,12 +39,21 @@ type workspaceSkillVersion struct {
 	Status   string `json:"status"`
 }
 
+// evaluationCaseResult is the outcome of one case in one run. The agent
+// evaluator also carries the judge fields of specs/quality-loop.md §6 (M4);
+// skill evaluations never populate them, so the JSON stays identical for
+// the two callers.
 type evaluationCaseResult struct {
-	Name       string   `json:"name"`
-	Passed     bool     `json:"passed"`
-	Answer     string   `json:"answer,omitempty"`
-	Missed     []string `json:"missed,omitempty"`
-	Unexpected []string `json:"unexpected,omitempty"`
+	Name           string   `json:"name"`
+	Passed         bool     `json:"passed"`
+	Answer         string   `json:"answer,omitempty"`
+	Missed         []string `json:"missed,omitempty"`
+	Unexpected     []string `json:"unexpected,omitempty"`
+	Check          string   `json:"check,omitempty"`
+	JudgeScore     *int     `json:"judge_score,omitempty"`
+	JudgeRationale string   `json:"judge_rationale,omitempty"`
+	Error          string   `json:"error,omitempty"`
+	Cause          string   `json:"cause,omitempty"`
 }
 
 // RunSkillEvaluation loads the suite, runs every case against the requested

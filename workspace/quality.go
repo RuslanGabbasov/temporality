@@ -31,15 +31,19 @@ const (
 	DefinitionChangeChanged = "changed"
 )
 
-// QualityEvaluation is the last suite run shown on a version row (§7.1).
-// Verdict and judge agreement are deliberately absent until M3/M4 land —
-// the dashboard reports what the evaluation table actually stores.
+// QualityEvaluation is the last suite run shown on a version row (§7.1,
+// §8.4): the unified verdict (§5.2) and the judge agreement of the deciding
+// calibration ride along so the dashboard shows gate-relevant status, not
+// just counts. Verdict "" marks legacy rows written before migration
+// 000056; judge_agreement is null when no judge calibration exists.
 type QualityEvaluation struct {
-	ID        int64     `json:"id"`
-	Passed    int       `json:"passed"`
-	Failed    int       `json:"failed"`
-	PassRate  float64   `json:"pass_rate"`
-	CreatedAt time.Time `json:"created_at"`
+	ID             int64     `json:"id"`
+	Passed         int       `json:"passed"`
+	Failed         int       `json:"failed"`
+	PassRate       float64   `json:"pass_rate"`
+	Verdict        string    `json:"verdict,omitempty"`
+	JudgeAgreement *float64  `json:"judge_agreement"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // QualityVersion is one row of the quality dashboard (§7.1, §8.4). A version
@@ -122,11 +126,30 @@ func (s *Store) AgentQualityReport(ctx context.Context, agentID string) (Quality
 	if err != nil {
 		return QualityReport{}, err
 	}
+	// Judge agreement of the deciding calibration per judge model (§8.4):
+	// models without a calibration row stay absent — the dashboard reports
+	// null, never a fake 0.
+	judgeAgreement := map[string]float64{}
+	for _, evaluation := range evaluations {
+		if evaluation.JudgeModel == "" {
+			continue
+		}
+		if _, seen := judgeAgreement[evaluation.JudgeModel]; seen {
+			continue
+		}
+		calibration, err := s.latestJudgeCalibration(ctx, evaluation.JudgeModel)
+		if err != nil {
+			return QualityReport{}, err
+		}
+		if calibration.JudgeModel != "" {
+			judgeAgreement[evaluation.JudgeModel] = calibration.AgreementRate
+		}
+	}
 	suite, err := s.GetAgentEvaluationSuite(ctx, agentID)
 	if err != nil {
 		return QualityReport{}, err
 	}
-	return buildQualityReport(agentID, snapshots, runs, requests, terminal, evaluations, countGoldenCases(suite.Cases)), nil
+	return buildQualityReport(agentID, snapshots, runs, requests, terminal, evaluations, judgeAgreement, countGoldenCases(suite.Cases)), nil
 }
 
 // qualitySnapshots reads version + creation time only: the report needs the
@@ -234,10 +257,12 @@ func (s *Store) qualityTerminalEvents(ctx context.Context, agentID string) ([]qu
 	return events, rows.Err()
 }
 
-// qualityEvaluationRuns reads this agent's suite runs (000048), newest first.
+// qualityEvaluationRuns reads this agent's suite runs (000048), newest
+// first, with the unified verdict and judge provenance (000056, §5.1, §6.2)
+// the dashboard surfaces (§8.4).
 func (s *Store) qualityEvaluationRuns(ctx context.Context, agentID string) ([]AgentEvaluationRun, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, agent_version, passed, failed, created_at
+		`SELECT id, agent_version, passed, failed, verdict, judge_model, created_at
 		 FROM workspace_agent_evaluation_run
 		 WHERE agent_id = $1
 		 ORDER BY created_at DESC, id DESC`, agentID)
@@ -248,7 +273,8 @@ func (s *Store) qualityEvaluationRuns(ctx context.Context, agentID string) ([]Ag
 	evaluations := []AgentEvaluationRun{}
 	for rows.Next() {
 		var evaluation AgentEvaluationRun
-		if err := rows.Scan(&evaluation.ID, &evaluation.AgentVersion, &evaluation.Passed, &evaluation.Failed, &evaluation.CreatedAt); err != nil {
+		if err := rows.Scan(&evaluation.ID, &evaluation.AgentVersion, &evaluation.Passed, &evaluation.Failed,
+			&evaluation.Verdict, &evaluation.JudgeModel, &evaluation.CreatedAt); err != nil {
 			return nil, err
 		}
 		evaluations = append(evaluations, evaluation)
@@ -267,8 +293,9 @@ type versionBucket struct {
 // math is unit-testable on a fixed dataset (§7 done criteria). Version rows
 // follow the snapshot list; versions observed only in runs or evaluations are
 // appended so no data disappears. Version 0 (unknown pin, §3.1) never enters
-// the metrics.
-func buildQualityReport(agentID string, snapshots []AgentVersion, runs []qualityRun, requests []HumanRequest, terminal []qualityTerminalEvent, evaluations []AgentEvaluationRun, goldens int) QualityReport {
+// the metrics. judgeAgreement maps a judge model to its latest calibration
+// agreement (§6.4); models without calibration stay absent → null in §8.4.
+func buildQualityReport(agentID string, snapshots []AgentVersion, runs []qualityRun, requests []HumanRequest, terminal []qualityTerminalEvent, evaluations []AgentEvaluationRun, judgeAgreement map[string]float64, goldens int) QualityReport {
 	// Verdicts per run: ask_human projections (§3.3) plus human terminal
 	// operation events (§3.4, source 2) through the shared M1 projection.
 	verdictsByRun := map[string][]HITLVerdict{}
@@ -368,7 +395,14 @@ func buildQualityReport(agentID string, snapshots []AgentVersion, runs []quality
 					Passed:    evaluation.Passed,
 					Failed:    evaluation.Failed,
 					PassRate:  roundQualityRate(rate),
+					Verdict:   evaluation.Verdict,
 					CreatedAt: evaluation.CreatedAt,
+				}
+				// §8.4: the judge agreement rides along when the run was
+				// scored by a judge model that has a calibration history.
+				if agreement, ok := judgeAgreement[evaluation.JudgeModel]; ok {
+					value := roundQualityRate(agreement)
+					row.LastEvaluation.JudgeAgreement = &value
 				}
 			}
 			if total > 0 && (!foundBest || rate > bestRaw) {

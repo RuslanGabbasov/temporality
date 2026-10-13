@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/observation"
+	"github.com/temporality-project/temporality/workspace"
 )
 
 // Agent evaluation (docs/plan-evaluable-agent.md §2.2 stage 8). The runner
@@ -153,6 +155,9 @@ func (a *Activities) RunAgentEvaluationMeta(ctx context.Context, agentID string,
 			Input          string   `json:"input"`
 			MustContain    []string `json:"must_contain"`
 			MustNotContain []string `json:"must_not_contain"`
+			Check          string   `json:"check"`
+			JudgePrompt    string   `json:"judge_prompt"`
+			JudgeThreshold *int     `json:"judge_threshold"`
 			HeldOut        bool     `json:"held_out"`
 		} `json:"cases"`
 	}
@@ -164,6 +169,27 @@ func (a *Activities) RunAgentEvaluationMeta(ctx context.Context, agentID string,
 	}
 	if len(suite.Cases) > agentEvalMaxCases {
 		suite.Cases = suite.Cases[:agentEvalMaxCases]
+	}
+
+	// §6.1/§6.2: a suite with judge cases needs the installation-wide judge
+	// model. Resolution happens once, before any case runs; an unconfigured
+	// judge fails every judge case with cause judge_not_configured — the
+	// verdict algorithm turns that into a run error, never a pass.
+	var judgeClient *llm.Client
+	for _, c := range suite.Cases {
+		if workspace.CheckUsesJudge(workspace.NormalizeEvalCheck(c.Check)) {
+			config, cfgErr := a.judgeConfig(ctx)
+			if cfgErr != nil {
+				return "", cfgErr
+			}
+			if config.Configured {
+				judgeClient, cfgErr = a.judgeModelClient(config.Model)
+				if cfgErr != nil {
+					return "", cfgErr
+				}
+			}
+			break
+		}
 	}
 
 	results := make([]evaluationCaseResult, 0, len(suite.Cases))
@@ -179,6 +205,30 @@ func (a *Activities) RunAgentEvaluationMeta(ctx context.Context, agentID string,
 		tokensIn += usage.PromptTokens
 		tokensOut += usage.CompletionTokens
 		result.Name = c.Name
+		check := workspace.NormalizeEvalCheck(c.Check)
+		result.Check = check
+		// §6.3 determinism: patterns are the necessary condition — a failed
+		// pattern check fails the case regardless of any judge score. The
+		// judge only ever runs on answers that passed the patterns.
+		if workspace.CheckUsesJudge(check) && result.Passed {
+			scored, judgeUsage, judgeErr := a.judgeEvalCase(ctx, judgeClient, c.JudgePrompt, c.Input, result.Answer, c.JudgeThreshold)
+			tokensIn += judgeUsage.PromptTokens
+			tokensOut += judgeUsage.CompletionTokens
+			if judgeErr != nil {
+				result.Passed = false
+				result.Error = judgeErr.Error()
+				result.Cause = workspace.CauseJudgeError
+				if errors.Is(judgeErr, ErrJudgeNotConfigured) {
+					result.Cause = workspace.CauseJudgeNotConfigured
+				} else if strings.Contains(judgeErr.Error(), "invalid JSON") {
+					result.Cause = workspace.CauseJudgeInvalidJSON
+				}
+			} else {
+				result.JudgeScore = scored.score
+				result.JudgeRationale = scored.rationale
+				result.Passed = scored.passed
+			}
+		}
 		if result.Passed {
 			passed++
 		} else {
@@ -192,6 +242,10 @@ func (a *Activities) RunAgentEvaluationMeta(ctx context.Context, agentID string,
 		"passed":        passed,
 		"failed":        failed,
 		"cases":         results,
+		// §6.2/§11.1 provenance: the model whose answers the cases carry.
+		// The server compares it against the judge model and stores
+		// judge_same_model — the self-bias marker for the UI.
+		"tested_model": a.Model.Model(),
 	}
 	if meta.RunID > 0 {
 		// Gate runs finalise the pre-created row (§10.4): identity rides along.

@@ -37,13 +37,14 @@ func TestBuildQualityReportPerVersion(t *testing.T) {
 		}},
 	}
 	evaluations := []AgentEvaluationRun{
-		{ID: 10, AgentVersion: 1, Passed: 3, Failed: 0, CreatedAt: base.Add(10 * time.Minute)}, // first green
-		{ID: 11, AgentVersion: 1, Passed: 2, Failed: 1, CreatedAt: base.Add(40 * time.Minute)}, // last run
+		{ID: 10, AgentVersion: 1, Passed: 3, Failed: 0, Verdict: "pass", CreatedAt: base.Add(10 * time.Minute)}, // first green
+		{ID: 11, AgentVersion: 1, Passed: 2, Failed: 1, Verdict: "fail", JudgeModel: "judge-x", CreatedAt: base.Add(40 * time.Minute)}, // last run
 		{ID: 12, AgentVersion: 2, Passed: 1, Failed: 1, CreatedAt: base.Add(65 * time.Minute)}, // red
-		{ID: 13, AgentVersion: 2, Passed: 2, Failed: 0, CreatedAt: base.Add(80 * time.Minute)}, // green
+		{ID: 13, AgentVersion: 2, Passed: 2, Failed: 0, Verdict: "pass", JudgeModel: "judge-x", CreatedAt: base.Add(80 * time.Minute)}, // green
 	}
+	judgeAgreement := map[string]float64{"judge-x": 0.86}
 
-	report := buildQualityReport("agent-a", snapshots, runs, requests, terminal, evaluations, 2)
+	report := buildQualityReport("agent-a", snapshots, runs, requests, terminal, evaluations, judgeAgreement, 2)
 	require.Equal(t, "agent-a", report.AgentID)
 	require.Len(t, report.Versions, 3)
 
@@ -57,6 +58,9 @@ func TestBuildQualityReportPerVersion(t *testing.T) {
 	require.NotNil(t, v1.LastEvaluation)
 	require.Equal(t, int64(11), v1.LastEvaluation.ID)
 	require.InDelta(t, 0.6667, v1.LastEvaluation.PassRate, 0.0001)
+	require.Equal(t, "fail", v1.LastEvaluation.Verdict) // §8.4: verdict rides along
+	require.NotNil(t, v1.LastEvaluation.JudgeAgreement)
+	require.InDelta(t, 0.86, *v1.LastEvaluation.JudgeAgreement, 1e-9)
 	require.Equal(t, 2, v1.Goldens)
 	require.NotNil(t, v1.TTVIMinutes)
 	require.Equal(t, int64(10), *v1.TTVIMinutes) // version created → first green run
@@ -71,6 +75,9 @@ func TestBuildQualityReportPerVersion(t *testing.T) {
 	require.Equal(t, 1.0, *v2.BestPassRate)
 	require.NotNil(t, v2.LastEvaluation)
 	require.Equal(t, int64(13), v2.LastEvaluation.ID)
+	require.Equal(t, "pass", v2.LastEvaluation.Verdict)
+	require.NotNil(t, v2.LastEvaluation.JudgeAgreement)
+	require.InDelta(t, 0.86, *v2.LastEvaluation.JudgeAgreement, 1e-9)
 	require.NotNil(t, v2.TTVIMinutes)
 	require.Equal(t, int64(20), *v2.TTVIMinutes)
 	require.True(t, v2.HasData)
@@ -93,6 +100,7 @@ func TestBuildQualityReportDataOnlyVersions(t *testing.T) {
 		[]qualityRun{{runID: "r1", status: "completed", agentVersion: 1}},
 		nil, nil,
 		[]AgentEvaluationRun{{ID: 7, AgentVersion: 3, Passed: 1, Failed: 0, CreatedAt: base.Add(time.Hour)}},
+		nil,
 		0)
 	require.Len(t, report.Versions, 3)
 	require.Equal(t, 1, report.Versions[0].Version)
@@ -103,6 +111,7 @@ func TestBuildQualityReportDataOnlyVersions(t *testing.T) {
 	require.Equal(t, 3, report.Versions[2].Version)
 	require.True(t, report.Versions[2].HasData)
 	require.NotNil(t, report.Versions[2].LastEvaluation)
+	require.Nil(t, report.Versions[2].LastEvaluation.JudgeAgreement) // no judge → null, not a fake 0
 }
 
 // TestDefinitionDiffStructuralChanges: §7.2 field set — purpose, constraints,

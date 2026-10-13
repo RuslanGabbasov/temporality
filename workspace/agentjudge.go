@@ -71,6 +71,22 @@ func CheckUsesJudge(check string) bool {
 	return check == EvalCheckJudge || check == EvalCheckPatternsJudge
 }
 
+// JudgeSameModel reports the §11.1 self-bias marker: the judge scored the
+// same model that produced the answers. Allowed (single-provider installs),
+// but always visible in the UI next to the judge agreement. An empty tested
+// model (legacy record path) never flags same-model.
+func JudgeSameModel(testedModel, judgeModel string) bool {
+	tested := strings.TrimSpace(testedModel)
+	return tested != "" && tested == strings.TrimSpace(judgeModel)
+}
+
+// JudgeCalibrationDegraded applies the §6.4 floor to a stored agreement:
+// under 0.7 the judge is degraded and the gate refuses its runs as red with
+// cause judge_degraded.
+func JudgeCalibrationDegraded(agreementRate float64) bool {
+	return agreementRate < JudgeDegradedBelow
+}
+
 // NormalizeEvalCheck maps an absent check class to the backward-compatible
 // default; unknown values are returned as-is so validation can reject them.
 func NormalizeEvalCheck(check string) string {
@@ -246,7 +262,7 @@ func (s *Store) finalizeAgentEvaluationRun(ctx context.Context, run *AgentEvalua
 		env.JudgeConfigured = config.Configured
 		if config.Configured {
 			run.JudgeModel = config.Model
-			run.JudgeSameModel = strings.TrimSpace(run.TestedModel) != "" && run.TestedModel == config.Model
+			run.JudgeSameModel = JudgeSameModel(run.TestedModel, config.Model)
 			if calibration, err := s.latestJudgeCalibration(ctx, config.Model); err != nil {
 				return err
 			} else {

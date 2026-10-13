@@ -172,11 +172,11 @@ type JudgeCalibrationOutcome struct {
 	Degraded         bool               `json:"degraded"`
 	CasesChecked     int                `json:"cases_checked"`
 	CasesSkipped     int                `json:"cases_skipped"`
-	Scores           []calibrationScore `json:"-"`
+	Scores           []CalibrationScore `json:"-"`
 }
 
-// calibrationScore is one judged entry handed back for the snapshot.
-type calibrationScore struct {
+// CalibrationScore is one judged entry handed back for the snapshot.
+type CalibrationScore struct {
 	Name  string `json:"name"`
 	Label bool   `json:"label"`
 	Score int    `json:"score"`
@@ -215,7 +215,7 @@ func (a *Activities) CalibrateJudge(ctx context.Context, cases []JudgeCalibratio
 			outcome.CasesSkipped++
 			continue
 		}
-		outcome.Scores = append(outcome.Scores, calibrationScore{
+		outcome.Scores = append(outcome.Scores, CalibrationScore{
 			Name:  c.Name,
 			Label: c.Label,
 			Score: reply.Verdict.Score,
@@ -251,4 +251,35 @@ func (a *Activities) CalibrateJudge(ctx context.Context, cases []JudgeCalibratio
 	outcome.MeanAbsDeviation = deviation / float64(len(outcome.Scores))
 	outcome.Degraded = outcome.AgreementRate < judgeAgreementFloor
 	return outcome, nil
+}
+
+// judgeCaseScore is one judged case handed back to the agent runner.
+type judgeCaseScore struct {
+	score     *int
+	rationale string
+	passed    bool
+}
+
+// judgeEvalCase scores one evaluated answer for the agent runner (§6.1-§6.3):
+// the judge client is nil when the installation has no valid EVAL_JUDGE_MODEL
+// (ErrJudgeNotConfigured — the case records error, never a silent pass); the
+// case threshold decides pass/fail and a missing threshold is a case error,
+// not a free pass — the PUT suite validation requires it for judge checks.
+func (a *Activities) judgeEvalCase(ctx context.Context, client *llm.Client, judgePrompt, input, answer string, threshold *int) (judgeCaseScore, llm.Usage, error) {
+	if client == nil {
+		return judgeCaseScore{}, llm.Usage{}, ErrJudgeNotConfigured
+	}
+	if threshold == nil {
+		return judgeCaseScore{}, llm.Usage{}, errors.New("judge_threshold is required for judge cases")
+	}
+	reply, err := a.runJudgeCase(ctx, client, judgePrompt, input, answer)
+	if err != nil {
+		return judgeCaseScore{}, reply.Usage, err
+	}
+	score := reply.Verdict.Score
+	return judgeCaseScore{
+		score:     &score,
+		rationale: reply.Verdict.Rationale,
+		passed:    score >= *threshold,
+	}, reply.Usage, nil
 }
