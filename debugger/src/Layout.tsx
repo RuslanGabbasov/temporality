@@ -45,7 +45,6 @@ interface LayoutProps {
 const NAV_ITEMS = [
   { path: '/workspace', label: 'nav.workspace' },
   { path: '/agents', label: 'nav.runs' },
-  { path: '/operations', label: 'nav.operations' },
   { path: '/inbound', label: 'nav.inbound' },
   { path: '/observability', label: 'nav.knowledge' },
   { path: '/experience', label: 'nav.timeline' },
@@ -458,11 +457,11 @@ export default function Layout({ children, activePage }: LayoutProps) {
               onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path) }}
             >
               {t(label)}
-              {path === '/operations' && pendingOps > 0 && (
-                <span className="nav-badge" style={{ background: '#f7768e' }}>{pendingOps}</span>
-              )}
               {path === '/agents' && pendingApprovals > 0 && (
                 <span className="nav-badge" style={{ background: '#e6b85c' }}>{pendingApprovals}</span>
+              )}
+              {path === '/agents' && pendingOps > 0 && (
+                <span className="nav-badge" style={{ background: '#f7768e' }}>{pendingOps}</span>
               )}
             </a>
           ))}
@@ -635,11 +634,11 @@ export default function Layout({ children, activePage }: LayoutProps) {
                 onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path); setMobileNavOpen(false) }}
               >
                 {t(label)}
-                {path === '/operations' && pendingOps > 0 && (
-                  <span className="nav-badge" style={{ background: '#f7768e' }}>{pendingOps}</span>
-                )}
                 {path === '/agents' && pendingApprovals > 0 && (
                   <span className="nav-badge" style={{ background: '#e6b85c' }}>{pendingApprovals}</span>
+                )}
+                {path === '/agents' && pendingOps > 0 && (
+                  <span className="nav-badge" style={{ background: '#f7768e' }}>{pendingOps}</span>
                 )}
               </a>
             ))}

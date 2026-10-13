@@ -24,7 +24,11 @@ import {
 import PageLoading from './PageLoading'
 import { Time, Play, ChevronDown, ChevronRight } from '@carbon/icons-react'
 import ListFilter, { matchesFilter } from './ListFilter'
-import { runCost, taskCost, type RunCost, type TaskCost } from './kernelApi'
+import {
+  runCost, taskCost, type RunCost, type TaskCost,
+  operations as fetchOperations, reconcile, canReconcile, whoami,
+  type UncertainOperation, type ReconcileEffect, type Whoami,
+} from './kernelApi'
 
 const KERNEL_API = '/kernel-api'
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -36,6 +40,42 @@ function pendingApprovals(events: ObservationEvent[]) {
 }
 
 type RunStatus = 'completed' | 'failed' | 'running' | 'cancelled'
+
+/** Tool metadata for reconcile cards (from the retired Operations page). */
+function toolInfo(tool: string, server?: string): { icon: string; label: string; category: string } {
+  if (tool.startsWith('mcp__')) {
+    const name = tool.replace('mcp__', '')
+    return { icon: '🔌', label: name, category: server ? `MCP · ${server}` : 'MCP tool' }
+  }
+  if (tool === 'run_command') return { icon: '⚡', label: 'Shell command', category: 'Sandbox' }
+  if (tool === 'write_file') return { icon: '📝', label: 'Write file', category: 'Sandbox' }
+  if (tool === 'read_file') return { icon: '📄', label: 'Read file', category: 'Sandbox' }
+  if (tool === 'search') return { icon: '🔍', label: 'Search', category: 'Sandbox' }
+  return { icon: '🔧', label: tool, category: 'Tool' }
+}
+
+/** Extract turn number from operation_id like ".../turn/05/call_..." */
+function turnOf(opId: string): string | null {
+  const match = opId.match(/turn\/(\d+)/)
+  return match ? match[1] : null
+}
+
+/** Tool-specific hint: where to verify whether the effect landed. */
+function whereToLook(op: UncertainOperation, t: (key: string) => string): { icon: string; text: string } {
+  if (op.tool === 'run_command')
+    return { icon: '⚡', text: t('operations.look.sandbox') }
+  if (op.tool === 'write_file' || op.tool === 'read_file' || op.tool === 'search')
+    return { icon: '📝', text: t('operations.look.files') }
+  if (op.tool.startsWith('mcp__'))
+    return { icon: '🔌', text: t('operations.look.mcp') }
+  return { icon: '🔎', text: t('operations.look.default') }
+}
+
+const REASON_KEYS: Record<string, string> = {
+  crash_window: 'operations.reason.crash_window',
+  stale_in_flight: 'operations.reason.stale_in_flight',
+  failed_uncertain: 'operations.reason.failed_uncertain',
+}
 
 interface RunRow {
   id: string
@@ -240,10 +280,68 @@ export default function AgentRuns({ project }: { project: string }) {
   // asking run in the list so the inbox is navigable. Older kernels without
   // the endpoint simply show no markers.
   const [questionRuns, setQuestionRuns] = useState<Set<string>>(new Set())
+  // Unresolved reconcile operations grouped by run (docs/failure-
+  // reconciliation.md). The verdict UI lives next to the trace that produced
+  // the uncertainty instead of a standalone page.
+  const [opsByRun, setOpsByRun] = useState<Map<string, UncertainOperation[]>>(new Map())
+  const [opsOnly, setOpsOnly] = useState(false)
+  const [identity, setIdentity] = useState<Whoami | null>(null)
+  const [reconcileNote, setReconcileNote] = useState('')
   // Historical knowledge events (recorded before propositions were embedded in
   // events) carry bare knowledge ids — resolve them against the project list.
   const [knowledgeById, setKnowledgeById] = useState<Map<string, string>>(new Map())
   const pending = useMemo(() => pendingApprovals(timeline), [timeline])
+  // Ancestors of runs with unresolved ops light up too, so the delegation
+  // chain points straight at the failure; subtree counts feed the row tags.
+  const opRunIds = useMemo(() => {
+    const ids = new Set(opsByRun.keys())
+    const direct = new Map<string, number>()
+    for (const [id, list] of opsByRun) direct.set(id, list.length)
+    const parentOf = new Map<string, string>()
+    const childrenOf = new Map<string, string[]>()
+    for (const row of rows) {
+      if (!row.parent) continue
+      parentOf.set(row.id, row.parent)
+      const list = childrenOf.get(row.parent) ?? []
+      list.push(row.id)
+      childrenOf.set(row.parent, list)
+    }
+    const subtree = (id: string): number => {
+      let total = direct.get(id) ?? 0
+      for (const child of childrenOf.get(id) ?? []) total += subtree(child)
+      return total
+    }
+    for (const id of [...ids]) {
+      let parent = parentOf.get(id)
+      while (parent) { ids.add(parent); parent = parentOf.get(parent) }
+    }
+    const subtreeCount = new Map<string, number>()
+    for (const id of ids) subtreeCount.set(id, subtree(id))
+    return { ids, subtreeCount }
+  }, [opsByRun, rows])
+  // Ops anchored to the selected run or any of its delegated children —
+  // team-run traces merge child events, so their ops belong here too.
+  const selectedOps = useMemo(() => {
+    if (!selected) return [] as UncertainOperation[]
+    const keys = new Set<string>([selected])
+    const childrenOf = new Map<string, string[]>()
+    for (const row of rows) {
+      if (!row.parent) continue
+      const list = childrenOf.get(row.parent) ?? []
+      list.push(row.id)
+      childrenOf.set(row.parent, list)
+    }
+    const walk = (id: string) => {
+      for (const child of childrenOf.get(id) ?? []) { keys.add(child); walk(child) }
+    }
+    walk(selected)
+    return [...keys].flatMap((key) => opsByRun.get(key) ?? [])
+  }, [selected, rows, opsByRun])
+  const opById = useMemo(() => {
+    const map = new Map<string, UncertainOperation>()
+    for (const list of opsByRun.values()) for (const op of list) map.set(op.operation_id, op)
+    return map
+  }, [opsByRun])
   // A run row stays visible when it matches the filter or one of its delegated
   // children does, so searching for a child keeps its parent chain.
   const visibleRuns = useMemo(() => {
@@ -255,14 +353,14 @@ export default function AgentRuns({ project }: { project: string }) {
       childrenOf.set(row.parent, list)
     }
     const selfMatch = new Map<string, boolean>()
-    for (const row of rows) selfMatch.set(row.id, matchesFilter(filter, row.id, row.title))
+    for (const row of rows) selfMatch.set(row.id, matchesFilter(filter, row.id, row.title) && (!opsOnly || opRunIds.ids.has(row.id)))
     const subtreeMatch = (id: string): boolean => {
       const match = selfMatch.get(id) ?? false
       if (match) return true
       return (childrenOf.get(id) ?? []).some((child) => subtreeMatch(child))
     }
     return rows.filter((row) => subtreeMatch(row.id))
-  }, [rows, filter])
+  }, [rows, filter, opsOnly, opRunIds])
   const selectedLive = useMemo(() =>
     timeline.some((event) => event.type === 'run.started' && runID(event) === selected)
       && !timeline.some((event) => (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') && runID(event) === selected),
@@ -296,11 +394,29 @@ export default function AgentRuns({ project }: { project: string }) {
     return { visible, responseByKey, reasoningByKey }
   }, [timeline])
 
+  // Fetch unresolved operations for the project and group them by run. Best-
+  // effort: older kernels without the endpoint simply show no markers.
+  const refreshOps = useCallback(async () => {
+    const id = project.trim()
+    if (!id) { setOpsByRun(new Map()); return }
+    try {
+      const page = await fetchOperations(id)
+      const map = new Map<string, UncertainOperation[]>()
+      for (const op of page.operations ?? []) {
+        const list = map.get(op.run_id) ?? []
+        list.push(op)
+        map.set(op.run_id, list)
+      }
+      setOpsByRun(map)
+    } catch { setOpsByRun(new Map()) }
+  }, [project])
+
   const loadRuns = useCallback(async (autoSelect = false, silent = false) => {
     if (!project.trim()) return
     if (!autoSelect && !silent) setBusy(true)
     if (!silent) setError('')
     try {
+      void refreshOps()
       const startedPage = await observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.started', limit: 500 })
       // Terminal events give every list row (roots and delegated children
       // alike) its status tag without opening each run. run.cancelled matters
@@ -339,7 +455,7 @@ export default function AgentRuns({ project }: { project: string }) {
       }
     } catch (failure) { if (!silent) setError(message(failure)) }
     finally { if (!autoSelect && !silent) setBusy(false) }
-  }, [project])
+  }, [project, refreshOps])
 
   const loadRun = useCallback(async (run: string, silent = false) => {
     if (!project.trim() || !run) return
@@ -429,6 +545,29 @@ export default function AgentRuns({ project }: { project: string }) {
       })
       .catch(() => { /* bare ids stay as the fallback */ })
   }, [project])
+  // Verdict buttons need the caller's role. Kernels without /whoami are
+  // legacy no-auth deployments — treated as operator (the kernel still
+  // enforces the ladder server-side on the reconcile call itself).
+  useEffect(() => { void whoami().then(setIdentity).catch(() => setIdentity(null)) }, [])
+  const operator = identity === null || canReconcile(identity.role)
+
+  async function submitReconcile(op: UncertainOperation, effect: ReconcileEffect) {
+    setBusy(true); setError('')
+    try {
+      await reconcile({
+        project: op.project || project.trim(),
+        run_id: op.run_id,
+        operation_id: op.operation_id,
+        effect,
+        note: reconcileNote.trim() || undefined,
+        actor_id: identity?.subject && identity.subject !== 'anonymous' ? identity.subject : 'human-ui',
+        started_event_id: op.started_event_id,
+      })
+      setReconcileNote('')
+      await Promise.all([refreshOps(), loadRun(selected, true)])
+    } catch (failure) { setError(message(failure)) }
+    finally { setBusy(false) }
+  }
 
   async function decide(event: ObservationEvent, approved: boolean, response = '') {
     const operationID = String(event.data?.operation_id ?? '')
@@ -478,7 +617,16 @@ export default function AgentRuns({ project }: { project: string }) {
             <div style={{ padding: '0.5rem 0 0', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
                 <Heading style={{ fontSize: '1rem' }}>{t('runs.count', { count: String(visibleRuns.length) })}</Heading>
-                <button onClick={() => { setSelected(''); setTimeline([]); void loadRuns(true) }} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
+                <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+                  <button
+                    onClick={() => setOpsOnly((value) => !value)}
+                    disabled={opRunIds.ids.size === 0 && !opsOnly}
+                    title={t('runs.ops_filter')}
+                    aria-pressed={opsOnly}
+                    style={{ background: opsOnly ? 'rgba(247,118,142,0.15)' : 'none', border: `1px solid ${opsOnly ? '#f7768e' : 'var(--tm-border)'}`, color: opsOnly ? '#f7768e' : 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.85rem', padding: '0.2rem 0.4rem', lineHeight: 1, borderRadius: '4px' }}
+                  >⚠</button>
+                  <button onClick={() => { setSelected(''); setTimeline([]); void loadRuns(true) }} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
+                </div>
               </div>
               <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_runs') ?? 'Filter runs…'} />
             </div>
@@ -505,6 +653,9 @@ export default function AgentRuns({ project }: { project: string }) {
                     {row.status === 'running' && <Tag type="blue" size="sm">{t('chat.delegation.running')}</Tag>}
                     {row.status === 'cancelled' && <Tag type="warm-gray" size="sm">{t('status.cancelled')}</Tag>}
                     {questionRuns.has(row.id) && <Tag type="warm-gray" size="sm" title={t('runs.asks_human') ?? 'This run is waiting for a human answer'}>❓ {t('runs.asks_human') ?? 'asks you'}</Tag>}
+                    {opRunIds.ids.has(row.id) && (
+                      <Tag type="red" size="sm" title={t('runs.ops_tag_title')}>⚠ {opRunIds.subtreeCount.get(row.id) ?? 0}</Tag>
+                    )}
                   </div>
                   {(row.title || agentName) && (
                     <div style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.id}</div>
@@ -625,6 +776,75 @@ export default function AgentRuns({ project }: { project: string }) {
                   )
                 })}
 
+                {/* Failure reconciliation — uncertain operations of this run and
+                    its delegated children (docs/failure-reconciliation.md). The
+                    verdict is recorded next to the trace that produced the
+                    uncertainty; unlike approvals it never resumes the run. */}
+                {selectedOps.length > 0 && (
+                  <Tile style={{ borderLeft: '3px solid #f7768e' }}>
+                    <Heading style={{ fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      ⚠ {t('runs.reconcile_title')}
+                      <Tag type="red" size="sm">{selectedOps.length}</Tag>
+                    </Heading>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', margin: '0.25rem 0 0.75rem' }}>{t('operations.check_external')}</p>
+                    <Stack gap={3}>
+                      {selectedOps.map((op) => {
+                        const info = toolInfo(op.tool, op.server)
+                        const turn = turnOf(op.operation_id)
+                        const look = whereToLook(op, t)
+                        const delegated = op.error_type === 'delegated_run_failed'
+                        return (
+                          <div key={op.operation_id} style={{ padding: '0.75rem', background: 'var(--tm-raised)', borderRadius: '6px', minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', fontSize: '0.85rem' }}>
+                              <span>{info.icon}</span>
+                              <strong style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{info.label}</strong>
+                              <Tag type="gray" size="sm">{info.category}</Tag>
+                              {turn && <Tag type="cool-gray" size="sm">{t('operations.turn_n', { turn })}</Tag>}
+                              <Tag type="red" size="sm">{REASON_KEYS[op.reason] ? t(REASON_KEYS[op.reason]) : op.reason}</Tag>
+                              {op.state === 'in_flight' && <Tag type="blue" size="sm">{t('runs.ops_in_flight')}</Tag>}
+                              <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', marginLeft: 'auto', flexShrink: 0 }}>{shortTime(op.started_at)}</span>
+                            </div>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--tm-text)', margin: '0.5rem 0' }}>
+                              {delegated ? t('operations.delegated_notice', { run: op.child_run_id ?? '' }) : t('operations.agent_notice')}
+                            </p>
+                            {delegated && (op.child_ops_total ?? 0) > 0 && (
+                              <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0 0 0.25rem' }}>
+                                {t('operations.delegated_stats', { total: String(op.child_ops_total ?? 0), unresolved: String(op.child_ops_unresolved ?? 0) })}
+                              </p>
+                            )}
+                            {op.error_detail && (
+                              <pre style={{ background: 'var(--tm-surface)', color: '#f7768e', padding: '0.5rem', fontSize: '0.7rem', marginTop: '0.25rem', borderRadius: '4px', maxWidth: '100%', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '0.25rem 0' }}>{op.error_detail}</pre>
+                            )}
+                            {op.arguments && (
+                              <pre style={{ background: 'var(--tm-surface)', color: 'var(--tm-text)', padding: '0.5rem', fontSize: '0.7rem', borderRadius: '4px', maxWidth: '100%', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '0.25rem 0' }}>{op.arguments}</pre>
+                            )}
+                            <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0.5rem' }}>{look.icon} {look.text}</p>
+                            <div style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', fontFamily: 'monospace', overflowWrap: 'anywhere', margin: '0 0 0.5rem' }}>{op.operation_id}</div>
+                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                              {op.child_run_id && <Button size="sm" kind="tertiary" onClick={() => setSelected(op.child_run_id ?? '')}>{t('operations.open_child_run')}</Button>}
+                              {(['occurred', 'none', 'unknown'] as ReconcileEffect[]).map((effect) => (
+                                <Button
+                                  key={effect}
+                                  size="sm"
+                                  kind={effect === 'none' ? 'danger' : effect === 'occurred' ? 'primary' : 'secondary'}
+                                  disabled={busy || !operator}
+                                  onClick={() => void submitReconcile(op, effect)}
+                                >
+                                  {effect === 'occurred' ? t('operations.happened') : effect === 'none' ? t('operations.did_not_happen') : t('operations.unknown_verdict')}
+                                </Button>
+                              ))}
+                            </div>
+                            {!operator && <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.5rem', marginBottom: 0 }}>{t('operations.operator_required')}</p>}
+                          </div>
+                        )
+                      })}
+                    </Stack>
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <TextInput id="reconcile-note" labelText={t('operations.what_did_you_find')} value={reconcileNote} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReconcileNote(e.target.value)} placeholder={t('operations.find_placeholder')} />
+                    </div>
+                  </Tile>
+                )}
+
                 {/* Cross-agent knowledge disputes across the selected run's chain */}
                 <RunDisputes project={project.trim()} selected={selected} rows={rows} onOpenRun={setSelected} />
 
@@ -667,12 +887,15 @@ export default function AgentRuns({ project }: { project: string }) {
                         }
                       }
                       const detail = isLiveModelCall ? liveParts.join(' · ') || info.detail : info.detail
+                      // An event whose operation effect is still unresolved ties
+                      // this row to the reconcile card above — mark it in place.
+                      const unresolvedOp = opById.get(String(event.data?.operation_id ?? ''))
                       return (
                         <div
                           key={`${event.source.id}:${event.event_id}`}
                           style={{
                             padding: '0.4rem 0.5rem',
-                            borderLeft: `3px solid ${info.color}`,
+                            borderLeft: `3px solid ${unresolvedOp ? '#f7768e' : info.color}`,
                             marginBottom: '0.15rem',
                             background: 'var(--tm-surface)',
                             borderRadius: '0 4px 4px 0',
@@ -687,6 +910,9 @@ export default function AgentRuns({ project }: { project: string }) {
                             <span style={{ color: info.color, width: '1.2rem', textAlign: 'center', flexShrink: 0 }} className={isLiveModelCall ? 'live-dot' : undefined}>{info.icon}</span>
                             <strong style={{ color: info.color, minWidth: '100px' }}>{info.label}</strong>
                             <span style={{ color: isLiveModelCall ? 'var(--tm-teal)' : 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</span>
+                            {unresolvedOp && (
+                              <span style={{ color: '#f7768e', fontSize: '0.7rem', flexShrink: 0 }} title={t('runs.ops_trace_mark')}>⚠</span>
+                            )}
                             <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{shortTime(event.occurred_at)}</span>
                           </div>
                           <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>

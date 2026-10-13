@@ -32,8 +32,7 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 |---|---|
 | `/workspace` | Agent chat — SSE streaming, reasoning, Markdown, conversations |
 | `/agent-config` | Agent management — CRUD, templates, full configuration |
-| `/agents` | Run traces — event timeline, trajectory extraction |
-| `/operations` | Uncertain operations — batch reconcile, verdict buttons |
+| `/agents` | Run traces — event timeline, trajectory extraction, inline reconciliation of uncertain operations |
 | `/observability` | Knowledge — lifecycle, activation chains, patterns, projection |
 | `/experience` | Experience Timeline — memory lens, semantic zoom, retrospective audit |
 | `/skills` | Living Skills — contract, versions, executions, memory, evolution, skill builder |
@@ -243,7 +242,7 @@ variables are a legacy option for running the kernel without a workspace.
 execution) vs `effect=uncertain` (failure at the execution boundary).
 Read-only tools (read_file, search, grep) automatically get `effect=none`.
 
-Unreconciled operations are visible on `/operations` with batch reconcile.
+Unreconciled operations surface inline in the run trace on `/agents` — verdict cards at failed steps, run-list markers and a filter for affected runs.
 
 ```sh
 curl 'http://localhost:8090/v1/agent/operations?project=repo-a' -H "Authorization: Bearer $TOKEN"
