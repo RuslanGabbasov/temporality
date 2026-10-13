@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1824,6 +1825,119 @@ func TestAgentRunPlanFailureSkipsDependents(t *testing.T) {
 	require.True(t, childRuns["run-plan-fail/plan/01-a"])
 	require.True(t, childRuns["run-plan-fail/plan/02-b"])
 	require.True(t, childRuns["run-plan-fail/plan/04-c"])
+}
+
+// A child that ends by a policy limit (forced finale: turn_limit and friends)
+// finishes its workflow without an error, so the old settlement marked the
+// task completed even when its report said "work NOT finished". The task must
+// settle as incomplete instead, skip its dependents honestly, and keep the
+// executor's handoff report readable in the summary.
+func TestAgentRunPlanIncompleteTaskSkipsDependents(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	// DAG: a burns every turn on tool calls and ends by a forced finale that
+	// honestly reports the work as unfinished; mid depends on a and must be
+	// skipped (nothing to build on); independent c still finishes.
+	sawSummary := false
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			prompt := request.Messages[1].Content
+			switch {
+			case strings.Contains(prompt, "exhaust turns"):
+				// Loop turns carry tools; the forced finale does not.
+				if len(request.Tools) == 0 {
+					return llm.Completion{Content: "work NOT finished: ran out of turns"}, nil
+				}
+				return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "spin-" + strconv.Itoa(request.Turn), Name: "run_command", Args: map[string]any{"command": []any{"ls"}}}}}, nil
+			case strings.Contains(prompt, "work c"):
+				return llm.Completion{Content: "C-DONE"}, nil
+			}
+			t.Fatalf("unexpected child prompt: %s", prompt)
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
+				"goal": "honest plan",
+				"tasks": []any{
+					map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "exhaust turns"},
+					map[string]any{"id": "mid", "agent_id": "repo-a-reviewer", "prompt": "merge work", "depends_on": []any{"a"}},
+					map[string]any{"id": "c", "agent_id": "repo-a-qa", "prompt": "work c"},
+				},
+			}}}}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "incomplete") && strings.Contains(message.Content, "work NOT finished") && strings.Contains(message.Content, "C-DONE") {
+				sawSummary = true
+			}
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	resolveCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		resolveCalls++
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: 4, AutoApproveTools: []string{"run_command"}}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ChildRunSummaryRequest) (ChildRunSummary, error) {
+		require.Contains(t, request.RunID, "/plan/")
+		return ChildRunSummary{Total: 0, Unresolved: 0}, nil
+	}, activity.RegisterOptions{Name: ActivitySummarizeChildRun})
+	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
+		return ToolResult{Content: "exit_code=0"}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-plan-inc", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "run the plan", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var parentResult RunResult
+	require.NoError(t, env.GetWorkflowResult(&parentResult))
+	require.Equal(t, "completed", parentResult.Status)
+	require.Equal(t, "parent done", parentResult.Answer)
+	require.True(t, sawSummary, "the summary must carry the incomplete outcome with the executor's honest report")
+
+	var incomplete, skipped, planDone *observation.Event
+	childRuns := map[string]bool{}
+	for index := range recorded {
+		event := recorded[index]
+		switch {
+		case event.Type == "run.started" && strings.HasPrefix(event.Context.Run, "run-plan-inc/plan/"):
+			childRuns[event.Context.Run] = true
+		case event.Type == "plan.task.incomplete":
+			incomplete = &recorded[index]
+		case event.Type == "plan.task.skipped":
+			skipped = &recorded[index]
+		case event.Type == "plan.completed":
+			planDone = &recorded[index]
+		}
+	}
+	require.NotNil(t, incomplete, "the limited task must settle as incomplete, not completed")
+	require.Equal(t, "a", incomplete.Data["task_id"])
+	require.Equal(t, "run-plan-inc/plan/01-a", incomplete.Data["child_run_id"])
+	require.Equal(t, "turn_limit", incomplete.Data["child_status"])
+	require.NotNil(t, skipped, "the dependent task must be skipped")
+	require.Equal(t, "mid", skipped.Data["task_id"])
+	require.Equal(t, "upstream_incomplete", skipped.Data["reason"])
+	require.Equal(t, "a", skipped.Data["blocked_by"])
+	require.NotNil(t, planDone)
+	statuses, ok := planDone.Data["statuses"].(map[string]any)
+	require.True(t, ok, "plan.completed must carry per-task statuses")
+	require.Equal(t, "incomplete", statuses["a"])
+	require.Equal(t, "skipped", statuses["mid"])
+	require.Equal(t, "completed", statuses["c"])
+	// The skipped task never runs; the limited one did.
+	require.False(t, childRuns["run-plan-inc/plan/02-mid"], "the skipped task must not start a child run")
+	require.True(t, childRuns["run-plan-inc/plan/01-a"])
+	require.True(t, childRuns["run-plan-inc/plan/03-c"])
 }
 
 func TestAgentRunPlanWidthLimit(t *testing.T) {

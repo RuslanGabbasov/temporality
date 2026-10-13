@@ -10,13 +10,17 @@ export interface DelegationNodeInfo {
   childRunId: string
   agentId: string
   ordinal: number
-  status: 'completed' | 'failed' | 'running' | 'cancelled'
+  status: 'completed' | 'incomplete' | 'failed' | 'running' | 'cancelled'
   turns?: number
   error?: string
   taskId?: string
   round?: number
   verdict?: string
 }
+
+/** Terminal run statuses that mean "stopped by a policy limit": the forced
+ *  finale answered, but the deliverable was never produced. */
+const RUN_LIMIT_STATUSES = new Set(['turn_limit', 'time_limit', 'token_limit', 'budget_limit'])
 
 /** Fold delegation.* and plan.task.* events (emitted by the parent run) into node info. Plan tasks key by their child run id; rework events (rejected/reopened/invalidated) carry only a task id and resolve through it. */
 export function foldDelegations(events: ObservationEvent[]): DelegationNodeInfo[] {
@@ -25,7 +29,7 @@ export function foldDelegations(events: ObservationEvent[]): DelegationNodeInfo[
   const taskToChild = new Map<string, string>()
   for (const event of events) {
     const isDelegation = event.type === 'delegation.started' || event.type === 'delegation.completed' || event.type === 'delegation.failed'
-    const isPlanTask = event.type === 'plan.task.started' || event.type === 'plan.task.completed' || event.type === 'plan.task.failed'
+    const isPlanTask = event.type === 'plan.task.started' || event.type === 'plan.task.completed' || event.type === 'plan.task.failed' || event.type === 'plan.task.incomplete'
     const isPlanRework = event.type === 'plan.task.rejected' || event.type === 'plan.task.reopened' || event.type === 'plan.task.invalidated'
     if (!isDelegation && !isPlanTask && !isPlanRework) continue
     const d = (event.data ?? {}) as Record<string, any>
@@ -49,13 +53,20 @@ export function foldDelegations(events: ObservationEvent[]): DelegationNodeInfo[
       node.status = 'running'
       if (d.round != null) node.round = Number(d.round)
     } else if (event.type === 'delegation.completed' || event.type === 'plan.task.completed') {
-      node.status = 'completed'
+      // A child that answered from a forced finale (policy limit hit) is not
+      // "completed" in any sense the user cares about.
+      node.status = typeof d.child_status === 'string' && RUN_LIMIT_STATUSES.has(d.child_status) ? 'incomplete' : 'completed'
       node.turns = d.turns ?? node.turns
       if (d.round != null) node.round = Number(d.round)
       if (typeof d.verdict === 'string') node.verdict = d.verdict
     } else if (event.type === 'delegation.failed' || event.type === 'plan.task.failed') {
       node.status = 'failed'
       node.error = d.error ?? node.error
+    } else if (event.type === 'plan.task.incomplete') {
+      // The executor stopped by a policy limit; the child's own trace shows why.
+      node.status = 'incomplete'
+      node.turns = d.turns ?? node.turns
+      if (d.round != null) node.round = Number(d.round)
     } else if (event.type === 'plan.task.reopened' || event.type === 'plan.task.invalidated') {
       // The previous result was discarded; a fresh round follows when the branch
       // stays alive.
@@ -67,7 +78,7 @@ export function foldDelegations(events: ObservationEvent[]): DelegationNodeInfo[
 
 /** Fetch all delegation and plan-task events for a run and fold them into node info. */
 export async function fetchDelegations(project: string, runId: string): Promise<DelegationNodeInfo[]> {
-  const types = ['delegation.started', 'delegation.completed', 'delegation.failed', 'plan.task.started', 'plan.task.completed', 'plan.task.failed', 'plan.task.rejected', 'plan.task.reopened', 'plan.task.invalidated'] as const
+  const types = ['delegation.started', 'delegation.completed', 'delegation.failed', 'plan.task.started', 'plan.task.completed', 'plan.task.failed', 'plan.task.incomplete', 'plan.task.rejected', 'plan.task.reopened', 'plan.task.invalidated'] as const
   const pages = await Promise.all(types.map((type) =>
     observationApi.events(project, undefined, undefined, undefined, { run: runId, type, limit: 100 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 }))
   ))
@@ -111,8 +122,10 @@ async function fetchChildPayload(project: string, childRunId: string, terminal?:
   const completed = events.find((e) => e.type === 'run.completed')
   const cancelled = events.find((e) => e.type === 'run.cancelled')
   // run.cancelled is terminal: without it a cancelled child run renders as
-  // "running" forever.
-  const ownStatus: DelegationNodeInfo['status'] = failed ? 'failed' : cancelled ? 'cancelled' : completed ? 'completed' : 'running'
+  // "running" forever. run.completed with a policy-limit status means the
+  // answer came from a forced finale — the run ended, the work did not.
+  const completedStatus = completed ? String((completed.data as Record<string, any> | undefined)?.status ?? '') : ''
+  const ownStatus: DelegationNodeInfo['status'] = failed ? 'failed' : cancelled ? 'cancelled' : completed ? (RUN_LIMIT_STATUSES.has(completedStatus) ? 'incomplete' : 'completed') : 'running'
   const status = ownStatus !== 'running' ? ownStatus : (terminal ?? 'running')
   let summary = events.find((e) => e.type === 'agent.summary')?.data as Record<string, any> | undefined
   if (!summary && status !== 'running') {
@@ -185,11 +198,13 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
 
   const statusTag = status === 'completed'
     ? <Tag type="green" size="sm">{t('chat.delegation.completed')}</Tag>
-    : status === 'failed'
-      ? <Tag type="red" size="sm">{t('chat.delegation.failed')}</Tag>
-      : status === 'cancelled'
-        ? <Tag type="warm-gray" size="sm">{t('status.cancelled')}</Tag>
-        : <Tag type="blue" size="sm">{t('chat.delegation.running')}</Tag>
+    : status === 'incomplete'
+      ? <Tag type="purple" size="sm">{t('chat.plan.status_incomplete')}</Tag>
+      : status === 'failed'
+        ? <Tag type="red" size="sm">{t('chat.delegation.failed')}</Tag>
+        : status === 'cancelled'
+          ? <Tag type="warm-gray" size="sm">{t('status.cancelled')}</Tag>
+          : <Tag type="blue" size="sm">{t('chat.delegation.running')}</Tag>
 
   const openRun = (e: React.MouseEvent) => {
     e.stopPropagation()

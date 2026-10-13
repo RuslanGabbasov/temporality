@@ -182,7 +182,7 @@ func TestPlanSummary(t *testing.T) {
 		{TaskID: "later", AgentID: "qa", Status: planStatusSkipped, BlockedBy: "boom"},
 	}, []planRejection{{TaskID: "ok", By: "rev", Round: 1, Feedback: "fix the flaky assertion"}})
 	for _, expected := range []string{
-		"1 completed, 1 failed, 1 skipped, 0 invalidated",
+		"1 completed, 0 incomplete, 1 failed, 1 skipped, 0 invalidated",
 		"## ok (coder) — completed, round 2, verdict accept",
 		"shipped",
 		"## boom (coder) — failed", "model exploded",
@@ -196,5 +196,25 @@ func TestPlanSummary(t *testing.T) {
 	invalidated := planSummary(spec, []planTaskOutcome{{TaskID: "later", AgentID: "qa", Status: planStatusInvalidated, SkipReason: "upstream_rework"}}, nil)
 	if !strings.Contains(invalidated, "## later (qa) — invalidated (result discarded: upstream_rework)") {
 		t.Fatalf("invalidated outcome missing from summary:\n%s", invalidated)
+	}
+	// An executor stopped by a policy limit keeps its honest handoff report but
+	// never reads as a deliverable.
+	incomplete := planSummary(spec, []planTaskOutcome{
+		{TaskID: "ok", AgentID: "coder", Status: planStatusIncomplete, ChildStatus: "turn_limit", Turns: 17, Round: 1, Answer: "work NOT finished: ran out of turns"},
+		{TaskID: "later", AgentID: "qa", Status: planStatusSkipped, BlockedBy: "ok", SkipReason: "upstream_incomplete"},
+	}, nil)
+	for _, expected := range []string{
+		"0 completed, 1 incomplete, 0 failed, 1 skipped, 0 invalidated",
+		"## ok (coder) — incomplete (turn_limit), 17 turns",
+		"work NOT finished: ran out of turns",
+		"## later — skipped (upstream_incomplete: ok)",
+	} {
+		if !strings.Contains(incomplete, expected) {
+			t.Fatalf("incomplete summary missing %q:\n%s", expected, incomplete)
+		}
+	}
+	empty := planSummary(spec, []planTaskOutcome{{TaskID: "ok", AgentID: "coder", Status: planStatusIncomplete, ChildStatus: "budget_limit"}}, nil)
+	if !strings.Contains(empty, "(no final answer)") {
+		t.Fatalf("an incomplete outcome without an answer must say so:\n%s", empty)
 	}
 }

@@ -5,7 +5,7 @@ import { type Agent } from './workspaceApi'
 import { useT } from './i18n'
 import { explainKernelError } from './eventSummary'
 
-export type PlanTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'invalidated'
+export type PlanTaskStatus = 'pending' | 'running' | 'completed' | 'incomplete' | 'failed' | 'skipped' | 'invalidated'
 
 export interface PlanTaskInfo {
   id: string
@@ -13,6 +13,7 @@ export interface PlanTaskInfo {
   dependsOn: string[]
   reviewOf?: string[]
   status: PlanTaskStatus
+  childStatus?: string
   childRunId?: string
   turns?: number
   round?: number
@@ -35,6 +36,7 @@ export interface PlanInfo {
 // what blocks the branch".
 const EDGE_COLORS: Record<PlanTaskStatus, string> = {
   completed: '#9ece6a',
+  incomplete: '#ff9e64',
   failed: '#f7768e',
   running: '#7aa2f7',
   pending: '#565f89',
@@ -129,6 +131,13 @@ export function foldPlans(events: ObservationEvent[]): PlanInfo[] {
       task.status = 'failed'
       task.error = typeof d.error === 'string' ? d.error : task.error
       if (d.round != null) task.round = Number(d.round)
+    } else if (event.type === 'plan.task.incomplete') {
+      // The executor stopped by a policy limit (turns/time/tokens/budget):
+      // its report is a handoff, not the deliverable.
+      task.status = 'incomplete'
+      if (typeof d.child_status === 'string') task.childStatus = d.child_status
+      task.turns = d.turns ?? task.turns
+      if (d.round != null) task.round = Number(d.round)
     } else if (event.type === 'plan.task.skipped') {
       task.status = 'skipped'
       task.reason = typeof d.reason === 'string' ? d.reason : task.reason
@@ -150,7 +159,7 @@ export function foldPlans(events: ObservationEvent[]): PlanInfo[] {
 
 /** Fetch all plan events for a run and fold them into per-plan DAG info. */
 export async function fetchPlans(project: string, runId: string): Promise<PlanInfo[]> {
-  const types = ['plan.started', 'plan.task.started', 'plan.task.completed', 'plan.task.failed', 'plan.task.skipped', 'plan.task.rejected', 'plan.task.reopened', 'plan.task.invalidated'] as const
+  const types = ['plan.started', 'plan.task.started', 'plan.task.completed', 'plan.task.failed', 'plan.task.incomplete', 'plan.task.skipped', 'plan.task.rejected', 'plan.task.reopened', 'plan.task.invalidated'] as const
   const pages = await Promise.all(types.map((type) =>
     observationApi.events(project, undefined, undefined, undefined, { run: runId, type, limit: 100 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 }))
   ))
@@ -164,11 +173,22 @@ export async function fetchPlans(project: string, runId: string): Promise<PlanIn
 function depStatusIcon(status: PlanTaskStatus | undefined): { icon: string; color: string } {
   switch (status) {
     case 'completed': return { icon: '✓', color: '#9ece6a' }
+    case 'incomplete': return { icon: '…', color: '#ff9e64' }
     case 'failed': return { icon: '✗', color: '#f7768e' }
     case 'running': return { icon: '●', color: '#7aa2f7' }
     case 'skipped': return { icon: '–', color: '#565f89' }
     case 'invalidated': return { icon: '↺', color: '#e6b85c' }
     default: return { icon: '○', color: '#565f89' }
+  }
+}
+
+function childStatusLabel(status: string | undefined, t: ReturnType<typeof useT>): string {
+  switch (status) {
+    case 'turn_limit': return t('chat.plan.child_status.turn_limit')
+    case 'time_limit': return t('chat.plan.child_status.time_limit')
+    case 'token_limit': return t('chat.plan.child_status.token_limit')
+    case 'budget_limit': return t('chat.plan.child_status.budget_limit')
+    default: return status ?? ''
   }
 }
 
@@ -187,6 +207,7 @@ function PlanTaskChip({ task, agents, t, onOpenRun, statuses, chipRef }: {
   const running = task.status === 'running'
   const pending = task.status === 'pending'
   const invalidated = task.status === 'invalidated'
+  const incomplete = task.status === 'incomplete'
   const tag = failed
     ? <Tag type="red" size="sm">{t('chat.delegation.failed')}</Tag>
     : task.status === 'completed'
@@ -197,18 +218,24 @@ function PlanTaskChip({ task, agents, t, onOpenRun, statuses, chipRef }: {
           ? <Tag type="warm-gray" size="sm">{t('chat.plan.skipped')}</Tag>
           : invalidated
             ? <Tag type="warm-gray" size="sm">{t('chat.plan.status_invalidated')}</Tag>
-            : <Tag type="warm-gray" size="sm">{t('chat.plan.pending')}</Tag>
+            : incomplete
+              ? <Tag type="purple" size="sm">{t('chat.plan.status_incomplete')}</Tag>
+              : <Tag type="warm-gray" size="sm">{t('chat.plan.pending')}</Tag>
   const reason = skipped
     ? task.reason === 'run_time_limit' || task.reason === 'execution_budget'
       ? t(task.reason === 'execution_budget' ? 'chat.plan.execution_budget' : 'chat.plan.run_time_limit')
-      : `${t('chat.plan.upstream_failed')}${task.blockedBy ? ` · ${task.blockedBy}` : ''}`
+      : task.reason === 'upstream_incomplete'
+        ? `${t('chat.plan.upstream_incomplete')}${task.blockedBy ? ` · ${task.blockedBy}` : ''}`
+        : `${t('chat.plan.upstream_failed')}${task.blockedBy ? ` · ${task.blockedBy}` : ''}`
     : failed
       ? explainKernelError(task.error ?? '').cause
       : invalidated
         ? t(task.reason === 'upstream_rework_exhausted' ? 'chat.plan.upstream_rework_exhausted' : 'chat.plan.upstream_rework')
-        : task.feedback
-          ? `${t('runs.event.plan_task_rejected')} · ${task.rejectedBy ?? ''}: ${task.feedback}`
-          : ''
+        : incomplete
+          ? childStatusLabel(task.childStatus, t)
+          : task.feedback
+            ? `${t('runs.event.plan_task_rejected')} · ${task.rejectedBy ?? ''}: ${task.feedback}`
+            : ''
   const open = (e: React.MouseEvent) => {
     e.stopPropagation()
     if (onOpenRun && task.childRunId) onOpenRun(task.childRunId)

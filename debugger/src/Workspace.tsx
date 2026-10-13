@@ -524,6 +524,14 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         updateMsg(convId, runId, { streamLines: [...lines] })
       } catch { /* ignore */ }
     })
+    es.addEventListener('plan.task.incomplete', (e) => {
+      try {
+        const outer = JSON.parse(e.data)
+        const d = outer.data ?? outer
+        lines.push(t('chat.plan.stream_task_incomplete', { task: String(d.task_id ?? ''), name: delegationAgentName(d.agent_id) }) ?? `Plan · ${d.task_id} · incomplete`)
+        updateMsg(convId, runId, { streamLines: [...lines] })
+      } catch { /* ignore */ }
+    })
     es.addEventListener('plan.task.rejected', (e) => {
       try {
         const outer = JSON.parse(e.data)
@@ -564,7 +572,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const statuses = (d.statuses ?? {}) as Record<string, unknown>
         const counts = new Map<string, number>()
         for (const value of Object.values(statuses)) counts.set(String(value), (counts.get(String(value)) ?? 0) + 1)
-        const summary = ['completed', 'failed', 'skipped', 'invalidated']
+        const summary = ['completed', 'incomplete', 'failed', 'skipped', 'invalidated']
           .map((status) => counts.get(status) ? `${counts.get(status)} ${t(`chat.plan.status_${status}`)}` : '')
           .filter(Boolean).join(' · ')
         lines.push(t('chat.plan.stream_completed', { summary }) ?? `Plan finished: ${summary}`)

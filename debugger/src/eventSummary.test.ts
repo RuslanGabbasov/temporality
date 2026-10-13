@@ -360,6 +360,41 @@ describe('plan rework folding', () => {
     expect(nodes[0].status).toBe('running')
     expect(nodes[0].round).toBe(2)
   })
+
+  it('folds a policy-limited executor as incomplete and skips its dependent', () => {
+    const events = [
+      ev('plan.started', { operation_id: 'op', goal: 'g', tasks: [
+        { id: 'build', agent_id: 'coder', depends_on: [] },
+        { id: 'ship', agent_id: 'devops', depends_on: ['build'] },
+      ] }, 0),
+      ev('plan.task.started', { operation_id: 'op', task_id: 'build', agent_id: 'coder', child_run_id: 'r/plan/01-build', round: 1 }, 1),
+      ev('plan.task.incomplete', { operation_id: 'op', task_id: 'build', child_run_id: 'r/plan/01-build', child_status: 'turn_limit', turns: 17, round: 1 }, 2),
+      ev('plan.task.skipped', { operation_id: 'op', task_id: 'ship', reason: 'upstream_incomplete', blocked_by: 'build' }, 3),
+    ]
+    const plans = foldPlans(events)
+    expect(plans).toHaveLength(1)
+    const build = plans[0].tasks.find((task) => task.id === 'build')!
+    expect(build.status).toBe('incomplete')
+    expect(build.childStatus).toBe('turn_limit')
+    expect(build.turns).toBe(17)
+    const ship = plans[0].tasks.find((task) => task.id === 'ship')!
+    expect(ship.status).toBe('skipped')
+    expect(ship.reason).toBe('upstream_incomplete')
+    expect(ship.blockedBy).toBe('build')
+    // The delegation tree marks the same child run incomplete too.
+    const nodes = foldDelegations(events)
+    const node = nodes.find((n) => n.childRunId === 'r/plan/01-build')!
+    expect(node.status).toBe('incomplete')
+  })
+
+  it('marks a delegation node incomplete when the child finished from a forced finale', () => {
+    const events = [
+      ev('delegation.started', { child_run_id: 'r/delegate/01', agent_id: 'helper', ordinal: 1 }, 1),
+      ev('delegation.completed', { child_run_id: 'r/delegate/01', agent_id: 'helper', child_status: 'time_limit', turns: 3 }, 2),
+    ]
+    const nodes = foldDelegations(events)
+    expect(nodes[0].status).toBe('incomplete')
+  })
 })
 
 describe('restoreMarkdownLines', () => {

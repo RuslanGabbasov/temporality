@@ -349,6 +349,7 @@ func planSpecToArgs(spec PlanSpec) map[string]any {
 // planTaskStatus is the per-task terminal status inside a plan execution.
 const (
 	planStatusCompleted   = "completed"
+	planStatusIncomplete  = "incomplete" // executor stopped by a policy limit; its report is a handoff, not the deliverable
 	planStatusFailed      = "failed"
 	planStatusSkipped     = "skipped"
 	planStatusInvalidated = "invalidated" // result discarded: upstream was sent back or died
@@ -359,7 +360,7 @@ type planTaskOutcome struct {
 	TaskID      string
 	AgentID     string
 	ChildRunID  string
-	Status      string // completed | failed | skipped | invalidated
+	Status      string // completed | incomplete | failed | skipped | invalidated
 	ChildStatus string
 	Turns       int
 	Round       int // child runs launched for this task (1 = no rework)
@@ -394,7 +395,7 @@ func planSummary(spec PlanSpec, outcomes []planTaskOutcome, rejections []planRej
 	if goal == "" {
 		goal = "plan"
 	}
-	fmt.Fprintf(&b, "Plan %q finished: %d completed, %d failed, %d skipped, %d invalidated.", goal, counts[planStatusCompleted], counts[planStatusFailed], counts[planStatusSkipped], counts[planStatusInvalidated])
+	fmt.Fprintf(&b, "Plan %q finished: %d completed, %d incomplete, %d failed, %d skipped, %d invalidated.", goal, counts[planStatusCompleted], counts[planStatusIncomplete], counts[planStatusFailed], counts[planStatusSkipped], counts[planStatusInvalidated])
 	for index := range outcomes {
 		outcome := &outcomes[index]
 		switch outcome.Status {
@@ -411,6 +412,23 @@ func planSummary(spec PlanSpec, outcomes []planTaskOutcome, rejections []planRej
 			}
 			b.WriteString("\n")
 			b.WriteString(outcome.Answer)
+		case planStatusIncomplete:
+			// The child's forced finale is a handoff: the report is kept for the
+			// parent (and reviewers) to read, but the status says the deliverable
+			// was never produced by the executor's own final answer.
+			fmt.Fprintf(&b, "\n\n## %s (%s) — incomplete (%s)", outcome.TaskID, outcome.AgentID, outcome.ChildStatus)
+			if outcome.Round > 1 {
+				fmt.Fprintf(&b, ", round %d", outcome.Round)
+			}
+			if outcome.Turns > 0 {
+				fmt.Fprintf(&b, ", %d turns", outcome.Turns)
+			}
+			b.WriteString("\n")
+			if answer := strings.TrimSpace(outcome.Answer); answer != "" {
+				b.WriteString(answer)
+			} else {
+				b.WriteString("(no final answer)")
+			}
 		case planStatusFailed:
 			fmt.Fprintf(&b, "\n\n## %s (%s) — failed\n%s", outcome.TaskID, outcome.AgentID, outcome.Error)
 		case planStatusInvalidated:

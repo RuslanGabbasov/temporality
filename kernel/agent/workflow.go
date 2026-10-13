@@ -521,8 +521,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			return count
 		}
-		skipBranch := func(failedID string) error {
-			queue := append([]string{}, dag.Dependents[failedID]...)
+		// skipBranch settles the pending dependents of a dead task. The reason
+		// tells the UI and the summary whether the blocker failed or merely never
+		// finished (an incomplete upstream leaves its consumers nothing to build on).
+		skipBranch := func(blockedFrom, reason string) error {
+			queue := append([]string{}, dag.Dependents[blockedFrom]...)
 			for len(queue) > 0 {
 				id := queue[0]
 				queue = queue[1:]
@@ -530,8 +533,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					continue
 				}
 				statuses[id] = planStatusSkipped
-				outcomesByTask[id] = planTaskOutcome{TaskID: id, AgentID: agentIDs[id], Status: planStatusSkipped, BlockedBy: failedID, SkipReason: "upstream_failed"}
-				if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": id, "agent_id": agentIDs[id], "reason": "upstream_failed", "blocked_by": failedID}); err != nil {
+				outcomesByTask[id] = planTaskOutcome{TaskID: id, AgentID: agentIDs[id], Status: planStatusSkipped, BlockedBy: blockedFrom, SkipReason: reason}
+				if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": id, "agent_id": agentIDs[id], "reason": reason, "blocked_by": blockedFrom}); err != nil {
 					return err
 				}
 				queue = append(queue, dag.Dependents[id]...)
@@ -649,7 +652,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if err := emit(activityCtx, state, "plan.task.failed", data); err != nil {
 				return err
 			}
-			return skipBranch(taskID)
+			return skipBranch(taskID, "upstream_failed")
 		}
 		// The loop runs until every task reaches a terminal status (completed,
 		// failed, skipped, invalidated); rework rounds move tasks back to pending.
@@ -706,7 +709,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					if err := emit(activityCtx, state, "plan.task.failed", map[string]any{"operation_id": operationID, "task_id": task.ID, "child_run_id": childRunID, "agent_id": task.AgentID, "error_type": "agent_resolution_failed", "error": boundedFailureDetail(resolveErr), "effect": "none"}); err != nil {
 						return "", nil, err
 					}
-					if err := skipBranch(task.ID); err != nil {
+					if err := skipBranch(task.ID, "upstream_failed"); err != nil {
 						return "", nil, err
 					}
 					continue
@@ -788,16 +791,22 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					statuses[p.taskID] = planStatusInvalidated
 					outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusInvalidated, SkipReason: "upstream_rework_exhausted"}
 					// Its own pending consumers can no longer run: skip the branch.
-					if err := skipBranch(p.taskID); err != nil {
+					if err := skipBranch(p.taskID, "upstream_failed"); err != nil {
 						return "", nil, err
 					}
 				} else {
 					statuses[p.taskID] = ""
 					for _, dep := range spec.Tasks[taskIndex[p.taskID]].DependsOn {
-						if statuses[dep] == planStatusFailed || statuses[dep] == planStatusSkipped || statuses[dep] == planStatusInvalidated {
+						depStatus := statuses[dep]
+						blocked := depStatus == planStatusFailed || depStatus == planStatusSkipped || depStatus == planStatusInvalidated || depStatus == planStatusIncomplete
+						if blocked {
+							reason := "upstream_failed"
+							if depStatus == planStatusIncomplete {
+								reason = "upstream_incomplete"
+							}
 							statuses[p.taskID] = planStatusSkipped
-							outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusSkipped, BlockedBy: dep, SkipReason: "upstream_failed"}
-							if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": p.taskID, "agent_id": p.agentID, "reason": "upstream_failed", "blocked_by": dep}); err != nil {
+							outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusSkipped, BlockedBy: dep, SkipReason: reason}
+							if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": p.taskID, "agent_id": p.agentID, "reason": reason, "blocked_by": dep}); err != nil {
 								return "", nil, err
 							}
 							break
@@ -811,6 +820,36 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			if childErr != nil {
 				if err := failTask(p.taskID, p.childRunID, "delegated_run_failed", childErr, summarizeChild(p.childRunID)); err != nil {
+					return "", nil, err
+				}
+				continue
+			}
+			// Honest settlement: a child ended by a policy limit (forced finale)
+			// finished its workflow without an error, but its report is a handoff,
+			// not the deliverable. The task is incomplete and dependents must not
+			// build on unfinished work. Anything else that is not "completed"
+			// (cancelled, unknown) settles defensively as a failure: no answer was
+			// produced to trust.
+			switch child.Status {
+			case "completed":
+				// Normal settlement below (verdict gate, then completion).
+			case "turn_limit", "time_limit", "token_limit", "budget_limit":
+				answer, _ := BoundedNarrative(child.Answer)
+				statuses[p.taskID] = planStatusIncomplete
+				outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusIncomplete, ChildStatus: child.Status, Turns: child.Turns, Round: launches[p.taskID], Answer: answer, Error: "executor finished by " + child.Status + ", not by its own final answer"}
+				if err := emit(activityCtx, state, "plan.task.incomplete", map[string]any{"operation_id": operationID, "task_id": p.taskID, "child_run_id": p.childRunID, "agent_id": p.agentID, "child_status": child.Status, "turns": child.Turns, "round": launches[p.taskID]}); err != nil {
+					return "", nil, err
+				}
+				if err := skipBranch(p.taskID, "upstream_incomplete"); err != nil {
+					return "", nil, err
+				}
+				continue
+			default:
+				status := child.Status
+				if status == "" {
+					status = "unknown"
+				}
+				if err := failTask(p.taskID, p.childRunID, "delegated_run_"+status, fmt.Errorf("child run ended with status %q without a final answer", status), summarizeChild(p.childRunID)); err != nil {
 					return "", nil, err
 				}
 				continue
@@ -886,7 +925,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						if reason == "upstream_dead" {
 							statuses[p.taskID] = planStatusInvalidated
 							outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusInvalidated, SkipReason: "upstream_rework_exhausted"}
-							if err := skipBranch(p.taskID); err != nil {
+							if err := skipBranch(p.taskID, "upstream_failed"); err != nil {
 								return "", nil, err
 							}
 						} else {
