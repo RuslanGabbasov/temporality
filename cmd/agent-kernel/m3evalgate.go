@@ -36,6 +36,8 @@ import (
 // gate:false path is not silent either: it writes an audit record and the
 // agent.evaluation.gate.skipped event, so every apply without a green gate
 // stays attributable (CWE-778, §12 override-rate would otherwise miss it).
+// Since F-1 both trail writes happen only after the apply itself landed: a
+// failed apply must not journal a gate bypass that never happened.
 
 // evalGateRunTimeout bounds the background gate run; it matches
 // workspace.evalGateRunningWindow, so a run that dies with the deadline is
@@ -68,8 +70,11 @@ type evalGateOutbox interface {
 
 // evalApplyFunc continues a cleared apply on the regular path: build the
 // target agent, claim the proposal, bump the version, store the snapshot and
-// answer 200. The gate handler never touches agent state itself.
-type evalApplyFunc func(w http.ResponseWriter, r *http.Request, a workspace.Agent, proposal workspace.AgentProposal)
+// answer 200. The gate handler never touches agent state itself. The bool
+// result reports whether the apply actually landed — the gate:false path may
+// only journal the skip after a real apply (F-1): a failed apply must leave
+// no trace of a gate bypass that never happened.
+type evalApplyFunc func(w http.ResponseWriter, r *http.Request, a workspace.Agent, proposal workspace.AgentProposal) bool
 
 // kernelGateRunner adapts the kernel activities to the gate runner contract.
 type kernelGateRunner struct {
@@ -169,14 +174,18 @@ func RegisterM3Routes(mux *http.ServeMux, gate *controlplane.Gate, store evalGat
 			return
 		}
 		// gate:false (writer right, §8.3): the gate is skipped entirely —
-		// no decision lookup, no run. The skip itself is never silent: an
-		// audit record and the agent.evaluation.gate.skipped event mark who
-		// bypassed the gate and on which base version (CWE-778).
+		// no decision lookup, no run. The skip itself is never silent, and
+		// since F-1 never premature either: the audit record and the
+		// agent.evaluation.gate.skipped event are written only after the
+		// apply actually landed — a failed apply leaves no trace of a
+		// bypass that never happened (CWE-778).
 		if request.Gate != nil && !*request.Gate {
+			if !apply(w, r, a, proposal) {
+				return
+			}
 			recordEvalGateSkip(r.Context(), store, log, a, proposal, requestSubject(r))
 			emitEvalGateEvent(r.Context(), events, "agent.evaluation.gate.skipped", a, proposal, nil,
 				map[string]any{"cause": "gate_skipped"}, actorFromRequest(r))
-			apply(w, r, a, proposal)
 			return
 		}
 		// Golden drift (§13 option B): a case past its stale_after refuses
@@ -298,9 +307,10 @@ func recordEvalGateOverride(ctx context.Context, store evalGateStore, log *slog.
 
 // recordEvalGateSkip writes the audit entry of a gate-less apply (§8.3,
 // gate:false): the who (applying writer), the what (proposal, base version)
-// and the fact that no gate decision was consulted. Best-effort, exactly
-// like the override record — the apply already happened; an audit failure
-// is logged, never silently dropped.
+// and the fact that no gate decision was consulted. Called only after the
+// apply landed (F-1). Best-effort, exactly like the override record — the
+// apply already happened; an audit failure is logged, never silently
+// dropped.
 func recordEvalGateSkip(ctx context.Context, store evalGateStore, log *slog.Logger, a workspace.Agent, proposal workspace.AgentProposal, subject string) {
 	err := store.RecordAccessAudit(ctx, subject, workspace.AuditEvalGateSkipped, "agent_proposal",
 		strconv.FormatInt(proposal.ID, 10), map[string]any{

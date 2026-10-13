@@ -1923,9 +1923,11 @@ func main() {
 	// no run starts one and answers 202. The cleared apply continues on the
 	// transactional Store.ApplyAgentProposal (§10.1a): claim + version++ +
 	// immutable snapshot land atomically (docs/living-skills.md §26: agents
-	// propose, people apply).
+	// propose, people apply). The bool result tells the gate handler whether
+	// the apply landed, so the gate:false path journals its skip only after
+	// a real apply (F-1).
 	RegisterM3Routes(mux, gate, ws, kernelGateRunner{activities: activities}, events,
-		func(w http.ResponseWriter, r *http.Request, a workspace.Agent, proposal workspace.AgentProposal) {
+		func(w http.ResponseWriter, r *http.Request, a workspace.Agent, proposal workspace.AgentProposal) bool {
 			next := a
 			next.Description = proposal.Description
 			definition := proposal.Definition
@@ -1956,11 +1958,12 @@ func main() {
 				default:
 					writeError(w, 500, err)
 				}
-				return
+				return false
 			}
 			emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.applied", next, decided, actorFromRequest(r),
 				map[string]any{"from_version": a.DefinitionVersion, "to_version": next.DefinitionVersion})
 			writeJSON(w, 200, map[string]any{"agent": next, "proposal": decided})
+			return true
 		},
 		visibleUnits, time.Now, log)
 	// Rejecting keeps the proposal in history; a rejected proposal can never

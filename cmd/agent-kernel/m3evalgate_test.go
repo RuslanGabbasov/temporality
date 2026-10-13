@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -39,6 +40,7 @@ type fakeEvalGateStore struct {
 	createRuns   []workspace.AgentEvaluationRun
 	nextRunID    int64
 	audits       []storedAudit
+	applied      []bool // one entry per apply call: did it land?
 	abandonedIDs []int64
 }
 
@@ -158,8 +160,12 @@ func newEvalGateServer(t *testing.T, store *fakeEvalGateStore, runner *fakeEvalG
 	gate, err := controlplane.NewGate("readertoken:reader:reader:*\nwritertoken:writer:writer:*")
 	require.NoError(t, err)
 	if apply == nil {
-		apply = func(w http.ResponseWriter, _ *http.Request, _ workspace.Agent, _ workspace.AgentProposal) {
+		apply = func(w http.ResponseWriter, _ *http.Request, _ workspace.Agent, _ workspace.AgentProposal) bool {
+			store.mu.Lock()
+			store.applied = append(store.applied, true)
+			store.mu.Unlock()
 			writeJSON(w, 200, map[string]any{"applied": true})
+			return true
 		}
 	}
 	mux := http.NewServeMux()
@@ -402,9 +408,9 @@ func TestEvalGateReaderForbidden(t *testing.T) {
 }
 
 // gate:false skips the gate decision entirely — no lookup, no run (§8.3:
-// writer/owner right) — but the skip stays attributable: it writes an
-// audit record and the agent.evaluation.gate.skipped event, exactly like
-// an override (CWE-778).
+// writer/owner right) — but the skip stays attributable: once the apply
+// landed (F-1) it writes an audit record and the
+// agent.evaluation.gate.skipped event, exactly like an override (CWE-778).
 func TestEvalGateFalseSkipsGate(t *testing.T) {
 	store, runner, outbox := defaultEvalGateFixture()
 	store.decision = workspace.EvalGateDecision{State: workspace.EvalGateRed,
@@ -417,6 +423,7 @@ func TestEvalGateFalseSkipsGate(t *testing.T) {
 	require.Contains(t, body, `"applied":true`)
 	require.Zero(t, store.statusCalls)
 	require.Zero(t, store.createCalls)
+	require.Equal(t, []bool{true}, store.applied) // the apply landed first (F-1)
 
 	require.Len(t, store.audits, 1)
 	audit := store.audits[0]
@@ -435,6 +442,34 @@ func TestEvalGateFalseSkipsGate(t *testing.T) {
 	require.Empty(t, outbox.byType("agent.evaluation.gate.passed"))
 	require.Empty(t, outbox.byType("agent.evaluation.gate.blocked"))
 	require.Empty(t, outbox.byType("agent.evaluation.gate.overridden"))
+}
+
+// F-1: a gate:false apply that fails must leave no trace of a bypass —
+// neither the skipped audit record nor the skipped event is written when
+// the apply itself did not land, and the gate decision was never consulted.
+func TestEvalGateFalseApplyFailureLeavesNoTrace(t *testing.T) {
+	store, runner, outbox := defaultEvalGateFixture()
+	failingApply := func(w http.ResponseWriter, _ *http.Request, _ workspace.Agent, _ workspace.AgentProposal) bool {
+		store.mu.Lock()
+		store.applied = append(store.applied, false)
+		store.mu.Unlock()
+		writeError(w, 500, errors.New("apply failed"))
+		return false
+	}
+	server := newEvalGateServer(t, store, runner, outbox, failingApply)
+	defer server.Close()
+
+	status, _ := evalGatePost(t, server, "writertoken", `{"gate":false}`)
+	require.Equal(t, 500, status)
+	require.Equal(t, []bool{false}, store.applied)
+	require.Empty(t, store.audits) // no audit outside a landed apply
+	require.Empty(t, outbox.byType("agent.evaluation.gate.skipped"))
+	require.Empty(t, outbox.byType("agent.evaluation.gate.passed"))
+	require.Empty(t, outbox.byType("agent.evaluation.gate.blocked"))
+	require.Empty(t, outbox.byType("agent.evaluation.gate.overridden"))
+	require.Zero(t, store.statusCalls)
+	require.Zero(t, store.createCalls)
+	require.Zero(t, runner.calls)
 }
 
 // A proposal whose base version moved past the agent is refused with 409
