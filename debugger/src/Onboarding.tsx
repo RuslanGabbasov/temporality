@@ -1,8 +1,9 @@
-import { useState } from 'react'
-import { Button, TextInput, Heading } from '@carbon/react'
+import { useEffect, useState } from 'react'
+import { Button, TextInput, Heading, Tag } from '@carbon/react'
 import { Add } from '@carbon/icons-react'
 import { useT } from './i18n'
 import { authHeaders } from './api'
+import { setupStatus, buildSandbox, type SetupStatus } from './kernelApi'
 
 interface OnboardingProps {
   onComplete: () => void
@@ -11,8 +12,10 @@ interface OnboardingProps {
 const STEP_KEYS = [
   { id: 'welcome', titleKey: 'onboarding.welcome', descKey: 'onboarding.welcome_desc' },
   { id: 'project', titleKey: 'onboarding.project_title', descKey: 'onboarding.project_desc' },
+  { id: 'admin', titleKey: 'onboarding.admin_title', descKey: 'onboarding.admin_desc' },
   { id: 'provider', titleKey: 'onboarding.provider_title', descKey: 'onboarding.provider_desc' },
   { id: 'agent', titleKey: 'onboarding.agent_title', descKey: 'onboarding.agent_desc' },
+  { id: 'sandbox', titleKey: 'onboarding.sandbox_title', descKey: 'onboarding.sandbox_desc' },
   { id: 'done', titleKey: 'onboarding.done_title', descKey: 'onboarding.done_desc' },
 ] as const
 
@@ -22,6 +25,10 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const t = useT()
   const [step, setStep] = useState<StepId>('welcome')
   const [projectName, setProjectName] = useState('')
+  const [adminName, setAdminName] = useState('')
+  const [adminEmail, setAdminEmail] = useState('')
+  const [adminPassword, setAdminPassword] = useState('')
+  const [adminCreated, setAdminCreated] = useState(false)
   const [providerName, setProviderName] = useState('')
   const [providerUrl, setProviderUrl] = useState('')
   const [providerKey, setProviderKey] = useState('')
@@ -29,10 +36,20 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const [providerId, setProviderId] = useState('')
   const [agentName, setAgentName] = useState('Coder')
   const [agentModel, setAgentModel] = useState('')
+  const [status, setStatus] = useState<SetupStatus | null>(null)
+  const [buildBusy, setBuildBusy] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
   const currentStep = STEP_KEYS.find((s) => s.id === step)!
+
+  // Sandbox step reads the live bootstrap status: the wizard may be reopened
+  // after everything is configured, and the build button must reflect the
+  // actually installed image.
+  useEffect(() => {
+    if (step !== 'sandbox') return
+    setupStatus().then(setStatus).catch(() => setStatus(null))
+  }, [step])
 
   const createProject = async () => {
     if (!projectName.trim()) return
@@ -44,6 +61,28 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         body: JSON.stringify({ name: projectName.trim() }),
       })
       if (!resp.ok) throw new Error(await resp.text())
+      setStep('admin')
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
+    finally { setBusy(false) }
+  }
+
+  const createAdmin = async () => {
+    if (!adminName.trim() || adminPassword.length < 8) return
+    setBusy(true); setError('')
+    try {
+      const resp = await fetch('/kernel-api/v1/workspace/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          name: adminName.trim(),
+          email: adminEmail.trim(),
+          role: 'admin',
+          password: adminPassword,
+          active: true,
+        }),
+      })
+      if (!resp.ok) throw new Error(await resp.text())
+      setAdminCreated(true)
       setStep('provider')
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setBusy(false) }
@@ -53,13 +92,27 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     if (!providerName.trim() || !providerUrl.trim()) return
     setBusy(true); setError('')
     try {
+      // With a master key configured the key travels as a secret reference
+      // (encrypted at rest); without one the provider stores the literal ref
+      // as before — both resolve at the execution boundary.
+      let apiKeyRef = providerKey.trim()
+      if (providerKey.trim() && status?.master_key_configured) {
+        const secretName = `provider-${providerName.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-')}-key`
+        const created = await fetch('/kernel-api/v1/workspace/secrets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ name: secretName, provider: 'builtin', value: providerKey.trim() }),
+        })
+        if (!created.ok) throw new Error(await created.text())
+        apiKeyRef = `secret://${secretName}`
+      }
       const resp = await fetch('/kernel-api/v1/workspace/providers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           name: providerName.trim(),
           base_url: providerUrl.trim(),
-          api_key_ref: providerKey.trim(),
+          api_key_ref: apiKeyRef,
           models: providerModels.split(',').map((m) => m.trim()).filter(Boolean),
         }),
       })
@@ -86,14 +139,25 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         }),
       })
       if (!resp.ok) throw new Error(await resp.text())
-      setStep('done')
+      setStep('sandbox')
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setBusy(false) }
   }
 
+  const buildSandboxImage = async () => {
+    setBuildBusy(true); setError('')
+    try {
+      await buildSandbox()
+      const fresh = await setupStatus().catch(() => null)
+      setStatus(fresh)
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
+    finally { setBuildBusy(false) }
+  }
+
   const skipStep = () => {
     if (step === 'provider') setStep('agent')
-    else if (step === 'agent') setStep('done')
+    else if (step === 'agent') setStep('sandbox')
+    else if (step === 'sandbox') setStep('done')
   }
 
   return (
@@ -140,6 +204,42 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               {error && <p className="onboarding-error">{error}</p>}
               <div className="onboarding-actions">
                 <Button onClick={() => void createProject()} disabled={busy || !projectName.trim()}>{t('onboarding.create_project')}</Button>
+              </div>
+            </>
+          )}
+
+          {step === 'admin' && (
+            <>
+              {adminCreated && (
+                <Tag type="green" size="sm">{t('onboarding.admin_created')}</Tag>
+              )}
+              <TextInput
+                id="ob-admin-name"
+                labelText={t('onboarding.admin_name')}
+                value={adminName}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAdminName(e.target.value)}
+                placeholder="Ivan Petrov"
+              />
+              <TextInput
+                id="ob-admin-email"
+                labelText={t('onboarding.admin_email')}
+                value={adminEmail}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAdminEmail(e.target.value)}
+                placeholder="ivan@company.com"
+              />
+              <TextInput
+                id="ob-admin-password"
+                labelText={t('onboarding.admin_password')}
+                type="password"
+                value={adminPassword}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAdminPassword(e.target.value)}
+                placeholder="≥ 8 chars"
+              />
+              <p className="onboarding-hint">{t('onboarding.admin_hint')}</p>
+              {error && <p className="onboarding-error">{error}</p>}
+              <div className="onboarding-actions">
+                <Button kind="secondary" onClick={() => setStep('provider')}>{t('action.skip')}</Button>
+                <Button onClick={() => void createAdmin()} disabled={busy || !adminName.trim() || adminPassword.length < 8}>{t('onboarding.admin_create')}</Button>
               </div>
             </>
           )}
@@ -207,10 +307,47 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
             </>
           )}
 
+          {step === 'sandbox' && (
+            <>
+              {!status && <p className="onboarding-hint">{t('onboarding.sandbox_checking')}</p>}
+              {status?.sandbox.configured && status.sandbox.available && (
+                <Tag type="green" size="sm">{t('onboarding.sandbox_ready')}</Tag>
+              )}
+              {status?.sandbox.configured && !status.sandbox.available && (
+                <>
+                  <Tag type="red" size="sm">{t('onboarding.sandbox_image_missing')}</Tag>
+                  <p className="onboarding-hint">{status.sandbox.image}</p>
+                </>
+              )}
+              {!status?.sandbox.configured && (
+                <p className="onboarding-hint">{t('onboarding.sandbox_hint')}</p>
+              )}
+              {error && <p className="onboarding-error">{error}</p>}
+              <div className="onboarding-actions">
+                <Button kind="secondary" onClick={skipStep}>{t('action.skip')}</Button>
+                <Button
+                  onClick={() => void buildSandboxImage()}
+                  disabled={buildBusy || (status?.sandbox.configured === true && status.sandbox.available)}
+                >
+                  {buildBusy ? t('onboarding.sandbox_building') : t('onboarding.sandbox_build')}
+                </Button>
+              </div>
+              {buildBusy && <p className="onboarding-hint">{t('onboarding.sandbox_build_note')}</p>}
+            </>
+          )}
+
           {step === 'done' && (
-            <div className="onboarding-actions">
-              <Button onClick={onComplete}>{t('onboarding.open_workspace')}</Button>
-            </div>
+            <>
+              <ul className="onboarding-summary">
+                <li>{t('onboarding.summary_project')}: {projectName}</li>
+                {adminCreated && <li>{t('onboarding.summary_admin')}: {adminName}</li>}
+                {providerId && <li>{t('onboarding.summary_provider')}: {providerName}</li>}
+                {status?.sandbox.configured && status.sandbox.available && <li>{t('onboarding.summary_sandbox')}</li>}
+              </ul>
+              <div className="onboarding-actions">
+                <Button onClick={onComplete}>{t('onboarding.open_workspace')}</Button>
+              </div>
+            </>
           )}
         </div>
       </div>

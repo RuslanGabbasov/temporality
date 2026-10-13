@@ -31,6 +31,7 @@ import (
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/outbox"
 	"github.com/temporality-project/temporality/kernel/quota"
+	"github.com/temporality-project/temporality/kernel/sandbox"
 	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/skills"
 	"github.com/temporality-project/temporality/workspace"
@@ -229,6 +230,14 @@ func main() {
 		log.Error("migrate workspace v55 (human request delivery)", "error", err)
 		os.Exit(1)
 	}
+	if err = ws.Migrate(ctx, "migrations/000056_intake_policy.up.sql"); err != nil {
+		log.Error("migrate workspace v56 (intake policy)", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000057_workspace_setting.up.sql"); err != nil {
+		log.Error("migrate workspace v57 (workspace setting)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -255,7 +264,7 @@ func main() {
 	// Secrets (docs/secrets-management.md Phase 1): the broker resolves
 	// agent-granted secrets over the loopback workspace API with a TTL cache;
 	// the master key stays in this process and never reaches activities.
-	secretMasterKey := loadSecretMasterKey(log)
+	secretMasterKey := loadSecretMasterKey(ctx, log, ws)
 	activities.Secrets = &agent.SecretBroker{
 		HTTP: &http.Client{Timeout: 10 * time.Second},
 		TTL:  secretCacheTTL(),
@@ -291,25 +300,48 @@ func main() {
 		log.Error("parse KERNEL_AUTH_TOKENS", "error", err)
 		os.Exit(1)
 	}
+	// A tokenless instance still needs a live gate object: workspace-user
+	// tokens loaded below must be able to switch authentication on without a
+	// restart — the first user created through onboarding locks the anonymous
+	// admin out immediately (Enabled counts DB tokens too). NewGate returns
+	// nil for an empty configuration.
+	if gate == nil {
+		gate = &controlplane.Gate{}
+	}
 	// Workspace-user tokens live in the database and are loaded into a
 	// separate reloadable gate token set below (see refreshUserTokens), so
 	// the historical "restart the kernel after creating a user" limitation
 	// is gone.
 	if !gate.Enabled() {
-		log.Warn("KERNEL_AUTH_TOKENS is empty: authentication disabled; configure tokens before sharing this instance")
+		log.Warn("KERNEL_AUTH_TOKENS is empty: authentication disabled; create the first workspace user to enable it")
 	} else {
 		log.Info("kernel authentication enabled", "tokens", gate.TokenCount())
 	}
 	// Workspace self-access: agent tools (skills, triggers) call this kernel's
 	// own workspace API over loopback. A startup-random internal token lets the
-	// calls pass the gate without exposing a reusable credential; when the gate
-	// is disabled no token is needed.
+	// calls pass the gate once authentication is on (including after the first
+	// workspace user activates it) without exposing a reusable credential.
 	address := env("KERNEL_HTTP_ADDR", ":8090")
-	if gate.Enabled() {
-		internalToken := generateToken()
-		if internalGate, igErr := controlplane.NewGate(internalToken + ":kernel-internal:operator:*"); igErr == nil {
-			gate = gate.Merge(internalGate)
-			activities.WorkspaceToken = internalToken
+	internalToken := generateToken()
+	gate.SetInternalToken(internalToken)
+	activities.WorkspaceToken = internalToken
+	// First-run onboarding bootstrap: when KERNEL_SANDBOX_IMAGE is not set but
+	// the workspace holds a previously built image reference
+	// (workspace_setting.sandbox_image), install it without a restart. The env
+	// var always wins — an operator pinning a specific digest is never
+	// overridden by the database.
+	if strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_IMAGE")) == "" {
+		if image, gErr := ws.GetSetting(ctx, "sandbox_image"); gErr == nil && image != "" {
+			root := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_ROOT"))
+			if root == "" {
+				root = ".sandbox"
+			}
+			if runner, nErr := sandbox.New(image, root); nErr != nil {
+				log.Error("install sandbox runner from workspace_setting.sandbox_image", "image", image, "error", nErr)
+			} else if swappable := activities.SandboxSwappable(); swappable != nil {
+				swappable.Swap(runner)
+				log.Info("sandbox runner installed from workspace_setting", "image", image, "root", runner.Root)
+			}
 		}
 	}
 	// refreshUserTokens reloads workspace-user tokens from the database into
@@ -1169,6 +1201,77 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"events": events})
+	})
+
+	// First-run onboarding (docs/ROADMAP.md — bootstrap): status tells the UI
+	// what is still missing before the installation is usable, the build
+	// endpoint lets the wizard produce the sandbox image without a shell.
+	mux.HandleFunc("GET /v1/setup/status", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		projects, err := ws.ListProjects(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		providers, err := ws.ListProviders(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		sandboxStatus := map[string]any{"configured": false, "image": "", "available": false}
+		if swappable := activities.SandboxSwappable(); swappable != nil {
+			if image := swappable.Image(); image != "" {
+				sandboxStatus["configured"] = true
+				sandboxStatus["image"] = image
+				sandboxStatus["available"] = sandbox.ImageAvailable(r.Context(), env("KERNEL_DOCKER_BINARY", "docker"), image)
+			}
+		}
+		writeJSON(w, 200, map[string]any{
+			"needs_setup":           len(projects) == 0,
+			"auth_enabled":          gate.Enabled(),
+			"master_key_configured": secretMasterKey != nil,
+			"sandbox":               sandboxStatus,
+			"model_configured":      len(providers) > 0 || strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_API_KEY")) != "",
+		})
+	})
+	mux.HandleFunc("POST /v1/setup/sandbox/build", func(w http.ResponseWriter, r *http.Request) {
+		// Building a sandbox image changes what model-authored commands may
+		// execute — an operator-level decision even on a fresh install.
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		if strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_IMAGE")) != "" {
+			writeError(w, 409, errors.New("KERNEL_SANDBOX_IMAGE is pinned in the environment; rebuild through sandbox/build.sh to change it"))
+			return
+		}
+		swappable := activities.SandboxSwappable()
+		if swappable == nil {
+			writeError(w, 500, errors.New("sandbox runner is not swappable"))
+			return
+		}
+		ref, err := sandbox.BuildEmbedded(r.Context(), env("KERNEL_DOCKER_BINARY", "docker"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		root := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_ROOT"))
+		if root == "" {
+			root = ".sandbox"
+		}
+		runner, err := sandbox.New(ref, root)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.SetSetting(r.Context(), "sandbox_image", ref); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		swappable.Swap(runner)
+		log.Info("sandbox image built and pinned through onboarding", "image", ref, "root", runner.Root)
+		writeJSON(w, 200, map[string]any{"image": ref})
 	})
 
 	// Workspace CRUD endpoints
@@ -6296,24 +6399,51 @@ func loadMCPServers(ctx context.Context, log *slog.Logger, ws *workspace.Store, 
 }
 
 // loadSecretMasterKey reads the envelope-encryption key (32 bytes, hex or
-// base64). Absent key = secrets disabled: the log line explains the runtime
-// consequence instead of failing startup, so env-only setups keep working.
-func loadSecretMasterKey(log *slog.Logger) []byte {
+// base64). Resolution order: KERNEL_SECRET_MASTER_KEY env var (always wins,
+// so operators can pin the key explicitly), then the workspace_setting row
+// "secret_master_key" (bootstrapped on first start, survives restarts).
+// When neither exists the key is generated, persisted to the database and a
+// loud warning is logged: a fresh installation should work out of the box
+// while production installs are nudged to set the env var.
+func loadSecretMasterKey(ctx context.Context, log *slog.Logger, ws *workspace.Store) []byte {
 	if err := controlplane.LoadFileSecrets("KERNEL_SECRET_MASTER_KEY"); err != nil {
 		log.Error("load KERNEL_SECRET_MASTER_KEY_FILE", "error", err)
 		return nil
 	}
 	raw := strings.TrimSpace(os.Getenv("KERNEL_SECRET_MASTER_KEY"))
-	if raw == "" {
-		log.Warn("KERNEL_SECRET_MASTER_KEY is not set: workspace secrets with encrypted values will not resolve")
+	if raw != "" {
+		key, err := decodeSecretKey(raw)
+		if err != nil {
+			log.Error("KERNEL_SECRET_MASTER_KEY must be 32 bytes of hex or base64", "error", err)
+			return nil
+		}
+		return key
+	}
+	stored, err := ws.GetSetting(ctx, "secret_master_key")
+	if err != nil && !errors.Is(err, workspace.ErrNotFound) {
+		log.Error("read secret_master_key setting", "error", err)
 		return nil
 	}
-	key, err := decodeSecretKey(raw)
-	if err != nil {
-		log.Error("KERNEL_SECRET_MASTER_KEY must be 32 bytes of hex or base64", "error", err)
+	if stored != "" {
+		key, dErr := decodeSecretKey(stored)
+		if dErr != nil {
+			log.Error("stored secret_master_key is not 32 bytes of hex or base64; set KERNEL_SECRET_MASTER_KEY to override", "error", dErr)
+			return nil
+		}
+		return key
+	}
+	generated := make([]byte, 32)
+	if _, gErr := rand.Read(generated); gErr != nil {
+		log.Error("generate secret master key", "error", gErr)
 		return nil
 	}
-	return key
+	encoded := hex.EncodeToString(generated)
+	if sErr := ws.SetSetting(ctx, "secret_master_key", encoded); sErr != nil {
+		log.Error("persist generated secret master key", "error", sErr)
+		return nil
+	}
+	log.Warn("KERNEL_SECRET_MASTER_KEY is not set: generated a new master key and stored it in workspace_setting.secret_master_key — set the env var in production to pin the key explicitly (the env var always wins)")
+	return generated
 }
 
 func decodeSecretKey(raw string) ([]byte, error) {

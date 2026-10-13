@@ -37,6 +37,14 @@ type SandboxRunner interface {
 	Execute(context.Context, sandbox.Request) (sandbox.Result, error)
 }
 
+// sandboxConfigured reports whether a sandbox runner actually backs command
+// execution: activities.Sandbox may be a swappable wrapper installed before
+// any image exists (first-run onboarding adds one later), so a plain nil
+// check is not enough — an empty root means the same as no runner.
+func sandboxConfigured(r SandboxRunner) bool {
+	return r != nil && r.SandboxRoot() != ""
+}
+
 type Activities struct {
 	Events EventOutbox
 	Model  *llm.Client
@@ -140,7 +148,20 @@ func NewActivities(events EventOutbox) (*Activities, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), WorkspaceURL: strings.TrimRight(env("KERNEL_WORKSPACE_URL", "http://localhost:8090"), "/"), APIToken: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), MCP: registry, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandboxRunner}, nil
+	// The swappable wrapper lets first-run onboarding install a runner (built
+	// and pinned through POST /v1/setup/sandbox/build) after startup; with no
+	// image configured it stays transparently inert — sandboxConfigured checks
+	// the root, not the wrapper.
+	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), WorkspaceURL: strings.TrimRight(env("KERNEL_WORKSPACE_URL", "http://localhost:8090"), "/"), APIToken: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), MCP: registry, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandbox.NewSwappable(sandboxRunner)}, nil
+}
+
+// Sandbox returns the swappable sandbox runner so the control plane can
+// replace it at runtime (onboarding build endpoint).
+func (a *Activities) SandboxSwappable() *sandbox.Swappable {
+	if s, ok := a.Sandbox.(*sandbox.Swappable); ok {
+		return s
+	}
+	return nil
 }
 
 func (a *Activities) ToolDefs() []llm.ToolDef {
@@ -162,7 +183,7 @@ var runCommandTool = llm.ToolDef{
 // independent of any MCP server.
 func (a *Activities) BuiltinToolDefs() []llm.ToolDef {
 	defs := KernelTools()
-	if a.Sandbox != nil {
+	if sandboxConfigured(a.Sandbox) {
 		defs = append(defs, runCommandTool)
 		defs = append(defs, fileToolDefs...)
 	}
@@ -174,7 +195,7 @@ func (a *Activities) BuiltinToolDefs() []llm.ToolDef {
 // legacy env server only.
 func (a *Activities) ToolDefsFor(servers []string) []llm.ToolDef {
 	defs := a.MCP.ToolDefsFor(servers)
-	if a.Sandbox != nil {
+	if sandboxConfigured(a.Sandbox) {
 		defs = append(defs, runCommandTool)
 		defs = append(defs, fileToolDefs...)
 	}
@@ -196,7 +217,7 @@ func (a *Activities) PrepareRun(input *RunInput) error {
 	input.AutoApproveTools = nil
 	input.MCPServer = MCPServerName()
 	a.NetworkAccess = input.NetworkAccess
-	if a.Sandbox != nil {
+	if sandboxConfigured(a.Sandbox) {
 		// Consequential workspace tools covered by the kernel's sandbox policy
 		// (sandbox.workspace.v1): the project workspace is an isolated sandbox
 		// root, so commands and file writes there need no human round-trip.
@@ -438,7 +459,7 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		}
 		return ToolResult{Content: value}, nil
 	case "run_command":
-		if a.Sandbox == nil {
+		if !sandboxConfigured(a.Sandbox) {
 			return ToolResult{}, errors.New("sandbox is not configured")
 		}
 		command, err := stringArgs(request.Arguments["command"])

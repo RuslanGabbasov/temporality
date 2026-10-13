@@ -141,11 +141,25 @@ func (p Principal) AllowsAllProjects() bool {
 // Static tokens from the environment live in byToken (immutable after
 // startup). Tokens of workspace users live in the database and can change
 // at runtime, so they are kept in a separate reloadable set guarded by a
-// mutex.
+// mutex. The internal token is the kernel's loopback self-access credential
+// (agent tools calling the workspace API): it is accepted while the gate is
+// enabled but never enables the gate by itself, so a fresh installation can
+// bootstrap through the anonymous admin until the first user exists.
 type Gate struct {
-	byToken   map[string]Principal
-	dbMu      sync.RWMutex
-	dbByToken map[string]Principal
+	byToken       map[string]Principal
+	internalToken string
+	dbMu          sync.RWMutex
+	dbByToken     map[string]Principal
+}
+
+// SetInternalToken installs the loopback self-access token. It is only
+// meaningful on a gate that may become enabled later (see Enabled); setting
+// it on a nil gate is a no-op like every other mutation.
+func (g *Gate) SetInternalToken(token string) {
+	if g == nil {
+		return
+	}
+	g.internalToken = strings.TrimSpace(token)
 }
 
 // NewGate parses the token configuration. An empty raw value yields a
@@ -191,8 +205,14 @@ func NewGate(raw string) (*Gate, error) {
 	return gate, nil
 }
 
-// Enabled reports whether authentication is active.
-func (g *Gate) Enabled() bool { return g != nil && len(g.byToken) > 0 }
+// Enabled reports whether authentication is active. Static environment
+// tokens or live workspace-user tokens both count: creating the first
+// workspace user on a tokenless installation locks the anonymous admin out
+// without a restart. The internal loopback token deliberately does not count
+// — it must never turn authentication on by itself.
+func (g *Gate) Enabled() bool {
+	return g != nil && (len(g.byToken) > 0 || g.DBTokenCount() > 0)
+}
 
 // TokenCount is the number of configured tokens (for startup logs).
 func (g *Gate) TokenCount() int {
@@ -268,6 +288,9 @@ func (g *Gate) Authenticate(next http.Handler) http.Handler {
 		principal, known := g.byToken[token]
 		if !known {
 			principal, known = g.dbPrincipal(token)
+		}
+		if !known && token != "" && g.internalToken != "" && token == g.internalToken {
+			principal, known = Principal{Subject: "kernel-internal", Role: RoleOperator, Projects: []string{"*"}}, true
 		}
 		if !ok || !known {
 			writeError(w, http.StatusUnauthorized, "a valid bearer token is required")
@@ -389,7 +412,7 @@ func (g *Gate) Merge(other *Gate) *Gate {
 	if !other.Enabled() {
 		return g
 	}
-	merged := &Gate{byToken: make(map[string]Principal)}
+	merged := &Gate{byToken: make(map[string]Principal), internalToken: g.internalToken}
 	for token, p := range g.byToken {
 		merged.byToken[token] = p
 	}

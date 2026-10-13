@@ -145,7 +145,7 @@ func requireWritableWorkspace(request ToolRequest) error {
 // inside it. Argument-shape failures are non-retryable: they are
 // deterministic caller errors with no side effect.
 func (a *Activities) resolveToolTarget(request ToolRequest, pathArg string) (string, error) {
-	if a.Sandbox == nil {
+	if !sandboxConfigured(a.Sandbox) {
 		return "", fileToolFailure(errors.New("sandbox is not configured"))
 	}
 	workspace, err := a.Sandbox.ResolveWorkspace(request.WorkspacePath)

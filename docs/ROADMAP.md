@@ -23,6 +23,7 @@
 - [x] **Cost accounting v1** — model prices, per-call costs (per-run/project aggregation pending)
 - [x] **Trace informativeness pass** — delegation/knowledge/hint/plan rows resolve propositions and agent ids instead of guids; delegate tool previews target agent + prompt gist; MCP completions show result size; agent summaries show the answer
 - [x] **Live model-call progress in Runs** — in-flight «Вызов модели» row shows elapsed time, ~tokens, tok/s and stream liveness (alive/stalled/waiting first token) from the ephemeral token SSE at 1Hz
+- [x] **First-run bootstrap** — fresh installs configure themselves in the wizard: migration list fix (intake_enabled), gate hardening (internal loopback token never enables auth; first created user does), auto-generated secret master key persisted to `workspace_setting` with env override, runtime-swappable sandbox runner with `GET /v1/setup/status` + `POST /v1/setup/sandbox/build` (digest-pinned embedded Dockerfile, no restart needed), onboarding now walks project → admin user → provider (secret-backed key) → agent → sandbox build → summary, and hides the main navigation until the first project exists
 
 ### Done (Platform wave, Sept–Oct 2026)
 

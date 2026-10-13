@@ -198,6 +198,46 @@ func TestSetDBTokens(t *testing.T) {
 	}
 }
 
+// The internal loopback token must never switch the gate on by itself (a
+// fresh installation bootstraps through the anonymous admin), but once the
+// gate is on — via env tokens or the first workspace user — it authenticates
+// agent tools calling the workspace API over loopback.
+func TestInternalTokenDoesNotEnableGate(t *testing.T) {
+	gate := &Gate{}
+	gate.SetInternalToken("internal-loopback-token")
+	if gate.Enabled() {
+		t.Fatal("internal token alone must not enable the gate")
+	}
+	// Disabled gate: anonymous admin passes, internal token irrelevant.
+	request := httptest.NewRequest(http.MethodGet, "/x", nil)
+	rec := httptest.NewRecorder()
+	gate.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, _ := FromContext(r.Context())
+		_, _ = w.Write([]byte(principal.Subject))
+	})).ServeHTTP(rec, request)
+	if rec.Code != http.StatusOK || rec.Body.String() != "anonymous" {
+		t.Fatalf("disabled gate = %d %s, want 200 anonymous", rec.Code, rec.Body.String())
+	}
+
+	// Enabling the gate through a DB user must accept the internal token.
+	gate.SetDBTokens(map[string]Principal{
+		"db-token-123456789": {Subject: "dbuser", Role: RoleReader, Projects: []string{"*"}},
+	})
+	if !gate.Enabled() {
+		t.Fatal("db token must enable the gate")
+	}
+	request = httptest.NewRequest(http.MethodGet, "/x", nil)
+	request.Header.Set("Authorization", "Bearer internal-loopback-token")
+	rec = httptest.NewRecorder()
+	gate.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, _ := FromContext(r.Context())
+		_, _ = w.Write([]byte(principal.Subject))
+	})).ServeHTTP(rec, request)
+	if rec.Code != http.StatusOK || rec.Body.String() != "kernel-internal" {
+		t.Fatalf("internal token on enabled gate = %d %s, want 200 kernel-internal", rec.Code, rec.Body.String())
+	}
+}
+
 func TestMergePreservesDBTokens(t *testing.T) {
 	gate, err := NewGate("env-token-12345678:env:admin:*")
 	if err != nil {

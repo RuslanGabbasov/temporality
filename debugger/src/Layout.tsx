@@ -210,6 +210,10 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [pendingOps, setPendingOps] = useState(0)
   // Pending approvals badge (for Runs tab)
   const [pendingApprovals, setPendingApprovals] = useState(0)
+  // Onboarding mode: projects finished loading and none exist — the wizard
+  // owns the screen, so navigation and the project selector stay hidden.
+  const [projectsLoaded, setProjectsLoaded] = useState(false)
+  const onboarding = projectsLoaded && projects.length === 0
 
   useEffect(() => {
     if (!authToken()) return
@@ -284,8 +288,15 @@ export default function Layout({ children, activePage }: LayoutProps) {
     } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => { void loadProjects() }, [loadProjects])
-  useEffect(() => { void whoami().then(setIdentity).catch(() => {}) }, [])
+  useEffect(() => { void loadProjects().then(() => setProjectsLoaded(true)) }, [loadProjects])
+  useEffect(() => {
+    void whoami().then((id) => {
+      setIdentity(id)
+      // Tokenless fresh installation: anonymous callers are admins, so the
+      // login screen would only block the onboarding wizard.
+      if (!id.auth_enabled) setLoggedIn(true)
+    }).catch(() => {})
+  }, [])
 
   useEffect(() => {
     const loadAgents = async () => {
@@ -436,7 +447,8 @@ export default function Layout({ children, activePage }: LayoutProps) {
           Temporality
         </HeaderName>
 
-        {/* Desktop nav — hidden below 1100px */}
+        {/* Desktop nav — hidden below 1100px, and during onboarding */}
+        {!onboarding && (
         <nav className="header-nav-desktop" aria-label="Main navigation">
           {NAV_ITEMS.map(({ path, label }) => (
             <a
@@ -478,8 +490,10 @@ export default function Layout({ children, activePage }: LayoutProps) {
             )}
           </div>
         </nav>
+        )}
 
-        {/* Mobile hamburger — visible below 1100px */}
+        {/* Mobile hamburger — visible below 1100px, hidden during onboarding */}
+        {!onboarding && (
         <button
           className="header-hamburger"
           onClick={() => setMobileNavOpen(!mobileNavOpen)}
@@ -487,9 +501,11 @@ export default function Layout({ children, activePage }: LayoutProps) {
         >
           <Menu size={20} />
         </button>
+        )}
 
         <HeaderGlobalBar>
-          {/* Project selector */}
+          {/* Project selector — hidden during onboarding */}
+          {!onboarding && (
           <div style={{ position: 'relative', marginRight: '0.5rem' }}>
             <button
               onClick={() => { setShowProjectPanel(!showProjectPanel); if (!showProjectPanel) { setShowUserMenu(false); setShowConfigMenu(false) } }}
@@ -545,6 +561,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
               </HeaderPanel>
             )}
           </div>
+          )}
           {/* User menu */}
           <div style={{ position: 'relative', marginRight: '0.5rem' }}>
             <button
@@ -843,6 +860,13 @@ export default function Layout({ children, activePage }: LayoutProps) {
       )}
 
       {!loggedIn ? (
+        identity === null && !authToken() ? (
+          // Booting on a possibly-tokenless install: whoami decides whether the
+          // login screen or the anonymous admin onboarding applies.
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 3rem)' }}>
+            <img src="/temporality.svg" alt="Temporality" style={{ height: '48px', opacity: 0.6 }} />
+          </div>
+        ) : (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 3rem)', padding: '1rem' }}>
           <div style={{ maxWidth: '380px', width: '100%', textAlign: 'center' }}>
             <img src="/temporality.svg" alt="Temporality" style={{ height: '48px', marginBottom: '1rem' }} />
@@ -865,9 +889,10 @@ export default function Layout({ children, activePage }: LayoutProps) {
             />
           </div>
         </div>
+        )
       ) : (
         <>
-          {projects.length === 0 && <Onboarding onComplete={() => void loadProjects()} />}
+          {onboarding && <Onboarding onComplete={() => void loadProjects()} />}
           <Content id="main-content">
             {children({ project, setProject, projectDefaultAgent: projects.find((p) => p.id === project)?.default_agent_id, projectDefaultModel: projects.find((p) => p.id === project)?.default_model, refreshProjects: () => { void loadProjects() } })}
           </Content>

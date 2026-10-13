@@ -51,6 +51,13 @@ func main() {
 		log.Error("parse JOURNAL_AUTH_TOKENS", "error", err)
 		os.Exit(1)
 	}
+	// A tokenless instance still needs a live gate object: workspace-user
+	// tokens loaded below must be able to switch authentication on without a
+	// restart (fresh-instance bootstrap — the first created user locks the
+	// anonymous admin out). NewGate returns nil for an empty configuration.
+	if gate == nil {
+		gate = &controlplane.Gate{}
+	}
 	if !gate.Enabled() {
 		log.Warn("JOURNAL_AUTH_TOKENS is empty: authentication disabled; configure tokens before sharing this instance")
 	} else {

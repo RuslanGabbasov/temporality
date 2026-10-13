@@ -103,6 +103,28 @@ export function whoami(): Promise<Whoami> {
   return request('/v1/agent/whoami')
 }
 
+// First-run bootstrap status (docs/ROADMAP.md — onboarding): tells the wizard
+// which pieces (admin user, provider, sandbox image) are still missing.
+export interface SetupStatus {
+  needs_setup: boolean
+  auth_enabled: boolean
+  master_key_configured: boolean
+  model_configured: boolean
+  sandbox: {
+    configured: boolean
+    image: string
+    available: boolean
+  }
+}
+
+export function setupStatus(): Promise<SetupStatus> {
+  return request('/v1/setup/status')
+}
+
+export function buildSandbox(): Promise<{ image: string }> {
+  return request('/v1/setup/sandbox/build', { method: 'POST' })
+}
+
 // Password login: exchanges name-or-email + password for the user's bearer
 // token, which then lives in localStorage exactly like a pasted token.
 export function login(login: string, password: string): Promise<LoginResponse> {

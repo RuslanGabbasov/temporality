@@ -51,6 +51,8 @@ type Result struct {
 }
 
 type Runner interface {
+	SandboxRoot() string
+	ResolveWorkspace(path string) (string, error)
 	Execute(context.Context, Request) (Result, error)
 }
 
@@ -76,15 +78,34 @@ func NewFromEnv() (*Docker, error) {
 	if image == "" || root == "" {
 		return nil, errors.New("KERNEL_SANDBOX_IMAGE and KERNEL_SANDBOX_ROOT must be configured together")
 	}
-	if err := validateImage(image); err != nil {
+	if err := validateByteSize(strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_SCRATCH_SIZE"))); err != nil {
 		return nil, err
 	}
-	if err := validateByteSize(strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_SCRATCH_SIZE"))); err != nil {
+	// NewFromEnv fails on a missing root: the administrator explicitly
+	// configured a path that is not there, and guessing would hide it.
+	return newDocker(image, root, false)
+}
+
+// New builds a runner from an explicit image and root (first-run onboarding
+// bootstraps the image reference from workspace_setting.sandbox_image and the
+// default root). Unlike the env path it creates the root directory: the
+// default ./.sandbox is only correct if the kernel can materialize it.
+func New(image, root string) (*Docker, error) {
+	return newDocker(image, root, true)
+}
+
+func newDocker(image, root string, createRoot bool) (*Docker, error) {
+	if err := validateImage(image); err != nil {
 		return nil, err
 	}
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("resolve KERNEL_SANDBOX_ROOT: %w", err)
+	}
+	if createRoot {
+		if err := os.MkdirAll(rootAbs, 0o777); err != nil {
+			return nil, fmt.Errorf("create KERNEL_SANDBOX_ROOT: %w", err)
+		}
 	}
 	resolved, err := filepath.EvalSymlinks(rootAbs)
 	if err != nil {

@@ -1182,7 +1182,7 @@ func (s *Store) GetUserByToken(ctx context.Context, token string) (User, error) 
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, name, email, role, '', org_unit_id, active, channels, preferred_channel, created_at, updated_at
 		 FROM workspace_user WHERE token = $1 AND active = true`, token).
-		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &orgUnitID, &u.Active, &channels, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt)
+		Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Token, &orgUnitID, &u.Active, &u.PreferredChannel, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return u, ErrNotFound
 	}
@@ -1192,4 +1192,24 @@ func (s *Store) GetUserByToken(ctx context.Context, token string) (User, error) 
 	u.OrgUnitID = derefPtr(orgUnitID)
 	u.Channels = scanChannels(channels)
 	return u, nil
+}
+
+// GetSetting reads an installation-level setting. Empty value = not set
+// (ErrNotFound is reserved for future distinction; callers treat both alike).
+func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
+	var value string
+	err := s.pool.QueryRow(ctx, `SELECT value FROM workspace_setting WHERE key = $1`, key).Scan(&value)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return value, err
+}
+
+// SetSetting upserts an installation-level setting.
+func (s *Store) SetSetting(ctx context.Context, key, value string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO workspace_setting (key, value, updated_at) VALUES ($1, $2, now())
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+		key, value)
+	return err
 }
