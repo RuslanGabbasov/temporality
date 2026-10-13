@@ -61,10 +61,10 @@ func TestWorkspaceMustStayWithinConfiguredRoot(t *testing.T) {
 }
 
 func TestDockerArgumentsEnforceIsolation(t *testing.T) {
-	runner := &Docker{Image: "sandbox@sha256:abc", Memory: "1g", CPUs: "2", PIDs: 128, UID: 10001, GID: 10001, ScratchSize: "512m"}
+	runner := &Docker{Image: "sandbox@sha256:abc", Memory: "1g", CPUs: "2", PIDs: 128, UID: 10001, GID: 10001, ScratchSize: "512m", TmpSize: "256m"}
 	args := runner.arguments("/srv/work/repo", Request{Command: []string{"go", "test", "./..."}, ReadOnly: true}, "temporality-sandbox-test")
 	joined := strings.Join(args, " ")
-	for _, required := range []string{"--init", "--pull=never", "--name temporality-sandbox-test", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit 128", "--memory 1g", "--memory-swap 1g", "--cpus 2", "--ulimit nofile=1024:1024", "--user 10001:10001", "/srv/work/repo:/workspace:ro", "--tmpfs /tmp:rw,noexec,nosuid,size=64m", "--tmpfs /scratch:rw,exec,nosuid,size=512m", "--env HOME=/scratch", "--env TMPDIR=/scratch"} {
+	for _, required := range []string{"--init", "--pull=never", "--name temporality-sandbox-test", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit 128", "--memory 1g", "--memory-swap 1g", "--cpus 2", "--ulimit nofile=1024:1024", "--user 10001:10001", "/srv/work/repo:/workspace:ro", "--tmpfs /tmp:rw,noexec,nosuid,size=256m", "--tmpfs /scratch:rw,exec,nosuid,size=512m", "--env HOME=/scratch", "--env TMPDIR=/scratch"} {
 		if !strings.Contains(joined, required) {
 			t.Errorf("docker args missing %q: %s", required, joined)
 		}
@@ -74,8 +74,12 @@ func TestDockerArgumentsEnforceIsolation(t *testing.T) {
 	}
 	// A Docker built without an explicit scratch size still gets a sane default.
 	defaultScratch := (&Docker{}).arguments("/w", Request{Command: []string{"ls"}, ReadOnly: true}, "n")
-	if !strings.Contains(strings.Join(defaultScratch, " "), "--tmpfs /scratch:rw,exec,nosuid,size=512m") {
+	defaultJoined := strings.Join(defaultScratch, " ")
+	if !strings.Contains(defaultJoined, "--tmpfs /scratch:rw,exec,nosuid,size=512m") {
 		t.Fatalf("missing default scratch tmpfs: %s", defaultScratch)
+	}
+	if !strings.Contains(defaultJoined, "--tmpfs /tmp:rw,noexec,nosuid,size=256m") {
+		t.Fatalf("missing default /tmp tmpfs: %s", defaultScratch)
 	}
 }
 

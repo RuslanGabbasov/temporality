@@ -66,6 +66,7 @@ type Docker struct {
 	UID         int
 	GID         int
 	ScratchSize string
+	TmpSize     string
 	Network     string // "none" (default) or "bridge" for network access
 }
 
@@ -79,6 +80,9 @@ func NewFromEnv() (*Docker, error) {
 		return nil, errors.New("KERNEL_SANDBOX_IMAGE and KERNEL_SANDBOX_ROOT must be configured together")
 	}
 	if err := validateByteSize(strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_SCRATCH_SIZE"))); err != nil {
+		return nil, err
+	}
+	if err := validateByteSize(strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_TMP_SIZE"))); err != nil {
 		return nil, err
 	}
 	// NewFromEnv fails on a missing root: the administrator explicitly
@@ -115,7 +119,7 @@ func newDocker(image, root string, createRoot bool) (*Docker, error) {
 	if err != nil || !info.IsDir() {
 		return nil, errors.New("KERNEL_SANDBOX_ROOT must be an existing directory")
 	}
-	return &Docker{Root: resolved, Image: image, Binary: env("KERNEL_DOCKER_BINARY", "docker"), Memory: env("KERNEL_SANDBOX_MEMORY", "1g"), CPUs: env("KERNEL_SANDBOX_CPUS", "2"), PIDs: 128, UID: os.Getuid(), GID: os.Getgid(), ScratchSize: env("KERNEL_SANDBOX_SCRATCH_SIZE", "512m")}, nil
+	return &Docker{Root: resolved, Image: image, Binary: env("KERNEL_DOCKER_BINARY", "docker"), Memory: env("KERNEL_SANDBOX_MEMORY", "1g"), CPUs: env("KERNEL_SANDBOX_CPUS", "2"), PIDs: 128, UID: os.Getuid(), GID: os.Getgid(), ScratchSize: env("KERNEL_SANDBOX_SCRATCH_SIZE", "512m"), TmpSize: env("KERNEL_SANDBOX_TMP_SIZE", "256m")}, nil
 }
 
 func validateImage(image string) error {
@@ -264,6 +268,14 @@ func (d *Docker) arguments(workspace string, request Request, name string) []str
 	if scratchSize == "" {
 		scratchSize = "512m"
 	}
+	// Toolchains that ignore TMPDIR (some linkers, cgo, packaging steps)
+	// still land their temporaries in /tmp; 64m was too tight for real
+	// builds, so the cap is configurable and defaults to a size that
+	// survives a link step.
+	tmpSize := d.TmpSize
+	if tmpSize == "" {
+		tmpSize = "256m"
+	}
 	network := request.Network
 	if network == "" {
 		network = d.Network
@@ -271,7 +283,7 @@ func (d *Docker) arguments(workspace string, request Request, name string) []str
 	if network == "" {
 		network = "none"
 	}
-	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=" + network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(d.PIDs), "--memory", d.Memory, "--memory-swap", d.Memory, "--cpus", d.CPUs, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "--tmpfs", "/scratch:rw,exec,nosuid,size=" + scratchSize, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode}
+	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=" + network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(d.PIDs), "--memory", d.Memory, "--memory-swap", d.Memory, "--cpus", d.CPUs, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=" + tmpSize, "--tmpfs", "/scratch:rw,exec,nosuid,size=" + scratchSize, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode}
 	// Per-project persistent cache: a host directory under the sandbox root,
 	// outside any git workspace, so `git clean` and workspace resets cannot
 	// destroy toolchain caches. Toolchains see it at /cache; it stays writable
