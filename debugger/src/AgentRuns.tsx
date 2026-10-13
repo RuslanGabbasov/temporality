@@ -833,7 +833,7 @@ export default function AgentRuns({ project }: { project: string }) {
         </Column>
       </Grid>
 
-      {busy && <Loading withOverlay={false} />}
+      {busy && <Loading withOverlay={false} small />}
     </div>
   )
 }

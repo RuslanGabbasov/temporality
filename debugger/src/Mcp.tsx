@@ -328,7 +328,7 @@ export default function Mcp() {
         </AppModal>
       )}
 
-      {loading && <Loading withOverlay={false} />}
+      {loading && <Loading withOverlay={false} small />}
     </div>
   )
 }

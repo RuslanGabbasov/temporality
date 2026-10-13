@@ -1537,7 +1537,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         </AppModal>
       )}
 
-      {loading && <Loading withOverlay={false} />}
+      {loading && <Loading withOverlay={false} small />}
 
       {/* Template selection modal: curated builtin definitions from the server */}
       {showTemplates && (

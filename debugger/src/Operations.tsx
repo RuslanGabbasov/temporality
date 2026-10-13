@@ -527,7 +527,7 @@ export default function Operations({ project }: { project: string }) {
         </Column>
       </Grid>
 
-      {busy && <Loading withOverlay={false} />}
+      {busy && <Loading withOverlay={false} small />}
     </div>
   )
 }

@@ -861,7 +861,7 @@ export default function Skills() {
         </AppModal>
       )}
 
-      {loading && <Loading withOverlay={false} />}
+      {loading && <Loading withOverlay={false} small />}
     </div>
   )
 }

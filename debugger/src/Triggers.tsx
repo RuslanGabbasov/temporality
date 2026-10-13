@@ -190,7 +190,7 @@ export default function Triggers({ project }: { project: string }) {
         })}
       </Grid>
 
-      {loading && <Loading withOverlay={false} />}
+      {loading && <Loading withOverlay={false} small />}
 
       {/* Create/Edit modal */}
       {showForm && (

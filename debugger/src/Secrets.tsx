@@ -212,7 +212,7 @@ export default function Secrets() {
         </AppModal>
       )}
 
-      {loading && <Loading active />}
+      {loading && <Loading withOverlay={false} small />}
     </div>
   )
 }

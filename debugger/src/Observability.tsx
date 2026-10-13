@@ -248,7 +248,7 @@ export default function Observability({ project }: { project: string }) {
         ))}
       </div>
 
-      {loading && <Loading withOverlay={false} />}
+      {loading && <Loading withOverlay={false} small />}
 
       {/* ═══════════ OVERVIEW TAB ═══════════ */}
       {tab === 'overview' && !loading && (
@@ -517,7 +517,7 @@ export default function Observability({ project }: { project: string }) {
       {/* ═══════════ PATTERNS TAB ═══════════ */}
       {tab === 'patterns' && (
         <div>
-          {projectionLoading && <Loading withOverlay={false} />}
+          {projectionLoading && <Loading withOverlay={false} small />}
           {!projection && !projectionLoading && (
             <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '3rem 1rem' }}>
               <p>{t('knowledge.no_projection') ?? 'No projection data yet. Click Load to fetch experience patterns.'}</p>

@@ -537,7 +537,7 @@ export default function Org() {
           )}
         </div>
         {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginTop: '0.75rem' }} />}
-        {loading && <Loading withOverlay={false} />}
+        {loading && <Loading withOverlay={false} small />}
       </div>
     )
   }
@@ -623,7 +623,7 @@ export default function Org() {
                   })}
                 </div>
               ) : (
-                <Loading withOverlay={false} />
+                <Loading withOverlay={false} small />
               )}
 
               {/* Roles granted on this unit (docs/org-structure.md §13): each
@@ -1174,7 +1174,7 @@ export default function Org() {
         </AppModal>
       )}
 
-      {loading && <Loading withOverlay={false} />}
+      {loading && <Loading withOverlay={false} small />}
     </div>
   )
 }
