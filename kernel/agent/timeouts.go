@@ -15,6 +15,15 @@ import (
 // activity timeouts are not part of the replay command identity.
 var ModelCallActivityTimeout = durationFromEnv("TEMPORALITY_MODEL_ACTIVITY_TIMEOUT", 20*time.Minute)
 
+// modelHeartbeatInterval is how often kernel.call_model heartbeats while a
+// provider call is in flight. Temporal delivers activity cancellation only
+// through heartbeat responses, so this interval is the worst-case latency
+// between a kernel.nudge signal and the actual abortion of the HTTP request;
+// without heartbeats the cancelled call streams on as a zombie until its own
+// watchdog or StartToClose timeout kills it. No HeartbeatTimeout is set on
+// the activity options, so a missed beat cannot fail a healthy call.
+var modelHeartbeatInterval = durationFromEnv("TEMPORALITY_MODEL_HEARTBEAT_INTERVAL", 10*time.Second)
+
 // durationFromEnv parses a Go duration, falling back to the default when the
 // variable is unset or malformed (a kernel that refuses to boot over a typo
 // in an optional timeout would be worse than the default).

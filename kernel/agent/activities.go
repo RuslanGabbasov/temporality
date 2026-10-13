@@ -359,6 +359,29 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		info := activity.GetInfo(ctx)
 		attempt = int(info.Attempt)
 		activityID = info.ActivityID
+		// Heartbeat so kernel.nudge cancellation reaches the in-flight HTTP
+		// call: Temporal delivers activity cancellation only through heartbeat
+		// responses, so without this a cancelled call keeps streaming as a
+		// zombie until its own watchdog dies — burning provider tokens and
+		// emitting late model.attempt markers next to the retry the nudge
+		// already started. The goroutine exits when the activity returns
+		// (closed channel) or when the delivered cancellation fires ctx.Done.
+		heartbeatDone := make(chan struct{})
+		defer close(heartbeatDone)
+		go func() {
+			ticker := time.NewTicker(modelHeartbeatInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-heartbeatDone:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					activity.RecordHeartbeat(ctx, nil)
+				}
+			}
+		}()
 		if info.Attempt > 1 {
 			if logger := activity.GetLogger(ctx); logger != nil {
 				logger.Info("model call retrying after attempt failure",
@@ -422,6 +445,15 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		}, llm.WithPromptCacheKey(request.PromptCacheKey))
 		if streamErr == nil {
 			return completion, nil
+		}
+		// A cancelled context means the nudge (or workflow termination) killed
+		// the call on purpose: the workflow has already journaled model.nudged
+		// and started the retry, so a stream_fallback marker here would show a
+		// bogus "retry" for an intentional cancel, and the blocking salvage
+		// cannot run on a dead context anyway. Return fast so the cancellation
+		// is recorded instead of grinding through the fallback ladder.
+		if ctx.Err() != nil {
+			return llm.Completion{}, streamErr
 		}
 		streamMs := time.Since(streamStarted).Milliseconds()
 		// A stream that stalls behind gateway keepalives can burn most of the

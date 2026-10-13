@@ -605,6 +605,10 @@ export default function AgentRuns({ project }: { project: string }) {
         body: JSON.stringify({ turn, actor_id: identity?.subject && identity.subject !== 'anonymous' ? identity.subject : 'human-ui' }),
       })
       if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
+      // Pull the trace right away instead of waiting for the 10s poll: the
+      // workflow journals model.nudged within ~1–2s of the signal, and that
+      // row is the user-visible confirmation the nudge worked.
+      await loadRun(selected, true)
     } catch (failure) { setError(message(failure)) }
     finally { setBusy(false) }
   }
