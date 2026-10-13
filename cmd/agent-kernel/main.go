@@ -5410,8 +5410,17 @@ func main() {
 	// unauthenticated caller may reach exactly POST /v1/auth/login, every other
 	// path still requires a bearer token (or the anonymous pass-through when
 	// the gate is disabled).
+	//
+	// nginx (see debugger/nginx.conf) proxies /kernel-api/ WITHOUT a URI part
+	// so that run ids with encoded slashes (%2F) reach us byte-for-byte
+	// untouched — the only forwarding style that neither decodes nor
+	// double-escapes them. The price is that the /kernel-api prefix arrives
+	// intact, so it is stripped here, from both Path and RawPath, before any
+	// routing decision. The strip is a no-op when the prefix is absent (vite
+	// dev proxy and direct :8090 calls), and idempotent when present.
 	authed := gate.Authenticate(mux)
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stripKernelAPIProxyPrefix(r)
 		if r.Method == http.MethodPost && r.URL.Path == "/v1/auth/login" {
 			mux.ServeHTTP(w, r)
 			return
@@ -5433,6 +5442,29 @@ func main() {
 			log.Error("Temporal worker stopped", "error", err)
 		}
 	case <-ctx.Done():
+	}
+}
+
+// stripKernelAPIProxyPrefix removes the leading "/kernel-api" proxy prefix
+// in place. nginx (debugger/nginx.conf) forwards /kernel-api/ WITHOUT a URI
+// part in proxy_pass so that run ids containing encoded slashes (%2F) arrive
+// byte-for-byte untouched — the only forwarding style that neither decodes
+// nor double-escapes them. The price is the intact prefix, stripped here from
+// both Path and RawPath before any routing decision so that http.ServeMux
+// wildcard matching (which runs on the escaped path) sees the same request a
+// direct caller would. The strip is a no-op when the prefix is absent (vite
+// dev proxy and direct :8090 calls).
+func stripKernelAPIProxyPrefix(r *http.Request) {
+	const proxyPrefix = "/kernel-api"
+	if r.URL.Path != proxyPrefix && !strings.HasPrefix(r.URL.Path, proxyPrefix+"/") {
+		return
+	}
+	r.URL.Path = strings.TrimPrefix(r.URL.Path, proxyPrefix)
+	if r.URL.Path == "" {
+		r.URL.Path = "/"
+	}
+	if r.URL.RawPath != "" {
+		r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, proxyPrefix)
 	}
 }
 
