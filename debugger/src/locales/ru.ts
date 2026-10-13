@@ -177,6 +177,10 @@ export const ru: Record<string, string> = {
     // Runs
     'runs.title': 'Запуски',
     'runs.event.model_failed': 'Вызов модели не удался',
+    'runs.event.model_nudged': 'Вызов модели подтолкнут',
+    'runs.event.model_nudged_detail': 'ход {turn} отменён и повторён вручную',
+    'runs.nudge': 'Подтолкнуть вызов модели',
+    'runs.nudge_hint': 'Отменить зависший вызов модели и сразу повторить его',
     'runs.event.open_child_run': 'Открыть дочерний запуск',
     'errors.cause': 'Причина',
     'errors.raw_error': 'Полный текст ошибки',

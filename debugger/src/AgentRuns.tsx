@@ -591,6 +591,24 @@ export default function AgentRuns({ project }: { project: string }) {
     finally { setBusy(false) }
   }
 
+  // Nudge is the escape hatch for a stuck provider call: it cancels the
+  // in-flight request and retries the turn immediately (kernel.nudge signal).
+  // The applied nudge lands in the journal as model.nudged, which is the
+  // user-visible confirmation.
+  async function nudge(turn: number) {
+    setBusy(true); setError('')
+    try {
+      const root = timeline.find((item) => item.type === 'run.started' && runID(item) === selected)
+      const query = new URLSearchParams({ project: project.trim(), source_id: root?.source.id ?? '' })
+      const response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(selected)}/nudge?${query}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ turn, actor_id: identity?.subject && identity.subject !== 'anonymous' ? identity.subject : 'human-ui' }),
+      })
+      if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
+    } catch (failure) { setError(message(failure)) }
+    finally { setBusy(false) }
+  }
+
   // Prefer the run result (REST); evicted child runs have none — fall back
   // to the agent.summary event, which survives in the journal. Older summary
   // events are newline-collapsed, so restore the markdown structure.
@@ -910,6 +928,15 @@ export default function AgentRuns({ project }: { project: string }) {
                             <span style={{ color: info.color, width: '1.2rem', textAlign: 'center', flexShrink: 0 }} className={isLiveModelCall ? 'live-dot' : undefined}>{info.icon}</span>
                             <strong style={{ color: info.color, minWidth: '100px' }}>{info.label}</strong>
                             <span style={{ color: isLiveModelCall ? 'var(--tm-teal)' : 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</span>
+                            {isLiveModelCall && (
+                              <button
+                                onClick={() => void nudge(Number(event.data?.turn ?? 0) || 0)}
+                                disabled={busy}
+                                title={t('runs.nudge_hint') ?? 'Cancel the stuck model call and retry immediately'}
+                                aria-label={t('runs.nudge') ?? 'Nudge model call'}
+                                style={{ background: 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.1rem 0.35rem', lineHeight: 1, borderRadius: '4px', flexShrink: 0 }}
+                              >↻</button>
+                            )}
                             {unresolvedOp && (
                               <span style={{ color: '#f7768e', fontSize: '0.7rem', flexShrink: 0 }} title={t('runs.ops_trace_mark')}>⚠</span>
                             )}

@@ -134,6 +134,53 @@ func TestAgentRunRecordsApprovalAndKnowledgeTrajectory(t *testing.T) {
 	}
 }
 
+func TestAgentRunNudgeCancelsStuckModelCallAndRetries(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		if err := event.Validate(); err != nil {
+			return err
+		}
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	modelCalls := 0
+	env.RegisterActivityWithOptions(func(ctx context.Context, request ModelRequest) (llm.Completion, error) {
+		modelCalls++
+		if modelCalls == 1 {
+			// A stuck provider: the call parks until the kernel cancels it.
+			<-ctx.Done()
+			return llm.Completion{}, ctx.Err()
+		}
+		return llm.Completion{Content: "completed"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(NudgeSignal, Nudge{Turn: 1, ActorID: "human-1"})
+	}, time.Second)
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-nudge", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "verify the fix", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var result RunResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, "completed", result.Status)
+	require.Equal(t, 2, modelCalls, "the stuck attempt must be cancelled and retried exactly once")
+
+	var nudged []observation.Event
+	for _, event := range recorded {
+		if event.Type == "model.nudged" {
+			nudged = append(nudged, event)
+		}
+	}
+	require.NotEmpty(t, nudged, "the applied nudge must be journaled as model.nudged")
+	require.Equal(t, "1", fmt.Sprintf("%v", nudged[0].Data["turn"]))
+	require.Equal(t, "human-1", nudged[0].Data["actor_id"])
+}
+
 func TestAgentRunAskHumanDeliversResponseAndRecordsTrajectory(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

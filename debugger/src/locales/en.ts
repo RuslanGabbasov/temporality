@@ -177,6 +177,10 @@ export const en: Record<string, string> = {
     // Runs
     'runs.title': 'Runs',
     'runs.event.model_failed': 'Model call failed',
+    'runs.event.model_nudged': 'Model call nudged',
+    'runs.event.model_nudged_detail': 'turn {turn} cancelled and retried manually',
+    'runs.nudge': 'Nudge model call',
+    'runs.nudge_hint': 'Cancel the stuck model call and retry it immediately',
     'runs.event.open_child_run': 'Open child run',
     'errors.cause': 'Cause',
     'errors.raw_error': 'Full error text',

@@ -205,6 +205,13 @@ Also: knowledge hints and trajectory-based extraction, triggers
 (cron/webhook/listeners), human requests (`ask_human`) and org policies
 (model/MCP/token/network/sandbox constraints).
 
+When a provider hangs and a model call silently waits for its first token,
+a manual nudge is available: `POST /v1/agent/runs/{runID}/nudge?project=…`
+(writer) — the signal cancels the in-flight request and retries the turn
+immediately (model calls are pure, the prompt prefix is stable via
+`prompt_cache_key`, so a retry is safe). The intervention is journaled as a
+`model.nudged` event.
+
 ### Sandbox
 
 `KERNEL_SANDBOX_ROOT` + `KERNEL_SANDBOX_IMAGE` — an isolated container for

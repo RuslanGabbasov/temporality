@@ -54,6 +54,15 @@ describe('tool.completed summary', () => {
   })
 })
 
+describe('model.nudged summary', () => {
+  it('localizes the manual nudge of a stuck model call', () => {
+    const info = eventSummary(event('model.nudged', { turn: 2, actor_id: 'human-1' }), t)
+    expect(info.icon).toBe('↻')
+    expect(info.label).toBe('runs.event.model_nudged')
+    expect(info.detail).toBe('runs.event.model_nudged_detail')
+  })
+})
+
 describe('knowledge, hint and skill lifecycle summaries', () => {
   it('localizes knowledge lifecycle events', () => {
     expect(eventSummary(event('knowledge.used', { knowledge_id: 'K1', hint_id: 'h1' }), t).label).toBe('runs.event.knowledge_used')

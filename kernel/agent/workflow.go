@@ -31,6 +31,7 @@ const (
 	ActivityExtractKnowledge  = "kernel.extract_knowledge"
 	ActivitySummarizeChildRun = "kernel.summarize_child_run"
 	ApprovalSignal            = "kernel.approval"
+	NudgeSignal               = "kernel.nudge"
 
 	// MaxDelegationDepth bounds agent-to-agent delegation chains
 	// (docs/agent-delegation.md): depth 0 → 1 → 2 is allowed, a run at depth 2
@@ -261,6 +262,16 @@ type Approval struct {
 	// Response carries the human's answer for ask_human requests: a chosen
 	// option or free text. Empty for plain approvals.
 	Response string `json:"response,omitempty"`
+}
+
+// Nudge is the manual "unstick this model call" signal: it cancels the
+// in-flight call_model activity and retries the turn with a fresh attempt.
+// Model calls are pure (no side effects, cached prompt prefix), so a retry is
+// always safe. Turn 0 matches whatever turn is currently in flight — the UI
+// normally pins the exact turn to avoid acting on a stale request.
+type Nudge struct {
+	Turn    int    `json:"turn"`
+	ActorID string `json:"actor_id,omitempty"`
 }
 
 func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
@@ -982,8 +993,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// (no side effects, prompt prefix cached via PromptCacheKey), so Temporal
 		// retries the whole activity: a fresh attempt after wake recovers the
 		// run instead of killing it. ScheduleToClose bounds the total patience.
-		modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}})
-		if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, modelReq).Get(ctx, &completion); err != nil {
+		modelOpts := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
+		if err := executeModelWithNudge(ctx, activityCtx, state, modelOpts, modelReq, turn, &completion); err != nil {
 			failureDetail := boundedFailureDetail(err)
 			if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": turn, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
 				return result, eventErr
@@ -1818,8 +1829,8 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// finale can be as long a generation as any other turn, and deserves the
 	// same frozen-host recovery (fresh Temporal attempt after the machine
 	// wakes up instead of a dead run).
-	modelCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}})
-	if err := workflow.ExecuteActivity(modelCtx, ActivityCallModel, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, Project: input.Project, PromptCacheKey: input.TaskID}).Get(ctx, &finale); err != nil {
+	modelCtx := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
+	if err := executeModelWithNudge(ctx, activityCtx, state, modelCtx, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, Project: input.Project, PromptCacheKey: input.TaskID}, finaleTurn, &finale); err != nil {
 		failureDetail := boundedFailureDetail(err)
 		if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "forced_finale": true, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
 			return result, eventErr
@@ -2302,6 +2313,55 @@ func awaitApproval(ctx workflow.Context, operationID string, timeout time.Durati
 		return false, approval, false, errors.New("approval wait completed without matching operation")
 	}
 	return approval.Approved, approval, false, nil
+}
+
+// executeModelWithNudge runs one call_model activity, cancellable by the
+// kernel.nudge signal (the human escape hatch for a stuck provider). A stuck
+// endpoint can sit through the whole silent retry ladder — idle watchdog →
+// blocking fallback → Temporal retries — for the better part of an hour while
+// the UI shows nothing but "waiting for the first token". The nudge cancels
+// the in-flight HTTP request immediately and retries the turn: model calls
+// are pure (no side effects, prompt prefix cached via PromptCacheKey), so a
+// retry is always safe. Stale nudges (older turns, delivered while tools
+// ran) are drained and ignored via the turn check; each applied nudge emits a
+// model.nudged event for the audit trail. The returned nudged count feeds
+// observability.
+func executeModelWithNudge(ctx workflow.Context, activityCtx workflow.Context, state *eventState, opts workflow.ActivityOptions, request ModelRequest, turn int, out *llm.Completion) error {
+	nudgeChannel := workflow.GetSignalChannel(ctx, NudgeSignal)
+	for {
+		callCtx, cancelCall := workflow.WithCancel(ctx)
+		callCtx = workflow.WithActivityOptions(callCtx, opts)
+		future := workflow.ExecuteActivity(callCtx, ActivityCallModel, request)
+		applyNudge := false
+		nudgeActor := ""
+		selector := workflow.NewSelector(ctx)
+		selector.AddFuture(future, func(workflow.Future) {})
+		selector.AddReceive(nudgeChannel, func(channel workflow.ReceiveChannel, _ bool) {
+			var nudge Nudge
+			for channel.ReceiveAsync(&nudge) {
+				if nudge.Turn == 0 || nudge.Turn == turn {
+					applyNudge = true
+					nudgeActor = nudge.ActorID
+				}
+			}
+			if applyNudge {
+				cancelCall()
+			}
+		})
+		selector.Select(ctx)
+		err := future.Get(ctx, out)
+		if err == nil {
+			cancelCall()
+			return nil
+		}
+		if applyNudge && temporal.IsCanceledError(err) {
+			if eventErr := emit(activityCtx, state, "model.nudged", map[string]any{"turn": turn, "actor_id": nudgeActor}); eventErr != nil {
+				return eventErr
+			}
+			continue
+		}
+		return err
+	}
 }
 
 type eventState struct {

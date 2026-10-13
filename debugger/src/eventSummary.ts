@@ -190,6 +190,10 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       const suffix = info.timeout ? ` · ${t('errors.timeout_short')}` : ''
       return { icon: '🧠', label: t('runs.event.model_failed'), detail: (info.cause.slice(0, 60) + suffix).trim(), color: '#f7768e' }
     }
+    case 'model.nudged':
+      // Manual unstick: a human cancelled a hanging provider call and the
+      // kernel retried the turn (see kernel.nudge / POST .../nudge).
+      return { icon: '↻', label: t('runs.event.model_nudged'), detail: t('runs.event.model_nudged_detail', { turn: String(d.turn ?? '?') }), color: 'var(--tm-teal)' }
     case 'tool.started': {
       const args = d.arguments
       let preview = ''

@@ -811,6 +811,35 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]string{"run_id": r.PathValue("runID"), "status": "cancel_requested"})
 	})
+	mux.HandleFunc("POST /v1/agent/runs/{runID}/nudge", func(w http.ResponseWriter, r *http.Request) {
+		var nudge agent.Nudge
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&nudge); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, 400, err)
+			return
+		}
+		if nudge.ActorID == "" {
+			if principal, ok := controlplane.FromContext(r.Context()); ok && principal.UserID != "" {
+				nudge.ActorID = principal.UserID
+			}
+		}
+		project := r.URL.Query().Get("project")
+		if project == "" {
+			writeError(w, 400, errors.New("project query parameter is required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleWriter, project) {
+			return
+		}
+		sourceID := querySourceID(r, activities.SourceID)
+		workflowID := workflowIDFor(sourceID, project, r.PathValue("runID"))
+		// Turn 0 means "any in-flight model call" — the workflow selector
+		// matches it against every live turn.
+		if err := temporalClient.SignalWorkflow(r.Context(), workflowID, "", agent.NudgeSignal, nudge); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
+	})
 	mux.HandleFunc("GET /v1/agent/outbox", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleOperator) {
 			return
