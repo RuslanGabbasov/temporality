@@ -207,6 +207,18 @@ func main() {
 		log.Error("migrate workspace v50", "error", err)
 		os.Exit(1)
 	}
+	// Quality-loop migrations (specs/quality-loop.md): 000054 links a
+	// gate-started evaluation run to its proposal (M3 idempotent 202), 000056
+	// adds the unified run verdict, judge metadata and the calibration
+	// history (M4, shared with the M3 gate columns).
+	if err = ws.Migrate(ctx, "migrations/000054_eval_gate_proposal_link.up.sql"); err != nil {
+		log.Error("migrate workspace v54", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000056_judge_quality_loop.up.sql"); err != nil {
+		log.Error("migrate workspace v56", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -1877,65 +1889,52 @@ func main() {
 		emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.proposed", a, proposal, actorFromRequest(r), nil)
 		writeJSON(w, 201, proposal)
 	})
-	// Applying goes through the regular update path: bindings stay frozen,
-	// the version grows only on a real semantic change and the immutable
-	// snapshot is written exactly like a manual edit (docs/living-skills.md §26:
-	// agents propose, people apply).
-	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/proposals/{id}/apply", func(w http.ResponseWriter, r *http.Request) {
-		if !gate.Allow(w, r, controlplane.RoleWriter) {
-			return
-		}
-		agentID := r.PathValue("agentID")
-		proposalID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-		if err != nil {
-			writeError(w, 400, errors.New("invalid proposal id"))
-			return
-		}
-		a, proposal, ok := loadAgentProposal(w, r, ws, agentID, proposalID)
-		if !ok {
-			return
-		}
-		if !workspace.OrgVisible(a.OrgUnitID, visibleUnits(r)) {
-			writeError(w, 404, workspace.ErrNotFound)
-			return
-		}
-		if proposal.Status != "pending" {
-			writeError(w, 409, fmt.Errorf("proposal %d is already %s", proposal.ID, proposal.Status))
-			return
-		}
-		next := a
-		next.Description = proposal.Description
-		definition := proposal.Definition
-		next.Definition = &definition
-		// Bindings never change through a proposal (mirror of the PUT freeze).
-		next.OrgUnitID = a.OrgUnitID
-		if agentSemanticsChanged(a, next) {
-			next.DefinitionVersion++
-		}
-		if err := ws.UpdateAgent(r.Context(), next); err != nil {
-			if errors.Is(err, workspace.ErrNotFound) {
-				writeError(w, 404, err)
+	// Applying is gated (specs/quality-loop.md §5, M3 — cmd/agent-kernel/
+	// m3evalgate.go): a fresh green eval run on the proposal's base version
+	// is required, red blocks unless a writer overrides with justification,
+	// no run starts one and answers 202. The cleared apply continues on the
+	// transactional Store.ApplyAgentProposal (§10.1a): claim + version++ +
+	// immutable snapshot land atomically (docs/living-skills.md §26: agents
+	// propose, people apply).
+	RegisterM3Routes(mux, gate, ws, kernelGateRunner{activities: activities}, events,
+		func(w http.ResponseWriter, r *http.Request, a workspace.Agent, proposal workspace.AgentProposal) {
+			next := a
+			next.Description = proposal.Description
+			definition := proposal.Definition
+			next.Definition = &definition
+			// Bindings never change through a proposal (mirror of the PUT freeze).
+			next.OrgUnitID = a.OrgUnitID
+			if agentSemanticsChanged(a, next) {
+				next.DefinitionVersion++
+			}
+			var snapshot *workspace.AgentVersion
+			if next.Definition != nil && next.DefinitionVersion != a.DefinitionVersion {
+				version := agentVersionSnapshot(next, requestSubject(r), "proposal", proposal.GeneratorModel)
+				snapshot = &version
+			}
+			decided, err := ws.ApplyAgentProposal(r.Context(), next, proposal.ID, requestSubject(r), snapshot)
+			if err != nil {
+				switch {
+				case errors.Is(err, workspace.ErrNotFound):
+					writeError(w, 404, err)
+				case errors.Is(err, workspace.ErrBaseVersionStale):
+					writeJSON(w, 409, map[string]any{
+						"error":           "base_version_stale",
+						"base_version":    proposal.BaseVersion,
+						"current_version": next.DefinitionVersion,
+					})
+				case errors.Is(err, workspace.ErrConflict):
+					writeError(w, 409, err)
+				default:
+					writeError(w, 500, err)
+				}
 				return
 			}
-			writeError(w, 500, err)
-			return
-		}
-		if next.Definition != nil && next.DefinitionVersion != a.DefinitionVersion {
-			writeAgentVersion(r.Context(), ws, next, requestSubject(r), "proposal", proposal.GeneratorModel)
-		}
-		decided, err := ws.DecideAgentProposal(r.Context(), proposalID, "applied", requestSubject(r))
-		if err != nil {
-			if errors.Is(err, workspace.ErrConflict) {
-				writeError(w, 409, err)
-				return
-			}
-			writeError(w, 500, err)
-			return
-		}
-		emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.applied", next, decided, actorFromRequest(r),
-			map[string]any{"from_version": a.DefinitionVersion, "to_version": next.DefinitionVersion})
-		writeJSON(w, 200, map[string]any{"agent": next, "proposal": decided})
-	})
+			emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.applied", next, decided, actorFromRequest(r),
+				map[string]any{"from_version": a.DefinitionVersion, "to_version": next.DefinitionVersion})
+			writeJSON(w, 200, map[string]any{"agent": next, "proposal": decided})
+		},
+		visibleUnits, time.Now, log)
 	// Rejecting keeps the proposal in history; a rejected proposal can never
 	// be applied — deciding twice is a conflict.
 	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/proposals/{id}/reject", func(w http.ResponseWriter, r *http.Request) {
@@ -5302,14 +5301,14 @@ func loadAgentProposal(w http.ResponseWriter, r *http.Request, ws *workspace.Sto
 	return a, proposal, true
 }
 
-// writeAgentVersion stores the immutable definition snapshot with the
+// agentVersionSnapshot builds the immutable definition snapshot with the
 // effective prompt compiled by the same deterministic function runs use
 // (docs/plan-evaluable-agent.md, decision 2).
-func writeAgentVersion(ctx context.Context, ws *workspace.Store, a workspace.Agent, author, promptSource, generatorModel string) {
+func agentVersionSnapshot(a workspace.Agent, author, promptSource, generatorModel string) workspace.AgentVersion {
 	if promptSource == "" {
 		promptSource = "manual"
 	}
-	_ = ws.InsertAgentVersion(ctx, workspace.AgentVersion{
+	return workspace.AgentVersion{
 		AgentID: a.ID, Version: a.DefinitionVersion, Definition: *a.Definition,
 		Description: a.Description,
 		CompiledPrompt: agent.EffectiveSystemPrompt(agent.AgentPromptInput{
@@ -5317,7 +5316,14 @@ func writeAgentVersion(ctx context.Context, ws *workspace.Store, a workspace.Age
 		}, "", a.SystemPrompt),
 		PromptSource: promptSource, GeneratorModel: generatorModel,
 		Author: author, CreatedAt: time.Now().UTC(),
-	})
+	}
+}
+
+// writeAgentVersion stores the immutable definition snapshot (used by the
+// manual-edit paths; the gated proposal apply rides the transactional
+// Store.ApplyAgentProposal and passes its snapshot directly).
+func writeAgentVersion(ctx context.Context, ws *workspace.Store, a workspace.Agent, author, promptSource, generatorModel string) {
+	_ = ws.InsertAgentVersion(ctx, agentVersionSnapshot(a, author, promptSource, generatorModel))
 }
 
 // agentPromptPreview returns the effective system prompt shown in the UI:
