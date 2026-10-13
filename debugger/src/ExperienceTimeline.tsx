@@ -899,22 +899,32 @@ export default function ExperienceTimeline({ project }: { project: string }) {
               })}
             </g>
           })}
-          {lens.experience && <g className="population-lane">
-            <text x={8} y={view.populationY + 12} className="lane-label population-label">{t('timeline.memory_population')}</text>
-            <text x={8} y={view.populationY + 24} className="lane-sublabel">{t('timeline.alive_at_run_start')}</text>
-            {view.roots.filter((run) => !hiddenRoots.has(run.id)).map((run) => {
-              const alive = aliveRowAt(model.rows, run.startedAt)
-              const px = x(run.startedAt)
-              if (px < GUTTER || px > GUTTER + track || alive === 0) return null
-              const base = view.populationY + POPULATION_LANE - 8
-              return <g key={run.id}>
-                <rect x={px - 4} y={base - alive * 5} width={8} height={alive * 5} fill="#4fd6be" opacity={0.65} rx={1.5}>
-                  <title>{`${shortRun(run.id)} · ${alive} ${t('timeline.tooltip_alive_at_start')}`}</title>
-                </rect>
-                <text x={px} y={base - alive * 5 - 3} textAnchor="middle" className="population-count">{alive}</text>
-              </g>
-            })}
-          </g>}
+          {lens.experience && (() => {
+            // Normalize bar heights against the lane cap: small batches keep
+            // the 5px-per-unit look, large ones scale so the tallest bar
+            // (the visible maximum) fills the lane instead of flying past
+            // the rows above it.
+            const points = view.roots
+              .filter((run) => !hiddenRoots.has(run.id))
+              .map((run) => ({ id: run.id, px: x(run.startedAt), alive: aliveRowAt(model.rows, run.startedAt) }))
+              .filter((point) => point.px >= GUTTER && point.px <= GUTTER + track && point.alive > 0)
+            const base = view.populationY + POPULATION_LANE - 8
+            const maxAlive = points.reduce((max, point) => Math.max(max, point.alive), 0)
+            const unit = maxAlive > 0 ? Math.min(5, (base - view.populationY - 10) / maxAlive) : 5
+            return <g className="population-lane">
+              <text x={8} y={view.populationY + 12} className="lane-label population-label">{t('timeline.memory_population')}</text>
+              <text x={8} y={view.populationY + 24} className="lane-sublabel">{t('timeline.alive_at_run_start')}</text>
+              {points.map((point) => {
+                const barHeight = Math.max(2, point.alive * unit)
+                return <g key={point.id}>
+                  <rect x={point.px - 4} y={base - barHeight} width={8} height={barHeight} fill="#4fd6be" opacity={0.65} rx={1.5}>
+                    <title>{`${shortRun(point.id)} · ${point.alive} ${t('timeline.tooltip_alive_at_start')}`}</title>
+                  </rect>
+                  <text x={point.px} y={base - barHeight - 3} textAnchor="middle" className="population-count">{point.alive}</text>
+                </g>
+              })}
+            </g>
+          })()}
           {lens.experience && view.visibleScopes.map(({ scope, rows }) => {
             const headerY = view.scopeHeaderY.get(scope.id)!
             const aggregated = view.aggregatedIds.has(scope.id)
