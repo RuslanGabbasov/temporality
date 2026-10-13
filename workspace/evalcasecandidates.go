@@ -473,10 +473,16 @@ func (s *Store) AcceptEvalCaseCandidate(ctx context.Context, agentID string, id 
 	candidate.ReviewedBy = reviewer
 	candidate.ReviewedAt = &reviewedAt
 
+	// §13 option B: the golden's expected output freezes the business rules
+	// of the day it was reviewed — after DefaultSuiteStaleDays it turns
+	// stale and the apply gate refuses with suite_stale instead of
+	// masquerading drift as an agent regression.
+	staleAfter := reviewedAt.AddDate(0, 0, DefaultSuiteStaleDays)
 	suite.Cases = append(suite.Cases, EvaluationCase{
 		Name:           GoldenCaseName(candidate.RunID),
 		Input:          candidate.Input,
 		ExpectedOutput: candidate.ExpectedOutput,
+		StaleAfter:     &staleAfter,
 	})
 	encoded, err := json.Marshal(suite.Cases)
 	if err != nil {

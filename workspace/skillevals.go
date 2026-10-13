@@ -39,6 +39,13 @@ type EvaluationCase struct {
 	// is excluded from every run started by the eval gate (M3), so it can
 	// never decide an apply.
 	HeldOut bool `json:"held_out,omitempty"`
+	// StaleAfter marks golden drift (specs/quality-loop.md §13 option B):
+	// after this moment the case's expected output may no longer describe
+	// current business rules, so the apply gate refuses with suite_stale
+	// instead of silently gating on an outdated reference. Accepted goldens
+	// get DefaultSuiteStaleDays from their review; owners may set the field
+	// by hand through the existing PUT suite endpoint. Absent = never stale.
+	StaleAfter *time.Time `json:"stale_after,omitempty"`
 }
 
 // EvaluationSuite is the stored suite of a skill (one per skill, MVP).

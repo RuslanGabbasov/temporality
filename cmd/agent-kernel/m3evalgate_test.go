@@ -28,6 +28,7 @@ type fakeEvalGateStore struct {
 	agent    workspace.Agent
 	proposal workspace.AgentProposal
 	decision workspace.EvalGateDecision
+	suite    workspace.AgentEvaluationSuite
 
 	agentErr     error
 	proposalErr  error
@@ -55,6 +56,12 @@ func (f *fakeEvalGateStore) GetAgent(_ context.Context, _ string) (workspace.Age
 
 func (f *fakeEvalGateStore) GetAgentProposal(_ context.Context, _ string, _ int64) (workspace.AgentProposal, error) {
 	return f.proposal, f.proposalErr
+}
+
+func (f *fakeEvalGateStore) GetAgentEvaluationSuite(_ context.Context, agentID string) (workspace.AgentEvaluationSuite, error) {
+	suite := f.suite
+	suite.AgentID = agentID
+	return suite, nil
 }
 
 func (f *fakeEvalGateStore) EvalGateStatus(_ context.Context, _ string, _ int64, _ int, _ time.Time) (workspace.EvalGateDecision, error) {
@@ -409,4 +416,93 @@ func TestEvalGateMalformedBody(t *testing.T) {
 	status, _ := evalGatePost(t, server, "writertoken", `{"gate":`)
 	require.Equal(t, 400, status)
 	require.Zero(t, store.statusCalls)
+}
+
+// Golden drift (§13 option B): a case past its stale_after refuses the
+// apply with 409 suite_stale and the list of stale cases before the gate
+// decision is consulted — the green run underneath cannot mask drift.
+func TestEvalGateSuiteStaleRefusesBeforeGate(t *testing.T) {
+	store, runner, outbox := defaultEvalGateFixture()
+	store.decision = workspace.EvalGateDecision{State: workspace.EvalGateGreen,
+		Run: &workspace.AgentEvaluationRun{ID: 80, Verdict: workspace.EvalVerdictPass}}
+	past := time.Now().AddDate(0, 0, -1)
+	fresh := time.Now().AddDate(0, 0, 30)
+	store.suite = workspace.AgentEvaluationSuite{Cases: []workspace.EvaluationCase{
+		{Name: "golden/old1", StaleAfter: &past},
+		{Name: "fresh-case", StaleAfter: &fresh},
+		{Name: "no-deadline"},
+	}}
+	server := newEvalGateServer(t, store, runner, outbox, nil)
+	defer server.Close()
+
+	status, body := evalGatePost(t, server, "writertoken", "")
+	require.Equal(t, 409, status)
+	require.Contains(t, body, "suite_stale")
+	require.Contains(t, body, "golden/old1")
+	require.NotContains(t, body, "fresh-case")
+	require.Zero(t, store.statusCalls) // refused before the gate decision
+	require.Zero(t, store.createCalls)
+	blocked := outbox.byType("agent.evaluation.gate.blocked")
+	require.Len(t, blocked, 1)
+	require.Equal(t, workspace.CauseSuiteStale, blocked[0].Data["cause"])
+}
+
+// A held-out stale case never decides the gate (§4.5) — it stays out of the
+// suite_stale list too.
+func TestEvalGateSuiteStaleSkipsHeldOut(t *testing.T) {
+	store, runner, outbox := defaultEvalGateFixture()
+	store.decision = workspace.EvalGateDecision{State: workspace.EvalGateGreen,
+		Run: &workspace.AgentEvaluationRun{ID: 81, Verdict: workspace.EvalVerdictPass}}
+	past := time.Now().AddDate(0, 0, -1)
+	store.suite = workspace.AgentEvaluationSuite{Cases: []workspace.EvaluationCase{
+		{Name: "golden/held", HeldOut: true, StaleAfter: &past},
+	}}
+	server := newEvalGateServer(t, store, runner, outbox, nil)
+	defer server.Close()
+
+	status, body := evalGatePost(t, server, "writertoken", "")
+	require.Equal(t, 200, status)
+	require.Contains(t, body, `"applied":true`)
+}
+
+// Overriding suite_stale requires a justification and is audited, exactly
+// like a red-gate override (§13: "либо ревью кейсов, либо override").
+func TestEvalGateSuiteStaleOverride(t *testing.T) {
+	store, runner, outbox := defaultEvalGateFixture()
+	store.decision = workspace.EvalGateDecision{State: workspace.EvalGateGreen,
+		Run: &workspace.AgentEvaluationRun{ID: 82, Verdict: workspace.EvalVerdictPass}}
+	past := time.Now().AddDate(0, 0, -1)
+	store.suite = workspace.AgentEvaluationSuite{Cases: []workspace.EvaluationCase{
+		{Name: "golden/old2", StaleAfter: &past},
+	}}
+	server := newEvalGateServer(t, store, runner, outbox, nil)
+	defer server.Close()
+
+	status, _ := evalGatePost(t, server, "writertoken", `{"override":true}`)
+	require.Equal(t, 400, status)
+	require.Empty(t, store.audits)
+
+	status, body := evalGatePost(t, server, "writertoken",
+		`{"override":true,"justification":"business rule changed; goldens re-queued for review"}`)
+	require.Equal(t, 200, status)
+	require.Contains(t, body, `"applied":true`)
+	require.Len(t, store.audits, 1)
+	require.Equal(t, workspace.CauseSuiteStale, store.audits[0].details["gate_cause"])
+	require.Len(t, outbox.byType("agent.evaluation.gate.overridden"), 1)
+}
+
+// gate:false skips the staleness sweep as well — the whole gate, incl. the
+// drift check, is off for that apply (§8.3 writer right).
+func TestEvalGateSuiteStaleSkippedByGateFalse(t *testing.T) {
+	store, runner, outbox := defaultEvalGateFixture()
+	past := time.Now().AddDate(0, 0, -1)
+	store.suite = workspace.AgentEvaluationSuite{Cases: []workspace.EvaluationCase{
+		{Name: "golden/old3", StaleAfter: &past},
+	}}
+	server := newEvalGateServer(t, store, runner, outbox, nil)
+	defer server.Close()
+
+	status, body := evalGatePost(t, server, "writertoken", `{"gate":false}`)
+	require.Equal(t, 200, status)
+	require.Contains(t, body, `"applied":true`)
 }

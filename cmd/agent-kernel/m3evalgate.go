@@ -44,6 +44,7 @@ const evalGateRunTimeout = 30 * time.Minute
 type evalGateStore interface {
 	GetAgent(ctx context.Context, id string) (workspace.Agent, error)
 	GetAgentProposal(ctx context.Context, agentID string, id int64) (workspace.AgentProposal, error)
+	GetAgentEvaluationSuite(ctx context.Context, agentID string) (workspace.AgentEvaluationSuite, error)
 	EvalGateStatus(ctx context.Context, agentID string, proposalID int64, baseVersion int, now time.Time) (workspace.EvalGateDecision, error)
 	CreateGateRun(ctx context.Context, agentID string, version int, proposalID int64) (workspace.AgentEvaluationRun, error)
 	AbandonGateRun(ctx context.Context, runID int64, cause string) error
@@ -168,6 +169,38 @@ func RegisterM3Routes(mux *http.ServeMux, gate *controlplane.Gate, store evalGat
 		// no decision lookup, no run, no gate event.
 		if request.Gate != nil && !*request.Gate {
 			apply(w, r, a, proposal)
+			return
+		}
+		// Golden drift (§13 option B): a case past its stale_after refuses
+		// the apply with suite_stale before the gate can silently gate on an
+		// outdated reference — the owner either refreshes the cases or
+		// overrides with a justification.
+		suite, err := store.GetAgentEvaluationSuite(r.Context(), agentID)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if stale := workspace.EvalSuiteStaleCases(suite.Cases, now()); len(stale) > 0 {
+			if request.Override {
+				justification := strings.TrimSpace(request.Justification)
+				if justification == "" {
+					writeJSON(w, 400, map[string]any{"error": evalGateOverrideRequired()})
+					return
+				}
+				decision := workspace.EvalGateDecision{Cause: workspace.CauseSuiteStale}
+				recordEvalGateOverride(r.Context(), store, log, a, proposal, decision, justification, requestSubject(r))
+				emitEvalGateEvent(r.Context(), events, "agent.evaluation.gate.overridden", a, proposal, nil,
+					map[string]any{"cause": workspace.CauseSuiteStale, "override_justification": justification}, actorFromRequest(r))
+				apply(w, r, a, proposal)
+				return
+			}
+			emitEvalGateEvent(r.Context(), events, "agent.evaluation.gate.blocked", a, proposal, nil,
+				map[string]any{"cause": workspace.CauseSuiteStale}, actorFromRequest(r))
+			writeJSON(w, 409, map[string]any{
+				"error":       "suite_stale",
+				"cause":       workspace.CauseSuiteStale,
+				"stale_cases": stale,
+			})
 			return
 		}
 		decision, err := store.EvalGateStatus(r.Context(), agentID, proposalID, proposal.BaseVersion, now())

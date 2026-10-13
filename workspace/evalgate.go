@@ -38,6 +38,10 @@ const (
 	// kernel died or the record path failed); §10.4 sends it to error so
 	// the next apply may start a fresh run.
 	CauseGateRunAborted = "gate_run_aborted"
+	// CauseSuiteStale: a golden case is past its stale_after (§13 option
+	// B) — the apply refuses with suite_stale until the cases are reviewed
+	// or a writer overrides with a justification.
+	CauseSuiteStale = "suite_stale"
 )
 
 // evalGateRunningWindow bounds how long a gate run may stay 'unknown': the
@@ -45,6 +49,29 @@ const (
 // older than this is an abandoned row from a dead kernel. It is failed
 // instead of answered forever with 202 (§10.4: partial runs never gate).
 const evalGateRunningWindow = 30 * time.Minute
+
+// DefaultSuiteStaleDays is the golden drift horizon (§13 option B): a
+// golden case whose expected output has not been reviewed for this many
+// days turns stale and the apply gate refuses with suite_stale — drift
+// becomes visible before it can masquerade as an agent regression.
+const DefaultSuiteStaleDays = 90
+
+// EvalSuiteStaleCases lists gate-relevant case names whose stale_after has
+// passed at now (§13 option B): held-out cases never decide the gate (§4.5)
+// and stale ones never sneak past it either, so they are excluded from the
+// list; cases without stale_after are exempt by design.
+func EvalSuiteStaleCases(cases []EvaluationCase, now time.Time) []string {
+	stale := []string{}
+	for _, c := range cases {
+		if c.HeldOut || c.StaleAfter == nil {
+			continue
+		}
+		if now.After(*c.StaleAfter) {
+			stale = append(stale, c.Name)
+		}
+	}
+	return stale
+}
 
 // evalGateFreshnessWorkdays reads the freshness knob. Unparseable or
 // negative values fall back to the default: a broken knob must not widen the
@@ -137,9 +164,9 @@ type EvalGateDecision struct {
 //     an aborted run). Legacy 'unknown' rows never reach this function
 //     (§5.1).
 //
-// TODO(v1.5 backlog, §13 option B): a golden older than its stale_after
-// should surface as cause suite_stale instead of ageing silently inside the
-// gate — explicitly deferred from v1, owner's open question.
+// Note (§13 option B): suite drift is NOT decided here — a golden past its
+// stale_after surfaces as cause suite_stale in the apply handler through
+// EvalSuiteStaleCases, before the gate decision is even consulted.
 func evalGateDecide(running, latest *AgentEvaluationRun, cutoff time.Time) EvalGateDecision {
 	if running != nil {
 		return EvalGateDecision{State: EvalGateRunning, Run: running}
