@@ -116,6 +116,14 @@ type Activities struct {
 	// or a load error — degrades to the KERNEL_CHANNEL__* environment
 	// variables, preserving env-only deployments.
 	ChannelSettings func(context.Context) (ChannelSettings, error)
+	// secretIssuedMu + secretIssued dedupe secret.issued per run: every
+	// run_command with a granted secret re-resolves it at the execution
+	// boundary (the agent never holds values), so without the gate each
+	// command journals another "issued" event and six git calls read as six
+	// grants. Denials stay per-call — a retry after a mid-run admin grant is
+	// a real, actionable change.
+	secretIssuedMu sync.Mutex
+	secretIssued   map[string]time.Time
 }
 
 // providerCacheEntry is one cached model-config resolution; ok=false is the

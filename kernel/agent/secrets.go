@@ -162,12 +162,18 @@ func (a *Activities) sandboxSecretEnv(ctx context.Context, request ToolRequest) 
 // emitSecretIssued records secret.issued for granted resolutions and
 // secret.denied for refused ones (docs/secrets-management.md §7). Best-effort:
 // observability must not fail the tool call that already has its values.
+// Issuance is journaled once per run per secret — the grant happens at the
+// first command that needs it; later commands reuse the same access and
+// re-emitting per call turns a six-command run into six "issued" rows.
 func (a *Activities) emitSecretIssued(ctx context.Context, request ToolRequest, resolved, denied []string) {
 	if a.Events == nil || (len(resolved) == 0 && len(denied) == 0) {
 		return
 	}
 	now := time.Now().UTC()
 	for _, name := range resolved {
+		if !a.claimSecretIssued(request.RunID, name) {
+			continue
+		}
 		event := observation.Event{
 			Schema:     observation.Schema,
 			EventID:    fmt.Sprintf("%s/secret-issued/%s/%d", request.RunID, name, now.UnixNano()),
@@ -197,6 +203,36 @@ func (a *Activities) emitSecretIssued(ctx context.Context, request ToolRequest, 
 		}
 		_ = a.Events.Enqueue(ctx, event)
 	}
+}
+
+// secretIssuedWindow bounds how long a run's issuance claim lives. Runs are
+// hours long at most (the approval ceiling is a day); after the window the
+// pair can emit again — an honest re-issuance for a run that outlived it.
+const secretIssuedWindow = 24 * time.Hour
+
+// claimSecretIssued marks run+secret as journaled and reports whether this
+// call is the first claim for the pair. The map lives for the worker's
+// lifetime; a lazy sweep on overflow keeps it bounded.
+func (a *Activities) claimSecretIssued(runID, name string) bool {
+	key := runID + "\x00" + name
+	a.secretIssuedMu.Lock()
+	defer a.secretIssuedMu.Unlock()
+	now := time.Now()
+	if a.secretIssued == nil {
+		a.secretIssued = make(map[string]time.Time)
+	}
+	if issuedAt, ok := a.secretIssued[key]; ok && now.Sub(issuedAt) < secretIssuedWindow {
+		return false
+	}
+	if len(a.secretIssued) >= 4096 {
+		for k, at := range a.secretIssued {
+			if now.Sub(at) >= secretIssuedWindow {
+				delete(a.secretIssued, k)
+			}
+		}
+	}
+	a.secretIssued[key] = now
+	return true
 }
 
 // handleSecretList is the read-only secret discovery tool: names and

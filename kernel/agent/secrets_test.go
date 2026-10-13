@@ -91,7 +91,7 @@ func TestSecretEnvVarName(t *testing.T) {
 	}
 }
 
-func TestSandboxSecretEnvEmitsIssuedAndDenied(t *testing.T) {
+func TestSandboxSecretEnvEmitsIssuedOncePerRun(t *testing.T) {
 	var calls int32
 	server := secretResolveStub(t, "ghp_value", &calls)
 	outbox := &secretOutbox{}
@@ -113,9 +113,27 @@ func TestSandboxSecretEnvEmitsIssuedAndDenied(t *testing.T) {
 	if len(denied) != 1 || denied[0] != "missing-secret" {
 		t.Fatalf("denied = %v, want missing-secret", denied)
 	}
-	kinds := map[string]bool{}
+	// A second command in the same run re-injects the value at its own
+	// execution boundary but must not journal another issuance.
+	request.OperationID = "run-secret/turn/02/call_2"
+	env2, denied2, err := activities.sandboxSecretEnv(context.Background(), request)
+	if err != nil {
+		t.Fatalf("second sandboxSecretEnv: %v", err)
+	}
+	if len(env2) != 1 || env2[0] != "SECRET_GITHUB_TOKEN=ghp_value" {
+		t.Fatalf("second env = %v, want the value re-injected", env2)
+	}
+	if len(denied2) != 1 {
+		t.Fatalf("second denied = %v, denials stay per-call", denied2)
+	}
+	issued, deniedEvents := 0, 0
 	for _, event := range outbox.events {
-		kinds[event.Type] = true
+		switch event.Type {
+		case "secret.issued":
+			issued++
+		case "secret.denied":
+			deniedEvents++
+		}
 		if event.Context.Project != "demo" || event.Context.Run != "run-secret" {
 			t.Fatalf("event context not bound to the run: %+v", event.Context)
 		}
@@ -125,8 +143,11 @@ func TestSandboxSecretEnvEmitsIssuedAndDenied(t *testing.T) {
 			}
 		}
 	}
-	if !kinds["secret.issued"] || !kinds["secret.denied"] {
-		t.Fatalf("expected secret.issued and secret.denied events, got %v", kinds)
+	if issued != 1 {
+		t.Fatalf("secret.issued events = %d, want exactly one per run per secret", issued)
+	}
+	if deniedEvents != 2 {
+		t.Fatalf("secret.denied events = %d, want one per call", deniedEvents)
 	}
 }
 
