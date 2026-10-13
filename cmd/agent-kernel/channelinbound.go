@@ -47,6 +47,10 @@ type channelInboundLoop struct {
 	// emit journals one intake.* event (docs/inbound-messages.md §11); nil
 	// drops events (tests).
 	emit func(ctx context.Context, eventType string, message agent.InboundMessage, senderUserID string, data map[string]any)
+	// events receives hitl.verdict.recorded emissions when a channel reply
+	// answers a human request (specs/quality-loop.md §9); nil disables them
+	// (tests run without an outbox).
+	events hitlOutbox
 	// intakeEnabled gates the pipeline: messages are still deduplicated and
 	// recorded when off, but no run starts and no rejection is delivered.
 	intakeEnabled bool
@@ -318,7 +322,11 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, reply agent.Channel
 		if err := l.store.CancelHumanRequest(ctx, reply.Ask.RequestID, actor); err != nil && !errors.Is(err, workspace.ErrNotFound) {
 			l.log.Warn("channel reply cancel request", "operation", reply.Ask.RequestID, "error", err)
 		}
-	} else if _, err := l.store.AnswerHumanRequest(ctx, reply.Ask.RequestID, response, actor); err != nil && !errors.Is(err, workspace.ErrNotFound) {
+	} else if row, err := l.store.AnswerHumanRequest(ctx, reply.Ask.RequestID, response, actor); err == nil {
+		// Terminal transition with a verdict → hitl.verdict.recorded
+		// (specs/quality-loop.md §9) through the durable outbox.
+		emitHitlVerdict(ctx, l.events, row)
+	} else if !errors.Is(err, workspace.ErrNotFound) {
 		l.log.Warn("channel reply answer request", "operation", reply.Ask.RequestID, "error", err)
 	}
 	action := workspace.AuditHumanAnswered

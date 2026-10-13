@@ -64,6 +64,8 @@ const (
 	AuditIntakeRouted         = "intake.routed"
 	AuditIntakeRejected       = "intake.rejected"
 	AuditIntakeCancelled      = "intake.cancelled"
+	AuditEvalGateOverridden   = "agent.evaluation.gate.overridden"
+	AuditEvalGateSkipped      = "agent.evaluation.gate.skipped"
 )
 
 // RecordAccessAudit appends one event. Nil details is stored as {}.

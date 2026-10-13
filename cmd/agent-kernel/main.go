@@ -238,6 +238,28 @@ func main() {
 		log.Error("migrate workspace v57 (workspace setting)", "error", err)
 		os.Exit(1)
 	}
+	// Quality-loop migrations (specs/quality-loop.md), renumbered onto the
+	// free tail of main's chain: 000058 pins the agent version a human
+	// request was created under (HITL verdicts, §3), 000059 stores golden
+	// eval-case candidates (§4), 000060 links a gate-started evaluation run
+	// to its proposal (M3 idempotent 202, §5.3), 000061 adds the unified run
+	// verdict, judge metadata and the calibration history (M4/M5, §5-§7).
+	if err = ws.Migrate(ctx, "migrations/000058_human_request_agent_version.up.sql"); err != nil {
+		log.Error("migrate workspace v58 (human request agent version)", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000059_eval_case_candidates.up.sql"); err != nil {
+		log.Error("migrate workspace v59 (eval case candidates)", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000060_eval_gate_proposal_link.up.sql"); err != nil {
+		log.Error("migrate workspace v60 (eval gate proposal link)", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000061_judge_quality_loop.up.sql"); err != nil {
+		log.Error("migrate workspace v61 (judge quality loop)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -775,7 +797,13 @@ func main() {
 				response = approval.Reason
 			}
 			if closeStatus == "answered" {
-				_, closeErr = ws.AnswerHumanRequest(r.Context(), approval.OperationID, response, actor)
+				row, cerr := ws.AnswerHumanRequest(r.Context(), approval.OperationID, response, actor)
+				closeErr = cerr
+				if cerr == nil {
+					// Terminal transition with a verdict → hitl.verdict.recorded
+					// (specs/quality-loop.md §9) through the durable outbox.
+					emitHitlVerdict(r.Context(), events, row)
+				}
 			} else {
 				closeErr = ws.CancelHumanRequest(r.Context(), approval.OperationID, actor)
 			}
@@ -1893,9 +1921,37 @@ func main() {
 			writeError(w, 422, errors.New("at most 16 evaluation cases are supported"))
 			return
 		}
+		// Judge-case validation (specs/quality-loop.md §6.1-§6.2, M4): the
+		// check class must be known, judge checks need a 0-100 threshold and
+		// a configured installation judge model — otherwise saving would
+		// produce a suite whose runs can only end in error.
+		judgeCases := false
 		for i, c := range suite.Cases {
 			if strings.TrimSpace(c.Input) == "" {
 				writeError(w, 422, fmt.Errorf("case %d: input is required", i+1))
+				return
+			}
+			switch workspace.NormalizeEvalCheck(c.Check) {
+			case workspace.EvalCheckPatterns:
+			case workspace.EvalCheckJudge, workspace.EvalCheckPatternsJudge:
+				judgeCases = true
+				if c.JudgeThreshold == nil || *c.JudgeThreshold < 0 || *c.JudgeThreshold > 100 {
+					writeError(w, 422, fmt.Errorf("case %d: judge_threshold (0-100) is required for judge checks", i+1))
+					return
+				}
+			default:
+				writeError(w, 422, fmt.Errorf("case %d: unknown check %q (use patterns, judge or patterns+judge)", i+1, c.Check))
+				return
+			}
+		}
+		if judgeCases {
+			judgeConfig, cfgErr := ws.JudgeConfig(r.Context())
+			if cfgErr != nil {
+				writeError(w, 500, cfgErr)
+				return
+			}
+			if !judgeConfig.Configured {
+				writeError(w, 422, errors.New("judge_not_configured: set EVAL_JUDGE_MODEL to a configured provider model before saving judge cases"))
 				return
 			}
 		}
@@ -1976,6 +2032,53 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"runs": runs})
+	})
+	// HITL verdicts of one run (specs/quality-loop.md §3, §8.1): every human
+	// decision on the run — ask_human answers plus human approvals and manual
+	// reconciliations — projected with a type, an author and the agent version
+	// pinned at ask time. Reader role, like the evaluation endpoints.
+	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/runs/{runID}/verdicts", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		agentID, runID := r.PathValue("agentID"), r.PathValue("runID")
+		a, err := ws.GetAgent(r.Context(), agentID)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("agent not found"))
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(a.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		run, err := ws.GetRun(r.Context(), runID)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("run not found"))
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if run.AgentID != "" && run.AgentID != agentID {
+			writeError(w, 404, errors.New("run not found"))
+			return
+		}
+		verdicts, err := ws.RunVerdicts(r.Context(), run.ProjectID, run.RunID)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{
+			"run_id":        runID,
+			"agent_version": run.AgentVersion,
+			"outcome":       workspace.ClassifyRunOutcome(run.Status, verdicts),
+			"verdicts":      verdicts,
+		})
 	})
 	// Evolution proposals (docs/plan-evaluable-agent.md §2.2 stage 10): agents
 	// and humans propose definition changes with full provenance; only a human
@@ -2080,65 +2183,55 @@ func main() {
 		emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.proposed", a, proposal, actorFromRequest(r), nil)
 		writeJSON(w, 201, proposal)
 	})
-	// Applying goes through the regular update path: bindings stay frozen,
-	// the version grows only on a real semantic change and the immutable
-	// snapshot is written exactly like a manual edit (docs/living-skills.md §26:
-	// agents propose, people apply).
-	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/proposals/{id}/apply", func(w http.ResponseWriter, r *http.Request) {
-		if !gate.Allow(w, r, controlplane.RoleWriter) {
-			return
-		}
-		agentID := r.PathValue("agentID")
-		proposalID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-		if err != nil {
-			writeError(w, 400, errors.New("invalid proposal id"))
-			return
-		}
-		a, proposal, ok := loadAgentProposal(w, r, ws, agentID, proposalID)
-		if !ok {
-			return
-		}
-		if !workspace.OrgVisible(a.OrgUnitID, visibleUnits(r)) {
-			writeError(w, 404, workspace.ErrNotFound)
-			return
-		}
-		if proposal.Status != "pending" {
-			writeError(w, 409, fmt.Errorf("proposal %d is already %s", proposal.ID, proposal.Status))
-			return
-		}
-		next := a
-		next.Description = proposal.Description
-		definition := proposal.Definition
-		next.Definition = &definition
-		// Bindings never change through a proposal (mirror of the PUT freeze).
-		next.OrgUnitID = a.OrgUnitID
-		if agentSemanticsChanged(a, next) {
-			next.DefinitionVersion++
-		}
-		if err := ws.UpdateAgent(r.Context(), next); err != nil {
-			if errors.Is(err, workspace.ErrNotFound) {
-				writeError(w, 404, err)
-				return
+	// Applying is gated (specs/quality-loop.md §5, M3 — cmd/agent-kernel/
+	// m3evalgate.go): a fresh green eval run on the proposal's base version
+	// is required, red blocks unless a writer overrides with justification,
+	// no run starts one and answers 202. The cleared apply continues on the
+	// transactional Store.ApplyAgentProposal (§10.1a): claim + version++ +
+	// immutable snapshot land atomically (docs/living-skills.md §26: agents
+	// propose, people apply). The bool result tells the gate handler whether
+	// the apply landed, so the gate:false path journals its skip only after
+	// a real apply (F-1).
+	RegisterM3Routes(mux, gate, ws, kernelGateRunner{activities: activities}, events,
+		func(w http.ResponseWriter, r *http.Request, a workspace.Agent, proposal workspace.AgentProposal) bool {
+			next := a
+			next.Description = proposal.Description
+			definition := proposal.Definition
+			next.Definition = &definition
+			// Bindings never change through a proposal (mirror of the PUT freeze).
+			next.OrgUnitID = a.OrgUnitID
+			if agentSemanticsChanged(a, next) {
+				next.DefinitionVersion++
 			}
-			writeError(w, 500, err)
-			return
-		}
-		if next.Definition != nil && next.DefinitionVersion != a.DefinitionVersion {
-			writeAgentVersion(r.Context(), ws, next, requestSubject(r), "proposal", proposal.GeneratorModel)
-		}
-		decided, err := ws.DecideAgentProposal(r.Context(), proposalID, "applied", requestSubject(r))
-		if err != nil {
-			if errors.Is(err, workspace.ErrConflict) {
-				writeError(w, 409, err)
-				return
+			var snapshot *workspace.AgentVersion
+			if next.Definition != nil && next.DefinitionVersion != a.DefinitionVersion {
+				version := agentVersionSnapshot(next, requestSubject(r), "proposal", proposal.GeneratorModel)
+				snapshot = &version
 			}
-			writeError(w, 500, err)
-			return
-		}
-		emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.applied", next, decided, actorFromRequest(r),
-			map[string]any{"from_version": a.DefinitionVersion, "to_version": next.DefinitionVersion})
-		writeJSON(w, 200, map[string]any{"agent": next, "proposal": decided})
-	})
+			decided, err := ws.ApplyAgentProposal(r.Context(), next, proposal.ID, requestSubject(r), snapshot)
+			if err != nil {
+				switch {
+				case errors.Is(err, workspace.ErrNotFound):
+					writeError(w, 404, err)
+				case errors.Is(err, workspace.ErrBaseVersionStale):
+					writeJSON(w, 409, map[string]any{
+						"error":           "base_version_stale",
+						"base_version":    proposal.BaseVersion,
+						"current_version": next.DefinitionVersion,
+					})
+				case errors.Is(err, workspace.ErrConflict):
+					writeError(w, 409, err)
+				default:
+					writeError(w, 500, err)
+				}
+				return false
+			}
+			emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.applied", next, decided, actorFromRequest(r),
+				map[string]any{"from_version": a.DefinitionVersion, "to_version": next.DefinitionVersion})
+			writeJSON(w, 200, map[string]any{"agent": next, "proposal": decided})
+			return true
+		},
+		visibleUnits, time.Now, log)
 	// Rejecting keeps the proposal in history; a rejected proposal can never
 	// be applied — deciding twice is a conflict.
 	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/proposals/{id}/reject", func(w http.ResponseWriter, r *http.Request) {
@@ -4812,10 +4905,21 @@ func main() {
 		if req.Status == "" {
 			req.Status = workspace.HumanStatusPending
 		}
+		// Pin the agent definition version at ask time (specs/quality-loop.md
+		// §3.1): the verdict attributes to the snapshot that produced the
+		// question. A client-supplied value is never trusted; an unresolvable
+		// agent keeps 0 = unknown and stays out of per-version metrics.
+		req.AgentVersion = 0
+		if req.AgentID != "" {
+			if a, aErr := ws.GetAgent(r.Context(), req.AgentID); aErr == nil {
+				req.AgentVersion = a.DefinitionVersion
+			}
+		}
 		if err := ws.CreateHumanRequest(r.Context(), &req); err != nil {
 			writeError(w, 500, err)
 			return
 		}
+		emitHitlVerdict(r.Context(), events, req)
 		if req.Status == workspace.HumanStatusDelivered {
 			if err := ws.DeliverHumanRequest(r.Context(), req.ID, req.ResolvedUser, req.Status, req.Channel, ""); err != nil && !errors.Is(err, workspace.ErrNotFound) {
 				log.Warn("mark human request delivered", "id", req.ID, "error", err)
@@ -4859,9 +4963,14 @@ func main() {
 		var err error
 		switch body.Status {
 		case "answered":
-			_, err = ws.AnswerHumanRequest(r.Context(), id, body.Response, body.ActorID)
-			if err == nil {
+			row, aErr := ws.AnswerHumanRequest(r.Context(), id, body.Response, body.ActorID)
+			if aErr == nil {
+				// Terminal transition with a verdict → hitl.verdict.recorded
+				// (specs/quality-loop.md §9) through the durable outbox.
+				emitHitlVerdict(r.Context(), events, row)
 				err = ws.RecordAccessAudit(r.Context(), body.ActorID, workspace.AuditHumanAnswered, "human_request", id, map[string]any{"response": body.Response})
+			} else {
+				err = aErr
 			}
 		case "cancelled":
 			err = ws.CancelHumanRequest(r.Context(), id, body.ActorID)
@@ -5322,7 +5431,14 @@ func main() {
 		writeJSON(w, 200, map[string]any{"deleted": true})
 	})
 
+	// Quality dashboard and version diffs (specs/quality-loop.md §7, M5).
+	RegisterM5Routes(mux, gate, ws, events, visibleUnits)
+	// LLM-judge configuration and calibration (specs/quality-loop.md §6, M4).
+	RegisterM4Routes(mux, gate, ws, activities, events, visibleUnits, log)
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
+	// M2 golden eval-case candidates (specs/quality-loop.md §4): review
+	// endpoints, candidate events and the harvesting/reaping background job.
+	RegisterM2Routes(ctx, mux, ws, gate, events, temporalClient, activities.SourceID, log)
 	// Intake pipeline (docs/inbound-messages.md): the system project + agent
 	// exist before the first message arrives; create-if-absent, never
 	// overwritten. The kill switch records and rejects messages without
@@ -5370,6 +5486,7 @@ func main() {
 					emit:          intakeEmitter,
 					intakeEnabled: intakeEnabled,
 					ratePerHour:   intakeRatePerHour,
+					events:        events,
 				},
 				hook: hook,
 				log:  log,
@@ -5403,6 +5520,7 @@ func main() {
 			emit:          intakeEmitter,
 			intakeEnabled: intakeEnabled,
 			ratePerHour:   intakeRatePerHour,
+			events:        events,
 		}
 		go loop.run(ctx)
 	}
@@ -6042,14 +6160,14 @@ func loadAgentProposal(w http.ResponseWriter, r *http.Request, ws *workspace.Sto
 	return a, proposal, true
 }
 
-// writeAgentVersion stores the immutable definition snapshot with the
+// agentVersionSnapshot builds the immutable definition snapshot with the
 // effective prompt compiled by the same deterministic function runs use
 // (docs/plan-evaluable-agent.md, decision 2).
-func writeAgentVersion(ctx context.Context, ws *workspace.Store, a workspace.Agent, author, promptSource, generatorModel string) {
+func agentVersionSnapshot(a workspace.Agent, author, promptSource, generatorModel string) workspace.AgentVersion {
 	if promptSource == "" {
 		promptSource = "manual"
 	}
-	_ = ws.InsertAgentVersion(ctx, workspace.AgentVersion{
+	return workspace.AgentVersion{
 		AgentID: a.ID, Version: a.DefinitionVersion, Definition: *a.Definition,
 		Description: a.Description,
 		CompiledPrompt: agent.EffectiveSystemPrompt(agent.AgentPromptInput{
@@ -6057,7 +6175,14 @@ func writeAgentVersion(ctx context.Context, ws *workspace.Store, a workspace.Age
 		}, "", a.SystemPrompt),
 		PromptSource: promptSource, GeneratorModel: generatorModel,
 		Author: author, CreatedAt: time.Now().UTC(),
-	})
+	}
+}
+
+// writeAgentVersion stores the immutable definition snapshot (used by the
+// manual-edit paths; the gated proposal apply rides the transactional
+// Store.ApplyAgentProposal and passes its snapshot directly).
+func writeAgentVersion(ctx context.Context, ws *workspace.Store, a workspace.Agent, author, promptSource, generatorModel string) {
+	_ = ws.InsertAgentVersion(ctx, agentVersionSnapshot(a, author, promptSource, generatorModel))
 }
 
 // agentPromptPreview returns the effective system prompt shown in the UI:
@@ -7078,6 +7203,45 @@ func emitAgentDefinitionEvent(ctx context.Context, observationURL, token, eventT
 	}
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, response.Body)
+}
+
+// hitlOutbox is the durable-outbox surface the verdict emission needs;
+// *outbox.Outbox satisfies it and tests provide fakes.
+type hitlOutbox interface {
+	Enqueue(context.Context, observation.Event) error
+}
+
+// emitHitlVerdict records hitl.verdict.recorded (specs/quality-loop.md §9)
+// on every terminal human_request transition that carries a verdict.
+// Best-effort: the human_request row stays the source of truth. Event ids
+// include UnixNano (§8 idempotency note), so journal duplicates are impossible.
+func emitHitlVerdict(ctx context.Context, events hitlOutbox, req workspace.HumanRequest) {
+	verdictType := workspace.Verdict(req)
+	if verdictType == "" || events == nil {
+		return
+	}
+	item := observation.Event{
+		Schema:     observation.Schema,
+		EventID:    fmt.Sprintf("hitl-verdict/%s/%d", req.ID, time.Now().UnixNano()),
+		OccurredAt: time.Now().UTC(),
+		Source:     observation.Source{ID: "workspace", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{
+			Project: req.ProjectID, Run: req.RunID,
+			Actor: observation.Actor{ID: req.AnsweredBy, Type: "human"},
+		},
+		Type: "hitl.verdict.recorded",
+		Data: map[string]any{
+			"run_id":        req.RunID,
+			"agent_id":      req.AgentID,
+			"agent_version": req.AgentVersion,
+			"type":          verdictType,
+			"source":        workspace.VerdictSourceHumanRequest,
+			"answered_by":   req.AnsweredBy,
+		},
+	}
+	if err := events.Enqueue(ctx, item); err != nil {
+		slog.Warn("emit hitl verdict", "operation", req.ID, "error", err)
+	}
 }
 
 func env(name, fallback string) string {
