@@ -1326,7 +1326,29 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     <SelectItem value="" text={t('agents.default_label') ?? 'Default'} />
                     {providers.map((p) => <SelectItem key={p.id} value={p.id} text={p.name} />)}
                   </Select>
-                  <TextInput id="agent-model" labelText={t('agents.model') ?? 'Model'} value={form.model ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, model: e.target.value })} placeholder="mimo-v2.6-pro…" />
+                  {(() => {
+                    // The model dropdown follows the provider selection: a
+                    // concrete provider narrows the list to its catalog; the
+                    // default routes across all providers and labels each
+                    // model with its owner. A value outside the catalog (wizard
+                    // suggestion, legacy config) stays selectable; with no
+                    // catalog at all we degrade to free text.
+                    const scoped = form.provider ? providers.filter((p) => p.id === form.provider) : providers
+                    const options = scoped.flatMap((p) => (p.models ?? []).map((m) => ({ model: m, label: form.provider ? m : `${m} · ${p.name}`, key: `${p.id}/${m}` })))
+                    if (options.length === 0) {
+                      return (
+                        <TextInput id="agent-model" labelText={t('agents.model') ?? 'Model'} value={form.model ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, model: e.target.value })} placeholder="mimo-v2.6-pro…" />
+                      )
+                    }
+                    const inCatalog = options.some((o) => o.model === form.model)
+                    return (
+                      <Select id="agent-model" labelText={t('agents.model') ?? 'Model'} value={form.model ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, model: e.target.value })}>
+                        <SelectItem value="" text={t('agents.default_label') ?? 'Default'} />
+                        {form.model && !inCatalog && <SelectItem value={form.model} text={`${form.model} · ${t('agents.model_not_in_catalog') ?? 'not in catalog'}`} />}
+                        {options.map((o) => <SelectItem key={o.key} value={o.model} text={o.label} />)}
+                      </Select>
+                    )
+                  })()}
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {editing && (

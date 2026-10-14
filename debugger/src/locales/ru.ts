@@ -414,6 +414,7 @@ export const ru: Record<string, string> = {
     'agents.network': 'Сеть',
     'agents.read_only': 'Только чтение',
     'agents.default_label': 'По умолчанию',
+    'agents.model_not_in_catalog': 'нет в каталоге',
     'agents.restricted': 'Ограниченный',
     'agents.standard': 'Стандартный',
     'agents.privileged': 'Привилегированный',

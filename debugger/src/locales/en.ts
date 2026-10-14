@@ -414,6 +414,7 @@ export const en: Record<string, string> = {
     'agents.network': 'Network',
     'agents.read_only': 'Read-only',
     'agents.default_label': 'Default',
+    'agents.model_not_in_catalog': 'not in catalog',
     'agents.restricted': 'Restricted',
     'agents.standard': 'Standard',
     'agents.privileged': 'Privileged',
