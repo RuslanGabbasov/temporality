@@ -31,17 +31,18 @@ type fakeEvalGateStore struct {
 	decision workspace.EvalGateDecision
 	suite    workspace.AgentEvaluationSuite
 
-	agentErr     error
-	proposalErr  error
-	decisionErr  error
-	createErr    error
-	statusCalls  int
-	createCalls  int
-	createRuns   []workspace.AgentEvaluationRun
-	nextRunID    int64
-	audits       []storedAudit
-	applied      []bool // one entry per apply call: did it land?
-	abandonedIDs []int64
+	agentErr      error
+	proposalErr   error
+	decisionErr   error
+	createErr     error
+	statusCalls   int
+	createCalls   int
+	createRuns    []workspace.AgentEvaluationRun
+	nextRunID     int64
+	audits        []storedAudit
+	applied       []bool // one entry per apply call: did it land?
+	abandonedIDs  []int64
+	auditWriteErr error // non-nil: the transactional audited apply (F-2) fails on the audit INSERT
 }
 
 type storedAudit struct {
@@ -160,10 +161,24 @@ func newEvalGateServer(t *testing.T, store *fakeEvalGateStore, runner *fakeEvalG
 	gate, err := controlplane.NewGate("readertoken:reader:reader:*\nwritertoken:writer:writer:*")
 	require.NoError(t, err)
 	if apply == nil {
-		apply = func(w http.ResponseWriter, _ *http.Request, _ workspace.Agent, _ workspace.AgentProposal) bool {
+		// Mirrors the main-wired callback: a non-nil audit event runs the
+		// transactional audited apply (F-2) — the record joins the apply,
+		// and an audit INSERT failure rolls the apply back and answers 503
+		// audit_write_failed; a nil event is the regular apply.
+		apply = func(w http.ResponseWriter, _ *http.Request, _ workspace.Agent, _ workspace.AgentProposal, audit *workspace.AccessAuditEvent) bool {
 			store.mu.Lock()
+			defer store.mu.Unlock()
+			if audit != nil && store.auditWriteErr != nil {
+				writeJSON(w, 503, map[string]any{"error": "audit_write_failed"})
+				return false
+			}
 			store.applied = append(store.applied, true)
-			store.mu.Unlock()
+			if audit != nil {
+				store.audits = append(store.audits, storedAudit{
+					actor: audit.Actor, action: audit.Action, entityKind: audit.EntityKind,
+					entityID: audit.EntityID, details: audit.Details,
+				})
+			}
 			writeJSON(w, 200, map[string]any{"applied": true})
 			return true
 		}
@@ -409,8 +424,10 @@ func TestEvalGateReaderForbidden(t *testing.T) {
 
 // gate:false skips the gate decision entirely — no lookup, no run (§8.3:
 // writer/owner right) — but the skip stays attributable: once the apply
-// landed (F-1) it writes an audit record and the
-// agent.evaluation.gate.skipped event, exactly like an override (CWE-778).
+// landed (F-1) it emits the agent.evaluation.gate.skipped event, and since
+// F-2 the audit record rides the apply's own transaction — the callback
+// received the very event it must journal atomically with the apply
+// (CWE-778).
 func TestEvalGateFalseSkipsGate(t *testing.T) {
 	store, runner, outbox := defaultEvalGateFixture()
 	store.decision = workspace.EvalGateDecision{State: workspace.EvalGateRed,
@@ -433,6 +450,7 @@ func TestEvalGateFalseSkipsGate(t *testing.T) {
 	require.Equal(t, "writer", audit.actor)
 	require.EqualValues(t, 4, audit.details["base_version"])
 	require.Equal(t, "agent-a", audit.details["agent_id"])
+	require.Equal(t, false, audit.details["gate"])
 
 	skipped := outbox.byType("agent.evaluation.gate.skipped")
 	require.Len(t, skipped, 1)
@@ -449,7 +467,7 @@ func TestEvalGateFalseSkipsGate(t *testing.T) {
 // the apply itself did not land, and the gate decision was never consulted.
 func TestEvalGateFalseApplyFailureLeavesNoTrace(t *testing.T) {
 	store, runner, outbox := defaultEvalGateFixture()
-	failingApply := func(w http.ResponseWriter, _ *http.Request, _ workspace.Agent, _ workspace.AgentProposal) bool {
+	failingApply := func(w http.ResponseWriter, _ *http.Request, _ workspace.Agent, _ workspace.AgentProposal, _ *workspace.AccessAuditEvent) bool {
 		store.mu.Lock()
 		store.applied = append(store.applied, false)
 		store.mu.Unlock()
@@ -463,6 +481,31 @@ func TestEvalGateFalseApplyFailureLeavesNoTrace(t *testing.T) {
 	require.Equal(t, 500, status)
 	require.Equal(t, []bool{false}, store.applied)
 	require.Empty(t, store.audits) // no audit outside a landed apply
+	require.Empty(t, outbox.byType("agent.evaluation.gate.skipped"))
+	require.Empty(t, outbox.byType("agent.evaluation.gate.passed"))
+	require.Empty(t, outbox.byType("agent.evaluation.gate.blocked"))
+	require.Empty(t, outbox.byType("agent.evaluation.gate.overridden"))
+	require.Zero(t, store.statusCalls)
+	require.Zero(t, store.createCalls)
+	require.Zero(t, runner.calls)
+}
+
+// F-2 fail-closed: the gate:false skip is journaled inside the apply's own
+// transaction — when the audit INSERT fails, the apply rolls back with it,
+// so the answer is 503 audit_write_failed (never 200, never silent), no
+// apply happened and no audit record exists. The fail-open hole where a
+// dropped audit INSERT left the bypass unjournaled is closed.
+func TestEvalGateFalseAuditWriteFailureRollsBackApply(t *testing.T) {
+	store, runner, outbox := defaultEvalGateFixture()
+	store.auditWriteErr = errors.New("insert access_audit_log: connection lost")
+	server := newEvalGateServer(t, store, runner, outbox, nil)
+	defer server.Close()
+
+	status, body := evalGatePost(t, server, "writertoken", `{"gate":false}`)
+	require.Equal(t, 503, status)
+	require.Contains(t, body, "audit_write_failed")
+	require.Empty(t, store.applied) // the apply rolled back with the audit record
+	require.Empty(t, store.audits)  // nothing journaled outside the rolled-back tx
 	require.Empty(t, outbox.byType("agent.evaluation.gate.skipped"))
 	require.Empty(t, outbox.byType("agent.evaluation.gate.passed"))
 	require.Empty(t, outbox.byType("agent.evaluation.gate.blocked"))

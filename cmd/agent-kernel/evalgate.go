@@ -36,8 +36,12 @@ import (
 // gate:false path is not silent either: it writes an audit record and the
 // agent.evaluation.gate.skipped event, so every apply without a green gate
 // stays attributable (CWE-778, §12 override-rate would otherwise miss it).
-// Since F-1 both trail writes happen only after the apply itself landed: a
-// failed apply must not journal a gate bypass that never happened.
+// Since F-1 the event is written only after the apply itself landed: a
+// failed apply must not journal a gate bypass that never happened. Since
+// F-2 the audit record is no longer best-effort either — it rides the
+// apply's own transaction (Store.ApplyAgentProposalAudited), so a failed
+// audit INSERT rolls the apply back and answers 503 audit_write_failed:
+// a gate-less apply can never land unjournaled (fail-closed).
 
 // evalGateRunTimeout bounds the background gate run; it matches
 // workspace.evalGateRunningWindow, so a run that dies with the deadline is
@@ -73,8 +77,12 @@ type evalGateOutbox interface {
 // answer 200. The gate handler never touches agent state itself. The bool
 // result reports whether the apply actually landed — the gate:false path may
 // only journal the skip after a real apply (F-1): a failed apply must leave
-// no trace of a gate bypass that never happened.
-type evalApplyFunc func(w http.ResponseWriter, r *http.Request, a workspace.Agent, proposal workspace.AgentProposal) bool
+// no trace of a gate bypass that never happened. A non-nil audit event asks
+// the callback for the transactional audited apply (F-2): the callback must
+// write that record in the same transaction as the apply and answer 503
+// audit_write_failed when it cannot; a nil event is the regular apply (the
+// gate paths journal separately, best-effort).
+type evalApplyFunc func(w http.ResponseWriter, r *http.Request, a workspace.Agent, proposal workspace.AgentProposal, audit *workspace.AccessAuditEvent) bool
 
 // kernelGateRunner adapts the kernel activities to the gate runner contract.
 type kernelGateRunner struct {
@@ -174,16 +182,28 @@ func RegisterEvalGateRoutes(mux *http.ServeMux, gate *controlplane.Gate, store e
 			return
 		}
 		// gate:false (writer right, §8.3): the gate is skipped entirely —
-		// no decision lookup, no run. The skip itself is never silent, and
-		// since F-1 never premature either: the audit record and the
-		// agent.evaluation.gate.skipped event are written only after the
-		// apply actually landed — a failed apply leaves no trace of a
-		// bypass that never happened (CWE-778).
+		// no decision lookup, no run. The skip itself is neither silent nor
+		// premature: the audit record rides the apply's own transaction (F-2,
+		// Store.ApplyAgentProposalAudited) — a failed audit INSERT rolls the
+		// apply back and the callback answers 503 audit_write_failed, so the
+		// bypass can never land unjournaled (CWE-778) — and the
+		// agent.evaluation.gate.skipped event is emitted only after the
+		// apply actually landed (F-1).
 		if request.Gate != nil && !*request.Gate {
-			if !apply(w, r, a, proposal) {
+			audit := workspace.AccessAuditEvent{
+				Actor:      requestSubject(r),
+				Action:     workspace.AuditEvalGateSkipped,
+				EntityKind: "agent_proposal",
+				EntityID:   strconv.FormatInt(proposal.ID, 10),
+				Details: map[string]any{
+					"agent_id":     a.ID,
+					"base_version": proposal.BaseVersion,
+					"gate":         false,
+				},
+			}
+			if !apply(w, r, a, proposal, &audit) {
 				return
 			}
-			recordEvalGateSkip(r.Context(), store, log, a, proposal, requestSubject(r))
 			emitEvalGateEvent(r.Context(), events, "agent.evaluation.gate.skipped", a, proposal, nil,
 				map[string]any{"cause": "gate_skipped"}, actorFromRequest(r))
 			return
@@ -207,7 +227,7 @@ func RegisterEvalGateRoutes(mux *http.ServeMux, gate *controlplane.Gate, store e
 				// The bypass trail (audit + event) lands only after the apply itself
 				// landed (F-1): a failed apply leaves no trace of a suite_stale
 				// override that never happened.
-				if !apply(w, r, a, proposal) {
+				if !apply(w, r, a, proposal, nil) {
 					return
 				}
 				decision := workspace.EvalGateDecision{Cause: workspace.CauseSuiteStale}
@@ -234,7 +254,7 @@ func RegisterEvalGateRoutes(mux *http.ServeMux, gate *controlplane.Gate, store e
 		case workspace.EvalGateGreen:
 			// Fresh green on the base version: apply proceeds (§5.3).
 			emitEvalGateEvent(r.Context(), events, "agent.evaluation.gate.passed", a, proposal, decision.Run, nil, actorFromRequest(r))
-			apply(w, r, a, proposal)
+			apply(w, r, a, proposal, nil)
 		case workspace.EvalGateRed:
 			// Red run (or judge-degraded green): 409 with the body of reasons
 			// (§5.4, §8.3) unless a writer promotes it with a justification —
@@ -248,7 +268,7 @@ func RegisterEvalGateRoutes(mux *http.ServeMux, gate *controlplane.Gate, store e
 				// Same F-1 ordering as the gate:false path: journal the override
 				// only once the apply actually landed — a failed apply must not
 				// leave a promoted-red gate in the audit trail.
-				if !apply(w, r, a, proposal) {
+				if !apply(w, r, a, proposal, nil) {
 					return
 				}
 				recordEvalGateOverride(r.Context(), store, log, a, proposal, decision, justification, requestSubject(r))
@@ -312,24 +332,6 @@ func recordEvalGateOverride(ctx context.Context, store evalGateStore, log *slog.
 		})
 	if err != nil && log != nil {
 		log.Warn("record eval gate override audit", "proposal", proposal.ID, "error", err)
-	}
-}
-
-// recordEvalGateSkip writes the audit entry of a gate-less apply (§8.3,
-// gate:false): the who (applying writer), the what (proposal, base version)
-// and the fact that no gate decision was consulted. Called only after the
-// apply landed (F-1). Best-effort, exactly like the override record — the
-// apply already happened; an audit failure is logged, never silently
-// dropped.
-func recordEvalGateSkip(ctx context.Context, store evalGateStore, log *slog.Logger, a workspace.Agent, proposal workspace.AgentProposal, subject string) {
-	err := store.RecordAccessAudit(ctx, subject, workspace.AuditEvalGateSkipped, "agent_proposal",
-		strconv.FormatInt(proposal.ID, 10), map[string]any{
-			"agent_id":     a.ID,
-			"base_version": proposal.BaseVersion,
-			"gate":         false,
-		})
-	if err != nil && log != nil {
-		log.Warn("record eval gate skip audit", "proposal", proposal.ID, "error", err)
 	}
 }
 

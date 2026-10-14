@@ -160,8 +160,32 @@ var ErrBaseVersionStale = errors.New("base_version_stale")
 // surfaces as ErrBaseVersionStale, never as a silent apply over a stale base.
 // The immutable version snapshot rides the same transaction, so the apply
 // lands whole (proposal decided + agent updated + snapshot written) or not
-// at all.
+// at all. Its transactional body is shared with ApplyAgentProposalAudited.
 func (s *Store) ApplyAgentProposal(ctx context.Context, next Agent, proposalID int64, decidedBy string, snapshot *AgentVersion) (AgentProposal, error) {
+	return s.applyAgentProposal(ctx, next, proposalID, decidedBy, snapshot, nil)
+}
+
+// ApplyAgentProposalAudited is ApplyAgentProposal with the access-audit
+// record of the apply written inside the same transaction (F-2,
+// specs/quality-loop.md §8.3 gate:false): claim + version++ + snapshot +
+// audit land atomically — a failed audit INSERT rolls the whole apply back,
+// so a gate-less apply can never go through unjournaled. This is the
+// fail-closed counterpart of the best-effort RecordAccessAudit paths: here
+// the audit record is part of the contract, so its failure must not be
+// survivable; it surfaces as ErrAuditWriteFailed so the kernel answers 503
+// instead of a success that lost the bypass trail (CWE-778). A nil audit
+// event is a programming error and is refused outright — silently degrading
+// to an unjournaled apply would recreate the hole this closes.
+func (s *Store) ApplyAgentProposalAudited(ctx context.Context, next Agent, proposalID int64, decidedBy string, snapshot *AgentVersion, audit *AccessAuditEvent) (AgentProposal, error) {
+	if audit == nil {
+		return AgentProposal{}, errors.New("audited apply requires a non-nil audit event")
+	}
+	return s.applyAgentProposal(ctx, next, proposalID, decidedBy, snapshot, audit)
+}
+
+// applyAgentProposal is the shared transactional body: audit is nil on the
+// regular path, the gate-skip record on the audited one (F-2).
+func (s *Store) applyAgentProposal(ctx context.Context, next Agent, proposalID int64, decidedBy string, snapshot *AgentVersion, audit *AccessAuditEvent) (AgentProposal, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return AgentProposal{}, err
@@ -211,6 +235,11 @@ func (s *Store) ApplyAgentProposal(ctx context.Context, next Agent, proposalID i
 	if snapshot != nil {
 		if err := insertAgentVersionRow(ctx, tx, *snapshot); err != nil {
 			return AgentProposal{}, err
+		}
+	}
+	if audit != nil {
+		if err := insertAccessAudit(ctx, tx, audit.Actor, audit.Action, audit.EntityKind, audit.EntityID, audit.Details); err != nil {
+			return AgentProposal{}, fmt.Errorf("%w: %v", ErrAuditWriteFailed, err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
