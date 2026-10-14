@@ -699,6 +699,8 @@ export const en: Record<string, string> = {
     'mcp.all_tools': 'all tools',
     'mcp.tools_count': '{{count}} tools',
     'mcp.approval_count': '{{count}} approval',
+    'mcp.select_all': 'Select all',
+    'mcp.clear_all': 'Clear all',
 
     // Secrets
     'secrets.title': 'Secrets',

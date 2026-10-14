@@ -161,6 +161,15 @@ export default function Mcp() {
     setForm({ ...form, allowed_tools: allowed, approval_tools: approval })
   }
 
+  const selectAllTools = () => {
+    setForm({ ...form, allowed_tools: discovered.map((tool) => tool.name) })
+  }
+
+  const clearAllTools = () => {
+    // Mirrors toggleTool: dropping the allowlist entry drops its approval flag.
+    setForm({ ...form, allowed_tools: [], approval_tools: [] })
+  }
+
   const type = form.type ?? 'stdio'
 
   return (
@@ -253,7 +262,13 @@ export default function Mcp() {
 
               {discovered.length > 0 && (
                 <div>
-                  <p className="cds--label" style={{ marginBottom: '0.25rem' }}>{t('mcp.tools_label') ?? 'Tools'}</p>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                    <p className="cds--label" style={{ marginBottom: 0 }}>{t('mcp.tools_label') ?? 'Tools'}</p>
+                    <div style={{ display: 'flex', gap: '0.25rem' }}>
+                      <Button size="sm" kind="ghost" onClick={selectAllTools}>{t('mcp.select_all') ?? 'Select all'}</Button>
+                      <Button size="sm" kind="ghost" onClick={clearAllTools}>{t('mcp.clear_all') ?? 'Clear all'}</Button>
+                    </div>
+                  </div>
                   <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>
                     {t('mcp.tools_hint') ?? 'Unchecked tools are hidden from agents. "Approval" sends the tool through the human approval flow.'}
                   </p>
@@ -262,21 +277,25 @@ export default function Mcp() {
                       const allowed = (form.allowed_tools ?? []).includes(tool.name)
                       return (
                         <div key={tool.name} style={{ padding: '0.25rem 0', borderBottom: '1px solid var(--tm-border)', minWidth: 0, overflowWrap: 'anywhere' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                            <Checkbox
-                              id={`mcp-tool-${tool.name}`}
-                              labelText={tool.name}
-                              title={tool.description || tool.name}
-                              checked={allowed}
-                              onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => toggleTool(tool.name, checked)}
-                            />
-                            {allowed && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <div style={{ minWidth: 0, flex: '1 1 auto' }}>
                               <Checkbox
-                                id={`mcp-approval-${tool.name}`}
-                                labelText={t('mcp.approval') ?? 'Approval'}
-                                checked={(form.approval_tools ?? []).includes(tool.name)}
-                                onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => toggleApproval(tool.name, checked)}
+                                id={`mcp-tool-${tool.name}`}
+                                labelText={tool.name}
+                                title={tool.description || tool.name}
+                                checked={allowed}
+                                onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => toggleTool(tool.name, checked)}
                               />
+                            </div>
+                            {allowed && (
+                              <div style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                                <Checkbox
+                                  id={`mcp-approval-${tool.name}`}
+                                  labelText={t('mcp.approval') ?? 'Approval'}
+                                  checked={(form.approval_tools ?? []).includes(tool.name)}
+                                  onChange={(_: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => toggleApproval(tool.name, checked)}
+                                />
+                              </div>
                             )}
                           </div>
                           {tool.description && (

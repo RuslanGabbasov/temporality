@@ -699,6 +699,8 @@ export const ru: Record<string, string> = {
     'mcp.all_tools': 'все инструменты',
     'mcp.tools_count': 'инструментов: {{count}}',
     'mcp.approval_count': 'согласование: {{count}}',
+    'mcp.select_all': 'Выбрать все',
+    'mcp.clear_all': 'Снять выбор',
 
     // Secrets
     'secrets.title': 'Секреты',
