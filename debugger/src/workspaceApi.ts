@@ -775,6 +775,13 @@ export const workspaceApi = {
     request<Trigger>(`/v1/workspace/triggers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteTrigger: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/triggers/${id}`, { method: 'DELETE' }),
+  // Per-trigger webhook delivery token: generate returns the raw "whk_…"
+  // credential exactly once; revoke clears it (deliveries fall back to the
+  // regular writer authorization).
+  generateWebhookToken: (id: string) =>
+    request<{ trigger_id: string; token: string }>(`/v1/workspace/triggers/${id}/webhook-token`, { method: 'POST' }),
+  revokeWebhookToken: (id: string) =>
+    request<{ trigger_id: string; revoked: boolean }>(`/v1/workspace/triggers/${id}/webhook-token`, { method: 'DELETE' }),
 
   // Execution identities (org-structure.md §20): CRUD is admin-gated; the
   // store defaults absent allowed-lists to ["*"], so an empty list = any.

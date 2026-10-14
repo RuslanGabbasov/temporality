@@ -3434,12 +3434,18 @@ func main() {
 		if raw, ok := body["enabled"]; ok {
 			_ = json.Unmarshal(raw, &existing.Enabled)
 		}
+		// The per-trigger delivery token hash is managed exclusively through
+		// the /webhook-token endpoints. A config round-trip from a form that
+		// never saw the real hash must neither clobber nor forge it: capture
+		// the stored hash before the config replacement and restore it after.
+		storedWebhookTokenHash := webhookStoredTokenHash(existing.Config)
 		if raw, ok := body["config"]; ok && string(raw) != "null" {
 			var cfg json.RawMessage
 			if json.Unmarshal(raw, &cfg) == nil && len(cfg) > 0 {
 				existing.Config = cfg
 			}
 		}
+		existing.Config = preserveWebhookTokenHash(existing.Config, storedWebhookTokenHash, existing.Type)
 		// Re-authorize the merged trigger (§21): agent/identity may have changed.
 		if err := authorizeTriggerUse(r.Context(), ws, r, &existing); err != nil {
 			writeError(w, 403, err)
@@ -3457,6 +3463,99 @@ func main() {
 			log.Warn("audit trigger update", "error", err)
 		}
 		writeJSON(w, 200, existing)
+	})
+	// Per-trigger webhook delivery token (operator only): generate a fresh
+	// "whk_…" credential whose sha256 hash lands in the trigger config. The
+	// raw token is returned exactly once — losing it means regenerating. The
+	// token authorizes deliveries to THIS trigger's endpoint only and is safe
+	// to hand to external systems (TFS/Azure DevOps, CI, chat bots) without
+	// exposing a workspace principal. DELETE revokes it.
+	mux.HandleFunc("POST /v1/workspace/triggers/{triggerID}/webhook-token", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		trigger, err := ws.GetTrigger(r.Context(), r.PathValue("triggerID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(trigger.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		if trigger.Type != "webhook" {
+			writeError(w, 422, errors.New("delivery tokens exist only for webhook triggers"))
+			return
+		}
+		var cfg workspace.WebhookConfig
+		if err := json.Unmarshal(trigger.Config, &cfg); err != nil {
+			writeError(w, 422, errors.New("trigger config is not valid webhook config"))
+			return
+		}
+		random := make([]byte, 32)
+		if _, err := rand.Read(random); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		token := "whk_" + base64.RawURLEncoding.EncodeToString(random)
+		digest := sha256.Sum256([]byte(token))
+		cfg.AuthTokenHash = hex.EncodeToString(digest[:])
+		merged, mErr := json.Marshal(cfg)
+		if mErr != nil {
+			writeError(w, 500, mErr)
+			return
+		}
+		trigger.Config = merged
+		if err := ws.UpdateTrigger(r.Context(), trigger); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTriggerUpdated, "trigger", trigger.ID, map[string]any{"webhook_token": "generated"}); err != nil {
+			log.Warn("audit webhook token generate", "error", err)
+		}
+		writeJSON(w, 200, map[string]any{"trigger_id": trigger.ID, "token": token})
+	})
+	mux.HandleFunc("DELETE /v1/workspace/triggers/{triggerID}/webhook-token", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		trigger, err := ws.GetTrigger(r.Context(), r.PathValue("triggerID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(trigger.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		var cfg workspace.WebhookConfig
+		if json.Unmarshal(trigger.Config, &cfg) != nil || cfg.AuthTokenHash == "" {
+			writeJSON(w, 200, map[string]any{"trigger_id": trigger.ID, "revoked": false})
+			return
+		}
+		cfg.AuthTokenHash = ""
+		merged, mErr := json.Marshal(cfg)
+		if mErr != nil {
+			writeError(w, 500, mErr)
+			return
+		}
+		trigger.Config = merged
+		if err := ws.UpdateTrigger(r.Context(), trigger); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if err := ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTriggerUpdated, "trigger", trigger.ID, map[string]any{"webhook_token": "revoked"}); err != nil {
+			log.Warn("audit webhook token revoke", "error", err)
+		}
+		writeJSON(w, 200, map[string]any{"trigger_id": trigger.ID, "revoked": true})
 	})
 	mux.HandleFunc("DELETE /v1/workspace/triggers/{triggerID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleOperator) {
@@ -4495,9 +4594,6 @@ func main() {
 	// id/type/source/actor/payload. Delivery is idempotent by event id — the
 	// same source event never creates a second run (§4).
 	mux.HandleFunc("POST /v1/workspace/webhook/{projectID}/{path...}", func(w http.ResponseWriter, r *http.Request) {
-		if !gate.Allow(w, r, controlplane.RoleWriter) {
-			return
-		}
 		projectID := r.PathValue("projectID")
 		path := r.PathValue("path")
 		triggers, err := ws.ListTriggers(r.Context(), projectID)
@@ -4521,6 +4617,20 @@ func main() {
 		}
 		var cfg workspace.WebhookConfig
 		_ = json.Unmarshal(matched.Config, &cfg)
+		// Authorization: a per-trigger delivery token (hash in the config)
+		// admits the caller for THIS endpoint only — the route is mounted past
+		// the gate (see the root handler), so external systems never need a
+		// workspace credential. Otherwise fall through to the regular writer
+		// gate: Allow writes the 401/403 itself for anonymous callers.
+		authorized := false
+		if cfg.AuthTokenHash != "" {
+			if token, ok := controlplane.BearerToken(r); ok && webhookTokenMatches(token, cfg.AuthTokenHash) {
+				authorized = true
+			}
+		}
+		if !authorized && !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
 		// Normalize the incoming request into the trigger event envelope.
 		raw, _ := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 		// Optional origin/integrity hardening: when the trigger carries a
@@ -5625,6 +5735,14 @@ func main() {
 			mux.ServeHTTP(w, r)
 			return
 		}
+		// Webhook trigger deliveries authorize against the matched trigger's
+		// own token (or fall back to the writer gate inside the handler), so
+		// they enter the mux directly — an unknown per-trigger token must
+		// reach the handler, not die in the Authenticate middleware.
+		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/workspace/webhook/") {
+			mux.ServeHTTP(w, r)
+			return
+		}
 		authed.ServeHTTP(w, r)
 	})
 	server := &http.Server{Addr: address, Handler: root, ReadHeaderTimeout: 5 * time.Second}
@@ -5693,6 +5811,48 @@ func webhookSignatureValid(r *http.Request, raw []byte, secret string) bool {
 		}
 	}
 	return false
+}
+
+// webhookTokenMatches compares a presented per-trigger delivery token with
+// the stored sha256 hex hash in constant time.
+func webhookTokenMatches(token, storedHash string) bool {
+	if token == "" {
+		return false
+	}
+	digest := sha256.Sum256([]byte(token))
+	return hmac.Equal([]byte(hex.EncodeToString(digest[:])), []byte(storedHash))
+}
+
+// webhookStoredTokenHash reads the delivery-token hash out of a stored
+// webhook trigger config ("" when absent or unparsable).
+func webhookStoredTokenHash(config json.RawMessage) string {
+	var cfg workspace.WebhookConfig
+	if json.Unmarshal(config, &cfg) != nil {
+		return ""
+	}
+	return cfg.AuthTokenHash
+}
+
+// preserveWebhookTokenHash restores the server-stored delivery-token hash
+// after a client-supplied config replacement. The hash is managed exclusively
+// through the /webhook-token endpoints: a form that round-trips a config it
+// never fully saw can neither clobber nor forge it, and a client cannot
+// install a hash of its own when none is stored. Non-webhook configs pass
+// through untouched.
+func preserveWebhookTokenHash(config json.RawMessage, storedHash, triggerType string) json.RawMessage {
+	if triggerType != "webhook" {
+		return config
+	}
+	var cfg workspace.WebhookConfig
+	if json.Unmarshal(config, &cfg) != nil || cfg.AuthTokenHash == storedHash {
+		return config
+	}
+	cfg.AuthTokenHash = storedHash
+	merged, err := json.Marshal(cfg)
+	if err != nil {
+		return config
+	}
+	return merged
 }
 
 func validateApproval(approval agent.Approval) error {

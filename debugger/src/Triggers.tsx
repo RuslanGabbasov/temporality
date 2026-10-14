@@ -42,6 +42,11 @@ export default function Triggers({ project }: { project: string }) {
   const [editing, setEditing] = useState<Trigger | null>(null)
   const [form, setForm] = useState<Partial<Trigger> & { config: any }>({ type: 'schedule', name: '', enabled: true, config: {} })
   const [filter, setFilter] = useState('')
+  // Per-trigger webhook delivery token (shown once, hash lives server-side):
+  // generatedToken is displayed in a dedicated modal exactly like user tokens.
+  const [generatedToken, setGeneratedToken] = useState<string | null>(null)
+  const [tokenBusy, setTokenBusy] = useState(false)
+  const [tokenError, setTokenError] = useState('')
 
   const visibleTriggers = triggers.filter((tr) => matchesFilter(filter, tr.name, tr.type, tr.id))
 
@@ -123,6 +128,36 @@ export default function Triggers({ project }: { project: string }) {
     return `${window.location.origin}/kernel-api/v1/workspace/webhook/${t.project_id}/${cfg.path || ''}`
   }
 
+  const copyToClipboard = (text: string) => {
+    void navigator.clipboard.writeText(text)
+  }
+
+  const genToken = async () => {
+    if (!editing) return
+    setTokenBusy(true); setTokenError('')
+    try {
+      const res = await workspaceApi.generateWebhookToken(editing.id)
+      setGeneratedToken(res.token)
+      // Placeholder flag only: the real hash never reaches the form and PUT
+      // preserves the stored one server-side.
+      setForm((f) => ({ ...f, config: { ...f.config, auth_token_hash: 'set' } }))
+    } catch (f) { setTokenError(message(f)) }
+    finally { setTokenBusy(false) }
+  }
+
+  const revokeToken = async () => {
+    if (!editing) return
+    setTokenBusy(true); setTokenError('')
+    try {
+      await workspaceApi.revokeWebhookToken(editing.id)
+      const cfg = { ...form.config }
+      delete cfg.auth_token_hash
+      setForm((f) => ({ ...f, config: cfg }))
+      setGeneratedToken(null)
+    } catch (f) { setTokenError(message(f)) }
+    finally { setTokenBusy(false) }
+  }
+
   return (
     <div style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
@@ -190,6 +225,21 @@ export default function Triggers({ project }: { project: string }) {
         })}
       </Grid>
 
+      {/* One-time delivery token reveal (same pattern as user tokens) */}
+      {generatedToken && (
+        <AppModal onClose={() => setGeneratedToken(null)} panelStyle={{ width: '600px' }}>
+          <Heading>{t('triggers.token_modal_title') ?? 'Webhook delivery token'}</Heading>
+          <p style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>{t('triggers.token_modal_hint') ?? 'The token is shown exactly once — copy it now. Lost it? Regenerate.'}</p>
+          <div style={{ background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all', marginBottom: '1rem' }}>
+            {generatedToken}
+          </div>
+          <div className="form-actions">
+            <Button kind="secondary" onClick={() => setGeneratedToken(null)}>{t('action.close') ?? 'Close'}</Button>
+            <Button onClick={() => { copyToClipboard(generatedToken); setGeneratedToken(null) }}>{t('triggers.token_copy_close') ?? 'Copy & Close'}</Button>
+          </div>
+        </AppModal>
+      )}
+
       {loading && <PageLoading />}
 
       {/* Create/Edit modal */}
@@ -253,6 +303,29 @@ export default function Triggers({ project }: { project: string }) {
                 <TextInput id="trigger-path" labelText={t('triggers.webhook_path') ?? 'Webhook path'} value={form.config?.path ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, path: e.target.value } })} placeholder="deploy-notify" helperText={t('triggers.webhook_helper', { url: `${project}/${form.config?.path || '...'}` }) ?? `Endpoint: POST /kernel-api/v1/workspace/webhook/${project}/${form.config?.path || '...'}`} />
                 <TextInput id="trigger-secret" labelText={t('triggers.secret_optional') ?? 'Signing secret (optional)'} value={form.config?.secret ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, secret: e.target.value } })} placeholder="hmac-secret" helperText={t('triggers.secret_hint') ?? 'When set, deliveries must be signed: X-Temporality-Signature: sha256-<HMAC-SHA256 of the body>'} />
                 <TextArea id="trigger-prompt-tpl" labelText={t('triggers.prompt_template') ?? 'Prompt template'} value={form.config?.prompt_template ?? ''} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, config: { ...form.config, prompt_template: e.target.value } })} rows={4} placeholder="Deploy completed: {{body.tag}}. Review changes and verify." helperText={t('triggers.prompt_template_helper') ?? 'Use {{body.field}} to insert values from the JSON request body.'} />
+                {/* Delivery token exists only for a saved webhook trigger —
+                    generation needs the trigger id. The hash itself never
+                    leaves the server; the form only tracks set/unset. */}
+                {editing && (
+                  <div style={{ border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>{t('triggers.token_title') ?? 'Delivery token'}</span>
+                      {!!form.config?.auth_token_hash && <Tag type="green" size="sm">{t('triggers.token_active') ?? 'active'}</Tag>}
+                    </div>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.5rem 0' }}>
+                      {t('triggers.token_hint') ?? 'A dedicated token for this webhook: put it into the external system (TFS, CI, chat bot) instead of your user token. Send it as Bearer or as the password in Basic auth — it works only on this trigger’s endpoint.'}
+                    </p>
+                    {tokenError && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={tokenError} onClose={() => setTokenError('')} lowContrast style={{ marginBottom: '0.5rem' }} />}
+                    <Stack orientation="horizontal" gap={3}>
+                      <Button size="sm" kind="secondary" disabled={tokenBusy} onClick={() => void genToken()}>
+                        {form.config?.auth_token_hash ? (t('triggers.token_regenerate') ?? 'Regenerate token') : (t('triggers.token_generate') ?? 'Generate token')}
+                      </Button>
+                      {!!form.config?.auth_token_hash && (
+                        <Button size="sm" kind="danger--ghost" disabled={tokenBusy} onClick={() => void revokeToken()}>{t('triggers.token_revoke') ?? 'Revoke'}</Button>
+                      )}
+                    </Stack>
+                  </div>
+                )}
               </>
             )}
 
