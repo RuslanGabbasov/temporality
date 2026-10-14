@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -195,13 +196,18 @@ func (s *Server) listObservations(w http.ResponseWriter, r *http.Request) {
 			*target = &parsed
 		}
 	}
-	page, err := s.store.ListObservationPage(r.Context(), observation.Filter{
+	filter := observation.Filter{
 		Project: r.URL.Query().Get("project"), SourceID: r.URL.Query().Get("source_id"), EventID: r.URL.Query().Get("event_id"), Run: r.URL.Query().Get("run"),
 		Task: r.URL.Query().Get("task"), Actor: r.URL.Query().Get("actor"),
 		Type: r.URL.Query().Get("type"), Since: since, Until: until, KnownAt: knownAt, Limit: limit,
-	}, cursor)
+	}
+	page, err := s.store.ListObservationPage(r.Context(), filter, cursor)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, errors.New("could not list observation events"))
+		// The 500 body is what /v1/agent/operations surfaces in its error
+		// banner — a bare "could not list" is undiagnosable. Keep the cause in
+		// both the server log and the response.
+		s.log.Error("list observation events", "error", err, "project", filter.Project, "type", filter.Type)
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("could not list observation events: %w", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": page.Events, "count": len(page.Events), "next_cursor": page.NextCursor})

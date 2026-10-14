@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -1059,5 +1060,25 @@ func TestObservationHintsHonorsAgentContext(t *testing.T) {
 	})
 	if res.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("oversized active_skills status = %d, body = %v", res.StatusCode, body)
+	}
+}
+
+// The 500 body of the event listing is what /v1/agent/operations surfaces
+// in its error banner (kernel carries the journal body through). A bare
+// "could not list" made storage failures undiagnosable from the UI.
+type failingListStore struct{ observation.Store }
+
+func (failingListStore) ListObservationPage(context.Context, observation.Filter, string) (observation.Page, error) {
+	return observation.Page{}, errors.New("boom: storage unavailable")
+}
+
+func TestListObservationsErrorCarriesCause(t *testing.T) {
+	handler := New(failingListStore{}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	res, body := doJSON(t, handler, "GET", "/v1/observations/events?project=lighthouse", nil)
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", res.StatusCode)
+	}
+	if msg, _ := body["error"].(string); !strings.Contains(msg, "boom: storage unavailable") {
+		t.Fatalf("error body hides the storage cause: %v", body["error"])
 	}
 }

@@ -232,11 +232,15 @@ func (s *Store) ListRoutedInboundMessages(ctx context.Context, senderUserID stri
 // expired (docs/inbound-messages.md §6.1: the clarification timeout ends the
 // intake politely). Called lazily from the list endpoint.
 func (s *Store) ExpireStaleInboundMessages(ctx context.Context, ttl time.Duration) error {
+	// make_interval(secs => $4), not $4::interval: pgx has no encode plan for
+	// an int arg against the interval OID, so the cast made every sweep fail
+	// client-side ("unable to encode 172800 ... for interval") and inbox rows
+	// never expired. Same pattern as human_request stats.
 	_, err := s.pool.Exec(ctx,
 		`UPDATE workspace_inbound_message
 		   SET status = $1, updated_at = now()
-		 WHERE status IN ($2, $3) AND created_at < now() - $4::interval`,
-		InboundStatusExpired, InboundStatusReceived, InboundStatusClarifying, int(ttl.Seconds()))
+		 WHERE status IN ($2, $3) AND created_at < now() - make_interval(secs => $4)`,
+		InboundStatusExpired, InboundStatusReceived, InboundStatusClarifying, ttl.Seconds())
 	return err
 }
 
