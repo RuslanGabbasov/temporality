@@ -20,6 +20,7 @@ import AppModal from './Modal'
 import ProjectRequired from './ProjectRequired'
 import { useI18n, pluralT } from './i18n'
 import { pseudoToolLabel, formatDuration } from './eventSummary'
+import { randomUUID } from './uuid'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -261,7 +262,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
   const createConversation = () => {
     const conv: Conversation = {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       title: t('new.conversation') ?? 'New conversation',
       messages: [],
       agentId: newChatAgentId,
@@ -289,7 +290,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     // Create a new conversation with messages up to (and including) the clicked message
     const branchMessages = conv.messages.slice(0, messageIndex + 1)
     const branch: Conversation = {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       title: conv.title + ' (branch)',
       messages: branchMessages,
       agentId: conv.agentId,
