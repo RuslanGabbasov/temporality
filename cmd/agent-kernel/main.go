@@ -1292,7 +1292,7 @@ func main() {
 			}
 		}
 		writeJSON(w, 200, map[string]any{
-			"needs_setup":           len(projects) == 0,
+			"needs_setup":           !hasUserProjects(projects),
 			"auth_enabled":          gate.Enabled(),
 			"master_key_configured": secretMasterKey != nil,
 			"sandbox":               sandboxStatus,

@@ -37,6 +37,20 @@ const IntakeProjectID = "intake"
 // IntakeAgentID is the create-if-absent system agent for intake runs.
 const IntakeAgentID = "intake"
 
+// hasUserProjects reports whether the installation has at least one
+// user-created project. bootstrapIntake creates the system "intake" project
+// on every fresh start, so its presence must not count as "already set up" —
+// otherwise the first-run onboarding wizard never shows on a clean install
+// (admins see system projects, docs/inbound-messages.md §4.2).
+func hasUserProjects(projects []workspace.Project) bool {
+	for _, p := range projects {
+		if p.ID != IntakeProjectID {
+			return true
+		}
+	}
+	return false
+}
+
 // inboundExpiryTTL bounds how long a message may sit in received/clarifying
 // before the lazy sweep expires it (docs/inbound-messages.md §6.1): longer
 // than any reasonable clarification dialog, shorter than forever.

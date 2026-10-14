@@ -25,6 +25,20 @@ func TestAmendmentPromptComposition(t *testing.T) {
 	}
 }
 
+// TestHasUserProjects: the system intake project is always present
+// (bootstrapIntake), so onboarding must key off user projects only.
+func TestHasUserProjects(t *testing.T) {
+	if hasUserProjects(nil) {
+		t.Fatal("empty list must not count as set up")
+	}
+	if hasUserProjects([]workspace.Project{{ID: IntakeProjectID, Name: "Intake (system)"}}) {
+		t.Fatal("intake-only install must still need setup")
+	}
+	if !hasUserProjects([]workspace.Project{{ID: IntakeProjectID}, {ID: "p1", Name: "Первый проект"}}) {
+		t.Fatal("a user project means setup is done")
+	}
+}
+
 // TestAmendmentPromptFailedRun: a failed prior run surfaces its error as the
 // outcome instead of an empty section.
 func TestAmendmentPromptFailedRun(t *testing.T) {

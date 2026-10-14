@@ -20,7 +20,7 @@ import { TOKEN_STORAGE_KEY, authToken, authHeaders } from './api'
 import Onboarding from './Onboarding'
 import { LOCALES, useI18n, useT, type Locale } from './i18n'
 import { useTheme } from './theme'
-import { whoami, login as apiLogin, type Whoami } from './kernelApi'
+import { whoami, login as apiLogin, INTAKE_PROJECT_ID, type Whoami } from './kernelApi'
 import ChannelsDialog from './ChannelsDialog'
 import AppModal from './Modal'
 import { workspaceApi, type OrgUnit } from './workspaceApi'
@@ -210,9 +210,11 @@ export default function Layout({ children, activePage }: LayoutProps) {
   // Pending approvals badge (for Runs tab)
   const [pendingApprovals, setPendingApprovals] = useState(0)
   // Onboarding mode: projects finished loading and none exist — the wizard
-  // owns the screen, so navigation and the project selector stay hidden.
+  // owns the screen, so navigation and the project selector stay hidden. The
+  // system intake project is bootstrapped on every install and must not count
+  // as a user project here, or a fresh install would skip the wizard.
   const [projectsLoaded, setProjectsLoaded] = useState(false)
-  const onboarding = projectsLoaded && projects.length === 0
+  const onboarding = projectsLoaded && !projects.some((p) => p.id !== INTAKE_PROJECT_ID)
 
   useEffect(() => {
     if (!authToken()) return

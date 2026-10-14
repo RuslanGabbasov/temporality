@@ -3,6 +3,7 @@ import { Button, InlineNotification, Tag } from '@carbon/react'
 import { Renew } from '@carbon/icons-react'
 import { workspaceApi, type InboundMessage } from './workspaceApi'
 import { useT, useI18n } from './i18n'
+import { INTAKE_PROJECT_ID } from './kernelApi'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -125,8 +126,8 @@ export default function InboundMessages() {
               )}
               {row.intake_run_id && (
                 <a
-                  href={`/agents?project=intake&run=${encodeURIComponent(row.intake_run_id)}`}
-                  onClick={(e) => { e.preventDefault(); openRun('intake', row.intake_run_id!) }}
+                  href={`/agents?project=${INTAKE_PROJECT_ID}&run=${encodeURIComponent(row.intake_run_id)}`}
+                  onClick={(e) => { e.preventDefault(); openRun(INTAKE_PROJECT_ID, row.intake_run_id!) }}
                   style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}
                 >
                   intake →

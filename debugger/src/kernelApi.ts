@@ -105,6 +105,11 @@ export function whoami(): Promise<Whoami> {
 
 // First-run bootstrap status (docs/ROADMAP.md — onboarding): tells the wizard
 // which pieces (admin user, provider, sandbox image) are still missing.
+// INTAKE_PROJECT_ID mirrors the kernel-side system project (cmd/agent-kernel
+// intake.go): it exists on every install, so UI "is this a fresh install"
+// checks must ignore it.
+export const INTAKE_PROJECT_ID = 'intake'
+
 export interface SetupStatus {
   needs_setup: boolean
   auth_enabled: boolean
