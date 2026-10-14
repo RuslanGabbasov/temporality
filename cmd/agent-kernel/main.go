@@ -5484,6 +5484,11 @@ func main() {
 	RegisterQualityRoutes(mux, gate, ws, events, visibleUnits)
 	// LLM-judge configuration and calibration (specs/quality-loop.md §6).
 	RegisterJudgeRoutes(mux, gate, ws, activities, events, visibleUnits, log)
+	// Scheduled quality runs (docs/agent-quality-loop.md §8.1): the cadence is
+	// an operator setting the loop re-reads every minute, so UI changes apply
+	// without a restart. Anchored on the newest scheduled run row.
+	registerQualityScheduleRoutes(mux, gate, ws, events)
+	go runQualityScheduleJob(ctx, ws, activities, log)
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
 	// Golden eval-case candidates (specs/quality-loop.md §4): review
 	// endpoints, candidate events and the harvesting/reaping background job.

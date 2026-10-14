@@ -166,6 +166,25 @@ export interface AgentEvaluationCaseResult {
   unexpected?: string[]
 }
 
+// Installation-wide judge resolution (GET/PUT /v1/workspace/evaluation-judge):
+// configured=false means the judge is off; source says which knob is in
+// effect — "setting" (UI) or "env".
+export interface JudgeConfig {
+  model: string
+  provider_id?: string
+  configured: boolean
+  source?: string
+}
+
+// Scheduled quality-run cadence (GET/PUT /v1/workspace/quality-schedule):
+// interval_hours=0 disables; next_run_at is the approximate fire time.
+export interface QualitySchedule {
+  interval_hours: number
+  enabled: boolean
+  last_run_at?: string
+  next_run_at?: string
+}
+
 export interface AgentEvaluationRun {
   id: number
   agent_id: string
@@ -686,6 +705,16 @@ export const workspaceApi = {
     request<{ runs: AgentEvaluationRun[] }>(`/v1/workspace/agents/${id}/evaluations`),
   listAgentProposals: (id: string) =>
     request<{ proposals: AgentProposal[] }>(`/v1/workspace/agents/${id}/proposals`),
+  // Installation-level quality settings (docs/agent-quality-loop.md §15):
+  // the judge model and the scheduled re-run cadence, owned by the UI.
+  getJudgeConfig: () =>
+    request<JudgeConfig>('/v1/workspace/evaluation-judge'),
+  updateJudgeConfig: (model: string) =>
+    request<JudgeConfig>('/v1/workspace/evaluation-judge', { method: 'PUT', body: JSON.stringify({ model }) }),
+  getQualitySchedule: () =>
+    request<QualitySchedule>('/v1/workspace/quality-schedule'),
+  updateQualitySchedule: (intervalHours: number) =>
+    request<QualitySchedule>('/v1/workspace/quality-schedule', { method: 'PUT', body: JSON.stringify({ interval_hours: intervalHours }) }),
   createAgentProposal: (id: string, data: { problem: string; change: string; effect?: string; description?: string; definition?: { constraints?: string[]; completion?: string[] }; evidence?: string[] }) =>
     request<AgentProposal>(`/v1/workspace/agents/${id}/proposals`, { method: 'POST', body: JSON.stringify(data) }),
   applyAgentProposal: (id: string, proposalId: number) =>

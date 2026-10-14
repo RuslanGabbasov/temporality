@@ -97,32 +97,64 @@ func NormalizeEvalCheck(check string) string {
 }
 
 // JudgeConfig is the installation-wide judge model resolution (§6.2): the
-// EVAL_JUDGE_MODEL value validated against the models of the configured
-// providers. Empty or unknown ⇒ judge mode is off (configured=false).
+// operator setting (UI) or EVAL_JUDGE_MODEL value validated against the
+// models of the configured providers. Empty or unknown ⇒ judge mode is off
+// (configured=false). Source says which knob is in effect — "setting" (UI),
+// "env" or "" (off) — so the interface can label what it edits.
 type JudgeConfig struct {
 	Model      string `json:"model"`
 	ProviderID string `json:"provider_id,omitempty"`
 	Configured bool   `json:"configured"`
+	Source     string `json:"source,omitempty"`
 }
 
-// JudgeConfig resolves EVAL_JUDGE_MODEL against the configured providers.
-func (s *Store) JudgeConfig(ctx context.Context) (JudgeConfig, error) {
-	model := strings.TrimSpace(os.Getenv(EnvJudgeModel))
-	if model == "" {
-		return JudgeConfig{}, nil
-	}
+// ProviderOfModel finds the provider that lists the given model. Shared by
+// judge resolution and the settings endpoint that validates an operator's
+// choice before saving it.
+func (s *Store) ProviderOfModel(ctx context.Context, model string) (string, bool, error) {
 	providers, err := s.ListProviders(ctx)
 	if err != nil {
-		return JudgeConfig{}, err
+		return "", false, err
 	}
 	for _, p := range providers {
 		for _, candidate := range p.Models {
 			if strings.TrimSpace(candidate) == model {
-				return JudgeConfig{Model: model, ProviderID: p.ID, Configured: true}, nil
+				return p.ID, true, nil
 			}
 		}
 	}
-	return JudgeConfig{Model: model, Configured: false}, nil
+	return "", false, nil
+}
+
+// JudgeConfig resolves the judge model: the UI setting first, then
+// EVAL_JUDGE_MODEL. A stored row wins even when empty — an operator who
+// turned the judge off in the interface must not be re-enabled by the
+// environment.
+func (s *Store) JudgeConfig(ctx context.Context) (JudgeConfig, error) {
+	model := ""
+	source := ""
+	if value, found, err := s.getSettingFound(ctx, SettingJudgeModel); err != nil {
+		return JudgeConfig{}, err
+	} else if found {
+		model = strings.TrimSpace(value)
+		source = "setting"
+	} else {
+		model = strings.TrimSpace(os.Getenv(EnvJudgeModel))
+		if model != "" {
+			source = "env"
+		}
+	}
+	if model == "" {
+		return JudgeConfig{}, nil
+	}
+	providerID, ok, err := s.ProviderOfModel(ctx, model)
+	if err != nil {
+		return JudgeConfig{}, err
+	}
+	if !ok {
+		return JudgeConfig{Model: model, Source: source}, nil
+	}
+	return JudgeConfig{Model: model, ProviderID: providerID, Configured: true, Source: source}, nil
 }
 
 // EvalThresholds are the effective regression gates of a run (§6.5):

@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/temporality-project/temporality/controlplane"
@@ -35,6 +38,14 @@ type judgeStore interface {
 	SaveJudgeCalibration(ctx context.Context, calibration *workspace.JudgeCalibration) error
 }
 
+// judgeSettingsStore is the writable part the PUT needs; only the real
+// *workspace.Store satisfies it (fakes that do not persist settings exist in
+// judge tests and simply do not register the PUT route).
+type judgeSettingsStore interface {
+	SetSetting(ctx context.Context, key, value string) error
+	ProviderOfModel(ctx context.Context, model string) (string, bool, error)
+}
+
 // judgeActivities is the kernel surface calibration needs; *agent.Activities
 // satisfies it and tests provide fakes.
 type judgeActivities interface {
@@ -56,6 +67,46 @@ func RegisterJudgeRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws judgeSt
 		}
 		writeJSON(w, 200, config)
 	})
+
+	// The judge model as an installation setting (operator-only): an empty
+	// model turns the judge off and must override a non-empty env default —
+	// an operator who disabled the judge in the UI owns that choice. A
+	// non-empty model must resolve to a configured provider's catalog.
+	if settings, ok := ws.(judgeSettingsStore); ok {
+		mux.HandleFunc("PUT /v1/workspace/evaluation-judge", func(w http.ResponseWriter, r *http.Request) {
+			if !gate.Allow(w, r, controlplane.RoleOperator) {
+				return
+			}
+			var req struct {
+				Model string `json:"model"`
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+				writeError(w, 400, err)
+				return
+			}
+			model := strings.TrimSpace(req.Model)
+			if model != "" {
+				if _, ok, err := settings.ProviderOfModel(r.Context(), model); err != nil {
+					writeError(w, 500, err)
+					return
+				} else if !ok {
+					writeError(w, 422, fmt.Errorf("model %q is not listed by any configured provider", model))
+					return
+				}
+			}
+			if err := settings.SetSetting(r.Context(), workspace.SettingJudgeModel, model); err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			config, err := ws.JudgeConfig(r.Context())
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			emitJudgeConfigured(r.Context(), events, config, requestSubject(r))
+			writeJSON(w, 200, config)
+		})
+	}
 
 	// §6.4 calibration: judge the fixed set of historically labelled answers
 	// and record agreement. Below the 0.7 floor the judge is stored degraded —
@@ -146,6 +197,34 @@ func RegisterJudgeRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws judgeSt
 			"cases_skipped":      outcome.CasesSkipped,
 		})
 	})
+}
+
+// emitJudgeConfigured records the judge configuration change (§9): who
+// flipped the installation-level knob and to what. Best-effort — the stored
+// setting row is the source of truth.
+func emitJudgeConfigured(ctx context.Context, events judgeOutbox, config workspace.JudgeConfig, subject string) {
+	if events == nil {
+		return
+	}
+	item := observation.Event{
+		Schema:     observation.Schema,
+		EventID:    "judge-configured/" + time.Now().UTC().Format("20060102T150405.000000000"),
+		OccurredAt: time.Now().UTC(),
+		Source:     observation.Source{ID: "workspace", Integration: "agent-kernel", Version: "1"},
+		Context:    observation.Context{Actor: observation.Actor{ID: subject, Type: "user"}},
+		Type:       "agent.evaluation.judge.configured",
+		Data: map[string]any{
+			"model":      config.Model,
+			"configured": config.Configured,
+			"source":     config.Source,
+		},
+	}
+	if err := item.Validate(); err != nil {
+		return
+	}
+	if err := events.Enqueue(ctx, item); err != nil {
+		slog.Warn("emit judge configured event", "error", err)
+	}
 }
 
 // emitJudgeCalibrated records agent.evaluation.judge.calibrated (§9) with the

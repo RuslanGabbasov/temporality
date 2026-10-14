@@ -56,6 +56,10 @@ type EvalRunMeta struct {
 // shared with the apply endpoint that pre-creates the run row.
 const EvalTriggerGate = "gate"
 
+// EvalTriggerSchedule is the trigger string of scheduled runs
+// (docs/agent-quality-loop.md §15): the periodic re-run of suites.
+const EvalTriggerSchedule = "schedule"
+
 // RunAgentEvaluation loads the suite, runs every case against the requested
 // definition version (0 = current) and records the run. Returns a compact
 // summary for the caller (HTTP or a future agent tool).

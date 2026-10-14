@@ -39,6 +39,8 @@ import {
   type MCPToolInfo,
   type Secret,
   type Run,
+  type JudgeConfig,
+  type QualitySchedule,
 } from './workspaceApi'
 import { detectRegressions, latestEvalByVersion, passRate, runsByVersion as aggregateRunsByVersion } from './agentEvolution'
 import { useT } from './i18n'
@@ -113,6 +115,16 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [mcpTools, setMcpTools] = useState<MCPServerTools[]>([])
   const [secretsList, setSecretsList] = useState<Secret[]>([])
   const [builtinTools, setBuiltinTools] = useState<MCPToolInfo[]>([])
+  // Installation-level quality settings (judge + schedule): loaded once,
+  // saved through their own endpoints. Collapsed by default — a rarely used
+  // operator surface that must not push the agent list down.
+  const [qualityOpen, setQualityOpen] = useState(false)
+  const [judgeConfig, setJudgeConfig] = useState<JudgeConfig | null>(null)
+  const [judgeDraft, setJudgeDraft] = useState('')
+  const [schedule, setSchedule] = useState<QualitySchedule | null>(null)
+  const [scheduleDraft, setScheduleDraft] = useState('')
+  const [qualityBusy, setQualityBusy] = useState(false)
+  const [qualityError, setQualityError] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -188,6 +200,40 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   }, [project])
 
   useEffect(() => { void load() }, [load])
+
+  // Quality settings are independent of the agent list: a failure here must
+  // not break the page, and the panel just shows its own error.
+  const loadQualitySettings = useCallback(async () => {
+    try {
+      const [judge, sched] = await Promise.all([
+        workspaceApi.getJudgeConfig(),
+        workspaceApi.getQualitySchedule(),
+      ])
+      setJudgeConfig(judge)
+      setJudgeDraft(judge.configured ? judge.model : '')
+      setSchedule(sched)
+      setScheduleDraft(sched.enabled ? String(sched.interval_hours) : '0')
+    } catch { /* panel shows its own empty state */ }
+  }, [])
+  useEffect(() => { void loadQualitySettings() }, [loadQualitySettings])
+
+  const saveJudge = async () => {
+    setQualityBusy(true); setQualityError('')
+    try {
+      const judge = await workspaceApi.updateJudgeConfig(judgeDraft.trim())
+      setJudgeConfig(judge)
+    } catch (e) { setQualityError(message(e)) }
+    finally { setQualityBusy(false) }
+  }
+
+  const saveSchedule = async () => {
+    setQualityBusy(true); setQualityError('')
+    try {
+      const sched = await workspaceApi.updateQualitySchedule(Number(scheduleDraft) || 0)
+      setSchedule(sched)
+    } catch (e) { setQualityError(message(e)) }
+    finally { setQualityBusy(false) }
+  }
 
   const touch = (section: SectionKey) =>
     setProvenance((prev) => (prev[section] === 'user' ? prev : { ...prev, [section]: 'user' }))
@@ -686,6 +732,53 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
           <Button kind="secondary" onClick={() => setShowTemplates(true)}>{t('agents.from_template') ?? 'From template'}</Button>
           <Button renderIcon={Add} onClick={openWizard}>{t('agents.new_agent') ?? 'New Agent'}</Button>
         </Stack>
+      </div>
+
+      {/* Installation-level quality settings: judge model and scheduled
+          re-runs. Collapsed by default — an operator surface, not part of the
+          everyday agent browsing flow. */}
+      <div style={{ marginBottom: '1rem', borderBottom: '1px solid var(--tm-border)' }}>
+        <Button size="sm" kind="ghost" onClick={() => setQualityOpen(!qualityOpen)} style={{ padding: 0 }}>
+          {qualityOpen ? (t('quality.hide_settings') ?? 'Hide quality settings') : (t('quality.show_settings') ?? 'Quality settings')}
+        </Button>
+        {qualityOpen && (
+          <div style={{ padding: '0.75rem 0' }}>
+            {qualityError && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={qualityError} onClose={() => setQualityError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
+            <Stack orientation="horizontal" gap={4}>
+              <div style={{ minWidth: 260 }}>
+                <Select id="quality-judge-model" labelText={t('quality.judge_model') ?? 'Judge model'} value={judgeDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setJudgeDraft(e.target.value)}>
+                  <SelectItem value="" text={t('quality.judge_off') ?? '— off —'} />
+                  {providers.flatMap((p) => (p.models ?? []).map((m) => (
+                    <SelectItem key={`${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
+                  )))}
+                </Select>
+                {judgeConfig && (
+                  <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>
+                    {judgeConfig.configured
+                      ? (t('quality.judge_status_on', { source: judgeConfig.source === 'setting' ? (t('quality.source_setting') ?? 'UI') : (t('quality.source_env') ?? 'env') }) ?? `active (${judgeConfig.source})`)
+                      : (t('quality.judge_status_off') ?? 'judge is off')}
+                  </p>
+                )}
+                <Button size="sm" disabled={qualityBusy} onClick={() => void saveJudge()} style={{ marginTop: '0.5rem' }}>{t('action.save') ?? 'Save'}</Button>
+              </div>
+              <div style={{ minWidth: 220 }}>
+                <Select id="quality-schedule" labelText={t('quality.schedule_interval') ?? 'Re-run suites every'} value={scheduleDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setScheduleDraft(e.target.value)}>
+                  <SelectItem value="0" text={t('quality.schedule_off') ?? '— off —'} />
+                  <SelectItem value="6" text={t('quality.schedule_6h') ?? '6 hours'} />
+                  <SelectItem value="12" text={t('quality.schedule_12h') ?? '12 hours'} />
+                  <SelectItem value="24" text={t('quality.schedule_24h') ?? '24 hours'} />
+                  <SelectItem value="168" text={t('quality.schedule_7d') ?? '7 days'} />
+                </Select>
+                {schedule?.enabled && schedule.next_run_at && (
+                  <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>
+                    {t('quality.next_run') ?? 'next run'}: {new Date(schedule.next_run_at).toLocaleString()}
+                  </p>
+                )}
+                <Button size="sm" disabled={qualityBusy} onClick={() => void saveSchedule()} style={{ marginTop: '0.5rem' }}>{t('action.save') ?? 'Save'}</Button>
+              </div>
+            </Stack>
+          </div>
+        )}
       </div>
 
       {/* Master-detail: agent list on the left, full profile with tabs on the right */}
