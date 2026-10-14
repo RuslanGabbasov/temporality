@@ -56,16 +56,6 @@ func main() {
 	}
 	databaseURL := requiredEnv("DATABASE_URL")
 	observationURL := env("TEMPORALITY_URL", "http://localhost:8080")
-	events, err := outbox.Open(ctx, databaseURL, observationURL)
-	if err != nil {
-		log.Error("open kernel outbox", "error", err)
-		os.Exit(1)
-	}
-	defer events.Close()
-	if err = events.Migrate(ctx, "migrations/000019_kernel_event_outbox.up.sql"); err != nil {
-		log.Error("migrate kernel outbox", "error", err)
-		os.Exit(1)
-	}
 	quotas, err := quota.Open(ctx, databaseURL, os.Getenv("KERNEL_RUN_QUOTAS"))
 	if err != nil {
 		log.Error("open run quotas", "error", err)
@@ -84,7 +74,6 @@ func main() {
 		log.Error("parse model prices", "error", err)
 		os.Exit(1)
 	}
-	costAPI := cost.NewCostAPI(costPrices, observationURL, os.Getenv("TEMPORALITY_API_TOKEN"))
 	if len(costPrices.Prices()) > 0 {
 		log.Info("model cost accounting enabled", "models", len(costPrices.Prices()))
 	}
@@ -275,6 +264,40 @@ func main() {
 	// the template gallery. Cleanup removes agents left by the earlier
 	// auto-seeding model, so no builtin is forced on an existing workspace.
 	cleanupSeededBuiltinAgents(ctx, log, ws)
+	// Kernel→journal auth must be resolved before every consumer reads
+	// TEMPORALITY_API_TOKEN: the outbox publisher, the cost API and the
+	// activities' direct journal calls. On a fresh install the env is empty and
+	// the journal's gate switches on with the first workspace user — without
+	// this, every kernel journal call 401s: runs publish nothing (invisible in
+	// the UI) and /v1/agent/operations 500s on every poll. The probe keeps open
+	// dev stands open (see resolveJournalToken).
+	journalToken, journalTokenSource, err := resolveJournalToken(ctx, &http.Client{Timeout: 5 * time.Second}, observationURL, strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), func() (string, error) {
+		return ws.EnsureKernelServiceToken(ctx)
+	})
+	if err != nil {
+		log.Error("kernel journal auth: provisioning the service principal failed", "error", err)
+		os.Exit(1)
+	}
+	switch journalTokenSource {
+	case journalTokenService:
+		os.Setenv("TEMPORALITY_API_TOKEN", journalToken)
+		log.Info("kernel journal auth: TEMPORALITY_API_TOKEN is empty or rejected; using the auto-provisioned service principal", "user", workspace.KernelServiceUserName)
+	case journalTokenEnvStale:
+		if journalToken == "" {
+			log.Info("kernel journal auth: journal unreachable at boot; if it requires a token, restart the kernel once it is up")
+		}
+	}
+	events, err := outbox.Open(ctx, databaseURL, observationURL)
+	if err != nil {
+		log.Error("open kernel outbox", "error", err)
+		os.Exit(1)
+	}
+	defer events.Close()
+	if err = events.Migrate(ctx, "migrations/000019_kernel_event_outbox.up.sql"); err != nil {
+		log.Error("migrate kernel outbox", "error", err)
+		os.Exit(1)
+	}
+	costAPI := cost.NewCostAPI(costPrices, observationURL, os.Getenv("TEMPORALITY_API_TOKEN"))
 	activities, err := agent.NewActivities(events)
 	if err != nil {
 		log.Error("configure activities", "error", err)

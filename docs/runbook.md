@@ -117,7 +117,12 @@ docker compose up -d
 
 - `JOURNAL_AUTH_TOKENS` — токены journal API (reader/writer/operator)
 - `KERNEL_AUTH_TOKENS` — токены kernel API (reader/writer/operator)
-- `TEMPORALITY_API_TOKEN` — токен kernel → journal (writer)
+- `TEMPORALITY_API_TOKEN` — токен kernel → journal (writer); может быть не
+  задан: тогда ядро на старте автоматически провиженит сервисный принципал
+  `temporality-kernel` в общей БД (writer, все проекты) и использует его токен.
+  Деактивация этого пользователя в UI — осознанное действие администратора:
+  ядро упадёт на старте с понятной ошибкой, пока его не реактивируют или не
+  зададут `TEMPORALITY_API_TOKEN` вручную.
 
 ### Добавление нового токена (без простоя)
 

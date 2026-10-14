@@ -128,8 +128,17 @@ comma-separated list. Tokens: `openssl rand -hex 24`.
 # .env
 JOURNAL_AUTH_TOKENS=token1:alice:reader:*;token2:bob:writer:lighthouse
 KERNEL_AUTH_TOKENS=token1:alice:reader:*;token2:bob:writer:lighthouse
-TEMPORALITY_API_TOKEN=token2   # kernel → journal
+TEMPORALITY_API_TOKEN=token2   # kernel → journal (optional, see below)
 ```
+
+When `TEMPORALITY_API_TOKEN` is not set (or the journal rejects it), the
+kernel probes the journal at boot and auto-provisions a `temporality-kernel`
+service principal (writer, all projects) in the shared database — the journal
+picks it up on its next token reload. This keeps a clean install working with
+zero manual tokens: after onboarding the journal switches auth on, and the
+kernel already holds an accepted token. A deliberately open journal (no
+users, no static tokens) stays open — provisioning only happens after an
+explicit 401/403.
 
 | Layer | reader | writer | operator | admin |
 |---|---|---|---|---|

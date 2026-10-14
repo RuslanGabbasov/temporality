@@ -157,8 +157,17 @@ Bearer-токены с RBAC и областью проектов. Пустые �
 # .env
 JOURNAL_AUTH_TOKENS=token1:alice:reader:*;token2:bob:writer:lighthouse
 KERNEL_AUTH_TOKENS=token1:alice:reader:*;token2:bob:writer:lighthouse
-TEMPORALITY_API_TOKEN=token2   # ядро → journal
+TEMPORALITY_API_TOKEN=token2   # ядро → journal (необязателен, см. ниже)
 ```
+
+Если `TEMPORALITY_API_TOKEN` не задан (или отклоняется журналом), ядро на
+старте пробует журнал и автоматически провиженит сервисный принципал
+`temporality-kernel` (writer, все проекты) в общей БД — журнал подхватывает
+его при очередной перезагрузке токенов. Это закрывает чистую установку без
+ручных токенов: после онбординга журнал включает авторизацию, а ядро уже
+имеет допустимый токен. Открытый журнал (без пользователей и статических
+токенов) остаётся открытым — провижининг срабатывает только после явного
+401/403.
 
 | Слой | reader | writer | operator | admin |
 |---|---|---|---|---|
