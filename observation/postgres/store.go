@@ -9,6 +9,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -178,11 +179,47 @@ func scanObservation(row observationScanner) (observation.Event, error) {
 	if err != nil {
 		return event, err
 	}
-	if err = json.Unmarshal(data, &event.Data); err != nil {
-		return event, err
-	}
-	if err = json.Unmarshal(evidence, &event.Evidence); err != nil {
-		return event, err
-	}
+	event.Data = decodeJSONObject(event.Source.ID, event.EventID, data)
+	event.Evidence = decodeEvidence(event.Source.ID, event.EventID, evidence)
 	return event, nil
+}
+
+// decodeJSONObject parses the jsonb data column, which must hold a JSON
+// object. The write path only ever produces objects, but jsonb itself allows
+// scalars and arrays, and one out-of-band row (direct DB write, ancient
+// writer) holding e.g. an array used to fail every listing that paged
+// through it — /v1/agent/operations answered HTTP 500 forever. Degrade the
+// row to a marker instead of failing the page; the journal stays append-only,
+// so the row itself cannot be repaired in place.
+func decodeJSONObject(sourceID, eventID string, data []byte) map[string]any {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(trimmed, &parsed); err != nil {
+		slog.Warn("observation event data is not a JSON object; degrading to marker", "source_id", sourceID, "event_id", eventID, "error", err)
+		const keep = 512
+		snippet := string(trimmed)
+		if len(snippet) > keep {
+			snippet = snippet[:keep] + "…"
+		}
+		return map[string]any{"_unparsed_data": snippet}
+	}
+	return parsed
+}
+
+// decodeEvidence parses the jsonb evidence column the same tolerant way: a
+// malformed row loses its evidence but never fails the listing.
+func decodeEvidence(sourceID, eventID string, evidence []byte) []observation.Evidence {
+	trimmed := bytes.TrimSpace(evidence)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	var parsed []observation.Evidence
+	if err := json.Unmarshal(trimmed, &parsed); err != nil {
+		slog.Warn("observation event evidence is not a JSON array; dropping", "source_id", sourceID, "event_id", eventID, "error", err)
+		return nil
+	}
+	return parsed
 }

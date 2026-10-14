@@ -7,7 +7,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/temporality-project/temporality/observation"
@@ -240,8 +242,12 @@ func (a *Activities) toolEvents(ctx context.Context, project, eventType string) 
 			return nil, err
 		}
 		if response.StatusCode != http.StatusOK {
+			// Carry the journal's own error body (e.g. "could not list
+			// observation events") — a bare status code is not diagnosable
+			// from the operations panel's error banner.
+			body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
 			response.Body.Close()
-			return nil, fmt.Errorf("Temporality event listing returned HTTP %d", response.StatusCode)
+			return nil, fmt.Errorf("journal event listing (type=%s project=%s) returned HTTP %d: %s", eventType, project, response.StatusCode, strings.TrimSpace(string(body)))
 		}
 		var page struct {
 			Events     []observation.Event `json:"events"`
