@@ -227,6 +227,9 @@ surfaced in the trace and the chat as a `model.attempt` marker (reason
 read-only root, dropped capabilities, resource limits, bounded output.
 A persistent per-project toolchain cache is mounted at `/cache`
 (GOCACHE/GOMODCACHE) — it survives `git clean` and workspace re-creation.
+Out of the box the root defaults to `/tmp` (zero setup, but volatile
+across host reboots — set `TEMPORALITY_SANDBOX_ROOT` in `.env` for
+persistence, see `.env.example`).
 
 Native file tools `write_file` / `read_file` / `edit_file` run on the kernel
 side directly over the workspace: no shell, no command argument limits,

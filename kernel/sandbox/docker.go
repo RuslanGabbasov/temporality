@@ -73,11 +73,15 @@ type Docker struct {
 func NewFromEnv() (*Docker, error) {
 	image := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_IMAGE"))
 	root := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_ROOT"))
-	if image == "" && root == "" {
+	if image == "" {
+		// A configured root without an image is legitimate: file uploads,
+		// inbound channels and workspace files read KERNEL_SANDBOX_ROOT directly
+		// and stay functional; only the run_command runner stays inert until an
+		// image is configured (env or first-run onboarding).
 		return nil, nil
 	}
-	if image == "" || root == "" {
-		return nil, errors.New("KERNEL_SANDBOX_IMAGE and KERNEL_SANDBOX_ROOT must be configured together")
+	if root == "" {
+		return nil, errors.New("KERNEL_SANDBOX_IMAGE requires KERNEL_SANDBOX_ROOT")
 	}
 	if err := validateByteSize(strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_SCRATCH_SIZE"))); err != nil {
 		return nil, err

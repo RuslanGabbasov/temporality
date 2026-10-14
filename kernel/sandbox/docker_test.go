@@ -9,6 +9,30 @@ import (
 	"time"
 )
 
+func TestNewFromEnvRootWithoutImageIsNotARunner(t *testing.T) {
+	// The compose default points KERNEL_SANDBOX_ROOT at /tmp while the image
+	// stays unconfigured until onboarding: uploads, inbound channels and
+	// workspace files read the root directly, so this must not be an error —
+	// only the run_command runner stays inert.
+	t.Setenv("KERNEL_SANDBOX_IMAGE", "")
+	t.Setenv("KERNEL_SANDBOX_ROOT", t.TempDir())
+	runner, err := NewFromEnv()
+	if err != nil {
+		t.Fatalf("root without image must not error: %v", err)
+	}
+	if runner != nil {
+		t.Fatalf("expected no runner without an image, got %+v", runner)
+	}
+}
+
+func TestNewFromEnvImageWithoutRootFails(t *testing.T) {
+	t.Setenv("KERNEL_SANDBOX_IMAGE", "sandbox@sha256:"+strings.Repeat("a", 64))
+	t.Setenv("KERNEL_SANDBOX_ROOT", "")
+	if _, err := NewFromEnv(); err == nil || !strings.Contains(err.Error(), "requires") {
+		t.Fatalf("image without root must fail with a requires-root error, got %v", err)
+	}
+}
+
 func TestExecuteCapturesCommandAndAlwaysRemovesContainer(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(root, "repo")
