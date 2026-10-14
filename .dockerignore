@@ -1,0 +1,15 @@
+# Allowlist: the Dockerfile COPYs exactly these paths. Everything else in the
+# checkout — the multi-gigabyte .sandbox agent workspaces, debugger/ with its
+# node_modules, .git history, bin/ — must stay out of the build context:
+# context transfer of that bulk dominated build time on slower servers.
+*
+!go.mod
+!go.sum
+!cmd
+!controlplane
+!observation
+!kernel
+!skills
+!workspace
+!examples
+!migrations

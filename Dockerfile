@@ -2,7 +2,12 @@ FROM golang:1.27-alpine AS build
 ARG KERNEL_BUILD_TAGS=""
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+# Cache mounts (BuildKit) keep downloaded modules and compiled package
+# artifacts across builds: without them every source change recompiles the
+# whole dependency tree from scratch — minutes on a laptop, 10+ on a server.
+# sharing=locked guards the parallel journal/agent-kernel target builds.
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    go mod download
 COPY cmd ./cmd
 COPY controlplane ./controlplane
 COPY observation ./observation
@@ -10,7 +15,9 @@ COPY kernel ./kernel
 COPY skills ./skills
 COPY workspace ./workspace
 COPY examples ./examples
-RUN CGO_ENABLED=0 go build -o /out/temporality-journal ./cmd/temporality-journal \
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    CGO_ENABLED=0 go build -o /out/temporality-journal ./cmd/temporality-journal \
  && CGO_ENABLED=0 go build -tags "$KERNEL_BUILD_TAGS" -o /out/temporality-agent-kernel ./cmd/agent-kernel \
  && CGO_ENABLED=0 go build -o /out/test-mcp ./examples/test-mcp
 
