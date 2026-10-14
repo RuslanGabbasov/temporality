@@ -169,7 +169,7 @@ func newEvalGateServer(t *testing.T, store *fakeEvalGateStore, runner *fakeEvalG
 		}
 	}
 	mux := http.NewServeMux()
-	RegisterM3Routes(mux, gate, store, runner, outbox, apply,
+	RegisterEvalGateRoutes(mux, gate, store, runner, outbox, apply,
 		func(*http.Request) []string { return nil }, time.Now, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return httptest.NewServer(gate.Authenticate(mux))
 }

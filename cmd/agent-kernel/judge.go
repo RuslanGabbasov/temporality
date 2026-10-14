@@ -41,8 +41,8 @@ type judgeActivities interface {
 	CalibrateJudge(ctx context.Context, cases []agent.JudgeCalibrationCase) (agent.JudgeCalibrationOutcome, error)
 }
 
-// RegisterM4Routes mounts the judge configuration and calibration endpoints.
-func RegisterM4Routes(mux *http.ServeMux, gate *controlplane.Gate, ws judgeStore, activities judgeActivities, events judgeOutbox, visibleUnits func(*http.Request) []string, log *slog.Logger) {
+// RegisterJudgeRoutes mounts the judge configuration and calibration endpoints.
+func RegisterJudgeRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws judgeStore, activities judgeActivities, events judgeOutbox, visibleUnits func(*http.Request) []string, log *slog.Logger) {
 	// §6.2: the judge model resolution the kernel evaluator reads before
 	// scoring judge cases; configured=false turns the judge mode off.
 	mux.HandleFunc("GET /v1/workspace/evaluation-judge", func(w http.ResponseWriter, r *http.Request) {

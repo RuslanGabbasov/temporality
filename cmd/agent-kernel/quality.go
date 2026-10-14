@@ -29,12 +29,12 @@ type qualityOutbox interface {
 	Enqueue(context.Context, observation.Event) error
 }
 
-// RegisterM5Routes mounts the quality dashboard of specs/quality-loop.md §7:
+// RegisterQualityRoutes mounts the quality dashboard of specs/quality-loop.md §7:
 // per-version quality metrics and the structural + compiled-prompt diff of
 // two definition snapshots. RBAC mirrors the evaluation endpoints (§10.3):
 // the /quality aggregate is writer/owner territory, the diff reads at reader
 // like GET /versions and GET /evaluations.
-func RegisterM5Routes(mux *http.ServeMux, gate *controlplane.Gate, ws qualityStore, events qualityOutbox, visibleUnits func(*http.Request) []string) {
+func RegisterQualityRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws qualityStore, events qualityOutbox, visibleUnits func(*http.Request) []string) {
 	// GET /quality (§7.1, §8.4): runs, confirmed/corrected verdict outcomes,
 	// best and last suite evaluation, goldens and time-to-verified-improvement
 	// per definition version. A version without data reports has_data=false

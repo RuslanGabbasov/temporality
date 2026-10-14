@@ -111,10 +111,10 @@ func parseEvalGateRequest(w http.ResponseWriter, r *http.Request) (evalGateReque
 	return request, true
 }
 
-// RegisterM3Routes mounts the gated apply endpoint over the interfaces above;
+// RegisterEvalGateRoutes mounts the gated apply endpoint over the interfaces above;
 // main wires the real store, kernel runner and apply callback, tests mount
 // this handler alone.
-func RegisterM3Routes(mux *http.ServeMux, gate *controlplane.Gate, store evalGateStore, runner evalGateRunner, events evalGateOutbox, apply evalApplyFunc, visibleUnits func(*http.Request) []string, now func() time.Time, log *slog.Logger) {
+func RegisterEvalGateRoutes(mux *http.ServeMux, gate *controlplane.Gate, store evalGateStore, runner evalGateRunner, events evalGateOutbox, apply evalApplyFunc, visibleUnits func(*http.Request) []string, now func() time.Time, log *slog.Logger) {
 	if now == nil {
 		now = time.Now
 	}

@@ -2183,7 +2183,7 @@ func main() {
 		emitAgentDefinitionEvent(r.Context(), observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), "agent.definition.proposed", a, proposal, actorFromRequest(r), nil)
 		writeJSON(w, 201, proposal)
 	})
-	// Applying is gated (specs/quality-loop.md §5, M3 — cmd/agent-kernel/
+	// Applying is gated (specs/quality-loop.md §5 — cmd/agent-kernel/
 	// m3evalgate.go): a fresh green eval run on the proposal's base version
 	// is required, red blocks unless a writer overrides with justification,
 	// no run starts one and answers 202. The cleared apply continues on the
@@ -2192,7 +2192,7 @@ func main() {
 	// propose, people apply). The bool result tells the gate handler whether
 	// the apply landed, so the gate:false path journals its skip only after
 	// a real apply (F-1).
-	RegisterM3Routes(mux, gate, ws, kernelGateRunner{activities: activities}, events,
+	RegisterEvalGateRoutes(mux, gate, ws, kernelGateRunner{activities: activities}, events,
 		func(w http.ResponseWriter, r *http.Request, a workspace.Agent, proposal workspace.AgentProposal) bool {
 			next := a
 			next.Description = proposal.Description
@@ -5431,14 +5431,14 @@ func main() {
 		writeJSON(w, 200, map[string]any{"deleted": true})
 	})
 
-	// Quality dashboard and version diffs (specs/quality-loop.md §7, M5).
-	RegisterM5Routes(mux, gate, ws, events, visibleUnits)
-	// LLM-judge configuration and calibration (specs/quality-loop.md §6, M4).
-	RegisterM4Routes(mux, gate, ws, activities, events, visibleUnits, log)
+	// Quality dashboard and version diffs (specs/quality-loop.md §7).
+	RegisterQualityRoutes(mux, gate, ws, events, visibleUnits)
+	// LLM-judge configuration and calibration (specs/quality-loop.md §6).
+	RegisterJudgeRoutes(mux, gate, ws, activities, events, visibleUnits, log)
 	registerExampleRoutes(mux, temporalClient, taskQueue, activities, gate)
-	// M2 golden eval-case candidates (specs/quality-loop.md §4): review
+	// Golden eval-case candidates (specs/quality-loop.md §4): review
 	// endpoints, candidate events and the harvesting/reaping background job.
-	RegisterM2Routes(ctx, mux, ws, gate, events, temporalClient, activities.SourceID, log)
+	RegisterEvalCandidateRoutes(ctx, mux, ws, gate, events, temporalClient, activities.SourceID, log)
 	// Intake pipeline (docs/inbound-messages.md): the system project + agent
 	// exist before the first message arrives; create-if-absent, never
 	// overwritten. The kill switch records and rejects messages without

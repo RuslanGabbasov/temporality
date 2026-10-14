@@ -59,7 +59,7 @@ func newQualityServer(t *testing.T, store qualityStore, outbox qualityOutbox, un
 	gate, err := controlplane.NewGate("readertoken:reader:reader:*\nwritertoken:writer:writer:*")
 	require.NoError(t, err)
 	mux := http.NewServeMux()
-	RegisterM5Routes(mux, gate, store, outbox, func(*http.Request) []string { return units })
+	RegisterQualityRoutes(mux, gate, store, outbox, func(*http.Request) []string { return units })
 	return httptest.NewServer(gate.Authenticate(mux))
 }
 

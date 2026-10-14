@@ -37,10 +37,10 @@ type candidateOutbox interface {
 	Enqueue(context.Context, observation.Event) error
 }
 
-// RegisterM2Routes wires M2: migration, review endpoints and the harvesting
-// job (which also refreshes terminal run rows from Temporal — see
-// refreshFinishedRuns).
-func RegisterM2Routes(ctx context.Context, mux *http.ServeMux, ws *workspace.Store, gate *controlplane.Gate, events candidateOutbox, temporalClient client.Client, sourceID string, log *slog.Logger) {
+// RegisterEvalCandidateRoutes wires the eval-case candidate migration, review
+// endpoints and the harvesting job (which also refreshes terminal run rows
+// from Temporal — see refreshFinishedRuns).
+func RegisterEvalCandidateRoutes(ctx context.Context, mux *http.ServeMux, ws *workspace.Store, gate *controlplane.Gate, events candidateOutbox, temporalClient client.Client, sourceID string, log *slog.Logger) {
 	if err := ws.Migrate(ctx, "migrations/000059_eval_case_candidates.up.sql"); err != nil {
 		log.Error("migrate workspace v59 (eval case candidates)", "error", err)
 		os.Exit(1)
@@ -53,7 +53,7 @@ func RegisterM2Routes(ctx context.Context, mux *http.ServeMux, ws *workspace.Sto
 			return
 		}
 		agentID := r.PathValue("agentID")
-		if !m2CandidateAgent(w, r, ws, agentID) {
+		if !resolveCandidateAgent(w, r, ws, agentID) {
 			return
 		}
 		candidates, err := ws.ListEvalCaseCandidates(r.Context(), agentID, r.URL.Query().Get("verdict"), 0)
@@ -77,7 +77,7 @@ func RegisterM2Routes(ctx context.Context, mux *http.ServeMux, ws *workspace.Sto
 			writeError(w, 400, errors.New("invalid candidate id"))
 			return
 		}
-		if !m2CandidateAgent(w, r, ws, agentID) {
+		if !resolveCandidateAgent(w, r, ws, agentID) {
 			return
 		}
 		candidate, suite, acceptErr := ws.AcceptEvalCaseCandidate(r.Context(), agentID, id, requestUserID(r))
@@ -111,7 +111,7 @@ func RegisterM2Routes(ctx context.Context, mux *http.ServeMux, ws *workspace.Sto
 			writeError(w, 400, errors.New("invalid candidate id"))
 			return
 		}
-		if !m2CandidateAgent(w, r, ws, agentID) {
+		if !resolveCandidateAgent(w, r, ws, agentID) {
 			return
 		}
 		candidate, rejectErr := ws.RejectEvalCaseCandidate(r.Context(), agentID, id, requestUserID(r))
@@ -131,10 +131,10 @@ func RegisterM2Routes(ctx context.Context, mux *http.ServeMux, ws *workspace.Sto
 	go runEvalCandidateJob(ctx, ws, events, temporalClient, sourceID, log)
 }
 
-// m2CandidateAgent resolves the agent behind a candidate endpoint, writing
+// resolveCandidateAgent resolves the agent behind a candidate endpoint, writing
 // the §8.2 error response itself. Org-hidden agents read as absent — the
 // same visibility rule the evaluation and proposal endpoints apply.
-func m2CandidateAgent(w http.ResponseWriter, r *http.Request, ws *workspace.Store, agentID string) bool {
+func resolveCandidateAgent(w http.ResponseWriter, r *http.Request, ws *workspace.Store, agentID string) bool {
 	a, err := ws.GetAgent(r.Context(), agentID)
 	if err != nil {
 		if errors.Is(err, workspace.ErrNotFound) {
@@ -144,16 +144,16 @@ func m2CandidateAgent(w http.ResponseWriter, r *http.Request, ws *workspace.Stor
 		writeError(w, 500, err)
 		return false
 	}
-	if !workspace.OrgVisible(a.OrgUnitID, m2VisibleUnits(r)) {
+	if !workspace.OrgVisible(a.OrgUnitID, candidateVisibleUnits(r)) {
 		writeError(w, 404, workspace.ErrNotFound)
 		return false
 	}
 	return true
 }
 
-// m2VisibleUnits is the org-chain projection main's handlers use (nil means
+// candidateVisibleUnits is the org-chain projection main's handlers use (nil means
 // unfiltered: admins, service tokens and unassigned users).
-func m2VisibleUnits(r *http.Request) []string {
+func candidateVisibleUnits(r *http.Request) []string {
 	principal, ok := controlplane.FromContext(r.Context())
 	if !ok || principal.Role >= controlplane.RoleAdmin {
 		return nil

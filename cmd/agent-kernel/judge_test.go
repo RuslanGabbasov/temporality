@@ -68,7 +68,7 @@ func newJudgeServer(t *testing.T, store *fakeJudgeStore, activities judgeActivit
 	gate, err := controlplane.NewGate("readertoken:reader:reader:*\nwritertoken:writer:writer:*")
 	require.NoError(t, err)
 	mux := http.NewServeMux()
-	RegisterM4Routes(mux, gate, store, activities, events,
+	RegisterJudgeRoutes(mux, gate, store, activities, events,
 		func(*http.Request) []string { return nil }, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return httptest.NewServer(gate.Authenticate(mux))
 }
