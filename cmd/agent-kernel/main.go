@@ -6875,9 +6875,13 @@ func workspaceDraftModel(ctx context.Context, lister providerLister, resolveKey 
 		if kErr != nil {
 			return nil, fmt.Errorf("provider %q credential: %w", p.ID, kErr)
 		}
-		config, cErr := llm.ConfigFromEnv()
+		// OptionalConfigFromEnv keeps the shared defaults (timeouts,
+		// MaxOutputTokens=16384) without requiring an env endpoint — the same
+		// contract run routing applies. A zero config here would send
+		// max_tokens=0 and 400 at the provider.
+		config, cErr := llm.OptionalConfigFromEnv()
 		if cErr != nil {
-			config = llm.Config{}
+			return nil, fmt.Errorf("provider %q model config: %w", p.ID, cErr)
 		}
 		config.BaseURL = p.BaseURL
 		config.Model = model

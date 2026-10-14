@@ -67,3 +67,33 @@ func TestWorkspaceDraftModelKeepsEnvDefaults(t *testing.T) {
 	_, err = workspaceDraftModel(context.Background(), lister, func(_ context.Context, _ string) (string, error) { return "", nil })
 	require.NoError(t, err)
 }
+
+// Regression: on installs without an env endpoint (pure onboarding) the
+// wizard must still build a config with the shared defaults. The old fallback
+// replaced ConfigFromEnv's error with a zero Config and sent max_tokens=0,
+// which providers reject with 400.
+func TestWorkspaceDraftModelWithoutEnvEndpointKeepsDefaults(t *testing.T) {
+	t.Setenv("TEMPORALITY_MODEL_BASE_URL", "")
+	t.Setenv("TEMPORALITY_MODEL_ID", "")
+	config, err := llm.OptionalConfigFromEnv()
+	require.NoError(t, err)
+	require.Equal(t, 16384, config.MaxOutputTokens)
+	require.Equal(t, 180*time.Second, config.Timeout)
+	lister := stubProviderLister{providers: []workspace.Provider{
+		{ID: "a", BaseURL: "http://a/v1", Models: []string{"am1"}},
+	}}
+	_, err = workspaceDraftModel(context.Background(), lister, func(_ context.Context, _ string) (string, error) { return "", nil })
+	require.NoError(t, err)
+}
+
+// A malformed optional env value must fail loudly instead of silently
+// degrading to a zero config (the old code swallowed the error entirely).
+func TestWorkspaceDraftModelMalformedEnvFails(t *testing.T) {
+	t.Setenv("TEMPORALITY_MODEL_TIMEOUT", "not-a-duration")
+	lister := stubProviderLister{providers: []workspace.Provider{
+		{ID: "a", BaseURL: "http://a/v1", Models: []string{"am1"}},
+	}}
+	_, err := workspaceDraftModel(context.Background(), lister, func(_ context.Context, _ string) (string, error) { return "", nil })
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `provider "a" model config`)
+}
