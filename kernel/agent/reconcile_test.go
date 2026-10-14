@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,9 +15,13 @@ import (
 
 type stubLiveness struct {
 	running map[string]bool
+	err     error
 }
 
 func (s stubLiveness) IsWorkflowRunning(_ context.Context, _, _, runID string) (bool, error) {
+	if s.err != nil {
+		return false, s.err
+	}
 	return s.running[runID], nil
 }
 
@@ -259,6 +264,47 @@ func TestUncertainOperationsCarryRunHeader(t *testing.T) {
 	require.Equal(t, "qa", operation.AgentID)
 	require.Equal(t, "run-root", operation.ParentRunID)
 	require.Equal(t, "Проверить релиз", operation.Title)
+}
+
+// A Temporal failure while checking one workflow's liveness must degrade to
+// that single operation surfacing as uncertain — the listing itself must not
+// 500 and blank the panel for every other operation.
+func TestUncertainOperationsLivenessErrorDegrades(t *testing.T) {
+	old := time.Now().Add(-time.Hour)
+	server := journalStub(t,
+		toolEvent("repo", "run-1", "op-degraded", "tool.started", old),
+		toolEvent("repo", "run-2", "op-crashed", "tool.started", old),
+	)
+	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "writer"}
+	liveness := erroringLiveness{failFor: map[string]bool{"run-1": true}, running: map[string]bool{"run-2": true}}
+
+	operations, err := activities.UncertainOperations(context.Background(), "repo", liveness)
+	require.NoError(t, err, "one liveness failure must not fail the listing")
+
+	ids := map[string]UncertainOperation{}
+	for _, operation := range operations {
+		ids[operation.OperationID] = operation
+	}
+	require.Contains(t, ids, "op-degraded")
+	require.Equal(t, "uncertain", ids["op-degraded"].State)
+	require.Equal(t, "liveness_error", ids["op-degraded"].Reason)
+	require.Contains(t, ids["op-degraded"].ErrorDetail, "temporal unavailable")
+	// The healthy sibling operation is still classified normally (old
+	// tool.started inside a running workflow → stale_in_flight).
+	require.Contains(t, ids, "op-crashed")
+	require.Equal(t, "stale_in_flight", ids["op-crashed"].Reason)
+}
+
+type erroringLiveness struct {
+	failFor map[string]bool
+	running map[string]bool
+}
+
+func (e erroringLiveness) IsWorkflowRunning(_ context.Context, _, _, runID string) (bool, error) {
+	if e.failFor[runID] {
+		return false, errors.New("temporal unavailable")
+	}
+	return e.running[runID], nil
 }
 
 func TestRecordReconciliationWritesDerivedEvent(t *testing.T) {

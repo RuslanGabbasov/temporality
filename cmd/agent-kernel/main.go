@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,6 +29,7 @@ import (
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/cost"
+	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/outbox"
 	"github.com/temporality-project/temporality/kernel/quota"
@@ -2361,7 +2363,23 @@ func main() {
 			writeError(w, 422, errors.New("description is required"))
 			return
 		}
-		draft, err := agent.BuildAgentDraft(r.Context(), activities.Model, req.Description, activities.ToolsSummary(), req.Final)
+		// The wizard runs on fresh installs configured purely through
+		// onboarding: a workspace provider exists, but the env gateway
+		// (activities.Model) is nil. Fall back to a workspace provider client —
+		// the same registry run routing uses — instead of failing with 502
+		// "model client is not configured".
+		modelClient := activities.Model
+		if modelClient == nil {
+			var err error
+			modelClient, err = workspaceDraftModel(r.Context(), ws, func(ctx context.Context, ref string) (string, error) {
+				return resolveProviderAPIKey(ctx, ws, ref, secretMasterKey)
+			})
+			if err != nil {
+				writeError(w, 502, err)
+				return
+			}
+		}
+		draft, err := agent.BuildAgentDraft(r.Context(), modelClient, req.Description, activities.ToolsSummary(), req.Final)
 		if err != nil {
 			writeError(w, 502, err)
 			return
@@ -6837,6 +6855,42 @@ var providerEnvNameRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 //
 // Resolution happens here, at the routing boundary, so plaintext keys live
 // only in memory and never in the database (docs/secrets-management.md §4).
+// workspaceDraftModel picks a model client for workspace-level LLM features
+// (the agent wizard) on installs that have no env gateway: the first
+// provider (by ID, for determinism) that lists models, first model in its
+// catalog. Mirrors the run-path routing contract — provider credentials
+// resolve at the boundary — without inventing a "default model" setting.
+func workspaceDraftModel(ctx context.Context, lister providerLister, resolveKey func(ctx context.Context, ref string) (string, error)) (*llm.Client, error) {
+	providers, err := lister.ListProviders(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list providers for the agent wizard: %w", err)
+	}
+	sort.Slice(providers, func(i, j int) bool { return providers[i].ID < providers[j].ID })
+	for _, p := range providers {
+		if len(p.Models) == 0 {
+			continue
+		}
+		model := p.Models[0]
+		apiKey, kErr := resolveKey(ctx, p.APIKeyRef)
+		if kErr != nil {
+			return nil, fmt.Errorf("provider %q credential: %w", p.ID, kErr)
+		}
+		config, cErr := llm.ConfigFromEnv()
+		if cErr != nil {
+			config = llm.Config{}
+		}
+		config.BaseURL = p.BaseURL
+		config.Model = model
+		config.APIKey = apiKey
+		return llm.New(config), nil
+	}
+	return nil, errors.New("no model configured for the agent wizard: add a provider with models (Providers page) or set TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID")
+}
+
+type providerLister interface {
+	ListProviders(ctx context.Context) ([]workspace.Provider, error)
+}
+
 func resolveProviderAPIKey(ctx context.Context, ws *workspace.Store, ref string, masterKey []byte) (string, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {

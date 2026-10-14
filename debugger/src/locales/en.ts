@@ -383,6 +383,7 @@ export const en: Record<string, string> = {
     'operations.reason.crash_window': 'Agent crashed before confirmation',
     'operations.reason.stale_in_flight': 'Operation stuck — no response',
     'operations.reason.failed_uncertain': 'Tool failed — may have side effects',
+    'operations.reason.liveness_error': 'Workflow state could not be checked — effect question stays open',
 
     // Agents
     'agents.title': 'Agents',

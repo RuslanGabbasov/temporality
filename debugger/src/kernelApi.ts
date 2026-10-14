@@ -80,6 +80,7 @@ const REASON_TEXT: Record<string, string> = {
   crash_window: 'workflow ended before the terminal event landed — the effect may or may not have executed',
   stale_in_flight: 'no terminal event while the workflow still runs — the activity appears stuck',
   failed_uncertain: 'the tool failed at the execution boundary — the effect may have landed downstream',
+  liveness_error: 'workflow state could not be checked — the effect question stays open until reconciled',
 }
 
 export function reasonText(reason: string): string {

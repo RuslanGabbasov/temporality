@@ -383,6 +383,7 @@ export const ru: Record<string, string> = {
     'operations.reason.crash_window': 'Агент упал до подтверждения',
     'operations.reason.stale_in_flight': 'Операция зависла — нет ответа',
     'operations.reason.failed_uncertain': 'Инструмент завершился ошибкой — возможны побочные эффекты',
+    'operations.reason.liveness_error': 'Не удалось проверить состояние воркфлоу — вопрос об эффекте открыт',
 
     // Agents
     'agents.title': 'Агенты',

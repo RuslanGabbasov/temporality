@@ -190,9 +190,17 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 			}
 			continue
 		}
-		running, err := liveness.IsWorkflowRunning(ctx, event.Source.ID, event.Context.Project, event.Context.Run)
-		if err != nil {
-			return nil, fmt.Errorf("check workflow %s: %w", event.Context.Run, err)
+		running, livenessErr := liveness.IsWorkflowRunning(ctx, event.Source.ID, event.Context.Project, event.Context.Run)
+		if livenessErr != nil {
+			// One Temporal hiccup must not blank the whole listing — every other
+			// operation still deserves attention. Surface this one as uncertain
+			// with the diagnostic in the reason; the operator can reconcile it
+			// (effect=unknown) once the underlying workflow state is knowable.
+			operation.State = OperationStateUncertain
+			operation.Reason = "liveness_error"
+			operation.ErrorDetail = livenessErr.Error()
+			uncertain = append(uncertain, operation)
+			continue
 		}
 		operation.State = OperationStateInFlight
 		operation.Reason = "workflow_running"
