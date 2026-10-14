@@ -2,6 +2,18 @@ export const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, 
 
 export const TOKEN_STORAGE_KEY = 'temporality_token'
 
+// The project the user worked in last: restored on load so a fresh visit
+// does not dump them back into the default (system) project.
+export const PROJECT_STORAGE_KEY = 'temporality_project'
+
+export function storedProject(): string {
+  return localStorage.getItem(PROJECT_STORAGE_KEY) ?? ''
+}
+
+export function rememberProject(project: string) {
+  if (project) localStorage.setItem(PROJECT_STORAGE_KEY, project)
+}
+
 export function authToken(): string {
   return localStorage.getItem(TOKEN_STORAGE_KEY) ?? ''
 }

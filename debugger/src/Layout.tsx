@@ -16,7 +16,7 @@ import {
 } from '@carbon/react'
 import { User, Settings, Add, Edit, TrashCan, Folder, ChevronDown } from '@carbon/icons-react'
 import { Menu } from '@carbon/icons-react'
-import { TOKEN_STORAGE_KEY, authToken, authHeaders } from './api'
+import { TOKEN_STORAGE_KEY, authToken, authHeaders, storedProject, rememberProject } from './api'
 import Onboarding from './Onboarding'
 import { LOCALES, useI18n, useT, type Locale } from './i18n'
 import { useTheme } from './theme'
@@ -167,8 +167,10 @@ function LoginFields(props: LoginFieldsProps) {
 }
 
 export default function Layout({ children, activePage }: LayoutProps) {
+  // URL param wins (deep links like /agents?project=intake&run=… from the
+  // Inbox), then the remembered choice, then the project list fallback.
   const params = new URLSearchParams(window.location.search)
-  const [project, setProject] = useState(params.get('project') ?? '')
+  const [project, setProject] = useState(params.get('project') ?? storedProject())
   const [projects, setProjects] = useState<Project[]>([])
   const [allAgents, setAllAgents] = useState<{ id: string; name: string }[]>([])
   const [showProjectPanel, setShowProjectPanel] = useState(false)
@@ -282,14 +284,39 @@ export default function Layout({ children, activePage }: LayoutProps) {
         const list: Project[] = data.projects ?? []
         setProjects(list)
         setProject((current) => {
-          if (!current || !list.some((p) => p.id === current)) return list[0]?.id ?? ''
-          return current
+          if (current && list.some((p) => p.id === current)) return current
+          // Fallback prefers a real project: intake is the system project —
+          // it has no user-facing operations, so landing there after a fresh
+          // load is noise. Only an install with nothing but intake stays on it
+          // (and then onboarding owns the screen anyway).
+          const real = list.find((p) => p.id !== INTAKE_PROJECT_ID)
+          return real?.id ?? list[0]?.id ?? ''
         })
       }
     } catch { /* ignore */ }
   }, [])
 
   useEffect(() => { void loadProjects().then(() => setProjectsLoaded(true)) }, [loadProjects])
+  // Client-side navigation (pushState + popstate, e.g. the Inbox opening an
+  // intake run) must update the project too: Layout's initializer runs once,
+  // so without this sync the deep-linked page would query the wrong project.
+  useEffect(() => {
+    const sync = () => {
+      const fromURL = new URLSearchParams(window.location.search).get('project')
+      if (fromURL) setProject((current) => (current === fromURL ? current : fromURL))
+    }
+    sync()
+    window.addEventListener('popstate', sync)
+    return () => window.removeEventListener('popstate', sync)
+  }, [])
+  // The user's explicit choice outlives the tab: picking a project once must
+  // not be undone by the next page load falling back to the list default.
+  // Deep-link syncing above deliberately does NOT persist — arriving at the
+  // system intake project via a link is navigation, not a preference.
+  const selectProject = useCallback((id: string) => {
+    setProject(id)
+    rememberProject(id)
+  }, [])
   useEffect(() => {
     void whoami().then((id) => {
       setIdentity(id)
@@ -436,7 +463,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
 
   const deleteProject = async (id: string) => {
     await fetch(`/kernel-api/v1/workspace/projects/${id}`, { method: 'DELETE', headers: { ...authHeaders() } })
-    if (project === id) setProject(projects.find((p) => p.id !== id)?.id ?? '')
+    if (project === id) selectProject(projects.find((p) => p.id !== id && p.id !== INTAKE_PROJECT_ID)?.id ?? projects.find((p) => p.id !== id)?.id ?? '')
     void loadProjects()
   }
 
@@ -528,12 +555,16 @@ export default function Layout({ children, activePage }: LayoutProps) {
                 <div style={{ padding: '0.5rem' }}>
                   <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', padding: '0.5rem 0.5rem 0.25rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t('projects.title')}</div>
                   <div style={{ display: 'grid', gap: '1px' }}>
-                    {projects.map((p) => {
+                    {/* The system intake project is hidden from the picker:
+                        it hosts the intake pipeline, not user work. Its runs
+                        stay reachable via Inbox deep links, which sync the
+                        project through the URL. */}
+                    {projects.filter((p) => p.id !== INTAKE_PROJECT_ID).map((p) => {
                       const defaultAgent = allAgents.find((a) => a.id === p.default_agent_id)
                       return (
                         <div
                           key={p.id}
-                          onClick={() => { setProject(p.id); setShowProjectPanel(false) }}
+                          onClick={() => { selectProject(p.id); setShowProjectPanel(false) }}
                           style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.5rem 0.5rem', cursor: 'pointer', background: p.id === project ? 'var(--tm-elevated)' : 'transparent', borderRadius: '4px', minWidth: 0 }}
                         >
                           <div style={{ minWidth: 0 }}>
@@ -898,7 +929,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
             projects so role-dependent UI matches the new caller. */}
           {onboarding && <Onboarding onComplete={() => { void whoami().then(setIdentity).catch(() => {}); void loadProjects() }} />}
           <Content id="main-content">
-            {children({ project, setProject, projectDefaultAgent: projects.find((p) => p.id === project)?.default_agent_id, projectDefaultModel: projects.find((p) => p.id === project)?.default_model, refreshProjects: () => { void loadProjects() } })}
+            {children({ project, setProject: selectProject, projectDefaultAgent: projects.find((p) => p.id === project)?.default_agent_id, projectDefaultModel: projects.find((p) => p.id === project)?.default_model, refreshProjects: () => { void loadProjects() } })}
           </Content>
         </>
       )}
