@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Button, TextInput, Heading, Tag } from '@carbon/react'
+import { Button, TextInput, Heading, Tag, Select, SelectItem } from '@carbon/react'
 import { Add } from '@carbon/icons-react'
 import { useT } from './i18n'
-import { authHeaders } from './api'
-import { setupStatus, buildSandbox, type SetupStatus } from './kernelApi'
+import { authHeaders, authToken, TOKEN_STORAGE_KEY } from './api'
+import { setupStatus, buildSandbox, login as apiLogin, type SetupStatus } from './kernelApi'
+import { workspaceApi } from './workspaceApi'
 
 interface OnboardingProps {
   onComplete: () => void
@@ -32,7 +33,10 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const [providerName, setProviderName] = useState('')
   const [providerUrl, setProviderUrl] = useState('')
   const [providerKey, setProviderKey] = useState('')
-  const [providerModels, setProviderModels] = useState('')
+  const [discoveredModels, setDiscoveredModels] = useState<string[]>([])
+  const [providerModel, setProviderModel] = useState('')
+  const [checking, setChecking] = useState(false)
+  const [checkNote, setCheckNote] = useState('')
   const [providerId, setProviderId] = useState('')
   const [agentName, setAgentName] = useState('Coder')
   const [agentModel, setAgentModel] = useState('')
@@ -43,9 +47,14 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
   const currentStep = STEP_KEYS.find((s) => s.id === step)!
 
-  // Sandbox step reads the live bootstrap status: the wizard may be reopened
-  // after everything is configured, and the build button must reflect the
-  // actually installed image.
+  // The wizard needs the bootstrap status before the sandbox step too:
+  // master_key_configured decides whether the provider key travels as an
+  // encrypted secret reference or as a literal. Fetched once on mount and
+  // refreshed on the sandbox step (the build button must reflect the actually
+  // installed image even when the wizard is reopened).
+  useEffect(() => {
+    setupStatus().then(setStatus).catch(() => setStatus(null))
+  }, [])
   useEffect(() => {
     if (step !== 'sandbox') return
     setupStatus().then(setStatus).catch(() => setStatus(null))
@@ -82,10 +91,38 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         }),
       })
       if (!resp.ok) throw new Error(await resp.text())
+      // Creating the first user enables auth immediately (Gate.Enabled counts
+      // live workspace tokens): the anonymous wizard caller would get 401 on
+      // the very next step. Log in as the new admin right away — the token
+      // lands in localStorage, so authHeaders() picks it up without a reload
+      // (a reload would restart the wizard and lose its state).
+      if (!authToken()) {
+        const result = await apiLogin(adminName.trim(), adminPassword)
+        localStorage.setItem(TOKEN_STORAGE_KEY, result.token)
+      }
       setAdminCreated(true)
       setStep('provider')
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setBusy(false) }
+  }
+
+  // Check the typed key against the provider before creating anything: a
+  // probe call both validates the credentials and discovers the model catalog
+  // (the same auto-fetch the Providers page uses) — no manual model typing.
+  const checkProvider = async () => {
+    if (!providerUrl.trim()) return
+    setChecking(true); setCheckNote('')
+    try {
+      const data = await workspaceApi.probeProviderModels({ base_url: providerUrl.trim(), api_key_ref: providerKey.trim() })
+      const models = data.models ?? []
+      setDiscoveredModels(models)
+      setProviderModel((current) => (current && models.includes(current) ? current : models[0] ?? ''))
+      setCheckNote(t('providers.fetched_n', { count: String(data.count ?? models.length) }) ?? `${data.count ?? models.length}`)
+    } catch (e) {
+      setDiscoveredModels([])
+      setProviderModel('')
+      setCheckNote(`${t('providers.fetch_failed') ?? 'Failed'}: ${e instanceof Error ? e.message : 'Request failed'}`)
+    } finally { setChecking(false) }
   }
 
   const createProvider = async () => {
@@ -113,13 +150,13 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           name: providerName.trim(),
           base_url: providerUrl.trim(),
           api_key_ref: apiKeyRef,
-          models: providerModels.split(',').map((m) => m.trim()).filter(Boolean),
+          models: discoveredModels,
         }),
       })
       if (!resp.ok) throw new Error(await resp.text())
       const created = await resp.json().catch(() => null)
       setProviderId(typeof created?.id === 'string' ? created.id : '')
-      setAgentModel(providerModels.split(',')[0]?.trim() ?? '')
+      setAgentModel(providerModel || discoveredModels[0] || '')
       setStep('agent')
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setBusy(false) }
@@ -268,13 +305,22 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProviderKey(e.target.value)}
                 placeholder="sk-..."
               />
-              <TextInput
-                id="ob-prov-models"
-                labelText={t('providers.models')}
-                value={providerModels}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProviderModels(e.target.value)}
-                placeholder="gpt-4o, gpt-4o-mini"
-              />
+              <div>
+                <Button size="sm" kind="secondary" renderIcon={Add} disabled={checking || !providerUrl.trim()} onClick={() => void checkProvider()}>
+                  {checking ? (t('providers.fetching_models') ?? 'Discovering…') : (t('providers.check_and_fetch') ?? 'Check key & fetch models')}
+                </Button>
+                {checkNote && <p className="onboarding-hint" style={{ marginBottom: 0 }}>{checkNote}</p>}
+              </div>
+              {discoveredModels.length > 0 && (
+                <Select
+                  id="ob-prov-model"
+                  labelText={t('onboarding.provider_default_model') ?? 'Default model'}
+                  value={providerModel}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setProviderModel(e.target.value)}
+                >
+                  {discoveredModels.map((m) => <SelectItem key={m} value={m} text={m} />)}
+                </Select>
+              )}
               {error && <p className="onboarding-error">{error}</p>}
               <div className="onboarding-actions">
                 <Button kind="secondary" onClick={skipStep}>{t('action.skip')}</Button>

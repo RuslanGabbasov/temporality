@@ -893,7 +893,10 @@ export default function Layout({ children, activePage }: LayoutProps) {
         )
       ) : (
         <>
-          {onboarding && <Onboarding onComplete={() => void loadProjects()} />}
+          {/* The wizard may have logged in as the freshly created admin (the
+            token is already in localStorage) — refresh identity along with
+            projects so role-dependent UI matches the new caller. */}
+          {onboarding && <Onboarding onComplete={() => { void whoami().then(setIdentity).catch(() => {}); void loadProjects() }} />}
           <Content id="main-content">
             {children({ project, setProject, projectDefaultAgent: projects.find((p) => p.id === project)?.default_agent_id, projectDefaultModel: projects.find((p) => p.id === project)?.default_model, refreshProjects: () => { void loadProjects() } })}
           </Content>
