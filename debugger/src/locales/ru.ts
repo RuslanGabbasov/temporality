@@ -889,6 +889,12 @@ export const ru: Record<string, string> = {
     'triggers.execution_identity': 'Идентификатор исполнения',
     'triggers.no_identity': 'Без идентификатора (не рекомендуется)',
     'triggers.identity_helper': 'Права, с которыми работает запуск: агенты, MCP-серверы, провайдеры и проекты, которые он может затрагивать. Без идентификатора запуск не ограничен правами.',
+    'triggers.deliveries_title': 'Последние вызовы вебхуков',
+    'triggers.delivery_accepted': 'запущено',
+    'triggers.delivery_duplicate': 'дубль',
+    'triggers.delivery_rejected': 'отклонено',
+    'triggers.delivery_empty': 'Вызовов пока не было: сработавшие вебхуки появятся здесь.',
+    'triggers.open_run': 'Открыть запуск →',
 
     // Projects
     'projects.title': 'Проекты',

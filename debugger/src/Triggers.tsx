@@ -22,6 +22,7 @@ import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
+import { observationApi, type ObservationEvent } from './observationApi'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -29,6 +30,21 @@ const TYPE_INFO: Record<string, { icon: string; label: string; color: 'blue' | '
   schedule: { icon: '⏰', label: 'triggers.schedule', color: 'blue' },
   webhook: { icon: '🔗', label: 'triggers.webhook', color: 'cyan' },
   event: { icon: '📡', label: 'triggers.event', color: 'green' },
+}
+
+// Delivery outcomes (trigger.accepted/rejected/duplicate journal events):
+// what a webhook call actually did — the UI answer to "did it fire?".
+const DELIVERY_INFO: Record<string, { label: string; tag: 'green' | 'gray' | 'red' }> = {
+  'trigger.accepted': { label: 'triggers.delivery_accepted', tag: 'green' },
+  'trigger.duplicate': { label: 'triggers.delivery_duplicate', tag: 'gray' },
+  'trigger.rejected': { label: 'triggers.delivery_rejected', tag: 'red' },
+}
+
+const deliveryTime = (iso: string) => {
+  const d = new Date(iso)
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : d.toLocaleString()
 }
 
 export default function Triggers({ project }: { project: string }) {
@@ -48,8 +64,24 @@ export default function Triggers({ project }: { project: string }) {
   const [generatedToken, setGeneratedToken] = useState<string | null>(null)
   const [tokenBusy, setTokenBusy] = useState(false)
   const [tokenError, setTokenError] = useState('')
+  // Recent webhook deliveries (trigger.accepted/rejected/duplicate journal
+  // events): the answer to "did the webhook actually start anything?".
+  const [deliveries, setDeliveries] = useState<ObservationEvent[]>([])
 
   const visibleTriggers = triggers.filter((tr) => matchesFilter(filter, tr.name, tr.type, tr.id))
+
+  const loadDeliveries = useCallback(async () => {
+    if (!project.trim()) return
+    // Outcome events only; a failure here degrades silently (empty section)
+    // — deliveries are diagnostics, not a blocker for trigger management.
+    try {
+      const kinds = ['trigger.accepted', 'trigger.rejected', 'trigger.duplicate']
+      const pages = await Promise.all(kinds.map((type) => observationApi.events(project, undefined, undefined, undefined, { type, limit: 30 }).catch(() => ({ events: [] as ObservationEvent[] }))))
+      const merged = pages.flatMap((p) => p.events ?? [])
+      merged.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1))
+      setDeliveries(merged.slice(0, 20))
+    } catch { setDeliveries([]) }
+  }, [project])
 
   const load = useCallback(async () => {
     if (!project.trim()) return
@@ -68,6 +100,11 @@ export default function Triggers({ project }: { project: string }) {
   }, [project])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    void loadDeliveries()
+    const timer = setInterval(() => void loadDeliveries(), 15000)
+    return () => clearInterval(timer)
+  }, [loadDeliveries])
 
   const startCreate = (type: 'schedule' | 'webhook' | 'event') => {
     setEditing(null)
@@ -233,6 +270,40 @@ export default function Triggers({ project }: { project: string }) {
           )
         })}
       </Grid>
+
+      {/* Delivery history: journal outcome events for the project's webhook
+          triggers, so a fired webhook is never a black box — accepted /
+          duplicate / rejected, with the reason and a link to the run. */}
+      {(triggers.some((tr) => tr.type === 'webhook') || deliveries.length > 0) && (
+        <div style={{ marginTop: '1.5rem' }}>
+          <div style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }}>{t('triggers.deliveries_title') ?? 'Recent webhook deliveries'}</div>
+          {deliveries.length === 0 ? (
+            <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-3)', margin: 0 }}>{t('triggers.delivery_empty') ?? 'No deliveries yet.'}</p>
+          ) : (
+            deliveries.map((e) => {
+              const info = DELIVERY_INFO[e.type] ?? DELIVERY_INFO['trigger.rejected']
+              const reason = typeof e.data?.reason === 'string' ? e.data.reason : ''
+              // Accepted events carry the run in the context; duplicates — in
+              // data.run_id; rejected deliveries have no run to link to.
+              const runID = typeof e.data?.run_id === 'string' && e.data.run_id
+                ? e.data.run_id
+                : e.type === 'trigger.accepted' && typeof e.context?.run === 'string' ? e.context.run : ''
+              const name = typeof e.data?.trigger_name === 'string' && e.data.trigger_name ? e.data.trigger_name : '—'
+              return (
+                <div key={e.event_id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', padding: '0.4rem 0', borderBottom: '1px solid var(--tm-border)', fontSize: '0.8rem' }}>
+                  <span style={{ color: 'var(--tm-text-3)', fontVariantNumeric: 'tabular-nums' }}>{deliveryTime(e.occurred_at)}</span>
+                  <span style={{ fontWeight: 600 }}>{name}</span>
+                  <Tag type={info.tag} size="sm">{t(info.label) ?? info.label}</Tag>
+                  {reason && <span style={{ color: 'var(--tm-text-3)', flexBasis: '100%', wordBreak: 'break-word' }}>{reason}</span>}
+                  {runID && (
+                    <a href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(runID)}`} style={{ marginLeft: 'auto' }}>{t('triggers.open_run') ?? 'Open run →'}</a>
+                  )}
+                </div>
+              )
+            })
+          )}
+        </div>
+      )}
 
       {loading && <PageLoading />}
 

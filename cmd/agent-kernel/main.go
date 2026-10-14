@@ -4645,15 +4645,6 @@ func main() {
 		}
 		// Normalize the incoming request into the trigger event envelope.
 		raw, _ := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
-		// Optional origin/integrity hardening: when the trigger carries a
-		// secret, the delivery must be signed with it (HMAC-SHA256 over the raw
-		// body). Native format X-Temporality-Signature: sha256-<hex>; the
-		// GitHub-style X-Hub-Signature-256: sha256=<hex> is accepted too.
-		// Unsigned senders simply leave the secret empty.
-		if cfg.Secret != "" && !webhookSignatureValid(r, raw, cfg.Secret) {
-			writeError(w, 401, errors.New("invalid or missing webhook signature (X-Temporality-Signature)"))
-			return
-		}
 		var body map[string]any
 		_ = json.Unmarshal(raw, &body)
 		eventID := firstNonEmpty(r.Header.Get("X-Event-ID"), r.Header.Get("X-Delivery-ID"), bodyString(body, "event_id"), bodyString(body, "id"))
@@ -4662,6 +4653,34 @@ func main() {
 			// same delivery still deduplicate; timestamped ids stay unique per call.
 			digest := sha256.Sum256(raw)
 			eventID = "sha256:" + hex.EncodeToString(digest[:])[:16]
+		}
+		// Idempotent run identity: deterministic for a (trigger, event) pair.
+		key := sha256.Sum256([]byte(matched.ID + "\x00" + eventID))
+		taskID := "trigger-" + matched.ID + "-" + hex.EncodeToString(key[:])[:12]
+		// Delivery observability: every attempt that got past authorization is
+		// journalled, so the UI can show what a webhook call actually did —
+		// accepted, duplicate or rejected — instead of firing into the void.
+		deliveryScope := agent.EventScope(activities.SourceID, projectID, taskID)
+		emitDeliveryEvent := func(kind string, data map[string]any) {
+			item := observation.Event{
+				Schema: observation.Schema, EventID: "trigger/" + deliveryScope + "/" + kind, OccurredAt: time.Now().UTC(),
+				Source:  observation.Source{ID: activities.SourceID, Integration: "temporality-agent-kernel", Version: "0.1"},
+				Context: observation.Context{Project: projectID, Run: taskID, Task: taskID, Actor: observation.Actor{ID: "webhook-" + matched.ID, Type: "trigger"}},
+				Type:    "trigger." + kind, Data: data,
+			}
+			if err := events.Enqueue(r.Context(), item); err != nil {
+				slog.Error("emit trigger delivery event", "trigger", matched.ID, "kind", kind, "error", err)
+			}
+		}
+		// Optional origin/integrity hardening: when the trigger carries a
+		// secret, the delivery must be signed with it (HMAC-SHA256 over the raw
+		// body). Native format X-Temporality-Signature: sha256-<hex>; the
+		// GitHub-style X-Hub-Signature-256: sha256=<hex> is accepted too.
+		// Unsigned senders simply leave the secret empty.
+		if cfg.Secret != "" && !webhookSignatureValid(r, raw, cfg.Secret) {
+			emitDeliveryEvent("rejected", map[string]any{"trigger_id": matched.ID, "trigger_name": matched.Name, "event_id": eventID, "source": "webhook", "reason": "invalid or missing webhook signature (X-Temporality-Signature)"})
+			writeError(w, 401, errors.New("invalid or missing webhook signature (X-Temporality-Signature)"))
+			return
 		}
 		event := map[string]any{
 			"id":        eventID,
@@ -4680,12 +4699,10 @@ func main() {
 		if encoded, err := json.MarshalIndent(event, "", "  "); err == nil {
 			prompt = prompt + "\n\n--- Trigger event ---\n" + string(encoded)
 		}
-		// Idempotent run identity: deterministic for a (trigger, event) pair.
-		key := sha256.Sum256([]byte(matched.ID + "\x00" + eventID))
-		taskID := "trigger-" + matched.ID + "-" + hex.EncodeToString(key[:])[:12]
 		// Duplicate delivery (§4): the deterministic task id already exists —
 		// report the existing run instead of touching the workflow again.
 		if _, err := ws.GetTask(r.Context(), taskID); err == nil {
+			emitDeliveryEvent("duplicate", map[string]any{"trigger_id": matched.ID, "trigger_name": matched.Name, "event_id": eventID, "source": "webhook", "run_id": taskID})
 			writeJSON(w, 200, map[string]any{"trigger_id": matched.ID, "run_id": taskID, "duplicate": true})
 			return
 		}
@@ -4751,6 +4768,7 @@ func main() {
 			// Duplicate delivery of the same source event: the workflow already
 			// exists — report the existing run instead of erroring (§4).
 			if strings.Contains(wfErr.Error(), "already running") || strings.Contains(wfErr.Error(), "WorkflowExecutionAlreadyStarted") || isWorkflowExistsError(wfErr) {
+				emitDeliveryEvent("duplicate", map[string]any{"trigger_id": matched.ID, "trigger_name": matched.Name, "event_id": eventID, "source": "webhook", "run_id": input.RunID})
 				writeJSON(w, 200, map[string]any{"trigger_id": matched.ID, "run_id": input.RunID, "workflow_id": workflowID, "duplicate": true})
 				return
 			}

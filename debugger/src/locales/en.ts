@@ -889,6 +889,12 @@ export const en: Record<string, string> = {
     'triggers.execution_identity': 'Execution identity',
     'triggers.no_identity': 'Without identity (not recommended)',
     'triggers.identity_helper': 'The permissions the fired run acts under: agents, MCP servers, providers and projects it may touch. Without an identity the run is not permission-scoped.',
+    'triggers.deliveries_title': 'Recent webhook deliveries',
+    'triggers.delivery_accepted': 'started',
+    'triggers.delivery_duplicate': 'duplicate',
+    'triggers.delivery_rejected': 'rejected',
+    'triggers.delivery_empty': 'No deliveries yet: fired webhooks will appear here.',
+    'triggers.open_run': 'Open run →',
 
     // Projects
     'projects.title': 'Projects',
