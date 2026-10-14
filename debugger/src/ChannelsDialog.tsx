@@ -216,7 +216,7 @@ export default function ChannelsDialog({ userId, userName, onClose }: { userId: 
               )
             })}
             {channels.length < specs.length && (
-              <Button kind="ghost" size="sm" renderIcon={Add} onClick={addChannel} style={{ marginBottom: '0.9rem', padding: 0 }}>
+              <Button kind="ghost" size="sm" renderIcon={Add} onClick={addChannel} style={{ marginBottom: '0.9rem' }}>
                 {t('channels.add') ?? 'Add channel'}
               </Button>
             )}
