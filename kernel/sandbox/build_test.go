@@ -13,7 +13,7 @@ func TestSocketErrorPermissionDenied(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	msg := err.Error()
-	for _, want := range []string{"uid=10001", "TEMPORALITY_DOCKER_GID", "getent group docker"} {
+	for _, want := range []string{"uid=10001", "TEMPORALITY_DOCKER_GID", "docker compose up -d --build agent-kernel"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error message missing %q: %s", want, msg)
 		}

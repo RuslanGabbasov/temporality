@@ -309,12 +309,14 @@ read-only root, сброшенные capabilities, лимиты ресурсов
 в `.env` и пересоздаст agent-kernel. Без этого `run_command` падает с
 exit 125 «No such image».
 
-Доступ к Docker-сокету ядро получает через `group_add`. На Docker Desktop /
-OrbStack сокет проксируется как root:root (GID 0 — значение по умолчанию).
-На чистом Linux сокет принадлежит группе `docker`: укажите её GID
-в `TEMPORALITY_DOCKER_GID` (`getent group docker | cut -d: -f3`) в `.env`
-и перезапустите `docker compose up -d agent-kernel`. Иначе сборка песочницы
-из онбординга падает с permission denied на `/var/run/docker.sock`.
+Доступ к Docker-сокету ядро получает автоматически: контейнер стартует от
+root, entrypoint определяет группу сокета (`root:docker` на Linux,
+`root:root` на Docker Desktop / OrbStack) и дропается до непривилегированного
+пользователя с этой группой — ничего настраивать не нужно.
+`TEMPORALITY_DOCKER_GID` в `.env` остаётся для экзотических сетапов
+(переопределяет автоопределение). Если сборка песочницы из онбординга
+падает с permission denied — пересоздайте контейнер с текущим образом:
+`docker compose up -d --build agent-kernel`.
 
 ### MCP
 

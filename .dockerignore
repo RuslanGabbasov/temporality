@@ -13,3 +13,4 @@
 !workspace
 !examples
 !migrations
+!docker-entrypoint.sh

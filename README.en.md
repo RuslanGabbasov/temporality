@@ -243,13 +243,14 @@ pruning images (`docker system prune`), run `./sandbox/build.sh` — it
 rebuilds the image, updates `KERNEL_SANDBOX_IMAGE` in `.env` and recreates
 agent-kernel. Otherwise `run_command` fails with exit 125 "No such image".
 
-The kernel reaches the Docker socket through `group_add`. On Docker
-Desktop / OrbStack the socket is proxied as root:root (GID 0, the default).
-On a plain Linux host the socket belongs to the `docker` group: set its GID
-in `TEMPORALITY_DOCKER_GID` (`getent group docker | cut -d: -f3`) in `.env`
-and restart with `docker compose up -d agent-kernel`. Otherwise building
-the sandbox from onboarding fails with permission denied on
-`/var/run/docker.sock`.
+The kernel reaches the Docker socket automatically: the container starts
+as root, the entrypoint detects the socket's group (`root:docker` on Linux
+hosts, `root:root` on Docker Desktop / OrbStack) and drops to the
+unprivileged user with that group attached — nothing to configure.
+`TEMPORALITY_DOCKER_GID` in `.env` remains for exotic setups (overrides the
+detection). If building the sandbox from onboarding fails with permission
+denied, recreate the container with the current image:
+`docker compose up -d --build agent-kernel`.
 
 ### MCP
 

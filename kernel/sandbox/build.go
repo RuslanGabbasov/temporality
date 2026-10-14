@@ -59,7 +59,8 @@ func socketError(output string, err error, uid int) error {
 	switch {
 	case strings.Contains(output, "permission denied"):
 		return fmt.Errorf("docker daemon socket is not accessible for the kernel container user (uid=%d): %s\n"+
-			"On a Linux host the socket belongs to the docker group: set TEMPORALITY_DOCKER_GID to that group's GID (getent group docker | cut -d: -f3) in .env, then: docker compose up -d agent-kernel", uid, first)
+			"The entrypoint normally attaches the socket's group automatically — recreate the container with the current image: docker compose up -d --build agent-kernel. "+
+			"If it persists, the socket is likely not group-accessible (ls -l /var/run/docker.sock should show srw-rw---- with a group, not 0600), or set TEMPORALITY_DOCKER_GID in .env to that group's GID", uid, first)
 	case strings.Contains(output, "Cannot connect to the Docker daemon"), strings.Contains(output, "Is the docker daemon running?"):
 		return fmt.Errorf("docker daemon is not reachable from the kernel container: %s\n"+
 			"Check that /var/run/docker.sock is mounted into the agent-kernel service", first)

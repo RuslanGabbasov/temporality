@@ -103,16 +103,21 @@ services:
       args:
         # The Lead/Coder/Reviewer/QA example routes are opt-in via build tag.
         KERNEL_BUILD_TAGS: agent_examples
-    # Host uid/gid keeps sandbox workspace files owned by the local user and
-    # makes the kernel pass that uid to sandbox containers. The socket group
-    # differs by host: Docker Desktop/OrbStack proxy it as root:root (GID 0,
-    # the default), a plain Linux host mounts it as root:docker — set
-    # TEMPORALITY_DOCKER_GID to that group's GID
-    # (getent group docker | cut -d: -f3) in .env.
-    user: "${TEMPORALITY_UID:-10001}:${TEMPORALITY_GID:-10001}"
-    group_add:
-      - "${TEMPORALITY_DOCKER_GID:-0}"
+    # The container starts as root only so docker-entrypoint.sh can pick up
+    # the Docker socket's group at runtime (root:docker on Linux, root:root on
+    # Docker Desktop/OrbStack) and drop to the unprivileged user below with
+    # that group attached — no per-host GID configuration. TEMPORALITY_UID/GID
+    # keep sandbox workspace files owned by the host user and are passed to
+    # the kernel's sandbox containers. TEMPORALITY_DOCKER_GID overrides the
+    # socket group detection for exotic setups.
+    user: "0:0"
     environment:
+      # Drop target for docker-entrypoint.sh (uid/gid of the host user keeps
+      # sandbox workspace files owned by that user) plus the optional socket
+      # group override; empty = detect from the socket at startup.
+      TEMPORALITY_UID: "${TEMPORALITY_UID:-10001}"
+      TEMPORALITY_GID: "${TEMPORALITY_GID:-10001}"
+      TEMPORALITY_DOCKER_GID: "${TEMPORALITY_DOCKER_GID:-}"
       DATABASE_URL: postgres://temporality:temporality@postgres:5432/temporality?sslmode=disable
       TEMPORALITY_URL: http://journal:8080
       TEMPORAL_ADDRESS: temporal:7233

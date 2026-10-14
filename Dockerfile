@@ -30,7 +30,11 @@ EXPOSE 8080
 ENTRYPOINT ["temporality-journal"]
 
 FROM alpine:3.22 AS agent-kernel
-RUN adduser -D -u 10001 temporality
+# setpriv: the entrypoint starts as root, picks up the Docker socket's group
+# (root:docker on Linux hosts, root:root on Docker Desktop/OrbStack proxies)
+# and drops to the unprivileged user with that group attached — no per-host
+# GID configuration in .env.
+RUN adduser -D -u 10001 temporality && apk add --no-cache util-linux
 WORKDIR /app
 COPY --from=build /out/temporality-agent-kernel /usr/local/bin/temporality-agent-kernel
 COPY --from=build /out/test-mcp /usr/local/bin/test-mcp
@@ -40,6 +44,8 @@ COPY migrations ./migrations
 # The optional run_command sandbox shells out to the Docker CLI against the
 # host daemon socket, so the CLI must exist inside the image.
 COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
-USER temporality
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["temporality-agent-kernel"]
 EXPOSE 8090
-ENTRYPOINT ["temporality-agent-kernel"]
