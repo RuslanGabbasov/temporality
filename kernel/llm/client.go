@@ -151,8 +151,26 @@ type Config struct {
 	Reasoning               string
 }
 
-// ConfigFromEnv reads the shared TEMPORALITY_MODEL_* variables.
+// ConfigFromEnv reads the shared TEMPORALITY_MODEL_* variables and requires
+// the default model endpoint. Callers on the hot path (per model call) want
+// this contract; boot-time construction uses OptionalConfigFromEnv so a
+// clean install without a default model still comes up.
 func ConfigFromEnv() (Config, error) {
+	cfg, err := OptionalConfigFromEnv()
+	if err != nil {
+		return cfg, err
+	}
+	if cfg.BaseURL == "" || cfg.Model == "" {
+		return cfg, errors.New("TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID are required")
+	}
+	return cfg, nil
+}
+
+// OptionalConfigFromEnv reads the same variables but treats a missing default
+// endpoint (TEMPORALITY_MODEL_BASE_URL/TEMPORALITY_MODEL_ID) as legal: models
+// routed through workspace providers need no default. Malformed optional
+// values still fail.
+func OptionalConfigFromEnv() (Config, error) {
 	cfg := Config{
 		BaseURL:                 strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL")),
 		Model:                   strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID")),
@@ -164,9 +182,6 @@ func ConfigFromEnv() (Config, error) {
 		StreamFirstTokenTimeout: 2 * time.Minute,
 		MaxOutputTokens:         16384,
 		Reasoning:               strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_REASONING")),
-	}
-	if cfg.BaseURL == "" || cfg.Model == "" {
-		return cfg, errors.New("TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID are required")
 	}
 	if raw := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_TEMPERATURE")); raw != "" {
 		value, err := strconv.ParseFloat(raw, 64)

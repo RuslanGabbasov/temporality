@@ -140,9 +140,16 @@ type providerCacheEntry struct {
 const providerCacheTTL = 60 * time.Second
 
 func NewActivities(events EventOutbox) (*Activities, error) {
-	config, err := llm.ConfigFromEnv()
+	// Boot tolerates a missing default model (clean install configuring
+	// providers through onboarding): runs that need the default fail at call
+	// time with an actionable error instead of taking the kernel down.
+	config, err := llm.OptionalConfigFromEnv()
 	if err != nil {
 		return nil, err
+	}
+	var model *llm.Client
+	if config.BaseURL != "" && config.Model != "" {
+		model = llm.New(config)
 	}
 	registry := mcpclient.NewRegistry()
 	legacy, err := mcpclient.FromEnv(context.Background())
@@ -160,7 +167,7 @@ func NewActivities(events EventOutbox) (*Activities, error) {
 	// and pinned through POST /v1/setup/sandbox/build) after startup; with no
 	// image configured it stays transparently inert — sandboxConfigured checks
 	// the root, not the wrapper.
-	return &Activities{Events: events, Model: llm.New(config), HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), WorkspaceURL: strings.TrimRight(env("KERNEL_WORKSPACE_URL", "http://localhost:8090"), "/"), APIToken: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), MCP: registry, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandbox.NewSwappable(sandboxRunner)}, nil
+	return &Activities{Events: events, Model: model, HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), WorkspaceURL: strings.TrimRight(env("KERNEL_WORKSPACE_URL", "http://localhost:8090"), "/"), APIToken: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), MCP: registry, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandbox.NewSwappable(sandboxRunner)}, nil
 }
 
 // Sandbox returns the swappable sandbox runner so the control plane can
@@ -427,14 +434,14 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		if !routed {
 			config, err := llm.ConfigFromEnv()
 			if err != nil {
-				return llm.Completion{}, err
+				return llm.Completion{}, fmt.Errorf("model %q is not served by any workspace provider and no default model is configured (set TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID, or add the model to a provider)", request.Model)
 			}
 			config.Model = request.Model
 			client = llm.New(config)
 		}
 	}
 	if client == nil {
-		return llm.Completion{}, errors.New("model client is not configured")
+		return llm.Completion{}, errors.New("no model configured: set the run's model or a project default, or configure TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID")
 	}
 	if a.Tokens != nil && request.RunID != "" {
 		// Live path: stream tokens to the ephemeral bus for subscribed UIs. A

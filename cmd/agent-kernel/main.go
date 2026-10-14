@@ -270,6 +270,12 @@ func main() {
 		log.Error("configure activities", "error", err)
 		os.Exit(1)
 	}
+	// A missing default model is legal on a clean install (providers get
+	// configured through onboarding); say so loudly instead of failing later
+	// with a cryptic per-run error.
+	if strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL")) == "" || strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID")) == "" {
+		log.Warn("no default model configured (TEMPORALITY_MODEL_BASE_URL/TEMPORALITY_MODEL_ID); runs must select a model served by a workspace provider")
+	}
 	// Ephemeral live-token streaming: the activity worker and the HTTP server
 	// share one process, so an in-memory bus connects them without a broker.
 	activities.Tokens = agent.NewTokenBus()
