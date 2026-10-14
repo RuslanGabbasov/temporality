@@ -12,6 +12,9 @@ export interface RunTokenMetrics {
   lastChunkAgoMs: number
   /** True between the first received chunk and the done event. */
   streaming: boolean
+  /** Tool name when the model is currently streaming a tool call (no answer
+   * text this turn — the args are the output). Feeds the live “⚙ tool” hint. */
+  tool?: string
 }
 
 /** Sliding window for the rate estimate: long enough to smooth out bursty
@@ -26,6 +29,10 @@ export interface TokenStreamFrame {
   turn?: number
   text?: string
   reasoning?: string
+  /** Live tool-call streaming: tool name + argument fragment. Most agent
+   * turns produce no text — args are the actual streamed output. */
+  tool?: string
+  args?: string
 }
 
 /** Pure accumulator over token-stream frames — kept free of EventSource so the
@@ -37,6 +44,7 @@ export class TokenMeter {
   private firstAt = 0
   private lastAt = 0
   private live = false
+  private tool = ''
 
   apply(frame: TokenStreamFrame, now: number = Date.now()) {
     if (frame.type === 'done') {
@@ -51,12 +59,16 @@ export class TokenMeter {
       this.chars = 0
       this.window = []
       this.firstAt = 0
+      this.tool = ''
     }
-    const chunk = (frame.text?.length ?? 0) + (frame.reasoning?.length ?? 0)
+    // Tool args count toward liveness/rate: on a tool-only turn they ARE the
+    // streamed output (the answer text stays empty until the next turn).
+    const chunk = (frame.text?.length ?? 0) + (frame.reasoning?.length ?? 0) + (frame.args?.length ?? 0)
     if (frame.type === 'snapshot') {
       // The snapshot replaces the accumulated state (reconnect mid-turn).
       this.chars = chunk
       this.lastAt = now
+      if (frame.tool) this.tool = frame.tool
       if (chunk > 0) {
         this.live = true
         this.firstAt = now
@@ -70,6 +82,10 @@ export class TokenMeter {
       this.live = true
       if (!this.firstAt) this.firstAt = now
     }
+    // The tool name arrives on the first args chunk and persists for the turn;
+    // a later text chunk clears it (the model moved on to the answer).
+    if (frame.tool) this.tool = frame.tool
+    else if (frame.text) this.tool = ''
   }
 
   metrics(now: number = Date.now()): RunTokenMetrics {
@@ -83,6 +99,7 @@ export class TokenMeter {
       tps: Math.round(tps * 10) / 10,
       lastChunkAgoMs: this.lastAt ? now - this.lastAt : Number.POSITIVE_INFINITY,
       streaming: this.live,
+      tool: this.tool || undefined,
     }
   }
 }

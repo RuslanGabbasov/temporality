@@ -63,6 +63,51 @@ func TestCallModelStreamsTokensToBus(t *testing.T) {
 	}
 }
 
+// A turn that goes straight for a tool call streams no text at all — only
+// tool-call argument fragments. Those must reach the bus too, or the UI sits
+// on "waiting for the first token" for the whole call while tokens flow.
+func TestCallModelStreamsToolCallDeltasToBus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		chunks := []string{
+			`{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"run_command","arguments":""}}]}`,
+			`{"tool_calls":[{"index":0,"function":{"arguments":"{\"command\":"}}]}`,
+			`{"tool_calls":[{"index":0,"function":{"arguments":"[\"go\",\"test\"]}"}}]}`,
+		}
+		for _, chunk := range chunks {
+			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":%s}]}\n\n", chunk)
+			flusher.Flush()
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n\n")
+		flusher.Flush()
+	}))
+	defer server.Close()
+	activities := &Activities{
+		Model:  llm.New(llm.Config{BaseURL: server.URL, Model: "test", APIKey: "k", Timeout: 10 * time.Second}),
+		Tokens: NewTokenBus(),
+	}
+
+	_, err := activities.CallModel(context.Background(), ModelRequest{
+		RunID: "run-tool-stream", Turn: 7,
+		Messages: []llm.Message{{Role: "user", Content: "run tests"}},
+	})
+	if err != nil {
+		t.Fatalf("CallModel: %v", err)
+	}
+	_, snapshot, cancel := activities.Tokens.Subscribe("run-tool-stream")
+	defer cancel()
+	if snapshot.Turn != 7 || snapshot.Tool != "run_command" {
+		t.Fatalf("snapshot = %+v, want turn 7 tool run_command", snapshot)
+	}
+	if snapshot.Args != `{"command":["go","test"]}` {
+		t.Fatalf("snapshot args = %q, want accumulated tool arguments", snapshot.Args)
+	}
+	if snapshot.Text != "" {
+		t.Fatalf("snapshot text = %q, want no text on a tool-only turn", snapshot.Text)
+	}
+}
+
 // capturedOutbox records enqueued events so tests can assert what the
 // activity journaled straight through the outbox (model.attempt markers).
 type capturedOutbox struct {

@@ -51,6 +51,39 @@ func TestTokenBusTurnChangeResetsLiveText(t *testing.T) {
 	}
 }
 
+func TestTokenBusPublishToolAccumulatesAndSnapshots(t *testing.T) {
+	bus := NewTokenBus()
+	bus.PublishTool("run-1", 3, "run_command", `{"command":`)
+	bus.PublishTool("run-1", 3, "", `["go","test"]}`)
+
+	ch, snapshot, cancel := bus.Subscribe("run-1")
+	defer cancel()
+	if snapshot.Type != "snapshot" || snapshot.Turn != 3 || snapshot.Tool != "run_command" {
+		t.Fatalf("snapshot = %+v, want turn 3 tool run_command", snapshot)
+	}
+	if snapshot.Args != `{"command":["go","test"]}` || snapshot.Text != "" {
+		t.Fatalf("snapshot = %+v, want accumulated args and no text", snapshot)
+	}
+
+	bus.PublishTool("run-1", 3, "", " more")
+	events := drainTokenEvents(t, ch)
+	if len(events) != 1 || events[0].Tool != "run_command" || events[0].Args != " more" {
+		t.Fatalf("live events = %+v, want one tool delta carrying the last name", events)
+	}
+}
+
+func TestTokenBusTurnChangeResetsToolArgs(t *testing.T) {
+	bus := NewTokenBus()
+	bus.PublishTool("run-1", 1, "plan", `{"goal":`)
+	bus.Publish("run-1", 2, "answer text", "")
+
+	_, snapshot, cancel := bus.Subscribe("run-1")
+	defer cancel()
+	if snapshot.Turn != 2 || snapshot.Tool != "" || snapshot.Args != "" || snapshot.Text != "answer text" {
+		t.Fatalf("snapshot = %+v, want turn 2 with tool args reset", snapshot)
+	}
+}
+
 func TestTokenBusCloseDeliversDoneAndDropsEntry(t *testing.T) {
 	bus := NewTokenBus()
 	bus.Publish("run-1", 1, "partial", "")

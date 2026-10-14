@@ -57,6 +57,9 @@ interface ChatMessage {
   totals?: string
   /** Whole-task budget (all follow-up runs + delegation tree), docs: cost accounting. */
   taskTotals?: string
+  /** Tool the model is streaming arguments for right now (no answer text this
+   * turn) — transient, cleared when the model moves on to text. */
+  liveTool?: string
 }
 
 interface Conversation {
@@ -322,17 +325,23 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     let liveTurn = -1
     let liveText = ''
     let liveReasoning = ''
-    const applyLive = (data: { type?: string; turn?: number; text?: string; reasoning?: string }) => {
+    let liveTool = ''
+    const applyLive = (data: { type?: string; turn?: number; text?: string; reasoning?: string; tool?: string; args?: string }) => {
       if (data.type === 'done') { closeTokenStream(); return }
       const turn = Number(data.turn ?? 0)
       if (turn !== liveTurn) {
         liveTurn = turn
         liveText = ''
         liveReasoning = ''
+        liveTool = ''
       }
       if (data.text) liveText += data.text
       if (data.reasoning) liveReasoning += data.reasoning
-      updateMsg(convId, runId, { content: liveText, reasoning: liveReasoning })
+      // Tool args are never rendered as content — they only say which tool the
+      // model is preparing, so the bubble shows life on tool-only turns.
+      if (data.tool) liveTool = data.tool
+      else if (data.text) liveTool = ''
+      updateMsg(convId, runId, { content: liveText, reasoning: liveReasoning, liveTool: liveTool || undefined })
     }
     tes.addEventListener('snapshot', (e) => {
       try { applyLive(JSON.parse((e as MessageEvent).data)) } catch { /* ignore */ }
@@ -855,6 +864,13 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     ) : msg.content ? (
                       <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                     ) : null}
+
+                    {msg.role === 'assistant' && msg.status === 'running' && msg.liveTool && !msg.content && (
+                      <div style={{ color: 'var(--tm-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span className='spinner' />
+                        <span>⚙ {t('chat.tool_streaming', { tool: msg.liveTool }) ?? `streaming ${msg.liveTool}…`}</span>
+                      </div>
+                    )}
 
                     {msg.role === 'assistant' && msg.runId && msg.status && (
                       <>

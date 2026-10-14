@@ -77,6 +77,7 @@ export const en: Record<string, string> = {
     'chat.stop': 'Stop',
     'chat.branch': 'Branch',
     'chat.streaming': 'streaming…',
+    'chat.tool_streaming': 'streaming {{tool}} tool call…',
     'chat.totals.tokens': '{{count}} tok',
     'chat.totals.cached': '↻ {{count}} cached',
     'chat.task_totals.title': 'Whole-task budget: every run of this task (follow-ups and delegated agents)',

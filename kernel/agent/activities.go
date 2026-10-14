@@ -449,6 +449,15 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 			if delta.Text != "" || delta.Reasoning != "" {
 				a.Tokens.Publish(request.RunID, request.Turn, delta.Text, delta.Reasoning)
 			}
+			// Tool-call deltas are the invisible majority of agent streaming: a
+			// turn that goes straight for a tool produces no text at all, so
+			// without publishing these the UI shows "waiting for the first
+			// token" while arguments stream for the whole call.
+			for _, call := range delta.ToolCalls {
+				if call.Name != "" || call.ArgsDelta != "" {
+					a.Tokens.PublishTool(request.RunID, request.Turn, call.Name, call.ArgsDelta)
+				}
+			}
 			return false
 		}, llm.WithPromptCacheKey(request.PromptCacheKey))
 		if streamErr == nil {

@@ -9,6 +9,7 @@ import Markdown from './Markdown'
 import { useT, useI18n, pluralT } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString, formatDuration } from './eventSummary'
 import { useRunTokenMetrics } from './tokenStream'
+import { subscribeRunJournal } from './journalStream'
 import {
   Button,
   TextInput,
@@ -478,7 +479,14 @@ export default function AgentRuns({ project }: { project: string }) {
         const childPages = await Promise.all(childIDs.map((child) => observationApi.events(project.trim(), undefined, undefined, undefined, { run: child, limit: 500 })))
         allEvents = [...page.events, ...childPages.flatMap((childPage) => childPage.events)].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
       }
-      setTimeline(allEvents)
+      setTimeline((prev) => {
+        if (!silent) return allEvents
+        // The live SSE tail may have appended events the poll snapshot lacks
+        // (frames raced the DB snapshot) — merge, never drop.
+        const seen = new Set(allEvents.map((e) => `${e.source.id}:${e.event_id}`))
+        const extra = prev.filter((e) => !seen.has(`${e.source.id}:${e.event_id}`))
+        return [...allEvents, ...extra].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
+      })
       const resultPath = teamRun ? `/v1/agent/examples/lead-coder-reviewer-qa/runs/${encodeURIComponent(run)}` : `/v1/agent/runs/${encodeURIComponent(run)}`
       const sourceQuery = new URLSearchParams({ project: project.trim(), source_id: root?.source.id ?? '' })
       let response = await fetch(`${KERNEL_API}${resultPath}?${sourceQuery}`, { headers: authHeaders() })
@@ -523,6 +531,39 @@ export default function AgentRuns({ project }: { project: string }) {
     const timer = window.setInterval(() => { void loadRun(selected, true) }, 10000)
     return () => window.clearInterval(timer)
   }, [selected, loadRun])
+  // Live journal tail: while the selected run is in flight, events arrive over
+  // SSE at the server's ~1.5s cadence instead of the 10s poll above — without
+  // it a finishing model call, its tool events and the next turn land in one
+  // delayed burst and the run looks frozen while it works. Frames carry only
+  // {type, occurred_at, event_id, data}; the shape the rows expect (source,
+  // context) is stamped from the run's own root event. The poll stays as the
+  // safety net (and covers team-run children the per-run stream skips).
+  useEffect(() => {
+    if (!selected || !selectedLive) return
+    const controller = new AbortController()
+    subscribeRunJournal(selected, (frame) => {
+      if (frame.event === 'done') return
+      let parsed: { type?: string; event_id?: string; occurred_at?: string; data?: Record<string, unknown> }
+      try { parsed = JSON.parse(frame.data) } catch { return }
+      if (!parsed.type || !parsed.event_id || !parsed.occurred_at) return
+      setTimeline((prev) => {
+        if (prev.some((existing) => existing.event_id === parsed.event_id)) return prev
+        const root = prev.find((e) => e.type === 'run.started')
+        const normalized: ObservationEvent = {
+          schema: root?.schema ?? 'temporality/observation/event/v1',
+          event_id: parsed.event_id!,
+          occurred_at: parsed.occurred_at!,
+          received_at: parsed.occurred_at!,
+          source: root?.source ?? { id: 'temporality-agent-kernel', integration: 'temporality-agent-kernel' },
+          context: { ...(root?.context ?? {}), run: selected },
+          type: parsed.type!,
+          data: parsed.data ?? {},
+        }
+        return [...prev, normalized].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
+      })
+    }, controller.signal)
+    return () => controller.abort()
+  }, [selected, selectedLive])
   // Silent list refresh: keeps status tags and newly started runs (including
   // delegated children) fresh without touching the current selection.
   useEffect(() => {
@@ -894,6 +935,10 @@ export default function AgentRuns({ project }: { project: string }) {
                         const elapsedMs = Math.max(0, nowTick - Date.parse(event.occurred_at))
                         liveParts.push(formatDuration(elapsedMs))
                         if (tokenMetrics) {
+                          // A tool name here means the model is streaming a tool
+                          // call right now (no answer text this turn) — the most
+                          // informative thing the row can show.
+                          if (tokenMetrics.tool) liveParts.push(`⚙ ${tokenMetrics.tool}`)
                           if (tokenMetrics.approxTokens > 0) liveParts.push(`~${tokenMetrics.approxTokens} tok`)
                           if (tokenMetrics.tps > 0) liveParts.push(`${tokenMetrics.tps} tok/s`)
                           const stalled = tokenMetrics.lastChunkAgoMs > 15_000

@@ -19,6 +19,33 @@ describe('TokenMeter', () => {
     expect(meter.metrics(1_100).streaming).toBe(true)
   })
 
+  it('counts streamed tool-call args as stream life and exposes the tool', () => {
+    const meter = new TokenMeter()
+    meter.apply({ type: 'delta', turn: 5, tool: 'run_command', args: '{"command":' }, 1_000)
+    meter.apply({ type: 'delta', turn: 5, args: '["go","test"]}' }, 2_000)
+    const m = meter.metrics(2_500)
+    // 27 chars of args / 4 — the tool-only turn is visible as streaming.
+    expect(m.approxTokens).toBeGreaterThan(0)
+    expect(m.streaming).toBe(true)
+    expect(m.tool).toBe('run_command')
+  })
+
+  it('clears the tool when the model moves on to answer text', () => {
+    const meter = new TokenMeter()
+    meter.apply({ type: 'delta', turn: 5, tool: 'plan', args: '{"goal":' }, 1_000)
+    meter.apply({ type: 'delta', turn: 5, text: 'Here is the answer' }, 2_000)
+    expect(meter.metrics(2_000).tool).toBeUndefined()
+  })
+
+  it('snapshot carries tool args from a mid-tool-call reconnect', () => {
+    const meter = new TokenMeter()
+    meter.apply({ type: 'snapshot', turn: 5, tool: 'plan', args: 'x'.repeat(400) }, 1_000)
+    const m = meter.metrics(1_000)
+    expect(m.approxTokens).toBe(100)
+    expect(m.streaming).toBe(true)
+    expect(m.tool).toBe('plan')
+  })
+
   it('resets on turn change', () => {
     const meter = new TokenMeter()
     meter.apply({ type: 'delta', turn: 1, text: 'x'.repeat(100) }, 1_000)

@@ -2704,7 +2704,7 @@ func main() {
 			writeEvent(TokenDoneEvent)
 			return
 		}
-		if snapshot.Text != "" || snapshot.Reasoning != "" {
+		if snapshot.Text != "" || snapshot.Reasoning != "" || snapshot.Args != "" {
 			writeEvent(snapshot)
 		}
 		ctx := r.Context()

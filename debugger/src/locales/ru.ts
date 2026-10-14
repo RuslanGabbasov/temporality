@@ -76,6 +76,7 @@ export const ru: Record<string, string> = {
     'chat.stop': 'Стоп',
     'chat.branch': 'Ветка',
     'chat.streaming': 'загрузка…',
+    'chat.tool_streaming': 'стримит вызов инструмента {{tool}}…',
     'chat.totals.tokens': '{{count}} ток.',
     'chat.totals.cached': '↻ {{count}} из кеша',
     'chat.task_totals.title': 'Бюджет всей задачи: все раны (продолжения диалога и делегированные агенты)',
