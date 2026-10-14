@@ -57,6 +57,7 @@ export const ru: Record<string, string> = {
     'action.building': 'Формируем…',
     'action.copy': 'Копировать',
     'action.skip': 'Пропустить',
+    'action.finish': 'Завершить',
     'action.search': 'Поиск',
     'action.confirm': 'Подтвердить',
     'action.regenerate': 'Пересоздать',

@@ -57,6 +57,7 @@ export const en: Record<string, string> = {
     'action.building': 'Building…',
     'action.copy': 'Copy',
     'action.skip': 'Skip',
+    'action.finish': 'Finish',
     'action.search': 'Search',
     'action.confirm': 'Confirm',
     'action.regenerate': 'Regenerate',

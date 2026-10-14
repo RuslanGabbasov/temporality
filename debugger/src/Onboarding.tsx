@@ -199,6 +199,10 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       await buildSandbox()
       const fresh = await setupStatus().catch(() => null)
       setStatus(fresh)
+      // A successful build is the step's purpose — advance like every other
+      // step's primary action instead of leaving the user on a green tag with
+      // only a disabled build button and an unlabeled way forward (Skip).
+      setStep('done')
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setBuildBusy(false) }
   }
@@ -382,13 +386,21 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               )}
               {error && <p className="onboarding-error">{error}</p>}
               <div className="onboarding-actions">
-                <Button kind="secondary" onClick={skipStep}>{t('action.skip')}</Button>
-                <Button
-                  onClick={() => void buildSandboxImage()}
-                  disabled={buildBusy || (status?.sandbox.configured === true && status.sandbox.available)}
-                >
-                  {buildBusy ? t('onboarding.sandbox_building') : t('onboarding.sandbox_build')}
-                </Button>
+                {status?.sandbox.configured && status.sandbox.available ? (
+                  // Ready (built just now or pinned in a previous run): the way
+                  // forward is finishing the wizard, not building again.
+                  <Button onClick={() => setStep('done')}>{t('action.finish')}</Button>
+                ) : (
+                  <>
+                    <Button kind="secondary" onClick={skipStep}>{t('action.skip')}</Button>
+                    <Button
+                      onClick={() => void buildSandboxImage()}
+                      disabled={buildBusy}
+                    >
+                      {buildBusy ? t('onboarding.sandbox_building') : t('onboarding.sandbox_build')}
+                    </Button>
+                  </>
+                )}
               </div>
               {buildBusy && <p className="onboarding-hint">{t('onboarding.sandbox_build_note')}</p>}
             </>
