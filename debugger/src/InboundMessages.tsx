@@ -79,7 +79,7 @@ export default function InboundMessages() {
           type="button"
           data-active={status === '' ? 'true' : 'false'}
           onClick={() => { setStatus(''); void load('') }}
-          style={{ border: '1px solid var(--tm-border)', borderRadius: '999px', padding: '0.2rem 0.75rem', cursor: 'pointer', color: status === '' ? 'var(--tm-bg)' : 'var(--tm-text-2)', background: status === '' ? 'var(--tm-accent)' : 'transparent', fontSize: '0.75rem' }}
+          style={{ border: '1px solid var(--tm-border)', borderRadius: '999px', padding: '0.2rem 0.75rem', cursor: 'pointer', color: status === '' ? '#FFFFFF' : 'var(--tm-text-2)', background: status === '' ? 'var(--tm-teal)' : 'transparent', fontSize: '0.75rem' }}
         >
           {t('inbound.filter_all') ?? 'All'}
         </button>
@@ -88,7 +88,7 @@ export default function InboundMessages() {
             key={s}
             type="button"
             onClick={() => { setStatus(s); void load(s) }}
-            style={{ background: status === s ? 'var(--tm-accent)' : 'transparent', border: '1px solid var(--tm-border)', borderRadius: '999px', padding: '0.2rem 0.75rem', cursor: 'pointer', color: status === s ? 'var(--tm-bg)' : 'var(--tm-text-2)', fontSize: '0.75rem' }}
+            style={{ background: status === s ? 'var(--tm-teal)' : 'transparent', border: '1px solid var(--tm-border)', borderRadius: '999px', padding: '0.2rem 0.75rem', cursor: 'pointer', color: status === s ? '#FFFFFF' : 'var(--tm-text-2)', fontSize: '0.75rem' }}
           >
             {statusLabel(s)}
           </button>
