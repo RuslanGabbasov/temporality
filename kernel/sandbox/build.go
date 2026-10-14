@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -32,11 +33,49 @@ const BuildImageTag = "temporality-sandbox:latest"
 // slow link is the slow part; the apk layer is small.
 const buildTimeout = 15 * time.Minute
 
+// PreflightSocket proves the daemon socket is usable by the current kernel
+// user before a build or run is attempted, and turns the two deployment-level
+// failures into instructions an operator can follow straight from the UI:
+// a plain Linux host mounts the socket as root:docker, and the kernel's
+// non-root user needs the host docker group GID added to the container.
+func PreflightSocket(ctx context.Context, binary string) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	probe := exec.CommandContext(ctx, binary, "version", "--format", "{{.Server.Version}}")
+	var output limitedBuffer
+	probe.Stdout, probe.Stderr = &output, &output
+	if err := probe.Run(); err != nil {
+		return socketError(strings.TrimSpace(output.String()), err, os.Getuid())
+	}
+	return nil
+}
+
+// socketError classifies a failed daemon probe. Testable pure helper.
+func socketError(output string, err error, uid int) error {
+	first := output
+	if idx := strings.IndexAny(output, "\r\n"); idx >= 0 {
+		first = output[:idx]
+	}
+	switch {
+	case strings.Contains(output, "permission denied"):
+		return fmt.Errorf("docker daemon socket is not accessible for the kernel container user (uid=%d): %s\n"+
+			"On a Linux host the socket belongs to the docker group: set TEMPORALITY_DOCKER_GID to that group's GID (getent group docker | cut -d: -f3) in .env, then: docker compose up -d agent-kernel", uid, first)
+	case strings.Contains(output, "Cannot connect to the Docker daemon"), strings.Contains(output, "Is the docker daemon running?"):
+		return fmt.Errorf("docker daemon is not reachable from the kernel container: %s\n"+
+			"Check that /var/run/docker.sock is mounted into the agent-kernel service", first)
+	default:
+		return fmt.Errorf("docker daemon probe failed: %w: %s", err, first)
+	}
+}
+
 // BuildEmbedded builds the embedded Dockerfile with the local Docker daemon
 // and returns the digest-pinned reference (temporality-sandbox@sha256:…).
 // The build context is the Dockerfile alone, sent over stdin — no host
 // directory is ever mounted or sent to the daemon.
 func BuildEmbedded(ctx context.Context, binary string) (string, error) {
+	if err := PreflightSocket(ctx, binary); err != nil {
+		return "", err
+	}
 	ctx, cancel := context.WithTimeout(ctx, buildTimeout)
 	defer cancel()
 	build := exec.CommandContext(ctx, binary, "build", "-t", BuildImageTag, "-")

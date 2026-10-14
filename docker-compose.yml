@@ -104,12 +104,14 @@ services:
         # The Lead/Coder/Reviewer/QA example routes are opt-in via build tag.
         KERNEL_BUILD_TAGS: agent_examples
     # Host uid/gid keeps sandbox workspace files owned by the local user and
-    # makes the kernel pass that uid to sandbox containers. The Docker socket
-    # is root:root inside the container (OrbStack/Docker Desktop proxy), so the
-    # root group is required to connect.
+    # makes the kernel pass that uid to sandbox containers. The socket group
+    # differs by host: Docker Desktop/OrbStack proxy it as root:root (GID 0,
+    # the default), a plain Linux host mounts it as root:docker — set
+    # TEMPORALITY_DOCKER_GID to that group's GID
+    # (getent group docker | cut -d: -f3) in .env.
     user: "${TEMPORALITY_UID:-10001}:${TEMPORALITY_GID:-10001}"
     group_add:
-      - "0"
+      - "${TEMPORALITY_DOCKER_GID:-0}"
     environment:
       DATABASE_URL: postgres://temporality:temporality@postgres:5432/temporality?sslmode=disable
       TEMPORALITY_URL: http://journal:8080
