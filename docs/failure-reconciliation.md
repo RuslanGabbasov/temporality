@@ -61,7 +61,15 @@ events plus Temporal liveness on demand.
   `stale_in_flight` (no terminal event after 10 minutes inside a running
   workflow) and `failed_uncertain` (uncertain failure). Completed, blocked,
   rejected (`effect=none`) and already-reconciled operations are settled and do
-  not resurface.
+  not resurface. The listing scans a bounded window — 7 days by default,
+  `TEMPORALITY_OPERATIONS_WINDOW` to override — because it runs on every UI
+  poll and pages through six event types with full payloads; unbounded scans
+  grew with journal history until busy projects turned every poll into a
+  journal-flooding walk and a 500. Operations older than the window stop
+  surfacing (their journal rows remain queryable by run id), and pagination is
+  capped at 40 pages per event type as a pathological-journal guard. The same
+  window covers terminal events, so windowing never marks a settled operation
+  as uncertain: a terminal event always follows its `tool.started`.
 - **Reconciliation** — `POST /v1/agent/operations/reconcile` (operator) writes
   a durable derived `operation.reconciled` event: `effect` is a closed
   vocabulary `none|occurred|unknown` (`unknown` is a legitimate terminal

@@ -947,6 +947,10 @@ func main() {
 		}
 		operations, err := activities.UncertainOperations(r.Context(), project, liveness)
 		if err != nil {
+			// The listing pages through the journal; its failures used to vanish
+			// into a bare 500 with no server-side trace. Log the cause so the next
+			// occurrence is diagnosable from docker logs without guessing.
+			log.Warn("list uncertain operations", "project", project, "error", err)
 			writeError(w, 500, err)
 			return
 		}

@@ -116,6 +116,11 @@ type Activities struct {
 	// or a load error — degrades to the KERNEL_CHANNEL__* environment
 	// variables, preserving env-only deployments.
 	ChannelSettings func(context.Context) (ChannelSettings, error)
+	// OperationsWindow bounds how far back the uncertain-operations listing
+	// scans the journal (TEMPORALITY_OPERATIONS_WINDOW, default 7d). Zero falls
+	// back to the default at call time so directly-constructed Activities
+	// (tests) need no init step.
+	OperationsWindow time.Duration
 	// secretIssuedMu + secretIssued dedupe secret.issued per run: every
 	// run_command with a granted secret re-resolves it at the execution
 	// boundary (the agent never holds values), so without the gate each
@@ -167,7 +172,18 @@ func NewActivities(events EventOutbox) (*Activities, error) {
 	// and pinned through POST /v1/setup/sandbox/build) after startup; with no
 	// image configured it stays transparently inert — sandboxConfigured checks
 	// the root, not the wrapper.
-	return &Activities{Events: events, Model: model, HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), WorkspaceURL: strings.TrimRight(env("KERNEL_WORKSPACE_URL", "http://localhost:8090"), "/"), APIToken: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), MCP: registry, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandbox.NewSwappable(sandboxRunner)}, nil
+	activities := &Activities{Events: events, Model: model, HTTP: &http.Client{Timeout: config.Timeout}, TemporalityURL: strings.TrimRight(env("TEMPORALITY_URL", "http://localhost:8080"), "/"), WorkspaceURL: strings.TrimRight(env("KERNEL_WORKSPACE_URL", "http://localhost:8090"), "/"), APIToken: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), MCP: registry, SourceID: env("KERNEL_SOURCE_ID", "temporality-agent-kernel"), Sandbox: sandbox.NewSwappable(sandboxRunner)}
+	// The operations listing window keeps journal scans bounded (see
+	// reconcile.go defaultOperationsWindow); a bad value must fail loudly at
+	// boot instead of silently unbounding the scan.
+	if raw := strings.TrimSpace(os.Getenv("TEMPORALITY_OPERATIONS_WINDOW")); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil || parsed <= 0 {
+			return nil, fmt.Errorf("TEMPORALITY_OPERATIONS_WINDOW must be a positive duration (e.g. 168h), got %q", raw)
+		}
+		activities.OperationsWindow = parsed
+	}
+	return activities, nil
 }
 
 // Sandbox returns the swappable sandbox runner so the control plane can

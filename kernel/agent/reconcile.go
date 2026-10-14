@@ -92,6 +92,23 @@ type ReconcileRequest struct {
 // means the workflow is stuck or the worker died without the timeout firing.
 const staleInFlightAfter = 10 * time.Minute
 
+// defaultOperationsWindow bounds how far back the uncertain-operations
+// listing scans the journal (overridable via TEMPORALITY_OPERATIONS_WINDOW).
+// The listing runs on every operations-panel poll — 15s from the UI — and each
+// call pages through six event types with full payloads (tool arguments), so
+// an unbounded scan made the listing slower with every recorded event until
+// the journal pool saturated and /v1/agent/operations started answering 500
+// on busy projects. A crash-window question older than a week is stale as an
+// operator question anyway: the run is long gone, the evidence cooled down,
+// and the journal row stays queryable by run id regardless.
+const defaultOperationsWindow = 7 * 24 * time.Hour
+
+// toolEventsMaxPages caps pagination per event type. 40 pages × 500 events =
+// 20k events of one type inside the window is far beyond any healthy project;
+// stopping there keeps a pathological journal (or a cursor bug) from turning
+// one listing call into an endless walk.
+const toolEventsMaxPages = 40
+
 // isOrchestrationTool marks tools that never run as a tool activity: plan
 // and delegate orchestrate child workflows from workflow code (durable,
 // replayed by Temporal) and routinely stay open for the whole DAG — rework
@@ -114,7 +131,12 @@ func isOrchestrationTool(tool string) bool {
 // visible projects, which it can do losslessly because every operation
 // carries its own project.
 func (a *Activities) UncertainOperations(ctx context.Context, project string, liveness WorkflowLiveness) ([]UncertainOperation, error) {
-	started, err := a.toolEvents(ctx, project, "tool.started")
+	window := a.OperationsWindow
+	if window <= 0 {
+		window = defaultOperationsWindow
+	}
+	since := time.Now().UTC().Add(-window)
+	started, err := a.toolEvents(ctx, project, "tool.started", since)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +144,12 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 	// call, the parent run for delegated work, and the human-readable task
 	// title. One extra scan per listing call; the journal is the source of
 	// truth and nothing is stored.
-	runStarted, err := a.toolEvents(ctx, project, "run.started")
+	//
+	// The same since-window applies to terminal events and run headers: a
+	// terminal event always follows its tool.started, so anything that started
+	// inside the window has its terminals inside the window too — windowing
+	// never marks a settled operation as uncertain.
+	runStarted, err := a.toolEvents(ctx, project, "run.started", since)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +169,7 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 	// verdict (including effect=unknown), the operation is settled and must
 	// not resurface in the uncertain listing on every scan.
 	for _, terminalType := range []string{"tool.completed", "tool.failed", "tool.blocked", "operation.reconciled"} {
-		events, err := a.toolEvents(ctx, project, terminalType)
+		events, err := a.toolEvents(ctx, project, terminalType, since)
 		if err != nil {
 			return nil, err
 		}
@@ -223,11 +250,17 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 }
 
 // toolEvents pages through one event type for a project.
-func (a *Activities) toolEvents(ctx context.Context, project, eventType string) ([]observation.Event, error) {
+// toolEvents pages through the journal's event listing for one event type.
+// since bounds the scan (empty time.Time = unbounded); the operations listing
+// always passes one, other callers may not.
+func (a *Activities) toolEvents(ctx context.Context, project, eventType string, since time.Time) ([]observation.Event, error) {
 	var collected []observation.Event
 	cursor := ""
-	for {
+	for page := 0; page < toolEventsMaxPages; page++ {
 		query := fmt.Sprintf("project=%s&type=%s&limit=500", urlQueryEscape(project), eventType)
+		if !since.IsZero() {
+			query += "&since=" + urlQueryEscape(since.Format(time.RFC3339Nano))
+		}
 		if cursor != "" {
 			query += "&cursor=" + urlQueryEscape(cursor)
 		}
@@ -265,6 +298,10 @@ func (a *Activities) toolEvents(ctx context.Context, project, eventType string) 
 		}
 		cursor = page.NextCursor
 	}
+	// Page cap reached: return what was collected rather than erroring — the
+	// listing stays useful (a bounded prefix) and a pathological journal cannot
+	// hang the endpoint. The cap is far beyond any healthy project's volume.
+	return collected, nil
 }
 
 func eventKey(event observation.Event) string {

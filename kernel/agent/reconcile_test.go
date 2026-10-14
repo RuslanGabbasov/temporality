@@ -48,11 +48,22 @@ func journalStub(t *testing.T, events ...observation.Event) *httptest.Server {
 			var matching []observation.Event
 			eventType := r.URL.Query().Get("type")
 			run := r.URL.Query().Get("run")
+			// Mirror the journal's since filter (occurred_at >= since) so tests
+			// exercise the operations scan window exactly as the server does.
+			var since time.Time
+			if raw := r.URL.Query().Get("since"); raw != "" {
+				parsed, err := time.Parse(time.RFC3339Nano, raw)
+				require.NoError(t, err)
+				since = parsed
+			}
 			for _, event := range events {
 				if eventType != "" && event.Type != eventType {
 					continue
 				}
 				if run != "" && event.Context.Run != run {
+					continue
+				}
+				if !since.IsZero() && event.OccurredAt.Before(since) {
 					continue
 				}
 				matching = append(matching, event)
@@ -406,4 +417,54 @@ func TestUncertainOperationsCarryDelegationContext(t *testing.T) {
 	require.Equal(t, "run-parent/delegate/01", operation.ChildRunID)
 	require.Equal(t, 3, operation.ChildOpsTotal)
 	require.Equal(t, 1, operation.ChildOpsUnresolved)
+}
+
+func TestUncertainOperationsWindowExcludesAncientHistory(t *testing.T) {
+	// Two identical unresolved crash-window operations: one recent, one far
+	// beyond the default 7d scan window. The ancient one must not surface —
+	// the window is what keeps the per-poll listing bounded (see
+	// defaultOperationsWindow).
+	old := time.Now().UTC().Add(-30 * 24 * time.Hour)
+	recent := time.Now().UTC().Add(-time.Hour)
+	server := journalStub(t,
+		toolEvent("omni", "run-ancient", "op-ancient", "tool.started", old),
+		toolEvent("omni", "run-fresh", "op-fresh", "tool.started", recent),
+	)
+	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "operator"}
+
+	operations, err := activities.UncertainOperations(context.Background(), "omni", stubLiveness{})
+	require.NoError(t, err)
+	require.Len(t, operations, 1)
+	require.Equal(t, "op-fresh", operations[0].OperationID)
+}
+
+func TestUncertainOperationsWindowIsConfigurable(t *testing.T) {
+	// A shorter configured window must exclude events the default would keep:
+	// proof the Activities field, not just the constant, drives the scan.
+	old := time.Now().UTC().Add(-72 * time.Hour)
+	server := journalStub(t,
+		toolEvent("omni", "run-old", "op-old", "tool.started", old),
+	)
+	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "operator", OperationsWindow: 24 * time.Hour}
+
+	operations, err := activities.UncertainOperations(context.Background(), "omni", stubLiveness{})
+	require.NoError(t, err)
+	require.Empty(t, operations)
+}
+
+func TestToolEventsStopsAtPageCap(t *testing.T) {
+	// A journal that always answers with another page (pathological cursor or
+	// bug) must not turn one listing call into an endless walk.
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_ = json.NewEncoder(w).Encode(map[string]any{"events": []observation.Event{}, "count": 0, "next_cursor": "more"})
+	}))
+	t.Cleanup(server.Close)
+	activities := &Activities{HTTP: server.Client(), TemporalityURL: server.URL, APIToken: "operator"}
+
+	events, err := activities.toolEvents(context.Background(), "omni", "tool.started", time.Now().UTC().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Empty(t, events)
+	require.Equal(t, toolEventsMaxPages, requests)
 }
