@@ -89,7 +89,10 @@ export default function Triggers({ project }: { project: string }) {
     if (!form.name?.trim()) return
     setLoading(true); setError('')
     try {
-      const payload = { ...form, project_id: project, config: JSON.stringify(form.config) }
+      // config travels as a JSON object, not a stringified one: the server
+      // stores jsonb and every consumer unmarshals it into a struct. (The
+      // stringified form used to double-encode and broke matching/firing.)
+      const payload = { ...form, project_id: project, config: form.config }
       if (editing) {
         await workspaceApi.updateTrigger(editing.id, payload)
         // PUT payloads ignore org bindings: re-scoping goes through the admin

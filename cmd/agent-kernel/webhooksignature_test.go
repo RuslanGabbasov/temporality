@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/temporality-project/temporality/workspace"
@@ -91,6 +92,34 @@ func TestWebhookStoredTokenHash(t *testing.T) {
 	}
 	if got := webhookStoredTokenHash(json.RawMessage(`not json`)); got != "" {
 		t.Fatalf("unparsable config must read as empty, got %q", got)
+	}
+}
+
+// Double-encoded configs (a JSON string holding the document) must be
+// unwrapped on write; everything else passes through byte-identical.
+func TestUnwrapJSONString(t *testing.T) {
+	// strconv.Quote builds the double-encoded form: a JSON string token whose
+	// content is itself the JSON document.
+	inner := `{"path":"pr-created","secret":""}`
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"double-encoded object", strconv.Quote(inner), inner},
+		{"plain object stays as is", `{"path":"p"}`, `{"path":"p"}`},
+		{"plain string stays as is", `"just a string"`, `"just a string"`},
+		{"string holding invalid json stays as is", `"{oops"`, `"{oops"`},
+		{"string holding an array stays as is", `"[1,2]"`, `"[1,2]"`},
+		{"empty stays as is", ``, ``},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(unwrapJSONString(json.RawMessage(tc.in)))
+			if got != tc.want {
+				t.Fatalf("unwrapJSONString(%s) = %s, want %s", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 

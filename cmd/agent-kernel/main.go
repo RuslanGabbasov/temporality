@@ -263,6 +263,12 @@ func main() {
 		log.Error("migrate workspace v61 (judge quality loop)", "error", err)
 		os.Exit(1)
 	}
+	// 000062 unwraps trigger configs that the UI used to store double-encoded
+	// (a JSON string node holding the document) — see the migration header.
+	if err = ws.Migrate(ctx, "migrations/000062_trigger_config_unwrap.up.sql"); err != nil {
+		log.Error("migrate workspace v62 (trigger config unwrap)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -3311,6 +3317,10 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
+		// Some clients (historically the UI) send the config double-encoded —
+		// a JSON string holding the document. Unwrap before storing: every
+		// consumer unmarshals the config into a struct.
+		req.Config = unwrapJSONString(req.Config)
 		if req.ID == "" {
 			req.ID = slugify(req.Name) + "-" + time.Now().UTC().Format("20060102-150405")
 		}
@@ -3442,7 +3452,9 @@ func main() {
 		if raw, ok := body["config"]; ok && string(raw) != "null" {
 			var cfg json.RawMessage
 			if json.Unmarshal(raw, &cfg) == nil && len(cfg) > 0 {
-				existing.Config = cfg
+				// Tolerate double-encoded configs (JSON string holding the
+				// document) the same way create does.
+				existing.Config = unwrapJSONString(cfg)
 			}
 		}
 		existing.Config = preserveWebhookTokenHash(existing.Config, storedWebhookTokenHash, existing.Type)
@@ -5821,6 +5833,29 @@ func webhookTokenMatches(token, storedHash string) bool {
 	}
 	digest := sha256.Sum256([]byte(token))
 	return hmac.Equal([]byte(hex.EncodeToString(digest[:])), []byte(storedHash))
+}
+
+// unwrapJSONString undoes accidental double encoding: a config that arrived
+// as a JSON *string* holding a JSON document ("\"{\\\"path\\\":…}\"") is
+// unwrapped to the embedded object. Anything else — plain objects, plain
+// strings, malformed input — passes through unchanged.
+func unwrapJSONString(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var inner string
+	if json.Unmarshal(raw, &inner) != nil {
+		return raw
+	}
+	trimmed := strings.TrimSpace(inner)
+	if !strings.HasPrefix(trimmed, "{") {
+		return raw
+	}
+	var probe json.RawMessage
+	if json.Unmarshal([]byte(inner), &probe) != nil {
+		return raw
+	}
+	return json.RawMessage(inner)
 }
 
 // webhookStoredTokenHash reads the delivery-token hash out of a stored
