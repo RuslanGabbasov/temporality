@@ -1925,9 +1925,13 @@ func main() {
 	// immutable snapshot land atomically (docs/living-skills.md §26: agents
 	// propose, people apply). The bool result tells the gate handler whether
 	// the apply landed, so the gate:false path journals its skip only after
-	// a real apply (F-1).
+	// a real apply (F-1). A gate:false apply passes its audit event along
+	// (F-2): the skip record joins the apply's own transaction
+	// (Store.ApplyAgentProposalAudited), so a failed audit INSERT rolls the
+	// apply back and answers 503 audit_write_failed — a gate-less apply can
+	// never land unjournaled (fail-closed, CWE-778).
 	RegisterM3Routes(mux, gate, ws, kernelGateRunner{activities: activities}, events,
-		func(w http.ResponseWriter, r *http.Request, a workspace.Agent, proposal workspace.AgentProposal) bool {
+		func(w http.ResponseWriter, r *http.Request, a workspace.Agent, proposal workspace.AgentProposal, audit *workspace.AccessAuditEvent) bool {
 			next := a
 			next.Description = proposal.Description
 			definition := proposal.Definition
@@ -1942,9 +1946,20 @@ func main() {
 				version := agentVersionSnapshot(next, requestSubject(r), "proposal", proposal.GeneratorModel)
 				snapshot = &version
 			}
-			decided, err := ws.ApplyAgentProposal(r.Context(), next, proposal.ID, requestSubject(r), snapshot)
+			var decided workspace.AgentProposal
+			var err error
+			if audit != nil {
+				decided, err = ws.ApplyAgentProposalAudited(r.Context(), next, proposal.ID, requestSubject(r), snapshot, audit)
+			} else {
+				decided, err = ws.ApplyAgentProposal(r.Context(), next, proposal.ID, requestSubject(r), snapshot)
+			}
 			if err != nil {
 				switch {
+				case errors.Is(err, workspace.ErrAuditWriteFailed):
+					// F-2 fail-closed: the audit INSERT rode the apply
+					// transaction, so the apply rolled back with it —
+					// surface 503, never a success without a bypass trail.
+					writeJSON(w, 503, map[string]any{"error": "audit_write_failed"})
 				case errors.Is(err, workspace.ErrNotFound):
 					writeError(w, 404, err)
 				case errors.Is(err, workspace.ErrBaseVersionStale):

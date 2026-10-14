@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -61,16 +62,31 @@ const (
 	AuditEvalGateSkipped      = "agent.evaluation.gate.skipped"
 )
 
-// RecordAccessAudit appends one event. Nil details is stored as {}.
-func (s *Store) RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error {
+// ErrAuditWriteFailed reports a failed access-audit INSERT on a path where
+// the record is part of the same transaction as the mutation it journals
+// (F-2, specs/quality-loop.md §8.3 gate:false): the mutation rolled back
+// with it, so the caller must surface the failure instead of proceeding —
+// the fail-closed counterpart of the best-effort RecordAccessAudit path.
+var ErrAuditWriteFailed = errors.New("audit_write_failed")
+
+// insertAccessAudit is the single audit INSERT, shared by the best-effort
+// RecordAccessAudit path (pool executor) and the transactional audited
+// apply (tx executor, F-2) so the two can never drift apart.
+// *pgxpool.Pool and pgx.Tx both satisfy agentExecer (workspace/store.go).
+func insertAccessAudit(ctx context.Context, ex agentExecer, actor, action, entityKind, entityID string, details map[string]any) error {
 	raw, err := json.Marshal(details)
 	if err != nil || raw == nil {
 		raw = []byte("{}")
 	}
-	_, err = s.pool.Exec(ctx,
+	_, err = ex.Exec(ctx,
 		`INSERT INTO access_audit_log (actor, action, entity_kind, entity_id, details) VALUES ($1, $2, $3, $4, $5)`,
 		actor, action, entityKind, entityID, raw)
 	return err
+}
+
+// RecordAccessAudit appends one event. Nil details is stored as {}.
+func (s *Store) RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error {
+	return insertAccessAudit(ctx, s.pool, actor, action, entityKind, entityID, details)
 }
 
 // ListAccessAudit returns the most recent events, newest first.
