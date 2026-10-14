@@ -136,6 +136,25 @@ func (p Principal) AllowsAllProjects() bool {
 	return false
 }
 
+// AllowedProjects returns the project set a cross-project listing may show
+// (docs/activity-scoping.md §5). all=true means the principal spans every
+// project and the caller needs no constraint. all=false with a non-empty
+// list is the any-of filter; all=false with an empty list means the principal
+// sees no projects at all — the caller must answer with an empty result, not
+// an unfiltered one (an empty ANY-list in SQL matches nothing, but a skipped
+// filter would leak everything).
+func (p Principal) AllowedProjects() (projects []string, all bool) {
+	if p.AllowsAllProjects() {
+		return nil, true
+	}
+	for _, allowed := range p.Projects {
+		if allowed != "" && allowed != "*" {
+			projects = append(projects, allowed)
+		}
+	}
+	return projects, false
+}
+
 // Gate resolves bearer tokens to principals. A nil *Gate (or one created
 // from an empty token list) is disabled and authorizes everything.
 //
@@ -367,6 +386,38 @@ func (g *Gate) Allow(w http.ResponseWriter, r *http.Request, min Role, projects 
 		return false
 	}
 	return true
+}
+
+// AllowQuery authorizes a listing request whose project filter may be empty
+// (docs/activity-scoping.md §5): activity lists are global by default and the
+// server constrains them to the principal's visible projects. A concrete
+// project behaves exactly like Allow. An empty one is no longer a 403 for
+// scoped principals — the handler receives the principal back and must apply
+// AllowedProjects() itself; skipping that step would turn "all MY projects"
+// into "all projects", so callers cannot ignore the returned value.
+func (g *Gate) AllowQuery(w http.ResponseWriter, r *http.Request, min Role, project string) (Principal, bool) {
+	principal, authenticated := r.Context().Value(contextKey{}).(Principal)
+	if !authenticated {
+		if g.Enabled() {
+			// Enabled gate but no principal: the handler was mounted without
+			// the Authenticate middleware. Fail closed.
+			writeError(w, http.StatusUnauthorized, "a valid bearer token is required")
+			return Principal{}, false
+		}
+		return Principal{Subject: "anonymous", Role: RoleAdmin, Projects: []string{"*"}}, true
+	}
+	if !g.Enabled() {
+		return principal, true
+	}
+	if project != "" && !principal.AllowsProject(project) {
+		writeError(w, http.StatusForbidden, fmt.Sprintf("token %q has no access to project %q", principal.Subject, project))
+		return Principal{}, false
+	}
+	if principal.Role < min {
+		writeError(w, http.StatusForbidden, fmt.Sprintf("token %q has role %s, need %s", principal.Subject, principal.Role, min))
+		return Principal{}, false
+	}
+	return principal, true
 }
 
 // FromContext returns the authenticated principal when the gate is enabled.

@@ -33,6 +33,11 @@ type Filter struct {
 	Until    *time.Time
 	KnownAt  *time.Time
 	Limit    int
+	// Projects restricts to events whose project_id is one of the listed —
+	// the any-of companion to Project used by cross-project listings that a
+	// scoped principal sees (docs/activity-scoping.md §5). Empty means no
+	// constraint; it never widens anything on its own.
+	Projects []string
 	// ScopeKind restricts to events whose data.scope_kind matches exactly.
 	// Used to load shared (org_unit / organization) knowledge regardless of
 	// which project originated it.

@@ -108,11 +108,12 @@ func isOrchestrationTool(tool string) bool {
 
 // UncertainOperations projects tool lifecycle events from the journal into
 // operations whose effect state is unresolved. The event stream stays the
-// source of truth — nothing is stored here.
+// source of truth — nothing is stored here. An empty project lists across
+// every project (docs/activity-scoping.md §5): the caller — the kernel API
+// handler — is responsible for constraining the result to the principal's
+// visible projects, which it can do losslessly because every operation
+// carries its own project.
 func (a *Activities) UncertainOperations(ctx context.Context, project string, liveness WorkflowLiveness) ([]UncertainOperation, error) {
-	if project == "" {
-		return nil, fmt.Errorf("project is required")
-	}
 	started, err := a.toolEvents(ctx, project, "tool.started")
 	if err != nil {
 		return nil, err

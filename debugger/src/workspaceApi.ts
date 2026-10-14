@@ -766,9 +766,11 @@ export const workspaceApi = {
   probeProviderModels: (data: { base_url: string; api_key_ref?: string }) =>
     request<{ models: string[]; count: number }>('/v1/workspace/providers/probe-models', { method: 'POST', body: JSON.stringify(data) }),
 
-  // Triggers
-  listTriggers: (projectId: string) =>
-    request<{ triggers: Trigger[] }>(`/v1/workspace/projects/${projectId}/triggers`),
+  // Triggers. listTriggers without a project hits the global listing
+  // (docs/activity-scoping.md §5) — server-side constrained to the visible
+  // projects — and includes a per-trigger project attribution for the UI.
+  listTriggers: (projectId?: string) =>
+    request<{ triggers: Trigger[] }>(projectId && projectId.trim() ? `/v1/workspace/projects/${encodeURIComponent(projectId.trim())}/triggers` : '/v1/workspace/triggers'),
   createTrigger: (data: Partial<Trigger>) =>
     request<Trigger>('/v1/workspace/triggers', { method: 'POST', body: JSON.stringify(data) }),
   updateTrigger: (id: string, data: Partial<Trigger>) =>

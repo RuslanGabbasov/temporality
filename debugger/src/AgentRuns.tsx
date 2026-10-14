@@ -89,6 +89,10 @@ interface RunRow {
   sourceId: string
   workflow?: string
   agentId?: string
+  /** Project attribution of the run (docs/activity-scoping.md §4): global
+   * listings span projects, so every row carries its own project — detail
+   * calls (result, cost, nudge) must use it, not the header filter. */
+  project?: string
 }
 
 /** Build the run call tree: roots are runs without a known parent, children
@@ -128,6 +132,7 @@ function buildRunRows(started: ObservationEvent[], statuses: Map<string, RunStat
       sourceId: event.source.id,
       workflow: typeof event.data?.workflow === 'string' ? event.data.workflow : undefined,
       agentId: typeof event.data?.agent_id === 'string' && event.data.agent_id ? event.data.agent_id : undefined,
+      project: event.context?.project || undefined,
     })
     for (const child of childrenOf.get(id) ?? []) walk(child, depth + 1)
   }
@@ -395,13 +400,13 @@ export default function AgentRuns({ project }: { project: string }) {
     return { visible, responseByKey, reasoningByKey }
   }, [timeline])
 
-  // Fetch unresolved operations for the project and group them by run. Best-
-  // effort: older kernels without the endpoint simply show no markers.
+  // Fetch unresolved operations and group them by run. The project filter is
+  // optional: the global listing spans every project the caller may see
+  // (docs/activity-scoping.md §5). Best-effort: older kernels without the
+  // endpoint simply show no markers.
   const refreshOps = useCallback(async () => {
-    const id = project.trim()
-    if (!id) { setOpsByRun(new Map()); return }
     try {
-      const page = await fetchOperations(id)
+      const page = await fetchOperations(project.trim() || undefined)
       const map = new Map<string, UncertainOperation[]>()
       for (const op of page.operations ?? []) {
         const list = map.get(op.run_id) ?? []
@@ -412,20 +417,23 @@ export default function AgentRuns({ project }: { project: string }) {
     } catch { setOpsByRun(new Map()) }
   }, [project])
 
+  // The header filter is a filter, not a mode: empty = every project the
+  // caller may see (docs/activity-scoping.md §7). The journal scopes an
+  // unfiltered query server-side, so the same code path serves both.
+  const scope = project.trim() || undefined
   const loadRuns = useCallback(async (autoSelect = false, silent = false) => {
-    if (!project.trim()) return
     if (!autoSelect && !silent) setBusy(true)
     if (!silent) setError('')
     try {
       void refreshOps()
-      const startedPage = await observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.started', limit: 500 })
+      const startedPage = await observationApi.events(scope, undefined, undefined, undefined, { type: 'run.started', limit: 500 })
       // Terminal events give every list row (roots and delegated children
       // alike) its status tag without opening each run. run.cancelled matters
       // as much: without it a cancelled run shows "running" forever.
       const [completedPage, failedPage, cancelledPage] = await Promise.all([
-        observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.completed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
-        observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.failed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
-        observationApi.events(project.trim(), undefined, undefined, undefined, { type: 'run.cancelled', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
+        observationApi.events(scope, undefined, undefined, undefined, { type: 'run.completed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
+        observationApi.events(scope, undefined, undefined, undefined, { type: 'run.failed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
+        observationApi.events(scope, undefined, undefined, undefined, { type: 'run.cancelled', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
       ])
       const statuses = new Map<string, RunStatus>()
       for (const event of failedPage.events) statuses.set(runID(event), 'failed')
@@ -436,7 +444,7 @@ export default function AgentRuns({ project }: { project: string }) {
       // Open human questions mark the asking runs (best-effort — the badge
       // in the header falls back to events when the endpoint is missing).
       try {
-        const open = await workspaceApi.listHumanRequests({ project: project.trim(), onlyOpen: true })
+        const open = await workspaceApi.listHumanRequests({ project: scope, onlyOpen: true })
         setQuestionRuns(new Set((open.requests ?? []).map((request) => request.run_id)))
       } catch { setQuestionRuns(new Set()) }
       const rootRuns = allRows.filter((row) => row.depth === 0)
@@ -445,7 +453,9 @@ export default function AgentRuns({ project }: { project: string }) {
       if (autoSelect && !currentSelected && rootRuns.length) {
         let found = ''
         for (const row of rootRuns) {
-          const query = new URLSearchParams({ project: project.trim(), source_id: row.sourceId })
+          // The detail endpoint needs the run's own project — in the global
+          // listing it is not the header filter.
+          const query = new URLSearchParams({ project: row.project ?? '', source_id: row.sourceId })
           let response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(row.id)}?${query}`, { headers: authHeaders() })
           if (!response.ok && row.workflow === 'LeadCoderReviewerQA') {
             response = await fetch(`${KERNEL_API}/v1/agent/examples/lead-coder-reviewer-qa/runs/${encodeURIComponent(row.id)}?${query}`, { headers: authHeaders() })
@@ -459,7 +469,7 @@ export default function AgentRuns({ project }: { project: string }) {
   }, [project, refreshOps])
 
   const loadRun = useCallback(async (run: string, silent = false) => {
-    if (!project.trim() || !run) return
+    if (!run) return
     if (!silent) setBusy(true)
     setError('')
     // Drop extras from the previously selected run while loading.
@@ -467,8 +477,13 @@ export default function AgentRuns({ project }: { project: string }) {
     setRunCostData(null)
     setTaskCostData(null)
     try {
-      const page = await observationApi.events(project.trim(), undefined, undefined, undefined, { run, limit: 500 })
+      // Events are fetched by run id alone: the journal scopes the query to
+      // the caller's visible projects server-side (docs/activity-scoping.md
+      // §5), and the run's own project comes from its root event — the header
+      // filter may be the global "All projects".
+      const page = await observationApi.events(undefined, undefined, undefined, undefined, { run, limit: 500 })
       const root = page.events.find((event) => event.type === 'run.started')
+      const runProject = root?.context?.project ?? project.trim()
       const teamRun = root?.data?.workflow === 'LeadCoderReviewerQA'
       let allEvents = page.events
       if (teamRun) {
@@ -476,7 +491,7 @@ export default function AgentRuns({ project }: { project: string }) {
           .filter((event) => event.type === 'delegation.started' || event.type === 'plan.task.started')
           .map((event) => String(event.data?.child_run_id ?? ''))
           .filter(Boolean)
-        const childPages = await Promise.all(childIDs.map((child) => observationApi.events(project.trim(), undefined, undefined, undefined, { run: child, limit: 500 })))
+        const childPages = await Promise.all(childIDs.map((child) => observationApi.events(undefined, undefined, undefined, undefined, { run: child, limit: 500 })))
         allEvents = [...page.events, ...childPages.flatMap((childPage) => childPage.events)].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
       }
       setTimeline((prev) => {
@@ -488,7 +503,7 @@ export default function AgentRuns({ project }: { project: string }) {
         return [...allEvents, ...extra].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
       })
       const resultPath = teamRun ? `/v1/agent/examples/lead-coder-reviewer-qa/runs/${encodeURIComponent(run)}` : `/v1/agent/runs/${encodeURIComponent(run)}`
-      const sourceQuery = new URLSearchParams({ project: project.trim(), source_id: root?.source.id ?? '' })
+      const sourceQuery = new URLSearchParams({ project: runProject, source_id: root?.source.id ?? '' })
       let response = await fetch(`${KERNEL_API}${resultPath}?${sourceQuery}`, { headers: authHeaders() })
       if (!response.ok && teamRun) response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(run)}?${sourceQuery}`, { headers: authHeaders() })
       if (response.ok) {
@@ -499,7 +514,7 @@ export default function AgentRuns({ project }: { project: string }) {
         const detail = await response.text()
         throw new Error(`${response.status} ${detail}`)
       }
-      const query = new URLSearchParams({ project: project.trim(), run })
+      const query = new URLSearchParams({ project: runProject, run })
       window.history.replaceState(null, '', `/agents?${query}`)
       // Fetch trajectory extraction (deterministic patterns from event stream)
       try {
@@ -509,14 +524,14 @@ export default function AgentRuns({ project }: { project: string }) {
       // Token/cost totals for the run (cached prompt tokens billed at half
       // price); stays zero until model prices are configured.
       try {
-        setRunCostData(await runCost(project.trim(), run))
+        setRunCostData(await runCost(runProject, run))
       } catch { /* totals stay hidden */ }
       // Task-wide budget: every run sharing the selected run's task — the
       // conversation follow-ups and the whole delegation tree.
       const taskID = root?.context?.task ?? ''
       if (taskID) {
         try {
-          setTaskCostData(await taskCost(project.trim(), taskID))
+          setTaskCostData(await taskCost(runProject, taskID))
         } catch { /* totals stay hidden */ }
       }
     } catch (failure) { setError(message(failure)) }
@@ -616,7 +631,7 @@ export default function AgentRuns({ project }: { project: string }) {
     try {
       const root = timeline.find((item) => item.type === 'run.started' && runID(item) === selected)
       const operation = event.data?.operation as Record<string, unknown> | undefined
-      const approvalQuery = new URLSearchParams({ project: project.trim(), source_id: root?.source.id ?? '' })
+      const approvalQuery = new URLSearchParams({ project: selectedProject, source_id: root?.source.id ?? '' })
       const response2 = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(selected)}/approval?${approvalQuery}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ operation_id: operationID, arguments_hash: operation?.arguments_hash ?? String(event.data?.arguments_hash ?? ''), approved, actor_id: 'human-ui', reason: reason.trim(), response: response.trim() }),
@@ -625,7 +640,7 @@ export default function AgentRuns({ project }: { project: string }) {
       await loadRun(selected, true)
       // The answered question no longer marks the run — refresh the open set.
       try {
-        const open = await workspaceApi.listHumanRequests({ project: project.trim(), onlyOpen: true })
+        const open = await workspaceApi.listHumanRequests({ project: selectedProject || undefined, onlyOpen: true })
         setQuestionRuns(new Set((open.requests ?? []).map((request) => request.run_id)))
       } catch { /* best-effort */ }
     } catch (failure) { setError(message(failure)) }
@@ -640,7 +655,7 @@ export default function AgentRuns({ project }: { project: string }) {
     setBusy(true); setError('')
     try {
       const root = timeline.find((item) => item.type === 'run.started' && runID(item) === selected)
-      const query = new URLSearchParams({ project: project.trim(), source_id: root?.source.id ?? '' })
+      const query = new URLSearchParams({ project: selectedProject, source_id: root?.source.id ?? '' })
       const response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(selected)}/nudge?${query}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ turn, actor_id: identity?.subject && identity.subject !== 'anonymous' ? identity.subject : 'human-ui' }),
@@ -653,6 +668,14 @@ export default function AgentRuns({ project }: { project: string }) {
     } catch (failure) { setError(message(failure)) }
     finally { setBusy(false) }
   }
+
+  // The selected run's own project: detail endpoints (result, approval,
+  // nudge) need it even when the header filter is the global "All projects".
+  // Falls back to the filter for run ids the list hasn't loaded yet.
+  const selectedProject = useMemo(
+    () => rows.find((row) => row.id === selected)?.project ?? project.trim(),
+    [rows, selected, project],
+  )
 
   // Prefer the run result (REST); evicted child runs have none — fall back
   // to the agent.summary event, which survives in the journal. Older summary
@@ -711,6 +734,10 @@ export default function AgentRuns({ project }: { project: string }) {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.role || 'agent'} · {shortTime(row.at)}</span>
+                    {/* Project attribution in the global listing
+                        (docs/activity-scoping.md §7): shows which project the
+                        run worked in without narrowing the list. */}
+                    {!project.trim() && row.project && <Tag type="gray" size="sm">{row.project}</Tag>}
                     {row.status === 'completed' && <Tag type="green" size="sm">{t('chat.delegation.completed')}</Tag>}
                     {row.status === 'failed' && <Tag type="red" size="sm">{t('chat.delegation.failed')}</Tag>}
                     {row.status === 'running' && <Tag type="blue" size="sm">{t('chat.delegation.running')}</Tag>}
@@ -909,13 +936,13 @@ export default function AgentRuns({ project }: { project: string }) {
                 )}
 
                 {/* Cross-agent knowledge disputes across the selected run's chain */}
-                <RunDisputes project={project.trim()} selected={selected} rows={rows} onOpenRun={setSelected} />
+                <RunDisputes project={selectedProject} selected={selected} rows={rows} onOpenRun={setSelected} />
 
                 {/* Delegation call tree — children runs with live status */}
-                <DelegationTree project={project.trim()} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
+                <DelegationTree project={selectedProject} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
 
                 {/* Plan DAG view — task graph of plan calls with live statuses */}
-                <PlanGraph project={project.trim()} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
+                <PlanGraph project={selectedProject} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
 
                 {/* Timeline — the main trace view */}
                 <Tile>
@@ -992,7 +1019,7 @@ export default function AgentRuns({ project }: { project: string }) {
                             <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{shortTime(event.occurred_at)}</span>
                           </div>
                           <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>
-                            <EventDetail event={event} t={t} project={project.trim()} response={turnKey ? trace.responseByKey.get(turnKey) : undefined} reasoning={turnKey ? trace.reasoningByKey.get(turnKey) : undefined} />
+                            <EventDetail event={event} t={t} project={selectedProject} response={turnKey ? trace.responseByKey.get(turnKey) : undefined} reasoning={turnKey ? trace.reasoningByKey.get(turnKey) : undefined} />
                           </div>
                         </div>
                       )

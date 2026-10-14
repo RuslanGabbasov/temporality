@@ -159,6 +159,73 @@ func TestAllowRoleAndProjectMatrix(t *testing.T) {
 	}
 }
 
+func TestAllowQueryScopesGlobalListings(t *testing.T) {
+	_, gate := newAuthedHandler(t)
+
+	// Mirrors the journal/kernel listing handlers: AllowQuery returns the
+	// principal so the handler can constrain a project-less query itself.
+	query := func(token, project string, role Role) (Principal, bool) {
+		var (
+			principal Principal
+			allowed   bool
+		)
+		inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			principal, allowed = gate.AllowQuery(w, r, role, project)
+		})
+		request := httptest.NewRequest(http.MethodGet, "/x", nil)
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		gate.Authenticate(inner).ServeHTTP(httptest.NewRecorder(), request)
+		return principal, allowed
+	}
+
+	// Scoped reader, concrete project: exactly like Allow.
+	if _, ok := query("read-token-1234567890", "lighthouse", RoleReader); !ok {
+		t.Fatal("scoped reader on an own project must pass")
+	}
+	if _, ok := query("read-token-1234567890", "forge", RoleReader); ok {
+		t.Fatal("scoped reader on someone else's project must 403")
+	}
+	// The same reader with an EMPTY filter is allowed now — the handler
+	// receives the principal and constrains the listing itself.
+	principal, ok := query("read-token-1234567890", "", RoleReader)
+	if !ok {
+		t.Fatal("empty project filter must not 403 a scoped reader")
+	}
+	projects, all := principal.AllowedProjects()
+	if all || len(projects) != 1 || projects[0] != "lighthouse" {
+		t.Fatalf("AllowedProjects() = %v %v, want [lighthouse] false", projects, all)
+	}
+	// Multi-project operator: any-of over both.
+	principal, ok = query("op-token-1234567890", "", RoleOperator)
+	if !ok {
+		t.Fatal("multi-project operator with empty filter must pass")
+	}
+	if projects, all = principal.AllowedProjects(); all || len(projects) != 2 {
+		t.Fatalf("AllowedProjects() = %v %v, want [lighthouse forge] false", projects, all)
+	}
+	// Role still applies on the unfiltered path.
+	if _, ok = query("read-token-1234567890", "", RoleWriter); ok {
+		t.Fatal("role check must survive the empty-filter path")
+	}
+}
+
+func TestAllowedProjectsAdminSeesEverything(t *testing.T) {
+	principal := Principal{Subject: "root", Role: RoleAdmin, Projects: []string{"*"}}
+	projects, all := principal.AllowedProjects()
+	if !all || projects != nil {
+		t.Fatalf("admin AllowedProjects() = %v %v, want nil true", projects, all)
+	}
+	// A scoped principal with an empty project set must report "sees nothing"
+	// rather than "sees everything" — the invariant the listing handlers rely
+	// on to avoid leaking rows (docs/activity-scoping.md §5).
+	scoped := Principal{Subject: "nobody", Role: RoleReader}
+	if projects, all = scoped.AllowedProjects(); all || len(projects) != 0 {
+		t.Fatalf("empty AllowedProjects() = %v %v, want [] false", projects, all)
+	}
+}
+
 func TestDisabledGateAllowsEverything(t *testing.T) {
 	gate, err := NewGate("   ")
 	if err != nil || gate != nil {

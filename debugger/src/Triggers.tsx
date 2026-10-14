@@ -16,8 +16,9 @@ import {
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Add, Copy, Edit, TrashCan } from '@carbon/icons-react'
-import { workspaceApi, type Trigger, type Agent, type ExecutionIdentity } from './workspaceApi'
+import { workspaceApi, type Trigger, type Agent, type ExecutionIdentity, type Project } from './workspaceApi'
 import { copyText } from './clipboard'
+import { INTAKE_PROJECT_ID } from './kernelApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
@@ -53,6 +54,10 @@ export default function Triggers({ project }: { project: string }) {
   const [triggers, setTriggers] = useState<Trigger[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
   const [identities, setIdentities] = useState<ExecutionIdentity[]>([])
+  // Projects feed the create form's routing target (docs/activity-scoping.md
+  // §6): a new trigger needs a concrete project even when the listing is
+  // global — without it, creation would silently bind to the wrong project.
+  const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -71,12 +76,13 @@ export default function Triggers({ project }: { project: string }) {
   const visibleTriggers = triggers.filter((tr) => matchesFilter(filter, tr.name, tr.type, tr.id))
 
   const loadDeliveries = useCallback(async () => {
-    if (!project.trim()) return
-    // Outcome events only; a failure here degrades silently (empty section)
-    // — deliveries are diagnostics, not a blocker for trigger management.
+    // Global delivery feed when the filter is empty — the journal scopes an
+    // unfiltered query to the caller's visible projects (docs/activity-scoping.md
+    // §5), so deliveries of every visible project light up.
     try {
       const kinds = ['trigger.accepted', 'trigger.rejected', 'trigger.duplicate']
-      const pages = await Promise.all(kinds.map((type) => observationApi.events(project, undefined, undefined, undefined, { type, limit: 30 }).catch(() => ({ events: [] as ObservationEvent[] }))))
+      const scope = project.trim() || undefined
+      const pages = await Promise.all(kinds.map((type) => observationApi.events(scope, undefined, undefined, undefined, { type, limit: 30 }).catch(() => ({ events: [] as ObservationEvent[] }))))
       const merged = pages.flatMap((p) => p.events ?? [])
       merged.sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1))
       setDeliveries(merged.slice(0, 20))
@@ -84,17 +90,19 @@ export default function Triggers({ project }: { project: string }) {
   }, [project])
 
   const load = useCallback(async () => {
-    if (!project.trim()) return
     setLoading(true)
     try {
-      const [tData, aData, idData] = await Promise.all([
-        workspaceApi.listTriggers(project),
+      const [tData, aData, idData, pData] = await Promise.all([
+        // Empty filter = the global listing (docs/activity-scoping.md §5).
+        workspaceApi.listTriggers(project.trim() || undefined),
         workspaceApi.listAllAgents(),
         workspaceApi.listExecutionIdentities().catch(() => ({ identities: [] })),
+        workspaceApi.listProjects().catch(() => ({ projects: [] as Project[] })),
       ])
       setTriggers(tData.triggers ?? [])
       setAgents(aData.agents ?? [])
       setIdentities(idData.identities ?? [])
+      setProjects((pData.projects ?? []).filter((p) => p.id !== INTAKE_PROJECT_ID))
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }, [project])
@@ -113,7 +121,10 @@ export default function Triggers({ project }: { project: string }) {
       : type === 'webhook'
       ? { path: '', secret: '', prompt_template: '' }
       : { event_type: 'tool.failed', filter: {}, prompt: '' }
-    setForm({ type, name: '', enabled: true, config: defaultConfig, project_id: project, org_unit_id: '', execution_identity_id: '' })
+    // In the global listing the form must still name a routing target; the
+    // first real project is only the pre-selection, the select makes it
+    // explicit (docs/activity-scoping.md §6).
+    setForm({ type, name: '', enabled: true, config: defaultConfig, project_id: project.trim() || projects[0]?.id || '', org_unit_id: '', execution_identity_id: '' })
     setShowForm(true)
   }
 
@@ -130,7 +141,7 @@ export default function Triggers({ project }: { project: string }) {
       // config travels as a JSON object, not a stringified one: the server
       // stores jsonb and every consumer unmarshals it into a struct. (The
       // stringified form used to double-encode and broke matching/firing.)
-      const payload = { ...form, project_id: project, config: form.config }
+      const payload = { ...form, project_id: form.project_id || project, config: form.config }
       if (editing) {
         await workspaceApi.updateTrigger(editing.id, payload)
         // PUT payloads ignore org bindings: re-scoping goes through the admin
@@ -237,6 +248,9 @@ export default function Triggers({ project }: { project: string }) {
                       <strong>{trigger.name}</strong>
                       <Tag type={info.color} size="sm">{t(info.label) ?? info.label}</Tag>
                       <Tag type={trigger.enabled ? 'green' : 'red'} size="sm">{trigger.enabled ? (t('triggers.on') ?? 'on') : (t('triggers.off') ?? 'off')}</Tag>
+                      {/* Project attribution in the global listing
+                          (docs/activity-scoping.md §7). */}
+                      {!project.trim() && <Tag type="gray" size="sm">{trigger.project_id}</Tag>}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.35rem' }}>
                       {trigger.type === 'schedule' && cfg.cron && <span>{t('triggers.cron_label') ?? 'cron:'} <code>{cfg.cron}</code></span>}
@@ -296,7 +310,7 @@ export default function Triggers({ project }: { project: string }) {
                   <Tag type={info.tag} size="sm">{t(info.label) ?? info.label}</Tag>
                   {reason && <span style={{ color: 'var(--tm-text-3)', flexBasis: '100%', wordBreak: 'break-word' }}>{reason}</span>}
                   {runID && (
-                    <a href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(runID)}`} style={{ marginLeft: 'auto' }}>{t('triggers.open_run') ?? 'Open run →'}</a>
+                    <a href={`/agents?project=${encodeURIComponent(e.context?.project ?? '')}&run=${encodeURIComponent(runID)}`} style={{ marginLeft: 'auto' }}>{t('triggers.open_run') ?? 'Open run →'}</a>
                   )}
                 </div>
               )
@@ -325,9 +339,14 @@ export default function Triggers({ project }: { project: string }) {
               <SelectItem value="event" text={`📡 ${t('triggers.event') ?? 'Event'}`} />
             </Select>
             <TextInput id="trigger-name" labelText={t('triggers.name') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="Daily report" />
+            {/* Routing target (docs/activity-scoping.md §6): the project whose
+                sandbox/agents the triggered run works in. */}
+            <Select id="trigger-project" labelText={t('triggers.project') ?? 'Project'} value={form.project_id ?? ''} disabled={!!editing} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, project_id: e.target.value })}>
+              {projects.map((p) => <SelectItem key={p.id} value={p.id} text={p.name} />)}
+            </Select>
             <Select id="trigger-agent" labelText={t('triggers.agent') ?? 'Agent'} value={form.agent_id ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, agent_id: e.target.value })}>
               <SelectItem value="" text={t('triggers.default_agent') ?? 'Default agent'} />
-              {agents.filter((a) => !a.project_id || a.project_id === project).map((a) => <SelectItem key={a.id} value={a.id} text={a.name} />)}
+              {agents.filter((a) => !a.project_id || a.project_id === (form.project_id ?? project)).map((a) => <SelectItem key={a.id} value={a.id} text={a.name} />)}
             </Select>
 
             {/* Org visibility (org-structure.md §46): the unit the trigger

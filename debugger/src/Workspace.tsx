@@ -17,6 +17,7 @@ import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
+import ProjectRequired from './ProjectRequired'
 import { useI18n, pluralT } from './i18n'
 import { pseudoToolLabel, formatDuration } from './eventSummary'
 
@@ -765,6 +766,10 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       setConversations((prev) => prev.map((c) => c.id === withErr.id ? withErr : c))
     } finally { setLoading(false) }
   }
+
+  // Chats, files and the project inbox are anchored to one project
+  // (docs/activity-scoping.md §7): the global filter has nothing to open.
+  if (!project.trim()) return <ProjectRequired what={t('workspace.title') ?? 'Workspace'} />
 
   return (
     <div className="workspace-root">

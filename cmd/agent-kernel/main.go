@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -937,13 +938,28 @@ func main() {
 	liveness := &temporalLiveness{client: temporalClient}
 	mux.HandleFunc("GET /v1/agent/operations", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
-		if !gate.Allow(w, r, controlplane.RoleReader, project) {
+		// Empty project = global listing constrained to the principal's visible
+		// projects (docs/activity-scoping.md §5) — no more 403 "set a project
+		// filter" for scoped tokens.
+		principal, allowed := gate.AllowQuery(w, r, controlplane.RoleReader, project)
+		if !allowed {
 			return
 		}
 		operations, err := activities.UncertainOperations(r.Context(), project, liveness)
 		if err != nil {
 			writeError(w, 500, err)
 			return
+		}
+		if project == "" {
+			if visible, all := principal.AllowedProjects(); !all {
+				filtered := make([]agent.UncertainOperation, 0, len(operations))
+				for _, operation := range operations {
+					if slices.Contains(visible, operation.Project) {
+						filtered = append(filtered, operation)
+					}
+				}
+				operations = filtered
+			}
 		}
 		writeJSON(w, 200, map[string]any{"operations": operations, "count": len(operations)})
 	})
@@ -3288,6 +3304,37 @@ func main() {
 	// Triggers (docs/org-structure.md §18, §21): org-scoped, optionally bound
 	// to an execution identity whose allowed-lists are re-checked at every
 	// automated run start.
+	mux.HandleFunc("GET /v1/workspace/triggers", func(w http.ResponseWriter, r *http.Request) {
+		// Cross-project listing (docs/activity-scoping.md §5): the project
+		// filter is optional — an absent filter shows every project the
+		// principal may see (visible projects ∩ org-unit bindings), a concrete
+		// one behaves like the per-project route.
+		principal, allowed := gate.AllowQuery(w, r, controlplane.RoleReader, r.URL.Query().Get("project"))
+		if !allowed {
+			return
+		}
+		var projects []string // nil = no project constraint
+		if project := r.URL.Query().Get("project"); project != "" {
+			projects = []string{project}
+		} else if visible, all := principal.AllowedProjects(); !all {
+			projects = visible // possibly empty: the store's ANY-list then matches nothing
+		}
+		triggers, err := ws.ListTriggersScoped(r.Context(), projects)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if units := visibleUnits(r); units != nil {
+			visible := make([]workspace.Trigger, 0, len(triggers))
+			for _, t := range triggers {
+				if workspace.OrgVisible(t.OrgUnitID, units) {
+					visible = append(visible, t)
+				}
+			}
+			triggers = visible
+		}
+		writeJSON(w, 200, map[string]any{"triggers": triggers})
+	})
 	mux.HandleFunc("GET /v1/workspace/projects/{projectID}/triggers", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -5041,7 +5088,10 @@ func main() {
 	// kernel activities through the internal token; the list is the UI inbox
 	// backed by a real entity, not by event-stream reconstruction.
 	mux.HandleFunc("GET /v1/workspace/human-requests", func(w http.ResponseWriter, r *http.Request) {
-		if !gate.Allow(w, r, controlplane.RoleReader) {
+		// Empty project lists across projects, scoped server-side to the
+		// principal's visible set (docs/activity-scoping.md §5).
+		principal, allowed := gate.AllowQuery(w, r, controlplane.RoleReader, r.URL.Query().Get("project"))
+		if !allowed {
 			return
 		}
 		// Lazy expiry sweep (§33): rows whose wait ended without the close
@@ -5053,10 +5103,28 @@ func main() {
 				_ = ws.RecordAccessAudit(r.Context(), "system", workspace.AuditHumanExpired, "human_request", id, nil)
 			}
 		}
-		requests, err := ws.ListHumanRequests(r.Context(), r.URL.Query().Get("project"), r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
-		if err != nil {
-			writeError(w, 500, err)
-			return
+		var requests []workspace.HumanRequest
+		if project := r.URL.Query().Get("project"); project != "" {
+			var err error
+			requests, err = ws.ListHumanRequests(r.Context(), project, r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+		} else if visible, all := principal.AllowedProjects(); all {
+			var err error
+			requests, err = ws.ListHumanRequests(r.Context(), "", r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+		} else {
+			var err error
+			requests, err = ws.ListHumanRequestsInProjects(r.Context(), visible, r.URL.Query().Get("status"), r.URL.Query().Get("user"), r.URL.Query().Get("open") == "1")
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
 		}
 		writeJSON(w, 200, map[string]any{"requests": requests})
 	})

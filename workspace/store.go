@@ -721,6 +721,40 @@ func (s *Store) ListTriggers(ctx context.Context, projectID string) ([]Trigger, 
 	return result, rows.Err()
 }
 
+// ListTriggersScoped is the cross-project listing for the UI
+// (docs/activity-scoping.md §5): projects=nil lists every trigger including
+// disabled ones (unlike ListAllTriggers, which feeds the trigger engine and
+// only wants enabled rows); an empty non-nil slice matches nothing — the
+// caller answers for a principal who sees no projects.
+func (s *Store) ListTriggersScoped(ctx context.Context, projects []string) ([]Trigger, error) {
+	query := `SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, created_at, updated_at
+		 FROM workspace_trigger`
+	args := []any{}
+	if projects != nil {
+		args = append(args, textListArg(projects))
+		query += ` WHERE project_id = ANY($1)`
+	}
+	query += ` ORDER BY created_at DESC`
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Trigger
+	for rows.Next() {
+		var t Trigger
+		var agentID, orgUnitID, identityID *string
+		if err := rows.Scan(&t.ID, &t.ProjectID, &agentID, &t.Name, &t.Type, &t.Enabled, &t.Config, &orgUnitID, &identityID, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		t.AgentID = derefPtr(agentID)
+		t.OrgUnitID = derefPtr(orgUnitID)
+		t.ExecutionIdentityID = derefPtr(identityID)
+		result = append(result, t)
+	}
+	return result, rows.Err()
+}
+
 func (s *Store) ListAllTriggers(ctx context.Context) ([]Trigger, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, agent_id, name, type, enabled, config, org_unit_id, execution_identity_id, created_at, updated_at
@@ -1212,6 +1246,17 @@ func derefPtr(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// textListArg normalizes a project list so pgx always binds an array literal
+// for = ANY($n): cardinality of a bound empty array is 0 (matches nothing —
+// the caller's "sees no projects" case), while a SQL NULL would leave the
+// condition unevaluated and leak every row.
+func textListArg(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 // GetUserByToken looks up a user by their bearer token.

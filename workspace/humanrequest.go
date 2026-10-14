@@ -295,6 +295,46 @@ func (s *Store) ListHumanRequests(ctx context.Context, project, status, resolved
 	return result, rows.Err()
 }
 
+// ListHumanRequestsInProjects is the any-of variant for cross-project
+// listings (docs/activity-scoping.md §5): projects=nil means no constraint
+// (the channel reply matcher already relied on that via the empty project),
+// an empty non-nil slice matches nothing — the caller answers for a principal
+// who sees no projects and must not see everyone else's rows instead.
+func (s *Store) ListHumanRequestsInProjects(ctx context.Context, projects []string, status, resolvedUser string, onlyOpen bool) ([]HumanRequest, error) {
+	query := `SELECT ` + humanRequestColumns + ` FROM human_request WHERE 1=1`
+	args := []any{}
+	if projects != nil {
+		args = append(args, textListArg(projects))
+		query += ` AND project_id = ANY($` + strconv.Itoa(len(args)) + `)`
+	}
+	if status != "" {
+		args = append(args, status)
+		query += ` AND status = $` + strconv.Itoa(len(args))
+	}
+	if resolvedUser != "" {
+		args = append(args, resolvedUser)
+		query += ` AND resolved_user = $` + strconv.Itoa(len(args))
+	}
+	if onlyOpen {
+		query += ` AND status IN ('pending','delivered')`
+	}
+	query += ` ORDER BY created_at DESC LIMIT 200`
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []HumanRequest{}
+	for rows.Next() {
+		r, err := scanHumanRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
 // ListHumanRequestsByRun returns every request of one run, oldest first —
 // the verdict projection reads the whole ask history of the run
 // (specs/quality-loop.md §3; served by idx_human_request_run).

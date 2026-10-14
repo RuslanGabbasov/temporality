@@ -96,8 +96,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function operations(project: string): Promise<{ operations: UncertainOperation[]; count: number }> {
-  return request(`/v1/agent/operations?project=${encodeURIComponent(project)}`)
+// The project filter is optional (docs/activity-scoping.md §5): an empty
+// value asks for the global listing, which the server constrains to the
+// caller's visible projects.
+export function operations(project?: string): Promise<{ operations: UncertainOperation[]; count: number }> {
+  const suffix = project && project.trim() ? `?project=${encodeURIComponent(project.trim())}` : ''
+  return request(`/v1/agent/operations${suffix}`)
 }
 
 export function whoami(): Promise<Whoami> {

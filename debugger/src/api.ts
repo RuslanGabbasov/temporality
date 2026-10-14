@@ -7,11 +7,16 @@ export const TOKEN_STORAGE_KEY = 'temporality_token'
 export const PROJECT_STORAGE_KEY = 'temporality_project'
 
 export function storedProject(): string {
+  // The empty string is a real choice ("All projects", docs/activity-scoping.md
+  // §7) — only a missing key means "no preference yet" and also defaults to
+  // the global view.
   return localStorage.getItem(PROJECT_STORAGE_KEY) ?? ''
 }
 
 export function rememberProject(project: string) {
-  if (project) localStorage.setItem(PROJECT_STORAGE_KEY, project)
+  // Store unconditionally: remembering "All projects" must survive reloads
+  // just like a concrete project does.
+  localStorage.setItem(PROJECT_STORAGE_KEY, project)
 }
 
 export function authToken(): string {

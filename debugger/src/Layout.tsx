@@ -243,11 +243,11 @@ export default function Layout({ children, activePage }: LayoutProps) {
           return ids
         }
         // Open agent questions come from the human_request entity (§28) — the
-        // list endpoint lazily expires stale rows. Cross-project first: an
-        // ask from a webhook run often lives in another project than the one
-        // currently open, and the badge must still light up. Tokens scoped to
-        // projects get 403 on the unscoped call — retry with the current
-        // project. Older kernels without the endpoint fall back to events.
+        // list endpoint lazily expires stale rows. Cross-project by default:
+        // the unscoped listing is server-side scoped to the caller's visible
+        // projects (docs/activity-scoping.md §5), so the badge lights up for
+        // asks from any visible project. Older kernels without the endpoint
+        // fall back to events.
         let openQuestions = 0
         try {
           const data = await workspaceApi.listHumanRequests({ onlyOpen: true })
@@ -285,7 +285,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
     return () => window.clearInterval(timer)
   }, [project])
 
-  const loadProjects = useCallback(async () => {
+  const loadProjects = useCallback(async (): Promise<Project[]> => {
     try {
       const resp = await fetch('/kernel-api/v1/workspace/projects', { headers: { ...authHeaders() } })
       if (resp.ok) {
@@ -293,7 +293,9 @@ export default function Layout({ children, activePage }: LayoutProps) {
         const list: Project[] = data.projects ?? []
         setProjects(list)
         setProject((current) => {
-          if (current && list.some((p) => p.id === current)) return current
+          // "" is the explicit All-projects filter (docs/activity-scoping.md
+          // §7) — a valid state to keep, not a missing choice to replace.
+          if (current === '' || (current && list.some((p) => p.id === current))) return current
           // Fallback prefers a real project: intake is the system project —
           // it has no user-facing operations, so landing there after a fresh
           // load is noise. Only an install with nothing but intake stays on it
@@ -301,8 +303,10 @@ export default function Layout({ children, activePage }: LayoutProps) {
           const real = list.find((p) => p.id !== INTAKE_PROJECT_ID)
           return real?.id ?? list[0]?.id ?? ''
         })
+        return list
       }
     } catch { /* ignore */ }
+    return []
   }, [])
 
   useEffect(() => { void loadProjects().then(() => setProjectsLoaded(true)) }, [loadProjects])
@@ -556,7 +560,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
               }}
             >
               <Folder size={14} style={{ color: 'rgba(255,255,255,0.6)' }} />
-              <span style={{ color: '#fff' }}>{project}</span>
+              <span style={{ color: '#fff' }}>{project || (t('projects.all') ?? 'All projects')}</span>
               <ChevronDown size={14} className="chevron-flip" data-open={showProjectPanel ? 'true' : 'false'} style={{ color: 'rgba(255,255,255,0.5)', flexShrink: 0 }} />
             </button>
             {showProjectPanel && (
@@ -564,6 +568,20 @@ export default function Layout({ children, activePage }: LayoutProps) {
                 <div style={{ padding: '0.5rem' }}>
                   <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', padding: '0.5rem 0.5rem 0.25rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t('projects.title')}</div>
                   <div style={{ display: 'grid', gap: '1px' }}>
+                    {/* All projects: the project selector is a filter, not a
+                        mode (docs/activity-scoping.md §7) — the empty filter
+                        lists runs/triggers/operations across every project
+                        the caller may see. Pinned first: it is the stable
+                        default, not another project in the list. */}
+                    <div
+                      onClick={() => { selectProject(''); setShowProjectPanel(false) }}
+                      style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.5rem 0.5rem', cursor: 'pointer', background: project === '' ? 'var(--tm-elevated)' : 'transparent', borderRadius: '4px', minWidth: 0 }}
+                    >
+                      <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--tm-text)' }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('projects.all') ?? 'All projects'}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0, fontSize: '0.65rem', color: 'var(--tm-muted)' }}>{t('projects.all_hint') ?? ''}</div>
+                    </div>
                     {/* Real projects first. The system intake project goes
                         last, tagged: it hosts the intake pipeline, not user
                         work, and must never be the default — but its runs
@@ -946,7 +964,16 @@ export default function Layout({ children, activePage }: LayoutProps) {
           {/* The wizard may have logged in as the freshly created admin (the
             token is already in localStorage) — refresh identity along with
             projects so role-dependent UI matches the new caller. */}
-          {onboarding && <Onboarding onComplete={() => { void whoami().then(setIdentity).catch(() => {}); void loadProjects() }} />}
+          {onboarding && <Onboarding onComplete={() => {
+            void whoami().then(setIdentity).catch(() => {})
+            // The wizard just created the first project: land in it instead of
+            // the global filter — the workspace/chat pages it opens next need
+            // a concrete project (docs/activity-scoping.md §7).
+            void loadProjects().then((list) => {
+              const real = list.find((p) => p.id !== INTAKE_PROJECT_ID)
+              if (real) selectProject(real.id)
+            })
+          }} />}
           <Content id="main-content">
             {children({ project, setProject: selectProject, projectDefaultAgent: projects.find((p) => p.id === project)?.default_agent_id, projectDefaultModel: projects.find((p) => p.id === project)?.default_model, refreshProjects: () => { void loadProjects() } })}
           </Content>

@@ -12,6 +12,7 @@ import {
   Heading,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
+import ProjectRequired from './ProjectRequired'
 import { useT } from './i18n'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
@@ -206,6 +207,10 @@ export default function Observability({ project }: { project: string }) {
     { key: 'knowledge', label: t('knowledge.title') ?? 'Knowledge' },
     { key: 'patterns', label: t('knowledge.patterns') ?? 'Patterns' },
   ]
+
+  // The knowledge projection is a per-project view (docs/activity-scoping.md
+  // §7): with the global filter active there is nothing to project.
+  if (!project.trim()) return <ProjectRequired what={t('knowledge.title') ?? 'Knowledge'} />
 
   return (
     <div style={{ padding: '1rem' }}>

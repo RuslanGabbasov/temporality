@@ -413,9 +413,12 @@ func TestAuthEnforcedOnJournal(t *testing.T) {
 	if res.StatusCode != http.StatusForbidden {
 		t.Fatalf("reader list other project = %d, want 403", res.StatusCode)
 	}
+	// The unscoped listing is no longer a 403: it returns the intersection
+	// with the reader's visible projects (docs/activity-scoping.md §5) — see
+	// TestGlobalListingScopedToPrincipal for the content assertions.
 	res, _ = doJSONWithToken(t, handler, "GET", "/v1/observations/events", "read-token-1234567890", nil)
-	if res.StatusCode != http.StatusForbidden {
-		t.Fatalf("reader unscoped list = %d, want 403", res.StatusCode)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("reader unscoped list = %d, want 200 (scoped server-side)", res.StatusCode)
 	}
 
 	// Reader may not ingest; writer may.
@@ -454,6 +457,69 @@ func TestAuthEnforcedOnJournal(t *testing.T) {
 	res, body := doJSONWithToken(t, handler, "POST", "/v1/observations/knowledge/invalidate", "op-token-1234567890", invalidate)
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("operator invalidate = %d, body = %v", res.StatusCode, body)
+	}
+}
+
+func TestGlobalListingScopedToPrincipal(t *testing.T) {
+	// docs/activity-scoping.md §5: an empty project filter lists everything the
+	// principal may see — no more, no less. Events in other projects and events
+	// without a project must stay invisible to a scoped reader.
+	store := memory.New()
+	gate, err := controlplane.NewGate("scoped-token-1234567890:alice:reader:lighthouse;admin-token-1234567890:root:admin:*")
+	if err != nil {
+		t.Fatalf("NewGate: %v", err)
+	}
+	handler := New(store, slog.New(slog.NewTextHandler(io.Discard, nil)), gate)
+	ingest := func(events ...observation.Event) {
+		t.Helper()
+		res, body := doJSONWithToken(t, handler, "POST", "/v1/observations/events", "admin-token-1234567890", map[string]any{"events": events})
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("ingest = %d %v", res.StatusCode, body)
+		}
+	}
+	event := func(project, id string) observation.Event {
+		return observation.Event{
+			Schema: observation.Schema, EventID: id, OccurredAt: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC),
+			Source:  observation.Source{ID: "kernel-test", Integration: "agent-kernel", Version: "1"},
+			Context: observation.Context{Project: project, Run: "run-1", Actor: observation.Actor{ID: "coder", Type: "agent"}},
+			Type:    "run.started",
+			Data:    map[string]any{"title": id},
+		}
+	}
+	ingest(event("lighthouse", "in-1"), event("forge", "out-1"), event("", "no-project-1"))
+
+	// Scoped reader: sees its own project only.
+	res, body := doJSONWithToken(t, handler, "GET", "/v1/observations/events", "scoped-token-1234567890", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("scoped unscoped listing = %d, want 200", res.StatusCode)
+	}
+	seen := map[string]bool{}
+	for _, raw := range body["events"].([]any) {
+		e := raw.(map[string]any)
+		seen[e["event_id"].(string)] = true
+	}
+	if !seen["in-1"] || seen["out-1"] || seen["no-project-1"] {
+		t.Fatalf("scoped reader saw %v, want only in-1", seen)
+	}
+
+	// A run-scoped query from the same reader passes the same constraint: the
+	// run's events carry their project, someone else's run comes back empty
+	// rather than 403/leaking.
+	res, body = doJSONWithToken(t, handler, "GET", "/v1/observations/events?run=run-1", "scoped-token-1234567890", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("run-scoped query = %d, want 200", res.StatusCode)
+	}
+	if count := body["count"]; count == nil || int(count.(float64)) != 1 {
+		t.Fatalf("run-scoped count = %v, want 1 (own project's run only)", body["count"])
+	}
+
+	// Admin spans everything, including project-less events.
+	res, body = doJSONWithToken(t, handler, "GET", "/v1/observations/events", "admin-token-1234567890", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("admin listing = %d", res.StatusCode)
+	}
+	if count := int(body["count"].(float64)); count != 3 {
+		t.Fatalf("admin listing count = %d, want 3", count)
 	}
 }
 

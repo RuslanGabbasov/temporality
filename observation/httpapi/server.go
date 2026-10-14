@@ -168,7 +168,11 @@ func (s *Server) appendObservations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listObservations(w http.ResponseWriter, r *http.Request) {
-	if !s.gate.Allow(w, r, controlplane.RoleReader, r.URL.Query().Get("project")) {
+	// The project filter may be empty: the listing is global then, constrained
+	// server-side to the principal's visible projects (docs/activity-scoping.md
+	// §5) — a scoped token no longer needs to know the project list up front.
+	principal, allowed := s.gate.AllowQuery(w, r, controlplane.RoleReader, r.URL.Query().Get("project"))
+	if !allowed {
 		return
 	}
 	limit := 100
@@ -200,6 +204,19 @@ func (s *Server) listObservations(w http.ResponseWriter, r *http.Request) {
 		Project: r.URL.Query().Get("project"), SourceID: r.URL.Query().Get("source_id"), EventID: r.URL.Query().Get("event_id"), Run: r.URL.Query().Get("run"),
 		Task: r.URL.Query().Get("task"), Actor: r.URL.Query().Get("actor"),
 		Type: r.URL.Query().Get("type"), Since: since, Until: until, KnownAt: knownAt, Limit: limit,
+	}
+	if filter.Project == "" {
+		// Global listing: constrain to the principal's visible set. Run-scoped
+		// queries pass through the same constraint — the run's own events carry
+		// its project, so an any-of filter yields them for a visible project and
+		// an empty page for someone else's run (no access widening by run id).
+		if projects, all := principal.AllowedProjects(); !all {
+			if len(projects) == 0 {
+				writeJSON(w, http.StatusOK, map[string]any{"events": []observation.Event{}, "count": 0, "next_cursor": ""})
+				return
+			}
+			filter.Projects = projects
+		}
 	}
 	page, err := s.store.ListObservationPage(r.Context(), filter, cursor)
 	if err != nil {

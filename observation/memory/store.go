@@ -75,6 +75,7 @@ func (s *Store) listObservationsAll(filter observation.Filter) []observation.Eve
 	result := make([]observation.Event, 0)
 	for _, event := range s.observationEvents {
 		if filter.Project != "" && event.Context.Project != filter.Project ||
+			len(filter.Projects) > 0 && !containsStringValue(filter.Projects, event.Context.Project) ||
 			filter.SourceID != "" && event.Source.ID != filter.SourceID ||
 			filter.EventID != "" && event.EventID != filter.EventID ||
 			filter.Run != "" && event.Context.Run != filter.Run ||

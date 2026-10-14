@@ -60,6 +60,14 @@ describe('kernelApi', () => {
     expect(page.operations[0].reason).toBe('failed_uncertain')
   })
 
+  it('operations without a project asks for the global listing (activity-scoping §5)', async () => {
+    const calls = stubFetch(() => ({ body: { operations: [], count: 0 } }))
+    await operations('')
+    await operations(undefined)
+    expect(calls[0].url).toBe(`${KERNEL_API}/v1/agent/operations`)
+    expect(calls[1].url).toBe(`${KERNEL_API}/v1/agent/operations`)
+  })
+
   it('whoami reports the token identity', async () => {
     stubFetch(() => ({ body: { subject: 'ruslan', role: 'operator', projects: ['repo-a'], auth_enabled: true } }))
     const identity = await whoami()
