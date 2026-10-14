@@ -726,6 +726,16 @@ export const ru: Record<string, string> = {
     'providers.key_label': 'API-ключ',
     'providers.key_helper': 'secret://имя (рекомендуется), имя переменной окружения или сам ключ',
     'providers.models_label': 'Модели (через запятую)',
+    'providers.models_helper': 'Оставьте пустым — список загрузится с провайдера автоматически; ручной список приостанавливает автосинхронизацию, пока его не очистить.',
+    'providers.fetch_models': 'Загрузить модели',
+    'providers.fetching_models': 'Загружаем…',
+    'providers.fetch_failed': 'Не удалось прочитать каталог провайдера',
+    'providers.fetched_n': 'Загружено моделей: {{count}}',
+    'providers.sync_now': 'Синхронизировать каталог',
+    'providers.syncing': 'Синхронизируем…',
+    'providers.catalog_auto': 'авто',
+    'providers.catalog_manual': 'вручную',
+    'providers.more_models': 'ещё {{count}}',
 
     // Users
     'users.title': 'Пользователи',

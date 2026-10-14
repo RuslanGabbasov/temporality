@@ -726,6 +726,16 @@ export const en: Record<string, string> = {
     'providers.key_label': 'API Key',
     'providers.key_helper': 'secret://name (recommended), an env var name, or the key itself',
     'providers.models_label': 'Models (comma-separated)',
+    'providers.models_helper': 'Leave empty to discover the list from the provider automatically; a manual list pauses auto-sync until you clear it.',
+    'providers.fetch_models': 'Discover models',
+    'providers.fetching_models': 'Discovering…',
+    'providers.fetch_failed': 'Could not read the provider catalog',
+    'providers.fetched_n': 'Discovered {{count}} models',
+    'providers.sync_now': 'Sync catalog now',
+    'providers.syncing': 'Syncing…',
+    'providers.catalog_auto': 'auto',
+    'providers.catalog_manual': 'manual',
+    'providers.more_models': '+{{count}} more',
 
     // Users
     'users.title': 'Users',

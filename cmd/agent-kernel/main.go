@@ -3057,6 +3057,14 @@ func main() {
 	})
 
 	// Providers
+	// Catalog sync (providermodels.go): mirrors workspace_provider.models
+	// with the provider's own GET /models listing — a background loop on a
+	// schedule, a hook right after save, and manual refresh/probe endpoints.
+	modelSync := NewProviderModelSync(ws, func(ctx context.Context, ref string) (string, error) {
+		return resolveProviderAPIKey(ctx, ws, ref, secretMasterKey)
+	}, log)
+	modelSync.RegisterRoutes(mux, gate)
+	go modelSync.Loop(ctx, providerModelsRefreshInterval(log))
 	mux.HandleFunc("GET /v1/workspace/providers", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -3085,9 +3093,18 @@ func main() {
 			req.ID = "prov-" + shortID()
 		}
 		provider := &workspace.Provider{ID: req.ID, Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels, OrgUnitID: req.OrgUnitID}
+		// An operator who typed a model list curated it: tag the row so the
+		// background loop never overwrites it. An empty list means "discover
+		// from the provider" — sync starts right after the row lands.
+		if len(provider.Models) > 0 {
+			provider.Labels = markProviderModelsSource(provider.Labels, providerModelsManual)
+		}
 		if err := ws.CreateProvider(r.Context(), provider); err != nil {
 			writeError(w, 500, err)
 			return
+		}
+		if len(provider.Models) == 0 {
+			modelSync.RefreshAsync(ctx, provider.ID)
 		}
 		writeJSON(w, 201, provider)
 	})
@@ -3125,6 +3142,14 @@ func main() {
 		if prev, err := ws.GetProvider(r.Context(), provider.ID); err == nil {
 			provider.OrgUnitID = prev.OrgUnitID
 		}
+		// Same catalog-ownership contract as create: a non-empty model list is
+		// a curated one (loop must not touch it), an empty list returns the
+		// provider to auto-discovery.
+		if len(provider.Models) > 0 {
+			provider.Labels = markProviderModelsSource(provider.Labels, providerModelsManual)
+		} else {
+			delete(provider.Labels, providerModelsSourceLabel)
+		}
 		if err := ws.UpdateProvider(r.Context(), provider); err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)
@@ -3132,6 +3157,9 @@ func main() {
 			}
 			writeError(w, 500, err)
 			return
+		}
+		if len(provider.Models) == 0 {
+			modelSync.RefreshAsync(ctx, provider.ID)
 		}
 		writeJSON(w, 200, provider)
 	})

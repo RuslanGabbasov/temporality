@@ -730,6 +730,12 @@ export const workspaceApi = {
     request<Provider>(`/v1/workspace/providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProvider: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/providers/${id}`, { method: 'DELETE' }),
+  // Catalog sync (providermodels.go): refresh mirrors the stored provider's
+  // catalog; probe previews a not-yet-saved form's catalog without persisting.
+  refreshProviderModels: (id: string) =>
+    request<{ models: string[]; count: number }>(`/v1/workspace/providers/${id}/refresh-models`, { method: 'POST' }),
+  probeProviderModels: (data: { base_url: string; api_key_ref?: string }) =>
+    request<{ models: string[]; count: number }>('/v1/workspace/providers/probe-models', { method: 'POST', body: JSON.stringify(data) }),
 
   // Triggers
   listTriggers: (projectId: string) =>

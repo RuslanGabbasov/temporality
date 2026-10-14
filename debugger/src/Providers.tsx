@@ -11,7 +11,7 @@ import {
   Heading,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, Edit, TrashCan } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
 import { workspaceApi, type Provider, type Secret } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
@@ -19,6 +19,10 @@ import AppModal from './Modal'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
+
+// How many model tags a provider card shows before collapsing the rest —
+// auto-discovered catalogs can be large and must not flood the grid.
+const MODELS_PREVIEW = 8
 
 export default function Providers() {
   const t = useT()
@@ -33,6 +37,11 @@ export default function Providers() {
   // Secrets list for the api_key_ref picker: a provider credential is a
   // secret://name reference first, an env name or literal second.
   const [secrets, setSecrets] = useState<Secret[]>([])
+  // Catalog discovery (probe) inside the form, and per-card sync state.
+  const [fetching, setFetching] = useState(false)
+  const [fetchNote, setFetchNote] = useState('')
+  const [syncingId, setSyncingId] = useState('')
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
 
   const visibleProviders = providers.filter((p) => matchesFilter(filter, p.name, p.base_url, p.id, ...(p.models ?? [])))
 
@@ -50,6 +59,7 @@ export default function Providers() {
   const startCreate = () => {
     setEditing(null)
     setForm({ name: '', base_url: '', api_key_ref: '', models: [] })
+    setFetchNote('')
     loadSecretOptions()
     setShowForm(true)
   }
@@ -57,6 +67,7 @@ export default function Providers() {
   const startEdit = (p: Provider) => {
     setEditing(p)
     setForm({ ...p })
+    setFetchNote('')
     loadSecretOptions()
     setShowForm(true)
   }
@@ -97,6 +108,31 @@ export default function Providers() {
     finally { setLoading(false) }
   }
 
+  // Discover previews the catalog straight from the form's base URL/key —
+  // works for unsaved providers too, nothing is persisted.
+  const discoverModels = async () => {
+    if (!form.base_url?.trim()) return
+    setFetching(true); setFetchNote('')
+    try {
+      const data = await workspaceApi.probeProviderModels({ base_url: form.base_url.trim(), api_key_ref: form.api_key_ref ?? '' })
+      setForm((f) => ({ ...f, models: data.models ?? [] }))
+      setFetchNote(t('providers.fetched_n', { count: String(data.count ?? 0) }) ?? `${data.count ?? 0}`)
+    } catch (f) {
+      setFetchNote(`${t('providers.fetch_failed') ?? 'Failed'}: ${message(f)}`)
+    } finally { setFetching(false) }
+  }
+
+  // Sync mirrors the stored provider's catalog now (the background loop
+  // already does this on a schedule; this covers "do it immediately").
+  const syncProvider = async (p: Provider) => {
+    setSyncingId(p.id); setError('')
+    try {
+      await workspaceApi.refreshProviderModels(p.id)
+      await load()
+    } catch (f) { setError(message(f)) }
+    finally { setSyncingId('') }
+  }
+
   return (
     <div style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
@@ -118,6 +154,9 @@ export default function Providers() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
                     <strong>{p.name}</strong>
                     <OrgBadge orgUnitID={p.org_unit_id} org={org} />
+                    {p.labels?.models_source === 'manual'
+                      ? <Tag type="gray" size="sm">{t('providers.catalog_manual') ?? 'manual'}</Tag>
+                      : (p.models?.length ? <Tag type="green" size="sm">{t('providers.catalog_auto') ?? 'auto'}</Tag> : null)}
                   </div>
                   <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem', wordBreak: 'break-all' }}>{p.base_url}</p>
                   {p.api_key_ref && (
@@ -127,11 +166,18 @@ export default function Providers() {
                   )}
                   {p.models?.length ? (
                     <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
-                      {p.models.map((m) => <Tag key={m} type="blue" size="sm">{m}</Tag>)}
+                      {(expanded.has(p.id) ? p.models : p.models.slice(0, MODELS_PREVIEW)).map((m) => <Tag key={m} type="blue" size="sm">{m}</Tag>)}
+                      {p.models.length > MODELS_PREVIEW && !expanded.has(p.id) && (
+                        <Tag size="sm" type="outline" style={{ cursor: 'pointer' }} onClick={() => setExpanded(new Set([...expanded, p.id]))}>
+                          {t('providers.more_models', { count: String(p.models.length - MODELS_PREVIEW) }) ?? `+${p.models.length - MODELS_PREVIEW}`}
+                        </Tag>
+                      )}
                     </div>
                   ) : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.5rem' }}>{t('providers.no_models') ?? 'No models listed'}</p>}
                 </div>
                 <Stack orientation="horizontal" gap={1}>
+                  <Button size="sm" kind="ghost" hasIconOnly renderIcon={Renew} iconDescription={t('providers.sync_now') ?? 'Sync catalog now'}
+                    disabled={syncingId === p.id} onClick={() => void syncProvider(p)} />
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => startEdit(p)} />
                   <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(p)} />
                 </Stack>
@@ -157,7 +203,16 @@ export default function Providers() {
                   ))}
                 </div>
               )}
-              <TextInput id="prov-models" labelText={t('providers.models_label') ?? 'Models (comma-separated)'} value={form.models?.join(', ') ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, models: e.target.value.split(',').map((m) => m.trim()).filter(Boolean) })} placeholder="z-ai-turbo, z-ai-pro" />
+              <div>
+                <TextInput id="prov-models" labelText={t('providers.models_label') ?? 'Models (comma-separated)'} value={form.models?.join(', ') ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, models: e.target.value.split(',').map((m) => m.trim()).filter(Boolean) })} placeholder="z-ai-turbo, z-ai-pro"
+                  helperText={t('providers.models_helper') ?? 'Leave empty to auto-discover from the provider'} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '-0.5rem' }}>
+                  <Button size="sm" kind="secondary" renderIcon={Renew} disabled={fetching || !form.base_url?.trim()} onClick={() => void discoverModels()}>
+                    {fetching ? (t('providers.fetching_models') ?? 'Discovering…') : (t('providers.fetch_models') ?? 'Discover models')}
+                  </Button>
+                  {fetchNote && <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{fetchNote}</span>}
+                </div>
+              </div>
               {org.units.length > 0 && (
                 <>
                   <OrgUnitSelect
