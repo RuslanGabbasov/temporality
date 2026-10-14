@@ -865,7 +865,7 @@ export const en: Record<string, string> = {
     'triggers.cron_helper': 'minute hour day month weekday — e.g. 0 9 * * 1-5 = weekdays at 9:00',
     'triggers.prompt': 'Prompt',
     'triggers.webhook_path': 'Webhook path',
-    'triggers.webhook_helper': 'Endpoint: POST {{url}}. Authorization required: a Bearer token (writer role), Basic (token as password) or ?token= in the URL.',
+    'triggers.webhook_helper': 'Authorization required: a writer Bearer token, this trigger’s delivery token, Basic (token as password) or ?token= in the URL.',
     'triggers.secret_optional': 'Signing secret (optional)',
     'triggers.secret_hint': 'When set, deliveries must be signed: X-Temporality-Signature: sha256-<HMAC-SHA256 of the body> (GitHub-style X-Hub-Signature-256 is accepted too).',
     'triggers.token_title': 'Delivery token',

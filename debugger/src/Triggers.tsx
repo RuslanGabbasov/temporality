@@ -15,7 +15,7 @@ import {
   Heading,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, Edit, TrashCan } from '@carbon/icons-react'
+import { Add, Copy, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Trigger, type Agent, type ExecutionIdentity } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
@@ -123,9 +123,14 @@ export default function Triggers({ project }: { project: string }) {
     } catch (f) { setError(message(f)) }
   }
 
+  // Full delivery address as the external system sees it (origin included):
+  // the form hint must be pasteable into TFS/CI as-is, not a path fragment.
+  const webhookUrlFor = (projectId: string, path: string) =>
+    `${window.location.origin}/kernel-api/v1/workspace/webhook/${projectId}/${path || ''}`
+
   const webhookUrl = (t: Trigger) => {
     const cfg = typeof t.config === 'string' ? JSON.parse(t.config) : t.config
-    return `${window.location.origin}/kernel-api/v1/workspace/webhook/${t.project_id}/${cfg.path || ''}`
+    return webhookUrlFor(t.project_id, cfg.path)
   }
 
   const copyToClipboard = (text: string) => {
@@ -300,7 +305,14 @@ export default function Triggers({ project }: { project: string }) {
             {/* Webhook config */}
             {form.type === 'webhook' && (
               <>
-                <TextInput id="trigger-path" labelText={t('triggers.webhook_path') ?? 'Webhook path'} value={form.config?.path ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, path: e.target.value } })} placeholder="deploy-notify" helperText={t('triggers.webhook_helper', { url: `${project}/${form.config?.path || '...'}` }) ?? `Endpoint: POST /kernel-api/v1/workspace/webhook/${project}/${form.config?.path || '...'}`} />
+                <TextInput id="trigger-path" labelText={t('triggers.webhook_path') ?? 'Webhook path'} value={form.config?.path ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, path: e.target.value } })} placeholder="deploy-notify" helperText={t('triggers.webhook_helper') ?? 'Authorization required: a writer Bearer token, this trigger’s delivery token, Basic (token as password) or ?token= in the URL.'} />
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', margin: '-0.5rem 0 0.75rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', fontFamily: 'monospace' }}>POST</span>
+                  <code style={{ fontSize: '0.7rem', wordBreak: 'break-all', color: 'var(--tm-text-2)', minWidth: '0' }}>{webhookUrlFor(project, form.config?.path || '…')}</code>
+                  {!!form.config?.path && (
+                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription={t('action.copy') ?? 'Copy'} onClick={() => copyToClipboard(webhookUrlFor(project, form.config?.path ?? ''))} />
+                  )}
+                </div>
                 <TextInput id="trigger-secret" labelText={t('triggers.secret_optional') ?? 'Signing secret (optional)'} value={form.config?.secret ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, secret: e.target.value } })} placeholder="hmac-secret" helperText={t('triggers.secret_hint') ?? 'When set, deliveries must be signed: X-Temporality-Signature: sha256-<HMAC-SHA256 of the body>'} />
                 <TextArea id="trigger-prompt-tpl" labelText={t('triggers.prompt_template') ?? 'Prompt template'} value={form.config?.prompt_template ?? ''} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, config: { ...form.config, prompt_template: e.target.value } })} rows={4} placeholder="Deploy completed: {{body.tag}}. Review changes and verify." helperText={t('triggers.prompt_template_helper') ?? 'Use {{body.field}} to insert values from the JSON request body.'} />
                 {/* Delivery token exists only for a saved webhook trigger —

@@ -865,7 +865,7 @@ export const ru: Record<string, string> = {
     'triggers.cron_helper': 'минута час день месяц день_недели — напр. 0 9 * * 1-5 = по будням в 9:00',
     'triggers.prompt': 'Промпт',
     'triggers.webhook_path': 'Путь вебхука',
-    'triggers.webhook_helper': 'Эндпоинт: POST {{url}}. Требуется авторизация: Bearer-токен (роль writer), Basic (токен в пароле) или ?token= в URL.',
+    'triggers.webhook_helper': 'Требуется авторизация: Bearer-токен (роль writer), токен доставки этого триггера, Basic (токен в пароле) или ?token= в URL.',
     'triggers.secret_optional': 'Секрет подписи (необязательно)',
     'triggers.secret_hint': 'Если задан — доставка должна быть подписана: X-Temporality-Signature: sha256-<HMAC-SHA256 от тела> (также принимается GitHub-стиль X-Hub-Signature-256).',
     'triggers.token_title': 'Токен доставки',
