@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react'
 import { API_BASE, authHeaders } from './api'
-import { observationApi, type ObservationEvent } from './observationApi'
+import { observationApi, runEvents, type ObservationEvent } from './observationApi'
 import { workspaceApi, type Agent } from './workspaceApi'
 import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
@@ -36,7 +36,7 @@ function message(error: unknown) { return error instanceof Error ? error.message
 function json(value: unknown) { return JSON.stringify(value, null, 2) }
 function runID(event: ObservationEvent) { return event.context?.run ?? '' }
 function pendingApprovals(events: ObservationEvent[]) {
-  const ended = new Set(events.filter((event) => ['approval.granted', 'approval.rejected', 'approval.timed_out', 'human.answered', 'human.cancelled', 'human.timed_out'].includes(event.type)).map((event) => event.data?.operation_id))
+  const ended = new Set(events.filter((event) => ['approval.granted', 'approval.rejected', 'approval.timed_out', 'human.answered', 'human.cancelled', 'human.timed_out', 'human.rejected'].includes(event.type)).map((event) => event.data?.operation_id))
   return events.filter((event) => (event.type === 'approval.requested' || event.type === 'human.requested') && !ended.has(event.data?.operation_id))
 }
 
@@ -480,19 +480,21 @@ export default function AgentRuns({ project }: { project: string }) {
       // Events are fetched by run id alone: the journal scopes the query to
       // the caller's visible projects server-side (docs/activity-scoping.md
       // §5), and the run's own project comes from its root event — the header
-      // filter may be the global "All projects".
-      const page = await observationApi.events(undefined, undefined, undefined, undefined, { run, limit: 500 })
-      const root = page.events.find((event) => event.type === 'run.started')
+      // filter may be the global "All projects". runEvents follows cursors to
+      // the run's end: a single page would cut long runs and hide terminal
+      // events (answered questions would never clear their cards).
+      const runEventsAll = await runEvents(run)
+      const root = runEventsAll.find((event) => event.type === 'run.started')
       const runProject = root?.context?.project ?? project.trim()
       const teamRun = root?.data?.workflow === 'LeadCoderReviewerQA'
-      let allEvents = page.events
+      let allEvents = runEventsAll
       if (teamRun) {
-        const childIDs = page.events
+        const childIDs = runEventsAll
           .filter((event) => event.type === 'delegation.started' || event.type === 'plan.task.started')
           .map((event) => String(event.data?.child_run_id ?? ''))
           .filter(Boolean)
-        const childPages = await Promise.all(childIDs.map((child) => observationApi.events(undefined, undefined, undefined, undefined, { run: child, limit: 500 })))
-        allEvents = [...page.events, ...childPages.flatMap((childPage) => childPage.events)].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
+        const childEventLists = await Promise.all(childIDs.map((child) => runEvents(child)))
+        allEvents = [...runEventsAll, ...childEventLists.flat()].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
       }
       setTimeline((prev) => {
         if (!silent) return allEvents
@@ -809,6 +811,9 @@ export default function AgentRuns({ project }: { project: string }) {
                 )}
 
                 {/* Pending approvals and human questions */}
+                {pending.length > 0 && error && (
+                  <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '0.75rem' }} />
+                )}
                 {pending.map((event) => {
                   const details = event.data?.details as Record<string, unknown> | undefined
                   const operation = event.data?.operation as Record<string, unknown> | undefined

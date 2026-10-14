@@ -99,3 +99,20 @@ export const observationApi = {
   hints: (body: { project: string; query?: string; tool?: string; tool_result?: string; entities?: string[]; topics?: string[]; limit?: number }) =>
     post<{ activation_id: string; matcher: string; context_block: unknown; hints: ObservationHint[]; count: number }>('/v1/observations/hints', body),
 }
+
+/** All events of one run, oldest-first, following journal cursors to the end.
+ *  The journal pages forward from the OLDEST event, so a single limited
+ *  request silently truncates long runs — terminal events (human.answered,
+ *  run.completed) would never reach the UI and pending question cards would
+ *  stay forever. The cap keeps the poll bounded for pathological runs. */
+export async function runEvents(run: string, project?: string, cap = 4000): Promise<ObservationEvent[]> {
+  const pageSize = 500
+  const collected: ObservationEvent[] = []
+  let cursor: string | undefined
+  do {
+    const page = await observationApi.events(project, cursor, undefined, undefined, { run, limit: pageSize })
+    collected.push(...page.events)
+    cursor = page.next_cursor
+  } while (cursor && collected.length < cap)
+  return collected
+}

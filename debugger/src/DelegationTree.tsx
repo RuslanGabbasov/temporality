@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Tag } from '@carbon/react'
-import { observationApi, type ObservationEvent } from './observationApi'
+import { observationApi, runEvents, type ObservationEvent } from './observationApi'
 import { type Agent } from './workspaceApi'
 import Markdown from './Markdown'
 import { useT } from './i18n'
@@ -115,9 +115,10 @@ const TRACE_SKIP = new Set([
 ])
 
 async function fetchChildPayload(project: string, childRunId: string, terminal?: DelegationNodeInfo['status']): Promise<ChildPayload> {
-  const page = await observationApi.events(project, undefined, undefined, undefined, { run: childRunId, limit: 500 })
-    .catch(() => ({ events: [] as ObservationEvent[], count: 0 }))
-  const events = page.events
+  // runEvents follows journal cursors to the child's end — a single page
+  // would cut long children and keep them "running" forever.
+  const events = await runEvents(childRunId, project)
+    .catch(() => [] as ObservationEvent[])
   const failed = events.find((e) => e.type === 'run.failed')
   const completed = events.find((e) => e.type === 'run.completed')
   const cancelled = events.find((e) => e.type === 'run.cancelled')
