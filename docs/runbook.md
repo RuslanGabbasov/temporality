@@ -297,6 +297,29 @@ KERNEL_RUN_QUOTAS=*:50,forge:200,lighthouse:100
 
 ## 8. Типовые аварии
 
+### MCP-сервер не подключается (EOF на initialize)
+
+**Симптом:** `connect MCP server ... connection closed: calling "initialize":
+client is closing: EOF` при сохранении/проверке удалённого MCP-сервера.
+
+**Причина:** сервер работает по Streamable HTTP, а в настройках выбран тип
+`sse` (или наоборот). SSE-клиент ждёт от GET-стрима события протокола SSE,
+которых streamable-сервер не присылает, и соединение умирает по EOF/таймауту.
+Сетевая доступность (ping) тут ни при чём — проверять нужно HTTP-ответ.
+
+**Решение:** сменить тип сервера на `http` (Streamable HTTP) в настройках
+MCP-сервера. Ошибка также содержит подсказку о смене типа. Проверить сервер
+вручную из контейнера:
+
+```sh
+docker compose exec -T agent-kernel wget -qO- --server-response \
+  --header='Content-Type: application/json' \
+  --header='Accept: application/json, text/event-stream' \
+  --header='Authorization: Bearer <ТОКЕН>' \
+  --post-data='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"0.0.1"}}}' \
+  http://<host>:<port>/mcp
+```
+
 ### Kernel не стартует (MCP connection error)
 
 **Симптом:** `connect MCP server: ... EOF` в логах.

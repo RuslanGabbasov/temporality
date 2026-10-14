@@ -246,6 +246,13 @@ func (c *Client) connect(ctx context.Context) (*mcp.ClientSession, error) {
 	}
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
+		// A legacy SSE client against a Streamable HTTP server either waits
+		// for an endpoint event that never comes or dies mid-handshake — both
+		// surface as cryptic EOF. Name the likely mismatch so the operator can
+		// fix the type.
+		if c.cfg.Type == TypeSSE && strings.Contains(err.Error(), "EOF") {
+			return nil, fmt.Errorf("connect MCP server %q: %w — endpoint did not behave as a legacy SSE server; if it speaks Streamable HTTP, set the server type to http", c.cfg.Name, err)
+		}
 		return nil, fmt.Errorf("connect MCP server %q: %w", c.cfg.Name, err)
 	}
 	return session, nil

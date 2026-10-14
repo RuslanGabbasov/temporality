@@ -3,6 +3,9 @@ package mcpclient
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,5 +110,43 @@ func TestToolResultIsBounded(t *testing.T) {
 	got := contentText([]mcp.Content{&mcp.TextContent{Text: strings.Repeat("x", maxResultBytes+20)}})
 	if len(got) > maxResultBytes+40 || !strings.Contains(got, "truncated") {
 		t.Fatalf("MCP result was not bounded: length=%d", len(got))
+	}
+}
+
+// A Streamable HTTP server answers the legacy SSE GET with an event-stream
+// that never carries SSE-protocol events and then dies. The failure must name
+// the likely transport mismatch instead of a bare EOF.
+func TestSSEAgainstStreamableServerHintsTransport(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.(http.Flusher).Flush()
+		panic(http.ErrAbortHandler) // close the stream mid-handshake
+	}))
+	defer server.Close()
+	c := NewClient(ServerConfig{ID: "x", Name: "StreamableOnly", Type: TypeSSE, URL: server.URL + "/mcp", Enabled: true})
+	err := c.Refresh(context.Background())
+	if err == nil {
+		t.Fatal("expected connection failure")
+	}
+	if !strings.Contains(err.Error(), "set the server type to http") {
+		t.Fatalf("error should hint at the transport mismatch: %v", err)
+	}
+}
+
+// A refused connection is a dead server, not a transport mismatch — no hint.
+func TestSSEAgainstDeadServerHasNoHint(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadURL := "http://" + listener.Addr().String() + "/mcp"
+	listener.Close()
+	c := NewClient(ServerConfig{ID: "x", Name: "Dead", Type: TypeSSE, URL: deadURL, Enabled: true})
+	err = c.Refresh(context.Background())
+	if err == nil {
+		t.Fatal("expected connection failure")
+	}
+	if strings.Contains(err.Error(), "set the server type to http") {
+		t.Fatalf("dead server must not produce a transport hint: %v", err)
 	}
 }
