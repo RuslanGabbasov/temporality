@@ -263,6 +263,11 @@ intake (классификация → уточнение → задача), с�
 `skill_history` / `skill_executions` / `skill_memory` / `skill_propose`
 (`docs/living-skills.md`).
 
+Контур качества агентов: применение предложений определений — только поверх
+свежего зелёного оценочного прогона (golden-кейсы из продакшна, HITL-вердикты,
+LLM-судья с калибровкой, дашборд качества по версиям) —
+`docs/agent-quality-loop.md`.
+
 Также: подсказки знаний и извлечение знаний из траекторий, триггеры
 (cron/webhook/listeners), вопросы человеку (`ask_human`) и политики
 организации (ограничения моделей/MCP/токенов/сети/песочницы).
@@ -411,4 +416,5 @@ Dev-сервер debugger (`npm --prefix debugger run dev`) проксирует
 - Модель событий: [`docs/event-model.md`](docs/event-model.md)
 - Архитектура: [`docs/architecture.md`](docs/architecture.md)
 - Управление секретами: [`docs/secrets-management.md`](docs/secrets-management.md)
+- Контур качества агентов: [`docs/agent-quality-loop.md`](docs/agent-quality-loop.md)
 - Роадмап: [`docs/ROADMAP.md`](docs/ROADMAP.md)
