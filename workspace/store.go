@@ -240,6 +240,25 @@ func (s *Store) ListAgentsByProject(ctx context.Context, projectID string) ([]Ag
 	return scanAgents(rows)
 }
 
+// FindAgentsByName resolves agents whose display name matches case-
+// insensitively, within the project scope (globals + the project's own agents).
+// It backs the run-config name fallback: delegation targets arrive as model-
+// supplied refs that are often display names, not exact ids. Ordered by id so
+// ambiguity errors are deterministic.
+func (s *Store) FindAgentsByName(ctx context.Context, name, projectID string) ([]Agent, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, project_id, name, description, model, provider, system_prompt, skills, mcp_servers, tools, secrets,
+		        sandbox_profile, temperature, max_tokens, network_access, read_only, max_turns, approval_mode, labels,
+		        definition, definition_version, org_unit_id, created_at, updated_at
+		 FROM workspace_agent WHERE (project_id IS NULL OR project_id = $1) AND lower(name) = lower($2) ORDER BY id`,
+		projectID, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAgents(rows)
+}
+
 func scanAgents(rows interface {
 	Next() bool
 	Scan(dest ...any) error

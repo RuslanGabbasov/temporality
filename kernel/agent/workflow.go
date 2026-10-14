@@ -458,7 +458,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "error_type": "agent_resolution_failed", "effect": "none", "detail": boundedFailureDetail(resolveErr)}); err != nil {
 					return "", nil, err
 				}
-				return "Plan rejected before execution, no effect: agent \"" + task.AgentID + "\" for task \"" + task.ID + "\" could not be resolved (" + boundedFailureDetail(resolveErr) + "). Check the agent_id and re-issue the plan.", nil, nil
+				return "Plan rejected before execution, no effect: agent \"" + task.AgentID + "\" for task \"" + task.ID + "\" could not be resolved (" + boundedFailureDetail(resolveErr) + "). List valid ids with the agents tool and re-issue the plan with exact agent_id values.", nil, nil
 			}
 		}
 		// Acceptance-gate budget (docs/agent-delegation.md): a task may be
@@ -1223,7 +1223,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := emit(activityCtx, state, "tool.failed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "delegate", "error_type": "agent_resolution_failed", "effect": "none", "detail": boundedFailureDetail(resolveErr)}); err != nil {
 					return "", false, err
 				}
-				return "Delegation rejected before execution, no effect: agent \"" + delegateAgentID + "\" could not be resolved (" + boundedFailureDetail(resolveErr) + "). Check the agent_id and re-issue, or do the work yourself.", false, nil
+				return "Delegation rejected before execution, no effect: agent \"" + delegateAgentID + "\" could not be resolved (" + boundedFailureDetail(resolveErr) + "). List valid ids with the agents tool and re-issue with the exact agent_id, or do the work yourself.", false, nil
 			}
 			// Width gate: wait for a free slot BEFORE initiating the next child so at
 			// most MaxDelegationWidth children of this turn are actually in flight.
@@ -2259,7 +2259,7 @@ var sandboxAutoApprovedTools = map[string]bool{
 // via isReadOnlyTool.
 var policySafeTools = map[string]bool{
 	"echo": true, "remember": true, "request_approval": true, "ask_human": true,
-	"human_contacts": true, "list_triggers": true,
+	"human_contacts": true, "list_triggers": true, "agents": true,
 	"skill_search": true, "skill_inspect": true, "skill_validate": true,
 	"skill_history": true, "skill_executions": true, "skill_memory": true,
 	"skill_diff": true, "skill_evaluate": true, "knowledge_lookup": true,
@@ -2808,6 +2808,7 @@ func KernelTools() []llm.ToolDef {
 		{Name: "human_contacts", Description: "Find who to ask before ask_human: search workspace users by name, role or org unit, or resolve an escalation target with escalate_for (the nearest org level above that user with active people, falling back to installation admins). Returns contact cards with user_id, role, org unit and enabled channel types — channel addresses are never exposed, delivery is automatic", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "Optional substring matched against user name or id"}, "role": map[string]any{"type": "string", "description": "Filter by workspace role: admin, operator, writer, reader"}, "org_unit_id": map[string]any{"type": "string", "description": "Filter by org unit id (the exact unit, not its subtree)"}, "escalate_for": map[string]any{"type": "string", "description": "User id or name: resolve who to escalate to when that user cannot answer"}}}},
 		{Name: "send_file", Description: "Deliver a file you produced in the workspace to a human: it is uploaded to their enabled messaging channels (Matrix, Telegram) and appears as a download in the product UI. Use it to hand over reports, archives, generated documents — not for files the user can already find in the repo", Parameters: map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "description": "Workspace path of the file, e.g. /workspace/report.md"}, "note": map[string]any{"type": "string", "description": "One-line human-facing caption for the file"}, "recipient": map[string]any{"type": "string", "description": "Logical recipient like ask_human: user id/name, role:admin, org:<unit>, project_owner. Defaults to the operator who started this run"}}, "required": []string{"path"}}},
 		{Name: "list_triggers", Description: "List all configured triggers (schedules, webhooks, event listeners) for this project", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
+		{Name: "agents", Description: "List agents available for delegation in this project: exact agent_id values, display names, purpose and capabilities. Ids are not always derivable from display names, so call this before delegate/plan and use the reported agent_id verbatim", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "Optional substring matched against agent id or name"}}}},
 		{Name: "create_trigger", Description: "Create a new trigger to automatically launch agent runs. Types: schedule (cron-based), webhook (HTTP endpoint), event (reacts to journal events).", Parameters: map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}, "type": map[string]any{"type": "string", "enum": []string{"schedule", "webhook", "event"}}, "cron": map[string]any{"type": "string", "description": "Cron expression for schedule triggers, e.g. '0 9 * * 1-5'"}, "prompt": map[string]any{"type": "string", "description": "The prompt sent to the agent when the trigger fires"}, "path": map[string]any{"type": "string", "description": "URL path for webhook triggers"}, "event_type": map[string]any{"type": "string", "description": "Event type to react to for event triggers, e.g. 'tool.failed'"}, "agent_id": map[string]any{"type": "string", "description": "Agent to use (optional, uses default if empty)"}}, "required": []string{"name", "type", "prompt"}}},
 		{Name: "update_trigger", Description: "Update an existing trigger's configuration (enable/disable, change cron, update prompt, etc.)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}, "enabled": map[string]any{"type": "boolean"}, "cron": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},
 		{Name: "delete_trigger", Description: "Delete a trigger by ID", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},

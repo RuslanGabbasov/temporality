@@ -307,7 +307,10 @@ func (a *Activities) ResolveAgent(ctx context.Context, request ResolveAgentReque
 		return RunInput{}, err
 	}
 	if status == http.StatusNotFound {
-		return RunInput{}, temporal.NewNonRetryableApplicationError(fmt.Sprintf("agent %q is not available in project %q", request.AgentID, request.Project), "AgentNotAvailable", nil)
+		// The body carries the actionable detail the workspace computed (unknown
+		// id, ambiguous name with candidate ids, scope miss) — surfacing it lets
+		// the model self-correct instead of guessing again.
+		return RunInput{}, temporal.NewNonRetryableApplicationError(fmt.Sprintf("agent %q is not available in project %q: %s", request.AgentID, request.Project, workspaceErrorDetail(body)), "AgentNotAvailable", nil)
 	}
 	if status != http.StatusOK {
 		return RunInput{}, temporal.NewNonRetryableApplicationError(fmt.Sprintf("workspace returned %d resolving agent %q: %s", status, request.AgentID, truncate(body, 400)), "AgentResolutionFailed", nil)
@@ -329,7 +332,9 @@ func (a *Activities) ResolveAgent(ctx context.Context, request ResolveAgentReque
 		return RunInput{}, temporal.NewNonRetryableApplicationError("prepare delegated run: "+err.Error(), "AgentResolutionFailed", nil)
 	}
 	if child.DelegationDepth >= MaxDelegationDepth {
-		child.DenyTools = append(child.DenyTools, "delegate", "plan")
+		// agents is the delegation roster: at the depth limit the child cannot
+		// delegate, so the list would only burn a turn.
+		child.DenyTools = append(child.DenyTools, "delegate", "plan", "agents")
 	}
 	return child, nil
 }
@@ -658,6 +663,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleBrowser(ctx, request)
 	case "list_triggers":
 		return a.handleListTriggers(ctx, request)
+	case "agents":
+		return a.handleAgents(ctx, request)
 	case "human_contacts":
 		return a.handleHumanContacts(ctx, request)
 	case "send_file":
@@ -908,6 +915,19 @@ func (a *Activities) providerCachePut(key string, config llm.Config, ok bool) {
 		a.providerCache = map[string]providerCacheEntry{}
 	}
 	a.providerCache[key] = providerCacheEntry{config: config, ok: ok, fetchedAt: time.Now()}
+}
+
+// workspaceErrorDetail extracts the message the workspace API reports in its
+// error envelope ({"error": ...}); anything else is truncated raw so callers
+// still see actionable detail instead of an opaque status code.
+func workspaceErrorDetail(body string) string {
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal([]byte(body), &payload) == nil && payload.Error != "" {
+		return truncate(payload.Error, 300)
+	}
+	return truncate(strings.TrimSpace(body), 300)
 }
 
 // workspaceDo performs an authenticated request against the kernel's own

@@ -2286,7 +2286,7 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleWriter, project) {
 			return
 		}
-		a, err := ws.GetAgent(r.Context(), r.PathValue("agentID"))
+		a, err := resolveAgentRef(r.Context(), ws, r.PathValue("agentID"), project)
 		if err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)
@@ -6241,6 +6241,47 @@ func agentPromptPreview(a workspace.Agent) (source, prompt string) {
 // and enforce capabilities by removing the corresponding tools and access
 // (docs/evaluable-agent.md §6; plan §4.1 — enforcement is hard, never
 // prompt-only).
+// agentRefLookup is the storage surface resolveAgentRef needs; the fake in
+// tests satisfies the same contract.
+type agentRefLookup interface {
+	GetAgent(ctx context.Context, id string) (workspace.Agent, error)
+	FindAgentsByName(ctx context.Context, name, projectID string) ([]workspace.Agent, error)
+}
+
+// resolveAgentRef resolves a delegation target reference: the exact id first,
+// then a case-insensitive display-name match scoped to the project (globals +
+// the project's own agents, mirroring ListAgentsByProject scope). Models
+// derive ids from display names ("Lead" → "lead") and miss on non-slug ids;
+// an unambiguous name match saves the failed round-trip, an ambiguous one
+// reports the candidate ids so the delegating agent can disambiguate with the
+// agents tool. A miss returns ErrNotFound — indistinguishable from an unknown
+// id on purpose (existence of agents in other projects is not leaked).
+func resolveAgentRef(ctx context.Context, ws agentRefLookup, ref, project string) (workspace.Agent, error) {
+	a, err := ws.GetAgent(ctx, ref)
+	if err == nil {
+		return a, nil
+	}
+	if !errors.Is(err, workspace.ErrNotFound) {
+		return workspace.Agent{}, err
+	}
+	matches, mErr := ws.FindAgentsByName(ctx, ref, project)
+	if mErr != nil {
+		return workspace.Agent{}, mErr
+	}
+	switch len(matches) {
+	case 0:
+		return workspace.Agent{}, workspace.ErrNotFound
+	case 1:
+		return matches[0], nil
+	default:
+		ids := make([]string, 0, len(matches))
+		for _, m := range matches {
+			ids = append(ids, m.ID)
+		}
+		return workspace.Agent{}, fmt.Errorf("agent name %q matches multiple agents (%s); use an exact agent_id — list valid ids with the agents tool", ref, strings.Join(ids, ", "))
+	}
+}
+
 func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Agent, input *agent.RunInput) {
 	if a == nil {
 		return
@@ -6289,9 +6330,10 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	}
 	// Delegation is an explicitly granted capability (docs/agent-delegation.md):
 	// nil or false denies the delegate tool, and agents without a structured
-	// definition never get it by default.
+	// definition never get it by default. The agents roster rides along: an
+	// agent that cannot delegate has no use for the target list.
 	if a.Definition == nil || a.Definition.Capabilities.Delegation == nil || !*a.Definition.Capabilities.Delegation {
-		input.DenyTools = append(input.DenyTools, "delegate", "plan")
+		input.DenyTools = append(input.DenyTools, "delegate", "plan", "agents")
 	}
 	if a.ReadOnly != nil && *a.ReadOnly {
 		input.ReadOnly = true
@@ -6368,9 +6410,10 @@ func applyAgentDefaults(ctx context.Context, ws *workspace.Store, a *workspace.A
 	}
 	// Delegation is an explicitly granted capability (docs/agent-delegation.md):
 	// nil or false denies the delegate tool, and agents without a structured
-	// definition never get it by default.
+	// definition never get it by default. The agents roster rides along: an
+	// agent that cannot delegate has no use for the target list.
 	if a.Definition == nil || a.Definition.Capabilities.Delegation == nil || !*a.Definition.Capabilities.Delegation {
-		input.DenyTools = append(input.DenyTools, "delegate", "plan")
+		input.DenyTools = append(input.DenyTools, "delegate", "plan", "agents")
 	}
 	if a.ReadOnly != nil && *a.ReadOnly {
 		input.ReadOnly = true
