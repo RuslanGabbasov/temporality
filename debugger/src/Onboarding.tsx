@@ -3,7 +3,7 @@ import { Button, TextInput, Heading, Tag, Select, SelectItem } from '@carbon/rea
 import { Add } from '@carbon/icons-react'
 import { useT } from './i18n'
 import { authHeaders, authToken, TOKEN_STORAGE_KEY } from './api'
-import { setupStatus, buildSandbox, login as apiLogin, type SetupStatus } from './kernelApi'
+import { setupStatus, buildSandbox, login as apiLogin, whoami, type SetupStatus } from './kernelApi'
 import { workspaceApi } from './workspaceApi'
 
 interface OnboardingProps {
@@ -55,6 +55,20 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   useEffect(() => {
     setupStatus().then(setStatus).catch(() => setStatus(null))
   }, [])
+  // A token left in localStorage dies with the database it belonged to
+  // (operator wiped the DB to re-run onboarding), and its 401s would break
+  // the first gated call — the provider probe — while the anonymous steps
+  // keep working because the gate is off until the first user exists.
+  // Validate the stored token once and drop it when the kernel no longer
+  // knows it, so the wizard proceeds anonymously and logs in fresh later.
+  useEffect(() => {
+    if (!authToken()) return
+    whoami().catch((e: unknown) => {
+      if (e instanceof Error && e.message.startsWith('401')) {
+        localStorage.removeItem(TOKEN_STORAGE_KEY)
+      }
+    })
+  }, [])
   useEffect(() => {
     if (step !== 'sandbox') return
     setupStatus().then(setStatus).catch(() => setStatus(null))
@@ -92,14 +106,12 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       })
       if (!resp.ok) throw new Error(await resp.text())
       // Creating the first user enables auth immediately (Gate.Enabled counts
-      // live workspace tokens): the anonymous wizard caller would get 401 on
-      // the very next step. Log in as the new admin right away — the token
-      // lands in localStorage, so authHeaders() picks it up without a reload
-      // (a reload would restart the wizard and lose its state).
-      if (!authToken()) {
-        const result = await apiLogin(adminName.trim(), adminPassword)
-        localStorage.setItem(TOKEN_STORAGE_KEY, result.token)
-      }
+      // live workspace tokens): the wizard must hold a token the kernel knows.
+      // Always log in as the freshly created admin — a stale token from a
+      // previous install (e.g. the operator wiped the DB to re-run bootstrap)
+      // would 401 every later step; the login replaces it with a valid one.
+      const result = await apiLogin(adminName.trim(), adminPassword)
+      localStorage.setItem(TOKEN_STORAGE_KEY, result.token)
       setAdminCreated(true)
       setStep('provider')
     } catch (e) { setError(e instanceof Error ? e.message : 'Failed') }
