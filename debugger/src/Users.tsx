@@ -18,6 +18,7 @@ import { workspaceApi, type User } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
+import { copyText } from './clipboard'
 import ChannelsDialog, { ChannelBadges } from './ChannelsDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
@@ -118,7 +119,9 @@ export default function Users() {
   }
 
   const copyToClipboard = (text: string) => {
-    void navigator.clipboard.writeText(text)
+    // Shared helper with an http-LAN fallback: navigator.clipboard is undefined
+    // in insecure contexts and calling it threw, breaking Copy & Close here.
+    void copyText(text)
   }
 
   const ROLE_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'red'> = {

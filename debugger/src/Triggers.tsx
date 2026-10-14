@@ -17,6 +17,7 @@ import {
 import PageLoading from './PageLoading'
 import { Add, Copy, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Trigger, type Agent, type ExecutionIdentity } from './workspaceApi'
+import { copyText } from './clipboard'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
@@ -137,7 +138,7 @@ export default function Triggers({ project }: { project: string }) {
   }
 
   const copyToClipboard = (text: string) => {
-    void navigator.clipboard.writeText(text)
+    void copyText(text)
   }
 
   const genToken = async () => {
@@ -232,21 +233,6 @@ export default function Triggers({ project }: { project: string }) {
           )
         })}
       </Grid>
-
-      {/* One-time delivery token reveal (same pattern as user tokens) */}
-      {generatedToken && (
-        <AppModal onClose={() => setGeneratedToken(null)} panelStyle={{ width: '600px' }}>
-          <Heading>{t('triggers.token_modal_title') ?? 'Webhook delivery token'}</Heading>
-          <p style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>{t('triggers.token_modal_hint') ?? 'The token is shown exactly once — copy it now. Lost it? Regenerate.'}</p>
-          <div style={{ background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all', marginBottom: '1rem' }}>
-            {generatedToken}
-          </div>
-          <div className="form-actions">
-            <Button kind="secondary" onClick={() => setGeneratedToken(null)}>{t('action.close') ?? 'Close'}</Button>
-            <Button onClick={() => { copyToClipboard(generatedToken); setGeneratedToken(null) }}>{t('triggers.token_copy_close') ?? 'Copy & Close'}</Button>
-          </div>
-        </AppModal>
-      )}
 
       {loading && <PageLoading />}
 
@@ -356,6 +342,23 @@ export default function Triggers({ project }: { project: string }) {
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
               <Button onClick={() => void save()}>{editing ? (t('action.save') ?? 'Save') : (t('action.create') ?? 'Create')}</Button>
             </div>
+        </AppModal>
+      )}
+
+      {/* One-time delivery token reveal. Rendered AFTER the form modal so the
+          equal z-index stacks it on top (later sibling wins) — it used to sit
+          underneath the still-open edit form. */}
+      {generatedToken && (
+        <AppModal onClose={() => setGeneratedToken(null)} panelStyle={{ width: '600px' }}>
+          <Heading>{t('triggers.token_modal_title') ?? 'Webhook delivery token'}</Heading>
+          <p style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>{t('triggers.token_modal_hint') ?? 'The token is shown exactly once — copy it now. Lost it? Regenerate.'}</p>
+          <div style={{ background: 'var(--tm-elevated)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.875rem', wordBreak: 'break-all', marginBottom: '1rem' }}>
+            {generatedToken}
+          </div>
+          <div className="form-actions">
+            <Button kind="secondary" onClick={() => setGeneratedToken(null)}>{t('action.close') ?? 'Close'}</Button>
+            <Button onClick={() => { copyToClipboard(generatedToken); setGeneratedToken(null) }}>{t('triggers.token_copy_close') ?? 'Copy & Close'}</Button>
+          </div>
         </AppModal>
       )}
     </div>
