@@ -898,6 +898,7 @@ export const en: Record<string, string> = {
 
     // Projects
     'projects.title': 'Projects',
+    'projects.system_tag': 'system',
     'projects.id': 'Project ID',
     'projects.name': 'Name',
     'projects.description': 'Description',

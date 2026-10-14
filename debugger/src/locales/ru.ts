@@ -898,6 +898,7 @@ export const ru: Record<string, string> = {
 
     // Projects
     'projects.title': 'Проекты',
+    'projects.system_tag': 'система',
     'projects.id': 'ID проекта',
     'projects.name': 'Название',
     'projects.description': 'Описание',

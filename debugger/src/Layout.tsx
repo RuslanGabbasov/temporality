@@ -13,6 +13,7 @@ import {
   Heading,
   InlineNotification,
   Toggle,
+  Tag,
 } from '@carbon/react'
 import { User, Settings, Add, Edit, TrashCan, Folder, ChevronDown } from '@carbon/icons-react'
 import { Menu } from '@carbon/icons-react'
@@ -242,20 +243,28 @@ export default function Layout({ children, activePage }: LayoutProps) {
           return ids
         }
         // Open agent questions come from the human_request entity (§28) — the
-        // list endpoint lazily expires stale rows. Older kernels without the
-        // endpoint fall back to trajectory events.
+        // list endpoint lazily expires stale rows. Cross-project first: an
+        // ask from a webhook run often lives in another project than the one
+        // currently open, and the badge must still light up. Tokens scoped to
+        // projects get 403 on the unscoped call — retry with the current
+        // project. Older kernels without the endpoint fall back to events.
         let openQuestions = 0
         try {
-          const data = await workspaceApi.listHumanRequests({ project, onlyOpen: true })
+          const data = await workspaceApi.listHumanRequests({ onlyOpen: true })
           openQuestions = (data.requests ?? []).length
         } catch {
-          const asked = await collect('human.requested')
-          if (asked.length > 0) {
-            const answered = new Set<string>()
-            for (const type of ['human.answered', 'human.cancelled', 'human.timed_out']) {
-              for (const id of await collect(type)) answered.add(id)
+          try {
+            const data = await workspaceApi.listHumanRequests({ project, onlyOpen: true })
+            openQuestions = (data.requests ?? []).length
+          } catch {
+            const asked = await collect('human.requested')
+            if (asked.length > 0) {
+              const answered = new Set<string>()
+              for (const type of ['human.answered', 'human.cancelled', 'human.timed_out']) {
+                for (const id of await collect(type)) answered.add(id)
+              }
+              openQuestions = asked.filter((id) => !answered.has(id)).length
             }
-            openQuestions = asked.filter((id) => !answered.has(id)).length
           }
         }
         // Tool approvals are not human_request rows — they still live in events.
@@ -555,12 +564,15 @@ export default function Layout({ children, activePage }: LayoutProps) {
                 <div style={{ padding: '0.5rem' }}>
                   <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', padding: '0.5rem 0.5rem 0.25rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t('projects.title')}</div>
                   <div style={{ display: 'grid', gap: '1px' }}>
-                    {/* The system intake project is hidden from the picker:
-                        it hosts the intake pipeline, not user work. Its runs
-                        stay reachable via Inbox deep links, which sync the
-                        project through the URL. */}
-                    {projects.filter((p) => p.id !== INTAKE_PROJECT_ID).map((p) => {
+                    {/* Real projects first. The system intake project goes
+                        last, tagged: it hosts the intake pipeline, not user
+                        work, and must never be the default — but its runs
+                        (webhook/intake trajectories) stay browsable, because
+                        hiding it completely made them unreachable: deep links
+                        require a configured UI URL the operator may not have. */}
+                    {[...projects.filter((p) => p.id !== INTAKE_PROJECT_ID), ...projects.filter((p) => p.id === INTAKE_PROJECT_ID)].map((p) => {
                       const defaultAgent = allAgents.find((a) => a.id === p.default_agent_id)
+                      const isSystem = p.id === INTAKE_PROJECT_ID
                       return (
                         <div
                           key={p.id}
@@ -568,7 +580,10 @@ export default function Layout({ children, activePage }: LayoutProps) {
                           style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.5rem 0.5rem', cursor: 'pointer', background: p.id === project ? 'var(--tm-elevated)' : 'transparent', borderRadius: '4px', minWidth: 0 }}
                         >
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '0.35rem', color: isSystem ? 'var(--tm-muted)' : undefined }}>
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                              {isSystem && <Tag size="sm" type="gray">{t('projects.system_tag') ?? 'system'}</Tag>}
+                            </div>
                             {(defaultAgent || p.default_model) && (
                               <div style={{ fontSize: '0.65rem', color: 'var(--tm-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>
                                 {defaultAgent ? defaultAgent.name : 'no agent'}{p.default_model ? ` · ${p.default_model}` : ''}
@@ -576,8 +591,12 @@ export default function Layout({ children, activePage }: LayoutProps) {
                             )}
                           </div>
                           <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
-                            <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={(e: React.MouseEvent) => { e.stopPropagation(); openEditProject(p) }} />
-                            <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setConfirmDelete(p.id) }} />
+                            {!isSystem && (
+                              <>
+                                <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={(e: React.MouseEvent) => { e.stopPropagation(); openEditProject(p) }} />
+                                <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={(e: React.MouseEvent) => { e.stopPropagation(); setConfirmDelete(p.id) }} />
+                              </>
+                            )}
                           </div>
                         </div>
                       )
