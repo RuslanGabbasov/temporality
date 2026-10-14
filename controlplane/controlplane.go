@@ -15,6 +15,7 @@ package controlplane
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -306,6 +307,17 @@ func BearerToken(r *http.Request) (string, bool) {
 	if header != "" {
 		if token, ok := strings.CutPrefix(header, "Bearer "); ok {
 			return strings.TrimSpace(token), true
+		}
+		// Integrations that can only speak HTTP Basic (Azure DevOps service
+		// hooks and friends) carry the token as the password; the username is
+		// ignored. The credential is the same workspace token, only the
+		// transport encoding differs.
+		if encoded, ok := strings.CutPrefix(header, "Basic "); ok {
+			if decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded)); err == nil {
+				if _, password, found := strings.Cut(string(decoded), ":"); found && strings.TrimSpace(password) != "" {
+					return strings.TrimSpace(password), true
+				}
+			}
 		}
 	}
 	// Also accept ?token= query parameter for SSE / EventSource connections

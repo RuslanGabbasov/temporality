@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -78,6 +79,41 @@ func TestAuthenticateEnforcement(t *testing.T) {
 	handler.ServeHTTP(rec, request)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("non-bearer scheme = %d, want 401", rec.Code)
+	}
+}
+
+// Integrations that can only speak HTTP Basic (Azure DevOps service hooks)
+// carry the token as the password; the username is ignored.
+func TestBasicAuthPasswordAsToken(t *testing.T) {
+	handler, _ := newAuthedHandler(t)
+
+	basic := func(username, password string) string {
+		return "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/observations/events", nil)
+	request.Header.Set("Authorization", basic("any-user", "read-token-1234567890"))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, request)
+	if rec.Code != http.StatusOK || rec.Body.String() != `{"subject":"alice"}` {
+		t.Fatalf("basic password token = %d %s, want 200 alice", rec.Code, rec.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/v1/observations/events", nil)
+	request.Header.Set("Authorization", basic("alice", "wrong-token"))
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, request)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("basic wrong password = %d, want 401", rec.Code)
+	}
+
+	// Malformed base64 or an empty password must not authenticate.
+	request = httptest.NewRequest(http.MethodGet, "/v1/observations/events", nil)
+	request.Header.Set("Authorization", "Basic !!!not-base64!!!")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, request)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("malformed basic = %d, want 401", rec.Code)
 	}
 }
 

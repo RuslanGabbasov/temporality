@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -4522,6 +4523,15 @@ func main() {
 		_ = json.Unmarshal(matched.Config, &cfg)
 		// Normalize the incoming request into the trigger event envelope.
 		raw, _ := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+		// Optional origin/integrity hardening: when the trigger carries a
+		// secret, the delivery must be signed with it (HMAC-SHA256 over the raw
+		// body). Native format X-Temporality-Signature: sha256-<hex>; the
+		// GitHub-style X-Hub-Signature-256: sha256=<hex> is accepted too.
+		// Unsigned senders simply leave the secret empty.
+		if cfg.Secret != "" && !webhookSignatureValid(r, raw, cfg.Secret) {
+			writeError(w, 401, errors.New("invalid or missing webhook signature (X-Temporality-Signature)"))
+			return
+		}
 		var body map[string]any
 		_ = json.Unmarshal(raw, &body)
 		eventID := firstNonEmpty(r.Header.Get("X-Event-ID"), r.Header.Get("X-Delivery-ID"), bodyString(body, "event_id"), bodyString(body, "id"))
@@ -5656,6 +5666,33 @@ func stripKernelAPIProxyPrefix(r *http.Request) {
 	if r.URL.RawPath != "" {
 		r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, proxyPrefix)
 	}
+}
+
+// webhookSignatureValid verifies the HMAC-SHA256 signature of the raw body
+// against the trigger secret. Accepted header forms (checked in order):
+// X-Temporality-Signature: sha256-<hex> (native, matches the outbound channel
+// webhook driver) and X-Hub-Signature-256: sha256=<hex> (GitHub style).
+func webhookSignatureValid(r *http.Request, raw []byte, secret string) bool {
+	candidate := func(header, prefix string) string {
+		value := strings.TrimSpace(r.Header.Get(header))
+		if value == "" {
+			return ""
+		}
+		return strings.TrimSpace(strings.TrimPrefix(value, prefix))
+	}
+	signatures := []string{
+		candidate("X-Temporality-Signature", "sha256-"),
+		candidate("X-Hub-Signature-256", "sha256="),
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(raw)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	for _, got := range signatures {
+		if got != "" && hmac.Equal([]byte(got), []byte(expected)) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateApproval(approval agent.Approval) error {
