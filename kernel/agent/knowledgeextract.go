@@ -167,6 +167,36 @@ type existingKnowledge struct {
 	FromRun bool
 }
 
+// extractionModelClient resolves the client for the extraction call the same
+// way CallModel routes run turns: the run's model is served by the workspace
+// provider that lists it, with the env-configured default as fallback. Clean
+// installs configure models through onboarding only — a.Model is nil there —
+// so extraction must not depend on a.Model alone or every run would end with
+// knowledge.extraction.failed (docs/workspace-providers.md).
+func (a *Activities) extractionModelClient(ctx context.Context, project, model string) (*llm.Client, error) {
+	if a.Model != nil && (model == "" || model == a.Model.Model()) {
+		return a.Model, nil
+	}
+	if model != "" && a.WorkspaceURL != "" {
+		if config, ok, err := a.modelConfigFor(ctx, project, model); err == nil && ok {
+			return llm.New(config), nil
+		}
+		// A failed lookup (workspace unreachable) or a clean 404 (no provider
+		// claims the model) both fall through: extraction is best-effort, so the
+		// default client is preferable to dropping the pass entirely.
+	}
+	if a.Model != nil {
+		return a.Model, nil
+	}
+	if config, err := llm.ConfigFromEnv(); err == nil {
+		if model != "" {
+			config.Model = model
+		}
+		return llm.New(config), nil
+	}
+	return nil, errors.New("no model available for knowledge extraction: set the run's model or a project default, or configure TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID")
+}
+
 // ExtractKnowledge is the activity behind run.completed extraction: it loads
 // the run's events from the journal, builds the compact trajectory context,
 // retrieves relevant existing knowledge, and asks the model for candidates.
@@ -188,8 +218,9 @@ func (a *Activities) ExtractKnowledge(ctx context.Context, request KnowledgeExtr
 			return result, nil
 		}
 	}
-	if a.Model == nil {
-		return result, errors.New("model client is not configured")
+	model, err := a.extractionModelClient(ctx, request.Project, request.Model)
+	if err != nil {
+		return result, err
 	}
 	trajectory := ExtractTrajectory(toEventLikes(events))
 	knownEvents := make(map[string]bool, len(events))
@@ -202,7 +233,7 @@ func (a *Activities) ExtractKnowledge(ctx context.Context, request KnowledgeExtr
 	existing, states := extractionContext(request, trajectory, knowledge)
 	offered := offeredHints(events)
 	user := renderExtractionContext(request, trajectory, existing, offered)
-	completion, err := completeParsed(ctx, a.Model, []llm.Message{
+	completion, err := completeParsed(ctx, model, []llm.Message{
 		{Role: "system", Content: extractionSystemPrompt},
 		{Role: "user", Content: user},
 	}, parseExtractionCandidates)

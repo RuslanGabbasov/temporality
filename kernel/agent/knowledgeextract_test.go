@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -447,4 +448,87 @@ func TestRenderExtractionContextListsOfferedHints(t *testing.T) {
 
 	// Without offers the section is absent — most runs see no hints.
 	require.NotContains(t, renderExtractionContext(request, trajectory, nil, nil), "Hints offered")
+}
+
+// extractionProviderStub fakes a provider serving the extraction completion:
+// it records the Authorization header it received and returns one candidate.
+func extractionProviderStub(t *testing.T, gotAuth *string, hits *int32) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits != nil {
+			atomic.AddInt32(hits, 1)
+		}
+		if gotAuth != nil {
+			*gotAuth = r.Header.Get("Authorization")
+		}
+		content, _ := json.Marshal(map[string]any{"candidates": []map[string]any{{"kind": "observation", "proposition": "The report command requires a pre-existing out directory and fails with exit 1 otherwise.", "evidence": []string{"r/event/000005"}}}})
+		reply, _ := json.Marshal(map[string]any{"choices": []map[string]any{{"message": map[string]any{"content": string(content)}, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(reply)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// Clean installs configure models through onboarding only: a.Model is nil and
+// extraction must resolve the run's model through the workspace provider
+// exactly like CallModel, or every run would end with knowledge.extraction.failed.
+func TestExtractKnowledgeRoutesModelThroughWorkspaceProvider(t *testing.T) {
+	var gotAuth string
+	var hits int32
+	provider := extractionProviderStub(t, &gotAuth, &hits)
+
+	var lookups int32
+	workspace := routingFakeWorkspace(t, "repo", "mimo-x", provider.URL, &lookups)
+	defer workspace.Close()
+
+	journal := extractionJournalStub(t, extractionRunEvents("run-route"), nil)
+	activities := &Activities{HTTP: journal.Client(), TemporalityURL: journal.URL, WorkspaceURL: workspace.URL}
+
+	result, err := activities.ExtractKnowledge(context.Background(), KnowledgeExtractRequest{Project: "repo", RunID: "run-route", Model: "mimo-x", Prompt: "run the report"})
+	require.NoError(t, err)
+	require.False(t, result.Skipped)
+	require.Len(t, result.Candidates, 1)
+	require.Equal(t, "Bearer prov-key", gotAuth)
+	require.Equal(t, int32(1), atomic.LoadInt32(&hits))
+	require.Equal(t, int32(1), atomic.LoadInt32(&lookups))
+}
+
+// When no provider claims the run's model, extraction still runs — best-effort
+// means falling back to the default client, not dropping the pass.
+func TestExtractKnowledgeFallsBackToDefaultClientWhenNoProvider(t *testing.T) {
+	var hits int32
+	provider := extractionProviderStub(t, nil, &hits)
+
+	var lookups int32
+	workspace := routingFakeWorkspace(t, "repo", "mimo-x", "http://unused.example", &lookups)
+	defer workspace.Close()
+
+	journal := extractionJournalStub(t, extractionRunEvents("run-fallback"), nil)
+	activities := &Activities{
+		HTTP:           journal.Client(),
+		TemporalityURL: journal.URL,
+		WorkspaceURL:   workspace.URL,
+		Model:          llm.New(llm.Config{BaseURL: provider.URL, Model: "default", Timeout: 10 * time.Second}),
+	}
+
+	result, err := activities.ExtractKnowledge(context.Background(), KnowledgeExtractRequest{Project: "repo", RunID: "run-fallback", Model: "mimo-y", Prompt: "run the report"})
+	require.NoError(t, err)
+	require.False(t, result.Skipped)
+	require.Len(t, result.Candidates, 1)
+	require.Equal(t, int32(1), atomic.LoadInt32(&hits))
+}
+
+// A stand with neither an env model nor any workspace provider must fail with
+// an actionable message instead of the old opaque "model client is not configured".
+func TestExtractKnowledgeWithoutAnyModelFailsActionably(t *testing.T) {
+	t.Setenv("TEMPORALITY_MODEL_BASE_URL", "")
+	t.Setenv("TEMPORALITY_MODEL_ID", "")
+
+	journal := extractionJournalStub(t, extractionRunEvents("run-nomodel"), nil)
+	activities := &Activities{HTTP: journal.Client(), TemporalityURL: journal.URL}
+
+	_, err := activities.ExtractKnowledge(context.Background(), KnowledgeExtractRequest{Project: "repo", RunID: "run-nomodel"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no model available for knowledge extraction")
 }
