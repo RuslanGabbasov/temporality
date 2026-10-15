@@ -2701,6 +2701,8 @@ button.header-nav-link {
 
 // Knowledge list toolbar (same pattern as experience-toolbar)
 .knowledge-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+// The knowledge search is the primary control of the page — twice the default toolbar width.
+.knowledge-toolbar .toolbar-search { width: 380px; max-width: 100%; }
 
 // Run picker
 .run-picker { position: relative; }
