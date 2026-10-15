@@ -542,6 +542,7 @@ export const en: Record<string, string> = {
     'agents.avg_turns': 'avg turns',
     'agents.proposals': 'Proposals',
     'agents.proposals_new': 'Propose change',
+    'agents.pending_proposals_hint': 'Pending evolution proposals: {{count}}',
     'agents.proposals_empty': 'No proposals yet. Agents file them with the agent_propose tool; changes go live only after a human applies them.',
     'agents.proposal_pending': 'pending',
     'agents.proposal_applied': 'applied',

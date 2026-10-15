@@ -97,6 +97,28 @@ func (s *Store) ListAgentProposals(ctx context.Context, agentID, status string, 
 	return result, rows.Err()
 }
 
+// PendingProposalCounts returns the number of pending proposals per agent
+// id. Backs the agents-list badge: a human must see where evolution decisions
+// are waiting without opening every profile.
+func (s *Store) PendingProposalCounts(ctx context.Context) (map[string]int, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT agent_id, count(*) FROM workspace_agent_proposal WHERE status = 'pending' GROUP BY agent_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := map[string]int{}
+	for rows.Next() {
+		var agentID string
+		var count int
+		if err := rows.Scan(&agentID, &count); err != nil {
+			return nil, err
+		}
+		counts[agentID] = count
+	}
+	return counts, rows.Err()
+}
+
 // GetAgentProposal loads one proposal scoped to its agent.
 func (s *Store) GetAgentProposal(ctx context.Context, agentID string, id int64) (AgentProposal, error) {
 	row := s.pool.QueryRow(ctx,

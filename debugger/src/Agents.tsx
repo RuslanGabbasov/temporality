@@ -167,6 +167,10 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // Evolution proposals (plan §2.2 stage 10): pending definition changes with
   // provenance; apply is human-only through the regular version path.
   const [proposals, setProposals] = useState<AgentProposal[]>([])
+  // Pending count per agent id (agents-list badge): comes with the agents
+  // list from the server and is re-synced from every per-agent proposals
+  // reload so decisions update it immediately.
+  const [pendingProposals, setPendingProposals] = useState<Record<string, number>>({})
   const [proposalBusy, setProposalBusy] = useState(false)
   const [proposalModalOpen, setProposalModalOpen] = useState(false)
   const [proposalForm, setProposalForm] = useState({ problem: '', change: '', effect: '', description: '', constraints: '', completion: '' })
@@ -190,6 +194,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         workspaceApi.listSecrets(),
       ])
       setAgents(agentsData.agents ?? [])
+      setPendingProposals(agentsData.pending_proposals ?? {})
       setProviders(providersData.providers ?? [])
       setAvailableSkills(skillsData.skills ?? [])
       setMcpServers(mcpData.servers ?? [])
@@ -446,6 +451,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // ── Master-detail: selection + lazy tab data ───────────────────────
 
   const selected = agents.find((a) => a.id === selectedId) ?? null
+  // Pending evolution proposals for the selected agent (tab badge); falls
+  // back to 0 when the server reported nothing.
+  const selectedPending = selectedId ? (pendingProposals[selectedId] ?? 0) : 0
 
   // Every project gets its own copy of the builtin agents on creation, so a
   // global list shows one duplicate per extra project. The panel is scoped
@@ -515,7 +523,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         setEvalSuite(sData.cases ?? [])
         setSuiteUpdatedAt(sData.updated_at)
         setEvalRuns(eData.runs ?? [])
-        setProposals(pData.proposals ?? [])
+        applyProposals(selectedId, pData.proposals ?? [])
       } catch (f) { setError(message(f)) }
     })()
   }, [detailTab, selectedId, evoLoadedFor])
@@ -549,6 +557,13 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // Evolution proposals: apply goes through the regular version path on the
   // server; afterwards reload versions, runs and proposals so the timeline and
   // the diff reflect the new definition version.
+  const applyProposals = (agentId: string, list: AgentProposal[]) => {
+    setProposals(list)
+    // The fetched list is the authoritative pending count — keep the list
+    // badge in sync so apply/reject/create update it without a full reload.
+    setPendingProposals((prev) => ({ ...prev, [agentId]: list.filter((p) => p.status === 'pending').length }))
+  }
+
   const refreshEvolution = async (agentId: string) => {
     const [vData, rData, pData] = await Promise.all([
       workspaceApi.listAgentVersions(agentId),
@@ -557,7 +572,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     ])
     setVersions(vData.versions ?? [])
     setAgentRuns(rData.runs ?? [])
-    setProposals(pData.proposals ?? [])
+    applyProposals(agentId, pData.proposals ?? [])
   }
 
   const applyProposal = async (proposal: AgentProposal) => {
@@ -577,7 +592,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     try {
       await workspaceApi.rejectAgentProposal(selectedId, proposal.id)
       const pData = await workspaceApi.listAgentProposals(selectedId)
-      setProposals(pData.proposals ?? [])
+      applyProposals(selectedId, pData.proposals ?? [])
     } catch (f) { setError(message(f)) }
     finally { setProposalBusy(false) }
   }
@@ -610,7 +625,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       })
       setProposalModalOpen(false)
       const pData = await workspaceApi.listAgentProposals(selectedId)
-      setProposals(pData.proposals ?? [])
+      applyProposals(selectedId, pData.proposals ?? [])
     } catch (f) { setError(message(f)) }
     finally { setProposalBusy(false) }
   }
@@ -806,6 +821,11 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <span style={{ fontWeight: 500, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{a.name}</span>
+                    {(pendingProposals[a.id] ?? 0) > 0 && (
+                      <span title={t('agents.pending_proposals_hint', { count: String(pendingProposals[a.id]) })}>
+                        <Tag type="purple" size="sm">⚡ {pendingProposals[a.id]}</Tag>
+                      </span>
+                    )}
                     <OrgBadge orgUnitID={a.org_unit_id} org={org} />
                     {a.id === defaultAgentId && <Tag type="green" size="sm">{t('agents.default') ?? 'default'}</Tag>}
                   </div>
@@ -859,6 +879,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                 </button>
                 <button role="tab" aria-selected={detailTab === 'evolution'} className={`skill-tab ${detailTab === 'evolution' ? 'active' : ''}`} onClick={() => setDetailTab('evolution')}>
                   {t('agents.evolution') ?? 'Evolution'}
+                  {selectedPending > 0 && <span className="tune-badge" style={{ marginLeft: '0.35rem' }}>{selectedPending}</span>}
                 </button>
               </div>
 

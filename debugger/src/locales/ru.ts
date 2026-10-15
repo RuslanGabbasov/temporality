@@ -542,6 +542,7 @@ export const ru: Record<string, string> = {
     'agents.avg_turns': 'средне ходов',
     'agents.proposals': 'Предложения',
     'agents.proposals_new': 'Предложить изменение',
+    'agents.pending_proposals_hint': 'Предложений эволюции ожидает решения: {{count}}',
     'agents.proposals_empty': 'Предложений пока нет. Агенты создают их инструментом agent_propose; изменения вступают в силу только после применения человеком.',
     'agents.proposal_pending': 'на рассмотрении',
     'agents.proposal_applied': 'применено',

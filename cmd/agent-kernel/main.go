@@ -1749,7 +1749,20 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"agents": agents})
+		// Pending evolution proposals per agent (list badge). Scoped to the
+		// agents this viewer can actually see so the counts leak nothing.
+		counts, err := ws.PendingProposalCounts(r.Context())
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		visible := make(map[string]int, len(counts))
+		for _, a := range agents {
+			if counts[a.ID] > 0 {
+				visible[a.ID] = counts[a.ID]
+			}
+		}
+		writeJSON(w, 200, map[string]any{"agents": agents, "pending_proposals": visible})
 	})
 	mux.HandleFunc("POST /v1/workspace/agents", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleWriter) {

@@ -679,7 +679,7 @@ export const workspaceApi = {
   },
 
   // Agents
-  listAllAgents: () => request<{ agents: Agent[] }>('/v1/workspace/agents'),
+  listAllAgents: () => request<{ agents: Agent[]; pending_proposals?: Record<string, number> }>('/v1/workspace/agents'),
   listAgentsByProject: (projectId: string) =>
     request<{ agents: Agent[] }>(`/v1/workspace/projects/${projectId}/agents`),
   getAgent: (id: string) => request<Agent>(`/v1/workspace/agents/${id}`),
