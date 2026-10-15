@@ -165,7 +165,7 @@ export default function Artifacts() {
           id: form.id ?? '', title: form.title, description: form.description,
           provider: form.provider ?? 'builtin', external_ref: form.external_ref,
           content: form.content, mime_type: form.mime_type, org_unit_id: form.org_unit_id,
-          kind: form.kind ?? 'reference',
+          kind: form.kind ?? 'reference', saga_id: form.saga_id,
         })
       }
       setShowForm(false); setEditing(null)
@@ -423,16 +423,16 @@ export default function Artifacts() {
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, mime_type: e.target.value })}
               placeholder="text/markdown"
             />
-            {editing && (
-              <TextInput
-                id="artifact-saga"
-                labelText={t('artifacts.saga_label') ?? 'Saga'}
-                value={form.saga_id ?? ''}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, saga_id: e.target.value })}
-                placeholder="saga-..."
-                helperText={t('artifacts.saga_helper') ?? 'Saga this work product belongs to; empty keeps the stored link'}
-              />
-            )}
+            <TextInput
+              id="artifact-saga"
+              labelText={t('artifacts.saga_label') ?? 'Saga'}
+              value={form.saga_id ?? ''}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, saga_id: e.target.value })}
+              placeholder="saga-…"
+              helperText={editing
+                ? (t('artifacts.saga_helper_edit') ?? 'Saga this work product belongs to; clear the field to detach — regulations usually carry none')
+                : (t('artifacts.saga_helper') ?? 'Optional: the saga this work product belongs to; company/department regulations do not need one')}
+            />
             {org.units.length > 0 && (
               <OrgUnitSelect
                 id="artifact-org"

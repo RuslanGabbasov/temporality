@@ -141,11 +141,13 @@ func TestArtifactSubmitSendsRoundAndExplainsHumanGate(t *testing.T) {
 }
 
 func TestArtifactUpdateSurfacesLockedConflict(t *testing.T) {
+	var sawPayload map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/workspace/artifacts/req-spec" || r.Method != http.MethodPut {
 			http.NotFound(w, r)
 			return
 		}
+		_ = json.NewDecoder(r.Body).Decode(&sawPayload)
 		w.WriteHeader(http.StatusConflict)
 		_, _ = w.Write([]byte(`{"error":"artifact is locked: artifact is in_review (locked while a review is open)"}`))
 	}))
@@ -161,6 +163,11 @@ func TestArtifactUpdateSurfacesLockedConflict(t *testing.T) {
 	}
 	if !strings.HasPrefix(result.Content, "error:") || !strings.Contains(result.Content, "HTTP 409") {
 		t.Fatalf("want a surfaced 409 tool error, got %q", result.Content)
+	}
+	// The update never mentioned the saga: the payload must omit the field so
+	// the server keeps the stored link (nil ≠ explicitly cleared).
+	if _, ok := sawPayload["saga_id"]; ok {
+		t.Fatalf("saga_id must be omitted when not passed, got %v", sawPayload["saga_id"])
 	}
 }
 

@@ -91,7 +91,12 @@ func (a *Activities) handleArtifactUpdate(ctx context.Context, request ToolReque
 		"title":       artifactStringArg(request, "title"),
 		"description": artifactStringArg(request, "description"),
 		"kind":        artifactStringArg(request, "kind"),
-		"saga_id":     artifactStringArg(request, "saga_id"),
+	}
+	// PUT writes saga_id as sent: only pass it when the caller named it, so an
+	// update that never mentions the saga keeps the stored link (and passing
+	// "" explicitly is the only way a tool call detaches one).
+	if saga := artifactStringArg(request, "saga_id"); saga != "" {
+		payload["saga_id"] = saga
 	}
 	if content := artifactStringArg(request, "content"); content != "" {
 		payload["content"] = content

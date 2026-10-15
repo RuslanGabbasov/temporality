@@ -4951,7 +4951,11 @@ func main() {
 		if req.Kind == "" {
 			artifact.Kind = current.Kind
 		}
-		if artifact.SagaID == "" {
+		// saga_id distinguishes "not mentioned" from "explicitly cleared": a
+		// payload without the field keeps the stored link (agent tool omits it),
+		// an explicit empty string detaches — a company/department regulation
+		// carries no saga at all.
+		if req.SagaID == nil {
 			artifact.SagaID = current.SagaID
 		}
 		artifact.OrgUnitID = current.OrgUnitID
@@ -7324,17 +7328,17 @@ type secretRequest struct {
 const maxArtifactContentBytes = 2 << 20 // 2 MiB
 
 type artifactRequest struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Provider    string `json:"provider"` // builtin (default) | url
-	ExternalRef string `json:"external_ref"`
-	Content     string `json:"content"`
-	MimeType    string `json:"mime_type"`
-	Kind        string `json:"kind"`    // reference (default) | work
-	SagaID      string `json:"saga_id"` // saga work product link, optional
-	OriginRun   string `json:"origin_run"`
-	OrgUnitID   string `json:"org_unit_id"` // only set on create; updates keep the stored binding
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Provider    string  `json:"provider"` // builtin (default) | url
+	ExternalRef string  `json:"external_ref"`
+	Content     string  `json:"content"`
+	MimeType    string  `json:"mime_type"`
+	Kind        string  `json:"kind"`    // reference (default) | work
+	SagaID      *string `json:"saga_id"` // saga link; nil = keep on edit, "" = detach
+	OriginRun   string  `json:"origin_run"`
+	OrgUnitID   string  `json:"org_unit_id"` // only set on create; updates keep the stored binding
 }
 
 // toArtifact validates the request and converts it into a workspace.Artifact.
@@ -7383,7 +7387,7 @@ func (r artifactRequest) toArtifact(id string) (workspace.Artifact, error) {
 		Content:     r.Content,
 		MimeType:    strings.TrimSpace(r.MimeType),
 		Kind:        r.Kind,
-		SagaID:      strings.TrimSpace(r.SagaID),
+		SagaID:      derefString(r.SagaID),
 		OriginRun:   strings.TrimSpace(r.OriginRun),
 		OrgUnitID:   strings.TrimSpace(r.OrgUnitID),
 	}, nil
