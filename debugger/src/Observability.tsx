@@ -57,6 +57,15 @@ const STATE_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 're
   corrected: 'warm-gray', superseded: 'gray', invalidated: 'red',
 }
 
+/** Localized knowledge-state label; t() returns the key itself when a
+ * translation is missing — treat that as "no translation" and keep the raw
+ * state id so a new state never renders as its own key name. */
+function stateLabel(state: string, t: (key: string, vars?: Record<string, string>) => string): string {
+  const key = `knowledge.state_${state}`
+  const text = t(key)
+  return text !== key ? text : state
+}
+
 type Tab = 'overview' | 'knowledge' | 'patterns'
 
 export default function Observability({ project }: { project: string }) {
@@ -409,7 +418,7 @@ export default function Observability({ project }: { project: string }) {
                 const label = state === 'all' ? (t('knowledge.all') ?? 'All')
                   : state === 'alive' ? (t('knowledge.alive') ?? 'Alive')
                   : state === 'at_risk' ? (t('knowledge.stale') ?? 'Stale')
-                  : state
+                  : stateLabel(state, t)
                 return (
                   <FilterChip key={state} active={stateFilter === state} onClick={() => setStateFilter(state)}>
                     {label}{facets ? ` (${count})` : ''}
@@ -444,7 +453,7 @@ export default function Observability({ project }: { project: string }) {
                     className={`workspace-tile ${selectedID === item.id ? 'selected' : ''}`}
                     style={{ padding: '0.5rem', cursor: 'pointer' }}
                   >
-                    <Tag type={STATE_COLORS[item.state] || 'gray'} size="sm">{item.at_risk ? 'at risk' : item.state}</Tag>
+                    <Tag type={STATE_COLORS[item.state] || 'gray'} size="sm">{item.at_risk ? (t('knowledge.at_risk') ?? 'at risk') : stateLabel(item.state, t)}</Tag>
                     {(item.scope_kind === 'organization' || item.scope_kind === 'org_unit') && (
                       <Tag type="purple" size="sm" title={item.scope_id}>
                         {item.scope_kind === 'organization' ? (t('knowledge.scope_organization') ?? 'organization') : (org.nameOf(item.scope_id))}
@@ -489,7 +498,7 @@ export default function Observability({ project }: { project: string }) {
             ) : (
               <Stack gap={2}>
                 <Tile>
-                  <Tag type={STATE_COLORS[selected.state] || 'gray'}>{selected.state}</Tag>
+                  <Tag type={STATE_COLORS[selected.state] || 'gray'}>{stateLabel(selected.state, t)}</Tag>
                   {(selected.scope_kind === 'organization' || selected.scope_kind === 'org_unit') && (
                     <Tag type="purple" size="sm" title={selected.scope_id}>
                       {t('knowledge.scope_shared') ?? 'Shared'}: {selected.scope_kind === 'organization' ? (t('knowledge.scope_organization') ?? 'whole organization') : org.nameOf(selected.scope_id)}
@@ -529,7 +538,7 @@ export default function Observability({ project }: { project: string }) {
                       <div key={entry.event_id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: '0.75rem' }}>
                         <small style={{ color: 'var(--tm-text-3)', minWidth: '7rem' }}>{new Date(entry.at).toLocaleString()}</small>
                         <Tag type="gray" size="sm">{entry.type}</Tag>
-                        <span>{entry.state}{entry.rule ? ` · ${entry.rule}` : ''}</span>
+                        <span>{stateLabel(entry.state, t)}{entry.rule ? ` · ${entry.rule}` : ''}</span>
                         {entry.reason && <small style={{ color: 'var(--tm-text-3)' }}>{entry.reason}</small>}
                       </div>
                     ))}
@@ -622,7 +631,7 @@ export default function Observability({ project }: { project: string }) {
                     {hintError && <InlineNotification kind="error" title="Error" subtitle={hintError} lowContrast />}
                     {hints.map((hint) => (
                       <Tile key={hint.hint_id} style={{ padding: '0.5rem' }}>
-                        <Tag type="gray" size="sm">{hint.state}</Tag>
+                        <Tag type="gray" size="sm">{stateLabel(hint.state, t)}</Tag>
                         <strong style={{ fontSize: '0.85rem' }}>{hint.proposition}</strong>
                         {hint.caution && <small style={{ color: '#e6b85c', display: 'block', marginTop: '0.25rem' }}>{hint.caution}</small>}
                         <small style={{ color: 'var(--tm-text-3)', display: 'block' }}>{t('knowledge.matched_by') ?? 'Matched by'}: {hint.matched_by.join(', ')}</small>
@@ -703,7 +712,7 @@ export default function Observability({ project }: { project: string }) {
                   <Stack gap={1}>
                     {projection.knowledge_lifecycle.map((k: any, i: number) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8rem', padding: '0.4rem 0', borderBottom: '1px solid #1a2332' }}>
-                        <Tag type={k.is_alive ? 'green' : 'red'} size="sm" style={{ flexShrink: 0 }}>{k.current_state}</Tag>
+                        <Tag type={k.is_alive ? 'green' : 'red'} size="sm" style={{ flexShrink: 0 }}>{stateLabel(k.current_state, t)}</Tag>
                         <span style={{ flex: 1, wordBreak: 'break-word' }}>{k.proposition || k.knowledge_id}</span>
                         <span style={{ color: 'var(--tm-text-3)', flexShrink: 0 }}>{k.run_count} runs</span>
                       </div>
