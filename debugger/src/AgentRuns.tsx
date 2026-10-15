@@ -333,6 +333,9 @@ export default function AgentRuns({ project }: { project: string }) {
   })
   const viewRef = useRef(view)
   useEffect(() => { viewRef.current = view }, [view])
+  // The run whose extras (trajectory, budgets) are on screen; loadRun drops
+  // them only when this changes (run switch), not on silent refreshes.
+  const loadedRunRef = useRef('')
   // loadRuns reads the current selection through a ref so its identity doesn't
   // change (and re-trigger the list effect) every time the user picks a run.
   const selectedRef = useRef(selected)
@@ -539,12 +542,18 @@ export default function AgentRuns({ project }: { project: string }) {
 
   const loadRun = useCallback(async (run: string, silent = false) => {
     if (!run) return
+    // Extras (trajectory, budgets) belong to a specific run; reset them only
+    // when switching runs — the silent poll refreshes the same run and must
+    // not flash the tabs' empty placeholders while refetching.
+    const runChanged = run !== loadedRunRef.current
+    loadedRunRef.current = run
     if (!silent) setBusy(true)
     setError('')
-    // Drop extras from the previously selected run while loading.
-    setTrajectory(null)
-    setRunCostData(null)
-    setTaskCostData(null)
+    if (runChanged) {
+      setTrajectory(null)
+      setRunCostData(null)
+      setTaskCostData(null)
+    }
     try {
       // Events are fetched by run id alone: the journal scopes the query to
       // the caller's visible projects server-side (docs/activity-scoping.md
