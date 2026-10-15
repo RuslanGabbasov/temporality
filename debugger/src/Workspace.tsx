@@ -225,13 +225,15 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   }, [])
 
   // Reconnect SSE streams for in-progress messages on mount (e.g. after
-  // navigating away and back to the Workspace tab). Also poll for stale
-  // running messages as a safety net.
+  // navigating away and back to the Workspace tab). tail=1: resume from the
+  // journal tail instead of replaying the run's whole history — returning to
+  // a long-running chat must show the live state, not storm through dozens of
+  // already-seen steps. Also poll for stale running messages as a safety net.
   useEffect(() => {
     for (const conv of conversations) {
       for (const msg of conv.messages) {
         if (msg.status === 'running' && msg.runId && !streamRef.current.has(conv.id)) {
-          streamRun(msg.runId, conv.id)
+          streamRun(msg.runId, conv.id, { tail: true })
         }
       }
     }
@@ -375,11 +377,34 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     }))
   }
 
-  const streamRun = (runId: string, convId: string) => {
+  const streamRun = (runId: string, convId: string, opts?: { tail?: boolean }) => {
     const token = localStorage.getItem('temporality_token') ?? ''
-    const es = new EventSource(`/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/stream${token ? `?token=${token}` : ''}`)
+    // tail=1 asks the kernel to skip the journal backlog and replay only the
+    // recent past + live events: reconnecting to a long in-flight run must not
+    // storm the chat with hundreds of stale updates before catching up.
+    const streamParams = new URLSearchParams()
+    if (token) streamParams.set('token', token)
+    if (opts?.tail) streamParams.set('tail', '1')
+    const streamQS = streamParams.toString()
+    const es = new EventSource(`/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/stream${streamQS ? `?${streamQS}` : ''}`)
     streamRef.current.set(convId, es)
     const lines: string[] = []
+
+    // Coalesce stream-line updates: a reconnect burst (or a busy delegation)
+    // lands dozens of events at once, and one setState per event turns the
+    // replay into a render storm. Flush at most once per short interval.
+    let linesTimer: number | undefined
+    const stopLinesTimer = () => {
+      if (linesTimer !== undefined) { window.clearTimeout(linesTimer); linesTimer = undefined }
+    }
+    const flushLines = () => {
+      linesTimer = undefined
+      updateMsg(convId, runId, { streamLines: [...lines] })
+    }
+    const pushLine = (line: string) => {
+      lines.push(line)
+      if (linesTimer === undefined) linesTimer = window.setTimeout(flushLines, 120)
+    }
 
     // Live token stream (ephemeral SSE, never journaled): preview the model's
     // answer and reasoning while it is being generated. The journal's
@@ -440,7 +465,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       try {
         const outer = JSON.parse(e.data)
         const line = formatStreamEvent(type, outer, t, locale)
-        if (line) { lines.push(line); updateMsg(convId, runId, { streamLines: [...lines] }) }
+        if (line) pushLine(line)
       } catch { /* ignore */ }
     }
 
@@ -502,8 +527,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         if (d.answer) {
-          lines.push(t('chat.answer_received') ?? 'Answer received')
-          updateMsg(convId, runId, { streamLines: [...lines] })
+          pushLine(t('chat.answer_received') ?? 'Answer received')
           void fetchFinalAnswer(runId, convId)
         }
       } catch { /* ignore */ }
@@ -515,29 +539,21 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         const action = d.action ?? d.operation?.tool ?? 'action'
-        lines.push(t('chat.stream.approval_needed', { action: String(action) }))
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(t('chat.stream.approval_needed', { action: String(action) }))
       } catch { /* ignore */ }
     })
-    es.addEventListener('approval.granted', (e) => {
-      try {
-        lines.push(t('chat.stream.approval_granted'))
-        updateMsg(convId, runId, { streamLines: [...lines] })
-      } catch { /* ignore */ }
+    es.addEventListener('approval.granted', () => {
+      pushLine(t('chat.stream.approval_granted'))
     })
-    es.addEventListener('approval.rejected', (e) => {
-      try {
-        lines.push(t('chat.stream.approval_rejected'))
-        updateMsg(convId, runId, { streamLines: [...lines] })
-      } catch { /* ignore */ }
+    es.addEventListener('approval.rejected', () => {
+      pushLine(t('chat.stream.approval_rejected'))
     })
     es.addEventListener('approval.auto_granted', (e) => {
       try {
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         const tool = d.operation?.tool ?? d.policy_id ?? 'tool'
-        lines.push(t('chat.stream.auto_approved', { tool: String(tool) }))
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(t('chat.stream.auto_approved', { tool: String(tool) }))
       } catch { /* ignore */ }
     })
 
@@ -549,6 +565,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     es.addEventListener('run.cancelled', () => {
       es.close(); streamRef.current.delete(convId)
       closeTokenStream()
+      stopLinesTimer()
       void fetchFinalAnswer(runId, convId)
     })
 
@@ -562,8 +579,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         const name = delegationAgentName(d.agent_id)
-        lines.push(t('chat.delegation.stream_started', { name }) ?? `Delegated to ${name}`)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(t('chat.delegation.stream_started', { name }) ?? `Delegated to ${name}`)
       } catch { /* ignore */ }
     })
     es.addEventListener('delegation.completed', (e) => {
@@ -575,8 +591,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const line = turns
           ? (t('chat.delegation.stream_completed', { name, count: turns }))
           : `${name} · ${t('chat.delegation.completed')}`
-        lines.push(line)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(line)
       } catch { /* ignore */ }
     })
     es.addEventListener('delegation.failed', (e) => {
@@ -584,8 +599,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         const name = delegationAgentName(d.agent_id)
-        lines.push(t('chat.delegation.stream_failed', { name }) ?? `${name} · failed`)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(t('chat.delegation.stream_failed', { name }) ?? `${name} · failed`)
       } catch { /* ignore */ }
     })
     // Plan events — DAG task progress of plan calls in the stream
@@ -594,8 +608,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         const goal = typeof d.goal === 'string' && d.goal.trim() ? d.goal : t('chat.plan.untitled')
-        lines.push(t('chat.plan.stream_started', { goal }) ?? `Plan started: ${goal}`)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(t('chat.plan.stream_started', { goal }) ?? `Plan started: ${goal}`)
       } catch { /* ignore */ }
     })
     es.addEventListener('plan.task.started', (e) => {
@@ -605,8 +618,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const round = Number(d.round ?? 1)
         const roundSuffix = round > 1 ? ` ×${round}` : ''
         const gate = Array.isArray(d.review_of) && d.review_of.length ? ` ⌾ ${d.review_of.join(', ')}` : ''
-        lines.push((t('chat.plan.stream_task_started', { task: String(d.task_id ?? '') + roundSuffix + gate, name: delegationAgentName(d.agent_id) })) ?? `Plan · ${d.task_id}`)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine((t('chat.plan.stream_task_started', { task: String(d.task_id ?? '') + roundSuffix + gate, name: delegationAgentName(d.agent_id) })) ?? `Plan · ${d.task_id}`)
       } catch { /* ignore */ }
     })
     es.addEventListener('plan.task.completed', (e) => {
@@ -617,32 +629,28 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const roundSuffix = round > 1 ? ` ×${round}` : ''
         const verdict = String(d.verdict ?? '')
         const verdictSuffix = verdict === 'accept' ? ' ✓' : verdict === 'rework' ? ' ↺' : ''
-        lines.push((t('chat.plan.stream_task_completed', { task: String(d.task_id ?? '') + roundSuffix + verdictSuffix, name: delegationAgentName(d.agent_id) })) ?? `Plan · ${d.task_id} · completed`)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine((t('chat.plan.stream_task_completed', { task: String(d.task_id ?? '') + roundSuffix + verdictSuffix, name: delegationAgentName(d.agent_id) })) ?? `Plan · ${d.task_id} · completed`)
       } catch { /* ignore */ }
     })
     es.addEventListener('plan.task.failed', (e) => {
       try {
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
-        lines.push(t('chat.plan.stream_task_failed', { task: String(d.task_id ?? ''), name: delegationAgentName(d.agent_id) }) ?? `Plan · ${d.task_id} · failed`)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(t('chat.plan.stream_task_failed', { task: String(d.task_id ?? ''), name: delegationAgentName(d.agent_id) }) ?? `Plan · ${d.task_id} · failed`)
       } catch { /* ignore */ }
     })
     es.addEventListener('plan.task.incomplete', (e) => {
       try {
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
-        lines.push(t('chat.plan.stream_task_incomplete', { task: String(d.task_id ?? ''), name: delegationAgentName(d.agent_id) }) ?? `Plan · ${d.task_id} · incomplete`)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(t('chat.plan.stream_task_incomplete', { task: String(d.task_id ?? ''), name: delegationAgentName(d.agent_id) }) ?? `Plan · ${d.task_id} · incomplete`)
       } catch { /* ignore */ }
     })
     es.addEventListener('plan.task.rejected', (e) => {
       try {
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
-        lines.push(t('chat.plan.stream_task_rejected', { task: String(d.task_id ?? ''), by: delegationAgentName(d.rejected_by), feedback: String(d.feedback ?? '') }) ?? `Plan · ${d.task_id} · rework`)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(t('chat.plan.stream_task_rejected', { task: String(d.task_id ?? ''), by: delegationAgentName(d.rejected_by), feedback: String(d.feedback ?? '') }) ?? `Plan · ${d.task_id} · rework`)
       } catch { /* ignore */ }
     })
     es.addEventListener('plan.task.reopened', (e) => {
@@ -650,24 +658,21 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         const round = Number(d.round ?? 0)
-        lines.push(t('chat.plan.stream_task_reopened', { task: String(d.task_id ?? ''), round: String(round + 1) }) ?? `Plan · ${d.task_id} · reopened`)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(t('chat.plan.stream_task_reopened', { task: String(d.task_id ?? ''), round: String(round + 1) }) ?? `Plan · ${d.task_id} · reopened`)
       } catch { /* ignore */ }
     })
     es.addEventListener('plan.task.invalidated', (e) => {
       try {
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
-        lines.push(t('chat.plan.stream_task_invalidated', { task: String(d.task_id ?? '') }) ?? `Plan · ${d.task_id} · discarded`)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(t('chat.plan.stream_task_invalidated', { task: String(d.task_id ?? '') }) ?? `Plan · ${d.task_id} · discarded`)
       } catch { /* ignore */ }
     })
     es.addEventListener('plan.task.skipped', (e) => {
       try {
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
-        lines.push(t('chat.plan.stream_task_skipped', { task: String(d.task_id ?? '') }) ?? `Plan · ${d.task_id} · skipped`)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(t('chat.plan.stream_task_skipped', { task: String(d.task_id ?? '') }) ?? `Plan · ${d.task_id} · skipped`)
       } catch { /* ignore */ }
     })
     es.addEventListener('plan.completed', (e) => {
@@ -680,8 +685,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const summary = ['completed', 'incomplete', 'failed', 'skipped', 'invalidated']
           .map((status) => counts.get(status) ? `${counts.get(status)} ${t(`chat.plan.status_${status}`)}` : '')
           .filter(Boolean).join(' · ')
-        lines.push(t('chat.plan.stream_completed', { summary }) ?? `Plan finished: ${summary}`)
-        updateMsg(convId, runId, { streamLines: [...lines] })
+        pushLine(t('chat.plan.stream_completed', { summary }) ?? `Plan finished: ${summary}`)
+        stopLinesTimer()
+        flushLines()
       } catch { /* ignore */ }
     })
 
@@ -691,8 +697,10 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const d = outer.data ?? outer
         const line = formatStreamEvent('run.failed', outer, t, locale)
         if (line) lines.push(line)
+        stopLinesTimer()
         updateMsg(convId, runId, { content: t('chat.stream.failed', { error: String(d.error ?? 'unknown') }), status: 'failed', streamLines: [...lines] })
       } catch {
+        stopLinesTimer()
         updateMsg(convId, runId, { content: t('chat.run_failed') ?? 'Run failed', status: 'failed', streamLines: [...lines] })
       }
       es.close(); streamRef.current.delete(convId)
@@ -702,6 +710,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     es.addEventListener('done', () => {
       es.close(); streamRef.current.delete(convId)
       closeTokenStream()
+      stopLinesTimer()
       // The final answer replaces the kept fragment — the REST copy also
       // fills the terminal status and totals. Skipping the fetch when a
       // fragment was on screen left policy-limited runs spinning forever.
@@ -711,6 +720,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     es.onerror = () => {
       es.close(); streamRef.current.delete(convId)
       closeTokenStream()
+      stopLinesTimer()
       void fetchFinalAnswer(runId, convId)
     }
   }

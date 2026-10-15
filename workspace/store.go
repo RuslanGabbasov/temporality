@@ -635,11 +635,14 @@ func (s *Store) StreamRunEvents(ctx context.Context, projectID, runID, afterCurs
 			 WHERE project_id = $1 AND run_id = $2
 			 ORDER BY occurred_at, event_id LIMIT $3`, projectID, runID, limit)
 	} else {
+		// Row-wise (occurred_at, event_id) comparison keeps pagination
+		// deterministic when events share a timestamp — a plain occurred_at >
+		// bound silently skipped same-second events at batch boundaries.
 		rows, err = s.pool.Query(ctx,
 			`SELECT event_id, type, occurred_at, data FROM observation_events
 			 WHERE project_id = $1 AND run_id = $2
-			 AND occurred_at > (SELECT occurred_at FROM observation_events WHERE event_id = $3 LIMIT 1)
-			 ORDER BY occurred_at LIMIT $4`, projectID, runID, afterCursor, limit)
+			 AND (occurred_at, event_id) > ((SELECT occurred_at FROM observation_events WHERE event_id = $3 LIMIT 1), $3)
+			 ORDER BY occurred_at, event_id LIMIT $4`, projectID, runID, afterCursor, limit)
 	}
 	if err != nil {
 		return nil, "", err
@@ -663,6 +666,49 @@ func (s *Store) StreamRunEvents(ctx context.Context, projectID, runID, afterCurs
 		events = append(events, ev)
 	}
 	return events, lastID, rows.Err()
+}
+
+// StreamRunEventsTail returns the most recent limit events of a run in
+// chronological order plus the cursor a live loop continues from. Reconnecting
+// clients use it to restore the current state (the latest answer fragment,
+// recent activity and — for a run that finished while the client was away —
+// its terminal event) without replaying the entire journal: a long run's full
+// replay storms the chat with hundreds of stale updates before it catches up.
+func (s *Store) StreamRunEventsTail(ctx context.Context, projectID, runID string, limit int) ([]StreamEvent, string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT event_id, type, occurred_at, data FROM observation_events
+		 WHERE project_id = $1 AND run_id = $2
+		 ORDER BY occurred_at DESC, event_id DESC LIMIT $3`, projectID, runID, limit)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	var events []StreamEvent
+	for rows.Next() {
+		var ev StreamEvent
+		var at time.Time
+		if err := rows.Scan(&ev.EventID, &ev.Type, &at, &ev.Data); err != nil {
+			return nil, "", err
+		}
+		if ev.Data == nil {
+			ev.Data = json.RawMessage("{}")
+		}
+		ev.OccurredAt = at.UTC().Format(time.RFC3339Nano)
+		events = append(events, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+	if len(events) == 0 {
+		return nil, "", nil
+	}
+	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+		events[i], events[j] = events[j], events[i]
+	}
+	return events, events[len(events)-1].EventID, nil
 }
 
 // Triggers

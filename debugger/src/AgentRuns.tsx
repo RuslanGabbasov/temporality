@@ -656,7 +656,7 @@ export default function AgentRuns({ project }: { project: string }) {
         }
         return [...prev, normalized].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
       })
-    }, controller.signal)
+    }, controller.signal, { tail: true })
     return () => controller.abort()
   }, [selected, selectedLive])
   // Silent list refresh: keeps status tags and newly started runs (including

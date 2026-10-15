@@ -302,7 +302,7 @@ scopes, success rates.
 | `GET /v1/workspace/runs/{id}/artifacts` | Reusable tool sequences |
 | `GET /v1/workspace/knowledge/{id}/chain` | Activation chain |
 | `GET /v1/workspace/projects/{id}/chains` | All chains |
-| `GET /v1/workspace/runs/{id}/stream` | SSE event stream |
+| `GET /v1/workspace/runs/{id}/stream` | SSE event stream; `?tail=1` — skip the full history replay: the last ~50 events plus only new ones (for reconnecting to a long run) |
 | `GET /v1/workspace/runs/{id}/stream` | + model.text_delta, model.reasoning |
 | `GET /v1/agent/cost/task?project=P&task=T` | Task budget: every run (chat follow-ups + delegation tree) with summed time/tokens/cost |
 

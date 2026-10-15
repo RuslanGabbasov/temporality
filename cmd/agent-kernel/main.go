@@ -2724,6 +2724,27 @@ func main() {
 		ctx := r.Context()
 		var cursor string
 		done := false
+		if r.URL.Query().Get("tail") == "1" {
+			// Reconnect mode: replay only the recent past — the latest answer
+			// fragment, the last activity lines and, when the run finished while
+			// the client was away, its terminal event — then continue live from
+			// the journal tail. A full replay of a long run floods the chat with
+			// hundreds of stale updates before reaching the present.
+			events, next, tErr := ws.StreamRunEventsTail(r.Context(), run.ProjectID, runID, 50)
+			if tErr == nil {
+				for _, ev := range events {
+					data, _ := json.Marshal(ev)
+					fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, data)
+					flusher.Flush()
+					if ev.Type == "run.completed" || ev.Type == "run.failed" || ev.Type == "run.cancelled" {
+						done = true
+					}
+				}
+				cursor = next
+			} else {
+				slog.Warn("stream tail fallback to full replay", "error", tErr.Error())
+			}
+		}
 		for !done {
 			select {
 			case <-ctx.Done():

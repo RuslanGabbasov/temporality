@@ -23,11 +23,18 @@ export function parseSSEBlock(block: string): JournalFrame | null {
 
 /** Subscribe to a run's journal stream; onEvent fires once per frame. The
  * fetch resolves and the subscription ends when the server closes the stream
- * (run reached a terminal event) or the signal aborts. Errors are swallowed:
- * the polling fallback in the caller stays the safety net. */
-export function subscribeRunJournal(runId: string, onEvent: (frame: JournalFrame) => void, signal: AbortSignal): void {
+ * (run reached a terminal event) or the signal aborts. With tail=true the
+ * server skips the journal backlog and sends only the recent past plus live
+ * events — the right mode when the caller already has the history (REST
+ * snapshot) and dedupes by event_id. Errors are swallowed: the polling
+ * fallback in the caller stays the safety net. */
+export function subscribeRunJournal(runId: string, onEvent: (frame: JournalFrame) => void, signal: AbortSignal, opts?: { tail?: boolean }): void {
   const token = localStorage.getItem('temporality_token') ?? ''
-  const url = `/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/stream${token ? `?token=${token}` : ''}`
+  const params = new URLSearchParams()
+  if (token) params.set('token', token)
+  if (opts?.tail) params.set('tail', '1')
+  const qs = params.toString()
+  const url = `/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/stream${qs ? `?${qs}` : ''}`
   void fetch(url, { signal, headers: { Accept: 'text/event-stream' } })
     .then(async (response) => {
       if (!response.ok || !response.body) return
