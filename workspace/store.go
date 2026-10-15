@@ -826,9 +826,13 @@ func (s *Store) ListAllTriggers(ctx context.Context) ([]Trigger, error) {
 
 func (s *Store) UpdateTrigger(ctx context.Context, t Trigger) error {
 	t.UpdatedAt = time.Now().UTC()
+	// project_id is part of the write so a trigger can move between projects
+	// (PUT accepts an explicit project_id change): every caller loads the row
+	// first, so an untouched project rewrites the same value. The webhook route
+	// embeds the project — moving repoints the URL, callers must surface it.
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE workspace_trigger SET name=$2, agent_id=$3, type=COALESCE(NULLIF($4,''),type), enabled=$5, config=COALESCE($6, config), execution_identity_id=COALESCE($8, execution_identity_id), updated_at=$7 WHERE id=$1`,
-		t.ID, t.Name, nullString(t.AgentID), t.Type, t.Enabled, nullRawMessage(t.Config), t.UpdatedAt, nullString(t.ExecutionIdentityID))
+		`UPDATE workspace_trigger SET project_id=$2, name=$3, agent_id=$4, type=COALESCE(NULLIF($5,''),type), enabled=$6, config=COALESCE($7, config), execution_identity_id=COALESCE($9, execution_identity_id), updated_at=$8 WHERE id=$1`,
+		t.ID, t.ProjectID, t.Name, nullString(t.AgentID), t.Type, t.Enabled, nullRawMessage(t.Config), t.UpdatedAt, nullString(t.ExecutionIdentityID))
 	if err != nil {
 		return err
 	}

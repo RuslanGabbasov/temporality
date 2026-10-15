@@ -3557,6 +3557,16 @@ func main() {
 		if v, ok := hasString("agent_id"); ok {
 			existing.AgentID = v
 		}
+		// Moving between projects is explicit: a trigger is born in whatever
+		// project the creator had selected, and the name/config text may claim
+		// another — the row's project_id is the truth. authorizeTriggerUse below
+		// re-checks the new target. The webhook route embeds the project
+		// (POST /v1/workspace/webhook/{projectID}/{path}), so the caller must
+		// repoint the external system to the new URL; the per-trigger token
+		// hash lives in the config and survives the move.
+		if v, ok := hasString("project_id"); ok && v != "" && v != existing.ProjectID {
+			existing.ProjectID = v
+		}
 		if v, ok := hasString("type"); ok && v != "" {
 			existing.Type = v
 		}
