@@ -93,6 +93,7 @@ export const en: Record<string, string> = {
     'chat.stop': 'Stop',
     'chat.branch': 'Branch',
     'chat.streaming': 'streaming…',
+    'chat.scroll_bottom': 'Scroll to bottom',
     'chat.tool_streaming': 'streaming {{tool}} tool call…',
     'chat.totals.tokens': '{{count}} tok',
     'chat.totals.cached': '↻ {{count}} cached',

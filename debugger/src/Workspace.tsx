@@ -9,7 +9,7 @@ import {
   Tag,
   Heading,
 } from '@carbon/react'
-import { Add, Attachment, Send, TrashCan } from '@carbon/icons-react'
+import { Add, ArrowDown, Attachment, Send, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Agent, type UploadedFile } from './workspaceApi'
 import { runCost, taskCost } from './kernelApi'
 import Markdown, { linkifyWorkspacePaths } from './Markdown'
@@ -168,7 +168,16 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   const [attachments, setAttachments] = useState<UploadedFile[]>([])
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const chatEndRef = useRef<HTMLDivElement>(null)
+  // Auto-scroll stickiness: while the user reads near the bottom the chat
+  // follows new content; once they scroll up into history it stops yanking
+  // them down and counts unread messages on a floating jump button instead.
+  const messagesRef = useRef<HTMLDivElement>(null)
+  const stickRef = useRef(true)
+  const jumpingRef = useRef(false)
+  const lastConvIdRef = useRef<string | null>(null)
+  const prevLenRef = useRef(0)
+  const [atBottom, setAtBottom] = useState(true)
+  const [unread, setUnread] = useState(0)
   const streamRef = useRef<Map<string, EventSource>>(new Map())
   // Live token streams (ephemeral /runs/{id}/tokens SSE), one per conversation.
   const tokenStreamRef = useRef<Map<string, EventSource>>(new Map())
@@ -251,8 +260,66 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
 
   useEffect(() => { void loadAllAgents() }, [loadAllAgents])
 
-  const scrollToBottom = () => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }
-  useEffect(scrollToBottom, [activeConv?.messages])
+  // "At bottom" with a tolerance: minor sub-pixel drift or a shrinking
+  // last message must not count as reading history.
+  const BOTTOM_TOLERANCE = 80
+
+  const onMessagesScroll = () => {
+    const el = messagesRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_TOLERANCE
+    if (jumpingRef.current) {
+      // Programmatic smooth jump: ignore intermediate frames, settle once arrived.
+      if (nearBottom) {
+        jumpingRef.current = false
+        stickRef.current = true
+        setAtBottom(true)
+        setUnread(0)
+      }
+      return
+    }
+    if (nearBottom === stickRef.current) return
+    stickRef.current = nearBottom
+    setAtBottom(nearBottom)
+    if (nearBottom) setUnread(0)
+  }
+
+  const jumpToBottom = () => {
+    const el = messagesRef.current
+    if (!el) return
+    jumpingRef.current = true
+    stickRef.current = true
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    // Safety net: user interaction cancels the smooth animation and no
+    // settling scroll event may arrive — never stay in jumping mode forever.
+    window.setTimeout(() => { jumpingRef.current = false }, 800)
+  }
+
+  // Follow new content only while stuck to the bottom; otherwise count
+  // unread messages and let the jump button bring the user back.
+  useEffect(() => {
+    const convId = activeConv?.id ?? null
+    const msgs = activeConv?.messages ?? []
+    const switched = lastConvIdRef.current !== convId
+    lastConvIdRef.current = convId
+    const prevLen = prevLenRef.current
+    prevLenRef.current = msgs.length
+    if (switched) {
+      stickRef.current = true
+      setAtBottom(true)
+      setUnread(0)
+      const el = messagesRef.current
+      if (el) el.scrollTop = el.scrollHeight
+      return
+    }
+    if (stickRef.current) {
+      const el = messagesRef.current
+      if (el) el.scrollTop = el.scrollHeight
+      return
+    }
+    const grew = msgs.length - prevLen
+    if (grew > 0) setUnread((u) => u + grew)
+  }, [activeConv?.messages, activeConv?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const agentName = (id: string) => allAgents.find((a) => a.id === id)?.name ?? (t('chat.default_agent') ?? 'Default')
 
@@ -724,6 +791,11 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     setError('')
 
     const userMsg: ChatMessage = { role: 'user', content, timestamp: new Date(), attachments: sentAttachments.length ? sentAttachments : undefined }
+    // Sending implies reading the reply: always follow it from the bottom,
+    // even if the user was browsing history a moment ago.
+    stickRef.current = true
+    setAtBottom(true)
+    setUnread(0)
     const updatedConv = { ...activeConv, messages: [...activeConv.messages, userMsg] }
     const firstLine = content || sentAttachments[0]?.name || ''
     if (updatedConv.messages.length === 1) {
@@ -847,7 +919,8 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
             </div>
 
             {/* Chat messages */}
-            <div className="workspace-messages">
+            <div className="workspace-messages-wrap">
+              <div className="workspace-messages" ref={messagesRef} onScroll={onMessagesScroll}>
               {activeConv.messages.length === 0 && (
                 <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '3rem 1rem' }}>
                   <Heading>Temporality Agent</Heading>
@@ -938,7 +1011,18 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                   </div>
                 </div>
               ))}
-              <div ref={chatEndRef} />
+              </div>
+              {!atBottom && (
+                <button
+                  className="chat-jump-btn"
+                  onClick={jumpToBottom}
+                  title={t('chat.scroll_bottom') ?? 'Scroll to bottom'}
+                  aria-label={t('chat.scroll_bottom') ?? 'Scroll to bottom'}
+                >
+                  <ArrowDown size={16} />
+                  {unread > 0 && <span className="chat-jump-badge">{unread > 99 ? '99+' : unread}</span>}
+                </button>
+              )}
             </div>
 
             {/* Input area */}

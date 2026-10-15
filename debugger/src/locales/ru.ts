@@ -92,6 +92,7 @@ export const ru: Record<string, string> = {
     'chat.stop': 'Стоп',
     'chat.branch': 'Ветка',
     'chat.streaming': 'загрузка…',
+    'chat.scroll_bottom': 'Прокрутить вниз',
     'chat.tool_streaming': 'стримит вызов инструмента {{tool}}…',
     'chat.totals.tokens': '{{count}} ток.',
     'chat.totals.cached': '↻ {{count}} из кеша',

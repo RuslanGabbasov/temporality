@@ -1289,11 +1289,62 @@ button.header-nav-link {
   background: var(--tm-bg);
 }
 
+.workspace-messages-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .workspace-messages {
   flex: 1;
   overflow-y: auto;
   padding: 1.5rem 2rem;
   min-height: 0;
+}
+
+// Floating "jump to latest" button — visible only when the user scrolled
+// away from the bottom; badge counts messages that arrived meanwhile.
+.chat-jump-btn {
+  position: absolute;
+  right: 1.5rem;
+  bottom: 1rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--tm-elevated);
+  border: 1px solid var(--tm-border-strong);
+  color: var(--tm-text-2);
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  z-index: 5;
+  transition: color 0.15s, border-color 0.15s;
+
+  &:hover {
+    color: var(--tm-text);
+    border-color: var(--tm-amber);
+  }
+}
+
+.chat-jump-badge {
+  position: absolute;
+  top: -0.375rem;
+  right: -0.375rem;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.25rem;
+  border-radius: 0.55rem;
+  background: var(--tm-amber);
+  color: #1b211f;
+  font-size: 0.62rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .workspace-input-bar {
