@@ -291,52 +291,66 @@ export default function Observability({ project }: { project: string }) {
     <div style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
-      {/* Top bar: refresh + bitemporal controls (auto-applied, debounced).
-          The three datetime fields live in a popover — the default view is
-          "now", and the toggle stays quiet (badge count) until a historical
-          cut is active. */}
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem' }}>
-        <button onClick={() => setRevision((r) => r + 1)} disabled={loading || listLoading} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
-        <div className="time-picker" style={{ marginLeft: 'auto' }}>
-          {timeOpen && <div className="run-picker-backdrop" onClick={() => setTimeOpen(false)} />}
+      {/* Tab bar with inline controls: refresh + bitemporal popover share the
+          tab row (right side) to keep the header a single line. The three
+          datetime fields live in a popover — the default view is "now", and
+          the toggle stays quiet (badge count) until a historical cut is
+          active. */}
+      <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--tm-border)', marginBottom: (asOfUTC || knownAtUTC || compareUTC) ? '0.4rem' : '1rem' }}>
+        {TABS.map((t) => (
           <button
-            className={`time-toggle ${timeOpen ? 'open' : ''} ${(asOfUTC || knownAtUTC || compareUTC) ? 'filtered' : ''}`}
-            onClick={() => setTimeOpen((open) => !open)}
-          >
-            ⏱ {t('knowledge.historical_view') ?? 'Historical view'}
-            {(asOfUTC || knownAtUTC || compareUTC) && (
-              <span className="tune-badge">{([asOfUTC, knownAtUTC, compareUTC].filter(Boolean)).length}</span>
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            style={{
+              padding: '0.5rem 1rem', background: tab === t.key ? 'var(--tm-elevated)' : 'transparent',
+              border: 'none', borderBottom: tab === t.key ? '2px solid var(--tm-teal)' : '2px solid transparent',
+              color: tab === t.key ? 'var(--tm-teal)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600,
+            }}
+          >{t.label}</button>
+        ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button onClick={() => setRevision((r) => r + 1)} disabled={loading || listLoading} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
+          <div className="time-picker">
+            {timeOpen && <div className="run-picker-backdrop" onClick={() => setTimeOpen(false)} />}
+            <button
+              className={`time-toggle ${timeOpen ? 'open' : ''} ${(asOfUTC || knownAtUTC || compareUTC) ? 'filtered' : ''}`}
+              onClick={() => setTimeOpen((open) => !open)}
+            >
+              ⏱ {t('knowledge.historical_view') ?? 'Historical view'}
+              {(asOfUTC || knownAtUTC || compareUTC) && (
+                <span className="tune-badge">{([asOfUTC, knownAtUTC, compareUTC].filter(Boolean)).length}</span>
+              )}
+            </button>
+            {timeOpen && (
+              <div className="time-panel">
+                <div className="time-field">
+                  <label htmlFor="as-of">{t('knowledge.as_of') ?? 'As of'}</label>
+                  <input id="as-of" type="datetime-local" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+                </div>
+                <div className="time-field">
+                  <label htmlFor="known-at">{t('knowledge.known_by') ?? 'Known by'}</label>
+                  <input id="known-at" type="datetime-local" value={knownAt} onChange={(e) => setKnownAt(e.target.value)} />
+                </div>
+                <div className="time-field">
+                  <label htmlFor="compare">{t('knowledge.compare') ?? 'Compare'}</label>
+                  <input id="compare" type="datetime-local" value={compareAsOf} onChange={(e) => setCompareAsOf(e.target.value)} />
+                </div>
+                <div className="time-presets">
+                  {TIME_PRESETS.map((preset) => (
+                    <button key={preset.key} className="preset-chip" onClick={() => { setAsOf(localDateTimeValue(new Date(Date.now() - preset.shiftMs()))); setTimeOpen(false) }}>
+                      {t(preset.key) ?? preset.key}
+                    </button>
+                  ))}
+                  {(asOf || knownAt || compareAsOf) && (
+                    <button className="preset-chip tune-reset" onClick={() => { setAsOf(''); setKnownAt(''); setCompareAsOf(''); setTimeOpen(false) }}>
+                      {t('knowledge.preset_reset') ?? 'Now'}
+                    </button>
+                  )}
+                </div>
+                <p className="time-hint">{t('knowledge.time_hint') ?? 'as_of cuts by when events happened; known_by by when the journal ingested them; compare adds a diff point on the overview.'}</p>
+              </div>
             )}
-          </button>
-          {timeOpen && (
-            <div className="time-panel">
-              <div className="time-field">
-                <label htmlFor="as-of">{t('knowledge.as_of') ?? 'As of'}</label>
-                <input id="as-of" type="datetime-local" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
-              </div>
-              <div className="time-field">
-                <label htmlFor="known-at">{t('knowledge.known_by') ?? 'Known by'}</label>
-                <input id="known-at" type="datetime-local" value={knownAt} onChange={(e) => setKnownAt(e.target.value)} />
-              </div>
-              <div className="time-field">
-                <label htmlFor="compare">{t('knowledge.compare') ?? 'Compare'}</label>
-                <input id="compare" type="datetime-local" value={compareAsOf} onChange={(e) => setCompareAsOf(e.target.value)} />
-              </div>
-              <div className="time-presets">
-                {TIME_PRESETS.map((preset) => (
-                  <button key={preset.key} className="preset-chip" onClick={() => { setAsOf(localDateTimeValue(new Date(Date.now() - preset.shiftMs()))); setTimeOpen(false) }}>
-                    {t(preset.key) ?? preset.key}
-                  </button>
-                ))}
-                {(asOf || knownAt || compareAsOf) && (
-                  <button className="preset-chip tune-reset" onClick={() => { setAsOf(''); setKnownAt(''); setCompareAsOf(''); setTimeOpen(false) }}>
-                    {t('knowledge.preset_reset') ?? 'Now'}
-                  </button>
-                )}
-              </div>
-              <p className="time-hint">{t('knowledge.time_hint') ?? 'as_of cuts by when events happened; known_by by when the journal ingested them; compare adds a diff point on the overview.'}</p>
-            </div>
-          )}
+          </div>
         </div>
       </div>
 
@@ -350,21 +364,6 @@ export default function Observability({ project }: { project: string }) {
           {compareUTC && <Tag type="purple" size="sm" filter onClose={() => setCompareAsOf('')}>{t('knowledge.compare')}: {new Date(compareUTC).toLocaleString()}</Tag>}
         </div>
       )}
-
-      {/* Tab bar */}
-      <div style={{ display: 'flex', gap: '0', borderBottom: '1px solid var(--tm-border)', marginBottom: '1rem' }}>
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            style={{
-              padding: '0.5rem 1rem', background: tab === t.key ? 'var(--tm-elevated)' : 'transparent',
-              border: 'none', borderBottom: tab === t.key ? '2px solid var(--tm-teal)' : '2px solid transparent',
-              color: tab === t.key ? 'var(--tm-teal)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600,
-            }}
-          >{t.label}</button>
-        ))}
-      </div>
 
       {loading && <PageLoading />}
 
