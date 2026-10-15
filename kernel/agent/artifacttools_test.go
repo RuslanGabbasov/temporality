@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -144,18 +145,97 @@ func TestArtifactReadChunksAndEmitsBestEffortEvent(t *testing.T) {
 	}
 }
 
-func TestArtifactReadURLProviderReturnsReference(t *testing.T) {
+func TestArtifactReadURLProviderProxiesThroughKernel(t *testing.T) {
+	// The sandbox has no egress: url artifacts are fetched by the kernel once,
+	// cached, and served in the same chunk envelope as builtin bodies.
+	var fetches int32
+	counting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/docs/deploy.md" {
+			http.NotFound(w, r)
+			return
+		}
+		atomic.AddInt32(&fetches, 1)
+		w.Header().Set("Content-Type", "text/markdown")
+		_, _ = w.Write([]byte("# Deploy runbook\n"))
+	}))
+	defer counting.Close()
+
 	outbox := &recordingOutbox{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"artifact": map[string]any{
 				"id": "deploy-runbook", "title": "Deploy Runbook", "provider": "url",
-				"external_ref": "https://wiki.example.com/deploy", "content": "", "size_bytes": 0,
+				"external_ref": counting.URL + "/docs/deploy.md", "content": "", "size_bytes": 0,
 			},
 			"offset": 0, "next_offset": 0, "truncated": false,
 		})
 	}))
 	defer server.Close()
+	activities := &Activities{HTTP: counting.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal", Events: outbox}
+
+	read := func() (content, checksum, externalRef string) {
+		t.Helper()
+		result, err := activities.RunTool(context.Background(), ToolRequest{
+			RunID: "run-1", Project: "demo", Name: "artifact_read",
+			Arguments: map[string]any{"artifact_id": "deploy-runbook"},
+		})
+		if err != nil {
+			t.Fatalf("artifact_read: %v", err)
+		}
+		var page struct {
+			Content     string `json:"content"`
+			Checksum    string `json:"checksum"`
+			ExternalRef string `json:"external_ref"`
+		}
+		if err := json.Unmarshal([]byte(result.Content), &page); err != nil {
+			t.Fatalf("parse result: %v (content %q)", err, result.Content)
+		}
+		return page.Content, page.Checksum, page.ExternalRef
+	}
+
+	firstContent, firstChecksum, externalRef := read()
+	if !strings.Contains(firstContent, "Deploy runbook") {
+		t.Fatalf("proxied body must reach the agent, got %q", firstContent)
+	}
+	if firstChecksum == "" || externalRef == "" {
+		t.Fatalf("checksum and external_ref must round-trip (checksum %q, ref %q)", firstChecksum, externalRef)
+	}
+	_, secondChecksum, _ := read()
+	if firstChecksum != secondChecksum {
+		t.Fatalf("cached read must be byte-stable: %q vs %q", firstChecksum, secondChecksum)
+	}
+	if got := atomic.LoadInt32(&fetches); got != 1 {
+		t.Fatalf("TTL cache must serve the second read without refetching, fetches=%d", got)
+	}
+
+	// Proxied reads emit artifact.read too: the audit trail covers external
+	// documents exactly like builtin ones.
+	if len(outbox.events) != 2 {
+		t.Fatalf("want 2 artifact.read events (one per read), got %d", len(outbox.events))
+	}
+	if outbox.events[0].Data["checksum"] != firstChecksum {
+		t.Fatalf("event checksum: %+v", outbox.events[0].Data)
+	}
+}
+
+func TestArtifactReadURLProviderUnavailable(t *testing.T) {
+	// The unavailable external document is a tagged tool error, not a hang or
+	// a crash: the agent sees exactly which artifact failed and why.
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := dead.URL + "/gone.md"
+	dead.Close() // port closed: every dial fails
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"artifact": map[string]any{
+				"id": "deploy-runbook", "title": "Deploy Runbook", "provider": "url",
+				"external_ref": deadURL, "content": "", "size_bytes": 0,
+			},
+			"offset": 0, "next_offset": 0, "truncated": false,
+		})
+	}))
+	defer server.Close()
+	outbox := &recordingOutbox{}
 	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal", Events: outbox}
 
 	result, err := activities.RunTool(context.Background(), ToolRequest{
@@ -165,16 +245,11 @@ func TestArtifactReadURLProviderReturnsReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("artifact_read: %v", err)
 	}
-	if !strings.Contains(result.Content, "https://wiki.example.com/deploy") {
-		t.Fatalf("url artifact must hand over external_ref, got %q", result.Content)
+	if !strings.Contains(result.Content, "external document unavailable") || !strings.Contains(result.Content, "deploy-runbook") {
+		t.Fatalf("expected a tagged unavailability error, got %q", result.Content)
 	}
-	if !strings.Contains(result.Content, "web_fetch") {
-		t.Fatalf("note must point at web_fetch, got %q", result.Content)
-	}
-	// No local body was served, so no artifact.read journal event either —
-	// the audit trail follows the registry body, not the outbound fetch.
 	if len(outbox.events) != 0 {
-		t.Fatalf("url artifact read must not emit artifact.read, got %d", len(outbox.events))
+		t.Fatalf("failed fetch must not emit artifact.read, got %d", len(outbox.events))
 	}
 }
 

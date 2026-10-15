@@ -4815,6 +4815,22 @@ func main() {
 		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditArtifactCreated, "artifact", artifact.ID, map[string]any{"title": artifact.Title, "provider": artifact.Provider})
 		writeJSON(w, 201, artifact)
 	})
+	// Exact path beats the {artifactID} wildcard: the UI fetches the whole
+	// map once to render "used by N skills" badges on the registry list.
+	mux.HandleFunc("GET /v1/workspace/artifacts/references", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		references, err := ws.ArtifactReferences(r.Context(), visibleUnits(r))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if references == nil {
+			references = map[string][]string{}
+		}
+		writeJSON(w, 200, map[string]any{"references": references})
+	})
 	mux.HandleFunc("GET /v1/workspace/artifacts/{artifactID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return

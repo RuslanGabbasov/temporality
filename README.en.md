@@ -214,7 +214,8 @@ tools (`docs/living-skills.md`).
 Artifact registry: reference documents (regulations, approved instructions,
 checklists) that skill manifests point at but never inline into the prompt —
 the agent loads bodies on demand through `artifact_search` / `artifact_read`
-in chunks, with `artifact.read` journal auditing (`docs/artifact-registry.md`).
+in chunks, with `artifact.read` journal auditing; url-provider artifacts are
+proxied and cached by the kernel itself (`docs/artifact-registry.md`).
 
 Also: knowledge hints and trajectory-based extraction, triggers
 (cron/webhook/listeners), human requests (`ask_human`) and org policies

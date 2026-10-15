@@ -57,6 +57,7 @@ const NAV_ITEMS = [
 const CONFIG_ITEMS = [
   { path: '/agent-config', label: 'nav.agents' },
   { path: '/skills', label: 'nav.skills' },
+  { path: '/artifacts', label: 'nav.artifacts' },
   { path: '/mcp', label: 'nav.mcp' },
   { path: '/secrets', label: 'nav.secrets' },
   { path: '/providers', label: 'nav.providers' },

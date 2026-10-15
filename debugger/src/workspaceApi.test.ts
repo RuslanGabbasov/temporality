@@ -136,3 +136,29 @@ describe('workspaceApi channel registry', () => {
     expect(page.types[1].configured).toBe(true)
   })
 })
+
+describe('workspaceApi artifacts', () => {
+  it('lists artifacts and their skill references', async () => {
+    const calls = stubFetch((url) => ({
+      body: url.endsWith('/references')
+        ? { references: { 'coding-standard': ['code-review', 'deploy-service'] } }
+        : { artifacts: [{ id: 'coding-standard', title: 'Standard', description: '', provider: 'builtin', size_bytes: 12000, created_at: '', updated_at: '' }], count: 1 },
+    }))
+    const list = await workspaceApi.listArtifacts()
+    const refs = await workspaceApi.artifactReferences()
+    expect(calls[0].url).toBe(`${BASE}/v1/workspace/artifacts`)
+    expect(calls[1].url).toBe(`${BASE}/v1/workspace/artifacts/references`)
+    expect(list.artifacts[0].provider).toBe('builtin')
+    expect(refs.references['coding-standard']).toEqual(['code-review', 'deploy-service'])
+  })
+
+  it('creates and updates artifacts against their ids', async () => {
+    const calls = stubFetch(() => ({ body: { id: 'coding-standard', title: 'Standard', provider: 'builtin', size_bytes: 1, created_at: '', updated_at: '' } }))
+    await workspaceApi.createArtifact({ id: 'coding-standard', title: 'Standard', provider: 'builtin', content: '# Rules' })
+    expect(calls[0].url).toBe(`${BASE}/v1/workspace/artifacts`)
+    expect(calls[0].init?.method).toBe('POST')
+    await workspaceApi.updateArtifact('coding-standard', { title: 'Standard v2', content: '# Rules v2' })
+    expect(calls[1].url).toBe(`${BASE}/v1/workspace/artifacts/coding-standard`)
+    expect(calls[1].init?.method).toBe('PUT')
+  })
+})

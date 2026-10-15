@@ -2,13 +2,17 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/temporality-project/temporality/observation"
 )
@@ -17,7 +21,20 @@ import (
 // reference document registry. Bodies never enter the prompt implicitly — the
 // agent pulls one chunk at a time with artifact_read, when the task matches
 // the artifact's applicability description.
-const artifactReadChunk = 32768 // 32 KiB per artifact_read call
+const (
+	artifactReadChunk  = 32768   // 32 KiB per artifact_read call
+	artifactFetchLimit = 2 << 20 // same 2 MiB cap as builtin bodies
+	artifactCacheTTL   = 15 * time.Minute
+)
+
+// cachedArtifact is one fetched url-provider body. The hash travels with the
+// content so artifact.read events stay honest about what the agent consumed.
+type cachedArtifact struct {
+	content   string
+	hash      string
+	mimeType  string
+	fetchedAt time.Time
+}
 
 func (a *Activities) handleArtifactSearch(ctx context.Context, request ToolRequest) (ToolResult, error) {
 	// Artifacts are workspace-global; the list endpoint ships metadata rows
@@ -117,14 +134,28 @@ func (a *Activities) handleArtifactRead(ctx context.Context, request ToolRequest
 	if err := json.Unmarshal([]byte(body), &page); err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
 	}
-	// url artifacts keep their body outside the registry: hand the agent the
-	// reference instead of pretending there is a chunk to page through.
+	// url artifacts keep their body in an external system: the kernel fetches
+	// it once and serves chunks from cache (egress stays here — the sandbox
+	// never dials out, docs/artifact-registry.md §10 phase 2).
 	if page.Artifact.Provider == "url" {
-		return ToolResult{Content: compactJSON(map[string]any{
-			"artifact_id": page.Artifact.ID, "title": page.Artifact.Title, "provider": "url",
+		doc, fetchedNow, err := a.cachedExternalArtifact(ctx, page.Artifact.ID, page.Artifact.ExternalRef)
+		if err != nil {
+			return ToolResult{Content: fmt.Sprintf("error: external document unavailable (artifact %s): %v", page.Artifact.ID, err)}, nil
+		}
+		content, next := chunkUTF8(doc.content, offset, artifactReadChunk)
+		truncated := next < len(doc.content)
+		_ = a.emitArtifactReadEvent(ctx, request, page.Artifact.ID, page.Artifact.Title,
+			doc.hash, offset, len(content))
+		encoded, _ := json.Marshal(map[string]any{
+			"artifact_id": page.Artifact.ID, "title": page.Artifact.Title,
+			"content": content, "offset": offset, "next_offset": next,
+			"truncated": truncated, "checksum": doc.hash, "size_bytes": len(doc.content),
+			"mime_type":    doc.mimeType,
 			"external_ref": page.Artifact.ExternalRef,
-			"note":         "body lives outside the registry; fetch it with web_fetch",
-		}, 2000)}, nil
+			"cached_until": doc.fetchedAt.Add(artifactCacheTTL).Format(time.RFC3339),
+			"refetched":    fetchedNow,
+		})
+		return ToolResult{Content: string(encoded)}, nil
 	}
 	// Audit trail (docs/artifact-registry.md §7): artifact.read lands in the
 	// journal best-effort — a logging failure must not cost the agent the
@@ -139,6 +170,75 @@ func (a *Activities) handleArtifactRead(ctx context.Context, request ToolRequest
 		"mime_type": page.Artifact.MimeType,
 	})
 	return ToolResult{Content: string(encoded)}, nil
+}
+
+// cachedExternalArtifact returns the url-provider body from cache when fresh,
+// or fetches it (reporting fetchedNow). The fetch honors the tool context and
+// the builtin 2 MiB cap: an oversized external document is an error, not a
+// silent truncation — the agent must know the body it sees is partial only
+// when chunked, never because the fetch gave up.
+func (a *Activities) cachedExternalArtifact(ctx context.Context, artifactID, externalRef string) (cachedArtifact, bool, error) {
+	a.artifactCacheMu.Lock()
+	if entry, ok := a.artifactCache[artifactID]; ok && time.Since(entry.fetchedAt) < artifactCacheTTL {
+		a.artifactCacheMu.Unlock()
+		return entry, false, nil
+	}
+	a.artifactCacheMu.Unlock()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, externalRef, nil)
+	if err != nil {
+		return cachedArtifact{}, false, fmt.Errorf("invalid external_ref: %w", err)
+	}
+	resp, err := a.HTTP.Do(req)
+	if err != nil {
+		return cachedArtifact{}, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return cachedArtifact{}, false, fmt.Errorf("external system answered HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, artifactFetchLimit+1))
+	if err != nil {
+		return cachedArtifact{}, false, err
+	}
+	if len(body) > artifactFetchLimit {
+		return cachedArtifact{}, false, fmt.Errorf("body exceeds %d bytes", artifactFetchLimit)
+	}
+	sum := sha256.Sum256(body)
+	entry := cachedArtifact{
+		content:   string(body),
+		hash:      hex.EncodeToString(sum[:]),
+		mimeType:  strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]),
+		fetchedAt: time.Now().UTC(),
+	}
+	if a.artifactCache == nil {
+		a.artifactCache = make(map[string]cachedArtifact)
+	}
+	a.artifactCacheMu.Lock()
+	a.artifactCache[artifactID] = entry
+	a.artifactCacheMu.Unlock()
+	return entry, true, nil
+}
+
+// chunkUTF8 slices content bytes [offset, offset+limit) backing the cut off
+// to a rune boundary, and returns the next offset (whole body when limit<=0).
+func chunkUTF8(content string, offset, limit int) (string, int) {
+	if offset > len(content) {
+		offset = len(content)
+	}
+	rest := content[offset:]
+	if limit <= 0 || limit >= len(rest) {
+		return rest, len(content)
+	}
+	cut := rest[:limit]
+	for len(cut) > 0 {
+		r, size := utf8.DecodeLastRuneInString(cut)
+		if r != utf8.RuneError || size != 1 {
+			break
+		}
+		cut = cut[:len(cut)-1]
+	}
+	return cut, offset + len(cut)
 }
 
 // emitArtifactReadEvent records artifact.read in the observation journal via

@@ -111,6 +111,12 @@ type Activities struct {
 	// rarely — a short TTL keeps the hot path free of workspace round trips.
 	providerCacheMu sync.Mutex
 	providerCache   map[string]providerCacheEntry
+	// artifactCacheMu + artifactCache memoize url-provider bodies fetched by
+	// artifact_read (docs/artifact-registry.md §10, phase 2): egress lives at
+	// the kernel — the sandbox never dials out — and the TTL keeps repeated
+	// reads of one external document from hammering the corporate system.
+	artifactCacheMu sync.Mutex
+	artifactCache   map[string]cachedArtifact
 	// ChannelSettings loads the admin-editable channel settings overlay
 	// (workspace channel_transport row: per-channel payload + UI URL). Nil —
 	// or a load error — degrades to the KERNEL_CHANNEL__* environment

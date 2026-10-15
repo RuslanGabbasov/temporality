@@ -150,8 +150,10 @@ digest навыка      "Artifacts: 2 reference docs (skill_inspect)"   — ~50
   skill_search), детерминированный порядок.
 * `artifact_read(artifact_id, offset?)` — тело документа чанком 32 КиБ:
   `{content, offset, next_offset, truncated, checksum, size_bytes}`.
-  UTF-8-safe граница чанка. Для `provider=url` возвращает external_ref
-  вместо тела.
+  UTF-8-safe граница чанка. Для `provider=url` ядро само забирает тело
+  (egress только у ядра — как у секретов), кэширует его в памяти с TTL
+  15 минут и раздаёт тем же конвертом; при недоступности внешней системы —
+  тег «внешний документ недоступен» с указанием артефакта и причины.
 
 `skill_inspect` показывает разрешённый список артефактов навыка (title,
 description, note) — без отдельного вызова на каждый id.
@@ -181,6 +183,8 @@ description, note) — без отдельного вызова на кажды�
 * `PUT /v1/workspace/artifacts/{id}` — обновление; hash пересчитывается.
 * `DELETE /v1/workspace/artifacts/{id}` — operator; 409 если занят
   манифестами.
+* `GET /v1/workspace/artifacts/references` — карта `artifact_id → [skill_id]`
+  по видимым навыкам (для индикатора «занят N навыками» в UI).
 
 ---
 

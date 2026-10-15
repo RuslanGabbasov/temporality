@@ -12,6 +12,7 @@ import Providers from './Providers'
 import Users from './Users'
 import Triggers from './Triggers'
 import Skills from './Skills'
+import Artifacts from './Artifacts'
 import Mcp from './Mcp'
 import Secrets from './Secrets'
 import Org from './Org'
@@ -26,6 +27,7 @@ const Routes = {
   workspace: /^\/workspace(\/|$)/,
   'agent-config': /^\/agent-config(\/|$)/,
   skills: /^\/skills(\/|$)/,
+  artifacts: /^\/artifacts(\/|$)/,
   mcp: /^\/mcp(\/|$)/,
   secrets: /^\/secrets(\/|$)/,
   providers: /^\/providers(\/|$)/,
@@ -36,7 +38,7 @@ const Routes = {
   inbound: /^\/inbound(\/|$)/,
 } as const
 
-type Page = 'project' | 'experience' | 'agents' | 'observability' | 'workspace' | 'agent-config' | 'skills' | 'mcp' | 'secrets' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
+type Page = 'project' | 'experience' | 'agents' | 'observability' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
 
 function pageFor(pathname: string): Page {
   if (Routes.project.test(pathname)) return 'project'
@@ -86,6 +88,8 @@ export default function App() {
             return <Agents project={project} defaultAgentId={projectDefaultAgent} refreshProjects={refreshProjects} />
           case 'skills':
             return <Skills />
+          case 'artifacts':
+            return <Artifacts />
           case 'mcp':
             return <Mcp />
           case 'secrets':

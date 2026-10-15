@@ -274,3 +274,36 @@ func (s *Store) ArtifactReferencedBy(ctx context.Context, artifactID string) ([]
 	sort.Strings(refs)
 	return refs, nil
 }
+
+// ArtifactReferences maps artifact id → ids of the visible skills whose
+// manifest references it, in one scan: the read-only twin of the delete
+// guard, powering the registry UI's "used by N skills" indicator.
+func (s *Store) ArtifactReferences(ctx context.Context, units []string) (map[string][]string, error) {
+	skills, err := s.ListSkillsVisible(ctx, units)
+	if err != nil {
+		return nil, err
+	}
+	references := make(map[string][]string)
+	for _, skill := range skills {
+		if len(skill.Manifest) == 0 {
+			continue
+		}
+		var manifest struct {
+			Artifacts []struct {
+				ID string `json:"id"`
+			} `json:"artifacts"`
+		}
+		if err := json.Unmarshal(skill.Manifest, &manifest); err != nil {
+			continue
+		}
+		for _, ref := range manifest.Artifacts {
+			if ref.ID != "" {
+				references[ref.ID] = append(references[ref.ID], skill.ID)
+			}
+		}
+	}
+	for id := range references {
+		sort.Strings(references[id])
+	}
+	return references, nil
+}

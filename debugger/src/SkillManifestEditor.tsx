@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { TextInput, Select, SelectItem, Checkbox, TextArea, InlineNotification, Button } from '@carbon/react'
 import { Add, TrashCan } from '@carbon/icons-react'
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml'
@@ -30,6 +30,9 @@ export interface SkillManifest {
   postconditions?: string[]
   evidence?: { required?: string[] }
   evaluation?: { suite?: string }
+  /** Reference documents (docs/artifact-registry.md §3.2): registry ids the
+   * skill points at; bodies load on demand via artifact_read, never inlined. */
+  artifacts?: { id: string; note?: string }[]
 }
 
 /** Known values offered as chip autosuggest, derived from the workspace. */
@@ -37,6 +40,7 @@ export interface ManifestSuggestions {
   tools?: string[]
   capabilities?: string[]
   mcp?: string[]
+  artifacts?: string[]
 }
 
 /** Where a section's current value came from. */
@@ -170,6 +174,53 @@ function StringListEditor({ values, onChange, placeholder }: { values: string[];
   )
 }
 
+/** Artifact refs: registry id picked from the workspace (with free entry for
+ * stale ids), plus an optional applicability note that travels in the
+ * manifest and surfaces in skill_inspect next to the artifact. */
+function ArtifactRefEditor({ refs, onChange, suggestions }: {
+  refs: { id: string; note?: string }[]
+  onChange: (next: { id: string; note?: string }[]) => void
+  suggestions?: string[]
+}) {
+  const t = useT()
+  const options = useMemo(() => {
+    const known = new Set(suggestions ?? [])
+    for (const ref of refs) if (ref.id) known.add(ref.id)
+    return [...known].sort()
+  }, [suggestions, refs])
+  const setRef = (i: number, patch: Partial<{ id: string; note?: string }>) =>
+    onChange(refs.map((ref, j) => (j === i ? { ...ref, ...patch } : ref)))
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+      {refs.map((ref, i) => (
+        <div key={i} className="condition-row" style={{ alignItems: 'center' }}>
+          <Select
+            id={`artifact-ref-${i}`}
+            hideLabel
+            labelText="artifact"
+            value={ref.id}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setRef(i, { id: e.target.value })}
+            style={{ minWidth: '160px' }}
+          >
+            <SelectItem value="" text="—" />
+            {options.map((id) => <SelectItem key={id} value={id} text={id} />)}
+          </Select>
+          <TextInput
+            id={`artifact-note-${i}`}
+            hideLabel
+            labelText="note"
+            value={ref.note ?? ''}
+            placeholder={t('skills.editor.artifact_note_placeholder') ?? 'When this document matters'}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRef(i, { note: e.target.value })}
+          />
+          <RemoveButton label={t('action.delete') ?? 'Delete'} onClick={() => onChange(refs.filter((_, j) => j !== i))} />
+        </div>
+      ))}
+      <AddRowButton label={t('skills.editor.add_artifact') ?? 'Attach artifact'} onClick={() => onChange([...refs, { id: '' }])} />
+    </div>
+  )
+}
+
 function FieldMapEditor({ fields, onChange, addLabel, namePlaceholder }: {
   fields: Record<string, ManifestField>
   onChange: (next: Record<string, ManifestField>) => void
@@ -279,7 +330,7 @@ export default function SkillManifestEditor({ manifest, onChange, suggestions, p
   // Dialog tabs split the manifest: the contract tab carries the identity
   // sections (and the raw YAML toggle), the runtime tab the requirements.
   const CONTRACT_SECTIONS = ['inputs', 'outputs', 'capabilities', 'tools']
-  const RUNTIME_SECTIONS = ['runtime', 'preconditions', 'postconditions', 'evidence', 'evaluation']
+  const RUNTIME_SECTIONS = ['runtime', 'preconditions', 'postconditions', 'evidence', 'evaluation', 'artifacts']
   const show = (section: string) => variant === 'all'
     || (variant === 'contract' ? CONTRACT_SECTIONS : RUNTIME_SECTIONS).includes(section)
 
@@ -412,6 +463,16 @@ export default function SkillManifestEditor({ manifest, onChange, suggestions, p
           placeholder="deploy-service/default"
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => { touch('evaluation'); patch({ evaluation: { suite: e.target.value } }) }}
         />
+      </div>
+      )}
+
+      {show('artifacts') && (
+      <div className="manifest-section">
+        <SectionLabel id="artifacts">{t('skills.editor.artifacts') ?? 'Reference artifacts'}</SectionLabel>
+        <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0 0 0.5rem' }}>
+          {t('skills.editor.artifacts_hint') ?? 'Documents the skill points at without inlining: the agent loads them with artifact_read when the task matches.'}
+        </p>
+        <ArtifactRefEditor refs={manifest.artifacts ?? []} onChange={(artifacts) => { touch('artifacts'); patch({ artifacts }) }} suggestions={suggestions?.artifacts} />
       </div>
       )}
     </div>

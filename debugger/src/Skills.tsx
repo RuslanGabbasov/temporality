@@ -154,14 +154,16 @@ export default function Skills() {
   const visibleSkills = skills.filter((s) => matchesFilter(filter, s.name, s.id, s.description))
 
   // Autosuggest values for the manifest editor: tools from builtins + MCP,
-  // capabilities collected from existing skills, mcp from server names.
+  // capabilities collected from existing skills, mcp from server names,
+  // artifacts from the reference registry.
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
-        const [toolsData, serversData] = await Promise.all([
+        const [toolsData, serversData, artifactsData] = await Promise.all([
           workspaceApi.listMCPTools(),
           workspaceApi.listMCPServers(),
+          workspaceApi.listArtifacts().catch(() => ({ artifacts: [] as never[] })),
         ])
         if (cancelled) return
         const tools = new Set<string>()
@@ -172,6 +174,7 @@ export default function Skills() {
         setSuggestions({
           tools: [...tools].sort(),
           mcp: (serversData.servers ?? []).map((s) => s.name).sort(),
+          artifacts: (artifactsData.artifacts ?? []).map((a) => a.id).sort(),
         })
       } catch {
         // suggestions are optional — ignore load errors

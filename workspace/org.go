@@ -204,6 +204,7 @@ const (
 	OrgResourceTrigger   = "trigger"
 	OrgResourceTeam      = "team"
 	OrgResourceSecret    = "secret"
+	OrgResourceArtifact  = "artifact"
 )
 
 var orgResourceTables = map[string]string{
@@ -214,6 +215,7 @@ var orgResourceTables = map[string]string{
 	OrgResourceTrigger:   "workspace_trigger",
 	OrgResourceTeam:      "workspace_team",
 	OrgResourceSecret:    "workspace_secret",
+	OrgResourceArtifact:  "workspace_artifact",
 }
 
 // SetResourceOrgUnit binds a resource to an org unit; unitID empty clears the

@@ -63,7 +63,7 @@ export interface OrgUnitRoleGrant {
   granted_at: string
 }
 
-export type OrgResourceKind = 'agent' | 'skill' | 'mcp-server' | 'provider' | 'trigger' | 'team' | 'secret'
+export type OrgResourceKind = 'agent' | 'skill' | 'mcp-server' | 'provider' | 'trigger' | 'team' | 'secret' | 'artifact'
 
 export interface Project {
   id: string
@@ -431,6 +431,27 @@ export interface Secret {
   external_ref?: string
   description?: string
   has_value: boolean
+  org_unit_id?: string
+  created_at: string
+  updated_at: string
+}
+
+/** Reference artifact (docs/artifact-registry.md §3.1): a regulation,
+ * approved instruction or checklist that skill manifests point at but never
+ * inline into the prompt — the agent loads the body on demand. Description
+ * is the applicability condition, not a content summary. */
+export interface Artifact {
+  id: string
+  title: string
+  description: string
+  provider: 'builtin' | 'url'
+  external_ref?: string
+  /** Builtin bodies are stripped from list responses; the editor fetches
+   * the full document via getArtifact. */
+  content?: string
+  content_hash?: string
+  size_bytes: number
+  mime_type?: string
   org_unit_id?: string
   created_at: string
   updated_at: string
@@ -892,6 +913,21 @@ export const workspaceApi = {
     request<{ deleted: boolean }>(`/v1/workspace/secrets/${id}`, { method: 'DELETE' }),
   setSecretValue: (id: string, value: string) =>
     request<{ stored: boolean }>(`/v1/workspace/secrets/${id}/value`, { method: 'POST', body: JSON.stringify({ value }) }),
+
+  // Reference artifacts (docs/artifact-registry.md phase 2): bodies load on
+  // demand — lists ship metadata only, the editor fetches the whole document.
+  listArtifacts: () =>
+    request<{ artifacts: Artifact[]; count: number }>('/v1/workspace/artifacts'),
+  getArtifact: (id: string) =>
+    request<{ artifact: Artifact; offset: number; next_offset: number; truncated: boolean }>(`/v1/workspace/artifacts/${id}`),
+  createArtifact: (data: Partial<Artifact> & { id: string; title: string }) =>
+    request<Artifact>('/v1/workspace/artifacts', { method: 'POST', body: JSON.stringify(data) }),
+  updateArtifact: (id: string, data: Partial<Artifact>) =>
+    request<Artifact>(`/v1/workspace/artifacts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteArtifact: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/workspace/artifacts/${id}`, { method: 'DELETE' }),
+  artifactReferences: () =>
+    request<{ references: Record<string, string[]> }>('/v1/workspace/artifacts/references'),
 
   // Users
   listUsers: () => request<{ users: User[] }>('/v1/workspace/users'),
