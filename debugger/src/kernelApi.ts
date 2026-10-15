@@ -228,10 +228,38 @@ export interface ApprovalStats {
   max_wait_ms?: number
 }
 
-// One long-running task (saga) inside a project: totals across runs, agents
-// and delegation stages.
+// One explicitly registered saga (docs/sagas.md): a long-running effort
+// uniting one or more tasks — each with its runs, agents and delegation
+// stages — with summed time/tokens/cost.
 export interface SagaRollup {
+  saga_id: string
+  title?: string
+  goal?: string
+  task_ids: string[]
+  root_run_id?: string
+  registered_by_run?: string
+  registered_at?: string
+  run_count: number
+  running: number
+  model_calls: number
+  agent_count: number
+  first_started_at?: string
+  last_ended_at?: string
+  elapsed_ms: number
+  active_ms: number
+  total_prompt_tokens: number
+  total_cached_tokens?: number
+  total_completion_tokens: number
+  total_tokens: number
+  total_cost_usd: number
+  approvals: ApprovalStats
+}
+
+// One task inside a project: totals across every run it spans (follow-ups +
+// delegation tree) and the saga it is bound to, if any.
+export interface TaskRollup {
   task_id: string
+  saga_id?: string
   title?: string
   root_run_id?: string
   run_count: number
@@ -250,10 +278,12 @@ export interface SagaRollup {
   approvals: ApprovalStats
 }
 
-// Project rollup: totals across every saga plus one row per saga.
+// Project rollup: totals across every task plus a row per saga and per task
+// (unbound tasks carry no saga_id).
 export interface ProjectBudget {
   project: string
   saga_count: number
+  task_count: number
   run_count: number
   model_calls: number
   first_started_at?: string
@@ -267,6 +297,7 @@ export interface ProjectBudget {
   total_cost_usd: number
   approvals: ApprovalStats
   sagas: SagaRollup[]
+  tasks: TaskRollup[]
 }
 
 export function projectBudget(project: string): Promise<ProjectBudget> {

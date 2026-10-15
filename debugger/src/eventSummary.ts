@@ -44,15 +44,28 @@ export function shortTime(iso: string) {
 
 /** Compact human duration for budget tiles: 2h 5m / 4m 30s / 12s / 900ms. */
 export function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return '0s'
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  const totalSeconds = Math.floor(ms / 1000)
-  const h = Math.floor(totalSeconds / 3600)
-  const m = Math.floor((totalSeconds % 3600) / 60)
-  const s = totalSeconds % 60
-  if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`
-  if (m > 0) return s > 0 ? `${m}m ${s}s` : `${m}m`
-  return `${s}s`
+	if (!Number.isFinite(ms) || ms <= 0) return '0s'
+	if (ms < 1000) return `${Math.round(ms)}ms`
+	const totalSeconds = Math.floor(ms / 1000)
+	const h = Math.floor(totalSeconds / 3600)
+	const m = Math.floor((totalSeconds % 3600) / 60)
+	const s = totalSeconds % 60
+	if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`
+	if (m > 0) return s > 0 ? `${m}m ${s}s` : `${m}m`
+	return `${s}s`
+}
+
+/** Human-approval budget tooltip: the full breakdown behind a compact cell.
+ * Structural on purpose — works for ApprovalStats from any rollup shape. */
+export function approvalHint(t: TranslateFn, ap: { requested: number; granted: number; rejected: number; timed_out: number; pending?: number; wait_ms: number }): string {
+	return t('runs.approvals_hint', {
+		requested: String(ap.requested),
+		granted: String(ap.granted),
+		rejected: String(ap.rejected),
+		timed_out: String(ap.timed_out),
+		pending: String(ap.pending ?? 0),
+		wait: formatDuration(ap.wait_ms),
+	})
 }
 
 /** MCP tool results arrive as JSON-encoded strings, sometimes doubly so

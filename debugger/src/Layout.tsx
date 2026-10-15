@@ -45,6 +45,7 @@ interface LayoutProps {
 // Primary work surfaces — always visible in the header.
 const NAV_ITEMS = [
   { path: '/workspace', label: 'nav.workspace' },
+  { path: '/project', label: 'nav.project' },
   { path: '/agents', label: 'nav.runs' },
   { path: '/inbound', label: 'nav.inbound' },
   { path: '/observability', label: 'nav.knowledge' },

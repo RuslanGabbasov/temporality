@@ -6,6 +6,7 @@ import Observability from './Observability'
 import AgentRuns from './AgentRuns'
 import ExperienceTimeline from './ExperienceTimeline'
 import Workspace from './Workspace'
+import ProjectOverview from './ProjectOverview'
 import Agents from './Agents'
 import Providers from './Providers'
 import Users from './Users'
@@ -18,6 +19,7 @@ import ChannelSettingsPage from './ChannelSettings'
 import InboundMessages from './InboundMessages'
 
 const Routes = {
+  project: /^\/project(\/|$)/,
   experience: /^\/experience(\/|$)/,
   agents: /^\/agents(\/|$)/,
   observability: /^\/observability(\/|$)/,
@@ -34,9 +36,10 @@ const Routes = {
   inbound: /^\/inbound(\/|$)/,
 } as const
 
-type Page = 'experience' | 'agents' | 'observability' | 'workspace' | 'agent-config' | 'skills' | 'mcp' | 'secrets' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
+type Page = 'project' | 'experience' | 'agents' | 'observability' | 'workspace' | 'agent-config' | 'skills' | 'mcp' | 'secrets' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
 
 function pageFor(pathname: string): Page {
+  if (Routes.project.test(pathname)) return 'project'
   if (Routes.agents.test(pathname)) return 'agents'
   if (Routes.observability.test(pathname)) return 'observability'
   if (Routes.workspace.test(pathname)) return 'workspace'
@@ -70,6 +73,8 @@ export default function App() {
     <Layout activePage={page}>
       {({ project, setProject, projectDefaultAgent, projectDefaultModel, refreshProjects }: AppState) => {
         switch (page) {
+          case 'project':
+            return <ProjectOverview project={project} />
           case 'agents':
             return <AgentRuns project={project} />
           case 'observability':

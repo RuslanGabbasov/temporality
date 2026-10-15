@@ -3,6 +3,7 @@ export const en: Record<string, string> = {
     // Navigation
     'nav.timeline': 'Timeline',
     'nav.workspace': 'Workspace',
+    'nav.project': 'Overview',
     'nav.runs': 'Runs',
     'nav.knowledge': 'Knowledge',
     'nav.agents': 'Agents',
@@ -17,6 +18,22 @@ export const en: Record<string, string> = {
     'nav.org': 'Organization',
     'nav.channels': 'Delivery channels',
     'nav.inbound': 'Inbox',
+
+    // Project overview (docs/sagas.md)
+    'project.title': 'Project overview',
+    'project.sagas': 'Sagas',
+    'project.sagas_n_one': 'saga',
+    'project.sagas_n_few': 'sagas',
+    'project.sagas_n_other': 'sagas',
+    'project.tasks_n_one': 'task',
+    'project.tasks_n_few': 'tasks',
+    'project.tasks_n_other': 'tasks',
+    'project.saga_col': 'Saga',
+    'project.tasks_col': 'Tasks',
+    'project.saga_expand': 'Tasks bound to this saga',
+    'project.no_sagas': 'No sagas registered yet — agents register them with the saga_register tool',
+    'project.unbound': 'Tasks without a saga',
+    'project.no_unbound': 'Every task belongs to a saga',
 
     // Common actions
     'action.create': 'Create',
@@ -281,12 +298,6 @@ export const en: Record<string, string> = {
     'runs.task_col_agent': 'Agent',
     'runs.task_col_runs': 'Runs',
     'runs.task_agents_col': 'Agents',
-    'runs.sagas': 'Project sagas',
-    'runs.sagas_n_one': 'saga',
-    'runs.sagas_n_few': 'sagas',
-    'runs.sagas_n_other': 'sagas',
-    'runs.saga_col': 'Saga',
-    'runs.saga_open': 'Open the saga budget',
     'runs.approvals_col': 'approvals',
     'runs.approvals_hint': 'Requested: {{requested}} · granted: {{granted}} · rejected: {{rejected}} · timed out: {{timed_out}} · pending: {{pending}} · total wait: {{wait}}',
     'runs.turns_heading': 'Turns',

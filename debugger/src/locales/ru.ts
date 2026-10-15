@@ -3,6 +3,7 @@ export const ru: Record<string, string> = {
     // Navigation
     'nav.timeline': 'Таймлайн',
     'nav.workspace': 'Главная',
+    'nav.project': 'Обзор',
     'nav.runs': 'Запуски',
     'nav.knowledge': 'Знания',
     'nav.agents': 'Агенты',
@@ -17,6 +18,22 @@ export const ru: Record<string, string> = {
     'nav.org': 'Организация',
     'nav.channels': 'Каналы доставки',
     'nav.inbound': 'Входящие',
+
+    // Project overview (docs/sagas.md)
+    'project.title': 'Обзор проекта',
+    'project.sagas': 'Саги',
+    'project.sagas_n_one': 'сага',
+    'project.sagas_n_few': 'саги',
+    'project.sagas_n_other': 'саг',
+    'project.tasks_n_one': 'задача',
+    'project.tasks_n_few': 'задачи',
+    'project.tasks_n_other': 'задач',
+    'project.saga_col': 'Сага',
+    'project.tasks_col': 'Задачи',
+    'project.saga_expand': 'Задачи в составе саги',
+    'project.no_sagas': 'Саги ещё не зарегистрированы — агент регистрирует их тулом saga_register',
+    'project.unbound': 'Задачи без саги',
+    'project.no_unbound': 'Все задачи привязаны к сагам',
 
     // Common actions
     'action.create': 'Создать',
@@ -281,12 +298,6 @@ export const ru: Record<string, string> = {
     'runs.task_col_agent': 'Агент',
     'runs.task_col_runs': 'Раны',
     'runs.task_agents_col': 'Агенты',
-    'runs.sagas': 'Саги проекта',
-    'runs.sagas_n_one': 'сага',
-    'runs.sagas_n_few': 'саги',
-    'runs.sagas_n_other': 'саг',
-    'runs.saga_col': 'Сага',
-    'runs.saga_open': 'Открыть бюджет саги',
     'runs.approvals_col': 'согласования',
     'runs.approvals_hint': 'Запрошено: {{requested}} · подтверждено: {{granted}} · отклонено: {{rejected}} · таймауты: {{timed_out}} · ожидает: {{pending}} · суммарное ожидание: {{wait}}',
     'runs.turns_heading': 'Ходы',
