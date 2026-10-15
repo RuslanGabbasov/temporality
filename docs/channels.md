@@ -51,8 +51,8 @@ type ChannelDriver interface {
     SendFile(ctx context.Context, to ChannelAddress, file OutboundFile) error // ErrUnsupported по capabilities
 
     // Входящие — драйвер реализует ровно одну модель:
-    Poller() ChannelPoller    // pull: matrix /sync, telegram getUpdates
-    Webhook() ChannelWebhook  // push: slack events, teams, mattermost
+    Poller() ChannelPoller    // pull: matrix /sync, telegram getUpdates, mattermost websocket
+    Webhook() ChannelWebhook  // push: slack events, teams
 
     // Идентичность отправителя в этом канале (mxid, chat id, member id…)
     SenderIdentity(user UserChannel) string
@@ -180,7 +180,7 @@ VerifyRequest (для push), курсор (для pull).
 | telegram | pull `getUpdates` | chat id (личка) = адрес | offset-курсор персистить; лимит 4096; getFile |
 | slack (webhook) | только outbound | — | текущее поведение, остаётся отдельным типом |
 | slack (bot) | push Events API | member id | треды (ReplyTo=ts), подпись запроса, blocks (future) |
-| mattermost | push webhook | user id | self-hosted: URL сервера в настройках драйвера |
+| mattermost | pull WebSocket (`posted`) | user id | self-hosted: URL сервера в настройках; тот же base_url+token стримит входящие через WS, включая DM, куда outgoing webhooks не достают; REST v4 для отправки. Ранее — outgoing webhooks: их стоит удалить из сервера, роут `/v1/channels/mattermost/hooks` больше не регистрируется |
 | teams | push Bot Framework | aad id | верификация Microsoft, самый тяжёлый onboard |
 | webhook (generic) | только outbound | — | escape hatch: envelope + HMAC-подпись, ответы в UI |
 

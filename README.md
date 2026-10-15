@@ -209,16 +209,16 @@ KERNEL_CHANNEL__MATRIX__HOMESERVER=https://matrix.org   # homeserver бота я
 KERNEL_CHANNEL__MATRIX__ACCESS_TOKEN=syt_...            # токен бота (состоит в комнатах пользователей)
 KERNEL_CHANNEL__TELEGRAM__BOT_TOKEN=123456:ABC...       # токен бота для Bot API
 KERNEL_UI_URL=http://localhost:3000                     # для ссылок в уведомлениях
+KERNEL_CHANNEL__MATTERMOST__BASE_URL=https://mm.corp    # self-hosted Mattermost
+KERNEL_CHANNEL__MATTERMOST__TOKEN=...                   # токен бота/персональный (REST v4 + WebSocket)
 
 # Двусторонние push-каналы (вебхуки приходят в ядро, путь — публичный через
 # reverse proxy):
 KERNEL_CHANNEL__SLACKBOT__BOT_TOKEN=xoxb-...            # Slack-приложение: токен бота
 KERNEL_CHANNEL__SLACKBOT__SIGNING_SECRET=...            # подпись Events API (v0:ts:body HMAC-SHA256)
 #   события: POST /v1/channels/slackbot/events
-KERNEL_CHANNEL__MATTERMOST__BASE_URL=https://mm.corp    # self-hosted Mattermost
-KERNEL_CHANNEL__MATTERMOST__TOKEN=...                   # токен бота/персональный (REST v4)
-KERNEL_CHANNEL__MATTERMOST__OUTGOING_TOKEN=...         # токен исходящих вебхуков (проверка входящих)
-#   события: POST /v1/channels/mattermost/hooks
+# Mattermost входящие принимает через WebSocket-стрим тем же токеном
+# (включая личные сообщения) — отдельный вебхук и OUTGOING_TOKEN больше не нужны
 
 # Легаси-имена работают как алиасы (одно и то же поле):
 # KERNEL_MATRIX_HOMESERVER, KERNEL_MATRIX_ACCESS_TOKEN,

@@ -2,30 +2,31 @@ package agent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
-	"time"
 )
 
 // mattermostDriver is the two-way Mattermost transport (docs/channels.md §9):
 // a bot/personal access token posts questions through REST API v4, and the
-// self-hosted server's outgoing webhooks push user messages to the kernel's
-// webhook route. The server URL is a driver setting — self-hosted by nature.
+// same token streams inbound `posted` events over the WebSocket API
+// (mattermostPoller) — including direct messages, which outgoing webhooks
+// could never serve. The server URL is a driver setting — self-hosted by
+// nature.
 type mattermostDriver struct{}
 
 func (mattermostDriver) Type() string { return "mattermost" }
 
-// Poller: mattermost inbound is push — outgoing webhooks (mattermostOutgoingWebhook).
-func (mattermostDriver) Poller() ChannelPoller { return nil }
+// Poller: mattermost inbound is pull — the WebSocket event stream (mattermostPoller).
+func (mattermostDriver) Poller() ChannelPoller { return mattermostPoller{} }
 
-func (mattermostDriver) Webhook() ChannelWebhook { return mattermostOutgoingWebhook{} }
+// Webhook: inbound runs over the WebSocket poller; there is no push route.
+// Deployments that configured outgoing webhooks in Mattermost should remove
+// them — the poller starts working with the same base_url + token pair.
+func (mattermostDriver) Webhook() ChannelWebhook { return nil }
 
 func (mattermostDriver) Spec() ChannelSpec {
 	return ChannelSpec{
@@ -39,7 +40,6 @@ func (mattermostDriver) Spec() ChannelSpec {
 		Settings: []SettingField{
 			{Name: "base_url", Label: "Server URL, https://mattermost.example.com"},
 			{Name: "token", Label: "Access token (bot or personal)", Secret: true},
-			{Name: "outgoing_token", Label: "Outgoing webhook token (inbound)", Secret: true},
 		},
 	}
 }
@@ -49,8 +49,8 @@ func (mattermostDriver) IsConfigured(settings map[string]string) bool {
 }
 
 // Self resolves the token's own account id (users/me) so the inbound router
-// can exclude the account's own posts from reply matching — outgoing
-// webhooks may echo the bot's answers back in some configurations.
+// can exclude the account's own posts from reply matching — the WebSocket
+// stream echoes them back.
 func (mattermostDriver) Self(ctx context.Context, client *http.Client, settings map[string]string) (string, error) {
 	base, token, err := mattermostCredentials(settings)
 	if err != nil {
@@ -143,70 +143,4 @@ func mattermostAPI(ctx context.Context, client *http.Client, method, endpoint, t
 		return nil, fmt.Errorf("mattermost returned %d: %s", resp.StatusCode, truncate(string(body), 200))
 	}
 	return body, nil
-}
-
-// mattermostOutgoingWebhook adapts Mattermost outgoing webhooks (form-encoded
-// POSTs) to the ChannelWebhook contract. The shared token in the payload is
-// the only authenticator Mattermost offers here — VerifyRequest rejects the
-// request when it does not match the configured value.
-type mattermostOutgoingWebhook struct{}
-
-func (mattermostOutgoingWebhook) Route() string { return "POST /v1/channels/mattermost/hooks" }
-
-func (mattermostOutgoingWebhook) VerifyRequest(r *http.Request, body []byte, settings map[string]string) error {
-	expected := setting(settings, "outgoing_token")
-	if expected == "" {
-		return errors.New("mattermost outgoing webhook token is not configured")
-	}
-	values, err := url.ParseQuery(string(body))
-	if err != nil {
-		return errors.New("malformed mattermost payload")
-	}
-	if values.Get("token") != expected {
-		return errors.New("mattermost token mismatch")
-	}
-	return nil
-}
-
-func (mattermostOutgoingWebhook) Parse(r *http.Request, body []byte) []InboundMessage {
-	values, err := url.ParseQuery(string(body))
-	if err != nil {
-		return nil
-	}
-	channelID := values.Get("channel_id")
-	userID := values.Get("user_id")
-	if channelID == "" || userID == "" {
-		return nil
-	}
-	text := strings.TrimSpace(values.Get("text"))
-	trigger := strings.TrimSpace(values.Get("trigger_word"))
-	// Outgoing webhooks prefix the payload text with the trigger word; the
-	// message the user actually typed starts after it.
-	text = strings.TrimSpace(strings.TrimPrefix(text, trigger))
-	if text == "" {
-		return nil
-	}
-	timestamp := time.Now().UTC()
-	if raw := strings.TrimSpace(values.Get("timestamp")); raw != "" {
-		if parsed, pErr := time.Parse(time.RFC3339, raw); pErr == nil {
-			timestamp = parsed.UTC()
-		}
-	}
-	id := strings.TrimSpace(values.Get("post_id"))
-	if id == "" {
-		digest := sha256.Sum256([]byte(channelID + "\x00" + userID + "\x00" + text + "\x00" + timestamp.Format(time.RFC3339Nano)))
-		id = "mm-" + hex.EncodeToString(digest[:])[:24]
-	}
-	return []InboundMessage{{
-		ID:        id,
-		Channel:   "mattermost",
-		ChatID:    channelID,
-		Sender:    userID,
-		Text:      text,
-		Timestamp: timestamp,
-	}}
-}
-
-func (mattermostOutgoingWebhook) Respond(w http.ResponseWriter, _ *http.Request, _ []byte) {
-	w.WriteHeader(http.StatusOK)
 }
