@@ -225,6 +225,13 @@ $css--font-face: false;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
 }
 
+:root[data-theme="light"] .time-panel {
+  background: var(--tm-elevated) !important;
+  color: var(--tm-text) !important;
+  border-color: var(--tm-border) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
 :root[data-theme="light"] .obs-panel {
   background: var(--tm-surface) !important;
 }
@@ -2678,6 +2685,22 @@ button.header-nav-link {
 .tune-grid .lens-toggle { justify-self: start; align-self: center; }
 .tune-panel select { padding: 0.26rem 0.4rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: var(--tm-surface); color: var(--tm-text); font-size: 0.72rem; }
 .tune-reset, .tune-reset:hover { color: var(--tm-danger); border-color: var(--tm-danger); }
+
+// Bitemporal popover on the knowledge page (same pattern as tune-picker):
+// the default view is "now", so the datetime fields stay hidden until asked.
+.time-picker { position: relative; }
+.time-toggle { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.55rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: transparent; color: var(--tm-text-3); font: 0.68rem var(--tm-mono); cursor: pointer; }
+.time-toggle:hover, .time-toggle.filtered, .time-toggle.open { color: var(--tm-teal); border-color: var(--tm-teal); }
+.time-panel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 31; width: 320px; max-width: calc(100vw - 2.5rem); padding: 0.6rem 0.85rem 0.75rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-lg); background: var(--tm-surface); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25); }
+.time-field { display: grid; gap: 0.2rem; color: var(--tm-text-2); font-size: 0.64rem; }
+.time-field + .time-field { margin-top: 0.5rem; }
+.time-field input[type="datetime-local"] { padding: 0.26rem 0.4rem; border: 1px solid var(--tm-border); border-radius: var(--tm-radius-sm); background: var(--tm-surface); color: var(--tm-text); font-size: 0.72rem; width: 100%; box-sizing: border-box; }
+.time-field input[type="datetime-local"]:focus { outline: none; border-color: var(--tm-teal); }
+.time-presets { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+.time-hint { margin: 0.6rem 0 0; color: var(--tm-text-3); font-size: 0.62rem; line-height: 1.5; }
+
+// Knowledge list toolbar (same pattern as experience-toolbar)
+.knowledge-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
 
 // Run picker
 .run-picker { position: relative; }

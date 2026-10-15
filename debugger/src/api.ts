@@ -34,6 +34,8 @@ export function apiUrl(path: string, query?: Record<string, string | number | un
   Object.entries(query ?? {}).forEach(([key, value]) => {
     if (value !== undefined && value !== '') params.set(key, String(value))
   })
-  const suffix = params.size ? `?${params.toString()}` : ''
+  // NB: no URLSearchParams.size here — it is a recent addition and the
+  // HTTP stand must keep working on older engines (cf. crypto.randomUUID).
+  const suffix = params.toString() ? `?${params.toString()}` : ''
   return `${API_BASE}${normalized}${suffix}`
 }

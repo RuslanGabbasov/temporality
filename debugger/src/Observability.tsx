@@ -25,6 +25,19 @@ function utcValue(local: string): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
 }
 
+/** datetime-local inputs take "YYYY-MM-DDTHH:mm" in LOCAL time — a plain
+ *  toISOString() slice would shift the preset by the timezone offset. */
+function localDateTimeValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+const TIME_PRESETS: { key: string; shiftMs: () => number }[] = [
+  { key: 'knowledge.preset_hour', shiftMs: () => 3600e3 },
+  { key: 'knowledge.preset_day', shiftMs: () => 24 * 3600e3 },
+  { key: 'knowledge.preset_week', shiftMs: () => 7 * 24 * 3600e3 },
+]
+
 /** Filters auto-apply, so inputs (search, datetime pickers) need a debounce
  *  to avoid firing a request per keystroke. */
 function useDebounced<T>(value: T, delayMs = 350): T {
@@ -40,17 +53,6 @@ const KNOWLEDGE_PAGE_SIZE = 50
 
 const STATE_FILTERS = ['all', 'alive', 'at_risk', 'proposed', 'confirmed', 'challenged', 'corrected', 'superseded', 'invalidated'] as const
 const SCOPE_FILTERS = ['all', 'project', 'org_unit', 'organization'] as const
-
-function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} style={{
-      padding: '0.1rem 0.6rem', borderRadius: '999px', cursor: 'pointer', fontSize: '0.72rem', lineHeight: 1.7,
-      background: active ? 'rgba(87,215,232,0.12)' : 'transparent',
-      border: `1px solid ${active ? 'var(--tm-teal)' : 'var(--tm-border)'}`,
-      color: active ? 'var(--tm-teal)' : 'var(--tm-text-2)',
-    }}>{children}</button>
-  )
-}
 
 const STATE_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'red'> = {
   proposed: 'blue', confirmed: 'green', challenged: 'warm-gray',
@@ -107,6 +109,7 @@ export default function Observability({ project }: { project: string }) {
   const [hintError, setHintError] = useState('')
   const [projection, setProjection] = useState<any>(null)
   const [projectionLoading, setProjectionLoading] = useState(false)
+  const [timeOpen, setTimeOpen] = useState(false)
 
   const debouncedSearch = useDebounced(searchInput)
   const asOfUTC = utcValue(useDebounced(asOf, 500))
@@ -288,19 +291,52 @@ export default function Observability({ project }: { project: string }) {
     <div style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
-      {/* Top bar: refresh + bitemporal controls (auto-applied, debounced) */}
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+      {/* Top bar: refresh + bitemporal controls (auto-applied, debounced).
+          The three datetime fields live in a popover — the default view is
+          "now", and the toggle stays quiet (badge count) until a historical
+          cut is active. */}
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem' }}>
         <button onClick={() => setRevision((r) => r + 1)} disabled={loading || listLoading} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div style={{ minWidth: '150px' }}>
-            <TextInput id="as-of" labelText={t('knowledge.as_of') ?? 'As of'} type="datetime-local" value={asOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAsOf(e.target.value)} size="sm" />
-          </div>
-          <div style={{ minWidth: '150px' }}>
-            <TextInput id="compare" labelText={t('knowledge.compare') ?? 'Compare'} type="datetime-local" value={compareAsOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompareAsOf(e.target.value)} size="sm" />
-          </div>
-          <div style={{ minWidth: '150px' }}>
-            <TextInput id="known-at" labelText={t('knowledge.known_by') ?? 'Known by'} type="datetime-local" value={knownAt} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKnownAt(e.target.value)} size="sm" />
-          </div>
+        <div className="time-picker" style={{ marginLeft: 'auto' }}>
+          {timeOpen && <div className="run-picker-backdrop" onClick={() => setTimeOpen(false)} />}
+          <button
+            className={`time-toggle ${timeOpen ? 'open' : ''} ${(asOfUTC || knownAtUTC || compareUTC) ? 'filtered' : ''}`}
+            onClick={() => setTimeOpen((open) => !open)}
+          >
+            ⏱ {t('knowledge.historical_view') ?? 'Historical view'}
+            {(asOfUTC || knownAtUTC || compareUTC) && (
+              <span className="tune-badge">{([asOfUTC, knownAtUTC, compareUTC].filter(Boolean)).length}</span>
+            )}
+          </button>
+          {timeOpen && (
+            <div className="time-panel">
+              <div className="time-field">
+                <label htmlFor="as-of">{t('knowledge.as_of') ?? 'As of'}</label>
+                <input id="as-of" type="datetime-local" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+              </div>
+              <div className="time-field">
+                <label htmlFor="known-at">{t('knowledge.known_by') ?? 'Known by'}</label>
+                <input id="known-at" type="datetime-local" value={knownAt} onChange={(e) => setKnownAt(e.target.value)} />
+              </div>
+              <div className="time-field">
+                <label htmlFor="compare">{t('knowledge.compare') ?? 'Compare'}</label>
+                <input id="compare" type="datetime-local" value={compareAsOf} onChange={(e) => setCompareAsOf(e.target.value)} />
+              </div>
+              <div className="time-presets">
+                {TIME_PRESETS.map((preset) => (
+                  <button key={preset.key} className="preset-chip" onClick={() => { setAsOf(localDateTimeValue(new Date(Date.now() - preset.shiftMs()))); setTimeOpen(false) }}>
+                    {t(preset.key) ?? preset.key}
+                  </button>
+                ))}
+                {(asOf || knownAt || compareAsOf) && (
+                  <button className="preset-chip tune-reset" onClick={() => { setAsOf(''); setKnownAt(''); setCompareAsOf(''); setTimeOpen(false) }}>
+                    {t('knowledge.preset_reset') ?? 'Now'}
+                  </button>
+                )}
+              </div>
+              <p className="time-hint">{t('knowledge.time_hint') ?? 'as_of cuts by when events happened; known_by by when the journal ingested them; compare adds a diff point on the overview.'}</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -394,54 +430,50 @@ export default function Observability({ project }: { project: string }) {
       {/* ═══════════ KNOWLEDGE TAB ═══════════ */}
       {tab === 'knowledge' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 380px', gap: '1rem' }}>
-          {/* Left: search + facet filters + knowledge list (server-side) */}
+          {/* Left: compact toolbar (search + facet selects, server-side) + knowledge list */}
           <div style={{ minWidth: 0 }}>
-            <TextInput
-              id="knowledge-search"
-              size="sm"
-              labelText={t('knowledge.search') ?? 'Search'}
-              placeholder={t('knowledge.search_placeholder') ?? 'Search propositions, topics, entities…'}
-              value={searchInput}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchInput(e.target.value)}
-              style={{ marginBottom: '0.75rem' }}
-            />
+            <div className="knowledge-toolbar">
+              <input
+                className="toolbar-search"
+                type="search"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder={t('knowledge.search_placeholder') ?? 'Search propositions, topics, entities…'}
+                title={t('knowledge.search') ?? 'Search'}
+              />
+              {/* State facet select: counts come from the server, each dimension
+                  counted without its own filter — the label always shows what
+                  switching would reveal. */}
+              <label className="toolbar-select">{t('knowledge.state_label') ?? 'State'}
+                <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)} title={t('knowledge.state_label') ?? 'State'}>
+                  {STATE_FILTERS.map((state) => {
+                    const count = state === 'all'
+                      ? (facets ? ['proposed', 'confirmed', 'challenged', 'corrected', 'superseded', 'invalidated'].reduce((sum, key) => sum + (facets.states[key] ?? 0), 0) : 0)
+                      : facets?.states[state] ?? 0
+                    const label = state === 'all' ? (t('knowledge.all') ?? 'All')
+                      : state === 'alive' ? (t('knowledge.alive') ?? 'Alive')
+                      : state === 'at_risk' ? (t('knowledge.stale') ?? 'Stale')
+                      : stateLabel(state, t)
+                    return <option key={state} value={state} disabled={state !== 'all' && count === 0 && stateFilter !== state}>{label} ({count})</option>
+                  })}
+                </select>
+              </label>
+              <label className="toolbar-select">{t('knowledge.scope_label') ?? 'Scope'}
+                <select value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value)} title={t('knowledge.scope_label') ?? 'Scope'}>
+                  {SCOPE_FILTERS.map((scope) => {
+                    const count = scope === 'all'
+                      ? (facets ? (facets.scopes.project ?? 0) + (facets.scopes.org_unit ?? 0) + (facets.scopes.organization ?? 0) : 0)
+                      : facets?.scopes[scope] ?? 0
+                    const label = scope === 'all' ? (t('knowledge.all') ?? 'All')
+                      : scope === 'project' ? (t('knowledge.scope_project') ?? 'Project')
+                      : scope === 'org_unit' ? (t('knowledge.scope_org_unit') ?? 'Org unit')
+                      : (t('knowledge.scope_org') ?? 'Organization')
+                    return <option key={scope} value={scope} disabled={scope !== 'all' && count === 0 && scopeFilter !== scope}>{label} ({count})</option>
+                  })}
+                </select>
+              </label>
+            </div>
             {listError && <InlineNotification kind="error" title="Error" subtitle={listError} onClose={() => setListError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
-            {/* State facet chips: counts come from the server, each dimension
-                counted without its own filter, so the chips always show what
-                switching would reveal */}
-            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.4rem' }}>
-              {STATE_FILTERS.map((state) => {
-                const count = state === 'all'
-                  ? (facets ? ['proposed', 'confirmed', 'challenged', 'corrected', 'superseded', 'invalidated'].reduce((sum, key) => sum + (facets.states[key] ?? 0), 0) : 0)
-                  : facets?.states[state] ?? 0
-                if (state !== 'all' && count === 0 && stateFilter !== state) return null
-                const label = state === 'all' ? (t('knowledge.all') ?? 'All')
-                  : state === 'alive' ? (t('knowledge.alive') ?? 'Alive')
-                  : state === 'at_risk' ? (t('knowledge.stale') ?? 'Stale')
-                  : stateLabel(state, t)
-                return (
-                  <FilterChip key={state} active={stateFilter === state} onClick={() => setStateFilter(state)}>
-                    {label}{facets ? ` (${count})` : ''}
-                  </FilterChip>
-                )
-              })}
-            </div>
-            {/* Scope facet chips */}
-            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-              {SCOPE_FILTERS.map((scope) => {
-                const count = scope === 'all' ? 0 : facets?.scopes[scope] ?? 0
-                if (scope !== 'all' && count === 0 && scopeFilter !== scope) return null
-                const label = scope === 'all' ? (t('knowledge.all') ?? 'All')
-                  : scope === 'project' ? (t('knowledge.scope_project') ?? 'Project')
-                  : scope === 'org_unit' ? (t('knowledge.scope_org_unit') ?? 'Org unit')
-                  : (t('knowledge.scope_org') ?? 'Organization')
-                return (
-                  <FilterChip key={scope} active={scopeFilter === scope} onClick={() => setScopeFilter(scope)}>
-                    {label}{scope !== 'all' && facets ? ` (${count})` : ''}
-                  </FilterChip>
-                )
-              })}
-            </div>
 
             {/* Knowledge items */}
             {listLoading && listKnowledge.length === 0 ? <PageLoading /> : (
@@ -470,7 +502,11 @@ export default function Observability({ project }: { project: string }) {
             )}
             {listKnowledge.length === 0 && !listLoading && (
               <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '2rem 1rem' }}>
-                <p>{t('knowledge.no_results') ?? 'No results. Try a different query or filters.'}</p>
+                {(asOfUTC || knownAtUTC) ? (
+                  <p>{t('knowledge.empty_historical') ?? 'Nothing had happened (or was known) in this project by the selected point in time. Clear the historical view or pick a later cut.'}</p>
+                ) : (
+                  <p>{t('knowledge.no_results') ?? 'No results. Try a different query or filters.'}</p>
+                )}
               </div>
             )}
             {(listCursor || listTotal > 0) && (
