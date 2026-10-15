@@ -861,38 +861,33 @@ export default function AgentRuns({ project }: { project: string }) {
                   )}
                 </div>
 
-                {/* Answer */}
-                {typeof answer === 'string' && (
-                  <Tile>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                      <Heading style={{ fontSize: '0.875rem' }}>{t('runs.answer') ?? 'Agent Answer'}</Heading>
-                      <Tag type={result?.status === 'completed' ? 'green' : result?.status === 'cancelled' ? 'warm-gray' : 'red'} size="sm">{String(result?.status ?? '')}</Tag>
-                    </div>
-                    <Markdown content={answer} />
-                  </Tile>
-                )}
-
-                {/* Multi-stage answer */}
-                {Array.isArray(stages) && stages.map((stage, index) => {
-                  const item = stage as Record<string, unknown>
-                  return (
-                    <Tile key={`${String(item.run_id ?? item.role ?? index)}`}>
-                      <Heading style={{ fontSize: '0.875rem' }}>{String(item.role ?? `Stage ${index + 1}`)}</Heading>
-                      <Tag type="gray" size="sm">{String(item.status ?? '')}</Tag>
-                      {typeof item.answer === 'string' && <Markdown content={item.answer} />}
-                    </Tile>
-                  )
-                })}
-
-                {/* Raw result if no answer */}
-                {result?.result !== undefined && !answer && (
-                  <Tile>
-                    <Heading style={{ fontSize: '0.875rem' }}>{t('runs.result') ?? 'Run Result'}</Heading>
-                    <pre style={{ background: 'var(--tm-raised)', color: 'var(--tm-text)', padding: '0.75rem', fontSize: '0.75rem', overflow: 'auto', borderRadius: '4px', maxHeight: '300px' }}>
-                      {json(result.result)}
-                    </pre>
-                  </Tile>
-                )}
+                {/* Detail tabs — trace, trajectory and budget are peer views of
+                    the same run; the bar sits right under the title so switching
+                    views never depends on content length. Actionable cards
+                    (approvals, questions, reconcile) stay visible on every
+                    view, directly under the bar. */}
+                <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--tm-border)', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                  {([
+                    { key: 'overview' as RunView, label: t('runs.view_overview') ?? 'Overview', badge: selectedOps.length > 0 ? `⚠ ${selectedOps.length}` : '' },
+                    { key: 'trace' as RunView, label: t('runs.trace') ?? 'Trace', badge: String(trace.visible.length) },
+                    { key: 'trajectory' as RunView, label: t('runs.trajectory') ?? 'Trajectory', badge: '' },
+                    { key: 'budget' as RunView, label: t('runs.task_budget') ?? 'Budget', badge: '' },
+                  ]).map((v) => (
+                    <button
+                      key={v.key}
+                      onClick={() => setView(v.key)}
+                      style={{
+                        padding: '0.5rem 1rem', background: view === v.key ? 'var(--tm-elevated)' : 'transparent',
+                        border: 'none', borderBottom: view === v.key ? '2px solid var(--tm-teal)' : '2px solid transparent',
+                        color: view === v.key ? 'var(--tm-teal)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600,
+                        display: 'flex', alignItems: 'center', gap: '0.35rem',
+                      }}
+                    >
+                      {v.label}
+                      {v.badge && <span style={{ fontSize: '0.7rem', fontWeight: 400 }}>{v.badge}</span>}
+                    </button>
+                  ))}
+                </div>
 
                 {/* Pending approvals and human questions */}
                 {pending.length > 0 && error && (
@@ -1024,34 +1019,40 @@ export default function AgentRuns({ project }: { project: string }) {
                   </Tile>
                 )}
 
-                {/* Detail tabs — trace, trajectory and budget are peer views of
-                    the same run; the old single column could not be scrolled
-                    to the end. Actionable cards (answer, approvals, reconcile)
-                    stay above the tabs on every view. */}
-                <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--tm-border)', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                  {([
-                    { key: 'overview' as RunView, label: t('runs.view_overview') ?? 'Overview', badge: selectedOps.length > 0 ? `⚠ ${selectedOps.length}` : '' },
-                    { key: 'trace' as RunView, label: t('runs.trace') ?? 'Trace', badge: String(trace.visible.length) },
-                    { key: 'trajectory' as RunView, label: t('runs.trajectory') ?? 'Trajectory', badge: '' },
-                    { key: 'budget' as RunView, label: t('runs.task_budget') ?? 'Budget', badge: '' },
-                  ]).map((v) => (
-                    <button
-                      key={v.key}
-                      onClick={() => setView(v.key)}
-                      style={{
-                        padding: '0.5rem 1rem', background: view === v.key ? 'var(--tm-elevated)' : 'transparent',
-                        border: 'none', borderBottom: view === v.key ? '2px solid var(--tm-teal)' : '2px solid transparent',
-                        color: view === v.key ? 'var(--tm-teal)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600,
-                        display: 'flex', alignItems: 'center', gap: '0.35rem',
-                      }}
-                    >
-                      {v.label}
-                      {v.badge && <span style={{ fontSize: '0.7rem', fontWeight: 400 }}>{v.badge}</span>}
-                    </button>
-                  ))}
-                </div>
-
                 {view === 'overview' && (<>
+                {/* Answer — the overview tab opens with what the run concluded */}
+                {typeof answer === 'string' && (
+                  <Tile>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                      <Heading style={{ fontSize: '0.875rem' }}>{t('runs.answer') ?? 'Agent Answer'}</Heading>
+                      <Tag type={result?.status === 'completed' ? 'green' : result?.status === 'cancelled' ? 'warm-gray' : 'red'} size="sm">{String(result?.status ?? '')}</Tag>
+                    </div>
+                    <Markdown content={answer} />
+                  </Tile>
+                )}
+
+                {/* Multi-stage answer */}
+                {Array.isArray(stages) && stages.map((stage, index) => {
+                  const item = stage as Record<string, unknown>
+                  return (
+                    <Tile key={`${String(item.run_id ?? item.role ?? index)}`}>
+                      <Heading style={{ fontSize: '0.875rem' }}>{String(item.role ?? `Stage ${index + 1}`)}</Heading>
+                      <Tag type="gray" size="sm">{String(item.status ?? '')}</Tag>
+                      {typeof item.answer === 'string' && <Markdown content={item.answer} />}
+                    </Tile>
+                  )
+                })}
+
+                {/* Raw result if no answer */}
+                {result?.result !== undefined && !answer && (
+                  <Tile>
+                    <Heading style={{ fontSize: '0.875rem' }}>{t('runs.result') ?? 'Run Result'}</Heading>
+                    <pre style={{ background: 'var(--tm-raised)', color: 'var(--tm-text)', padding: '0.75rem', fontSize: '0.75rem', overflow: 'auto', borderRadius: '4px', maxHeight: '300px' }}>
+                      {json(result.result)}
+                    </pre>
+                  </Tile>
+                )}
+
                 {/* Cross-agent knowledge disputes across the selected run's chain */}
                 <RunDisputes project={selectedProject} selected={selected} rows={rows} onOpenRun={setSelected} />
 
