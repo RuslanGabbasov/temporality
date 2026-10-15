@@ -174,7 +174,7 @@ export default function Observability({ project }: { project: string }) {
         observationApi.knowledge(project.trim(), asOfUTC, knownAtUTC),
         compareUTC ? observationApi.knowledge(project.trim(), compareUTC, knownAtUTC) : Promise.resolve(null),
       ])
-      setKnowledge(history.knowledge)
+      setKnowledge(history.knowledge ?? [])
       setComparisonKnowledge(comparison?.knowledge ?? null)
     } catch (reason) { setError(errorMessage(reason)) }
     finally { setLoading(false) }
@@ -195,11 +195,15 @@ export default function Observability({ project }: { project: string }) {
         cursor: reset ? undefined : listCursor || undefined,
       })
       if (seq !== listSeq.current) return
-      setListKnowledge((current) => reset ? page.knowledge : [...current, ...page.knowledge])
-      setListTotal(page.total ?? page.knowledge.length)
+      // The server contract says [], but a historical slice that matches
+      // nothing once arrived as JSON null — never trust an array field from
+      // the wire enough to iterate it raw.
+      const items = page.knowledge ?? []
+      setListKnowledge((current) => reset ? items : [...current, ...items])
+      setListTotal(page.total ?? items.length)
       setListCursor(page.next_cursor ?? '')
       if (page.facets) setFacets(page.facets)
-      if (reset) setSelectedID((current) => page.knowledge.some((item) => item.id === current) ? current : page.knowledge[0]?.id ?? '')
+      if (reset) setSelectedID((current) => items.some((item) => item.id === current) ? current : items[0]?.id ?? '')
     } catch (reason) { if (seq === listSeq.current) setListError(errorMessage(reason)) }
     finally { if (seq === listSeq.current) setListLoading(false) }
   }

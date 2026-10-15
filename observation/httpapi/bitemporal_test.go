@@ -56,13 +56,17 @@ func TestKnowledgeListBitemporalFilters(t *testing.T) {
 		t.Fatalf("as_of between knowledge = %v, want [K-early]", ids)
 	}
 
-	// as_of before everything: empty projection, not "everything".
+	// as_of before everything: empty projection, not "everything" — and the
+	// empty list must be a JSON array, never null (browser clients iterate it).
 	res, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&as_of=2026-09-01T00:00:00Z", nil)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("as_of before status = %d", res.StatusCode)
 	}
 	if ids := knowledgeIDs(body); len(ids) != 0 {
 		t.Fatalf("as_of before knowledge = %v, want none", ids)
+	}
+	if _, ok := body["knowledge"].([]any); !ok {
+		t.Fatalf("as_of before knowledge = %v, want JSON array (even empty), got null", body["knowledge"])
 	}
 
 	// known_at before ingest (memory store stamps wall clock at append):

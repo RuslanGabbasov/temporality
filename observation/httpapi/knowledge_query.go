@@ -252,7 +252,10 @@ func filterKnowledgeList(knowledge []observation.Knowledge, query knowledgeListQ
 // cursor is the last included item; with limit == 0 it returns everything
 // (legacy full-projection callers).
 func paginateKnowledgeList(knowledge []observation.Knowledge, cursor knowledgePageCursor, limit int) ([]observation.Knowledge, string) {
-	var page []observation.Knowledge
+	// Non-nil even when nothing matches: a nil slice marshals to JSON null,
+	// and browser clients that iterate the field (`for (const item of knowledge)`)
+	// crash on it — an empty historical slice must arrive as [].
+	page := []observation.Knowledge{}
 	for _, item := range knowledge {
 		if !knowledgeAfterCursor(item, cursor) {
 			continue
