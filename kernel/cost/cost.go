@@ -169,12 +169,42 @@ type TaskCost struct {
 	Agents                []TaskAgentRollup  `json:"agents"`
 }
 
-// SagaRollup is one long-running task inside a project: everything spent on
-// it across runs, agents and delegation stages — the per-saga row of the
-// project budget.
+// SagaRollup is one explicitly registered saga (docs/sagas.md): a
+// long-running effort that unites one or more tasks — each with its runs,
+// agents and delegation stages — with summed tokens, time, cost and the
+// human-approval budget.
 type SagaRollup struct {
+	SagaID                string        `json:"saga_id"`
+	Title                 string        `json:"title,omitempty"`
+	Goal                  string        `json:"goal,omitempty"`
+	TaskIDs               []string      `json:"task_ids"`
+	RootRunID             string        `json:"root_run_id,omitempty"` // earliest bound task's root run
+	RegisteredByRun       string        `json:"registered_by_run,omitempty"`
+	RegisteredAt          *time.Time    `json:"registered_at,omitempty"`
+	RunCount              int           `json:"run_count"`
+	Running               int           `json:"running"`
+	ModelCalls            int           `json:"model_calls"`
+	AgentCount            int           `json:"agent_count"`
+	FirstStartedAt        *time.Time    `json:"first_started_at,omitempty"`
+	LastEndedAt           *time.Time    `json:"last_ended_at,omitempty"`
+	ElapsedMS             int64         `json:"elapsed_ms"`
+	ActiveMS              int64         `json:"active_ms"`
+	TotalPromptTokens     int           `json:"total_prompt_tokens"`
+	TotalCachedTokens     int           `json:"total_cached_tokens,omitempty"`
+	TotalCompletionTokens int           `json:"total_completion_tokens"`
+	TotalTokens           int           `json:"total_tokens"`
+	TotalCostUSD          float64       `json:"total_cost_usd"`
+	Approvals             ApprovalStats `json:"approvals"`
+}
+
+// TaskRollup is one task inside a project: everything spent on it across
+// follow-up runs and the delegation tree, plus the saga it is bound to (empty
+// when the task has no explicit saga — those are the "unbound" rows of the
+// project page).
+type TaskRollup struct {
 	TaskID                string        `json:"task_id"`
-	Title                 string        `json:"title,omitempty"` // root run's title
+	SagaID                string        `json:"saga_id,omitempty"`
+	Title                 string        `json:"title,omitempty"`
 	RootRunID             string        `json:"root_run_id,omitempty"`
 	RunCount              int           `json:"run_count"`
 	Running               int           `json:"running"`
@@ -192,12 +222,13 @@ type SagaRollup struct {
 	Approvals             ApprovalStats `json:"approvals"`
 }
 
-// ProjectBudget is the project-level rollup: totals across every saga plus
-// one row per saga, so long-running cross-agent tasks become visible next to
-// each other.
+// ProjectBudget is the project-level rollup: totals across every task plus a
+// row per explicit saga and per task, so long-running cross-agent efforts and
+// unbound tasks are both visible (docs/sagas.md).
 type ProjectBudget struct {
 	Project               string        `json:"project"`
 	SagaCount             int           `json:"saga_count"`
+	TaskCount             int           `json:"task_count"`
 	RunCount              int           `json:"run_count"`
 	ModelCalls            int           `json:"model_calls"`
 	FirstStartedAt        *time.Time    `json:"first_started_at,omitempty"`
@@ -211,6 +242,7 @@ type ProjectBudget struct {
 	TotalCostUSD          float64       `json:"total_cost_usd"`
 	Approvals             ApprovalStats `json:"approvals"`
 	Sagas                 []SagaRollup  `json:"sagas"`
+	Tasks                 []TaskRollup  `json:"tasks"`
 }
 
 // RunCost is the aggregated cost for a run.
@@ -321,8 +353,9 @@ func (a *CostAPI) TaskCostHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, a.aggregateTask(project, taskID, events))
 }
 
-// ProjectBudgetHandler returns the project rollup: totals across every saga
-// plus a row per saga (task) with tokens, time, cost and approval budget.
+// ProjectBudgetHandler returns the project rollup: totals across every task
+// plus a row per explicit saga and per task (docs/sagas.md) with tokens, time,
+// cost and approval budget.
 func (a *CostAPI) ProjectBudgetHandler(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	if project == "" {
@@ -331,7 +364,8 @@ func (a *CostAPI) ProjectBudgetHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	events, err := a.queryEventsFiltered(r, project, "", "",
 		"run.started", "run.completed", "run.failed", "run.cancelled", "model.completed",
-		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted")
+		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted",
+		"saga.registered", "saga.attached")
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -544,15 +578,22 @@ func (a *CostAPI) finalizeSaga(s *sagaAccumulator, now time.Time) sagaTotals {
 	}
 	// Elapsed is the calendar span so far: while any run is live it keeps
 	// growing to now; once everything ended it is the last end - first start.
-	if out.firstStartedAt != nil {
-		end := now
-		if out.lastEndedAt != nil && out.running == 0 {
-			end = *out.lastEndedAt
-		}
-		out.elapsedMS = end.Sub(*out.firstStartedAt).Milliseconds()
-	}
+	out.elapsedMS = spanElapsedMS(out.firstStartedAt, out.lastEndedAt, out.running, now)
 	sort.Slice(out.runs, func(i, j int) bool { return out.runs[i].StartedAt.Before(out.runs[j].StartedAt) })
 	return out
+}
+
+// spanElapsedMS returns the calendar span of a scope: from its first start to
+// its last end, or up to now while anything is still running.
+func spanElapsedMS(first, last *time.Time, running int, now time.Time) int64 {
+	if first == nil {
+		return 0
+	}
+	end := now
+	if last != nil && running == 0 {
+		end = *last
+	}
+	return end.Sub(*first).Milliseconds()
 }
 
 // aggregateTask folds one task's events into a TaskCost (per-saga endpoint).
@@ -590,29 +631,102 @@ func (a *CostAPI) aggregateTask(project, taskID string, events []observation.Eve
 	return tasks
 }
 
-// aggregateProjectBudget groups a project's events by task and rolls each
-// saga up, plus project-wide totals. Sagas sort by latest activity first so
-// live work stays on top; ties break on task id for determinism.
+// sagaMeta is the registered identity of a saga (docs/sagas.md): id, title,
+// goal and who registered it. Titles come from saga.registered events only —
+// attaches never rename.
+type sagaMeta struct {
+	sagaID       string
+	title, goal  string
+	registeredBy string
+	registeredAt *time.Time
+}
+
+// sagaBindings projects saga.* events into task→saga bindings plus saga meta.
+// Bindings compare by time, not journal arrival order (merged type queries are
+// not globally chronological), and the latest binding per task wins — a
+// re-attach moves the task to another saga. Bindings to unknown saga ids have
+// no effect.
+func sagaBindings(events []observation.Event) (map[string]string, map[string]*sagaMeta) {
+	bindings := map[string]string{}
+	sagas := map[string]*sagaMeta{}
+	type binding struct {
+		sagaID string
+		at     time.Time
+	}
+	latest := map[string]binding{}
+	for _, ev := range events {
+		if ev.Type != "saga.registered" && ev.Type != "saga.attached" {
+			continue
+		}
+		sagaID, _ := ev.Data["saga_id"].(string)
+		if sagaID == "" || ev.Context.Task == "" {
+			continue
+		}
+		if ev.Type == "saga.registered" {
+			meta := sagas[sagaID]
+			if meta == nil {
+				at := ev.OccurredAt
+				meta = &sagaMeta{sagaID: sagaID, registeredAt: &at, registeredBy: ev.Context.Run}
+				if title, _ := ev.Data["title"].(string); title != "" {
+					meta.title = title
+				}
+				if goal, _ := ev.Data["goal"].(string); goal != "" {
+					meta.goal = goal
+				}
+				sagas[sagaID] = meta
+			}
+		}
+		if prev, ok := latest[ev.Context.Task]; ok && prev.at.After(ev.OccurredAt) {
+			continue
+		}
+		latest[ev.Context.Task] = binding{sagaID: sagaID, at: ev.OccurredAt}
+	}
+	for taskID, b := range latest {
+		if _, known := sagas[b.sagaID]; known {
+			bindings[taskID] = b.sagaID
+		}
+	}
+	return bindings, sagas
+}
+
+// aggregateProjectBudget rolls a project's events into per-task rows and per-
+// saga rows (explicit registrations, docs/sagas.md), plus project-wide totals.
+// Rows sort by latest activity first so live work stays on top; ties break on
+// ids for determinism.
 func (a *CostAPI) aggregateProjectBudget(project string, events []observation.Event) ProjectBudget {
 	now := a.now()
-	sagas := map[string]*sagaAccumulator{} // deterministic order comes from the sort below
+	bindings, sagaMetas := sagaBindings(events)
+	// Tasks: every task with lifecycle events rolls up on its own row (bound
+	// tasks carry their saga_id). Sagas: events of bound tasks feed one shared
+	// accumulator per saga, so multi-task sagas sum correctly.
+	taskAccs := map[string]*sagaAccumulator{}
+	sagaAccs := map[string]*sagaAccumulator{}
 	for _, ev := range events {
 		taskID := ev.Context.Task
-		if taskID == "" {
-			continue // saga = task; taskless events have no saga to belong to
+		if taskID == "" || ev.Type == "saga.registered" || ev.Type == "saga.attached" {
+			continue // taskless events have no task; saga events carry no spend
 		}
-		saga := sagas[taskID]
-		if saga == nil {
-			saga = newSagaAccumulator()
-			sagas[taskID] = saga
+		taskAcc := taskAccs[taskID]
+		if taskAcc == nil {
+			taskAcc = newSagaAccumulator()
+			taskAccs[taskID] = taskAcc
 		}
-		a.ingestSagaEvent(saga, ev)
+		a.ingestSagaEvent(taskAcc, ev)
+		if sagaID := bindings[taskID]; sagaID != "" {
+			sagaAcc := sagaAccs[sagaID]
+			if sagaAcc == nil {
+				sagaAcc = newSagaAccumulator()
+				sagaAccs[sagaID] = sagaAcc
+			}
+			a.ingestSagaEvent(sagaAcc, ev)
+		}
 	}
-	budget := ProjectBudget{Project: project}
-	for taskID, saga := range sagas {
-		totals := a.finalizeSaga(saga, now)
-		rollup := SagaRollup{
-			TaskID: taskID, Title: saga.title, RootRunID: saga.rootRunID,
+	budget := ProjectBudget{Project: project, Sagas: []SagaRollup{}, Tasks: []TaskRollup{}}
+	for taskID, acc := range taskAccs {
+		totals := a.finalizeSaga(acc, now)
+		rollup := TaskRollup{
+			TaskID: taskID, SagaID: bindings[taskID],
+			Title: acc.title, RootRunID: acc.rootRunID,
 			RunCount: totals.runCount, Running: totals.running, ModelCalls: totals.modelCalls,
 			AgentCount:     len(totals.agents),
 			FirstStartedAt: totals.firstStartedAt, LastEndedAt: totals.lastEndedAt,
@@ -620,9 +734,9 @@ func (a *CostAPI) aggregateProjectBudget(project string, events []observation.Ev
 			TotalPromptTokens: totals.promptTokens, TotalCachedTokens: totals.cachedTokens,
 			TotalCompletionTokens: totals.completionTokens, TotalTokens: totals.totalTokens,
 			TotalCostUSD: totals.costUSD,
-			Approvals:    saga.approvals.stats(),
+			Approvals:    acc.approvals.stats(),
 		}
-		budget.SagaCount++
+		budget.TaskCount++
 		budget.RunCount += rollup.RunCount
 		budget.ModelCalls += rollup.ModelCalls
 		if budget.FirstStartedAt == nil || (rollup.FirstStartedAt != nil && rollup.FirstStartedAt.Before(*budget.FirstStartedAt)) {
@@ -647,28 +761,98 @@ func (a *CostAPI) aggregateProjectBudget(project string, events []observation.Ev
 		if rollup.Approvals.MaxWaitMS > budget.Approvals.MaxWaitMS {
 			budget.Approvals.MaxWaitMS = rollup.Approvals.MaxWaitMS
 		}
-		budget.Sagas = append(budget.Sagas, rollup)
+		budget.Tasks = append(budget.Tasks, rollup)
 	}
-	// Project elapsed spans first saga start → last activity (now while
-	// anything is running), mirroring the per-saga definition.
-	if budget.FirstStartedAt != nil {
-		end := now
-		if budget.LastEndedAt != nil {
-			anyRunning := false
-			for _, saga := range budget.Sagas {
-				if saga.Running > 0 {
-					anyRunning = true
-					break
-				}
-			}
-			if !anyRunning {
-				end = *budget.LastEndedAt
+	// Registered sagas appear even without spend (registered-only rows); bound
+	// tasks that were re-bound away leave the saga's task list but its earlier
+	// registration stays visible.
+	for sagaID, meta := range sagaMetas {
+		rollup := SagaRollup{
+			SagaID: sagaID, Title: meta.title, Goal: meta.goal,
+			RegisteredByRun: meta.registeredBy, RegisteredAt: meta.registeredAt,
+			TaskIDs: []string{}, Approvals: ApprovalStats{},
+		}
+		for _, task := range budget.Tasks {
+			if task.SagaID == sagaID {
+				rollup.TaskIDs = append(rollup.TaskIDs, task.TaskID)
 			}
 		}
-		budget.ElapsedMS = end.Sub(*budget.FirstStartedAt).Milliseconds()
+		// Tasks roll newest-first; a saga's task list reads chronologically.
+		startedAt := map[string]*time.Time{}
+		for _, task := range budget.Tasks {
+			if task.SagaID == sagaID {
+				startedAt[task.TaskID] = task.FirstStartedAt
+			}
+		}
+		sort.Slice(rollup.TaskIDs, func(i, j int) bool {
+			aAt, bAt := startedAt[rollup.TaskIDs[i]], startedAt[rollup.TaskIDs[j]]
+			if aAt == nil || bAt == nil {
+				if aAt != bAt {
+					return aAt != nil
+				}
+				return rollup.TaskIDs[i] < rollup.TaskIDs[j]
+			}
+			if !aAt.Equal(*bAt) {
+				return aAt.Before(*bAt)
+			}
+			return rollup.TaskIDs[i] < rollup.TaskIDs[j]
+		})
+		if acc := sagaAccs[sagaID]; acc != nil {
+			totals := a.finalizeSaga(acc, now)
+			rollup.RootRunID = acc.rootRunID
+			rollup.RunCount = totals.runCount
+			rollup.Running = totals.running
+			rollup.ModelCalls = totals.modelCalls
+			rollup.AgentCount = len(totals.agents)
+			rollup.FirstStartedAt = totals.firstStartedAt
+			rollup.LastEndedAt = totals.lastEndedAt
+			rollup.ElapsedMS = totals.elapsedMS
+			rollup.ActiveMS = totals.activeMS
+			rollup.TotalPromptTokens = totals.promptTokens
+			rollup.TotalCachedTokens = totals.cachedTokens
+			rollup.TotalCompletionTokens = totals.completionTokens
+			rollup.TotalTokens = totals.totalTokens
+			rollup.TotalCostUSD = totals.costUSD
+			rollup.Approvals = acc.approvals.stats()
+			if rollup.Title == "" {
+				// Registration carried no title: name the saga after its earliest
+				// task's root run before falling back to the bare id.
+				rollup.Title = acc.title
+			}
+		}
+		if rollup.Title == "" {
+			rollup.Title = sagaID // ids alone are opaque, but better than empty
+		}
+		budget.SagaCount++
+		budget.Sagas = append(budget.Sagas, rollup)
 	}
+	// Project elapsed spans first task start → last activity (now while
+	// anything is running), mirroring the per-task definition.
+	anyRunning := false
+	for _, task := range budget.Tasks {
+		if task.Running > 0 {
+			anyRunning = true
+			break
+		}
+	}
+	budget.ElapsedMS = spanElapsedMS(budget.FirstStartedAt, budget.LastEndedAt, boolInt(anyRunning), now)
 	sort.Slice(budget.Sagas, func(i, j int) bool {
 		a_, b_ := budget.Sagas[i], budget.Sagas[j]
+		aAt, bAt := sagaSortAt(a_.FirstStartedAt, a_.RegisteredAt), sagaSortAt(b_.FirstStartedAt, b_.RegisteredAt)
+		if aAt == nil || bAt == nil {
+			if aAt != bAt {
+				return aAt != nil
+			}
+			return a_.SagaID < b_.SagaID
+		}
+		// Newest saga first: recent and live work floats to the top.
+		if !aAt.Equal(*bAt) {
+			return aAt.After(*bAt)
+		}
+		return a_.SagaID < b_.SagaID
+	})
+	sort.Slice(budget.Tasks, func(i, j int) bool {
+		a_, b_ := budget.Tasks[i], budget.Tasks[j]
 		aAt, bAt := a_.FirstStartedAt, b_.FirstStartedAt
 		if aAt == nil || bAt == nil {
 			if aAt != bAt {
@@ -676,13 +860,29 @@ func (a *CostAPI) aggregateProjectBudget(project string, events []observation.Ev
 			}
 			return a_.TaskID < b_.TaskID
 		}
-		// Newest saga first: recent and live work floats to the top.
 		if !aAt.Equal(*bAt) {
 			return aAt.After(*bAt)
 		}
 		return a_.TaskID < b_.TaskID
 	})
 	return budget
+}
+
+// sagaSortAt picks a saga's activity anchor: real spend start when present,
+// else its registration time.
+func sagaSortAt(first, registered *time.Time) *time.Time {
+	if first != nil {
+		return first
+	}
+	return registered
+}
+
+// boolInt keeps spanElapsedMS call sites readable.
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (a *CostAPI) queryEvents(r *http.Request, project, runID string) ([]observation.Event, error) {

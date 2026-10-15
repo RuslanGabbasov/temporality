@@ -207,7 +207,7 @@ func TestAggregateProjectBudget(t *testing.T) {
 	}
 
 	got := api.aggregateProjectBudget("p", events)
-	if got.SagaCount != 2 || got.RunCount != 3 || got.ModelCalls != 3 {
+	if got.SagaCount != 0 || got.TaskCount != 2 || got.RunCount != 3 || got.ModelCalls != 3 {
 		t.Fatalf("unexpected top-level counts: %+v", got)
 	}
 	if got.TotalTokens != 2250 || got.TotalCostUSD != 2.80 {
@@ -219,26 +219,131 @@ func TestAggregateProjectBudget(t *testing.T) {
 	if got.Approvals.WaitMS != 5*time.Minute.Milliseconds() {
 		t.Fatalf("expected 5m approval wait, got %dms", got.Approvals.WaitMS)
 	}
-	if len(got.Sagas) != 2 {
-		t.Fatalf("expected 2 sagas, got %d", len(got.Sagas))
+	// Without explicit saga events every task is unbound: sagas stay empty,
+	// tasks carry the same rows the old saga list carried.
+	if len(got.Sagas) != 0 || len(got.Tasks) != 2 {
+		t.Fatalf("expected 0 sagas and 2 tasks, got %d/%d", len(got.Sagas), len(got.Tasks))
 	}
-	// Newest saga first.
-	b := got.Sagas[0]
-	if b.TaskID != "B" || b.Title != "Docs refresh" || b.RootRunID != "b1" {
-		t.Fatalf("unexpected saga B: %+v", b)
+	// Newest task first.
+	b := got.Tasks[0]
+	if b.TaskID != "B" || b.Title != "Docs refresh" || b.RootRunID != "b1" || b.SagaID != "" {
+		t.Fatalf("unexpected task B: %+v", b)
 	}
 	if b.Running != 1 || b.LastEndedAt != nil {
-		t.Fatalf("saga B must be running: %+v", b)
+		t.Fatalf("task B must be running: %+v", b)
 	}
-	a := got.Sagas[1]
-	if a.TaskID != "A" || a.Title != "API migration" || a.RootRunID != "a1" {
-		t.Fatalf("unexpected saga A: %+v", a)
+	a := got.Tasks[1]
+	if a.TaskID != "A" || a.Title != "API migration" || a.RootRunID != "a1" || a.SagaID != "" {
+		t.Fatalf("unexpected task A: %+v", a)
 	}
 	if a.RunCount != 2 || a.AgentCount != 2 || a.Running != 0 {
-		t.Fatalf("unexpected saga A counts: %+v", a)
+		t.Fatalf("unexpected task A counts: %+v", a)
 	}
 	if a.Approvals.Granted != 1 || a.Approvals.WaitMS != 5*time.Minute.Milliseconds() {
-		t.Fatalf("unexpected saga A approvals: %+v", a.Approvals)
+		t.Fatalf("unexpected task A approvals: %+v", a.Approvals)
+	}
+}
+
+func TestAggregateProjectBudgetSagas(t *testing.T) {
+	cfg, _ := ParsePrices("m:1.00:2.00")
+	api := NewCostAPI(cfg, "", "")
+	base := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+	api.now = func() time.Time { return base.Add(2 * time.Hour) }
+	mk := func(typ, run, task string, at time.Time, data map[string]any) observation.Event {
+		return observation.Event{Type: typ, OccurredAt: at, Context: observation.Context{Run: run, Task: task}, Data: data}
+	}
+	events := []observation.Event{
+		// Analyst's task registers a saga before any spend; the binding event
+		// may also arrive after the task's events (out-of-order journals).
+		mk("run.started", "r1", "T1", base, map[string]any{"agent_id": "analyst", "title": "Analyst research"}),
+		mk("model.completed", "r1", "T1", base.Add(1*time.Minute), map[string]any{"model": "m", "prompt_tokens": 100, "completion_tokens": 20}),
+		mk("run.completed", "r1", "T1", base.Add(2*time.Minute), nil),
+		// Second task of the same saga (the lead's takeover): saga_attach.
+		mk("run.started", "r2", "T2", base.Add(30*time.Minute), map[string]any{"agent_id": "lead", "title": "Lead takeover"}),
+		mk("model.completed", "r2", "T2", base.Add(31*time.Minute), map[string]any{"model": "m", "prompt_tokens": 200, "completion_tokens": 40}),
+		// Unbound task: rolls up on its own, no saga row.
+		mk("run.started", "r3", "T3", base.Add(45*time.Minute), map[string]any{"agent_id": "dev", "title": "Unrelated fix"}),
+		mk("model.completed", "r3", "T3", base.Add(46*time.Minute), map[string]any{"model": "m", "prompt_tokens": 50, "completion_tokens": 10}),
+		// Saga events arrive last on purpose: bindings must be order-independent.
+		mk("saga.registered", "r1", "T1", base.Add(3*time.Minute), map[string]any{"saga_id": "saga-research-abc123", "title": "Competitor research", "goal": "deliver a report"}),
+		mk("saga.attached", "r2", "T2", base.Add(32*time.Minute), map[string]any{"saga_id": "saga-research-abc123", "note": "takeover"}),
+	}
+
+	got := api.aggregateProjectBudget("p", events)
+	if got.SagaCount != 1 || got.TaskCount != 3 || got.RunCount != 3 {
+		t.Fatalf("unexpected counts: saga=%d tasks=%d runs=%d", got.SagaCount, got.TaskCount, got.RunCount)
+	}
+	if len(got.Sagas) != 1 || len(got.Tasks) != 3 {
+		t.Fatalf("expected 1 saga row and 3 task rows, got %d/%d", len(got.Sagas), len(got.Tasks))
+	}
+	saga := got.Sagas[0]
+	if saga.SagaID != "saga-research-abc123" || saga.Title != "Competitor research" || saga.Goal != "deliver a report" {
+		t.Fatalf("unexpected saga meta: %+v", saga)
+	}
+	if len(saga.TaskIDs) != 2 || saga.TaskIDs[0] != "T1" || saga.TaskIDs[1] != "T2" {
+		t.Fatalf("saga must bind T1+T2 in task order, got %v", saga.TaskIDs)
+	}
+	// Both tasks' spend sums into the one saga row.
+	if saga.RunCount != 2 || saga.TotalTokens != (100+20)+(200+40) {
+		t.Fatalf("unexpected saga totals: %+v", saga)
+	}
+	if saga.RootRunID != "r1" || saga.AgentCount != 2 {
+		t.Fatalf("saga root/agents: %+v", saga)
+	}
+	// Tasks carry their binding; the unbound task has none.
+	bound := 0
+	for _, task := range got.Tasks {
+		if task.TaskID == "T1" || task.TaskID == "T2" {
+			bound++
+			if task.SagaID != "saga-research-abc123" {
+				t.Fatalf("task %s must be bound, got %q", task.TaskID, task.SagaID)
+			}
+		}
+		if task.TaskID == "T3" && task.SagaID != "" {
+			t.Fatalf("task T3 must stay unbound, got %q", task.SagaID)
+		}
+	}
+	if bound != 2 {
+		t.Fatalf("expected both saga tasks bound, got %d", bound)
+	}
+	// Project totals still cover every task, bound or not.
+	if got.TotalTokens != (100+20)+(200+40)+(50+10) {
+		t.Fatalf("unexpected project totals: %d", got.TotalTokens)
+	}
+}
+
+func TestSagaRebindLastWins(t *testing.T) {
+	cfg, _ := ParsePrices("")
+	api := NewCostAPI(cfg, "", "")
+	base := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+	api.now = func() time.Time { return base.Add(time.Hour) }
+	mk := func(typ, run, task string, at time.Time, data map[string]any) observation.Event {
+		return observation.Event{Type: typ, OccurredAt: at, Context: observation.Context{Run: run, Task: task}, Data: data}
+	}
+	events := []observation.Event{
+		mk("run.started", "r1", "T", base, map[string]any{"agent_id": "lead", "title": "Work"}),
+		mk("model.completed", "r1", "T", base.Add(time.Minute), map[string]any{"model": "m", "prompt_tokens": 10, "completion_tokens": 5}),
+		mk("saga.registered", "r1", "T", base.Add(2*time.Minute), map[string]any{"saga_id": "saga-one-aaaaaa", "title": "One"}),
+		// Later re-bind to another saga: the spend follows the latest binding,
+		// the abandoned saga keeps its registration row with zero tasks.
+		mk("saga.registered", "r9", "T9", base.Add(3*time.Minute), map[string]any{"saga_id": "saga-two-bbbbbb", "title": "Two"}),
+		mk("saga.attached", "r1", "T", base.Add(4*time.Minute), map[string]any{"saga_id": "saga-two-bbbbbb"}),
+	}
+	got := api.aggregateProjectBudget("p", events)
+	if got.SagaCount != 2 || got.TaskCount != 1 {
+		t.Fatalf("unexpected counts: %+v", got)
+	}
+	task := got.Tasks[0]
+	if task.SagaID != "saga-two-bbbbbb" {
+		t.Fatalf("latest binding must win, got %q", task.SagaID)
+	}
+	for _, saga := range got.Sagas {
+		if saga.SagaID == "saga-one-aaaaaa" && (len(saga.TaskIDs) != 0 || saga.TotalTokens != 0) {
+			t.Fatalf("abandoned saga must keep zero totals, got %+v", saga)
+		}
+		if saga.SagaID == "saga-two-bbbbbb" && (saga.TotalTokens != 15 || len(saga.TaskIDs) != 1) {
+			t.Fatalf("re-bound saga must own the spend, got %+v", saga)
+		}
 	}
 }
 

@@ -229,6 +229,10 @@ type ToolRequest struct {
 	Role          string `json:"role,omitempty"`
 	WorkspacePath string `json:"workspace_path,omitempty"`
 	Project       string `json:"project,omitempty"`
+	// TaskID is the owning task of the run (docs/sagas.md): saga tools bind
+	// explicit sagas at the task level, so follow-up runs and delegated
+	// children inherit the binding automatically.
+	TaskID string `json:"task_id,omitempty"`
 	// ActorID is the run starter; send_file resolves them as the default
 	// recipient of agent-produced files.
 	ActorID   string         `json:"actor_id,omitempty"`
@@ -1624,7 +1628,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						// Wall latency from the workflow clock covers scheduling, retries
 						// and execution — the honest end-to-end cost of the operation.
 						toolStarted := workflow.Now(ctx)
-						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets}).Get(ctx, &toolResult); err != nil {
+						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets}).Get(ctx, &toolResult); err != nil {
 							toolFailed = true
 							failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 							failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
@@ -1720,7 +1724,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				// Same wall-clock semantics as the approval path: scheduling,
 				// retries and execution in one number.
 				toolStarted := workflow.Now(ctx)
-				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets}).Get(ctx, &toolResult); err != nil {
+				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets}).Get(ctx, &toolResult); err != nil {
 					toolFailed = true
 					failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 					failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
@@ -2156,6 +2160,7 @@ var readOnlyTools = map[string]bool{
 	"fetch_image": true, "mcp__fetch_image": true,
 	"skill_search": true, "mcp__skill_search": true,
 	"skill_inspect": true, "mcp__skill_inspect": true,
+	"saga_list": true,
 }
 
 // browserReadOnlyActions are browser actions that only observe the page.
@@ -2278,6 +2283,9 @@ var policySafeTools = map[string]bool{
 	"skill_search": true, "skill_inspect": true, "skill_validate": true,
 	"skill_history": true, "skill_executions": true, "skill_memory": true,
 	"skill_diff": true, "skill_evaluate": true, "knowledge_lookup": true,
+	// Saga tools (docs/sagas.md) only write observation journal events — the
+	// system's own memory layer, no workspace or external effect.
+	"saga_register": true, "saga_attach": true,
 	// Intake dialog tools (docs/inbound-messages.md §7): start_task is the
 	// entire point of the dialog and passes full sender-side authorization on
 	// the API side, so a policy-mandated approval round trip would only stall
@@ -2835,6 +2843,9 @@ func KernelTools() []llm.ToolDef {
 		{Name: "skill_search", Description: "List living skills in this project: versioned capability packages (SKILL.md instructions + manifest contract) stored in the skill registry, not files in the repo. Returns id, name, version, capabilities, tools", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "Optional space-separated keywords; a skill matches when any keyword occurs in id, name, capability or tool (case-insensitive); results are ranked by keyword coverage"}}}},
 		{Name: "secret_list", Description: "List the secrets granted to this agent: names and descriptions only, never values. Granted secrets are injected automatically as SECRET_<NAME> environment variables into every run_command call — reference them from env, do not paste literals", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
 		{Name: "knowledge_lookup", Description: "Fetch the full knowledge item (proposition, state, topics, entities, evidence, history) by its knowledge_id. Priming cues carry a knowledge_id handle; call this when a compact cue matters to your task and you need the grounds, details or lifecycle behind it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"knowledge_id": map[string]any{"type": "string", "description": "The knowledge_id from a priming cue or a prior run"}}, "required": []string{"knowledge_id"}}},
+		{Name: "saga_register", Description: "Register the current task's work as a saga — an explicitly tracked long-running effort that may span many runs, chat follow-ups and delegated agents. Call it once when starting work you expect to be long or multi-stage, or when asked to track a saga. The saga rides the task: every follow-up run and delegation joins it automatically. Registering an already-bound task returns the existing saga", Parameters: map[string]any{"type": "object", "properties": map[string]any{"title": map[string]any{"type": "string", "description": "Short human-readable saga title"}, "goal": map[string]any{"type": "string", "description": "Optional one-line goal/outcome of the saga"}}, "required": []string{"title"}}},
+		{Name: "saga_attach", Description: "Attach the current task to an existing saga (docs/sagas.md). Use it to join related efforts — for example when taking over work another agent already tracks in a saga. The saga_id comes from saga_list", Parameters: map[string]any{"type": "object", "properties": map[string]any{"saga_id": map[string]any{"type": "string", "description": "The saga to join, from saga_list"}, "note": map[string]any{"type": "string", "description": "Optional one-line reason for joining this saga"}}, "required": []string{"saga_id"}}},
+		{Name: "saga_list", Description: "List sagas registered in this project: saga_id, title, goal, bound tasks and registration time. Use it to find an existing saga before saga_attach instead of registering a duplicate", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
 		{Name: "skill_inspect", Description: "Show a skill's full SKILL.md and manifest contract (capabilities, tools, runtime, preconditions, postconditions, evidence)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_validate", Description: "Validate a skill's manifest and return issues", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},
 		{Name: "skill_history", Description: "List a skill's versions", Parameters: map[string]any{"type": "object", "properties": map[string]any{"skill_id": map[string]any{"type": "string"}}, "required": []string{"skill_id"}}},

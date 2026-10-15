@@ -697,6 +697,12 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleSecretList(ctx, request)
 	case "knowledge_lookup":
 		return a.handleKnowledgeLookupTool(ctx, request)
+	case "saga_register":
+		return a.handleSagaRegister(ctx, request)
+	case "saga_attach":
+		return a.handleSagaAttach(ctx, request)
+	case "saga_list":
+		return a.handleSagaList(ctx, request)
 	case "skill_inspect", "skill_validate", "skill_history", "skill_executions", "skill_memory":
 		return a.handleSkillAction(ctx, request)
 	case "skill_propose":
