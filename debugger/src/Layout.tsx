@@ -295,7 +295,19 @@ export default function Layout({ children, activePage }: LayoutProps) {
         setProject((current) => {
           // "" is the explicit All-projects filter (docs/activity-scoping.md
           // §7) — a valid state to keep, not a missing choice to replace.
-          if (current === '' || (current && list.some((p) => p.id === current))) return current
+          if (current === '' || (current && list.some((p) => p.id === current))) {
+            // The system intake project is not a landing target: a stored
+            // intake selection (pre-fix localStorage) quietly scopes every
+            // page to a project with no user-facing operations. A URL-pinned
+            // intake (Входящие deeplinking into intake runs) is navigation and
+            // stays; an explicit in-session pick stays until reload too —
+            // only the persisted/default landing state moves to a real project.
+            if (current === INTAKE_PROJECT_ID && new URLSearchParams(window.location.search).get('project') !== INTAKE_PROJECT_ID) {
+              const realNow = list.find((p) => p.id !== INTAKE_PROJECT_ID)
+              if (realNow) return realNow.id
+            }
+            return current
+          }
           // Fallback prefers a real project: intake is the system project —
           // it has no user-facing operations, so landing there after a fresh
           // load is noise. Only an install with nothing but intake stays on it

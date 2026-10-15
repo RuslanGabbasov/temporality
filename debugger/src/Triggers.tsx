@@ -77,6 +77,19 @@ export default function Triggers({ project }: { project: string }) {
 
   const visibleTriggers = triggers.filter((tr) => matchesFilter(filter, tr.name, tr.type, tr.id))
 
+  // The routing target the form will actually save — the hint and the copy
+  // button must speak about it, not about the project selected in the header
+  // (they used to diverge: the copied URL said intake while the picker said
+  // omni, and the webhook ran wherever the URL pointed).
+  const targetProject = form.project_id || projects[0]?.id || ''
+  // The truth about odd targets: a trigger bound to a project missing from
+  // the picker (the intake system project, a deleted project) renders as the
+  // first option of a native select — showing the real id beats a plausible
+  // lie that hides where the runs actually go.
+  const projectOptions = targetProject && !projects.some((p) => p.id === targetProject)
+    ? [{ id: targetProject, name: targetProject }, ...projects]
+    : projects
+
   const loadDeliveries = useCallback(async () => {
     // Global delivery feed when the filter is empty — the journal scopes an
     // unfiltered query to the caller's visible projects (docs/activity-scoping.md
@@ -126,7 +139,14 @@ export default function Triggers({ project }: { project: string }) {
     // In the global listing the form must still name a routing target; the
     // first real project is only the pre-selection, the select makes it
     // explicit (docs/activity-scoping.md §6).
-    setForm({ type, name: '', enabled: true, config: defaultConfig, project_id: project.trim() || projects[0]?.id || '', org_unit_id: '', execution_identity_id: '' })
+    // Pre-select the routing target: the currently selected project unless
+    // it is the hidden intake system project — intake is not among the
+    // options, and a select value outside the options silently displays the
+    // first real project while the payload keeps the system id (the trigger
+    // then lists and runs under intake no matter what the form showed).
+    const selected = project.trim()
+    const preselected = selected && selected !== INTAKE_PROJECT_ID ? selected : (projects[0]?.id ?? '')
+    setForm({ type, name: '', enabled: true, config: defaultConfig, project_id: preselected, org_unit_id: '', execution_identity_id: '' })
     setShowForm(true)
   }
 
@@ -143,7 +163,7 @@ export default function Triggers({ project }: { project: string }) {
       // config travels as a JSON object, not a stringified one: the server
       // stores jsonb and every consumer unmarshals it into a struct. (The
       // stringified form used to double-encode and broke matching/firing.)
-      const payload = { ...form, project_id: form.project_id || project, config: form.config }
+      const payload = { ...form, project_id: form.project_id || projects[0]?.id || '', config: form.config }
       if (editing) {
         await workspaceApi.updateTrigger(editing.id, payload)
         // PUT payloads ignore org bindings: re-scoping goes through the admin
@@ -344,8 +364,8 @@ export default function Triggers({ project }: { project: string }) {
             <TextInput id="trigger-name" labelText={t('triggers.name') ?? 'Name'} value={form.name ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, name: e.target.value })} placeholder="Daily report" />
             {/* Routing target (docs/activity-scoping.md §6): the project whose
                 sandbox/agents the triggered run works in. */}
-            <Select id="trigger-project" labelText={t('triggers.project') ?? 'Project'} value={form.project_id ?? ''} disabled={!!editing} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, project_id: e.target.value })}>
-              {projects.map((p) => <SelectItem key={p.id} value={p.id} text={p.name} />)}
+            <Select id="trigger-project" labelText={t('triggers.project') ?? 'Project'} value={form.project_id ?? ''} disabled={!!editing} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, project_id: e.target.value })} helperText={t('triggers.project_helper') ?? 'Runs execute in this project and the webhook URL embeds it — the target cannot change after creation, recreate the trigger instead.'}>
+              {projectOptions.map((p) => <SelectItem key={p.id} value={p.id} text={p.name} />)}
             </Select>
             <Select id="trigger-agent" labelText={t('triggers.agent') ?? 'Agent'} value={form.agent_id ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, agent_id: e.target.value })}>
               <SelectItem value="" text={t('triggers.default_agent') ?? 'Default agent'} />
@@ -390,9 +410,9 @@ export default function Triggers({ project }: { project: string }) {
                 <TextInput id="trigger-path" labelText={t('triggers.webhook_path') ?? 'Webhook path'} value={form.config?.path ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, path: e.target.value } })} placeholder="deploy-notify" helperText={t('triggers.webhook_helper') ?? 'Authorization required: a writer Bearer token, this trigger’s delivery token, Basic (token as password) or ?token= in the URL.'} />
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', margin: '-0.5rem 0 0.75rem', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', fontFamily: 'monospace' }}>POST</span>
-                  <code style={{ fontSize: '0.7rem', wordBreak: 'break-all', color: 'var(--tm-text-2)', minWidth: '0' }}>{webhookUrlFor(project, form.config?.path || '…')}</code>
+                  <code style={{ fontSize: '0.7rem', wordBreak: 'break-all', color: 'var(--tm-text-2)', minWidth: 0 }}>{webhookUrlFor(targetProject || '…', form.config?.path || '…')}</code>
                   {!!form.config?.path && (
-                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription={t('action.copy') ?? 'Copy'} onClick={() => copyToClipboard(webhookUrlFor(project, form.config?.path ?? ''))} />
+                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Copy} iconDescription={t('action.copy') ?? 'Copy'} onClick={() => copyToClipboard(webhookUrlFor(targetProject, form.config?.path ?? ''))} />
                   )}
                 </div>
                 <TextInput id="trigger-secret" labelText={t('triggers.secret_optional') ?? 'Signing secret (optional)'} value={form.config?.secret ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, secret: e.target.value } })} placeholder="hmac-secret" helperText={t('triggers.secret_hint') ?? 'When set, deliveries must be signed: X-Temporality-Signature: sha256-<HMAC-SHA256 of the body>'} />

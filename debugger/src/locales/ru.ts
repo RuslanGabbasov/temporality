@@ -884,6 +884,7 @@ export const ru: Record<string, string> = {
     'triggers.edit_trigger': 'Изменить триггер',
     'triggers.type': 'Тип',
     'triggers.project': 'Проект',
+    'triggers.project_helper': 'Ран выполняется в этом проекте, и он зашит в URL вебхука — после создания цель поменять нельзя, пересоздайте триггер.',
     'triggers.name': 'Название',
     'triggers.agent': 'Агент',
     'triggers.default_agent': 'Агент по умолчанию',

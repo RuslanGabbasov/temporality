@@ -884,6 +884,7 @@ export const en: Record<string, string> = {
     'triggers.edit_trigger': 'Edit Trigger',
     'triggers.type': 'Type',
     'triggers.project': 'Project',
+    'triggers.project_helper': 'Runs execute in this project and the webhook URL embeds it — the target cannot change after creation, recreate the trigger instead.',
     'triggers.name': 'Name',
     'triggers.agent': 'Agent',
     'triggers.default_agent': 'Default agent',
