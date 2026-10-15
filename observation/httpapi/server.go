@@ -398,6 +398,11 @@ func (s *Server) listObservationKnowledge(w http.ResponseWriter, r *http.Request
 			*target = &parsed
 		}
 	}
+	query, err := parseKnowledgeListQuery(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	events, chain, err := s.visibleKnowledgeEvents(r.Context(), project, asOf, knownAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
@@ -422,7 +427,18 @@ func (s *Server) listObservationKnowledge(w http.ResponseWriter, r *http.Request
 		}
 		knowledge = filtered
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"knowledge": knowledge, "count": len(knowledge)})
+	// Deterministic order, then post-projection filters (state/scope/text are
+	// projection outputs, so they cannot live in SQL) and cursor pagination.
+	// Without a limit the full filtered set is returned — the legacy callers
+	// (run inspector, kernel skill memory) rely on that shape.
+	sortKnowledgeList(knowledge)
+	facets := knowledgeFacetsFor(knowledge, query)
+	filtered := filterKnowledgeList(knowledge, query)
+	page, nextCursor := paginateKnowledgeList(filtered, query.Cursor, query.Limit)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"knowledge": page, "count": len(page), "total": len(filtered),
+		"next_cursor": nextCursor, "facets": facets,
+	})
 }
 
 func (s *Server) diffKnowledge(w http.ResponseWriter, r *http.Request) {

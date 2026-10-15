@@ -1148,3 +1148,184 @@ func TestListObservationsErrorCarriesCause(t *testing.T) {
 		t.Fatalf("error body hides the storage cause: %v", body["error"])
 	}
 }
+
+// proposedAtEvent builds a knowledge.proposed event with an explicit
+// occurrence time so the listing order (updated_at DESC) stays deterministic
+// in tests that mix proposals with journal-time lifecycle events.
+func proposedAtEvent(project, eventID, knowledgeID, proposition string, at time.Time, extra map[string]any) observation.Event {
+	event := proposedEvent(project, eventID, knowledgeID, proposition)
+	event.OccurredAt = at
+	for key, value := range extra {
+		event.Data[key] = value
+	}
+	return event
+}
+
+func knowledgeIDs(body map[string]any) []string {
+	items, _ := body["knowledge"].([]any)
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if entry, ok := item.(map[string]any); ok {
+			ids = append(ids, entry["id"].(string))
+		}
+	}
+	return ids
+}
+
+func requireIDs(t *testing.T, body map[string]any, want ...string) {
+	t.Helper()
+	got := knowledgeIDs(body)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("knowledge ids = %v, want %v", got, want)
+	}
+}
+
+// The knowledge listing is the working surface for large knowledge bases:
+// search, state/scope filters with facet counts, deterministic order and
+// cursor pagination — while a plain call still returns the full projection
+// for the legacy consumers (run inspector, kernel skill memory).
+func TestKnowledgeListSearchFacetsPagination(t *testing.T) {
+	handler := newTestServer(t)
+	base := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	ingest := []observation.Event{
+		proposedAtEvent("lighthouse", "evt-k1", "K1", "gatekeeper v2 authenticates via .token-file", base, nil),
+		proposedAtEvent("lighthouse", "evt-k2", "K2", "docker tmpfs must be at least 512 MB", base.Add(5*time.Minute), map[string]any{
+			"topics": []string{"docker"}, "entities": []string{"tmpfs"},
+		}),
+		proposedAtEvent("lighthouse", "evt-k3", "K3", "run make test before push", base.Add(10*time.Minute), nil),
+		proposedAtEvent("other", "evt-k4", "K4", "gatekeeper rule of another project", base.Add(15*time.Minute), nil),
+	}
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": ingest}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+	// Retire K3 and widen K2 to organization scope through the real endpoints:
+	// both stamp s.now(), which is after every proposal, so the listing order
+	// is K2 (promoted last), K3, K1.
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/knowledge/invalidate", map[string]any{
+		"knowledge_id": "K3", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"}, "reason": "obsolete",
+	}); res.StatusCode != http.StatusCreated {
+		t.Fatalf("invalidate status = %d, body = %v", res.StatusCode, body)
+	}
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/knowledge/promote", map[string]any{
+		"knowledge_id": "K2", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"},
+		"scope_kind": "organization", "reason": "holds everywhere",
+	}); res.StatusCode != http.StatusCreated {
+		t.Fatalf("promote status = %d, body = %v", res.StatusCode, body)
+	}
+
+	t.Run("full projection without limit keeps legacy shape", func(t *testing.T) {
+		res, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse", nil)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d", res.StatusCode)
+		}
+		requireIDs(t, body, "K2", "K3", "K1")
+		if body["total"].(float64) != 3 || body["count"].(float64) != 3 {
+			t.Fatalf("total/count = %v/%v, want 3/3", body["total"], body["count"])
+		}
+		if body["next_cursor"] != "" {
+			t.Fatalf("next_cursor = %v, want empty", body["next_cursor"])
+		}
+		facets := body["facets"].(map[string]any)
+		states := facets["states"].(map[string]any)
+		if states["proposed"].(float64) != 2 || states["invalidated"].(float64) != 1 || states["alive"].(float64) != 2 {
+			t.Fatalf("state facets = %v", states)
+		}
+		scopes := facets["scopes"].(map[string]any)
+		if scopes["project"].(float64) != 2 || scopes["organization"].(float64) != 1 || scopes["org_unit"].(float64) != 0 {
+			t.Fatalf("scope facets = %v", scopes)
+		}
+	})
+
+	t.Run("search is case-insensitive, substring and multi-word AND", func(t *testing.T) {
+		_, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&q=GATEKEEPER", nil)
+		requireIDs(t, body, "K1")
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&q=token-file", nil)
+		requireIDs(t, body, "K1")
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&q=tmpfs+docker", nil)
+		requireIDs(t, body, "K2")
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&q=docker+nomatch", nil)
+		requireIDs(t, body)
+		// Search covers topics and entities, not just propositions.
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&q=512", nil)
+		requireIDs(t, body, "K2")
+	})
+
+	t.Run("state filter supports lifecycle states and pseudo-states", func(t *testing.T) {
+		_, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&state=alive", nil)
+		requireIDs(t, body, "K2", "K1")
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&state=invalidated", nil)
+		requireIDs(t, body, "K3")
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&state=at_risk", nil)
+		requireIDs(t, body)
+	})
+
+	t.Run("scope filter", func(t *testing.T) {
+		_, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&scope=organization", nil)
+		requireIDs(t, body, "K2")
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&scope=project", nil)
+		requireIDs(t, body, "K3", "K1")
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&q=docker&scope=project", nil)
+		requireIDs(t, body)
+	})
+
+	t.Run("facets respect the other dimensions but not their own filter", func(t *testing.T) {
+		_, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&state=invalidated", nil)
+		states := body["facets"].(map[string]any)["states"].(map[string]any)
+		// The state facet still shows the full split (2 proposed / 1 invalidated)
+		// even with the state filter active…
+		if states["proposed"].(float64) != 2 || states["invalidated"].(float64) != 1 {
+			t.Fatalf("state facets under state filter = %v", states)
+		}
+		// …while the scope facet applies the state filter.
+		scopes := body["facets"].(map[string]any)["scopes"].(map[string]any)
+		if scopes["project"].(float64) != 1 || scopes["organization"].(float64) != 0 {
+			t.Fatalf("scope facets under state filter = %v", scopes)
+		}
+	})
+
+	t.Run("cursor pagination follows the deterministic order", func(t *testing.T) {
+		_, page1 := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&limit=2", nil)
+		requireIDs(t, page1, "K2", "K3")
+		if page1["total"].(float64) != 3 {
+			t.Fatalf("total = %v, want 3", page1["total"])
+		}
+		cursor, _ := page1["next_cursor"].(string)
+		if cursor == "" {
+			t.Fatal("next_cursor is empty with more pages left")
+		}
+		page2URL := "/v1/observations/knowledge?project=lighthouse&limit=2&cursor=" + cursor
+		_, page2 := doJSON(t, handler, "GET", page2URL, nil)
+		requireIDs(t, page2, "K1")
+		if page2["next_cursor"] != "" {
+			t.Fatalf("next_cursor = %v, want empty on last page", page2["next_cursor"])
+		}
+		// The cursor is opaque but round-trips: limit=1 walks the whole list.
+		_, first := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&limit=1", nil)
+		requireIDs(t, first, "K2")
+		next, _ := first["next_cursor"].(string)
+		_, second := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&limit=1&cursor="+next, nil)
+		requireIDs(t, second, "K3")
+	})
+
+	t.Run("knowledge_id filter composes with pagination", func(t *testing.T) {
+		_, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&knowledge_id=K2&limit=1", nil)
+		requireIDs(t, body, "K2")
+		if body["total"].(float64) != 1 {
+			t.Fatalf("total = %v, want 1", body["total"])
+		}
+	})
+
+	t.Run("invalid parameters are rejected", func(t *testing.T) {
+		for _, path := range []string{
+			"/v1/observations/knowledge?project=lighthouse&limit=0",
+			"/v1/observations/knowledge?project=lighthouse&limit=501",
+			"/v1/observations/knowledge?project=lighthouse&state=bogus",
+			"/v1/observations/knowledge?project=lighthouse&scope=bogus",
+			"/v1/observations/knowledge?project=lighthouse&cursor=not-a-cursor",
+		} {
+			if res, _ := doJSON(t, handler, "GET", path, nil); res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("%s status = %d, want 400", path, res.StatusCode)
+			}
+		}
+	})
+}

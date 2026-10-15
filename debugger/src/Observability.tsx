@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { authHeaders } from './api'
-import { observationApi, type KnowledgeItem, type ObservationEvent, type ObservationHint } from './observationApi'
+import { observationApi, type KnowledgeFacets, type KnowledgeItem, type ObservationEvent, type ObservationHint } from './observationApi'
 import {
   Button,
   TextInput,
@@ -17,7 +17,40 @@ import { useT } from './i18n'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
-function utcValue(local: string) { return local ? new Date(local).toISOString() : undefined }
+/** Partial datetime-local values must not become Invalid Date .toISOString()
+ *  crashes — an unparseable value simply means "filter not applied yet". */
+function utcValue(local: string): string | undefined {
+  if (!local) return undefined
+  const date = new Date(local)
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+
+/** Filters auto-apply, so inputs (search, datetime pickers) need a debounce
+ *  to avoid firing a request per keystroke. */
+function useDebounced<T>(value: T, delayMs = 350): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs)
+    return () => clearTimeout(timer)
+  }, [value, delayMs])
+  return debounced
+}
+
+const KNOWLEDGE_PAGE_SIZE = 50
+
+const STATE_FILTERS = ['all', 'alive', 'at_risk', 'proposed', 'confirmed', 'challenged', 'corrected', 'superseded', 'invalidated'] as const
+const SCOPE_FILTERS = ['all', 'project', 'org_unit', 'organization'] as const
+
+function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '0.1rem 0.6rem', borderRadius: '999px', cursor: 'pointer', fontSize: '0.72rem', lineHeight: 1.7,
+      background: active ? 'rgba(87,215,232,0.12)' : 'transparent',
+      border: `1px solid ${active ? 'var(--tm-teal)' : 'var(--tm-border)'}`,
+      color: active ? 'var(--tm-teal)' : 'var(--tm-text-2)',
+    }}>{children}</button>
+  )
+}
 
 const STATE_COLORS: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'red'> = {
   proposed: 'blue', confirmed: 'green', challenged: 'warm-gray',
@@ -37,8 +70,17 @@ export default function Observability({ project }: { project: string }) {
   const [knowledge, setKnowledge] = useState<KnowledgeItem[]>([])
   const [comparisonKnowledge, setComparisonKnowledge] = useState<KnowledgeItem[] | null>(null)
   const [selectedID, setSelectedID] = useState(initParams.get('selected') ?? '')
-  const [clusterFilter, setClusterFilter] = useState(initParams.get('cluster') ?? 'all')
   const [stateFilter, setStateFilter] = useState<string>(initParams.get('state') ?? 'all')
+  const [scopeFilter, setScopeFilter] = useState<string>(initParams.get('scope') ?? 'all')
+  const [searchInput, setSearchInput] = useState(initParams.get('q') ?? '')
+  const [listKnowledge, setListKnowledge] = useState<KnowledgeItem[]>([])
+  const [listTotal, setListTotal] = useState(0)
+  const [listCursor, setListCursor] = useState('')
+  const [listLoading, setListLoading] = useState(false)
+  const [listError, setListError] = useState('')
+  const [facets, setFacets] = useState<KnowledgeFacets | null>(null)
+  const [revision, setRevision] = useState(0)
+  const listSeq = useRef(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [chain, setChain] = useState<any>(null)
@@ -57,28 +99,20 @@ export default function Observability({ project }: { project: string }) {
   const [projection, setProjection] = useState<any>(null)
   const [projectionLoading, setProjectionLoading] = useState(false)
 
-  const selected = useMemo(() => knowledge.find((item) => item.id === selectedID), [knowledge, selectedID])
+  const debouncedSearch = useDebounced(searchInput)
+  const asOfUTC = utcValue(useDebounced(asOf, 500))
+  const knownAtUTC = utcValue(useDebounced(knownAt, 500))
+  const compareUTC = utcValue(useDebounced(compareAsOf, 500))
+
+  const selected = useMemo(() => listKnowledge.find((item) => item.id === selectedID), [listKnowledge, selectedID])
   const clusters = useMemo(() => {
     const groups = new Map<string, KnowledgeItem[]>()
     for (const item of knowledge) {
-      const name = item.topics?.[0] || item.entities?.[0] || 'Unscoped'
+      const name = item.topics?.[0] || item.entities?.[0] || (t('knowledge.no_topic') ?? 'No topic')
       groups.set(name, [...(groups.get(name) ?? []), item])
     }
     return [...groups.entries()].sort((a, b) => b[1].length - a[1].length)
-  }, [knowledge])
-  const visibleKnowledge = knowledge.filter((item) => {
-    if (clusterFilter !== 'all' && (item.topics?.[0] || item.entities?.[0] || 'Unscoped') !== clusterFilter) return false
-    if (stateFilter !== 'all') {
-      if (stateFilter === 'alive') {
-        if (item.state === 'invalidated' || item.state === 'superseded' || item.state === 'corrected') return false
-      } else if (stateFilter === 'stale') {
-        if (!item.at_risk) return false
-      } else if (item.state !== stateFilter) {
-        return false
-      }
-    }
-    return true
-  })
+  }, [knowledge, t])
 
   // Health summary
   const health = useMemo(() => {
@@ -112,24 +146,50 @@ export default function Observability({ project }: { project: string }) {
     if (compareAsOf) urlP.set('compare', compareAsOf); else urlP.delete('compare')
     if (knownAt) urlP.set('known_at', knownAt); else urlP.delete('known_at')
     if (selectedID) urlP.set('selected', selectedID); else urlP.delete('selected')
-    if (clusterFilter !== 'all') urlP.set('cluster', clusterFilter); else urlP.delete('cluster')
+    if (stateFilter !== 'all') urlP.set('state', stateFilter); else urlP.delete('state')
+    if (scopeFilter !== 'all') urlP.set('scope', scopeFilter); else urlP.delete('scope')
+    if (searchInput.trim()) urlP.set('q', searchInput.trim()); else urlP.delete('q')
     window.history.replaceState(null, '', `${window.location.pathname}?${urlP.toString()}`)
-  }, [project, tab, asOf, compareAsOf, knownAt, selectedID, clusterFilter])
+  }, [project, tab, asOf, compareAsOf, knownAt, selectedID, stateFilter, scopeFilter, searchInput])
 
-  // Load knowledge
-  async function load() {
+  // Overview data: the full projection feeds health, clusters and the
+  // bitemporal comparison — it is not paginated.
+  async function loadOverview() {
     if (!project.trim()) { setError(t('knowledge.enter_project') ?? 'Enter a project ID.'); return }
     setLoading(true); setError('')
     try {
       const [history, comparison] = await Promise.all([
-        observationApi.knowledge(project.trim(), utcValue(asOf), utcValue(knownAt)),
-        compareAsOf ? observationApi.knowledge(project.trim(), utcValue(compareAsOf), utcValue(knownAt)) : Promise.resolve(null),
+        observationApi.knowledge(project.trim(), asOfUTC, knownAtUTC),
+        compareUTC ? observationApi.knowledge(project.trim(), compareUTC, knownAtUTC) : Promise.resolve(null),
       ])
       setKnowledge(history.knowledge)
       setComparisonKnowledge(comparison?.knowledge ?? null)
-      setSelectedID((current) => history.knowledge.some((item) => item.id === current) ? current : history.knowledge[0]?.id ?? '')
     } catch (reason) { setError(errorMessage(reason)) }
     finally { setLoading(false) }
+  }
+
+  // Knowledge tab: server-side search + filters + cursor pagination, so the
+  // page stays usable when the projection grows to thousands of items.
+  async function loadList(reset: boolean) {
+    if (!project.trim()) return
+    const seq = ++listSeq.current
+    setListLoading(true); setListError('')
+    try {
+      const page = await observationApi.knowledge(project.trim(), asOfUTC, knownAtUTC, {
+        q: debouncedSearch.trim() || undefined,
+        state: stateFilter !== 'all' ? stateFilter : undefined,
+        scope: scopeFilter !== 'all' ? scopeFilter : undefined,
+        limit: KNOWLEDGE_PAGE_SIZE,
+        cursor: reset ? undefined : listCursor || undefined,
+      })
+      if (seq !== listSeq.current) return
+      setListKnowledge((current) => reset ? page.knowledge : [...current, ...page.knowledge])
+      setListTotal(page.total ?? page.knowledge.length)
+      setListCursor(page.next_cursor ?? '')
+      if (page.facets) setFacets(page.facets)
+      if (reset) setSelectedID((current) => page.knowledge.some((item) => item.id === current) ? current : page.knowledge[0]?.id ?? '')
+    } catch (reason) { if (seq === listSeq.current) setListError(errorMessage(reason)) }
+    finally { if (seq === listSeq.current) setListLoading(false) }
   }
 
   // Load projection
@@ -143,7 +203,10 @@ export default function Observability({ project }: { project: string }) {
     finally { setProjectionLoading(false) }
   }
 
-  useEffect(() => { void load() }, [project])
+  // Bitemporal filters and the search box auto-apply (debounced); mutations
+  // bump the revision so both views refetch.
+  useEffect(() => { void loadOverview() }, [project, asOfUTC, knownAtUTC, compareUTC, revision])
+  useEffect(() => { void loadList(true) }, [project, debouncedSearch, stateFilter, scopeFilter, asOfUTC, knownAtUTC, revision])
   useEffect(() => { if (tab === 'patterns') void loadProjection() }, [tab])
 
   // Fetch activation chain
@@ -169,7 +232,7 @@ export default function Observability({ project }: { project: string }) {
         reason: reason.trim(),
       })
       setReason('')
-      await load()
+      setRevision((r) => r + 1)
     } catch (e) { setError(errorMessage(e)) }
   }
 
@@ -186,7 +249,7 @@ export default function Observability({ project }: { project: string }) {
         reason: promoteReason.trim(),
       })
       setPromoteReason('')
-      await load()
+      setRevision((r) => r + 1)
     } catch (e) { setPromoteError(errorMessage(e)) }
     finally { setPromoteBusy(false) }
   }
@@ -216,27 +279,32 @@ export default function Observability({ project }: { project: string }) {
     <div style={{ padding: '1rem' }}>
       {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
-      {/* Top bar: project + filters */}
+      {/* Top bar: refresh + bitemporal controls (auto-applied, debounced) */}
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-        <button onClick={() => void load()} disabled={loading} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
+        <button onClick={() => setRevision((r) => r + 1)} disabled={loading || listLoading} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <details style={{ fontSize: '0.75rem' }}>
-            <summary style={{ cursor: 'pointer', color: 'var(--tm-text-3)', padding: '0.25rem 0' }}>{t('knowledge.bitemporal_filters') ?? 'Bitemporal filters'}</summary>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap', marginTop: '0.35rem' }}>
-              <div style={{ minWidth: '130px' }}>
-                <TextInput id="as-of" labelText={t('knowledge.as_of') ?? 'As of'} type="datetime-local" value={asOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAsOf(e.target.value)} size="sm" />
-              </div>
-              <div style={{ minWidth: '130px' }}>
-                <TextInput id="compare" labelText={t('knowledge.compare') ?? 'Compare'} type="datetime-local" value={compareAsOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompareAsOf(e.target.value)} size="sm" />
-              </div>
-              <div style={{ minWidth: '130px' }}>
-                <TextInput id="known-at" labelText={t('knowledge.known_by') ?? 'Known by'} type="datetime-local" value={knownAt} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKnownAt(e.target.value)} size="sm" />
-              </div>
-              <Button size="sm" onClick={load} disabled={loading}>{t('knowledge.apply') ?? 'Apply'}</Button>
-            </div>
-          </details>
+          <div style={{ minWidth: '150px' }}>
+            <TextInput id="as-of" labelText={t('knowledge.as_of') ?? 'As of'} type="datetime-local" value={asOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAsOf(e.target.value)} size="sm" />
+          </div>
+          <div style={{ minWidth: '150px' }}>
+            <TextInput id="compare" labelText={t('knowledge.compare') ?? 'Compare'} type="datetime-local" value={compareAsOf} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompareAsOf(e.target.value)} size="sm" />
+          </div>
+          <div style={{ minWidth: '150px' }}>
+            <TextInput id="known-at" labelText={t('knowledge.known_by') ?? 'Known by'} type="datetime-local" value={knownAt} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKnownAt(e.target.value)} size="sm" />
+          </div>
         </div>
       </div>
+
+      {/* Active bitemporal view: visible reminder that the projection is cut
+          at a historical point, removable in one click */}
+      {(asOfUTC || knownAtUTC || compareUTC) && (
+        <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.75rem', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.65rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>⏱ {t('knowledge.historical_view') ?? 'Historical view'}</span>
+          {asOfUTC && <Tag type="purple" size="sm" filter onClose={() => setAsOf('')}>{t('knowledge.as_of')}: {new Date(asOfUTC).toLocaleString()}</Tag>}
+          {knownAtUTC && <Tag type="purple" size="sm" filter onClose={() => setKnownAt('')}>{t('knowledge.known_by')}: {new Date(knownAtUTC).toLocaleString()}</Tag>}
+          {compareUTC && <Tag type="purple" size="sm" filter onClose={() => setCompareAsOf('')}>{t('knowledge.compare')}: {new Date(compareUTC).toLocaleString()}</Tag>}
+        </div>
+      )}
 
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: '0', borderBottom: '1px solid var(--tm-border)', marginBottom: '1rem' }}>
@@ -263,7 +331,7 @@ export default function Observability({ project }: { project: string }) {
             {([
               { label: t('knowledge.total') ?? 'Total', count: health.total, color: 'var(--tm-text)', state: 'all' },
               { label: t('knowledge.alive') ?? 'Alive', count: health.alive, color: 'var(--tm-success)', state: 'alive' },
-              { label: t('knowledge.stale') ?? 'Stale', count: health.stale, color: 'var(--tm-amber)', state: 'stale' },
+              { label: t('knowledge.stale') ?? 'Stale', count: health.stale, color: 'var(--tm-amber)', state: 'at_risk' },
               { label: t('knowledge.invalidated') ?? 'Invalidated', count: health.invalidated, color: 'var(--tm-danger)', state: 'invalidated' },
             ]).map((s) => (
               <Tile
@@ -279,10 +347,10 @@ export default function Observability({ project }: { project: string }) {
           </div>
 
           {/* Changes vs comparison */}
-          {knowledgeChanges && (
+          {knowledgeChanges && compareUTC && (
             <InlineNotification
               kind="info"
-              title={`Change since ${new Date(utcValue(compareAsOf)!).toLocaleString()}`}
+              title={`Change since ${new Date(compareUTC).toLocaleString()}`}
               subtitle={`+${knowledgeChanges.added.length} new · ${knowledgeChanges.changed.length} changed · ${knowledgeChanges.previousCount} at comparison point`}
               lowContrast style={{ marginBottom: '1rem' }}
             />
@@ -315,52 +383,101 @@ export default function Observability({ project }: { project: string }) {
       )}
 
       {/* ═══════════ KNOWLEDGE TAB ═══════════ */}
-      {tab === 'knowledge' && !loading && (
+      {tab === 'knowledge' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 380px', gap: '1rem' }}>
-          {/* Left: knowledge list */}
+          {/* Left: search + facet filters + knowledge list (server-side) */}
           <div style={{ minWidth: 0 }}>
-            {/* Active state filter indicator */}
-            {stateFilter !== 'all' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                <Tag type="blue" size="sm">{t('knowledge.showing') ?? 'Showing'}: {stateFilter}</Tag>
-                <button onClick={() => setStateFilter('all')} style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.75rem' }}>✕ {t('knowledge.clear_filter') ?? 'Clear filter'}</button>
-              </div>
-            )}
-            {/* Cluster filter chips */}
-            {clusters.length > 1 && (
-              <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-                <Tag type={clusterFilter === 'all' ? 'blue' : 'gray'} size="sm" onClick={() => { setClusterFilter('all'); setSelectedID(knowledge[0]?.id ?? '') }} style={{ cursor: 'pointer' }}>{t('knowledge.all') ?? 'All'} ({knowledge.length})</Tag>
-                {clusters.map(([name, items]) => (
-                  <Tag key={name} type={clusterFilter === name ? 'blue' : 'gray'} size="sm" onClick={() => { setClusterFilter(name); setSelectedID(items[0]?.id ?? '') }} style={{ cursor: 'pointer' }}>
-                    {name} ({items.length})
-                  </Tag>
-                ))}
-              </div>
-            )}
+            <TextInput
+              id="knowledge-search"
+              size="sm"
+              labelText={t('knowledge.search') ?? 'Search'}
+              placeholder={t('knowledge.search_placeholder') ?? 'Search propositions, topics, entities…'}
+              value={searchInput}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchInput(e.target.value)}
+              style={{ marginBottom: '0.75rem' }}
+            />
+            {listError && <InlineNotification kind="error" title="Error" subtitle={listError} onClose={() => setListError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
+            {/* State facet chips: counts come from the server, each dimension
+                counted without its own filter, so the chips always show what
+                switching would reveal */}
+            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.4rem' }}>
+              {STATE_FILTERS.map((state) => {
+                const count = state === 'all'
+                  ? (facets ? ['proposed', 'confirmed', 'challenged', 'corrected', 'superseded', 'invalidated'].reduce((sum, key) => sum + (facets.states[key] ?? 0), 0) : 0)
+                  : facets?.states[state] ?? 0
+                if (state !== 'all' && count === 0 && stateFilter !== state) return null
+                const label = state === 'all' ? (t('knowledge.all') ?? 'All')
+                  : state === 'alive' ? (t('knowledge.alive') ?? 'Alive')
+                  : state === 'at_risk' ? (t('knowledge.stale') ?? 'Stale')
+                  : state
+                return (
+                  <FilterChip key={state} active={stateFilter === state} onClick={() => setStateFilter(state)}>
+                    {label}{facets ? ` (${count})` : ''}
+                  </FilterChip>
+                )
+              })}
+            </div>
+            {/* Scope facet chips */}
+            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+              {SCOPE_FILTERS.map((scope) => {
+                const count = scope === 'all' ? 0 : facets?.scopes[scope] ?? 0
+                if (scope !== 'all' && count === 0 && scopeFilter !== scope) return null
+                const label = scope === 'all' ? (t('knowledge.all') ?? 'All')
+                  : scope === 'project' ? (t('knowledge.scope_project') ?? 'Project')
+                  : scope === 'org_unit' ? (t('knowledge.scope_org_unit') ?? 'Org unit')
+                  : (t('knowledge.scope_org') ?? 'Organization')
+                return (
+                  <FilterChip key={scope} active={scopeFilter === scope} onClick={() => setScopeFilter(scope)}>
+                    {label}{scope !== 'all' && facets ? ` (${count})` : ''}
+                  </FilterChip>
+                )
+              })}
+            </div>
 
             {/* Knowledge items */}
-            <Stack gap={1}>
-              {visibleKnowledge.map((item) => (
-                <Tile
-                  key={item.id}
-                  onClick={() => setSelectedID(item.id)}
-                  className={`workspace-tile ${selectedID === item.id ? 'selected' : ''}`}
-                  style={{ padding: '0.5rem', cursor: 'pointer' }}
-                >
-                  <Tag type={STATE_COLORS[item.state] || 'gray'} size="sm">{item.at_risk ? 'at risk' : item.state}</Tag>
-                  {(item.scope_kind === 'organization' || item.scope_kind === 'org_unit') && (
-                    <Tag type="purple" size="sm" title={item.scope_id}>
-                      {item.scope_kind === 'organization' ? (t('knowledge.scope_organization') ?? 'organization') : (org.nameOf(item.scope_id))}
-                    </Tag>
-                  )}
-                  <strong style={{ fontSize: '0.875rem', marginLeft: '0.35rem' }}>{item.proposition}</strong>
-                  <br />
+            {listLoading && listKnowledge.length === 0 ? <PageLoading /> : (
+              <Stack gap={1}>
+                {listKnowledge.map((item) => (
+                  <Tile
+                    key={item.id}
+                    onClick={() => setSelectedID(item.id)}
+                    className={`workspace-tile ${selectedID === item.id ? 'selected' : ''}`}
+                    style={{ padding: '0.5rem', cursor: 'pointer' }}
+                  >
+                    <Tag type={STATE_COLORS[item.state] || 'gray'} size="sm">{item.at_risk ? 'at risk' : item.state}</Tag>
+                    {(item.scope_kind === 'organization' || item.scope_kind === 'org_unit') && (
+                      <Tag type="purple" size="sm" title={item.scope_id}>
+                        {item.scope_kind === 'organization' ? (t('knowledge.scope_organization') ?? 'organization') : (org.nameOf(item.scope_id))}
+                      </Tag>
+                    )}
+                    <strong style={{ fontSize: '0.875rem', marginLeft: '0.35rem' }}>{item.proposition}</strong>
+                    <br />
+                    <small style={{ color: 'var(--tm-text-3)' }}>
+                      {item.history.length} events · reused {item.reuse_count} · hints {item.hint_uses}/{item.hint_offers}
+                    </small>
+                  </Tile>
+                ))}
+              </Stack>
+            )}
+            {listKnowledge.length === 0 && !listLoading && (
+              <div style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '2rem 1rem' }}>
+                <p>{t('knowledge.no_results') ?? 'No results. Try a different query or filters.'}</p>
+              </div>
+            )}
+            {(listCursor || listTotal > 0) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.75rem' }}>
+                {listCursor && (
+                  <Button size="sm" kind="ghost" onClick={() => void loadList(false)} disabled={listLoading}>
+                    {t('knowledge.load_more') ?? 'Load more'}
+                  </Button>
+                )}
+                {listTotal > 0 && (
                   <small style={{ color: 'var(--tm-text-3)' }}>
-                    {item.history.length} events · reused {item.reuse_count} · hints {item.hint_uses}/{item.hint_offers}
+                    {t('knowledge.showing') ?? 'Showing'}: {listKnowledge.length} / {listTotal}
                   </small>
-                </Tile>
-              ))}
-            </Stack>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Right: detail panel — sticky so it stays visible while left list scrolls */}

@@ -67,6 +67,9 @@ export interface ObservationHint {
   history: KnowledgeTransition[]
 }
 
+export interface KnowledgeFacets { states: Record<string, number>; scopes: Record<string, number> }
+export interface KnowledgeListFilters { q?: string; state?: string; scope?: string; limit?: number; cursor?: string }
+
 async function request<T>(path: string, init?: RequestInit, query?: Record<string, string | number | undefined>): Promise<T> {
   const response = await fetch(apiUrl(path, query), {
     ...init,
@@ -90,8 +93,12 @@ export const observationApi = {
     if (!event) throw new Error('Source event was not found')
     return event
   },
-  knowledge: (project: string, asOf?: string, knownAt?: string) => request<{ knowledge: KnowledgeItem[]; count: number }>(
-    '/v1/observations/knowledge', undefined, { project, as_of: asOf, known_at: knownAt }),
+  knowledge: (project: string, asOf?: string, knownAt?: string, filters?: KnowledgeListFilters) => request<{ knowledge: KnowledgeItem[]; count: number; total?: number; next_cursor?: string; facets?: KnowledgeFacets }>(
+    '/v1/observations/knowledge', undefined, {
+      project, as_of: asOf, known_at: knownAt,
+      q: filters?.q, state: filters?.state, scope: filters?.scope,
+      limit: filters?.limit, cursor: filters?.cursor,
+    }),
   invalidate: (body: { knowledge_id: string; project: string; actor: ObservationActor; reason: string; evidence?: ObservationEvidence[] }) =>
     post<ObservationEvent>('/v1/observations/knowledge/invalidate', body),
   promote: (body: { knowledge_id: string; project: string; actor: ObservationActor; scope_kind: 'org_unit' | 'organization'; scope_id?: string; reason: string; evidence?: ObservationEvidence[] }) =>
