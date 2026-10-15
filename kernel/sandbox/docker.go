@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -123,7 +124,20 @@ func newDocker(image, root string, createRoot bool) (*Docker, error) {
 	if err != nil || !info.IsDir() {
 		return nil, errors.New("KERNEL_SANDBOX_ROOT must be an existing directory")
 	}
-	return &Docker{Root: resolved, Image: image, Binary: env("KERNEL_DOCKER_BINARY", "docker"), Memory: env("KERNEL_SANDBOX_MEMORY", "1g"), CPUs: env("KERNEL_SANDBOX_CPUS", "2"), PIDs: 128, UID: os.Getuid(), GID: os.Getgid(), ScratchSize: env("KERNEL_SANDBOX_SCRATCH_SIZE", "512m"), TmpSize: env("KERNEL_SANDBOX_TMP_SIZE", "256m")}, nil
+	return &Docker{Root: resolved, Image: image, Binary: env("KERNEL_DOCKER_BINARY", "docker"), Memory: env("KERNEL_SANDBOX_MEMORY", "1g"), CPUs: clampCPUs(env("KERNEL_SANDBOX_CPUS", "2"), runtime.NumCPU()), PIDs: 128, UID: os.Getuid(), GID: os.Getgid(), ScratchSize: env("KERNEL_SANDBOX_SCRATCH_SIZE", "512m"), TmpSize: env("KERNEL_SANDBOX_TMP_SIZE", "256m")}, nil
+}
+
+// clampCPUs keeps the --cpus quota inside what the docker daemon accepts.
+// The daemon rejects any quota above the CPUs it can see ("range of CPUs is
+// from 0.01 to N.00"), so a default or configured "2" on a 1-CPU host bricks
+// every run_command with a docker error. Values that do not parse stay
+// untouched — docker must surface that misconfiguration, not us.
+func clampCPUs(requested string, available int) string {
+	quota, err := strconv.ParseFloat(strings.TrimSpace(requested), 64)
+	if err != nil || quota <= 0 || quota <= float64(available) {
+		return requested
+	}
+	return strconv.FormatFloat(float64(available), 'f', -1, 64)
 }
 
 func validateImage(image string) error {

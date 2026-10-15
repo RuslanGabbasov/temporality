@@ -33,6 +33,30 @@ func TestNewFromEnvImageWithoutRootFails(t *testing.T) {
 	}
 }
 
+func TestClampCPUsStaysWithinDaemonAvailability(t *testing.T) {
+	// The daemon rejects quotas above the CPUs it can see; on a 1-CPU host
+	// the default "2" bricks every run_command until the quota is clamped.
+	cases := []struct {
+		requested string
+		available int
+		want      string
+	}{
+		{"2", 1, "1"},
+		{"2", 8, "2"},
+		{"0.5", 1, "0.5"},
+		{"2.50", 2, "2"},
+		{" 2 ", 1, "1"},
+		{"garbage", 1, "garbage"},
+		{"0", 1, "0"},
+		{"-1", 8, "-1"},
+	}
+	for _, tc := range cases {
+		if got := clampCPUs(tc.requested, tc.available); got != tc.want {
+			t.Errorf("clampCPUs(%q, %d) = %q, want %q", tc.requested, tc.available, got, tc.want)
+		}
+	}
+}
+
 func TestExecuteCapturesCommandAndAlwaysRemovesContainer(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(root, "repo")
