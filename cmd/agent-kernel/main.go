@@ -5445,7 +5445,15 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"messages": messages})
+		// Status counters are independent of the list limit: the inbox shows
+		// them on the filter chips, so a bounded list does not hide the scale.
+		response := map[string]any{"messages": messages}
+		if counts, cErr := ws.InboundMessageStatusCounts(r.Context()); cErr != nil {
+			log.Warn("inbound message status counts", "error", cErr)
+		} else {
+			response["counts"] = counts
+		}
+		writeJSON(w, 200, response)
 	})
 	mux.HandleFunc("POST /v1/workspace/human-requests", func(w http.ResponseWriter, r *http.Request) {
 		// Upsert from the notification activity (internal token): creates the

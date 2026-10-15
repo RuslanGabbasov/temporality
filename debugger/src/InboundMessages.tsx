@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { Button, InlineNotification, Tag } from '@carbon/react'
 import { Renew } from '@carbon/icons-react'
 import { workspaceApi, type InboundMessage } from './workspaceApi'
@@ -18,6 +18,10 @@ const STATUS_TAG: Record<string, 'blue' | 'green' | 'warm-gray' | 'red' | 'purpl
   expired: 'warm-gray',
 }
 
+// The list pages in instead of rendering the whole wall of rows; the filter
+// chips carry the full per-status counters, so the scale stays visible.
+const PAGE_SIZE = 50
+
 /**
  * Intake inbox (docs/inbound-messages.md §11): channel-initiative messages and
  * where the intake pipeline took them — classification, clarification and the
@@ -28,16 +32,23 @@ export default function InboundMessages() {
   const t = useT()
   const { locale } = useI18n()
   const [rows, setRows] = useState<InboundMessage[]>([])
+  const [counts, setCounts] = useState<Record<string, number>>({})
+  const [userNames, setUserNames] = useState<Record<string, string>>({})
   const [status, setStatus] = useState('')
+  const [limit, setLimit] = useState(PAGE_SIZE)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const load = async (withStatus = status) => {
+  const load = async (withStatus = status, withLimit = limit) => {
     setLoading(true)
     setError('')
     try {
-      const data = await workspaceApi.listInboundMessages(withStatus ? { status: withStatus } : undefined)
+      const data = await workspaceApi.listInboundMessages({
+        ...(withStatus ? { status: withStatus } : {}),
+        limit: withLimit,
+      })
       setRows(data.messages ?? [])
+      setCounts(data.counts ?? {})
     } catch (e) {
       setError(message(e))
     } finally {
@@ -45,7 +56,29 @@ export default function InboundMessages() {
     }
   }
 
-  useEffect(() => { void load('') }, [])
+  useEffect(() => { void load('', PAGE_SIZE) }, [])
+  // Sender logins → display names via the user directory (closed world); a
+  // failure degrades to plain logins rather than breaking the inbox.
+  useEffect(() => {
+    void workspaceApi.listUsers()
+      .then((data) => setUserNames(Object.fromEntries((data.users ?? []).map((u) => [u.id, u.name]))))
+      .catch(() => setUserNames({}))
+  }, [])
+
+  const countFor = (s: string) => (s ? (counts[s] ?? 0) : Object.values(counts).reduce((sum, n) => sum + n, 0))
+  const remaining = countFor(status) - rows.length
+
+  const selectStatus = (s: string) => {
+    setStatus(s)
+    setLimit(PAGE_SIZE)
+    void load(s, PAGE_SIZE)
+  }
+
+  const showMore = () => {
+    const next = limit + PAGE_SIZE
+    setLimit(next)
+    void load(status, next)
+  }
 
   const time = (iso: string) => {
     try { return new Date(iso).toLocaleString(locale === 'ru' ? 'ru-RU' : 'en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) } catch { return iso }
@@ -53,6 +86,16 @@ export default function InboundMessages() {
 
   const statusLabel = (s: string) => t(`inbound.status_${s}`) ?? s
   const classLabel = (c: string) => t(`inbound.class_${c}`) ?? c
+
+  const chipStyle = (active: boolean): CSSProperties => ({
+    background: active ? 'var(--tm-teal)' : 'transparent',
+    border: '1px solid var(--tm-border)',
+    borderRadius: '999px',
+    padding: '0.2rem 0.75rem',
+    cursor: 'pointer',
+    color: active ? '#FFFFFF' : 'var(--tm-text-2)',
+    fontSize: '0.75rem',
+  })
 
   const openRun = (project: string, run: string) => {
     const query = new URLSearchParams({ project, run })
@@ -75,22 +118,12 @@ export default function InboundMessages() {
       </div>
 
       <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', margin: '1rem 0' }}>
-        <button
-          type="button"
-          data-active={status === '' ? 'true' : 'false'}
-          onClick={() => { setStatus(''); void load('') }}
-          style={{ border: '1px solid var(--tm-border)', borderRadius: '999px', padding: '0.2rem 0.75rem', cursor: 'pointer', color: status === '' ? '#FFFFFF' : 'var(--tm-text-2)', background: status === '' ? 'var(--tm-teal)' : 'transparent', fontSize: '0.75rem' }}
-        >
-          {t('inbound.filter_all') ?? 'All'}
+        <button type="button" data-active={status === '' ? 'true' : 'false'} onClick={() => selectStatus('')} style={chipStyle(status === '')}>
+          {t('inbound.filter_all') ?? 'All'}{countFor('') > 0 ? ` · ${countFor('')}` : ''}
         </button>
         {STATUS_ORDER.map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => { setStatus(s); void load(s) }}
-            style={{ background: status === s ? 'var(--tm-teal)' : 'transparent', border: '1px solid var(--tm-border)', borderRadius: '999px', padding: '0.2rem 0.75rem', cursor: 'pointer', color: status === s ? '#FFFFFF' : 'var(--tm-text-2)', fontSize: '0.75rem' }}
-          >
-            {statusLabel(s)}
+          <button key={s} type="button" onClick={() => selectStatus(s)} style={chipStyle(status === s)}>
+            {statusLabel(s)}{counts[s] ? ` · ${counts[s]}` : ''}
           </button>
         ))}
       </div>
@@ -109,7 +142,7 @@ export default function InboundMessages() {
               <Tag size="sm" type="gray">{row.channel}</Tag>
               <span style={{ fontSize: '0.8rem' }}>
                 {row.sender_user_id
-                  ? <strong>{row.sender_user_id}</strong>
+                  ? <strong title={row.sender_user_id}>{userNames[row.sender_user_id] || row.sender_user_id}</strong>
                   : <span title={row.sender_raw} style={{ color: 'var(--tm-text-3)' }}>{row.sender_raw || '—'}</span>}
               </span>
               {row.classification && <Tag size="sm" type="cool-gray">{classLabel(row.classification)}</Tag>}
@@ -151,6 +184,14 @@ export default function InboundMessages() {
           </div>
         ))}
       </div>
+
+      {!loading && remaining > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.75rem' }}>
+          <Button size="sm" kind="secondary" onClick={showMore}>
+            {t('inbound.show_more') ?? 'Show more'} ({remaining})
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

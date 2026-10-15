@@ -968,7 +968,7 @@ export const workspaceApi = {
     if (params?.channel) query.set('channel', params.channel)
     if (params?.limit) query.set('limit', String(params.limit))
     const suffix = query.size > 0 ? `?${query.toString()}` : ''
-    return request<{ messages: InboundMessage[] }>(`/v1/workspace/inbound-messages${suffix}`)
+    return request<{ messages: InboundMessage[]; counts?: Record<string, number> }>(`/v1/workspace/inbound-messages${suffix}`)
   },
 
   // Org structure (docs/org-structure.md §38-39)

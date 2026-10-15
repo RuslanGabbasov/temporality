@@ -191,6 +191,27 @@ func (s *Store) ListInboundMessages(ctx context.Context, status, channel string,
 	return result, rows.Err()
 }
 
+// InboundMessageStatusCounts counts rows per status for the inbox filter
+// chips: the list itself is bounded by a limit, the counters are not, so the
+// inbox can show "Rejected · 214" without loading the whole wall of rows.
+func (s *Store) InboundMessageStatusCounts(ctx context.Context) (map[string]int, error) {
+	rows, err := s.pool.Query(ctx, `SELECT status, COUNT(*) FROM workspace_inbound_message GROUP BY status`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := map[string]int{}
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		counts[status] = count
+	}
+	return counts, rows.Err()
+}
+
 // itoa avoids importing strconv for the two callers in this file.
 func itoa(n int) string {
 	if n < 10 {
