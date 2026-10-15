@@ -670,14 +670,17 @@ export default function Layout({ children, activePage }: LayoutProps) {
                     </div>
                   ))}
                   {identity?.user_id && (
-                    <div
-                      onClick={() => { setShowChannels(true); setShowUserMenu(false) }}
-                      style={{ padding: '0.4rem 0.5rem 0.4rem 1.2rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-text-2)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <span style={{ width: '0.75rem', textAlign: 'center', fontSize: '0.7rem' }} />{t('channels.menu') ?? 'Notification channels'}
-                    </div>
+                    <>
+                      <div style={{ padding: '0.4rem 0.5rem', fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.25rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.5rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('settings.notifications') ?? 'Notifications'}</div>
+                      <div
+                        onClick={() => { setShowChannels(true); setShowUserMenu(false) }}
+                        style={{ padding: '0.3rem 0.5rem 0.3rem 1.2rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-text-2)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <span style={{ width: '0.75rem', textAlign: 'center', fontSize: '0.7rem' }} />{t('channels.menu') ?? 'Notification channels'}
+                      </div>
+                    </>
                   )}
                   <div
                     onClick={() => { loggedIn ? doLogout() : setShowLogin(true); setShowUserMenu(false) }}

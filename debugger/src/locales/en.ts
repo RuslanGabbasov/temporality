@@ -1252,6 +1252,7 @@ export const en: Record<string, string> = {
     'settings.light': 'Light',
     'settings.dark': 'Dark',
     'settings.system': 'System',
+    'settings.notifications': 'Notifications',
 
     // Status
     'status.completed': 'completed',

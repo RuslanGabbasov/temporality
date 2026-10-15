@@ -1252,6 +1252,7 @@ export const ru: Record<string, string> = {
     'settings.light': 'Светлая',
     'settings.dark': 'Тёмная',
     'settings.system': 'Системная',
+    'settings.notifications': 'Уведомления',
 
     // Status
     'status.completed': 'завершён',
