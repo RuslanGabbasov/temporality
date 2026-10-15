@@ -442,10 +442,10 @@ export default function Artifacts() {
                 onChange={(v: string) => setForm({ ...form, org_unit_id: v })}
               />
             )}
-            <Stack orientation="horizontal" gap={2}>
+            <div className="form-actions">
               <Button onClick={() => void save()} disabled={!form.title?.trim() || (!editing && !form.id?.trim()) || ((form.provider ?? 'builtin') === 'url' ? !form.external_ref?.trim() : !form.content?.trim())}>{t('action.save') ?? 'Save'}</Button>
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
-            </Stack>
+            </div>
           </Stack>
         </AppModal>
       )}
@@ -529,10 +529,10 @@ export default function Artifacts() {
               rows={2}
               placeholder={t('artifacts.submit_note_placeholder') ?? 'Why this deserves approval now'}
             />
-            <Stack orientation="horizontal" gap={2}>
+            <div className="form-actions">
               <Button disabled={busy || submitReviewers.trim() === ''} onClick={() => void submit()}>{t('artifacts.submit_review') ?? 'Send to review'}</Button>
               <Button kind="secondary" onClick={() => setSubmitOpen(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
-            </Stack>
+            </div>
           </Stack>
         </AppModal>
       )}

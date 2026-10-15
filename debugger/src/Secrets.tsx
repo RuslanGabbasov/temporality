@@ -207,10 +207,10 @@ export default function Secrets() {
                 onChange={(v: string) => setForm({ ...form, org_unit_id: v })}
               />
             )}
-            <Stack orientation="horizontal" gap={2}>
+            <div className="form-actions">
               <Button onClick={() => void save()} disabled={!form.name?.trim()}>{t('action.save') ?? 'Save'}</Button>
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
-            </Stack>
+            </div>
           </Stack>
         </AppModal>
       )}
