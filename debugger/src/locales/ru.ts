@@ -841,7 +841,7 @@ export const ru: Record<string, string> = {
     'artifacts.origin_human': 'человек{{user}}',
     'artifacts.saga_prefix': 'сага',
     'artifacts.saga_label': 'Сага',
-    'artifacts.saga_helper': 'Необязательно: сага, к которой относится рабочий продукт; общекомпанейские и отделенческие регламенты саги не имеют',
+    'artifacts.saga_helper': 'Необязательно: сага, к которой относится рабочий продукт; регламентам для всей компании или отдельного подразделения сага не нужна',
     'artifacts.saga_helper_edit': 'Сага, к которой относится рабочий продукт; очистите поле, чтобы отвязать — у регламентов саги обычно нет',
     'artifacts.submit_review': 'На согласование',
     'artifacts.open_reviews': 'Очередь согласования',
