@@ -720,6 +720,9 @@ func main() {
 			Project: req.Project,
 			TaskID:  runID,
 			Prompt:  req.Goal,
+			// The goal is the team run's display title — no title-model call
+			// needed for program runs.
+			Title: req.Goal,
 			Team: &agent.TeamRunInput{
 				TeamID:   team.ID,
 				TeamName: team.Name,
@@ -2463,7 +2466,14 @@ func main() {
 			return
 		}
 		if req.ID == "" {
-			req.ID = slugify(req.Title) + "-" + time.Now().UTC().Format("20060102-150405")
+			// Transliterate first: slugify drops non-Latin runes, so a Cyrillic
+			// title would collapse to "untitled". Cap the slug so the id stays
+			// readable next to its timestamp suffix.
+			slug := slugify(translit(req.Title))
+			if runes := []rune(slug); len(runes) > 48 {
+				slug = string(runes[:48])
+			}
+			req.ID = slug + "-" + time.Now().UTC().Format("20060102-150405")
 		}
 		// Ensure project exists in workspace (auto-create from journal scope).
 		if _, err := ws.GetProject(r.Context(), req.ProjectID); err != nil {
@@ -2576,6 +2586,7 @@ func main() {
 			Project: task.ProjectID,
 			TaskID:  task.ID,
 			Prompt:  task.Prompt,
+			Title:   task.Title,
 		}
 		applyAgentConfig(r.Context(), ws, agentCfg, &input)
 		applyProjectModel(r.Context(), ws, task.ProjectID, &input)
@@ -4853,6 +4864,7 @@ func main() {
 			writeError(w, 500, err)
 			return
 		}
+		input.Title = task.Title
 		input.ExecutionIdentityID = identityID
 		triggerEventData["execution_identity_id"] = identityID
 		emitTriggerEvent("trigger.accepted", "000001", triggerEventData)
@@ -4939,6 +4951,7 @@ func main() {
 					slog.Error("create trigger task", "trigger", t.ID, "error", err)
 					continue
 				}
+				input.Title = task.Title
 				input.ExecutionIdentityID = identityID
 				workflowID := workflowIDFor(activities.SourceID, t.ProjectID, input.RunID)
 				options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
@@ -7891,7 +7904,9 @@ func slugify(name string) string {
 			prevDash = true
 		}
 	}
-	result := strings.TrimRight(b.String(), "-")
+	// Trim both ends: a title opening with an emoji or quote used to leave a
+	// leading dash ("-12-cpu-2026…" run ids).
+	result := strings.Trim(b.String(), "-")
 	if result == "" {
 		return "untitled"
 	}

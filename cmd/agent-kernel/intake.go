@@ -750,6 +750,9 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 		input := agent.RunInput{
 			RunID: runID, Project: body.ProjectID, TaskID: taskID,
 			Prompt: prompt, ActorID: sender.ID,
+			// The intake agent already resolved a task title from the message —
+			// reuse it instead of gambling on the title-model call.
+			Title: body.Title,
 		}
 		applyAgentConfig(req.Context(), r.ws, agentCfg, &input)
 		applyProjectModel(req.Context(), r.ws, body.ProjectID, &input)

@@ -54,11 +54,15 @@ const (
 )
 
 type RunInput struct {
-	RunID                  string        `json:"run_id"`
-	Project                string        `json:"project"`
-	TaskID                 string        `json:"task_id"`
-	ActorID                string        `json:"actor_id"`
-	Prompt                 string        `json:"prompt"`
+	RunID   string `json:"run_id"`
+	Project string `json:"project"`
+	TaskID  string `json:"task_id"`
+	ActorID string `json:"actor_id"`
+	Prompt  string `json:"prompt"`
+	// Title is the owning task's display title. When present it becomes the
+	// run title directly — no model call, so a slow provider never leaves the
+	// Runs list with bare agent names (runtitle fallback ladder).
+	Title                  string        `json:"title,omitempty"`
 	Model                  string        `json:"model,omitempty"`
 	MaxTurns               int           `json:"max_turns,omitempty"`
 	Tools                  []llm.ToolDef `json:"tools,omitempty"`
@@ -315,12 +319,23 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	}
 	if input.ParentRunID == "" {
 		// Root runs get a short human title for the Runs list; delegated child
-		// runs are shown inside their parent. Best effort only: on any failure
-		// the UI falls back to the run ID, so this must not fail the run.
-		titleCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 25 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
-		var title string
-		if err := workflow.ExecuteActivity(titleCtx, ActivityGenerateTitle, TitleRequest{Prompt: input.Prompt}).Get(ctx, &title); err == nil && strings.TrimSpace(title) != "" {
-			started["title"] = strings.TrimSpace(title)
+		// runs are shown inside their parent. Ladder: the task's own title
+		// (deterministic, no model) → one minimal model call over the prompt →
+		// heuristic first line of the prompt. Best effort only: on total failure
+		// the UI falls back to the agent name, so this must not fail the run.
+		title := cleanTitle(input.Title)
+		if title == "" {
+			titleCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 25 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+			var modelTitle string
+			if err := workflow.ExecuteActivity(titleCtx, ActivityGenerateTitle, TitleRequest{Prompt: input.Prompt}).Get(ctx, &modelTitle); err == nil {
+				title = strings.TrimSpace(modelTitle)
+			}
+		}
+		if title == "" {
+			title = HeuristicTitle(input.Prompt)
+		}
+		if title != "" {
+			started["title"] = title
 		}
 	}
 	if err := emit(activityCtx, state, "run.started", started); err != nil {

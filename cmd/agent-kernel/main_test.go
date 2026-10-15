@@ -150,3 +150,22 @@ func TestIntakeEnvParsers(t *testing.T) {
 		}
 	})
 }
+
+func TestSlugifyTrimsLeadingDashes(t *testing.T) {
+	// A title opening with an emoji or quote used to leave a leading dash:
+	// run ids like "-12-cpu-2026…".
+	cases := []struct{ name, in, want string }{
+		{"leading separator", " 12 cpu quota fix", "12-cpu-quota-fix"},
+		{"emoji opener", "🔥 hotfix login", "hotfix-login"},
+		{"cyrillic collapses without translit", "Починить вход", "untitled"},
+		{"translit composed by caller", slugify(translit("Конкуренты и план")), "konkurenty-i-plan"},
+		{"plain", "Fix Login Timeout", "fix-login-timeout"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := slugify(tc.in); got != tc.want {
+				t.Fatalf("slugify(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

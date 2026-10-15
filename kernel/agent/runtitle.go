@@ -70,6 +70,28 @@ func truncateRunes(s string, limit int) string {
 	return string([]rune(s)[:limit])
 }
 
+// HeuristicTitle derives a display title from the task prompt without any
+// model call: the first meaningful line, stripped of the transcript's role
+// markers. It is the deterministic last-resort fallback — a slow or missing
+// provider must never leave the Runs list showing bare agent names instead
+// of what the run was about.
+func HeuristicTitle(prompt string) string {
+	for _, line := range strings.Split(prompt, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Chat runs carry the whole conversation as the prompt; the opening
+		// "User:" marker is packaging, not content.
+		line = strings.TrimSpace(strings.TrimPrefix(line, "User:"))
+		if line == "" {
+			continue
+		}
+		return cleanTitle(line)
+	}
+	return ""
+}
+
 // cleanTitle normalizes a raw model reply into a display title; "" means no
 // usable title and the caller falls back to the run ID.
 func cleanTitle(raw string) string {

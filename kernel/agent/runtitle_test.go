@@ -40,6 +40,22 @@ func TestGenerateRunTitleWithoutModelClient(t *testing.T) {
 	require.Empty(t, title)
 }
 
+func TestHeuristicTitle(t *testing.T) {
+	cases := []struct{ name, prompt, want string }{
+		{"first line", "Fix the login timeout\nThen verify with tests", "Fix the login timeout"},
+		{"skips blank lines", "\n\n  \nПочинить вход\nостальное", "Починить вход"},
+		{"strips chat user marker", "User: Подготовь смету на разработку\n\nAssistant: готово", "Подготовь смету на разработку"},
+		{"user marker alone is not a title", "User:\n\nРеальная задача", "Реальная задача"},
+		{"capped and cleaned", `"Fix login timeout."`, "Fix login timeout"},
+		{"empty prompt", "   \n\n", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, HeuristicTitle(tc.prompt))
+		})
+	}
+}
+
 func TestTruncateRunesNeverSplitsCharacters(t *testing.T) {
 	// Cyrillic is 2 bytes per rune: a byte-level cut would produce invalid UTF-8.
 	long := strings.Repeat("ф", 10)
