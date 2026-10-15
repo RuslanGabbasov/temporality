@@ -21,6 +21,7 @@ import { Add, Edit, TrashCan, Copy, Star, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
+import { useConfirm } from './ConfirmDialog'
 import {
   workspaceApi,
   type Agent,
@@ -106,6 +107,7 @@ function sameList(a?: string[], b?: string[]) {
 
 export default function Agents({ project, defaultAgentId, refreshProjects }: { project: string; defaultAgentId?: string; refreshProjects?: () => void }) {
   const t = useT()
+  const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
   const org = useOrgUnits()
   const [agents, setAgents] = useState<Agent[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
@@ -377,7 +379,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   }
 
   const deleteAgent = async (agent: Agent) => {
-    if (!confirm(t('agents.delete_confirm', { name: agent.name }) ?? `Delete agent "${agent.name}"?`)) return
+    if (!(await confirmDialog({ title: t('agents.delete_confirm', { name: agent.name }) ?? `Delete agent "${agent.name}"?`, body: t('action.delete_warning') ?? 'This cannot be undone.', danger: true, confirmLabel: t('action.delete') ?? 'Delete' }))) return
     setLoading(true); setError('')
     try {
       await workspaceApi.deleteAgent(agent.id)
@@ -724,6 +726,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
 
   return (
     <div style={{ padding: '1rem' }}>
+      {confirmDialogNode}
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -957,7 +960,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                                     size="sm"
                                     disabled={proposalBusy}
                                     onClick={() => {
-                                      if (confirm(t('agents.proposal_apply_confirm') ?? 'Apply this proposal? The definition version will increase and a snapshot will be stored.')) void applyProposal(p)
+                                      void (async () => {
+                                        if (await confirmDialog({ title: t('agents.proposal_apply_confirm_title') ?? 'Apply proposal?', body: t('agents.proposal_apply_confirm') ?? 'Apply this proposal? The definition version will increase and a snapshot will be stored.', confirmLabel: t('agents.proposal_apply') ?? 'Apply' })) void applyProposal(p)
+                                      })()
                                     }}
                                   >
                                     {t('agents.proposal_apply') ?? 'Apply'}
@@ -967,7 +972,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                                     kind="secondary"
                                     disabled={proposalBusy}
                                     onClick={() => {
-                                      if (confirm(t('agents.proposal_reject_confirm') ?? 'Reject this proposal? It stays in history and can never be applied.')) void rejectProposal(p)
+                                      void (async () => {
+                                        if (await confirmDialog({ title: t('agents.proposal_reject_confirm_title') ?? 'Reject proposal?', body: t('agents.proposal_reject_confirm') ?? 'Reject this proposal? It stays in history and can never be applied.', danger: true, confirmLabel: t('agents.proposal_reject') ?? 'Reject' })) void rejectProposal(p)
+                                      })()
                                     }}
                                   >
                                     {t('agents.proposal_reject') ?? 'Reject'}

@@ -16,6 +16,7 @@ import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type 
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
+import { useConfirm } from './ConfirmDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge, type OrgUnitsState } from './orgUnits'
 import Markdown from './Markdown'
 import SkillManifestEditor, { manifestToYaml, type SkillManifest, type ManifestSuggestions, type SectionProvenance } from './SkillManifestEditor'
@@ -113,6 +114,7 @@ function diffMarkdownCounts(from: string, to: string): [number, number] {
 
 export default function Skills() {
   const t = useT()
+  const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
   const org = useOrgUnits()
   const [skills, setSkills] = useState<Skill[]>([])
   const [selected, setSelected] = useState<Skill | null>(null)
@@ -317,7 +319,7 @@ export default function Skills() {
   }
 
   const remove = async (skill: Skill) => {
-    if (!confirm(t('skills.delete_confirm', { name: skill.name }) ?? `Delete skill "${skill.name}"?`)) return
+    if (!(await confirmDialog({ title: t('skills.delete_confirm', { name: skill.name }) ?? `Delete skill "${skill.name}"?`, body: t('action.delete_warning') ?? 'This cannot be undone.', danger: true, confirmLabel: t('action.delete') ?? 'Delete' }))) return
     setLoading(true); setError('')
     try {
       await workspaceApi.deleteSkill(skill.id)
@@ -404,6 +406,7 @@ export default function Skills() {
 
   return (
     <div style={{ padding: '1rem' }}>
+      {confirmDialogNode}
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -646,15 +649,21 @@ export default function Skills() {
                                   {isDraft ? (
                                     <>
                                       <Button size="sm" onClick={() => {
-                                        if (confirm(t('skills.apply_confirm', { version: version.version }) ?? `Apply draft ${version.version}? It becomes the current revision for all agents.`)) void applyVersion(selected, version.version)
+                                        void (async () => {
+                                          if (await confirmDialog({ title: t('skills.apply_confirm_title', { version: version.version }) ?? `Apply draft ${version.version}?`, body: t('skills.apply_confirm', { version: version.version }) ?? `It becomes the current revision for all agents.`, confirmLabel: t('skills.apply') ?? 'Apply' })) void applyVersion(selected, version.version)
+                                        })()
                                       }}>{t('skills.apply') ?? 'Apply'}</Button>
                                       <Button size="sm" kind="danger" onClick={() => {
-                                        if (confirm(t('skills.reject_confirm', { version: version.version }) ?? `Reject draft ${version.version}? It stays in history and can no longer be applied.`)) void rejectVersion(selected, version.version)
+                                        void (async () => {
+                                          if (await confirmDialog({ title: t('skills.reject_confirm_title', { version: version.version }) ?? `Reject draft ${version.version}?`, body: t('skills.reject_confirm', { version: version.version }) ?? `It stays in history and can no longer be applied.`, danger: true, confirmLabel: t('skills.reject') ?? 'Reject' })) void rejectVersion(selected, version.version)
+                                        })()
                                       }}>{t('skills.reject') ?? 'Reject'}</Button>
                                     </>
                                   ) : (
                                     <Button size="sm" kind="secondary" onClick={() => {
-                                      if (confirm(t('skills.rollback_confirm', { version: version.version }) ?? `Make version ${version.version} the current revision?`)) void applyVersion(selected, version.version)
+                                      void (async () => {
+                                        if (await confirmDialog({ title: t('skills.rollback_confirm_title', { version: version.version }) ?? `Make version ${version.version} current?`, body: t('skills.rollback_confirm', { version: version.version }) ?? `Version ${version.version} becomes the current revision for all agents.`, confirmLabel: t('skills.rollback') ?? 'Roll back' })) void applyVersion(selected, version.version)
+                                      })()
                                     }}>{t('skills.rollback') ?? 'Roll back to this version'}</Button>
                                   )}
                                 </div>

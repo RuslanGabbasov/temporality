@@ -19,6 +19,7 @@ import { workspaceApi, type Secret } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
+import { useConfirm } from './ConfirmDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -27,6 +28,7 @@ type SecretForm = Partial<Secret> & { value?: string }
 
 export default function Secrets() {
   const t = useT()
+  const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
   const org = useOrgUnits()
   const [secrets, setSecrets] = useState<Secret[]>([])
   const [loading, setLoading] = useState(false)
@@ -89,7 +91,7 @@ export default function Secrets() {
   }
 
   const remove = async (s: Secret) => {
-    if (!confirm(t('secrets.delete_confirm', { name: s.name }) ?? `Delete secret "${s.name}"?`)) return
+    if (!(await confirmDialog({ title: t('secrets.delete_confirm', { name: s.name }) ?? `Delete secret "${s.name}"?`, body: t('action.delete_warning') ?? 'This cannot be undone.', danger: true, confirmLabel: t('action.delete') ?? 'Delete' }))) return
     setLoading(true); setError('')
     try {
       await workspaceApi.deleteSecret(s.id)
@@ -100,6 +102,7 @@ export default function Secrets() {
 
   return (
     <div style={{ padding: '1rem' }}>
+      {confirmDialogNode}
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>

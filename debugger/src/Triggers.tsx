@@ -22,6 +22,7 @@ import { INTAKE_PROJECT_ID } from './kernelApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
+import { useConfirm } from './ConfirmDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 import { observationApi, type ObservationEvent } from './observationApi'
 
@@ -50,6 +51,7 @@ const deliveryTime = (iso: string) => {
 
 export default function Triggers({ project }: { project: string }) {
   const t = useT()
+  const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
   const org = useOrgUnits()
   const [triggers, setTriggers] = useState<Trigger[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
@@ -159,7 +161,7 @@ export default function Triggers({ project }: { project: string }) {
   }
 
   const remove = async (trigger: Trigger) => {
-    if (!confirm(t('triggers.delete_confirm', { name: trigger.name }) ?? `Delete trigger "${trigger.name}"?`)) return
+    if (!(await confirmDialog({ title: t('triggers.delete_confirm', { name: trigger.name }) ?? `Delete trigger "${trigger.name}"?`, body: t('action.delete_warning') ?? 'This cannot be undone.', danger: true, confirmLabel: t('action.delete') ?? 'Delete' }))) return
     setLoading(true); setError('')
     try {
       await workspaceApi.deleteTrigger(trigger.id)
@@ -217,6 +219,7 @@ export default function Triggers({ project }: { project: string }) {
 
   return (
     <div style={{ padding: '1rem' }}>
+      {confirmDialogNode}
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>

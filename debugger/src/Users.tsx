@@ -18,6 +18,7 @@ import { workspaceApi, type User } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
+import { useConfirm } from './ConfirmDialog'
 import { copyText } from './clipboard'
 import ChannelsDialog, { ChannelBadges } from './ChannelsDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
@@ -26,6 +27,7 @@ function message(error: unknown) { return error instanceof Error ? error.message
 
 export default function Users() {
   const t = useT()
+  const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
   const org = useOrgUnits()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(false)
@@ -90,7 +92,7 @@ export default function Users() {
   }
 
   const remove = async (u: User) => {
-    if (!confirm(t('users.delete_confirm', { name: u.name }) ?? `Delete user "${u.name}"?`)) return
+    if (!(await confirmDialog({ title: t('users.delete_confirm', { name: u.name }) ?? `Delete user "${u.name}"?`, body: t('action.delete_warning') ?? 'This cannot be undone.', danger: true, confirmLabel: t('action.delete') ?? 'Delete' }))) return
     setLoading(true); setError('')
     try {
       await workspaceApi.deleteUser(u.id)
@@ -132,6 +134,7 @@ export default function Users() {
 
   return (
     <div style={{ padding: '1rem' }}>
+      {confirmDialogNode}
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
