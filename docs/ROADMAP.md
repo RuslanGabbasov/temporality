@@ -54,6 +54,20 @@
 - [x] **Sandbox security matrix** — matrix doc + args/timeout/credentials/network tests incl. live egress check (`docs/sandbox-security-matrix.md`)
 - [x] **Knowledge reinforcement live check** — scenario B of `docs/knowledge-evolution.md` §11 verified live in `smoke-a`: deterministic `auto/` execution observation proposed in run 2, confirmed by `execution-reverification.v1` in run 3 (`scripts/audit_knowledge_live.py` → `reinforced: 1`)
 
+### Done (Experience & platform wave, Oct 2026)
+
+- [x] **Web research** — three phases shipped: `web_fetch` (readability → markdown, SSRF guards), `web_search` over self-hosted SearXNG with rate limiting, vision (`view_image` / `fetch_image`, images as content blocks) and `browser` — a headless browser over a CDP contract (Lightpanda by default) for JS-rendered pages (`docs/web-research.md`)
+- [x] **Agent quality loop** — eval-gated apply of evolution proposals (fresh green run required, suite/base staleness checks, writer override with justification is audited), golden cases with `stale_after`, LLM judge with calibration endpoints and verdict/judge agreement, per-version quality dashboard (`docs/agent-quality-loop.md`)
+- [x] **Artifact registry** — reference documents (regulations, instructions, checklists) that skill manifests point at without inlining into prompts: CRUD + org visibility, `artifact_search` / `artifact_read` chunked agent reads with `artifact.read` auditing, kernel-proxied url provider with a TTL cache, registry UI with "used by N skills" badges (`docs/artifact-registry.md`)
+- [x] **Sagas** — explicitly registered long-running efforts: `saga_register` / `saga_attach` / `saga_list` agent tools, task-level binding (chat follow-ups and delegated children join automatically), events-only storage (`saga.registered` / `saga.attached`), cross-agent takeover via `saga_attach` (`docs/sagas.md`)
+- [x] **Budget observability** — task budget (`GET /v1/agent/cost/task`: every run of a task with chat follow-ups and the delegation tree) and project budget (`GET /v1/agent/cost/project-budget`: totals plus per-saga/per-task rows with time, tokens, cost and approval budget) surfaced on the project overview page
+- [x] **Activity scoping rethink** — runs, operations, triggers and questions are global listings: the project is a filter/attribution, not a partition; the hidden-run and dead-end badge classes of bugs are gone (`docs/activity-scoping.md`)
+- [x] **Knowledge listing** — searchable, faceted, paginated knowledge page with compact bitemporal filters and presets; inline doubt/invalidation actions from the run trace
+- [x] **Run detail tabs** — trace / trajectory / budget as tabs under the run title; long-run chat reconnect via journal tail (`?tail=1`) instead of full replay
+- [x] **Mattermost inbound over WebSocket** — DMs included, outgoing webhooks and `OUTGOING_TOKEN` removed (see Channel driver layer)
+- [x] **Webhook delivery visibility** — trigger deliveries surfaced in the UI
+- [x] **Model gateway resilience** — stream idle/no-progress watchdogs, first-token timeout with an adaptive prefill budget and a manual nudge endpoint; runs survive host sleep
+
 ---
 
 ## P0 — Living Skills MVP

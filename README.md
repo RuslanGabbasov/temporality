@@ -30,17 +30,25 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 
 | Путь | Назначение |
 |---|---|
+| `/project` | Обзор проекта — саги и задачи с бюджетом (токены, время, стоимость, approvals), последние запуски |
 | `/workspace` | Чат с агентом — SSE-стриминг, reasoning, Markdown, диалоги |
 | `/agent-config` | Управление агентами — CRUD, шаблоны, полная конфигурация |
 | `/agents` | Трассы запусков — лента событий, извлечение траекторий, инлайн-reconcile неопределённых операций |
-| `/observability` | Знания — жизненный цикл, цепочки активации, паттерны, проекция |
+| `/observability` | Знания — поиск, фасеты, битемпоральные фильтры, жизненный цикл, цепочки активации, проекция |
 | `/experience` | Таймлайн опыта — memory lens, семантический зум, ретроспективный аудит |
 | `/skills` | Живые навыки — контракт, версии, выполнения, память, эволюция, сборщик навыков |
+| `/artifacts` | Артефакты — реестр справочных документов (регламенты, инструкции), привязка к навыкам |
 | `/mcp` | MCP-серверы — stdio / SSE / Streamable HTTP, привязка к агентам |
+| `/secrets` | Секреты — хранилище (builtin/env), гранты агентам и провайдерам |
 | `/providers` | Провайдеры моделей — OpenAI-совместимые эндпоинты |
 | `/users` | Пользователи — RBAC, токены, каналы уведомлений |
+| `/channels` | Каналы доставки — настройки транспортов (Matrix, Telegram, Mattermost, Slack) |
+| `/inbound` | Входящие — сообщения из каналов: конвейер intake, статусы, аудит |
 | `/triggers` | Триггеры — cron, webhook, слушатели событий, execution identity |
 | `/org` | Организация — дерево оргструктуры, роли на узлах, политики, эффективный доступ |
+
+Ленты запусков, операций и вопросов — глобальные: проект выступает фильтром,
+а не разделом (`docs/activity-scoping.md`).
 
 ## Запуск
 
@@ -50,8 +58,14 @@ docker compose up --build -d
 ```
 
 Поднимаются: PostgreSQL, Journal (`:8080`), debugger (`:3000`), dev-сервер
-Temporal (UI на `:8233`), Agent Kernel (`:8090`) и SearXNG (`127.0.0.1:8889`, метапоиск
-для тула агентов `web_search`; отключается пустым `KERNEL_SEARXNG_URL`).
+Temporal (UI на `:8233`), Agent Kernel (`:8090`), SearXNG (`127.0.0.1:8889`,
+метапоиск для тула агентов `web_search`; отключается пустым
+`KERNEL_SEARXNG_URL`) и headless-браузер Lightpanda для тула `browser`
+(отключается пустым `KERNEL_BROWSER_CDP_URL`).
+
+Чистая установка настраивается мастером онбординга: проект → администратор →
+провайдер модели (ключ сохраняется в секретах) → агент → сборка песочницы.
+Основная навигация скрыта, пока не создан первый проект.
 
 Остановить стек, сохранив данные:
 
@@ -268,6 +282,17 @@ intake (классификация → уточнение → задача), с�
 Делегирование: `delegate` — параллельные субагенты, `plan` — DAG-план между
 агентами с зависимостями и предикатами (`docs/agent-delegation.md`).
 
+Саги: явно зарегистрированная длительная работа, которая живёт дольше одного
+рана и переходит между агентами. Инструменты `saga_register` / `saga_attach` /
+`saga_list`; привязка живёт на уровне задачи — продолжения чата и делегированные
+dети присоединяются к саге автоматически. Обзор проекта (`/project`) показывает
+саги и задачи со сводкой бюджета (`docs/sagas.md`).
+
+Веб-исследования: `web_fetch` (страница → readability → markdown), `web_search`
+(self-hosted SearXNG), `view_image` / `fetch_image` (изображения как
+vision-блоки) и `browser` — headless-браузер за CDP-контрактом для JS-страниц
+(`docs/web-research.md`).
+
 Живые навыки: инструменты `skill_search` / `skill_inspect` / `skill_validate` /
 `skill_history` / `skill_executions` / `skill_memory` / `skill_propose`
 (`docs/living-skills.md`).
@@ -378,6 +403,7 @@ curl -X POST http://localhost:8090/v1/agent/operations/reconcile \
 | `GET /v1/workspace/runs/{id}/stream` | SSE-поток событий; `?tail=1` — без реплея всей истории: последние ~50 событий + только новые (для переподключения к долгому рану) |
 | `GET /v1/workspace/runs/{id}/stream` | + model.text_delta, model.reasoning |
 | `GET /v1/agent/cost/task?project=P&task=T` | Бюджет задачи: все раны (продолжения чата + дерево делегирования) с суммой времени/токенов/стоимости |
+| `GET /v1/agent/cost/project-budget?project=P` | Бюджет проекта: тоталы и построчная разбивка по сагам и задачам (время/токены/стоимость/approvals) |
 
 ## Workspace
 
@@ -441,4 +467,8 @@ Dev-сервер debugger (`npm --prefix debugger run dev`) проксирует
 - Архитектура: [`docs/architecture.md`](docs/architecture.md)
 - Управление секретами: [`docs/secrets-management.md`](docs/secrets-management.md)
 - Контур качества агентов: [`docs/agent-quality-loop.md`](docs/agent-quality-loop.md)
+- Реестр артефактов: [`docs/artifact-registry.md`](docs/artifact-registry.md)
+- Саги: [`docs/sagas.md`](docs/sagas.md)
+- Веб-исследования: [`docs/web-research.md`](docs/web-research.md)
+- Область активности: [`docs/activity-scoping.md`](docs/activity-scoping.md)
 - Роадмап: [`docs/ROADMAP.md`](docs/ROADMAP.md)

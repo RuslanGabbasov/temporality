@@ -30,17 +30,25 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 
 | Path | Purpose |
 |---|---|
+| `/project` | Project overview — sagas and tasks with a budget (tokens, time, cost, approvals), recent runs |
 | `/workspace` | Agent chat — SSE streaming, reasoning, Markdown, conversations |
 | `/agent-config` | Agent management — CRUD, templates, full configuration |
 | `/agents` | Run traces — event timeline, trajectory extraction, inline reconciliation of uncertain operations |
-| `/observability` | Knowledge — lifecycle, activation chains, patterns, projection |
+| `/observability` | Knowledge — search, facets, bitemporal filters, lifecycle, activation chains, projection |
 | `/experience` | Experience Timeline — memory lens, semantic zoom, retrospective audit |
 | `/skills` | Living Skills — contract, versions, executions, memory, evolution, skill builder |
+| `/artifacts` | Artifacts — reference document registry (regulations, instructions), skill linkage |
 | `/mcp` | MCP servers — stdio / SSE / Streamable HTTP, binding to agents |
+| `/secrets` | Secrets — store (builtin/env), grants to agents and providers |
 | `/providers` | Model providers — OpenAI-compatible endpoints |
 | `/users` | Users — RBAC, tokens, notification channels |
+| `/channels` | Delivery channels — transport settings (Matrix, Telegram, Mattermost, Slack) |
+| `/inbound` | Inbox — channel messages: intake pipeline, statuses, audit |
 | `/triggers` | Triggers — cron, webhook, event listeners, execution identity |
 | `/org` | Organization — org structure tree, node roles, policies, effective access |
+
+Run, operation and question listings are global: the project acts as a filter,
+not a partition (`docs/activity-scoping.md`).
 
 ## Getting started
 
@@ -50,9 +58,15 @@ docker compose up --build -d
 ```
 
 This starts PostgreSQL, the Journal (`:8080`), the debugger (`:3000`), the
-Temporal dev server (UI on `:8233`), the Agent Kernel (`:8090`) and SearXNG
-(`127.0.0.1:8889`, the meta-search behind the agents' `web_search` tool; disable
-it with an empty `KERNEL_SEARXNG_URL`).
+Temporal dev server (UI on `:8233`), the Agent Kernel (`:8090`), SearXNG
+(`127.0.0.1:8889`, the meta-search behind the agents' `web_search` tool;
+disable it with an empty `KERNEL_SEARXNG_URL`) and the Lightpanda headless
+browser behind the `browser` tool (disable it with an empty
+`KERNEL_BROWSER_CDP_URL`).
+
+A fresh install configures itself through the onboarding wizard: project →
+admin user → model provider (the key is stored in secrets) → agent → sandbox
+build. The main navigation stays hidden until the first project exists.
 
 Stop the stack while keeping data:
 
@@ -182,6 +196,17 @@ KERNEL_CHANNEL__MATRIX__HOMESERVER=https://matrix.org   # homeserver of the kern
 KERNEL_CHANNEL__MATRIX__ACCESS_TOKEN=syt_...            # bot token (member of user rooms)
 KERNEL_CHANNEL__TELEGRAM__BOT_TOKEN=123456:ABC...       # bot token for the Bot API
 KERNEL_UI_URL=http://localhost:3000                     # for links in notifications
+KERNEL_CHANNEL__MATTERMOST__BASE_URL=https://mm.corp    # self-hosted Mattermost
+KERNEL_CHANNEL__MATTERMOST__TOKEN=...                   # bot/personal token (REST v4 + WebSocket)
+
+# Two-way push channels (webhooks arrive at the kernel; the path must be
+# public through a reverse proxy):
+KERNEL_CHANNEL__SLACKBOT__BOT_TOKEN=xoxb-...            # Slack app: bot token
+KERNEL_CHANNEL__SLACKBOT__SIGNING_SECRET=...            # Events API signature (v0:ts:body HMAC-SHA256)
+#   events: POST /v1/channels/slackbot/events
+# Mattermost receives inbound over a WebSocket stream with the same token
+# (direct messages included) — a separate webhook and OUTGOING_TOKEN are no
+# longer needed
 
 # Legacy names keep working as aliases (same fields):
 # KERNEL_MATRIX_HOMESERVER, KERNEL_MATRIX_ACCESS_TOKEN,
@@ -198,6 +223,30 @@ as a `notification.sent` event with status `failed`, and the question remains
 available in the UI. Answers always happen in the app; external channels
 only deliver the question.
 
+## Inbound messages (intake)
+
+A user message sent on their own initiative in a channel starts the intake
+pipeline (classification → clarification → task), see `docs/inbound-messages.md`.
+It is enabled per project and off by default: a project starts accepting
+channel tasks only after the "Accept tasks from channels" toggle in the
+project settings. On upgrade only the projects that already routed messages
+stay enabled — a working channel does not die silently.
+
+Additional constraints:
+
+- **Org-scope policy**: `intake_mode = deny` in a node policy bans channel
+tasks for the whole subtree; a child cannot loosen an ancestor's veto.
+Enabling happens on the project only; an "allow" policy value does not
+exist.
+- **Sender limit**: `KERNEL_INTAKE_MAX_PER_HOUR` (default 10, 0 — off) —
+exceeding it is rejected with a polite reply in the channel and an
+`intake.rejected` event (reason `rate_limited`) instead of an intake run.
+- **Body retention (PII)**: `KERNEL_INTAKE_RETENTION_DAYS` (default 30,
+0 — keep forever) — past the deadline bodies and attachments are scrubbed,
+the row survives as an audit-chain link (marked in the Inbox).
+- **Audit**: `GET /v1/intake/audit?sender=<id>` (operator) — the chain
+message → intake run → task run with outcomes, without message bodies.
+
 ## Agent Kernel
 
 A durable Temporal workflow: model calls, approvals, `remember` proposals,
@@ -206,6 +255,17 @@ auto-captured verification observations, at-least-once outbox, MCP
 
 Delegation: `delegate` — parallel subagents; `plan` — a DAG plan across
 agents with dependencies and predicates (`docs/agent-delegation.md`).
+
+Sagas: explicitly registered long-running efforts that outlive a single run
+and cross agent boundaries. Tools `saga_register` / `saga_attach` /
+`saga_list`; the binding lives at the task level, so chat follow-ups and
+delegated children join the saga automatically. The project overview
+(`/project`) shows sagas and tasks with a budget rollup (`docs/sagas.md`).
+
+Web research: `web_fetch` (page → readability → markdown), `web_search`
+(self-hosted SearXNG), `view_image` / `fetch_image` (images as vision blocks)
+and `browser` — a headless browser over a CDP contract for JS-heavy pages
+(`docs/web-research.md`).
 
 Living skills: the `skill_search` / `skill_inspect` / `skill_validate` /
 `skill_history` / `skill_executions` / `skill_memory` / `skill_propose`
@@ -216,6 +276,11 @@ checklists) that skill manifests point at but never inline into the prompt —
 the agent loads bodies on demand through `artifact_search` / `artifact_read`
 in chunks, with `artifact.read` journal auditing; url-provider artifacts are
 proxied and cached by the kernel itself (`docs/artifact-registry.md`).
+
+Agent quality loop: definition proposals apply only on top of a fresh green
+evaluation run (golden cases from production, HITL verdicts, an LLM judge
+with calibration, a per-version quality dashboard) —
+`docs/agent-quality-loop.md`.
 
 Also: knowledge hints and trajectory-based extraction, triggers
 (cron/webhook/listeners), human requests (`ask_human`) and org policies
@@ -311,6 +376,7 @@ scopes, success rates.
 | `GET /v1/workspace/runs/{id}/stream` | SSE event stream; `?tail=1` — skip the full history replay: the last ~50 events plus only new ones (for reconnecting to a long run) |
 | `GET /v1/workspace/runs/{id}/stream` | + model.text_delta, model.reasoning |
 | `GET /v1/agent/cost/task?project=P&task=T` | Task budget: every run (chat follow-ups + delegation tree) with summed time/tokens/cost |
+| `GET /v1/agent/cost/project-budget?project=P` | Project budget: totals plus per-saga and per-task rows (time/tokens/cost/approvals) |
 
 ## Workspace
 
@@ -373,4 +439,9 @@ The debugger dev server (`npm --prefix debugger run dev`) proxies `/api` to
 - Event model: [`docs/event-model.md`](docs/event-model.md)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
 - Secrets management: [`docs/secrets-management.md`](docs/secrets-management.md)
+- Agent quality loop: [`docs/agent-quality-loop.md`](docs/agent-quality-loop.md)
+- Artifact registry: [`docs/artifact-registry.md`](docs/artifact-registry.md)
+- Sagas: [`docs/sagas.md`](docs/sagas.md)
+- Web research: [`docs/web-research.md`](docs/web-research.md)
+- Activity scoping: [`docs/activity-scoping.md`](docs/activity-scoping.md)
 - Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md)
