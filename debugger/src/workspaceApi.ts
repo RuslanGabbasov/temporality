@@ -193,6 +193,11 @@ export interface AgentEvaluationRun {
   failed: number
   cases: AgentEvaluationCaseResult[]
   created_at: string
+  verdict?: 'pass' | 'fail' | 'error' | 'unknown' | string
+  cause?: string
+  trigger?: string
+  proposal_id?: number
+  judge_degraded?: boolean
 }
 
 /** Evolution proposal (plan §2.2 stage 10): a pending definition change with
@@ -215,6 +220,13 @@ export interface AgentProposal {
   decided_at?: string
   decided_by?: string
 }
+
+/** Gated apply result: either the proposal landed (200) or the eval gate
+ * started/waited on a run (202) — the UI shows the run and asks for a second,
+ * conscious apply once it turns green. */
+export type ApplyProposalResult =
+  | { kind: 'applied'; agent: Agent; proposal: AgentProposal }
+  | { kind: 'evaluating'; evaluation_run_id: number; status: string }
 
 export interface BuiltinAgentSpec {
   slug: string
@@ -609,11 +621,26 @@ export interface UploadedFile {
   size: number
 }
 
+/** API error with the structured body intact: `code` is the machine-readable
+ * `error` field (e.g. `gate_blocked`, `suite_not_ready`) and `body` carries
+ * the details (`failed_cases`, `stale_cases`, versions) callers render. */
+export class ApiError extends Error {
+  status: number
+  code: string
+  body: Record<string, any>
+  constructor(status: number, body: Record<string, any>) {
+    super(typeof body?.error === 'string' && body.error ? body.error : `HTTP ${status}`)
+    this.status = status
+    this.code = typeof body?.error === 'string' ? body.error : ''
+    this.body = body ?? {}
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${KERNEL_API}${path}`, { ...init, headers: headers() })
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
-    throw new Error(body.error ?? `HTTP ${response.status}`)
+    throw new ApiError(response.status, body)
   }
   return response.json()
 }
@@ -717,8 +744,18 @@ export const workspaceApi = {
     request<QualitySchedule>('/v1/workspace/quality-schedule', { method: 'PUT', body: JSON.stringify({ interval_hours: intervalHours }) }),
   createAgentProposal: (id: string, data: { problem: string; change: string; effect?: string; description?: string; definition?: { constraints?: string[]; completion?: string[] }; evidence?: string[] }) =>
     request<AgentProposal>(`/v1/workspace/agents/${id}/proposals`, { method: 'POST', body: JSON.stringify(data) }),
-  applyAgentProposal: (id: string, proposalId: number) =>
-    request<{ agent: Agent; proposal: AgentProposal }>(`/v1/workspace/agents/${id}/proposals/${proposalId}/apply`, { method: 'POST' }),
+  // Gated apply (docs/agent-quality-loop.md §7.1): the answer is one of two
+  // shapes — the applied proposal (200) or the accepted-for-evaluation gate
+  // run (202) that a repeat apply waits on. `gate:false` skips the gate and is
+  // audited server-side; override paths stay API-only for now.
+  applyAgentProposal: async (id: string, proposalId: number, opts?: { gate?: boolean }): Promise<ApplyProposalResult> => {
+    const init = opts?.gate === false ? { method: 'POST' as const, body: JSON.stringify({ gate: false }) } : { method: 'POST' as const }
+    const result = await request<any>(`/v1/workspace/agents/${id}/proposals/${proposalId}/apply`, init)
+    if (result && typeof result.evaluation_run_id === 'number' && !result.proposal) {
+      return { kind: 'evaluating', evaluation_run_id: result.evaluation_run_id, status: result.status ?? 'running' }
+    }
+    return { kind: 'applied', agent: result.agent, proposal: result.proposal }
+  },
   rejectAgentProposal: (id: string, proposalId: number) =>
     request<AgentProposal>(`/v1/workspace/agents/${id}/proposals/${proposalId}/reject`, { method: 'POST' }),
   listBuiltinAgents: () =>

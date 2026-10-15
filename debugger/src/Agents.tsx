@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   Button,
   TextInput,
@@ -24,6 +24,7 @@ import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
 import {
   workspaceApi,
+  ApiError,
   type Agent,
   type AgentCapabilities,
   type AgentDefinition,
@@ -43,7 +44,7 @@ import {
   type JudgeConfig,
   type QualitySchedule,
 } from './workspaceApi'
-import { detectRegressions, latestEvalByVersion, passRate, runsByVersion as aggregateRunsByVersion } from './agentEvolution'
+import { applyGateErrorView, detectRegressions, latestEvalByVersion, passRate, runsByVersion as aggregateRunsByVersion } from './agentEvolution'
 import { useT } from './i18n'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 
@@ -174,6 +175,16 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [proposalBusy, setProposalBusy] = useState(false)
   const [proposalModalOpen, setProposalModalOpen] = useState(false)
   const [proposalForm, setProposalForm] = useState({ problem: '', change: '', effect: '', description: '', constraints: '', completion: '' })
+  // Gated apply feedback lives next to the proposals it explains: the eval
+  // gate answers 202 with a running evaluation or 409 with a machine code,
+  // and both need a human-readable story instead of a silently kept pending.
+  const [proposalNotice, setProposalNotice] = useState<{ kind: 'info' | 'success' | 'error'; text: string } | null>(null)
+  // Offered only when the gate cannot decide at all (suite_not_ready): the
+  // audited gate:false escape hatch, after an explicit confirmation.
+  const [skipGateProposal, setSkipGateProposal] = useState<AgentProposal | null>(null)
+  const selectedIdRef = useRef(selectedId)
+  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+  const polledRunsRef = useRef<Set<number>>(new Set())
 
   // Prompt tab preview (reflects the saved agent).
   const [promptPreview, setPromptPreview] = useState<{ source: string; prompt: string } | null>(null)
@@ -509,6 +520,8 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     setEvalSuite([])
     setEvalRuns([])
     setProposals([])
+    setProposalNotice(null)
+    setSkipGateProposal(null)
     void (async () => {
       try {
         const [vData, rData, sData, eData, pData] = await Promise.all([
@@ -575,15 +588,81 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     applyProposals(agentId, pData.proposals ?? [])
   }
 
-  const applyProposal = async (proposal: AgentProposal) => {
+  // Human-readable story for a gated-apply refusal: the server answers with
+  // machine codes (gate_blocked, suite_stale, …) and details; the locale owns
+  // the framing, the details ride in as params.
+  const applyGateErrorText = (err: unknown): string => {
+    if (err instanceof ApiError) {
+      const view = applyGateErrorView(err)
+      if (view?.kind === 'suite_not_ready') {
+        const cause = t(view.causeKey, view.causeParams) ?? view.rawCause
+        return t('agents.gate_suite_not_ready', { cause }) ?? `The eval gate cannot evaluate this proposal: ${cause}`
+      }
+      if (view) return t(view.key, view.params) ?? err.message
+    }
+    return message(err)
+  }
+
+  // Follow the gate's background evaluation (202) until it decides: green
+  // invites a second, conscious apply; red/error explains itself. Bounded by
+  // the server's own 30-minute gate-run window; stops silently when the user
+  // switches to another agent so stale polls never cross agents.
+  const pollGateRun = async (agentId: string, runId: number) => {
+    if (polledRunsRef.current.has(runId)) return
+    polledRunsRef.current.add(runId)
+    const deadline = Date.now() + 31 * 60 * 1000
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+    while (Date.now() < deadline) {
+      await sleep(8000)
+      if (selectedIdRef.current !== agentId) return
+      try {
+        const data = await workspaceApi.listAgentEvaluationRuns(agentId)
+        if (selectedIdRef.current !== agentId) return
+        setEvalRuns(data.runs ?? [])
+        const run = (data.runs ?? []).find((r) => r.id === runId)
+        if (run?.verdict && run.verdict !== 'unknown') {
+          if (run.verdict === 'pass') {
+            setProposalNotice({ kind: 'success', text: t('agents.gate_passed') ?? 'The evaluation run is green — press “Apply” again to apply the proposal.' })
+          } else if (run.verdict === 'fail') {
+            setProposalNotice({ kind: 'error', text: t('agents.gate_failed') ?? 'The evaluation run failed. Check the run history below.' })
+          } else {
+            setProposalNotice({ kind: 'error', text: t('agents.gate_run_error', { cause: run.cause ?? '' }) ?? `The evaluation run ended with an error (${run.cause ?? 'unknown'}).` })
+          }
+          return
+        }
+      } catch { /* transient listing failure — keep waiting */ }
+    }
+    if (selectedIdRef.current === agentId) {
+      setProposalNotice({ kind: 'info', text: t('agents.gate_poll_timeout') ?? 'The evaluation run is still unfinished — check its status in the run history below.' })
+    }
+  }
+
+  const applyProposal = async (proposal: AgentProposal, opts?: { gate?: boolean }) => {
     if (!selectedId) return
-    setProposalBusy(true); setError('')
+    setProposalBusy(true); setError(''); setProposalNotice(null); setSkipGateProposal(null)
     try {
-      await workspaceApi.applyAgentProposal(selectedId, proposal.id)
+      const result = await workspaceApi.applyAgentProposal(selectedId, proposal.id, opts)
+      if (result.kind === 'evaluating') {
+        // The gate started (or is already running) an evaluation run: the
+        // proposal stays pending on purpose — a green run still needs a
+        // second, conscious apply (agents propose, people apply).
+        setProposalNotice({ kind: 'info', text: t('agents.gate_started', { id: String(result.evaluation_run_id) }) ?? `The eval gate started evaluation run #${result.evaluation_run_id}. Press “Apply” again once it is green.` })
+        void pollGateRun(selectedId, result.evaluation_run_id)
+        return
+      }
+      setProposalNotice({
+        kind: 'success',
+        text: t('agents.proposal_applied_version', { version: String(result.agent?.definition_version ?? '') }) ?? `The definition is now v${result.agent?.definition_version ?? ''}.`,
+      })
       await refreshEvolution(selectedId)
       await load()
-    } catch (f) { setError(message(f)) }
-    finally { setProposalBusy(false) }
+    } catch (f) {
+      const text = applyGateErrorText(f)
+      setProposalNotice({ kind: 'error', text })
+      // The gate cannot decide at all: offer the audited gate:false path so an
+      // agent without a ready suite can still evolve — never silently.
+      if (f instanceof ApiError && f.code === 'suite_not_ready') setSkipGateProposal(proposal)
+    } finally { setProposalBusy(false) }
   }
 
   const rejectProposal = async (proposal: AgentProposal) => {
@@ -942,6 +1021,36 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                       <div className="skill-subheading" style={{ margin: 0 }}>{t('agents.proposals') ?? 'Proposals'}</div>
                       <Button size="sm" kind="secondary" onClick={openProposalModal}>{t('agents.proposals_new') ?? 'Propose change'}</Button>
                     </div>
+                    {proposalNotice && (
+                      <InlineNotification
+                        kind={proposalNotice.kind === 'error' ? 'error' : proposalNotice.kind === 'success' ? 'success' : 'info'}
+                        title={proposalNotice.kind === 'error' ? (t('action.error') ?? 'Error') : proposalNotice.kind === 'success' ? (t('agents.proposal_applied_ok') ?? 'Proposal applied.') : (t('agents.gate_title') ?? 'Eval gate')}
+                        subtitle={proposalNotice.text}
+                        onClose={() => { setProposalNotice(null); setSkipGateProposal(null) }}
+                        lowContrast
+                        style={{ marginBottom: '0.75rem' }}
+                      />
+                    )}
+                    {skipGateProposal && (
+                      <div style={{ marginBottom: '0.75rem' }}>
+                        <Button
+                          size="sm"
+                          kind="secondary"
+                          disabled={proposalBusy}
+                          onClick={() => {
+                            void (async () => {
+                              if (await confirmDialog({
+                                title: t('agents.gate_skip_title') ?? 'Apply without the gate?',
+                                body: t('agents.gate_skip_body') ?? 'The gate will be skipped; the bypass is recorded in the audit log.',
+                                confirmLabel: t('agents.gate_skip_action') ?? 'Apply without gate',
+                              })) void applyProposal(skipGateProposal, { gate: false })
+                            })()
+                          }}
+                        >
+                          {t('agents.gate_skip_action') ?? 'Apply without gate (audited)'}
+                        </Button>
+                      </div>
+                    )}
                     {proposals.length === 0 ? (
                       <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: 0 }}>
                         {t('agents.proposals_empty') ?? 'No proposals yet. Agents file them with the agent_propose tool; changes go live only after a human applies them.'}

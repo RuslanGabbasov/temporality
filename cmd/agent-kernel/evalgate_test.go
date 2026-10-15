@@ -31,18 +31,19 @@ type fakeEvalGateStore struct {
 	decision workspace.EvalGateDecision
 	suite    workspace.AgentEvaluationSuite
 
-	agentErr      error
-	proposalErr   error
-	decisionErr   error
-	createErr     error
-	statusCalls   int
-	createCalls   int
-	createRuns    []workspace.AgentEvaluationRun
-	nextRunID     int64
-	audits        []storedAudit
-	applied       []bool // one entry per apply call: did it land?
-	abandonedIDs  []int64
-	auditWriteErr error // non-nil: the transactional audited apply (F-2) fails on the audit INSERT
+	agentErr        error
+	proposalErr     error
+	decisionErr     error
+	createErr       error
+	statusCalls     int
+	createCalls     int
+	createRuns      []workspace.AgentEvaluationRun
+	nextRunID       int64
+	audits          []storedAudit
+	applied         []bool // one entry per apply call: did it land?
+	abandonedIDs    []int64
+	auditWriteErr   error // non-nil: the transactional audited apply (F-2) fails on the audit INSERT
+	judgeConfigured bool  // readiness resolution; pattern suites never consult it
 }
 
 type storedAudit struct {
@@ -65,6 +66,12 @@ func (f *fakeEvalGateStore) GetAgentEvaluationSuite(_ context.Context, agentID s
 	suite := f.suite
 	suite.AgentID = agentID
 	return suite, nil
+}
+
+// EvalGateSuiteReadiness delegates to the pure workspace rule so handler
+// tests exercise the real readiness semantics, not a preset.
+func (f *fakeEvalGateStore) EvalGateSuiteReadiness(_ context.Context, cases []workspace.EvaluationCase) (string, error) {
+	return workspace.GateSuiteReadiness(cases, f.judgeConfigured), nil
 }
 
 func (f *fakeEvalGateStore) EvalGateStatus(_ context.Context, _ string, _ int64, _ int, _ time.Time) (workspace.EvalGateDecision, error) {
@@ -209,6 +216,12 @@ func defaultEvalGateFixture() (*fakeEvalGateStore, *fakeEvalGateRunner, *capture
 	store := &fakeEvalGateStore{
 		agent:    workspace.Agent{ID: "agent-a", Name: "Agent A", DefinitionVersion: 4},
 		proposal: workspace.AgentProposal{ID: 7, AgentID: "agent-a", BaseVersion: 4, Status: "pending"},
+		// A decidable suite: three fresh gate cases. The gated apply refuses
+		// suites that cannot decide (§7.1), so every fixture that expects to
+		// reach a gate decision needs one.
+		suite: workspace.AgentEvaluationSuite{Cases: []workspace.EvaluationCase{
+			{Name: "golden/one"}, {Name: "golden/two"}, {Name: "golden/three"},
+		}},
 	}
 	runner := &fakeEvalGateRunner{}
 	return store, runner, &captureEvalGateOutbox{}
@@ -594,6 +607,7 @@ func TestEvalGateSuiteStaleSkipsHeldOut(t *testing.T) {
 	past := time.Now().AddDate(0, 0, -1)
 	store.suite = workspace.AgentEvaluationSuite{Cases: []workspace.EvaluationCase{
 		{Name: "golden/held", HeldOut: true, StaleAfter: &past},
+		{Name: "fresh-a"}, {Name: "fresh-b"}, {Name: "fresh-c"},
 	}}
 	server := newEvalGateServer(t, store, runner, outbox, nil)
 	defer server.Close()
@@ -612,6 +626,7 @@ func TestEvalGateSuiteStaleOverride(t *testing.T) {
 	past := time.Now().AddDate(0, 0, -1)
 	store.suite = workspace.AgentEvaluationSuite{Cases: []workspace.EvaluationCase{
 		{Name: "golden/old2", StaleAfter: &past},
+		{Name: "fresh-a"}, {Name: "fresh-b"},
 	}}
 	server := newEvalGateServer(t, store, runner, outbox, nil)
 	defer server.Close()
@@ -643,4 +658,83 @@ func TestEvalGateSuiteStaleSkippedByGateFalse(t *testing.T) {
 	status, body := evalGatePost(t, server, "writertoken", `{"gate":false}`)
 	require.Equal(t, 200, status)
 	require.Contains(t, body, `"applied":true`)
+}
+
+// Deterministic misconfiguration (§7.1): an empty suite can never decide the
+// gate, so the apply refuses with 409 suite_not_ready before any run is
+// started — never a 202 that launches a run dead on arrival.
+func TestEvalGateSuiteNotReadyEmptyRefuses(t *testing.T) {
+	store, runner, outbox := defaultEvalGateFixture()
+	store.suite = workspace.AgentEvaluationSuite{}
+	store.decision = workspace.EvalGateDecision{State: workspace.EvalGateNone}
+	server := newEvalGateServer(t, store, runner, outbox, nil)
+	defer server.Close()
+
+	status, body := evalGatePost(t, server, "writertoken", "")
+	require.Equal(t, 409, status)
+	require.Contains(t, body, "suite_not_ready")
+	require.Contains(t, body, workspace.CauseSuiteEmpty)
+	require.Zero(t, store.statusCalls) // refused before the gate decision
+	require.Zero(t, store.createCalls) // no doomed run started
+	require.Zero(t, runner.calls)
+	blocked := outbox.byType("agent.evaluation.gate.blocked")
+	require.Len(t, blocked, 1)
+	require.Equal(t, workspace.CauseSuiteEmpty, blocked[0].Data["cause"])
+}
+
+// Too-small suites refuse with suite_too_small; held-out cases never count
+// toward readiness (§4.5) — only toward the suite's own history.
+func TestEvalGateSuiteNotReadyTooSmall(t *testing.T) {
+	store, runner, outbox := defaultEvalGateFixture()
+	store.suite = workspace.AgentEvaluationSuite{Cases: []workspace.EvaluationCase{
+		{Name: "golden/a"}, {Name: "golden/b"}, {Name: "golden/held", HeldOut: true},
+	}}
+	store.decision = workspace.EvalGateDecision{State: workspace.EvalGateNone}
+	server := newEvalGateServer(t, store, runner, outbox, nil)
+	defer server.Close()
+
+	status, body := evalGatePost(t, server, "writertoken", "")
+	require.Equal(t, 409, status)
+	require.Contains(t, body, workspace.CauseSuiteTooSmall)
+	require.Zero(t, store.createCalls)
+}
+
+// Judge cases without a configured judge can only produce error verdicts —
+// the refusal names judge_not_configured, the cause the owner fixes first.
+func TestEvalGateSuiteNotReadyJudgeMissing(t *testing.T) {
+	store, runner, outbox := defaultEvalGateFixture()
+	store.judgeConfigured = false
+	store.suite = workspace.AgentEvaluationSuite{Cases: []workspace.EvaluationCase{
+		{Name: "golden/j1", Check: "judge"}, {Name: "golden/j2", Check: "judge"}, {Name: "golden/j3", Check: "judge"},
+	}}
+	server := newEvalGateServer(t, store, runner, outbox, nil)
+	defer server.Close()
+
+	status, body := evalGatePost(t, server, "writertoken", "")
+	require.Equal(t, 409, status)
+	require.Contains(t, body, workspace.CauseJudgeNotConfigured)
+	require.Zero(t, store.createCalls)
+}
+
+// Overriding a not-ready suite requires a justification and is audited with
+// the readiness cause — the same contract as a suite_stale override.
+func TestEvalGateSuiteNotReadyOverrideApplies(t *testing.T) {
+	store, runner, outbox := defaultEvalGateFixture()
+	store.suite = workspace.AgentEvaluationSuite{Cases: []workspace.EvaluationCase{
+		{Name: "golden/a"}, {Name: "golden/b"},
+	}}
+	server := newEvalGateServer(t, store, runner, outbox, nil)
+	defer server.Close()
+
+	status, _ := evalGatePost(t, server, "writertoken", `{"override":true}`)
+	require.Equal(t, 400, status)
+	require.Empty(t, store.audits)
+
+	status, body := evalGatePost(t, server, "writertoken",
+		`{"override":true,"justification":"goldens are being authored; change is time-critical"}`)
+	require.Equal(t, 200, status)
+	require.Contains(t, body, `"applied":true`)
+	require.Len(t, store.audits, 1)
+	require.Equal(t, workspace.CauseSuiteTooSmall, store.audits[0].details["gate_cause"])
+	require.Len(t, outbox.byType("agent.evaluation.gate.overridden"), 1)
 }

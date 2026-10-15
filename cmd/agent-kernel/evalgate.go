@@ -54,6 +54,7 @@ type evalGateStore interface {
 	GetAgent(ctx context.Context, id string) (workspace.Agent, error)
 	GetAgentProposal(ctx context.Context, agentID string, id int64) (workspace.AgentProposal, error)
 	GetAgentEvaluationSuite(ctx context.Context, agentID string) (workspace.AgentEvaluationSuite, error)
+	EvalGateSuiteReadiness(ctx context.Context, cases []workspace.EvaluationCase) (string, error)
 	EvalGateStatus(ctx context.Context, agentID string, proposalID int64, baseVersion int, now time.Time) (workspace.EvalGateDecision, error)
 	CreateGateRun(ctx context.Context, agentID string, version int, proposalID int64) (workspace.AgentEvaluationRun, bool, error)
 	AbandonGateRun(ctx context.Context, runID int64, cause string) error
@@ -242,6 +243,38 @@ func RegisterEvalGateRoutes(mux *http.ServeMux, gate *controlplane.Gate, store e
 				"error":       "suite_stale",
 				"cause":       workspace.CauseSuiteStale,
 				"stale_cases": stale,
+			})
+			return
+		}
+		// Deterministic misconfigurations refuse here instead of as a doomed
+		// gate run: an empty or too-small suite, or judge cases without a
+		// judge, can only produce error verdicts, so every retry would start
+		// another dead run and answer 202 forever while applying nothing
+		// (§7.1). Override with a justification mirrors suite_stale.
+		if cause, readinessErr := store.EvalGateSuiteReadiness(r.Context(), suite.Cases); readinessErr != nil {
+			writeError(w, 500, readinessErr)
+			return
+		} else if cause != "" {
+			if request.Override {
+				justification := strings.TrimSpace(request.Justification)
+				if justification == "" {
+					writeJSON(w, 400, map[string]any{"error": evalGateOverrideRequired()})
+					return
+				}
+				if !apply(w, r, a, proposal, nil) {
+					return
+				}
+				decision := workspace.EvalGateDecision{Cause: cause}
+				recordEvalGateOverride(r.Context(), store, log, a, proposal, decision, justification, requestSubject(r))
+				emitEvalGateEvent(r.Context(), events, "agent.evaluation.gate.overridden", a, proposal, nil,
+					map[string]any{"cause": cause, "override_justification": justification}, actorFromRequest(r))
+				return
+			}
+			emitEvalGateEvent(r.Context(), events, "agent.evaluation.gate.blocked", a, proposal, nil,
+				map[string]any{"cause": cause}, actorFromRequest(r))
+			writeJSON(w, 409, map[string]any{
+				"error": "suite_not_ready",
+				"cause": cause,
 			})
 			return
 		}

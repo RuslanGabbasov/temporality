@@ -56,6 +56,61 @@ const evalGateRunningWindow = 30 * time.Minute
 // becomes visible before it can masquerade as an agent regression.
 const DefaultSuiteStaleDays = 90
 
+// GateSuiteReadiness answers whether the suite can give the gate a decisive
+// run at all (docs/agent-quality-loop.md §7.1). The three deterministic
+// misconfigurations — no gate cases, judge cases without a configured
+// judge, fewer than EvalMinGateCases gate cases — map to ComputeRunVerdict
+// error causes: every gate run over such a suite is dead on arrival, and a
+// retry loop of error runs would answer 202 forever while applying nothing.
+// They surface here as an up-front refusal cause instead. Empty means ready.
+// Held-out cases never decide the gate (§4.5) and never count here either.
+func GateSuiteReadiness(cases []EvaluationCase, judgeConfigured bool) string {
+	gate := 0
+	judge := false
+	for _, c := range cases {
+		if c.HeldOut {
+			continue
+		}
+		gate++
+		if CheckUsesJudge(NormalizeEvalCheck(c.Check)) {
+			judge = true
+		}
+	}
+	// Same order as ComputeRunVerdict: an unconfigured judge is reported even
+	// when the suite is also small — it is the cause the owner must fix first.
+	if judge && !judgeConfigured {
+		return CauseJudgeNotConfigured
+	}
+	if gate == 0 {
+		return CauseSuiteEmpty
+	}
+	if gate < EvalMinGateCases {
+		return CauseSuiteTooSmall
+	}
+	return ""
+}
+
+// EvalGateSuiteReadiness is GateSuiteReadiness with the judge resolved from
+// the store — lazily, only when the gate cases actually use one, so a plain
+// pattern suite costs no extra lookup on apply.
+func (s *Store) EvalGateSuiteReadiness(ctx context.Context, cases []EvaluationCase) (string, error) {
+	judgeConfigured := true
+	for _, c := range cases {
+		if c.HeldOut {
+			continue
+		}
+		if CheckUsesJudge(NormalizeEvalCheck(c.Check)) {
+			config, err := s.JudgeConfig(ctx)
+			if err != nil {
+				return "", err
+			}
+			judgeConfigured = config.Configured
+			break
+		}
+	}
+	return GateSuiteReadiness(cases, judgeConfigured), nil
+}
+
 // EvalSuiteStaleCases lists gate-relevant case names whose stale_after has
 // passed at now (§13 option B): held-out cases never decide the gate (§4.5)
 // and stale ones never sneak past it either, so they are excluded from the

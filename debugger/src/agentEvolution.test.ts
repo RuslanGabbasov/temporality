@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { detectRegressions, latestEvalByVersion, passRate, runsByVersion } from './agentEvolution'
+import { applyGateErrorView, detectRegressions, latestEvalByVersion, passRate, runsByVersion } from './agentEvolution'
+import { ApiError } from './workspaceApi'
 import type { AgentEvaluationRun, Run } from './workspaceApi'
 
 const evalRun = (id: number, version: number, passed: number, failed: number, createdAt: string): AgentEvaluationRun =>
@@ -82,5 +83,34 @@ describe('detectRegressions', () => {
       evalRun(2, 3, 0, 4, '2026-10-05T00:00:00Z'),
       evalRun(1, 1, 4, 0, '2026-10-03T00:00:00Z'),
     ], SUITE_SAVED)).toEqual([])
+  })
+})
+
+describe('applyGateErrorView', () => {
+  const gateError = (body: Record<string, any>) => new ApiError(409, body)
+
+  it('maps suite_not_ready causes to locale views', () => {
+    expect(applyGateErrorView(gateError({ error: 'suite_not_ready', cause: 'suite_empty' })))
+      .toEqual({ kind: 'suite_not_ready', causeKey: 'agents.gate_cause_suite_empty', rawCause: 'suite_empty' })
+    expect(applyGateErrorView(gateError({ error: 'suite_not_ready', cause: 'suite_too_small' })))
+      .toEqual({ kind: 'suite_not_ready', causeKey: 'agents.gate_cause_suite_too_small', causeParams: { min: '3' }, rawCause: 'suite_too_small' })
+    expect(applyGateErrorView(gateError({ error: 'suite_not_ready', cause: 'judge_not_configured' })))
+      .toEqual({ kind: 'suite_not_ready', causeKey: 'agents.gate_cause_judge_not_configured', rawCause: 'judge_not_configured' })
+  })
+
+  it('maps blocked, stale and rebase refusals with their case lists', () => {
+    expect(applyGateErrorView(gateError({ error: 'gate_blocked', failed_cases: ['golden/a', 'golden/b'] })))
+      .toEqual({ kind: 'message', key: 'agents.gate_blocked', params: { cases: 'golden/a, golden/b' } })
+    expect(applyGateErrorView(gateError({ error: 'suite_stale', stale_cases: ['golden/old'] })))
+      .toEqual({ kind: 'message', key: 'agents.gate_suite_stale', params: { cases: 'golden/old' } })
+    expect(applyGateErrorView(gateError({ error: 'base_version_stale', base_version: 4, current_version: 7 })))
+      .toEqual({ kind: 'message', key: 'agents.gate_base_version_stale', params: { base: '4', current: '7' } })
+  })
+
+  it('falls back to null for unknown codes and plain errors', () => {
+    expect(applyGateErrorView(gateError({ error: 'audit_write_failed' }))).toBeNull()
+    expect(applyGateErrorView(gateError({ error: 'suite_not_ready', cause: 'mystery' }))).toBeNull()
+    expect(applyGateErrorView(new Error('HTTP 500'))).toBeNull()
+    expect(applyGateErrorView(null)).toBeNull()
   })
 })

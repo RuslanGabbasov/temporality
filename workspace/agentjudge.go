@@ -56,6 +56,12 @@ const (
 	TriggerSchedule = "schedule"
 )
 
+// EvalMinGateCases is the smallest suite that can decide the gate: below it
+// ComputeRunVerdict can only answer error, so the apply refuses up front
+// (docs/agent-quality-loop.md §7.1) instead of starting gate runs that are
+// dead on arrival.
+const EvalMinGateCases = 3
+
 // Environment contract (§6.2, §6.5).
 const (
 	EnvJudgeModel           = "EVAL_JUDGE_MODEL"
@@ -225,7 +231,7 @@ func ComputeRunVerdict(cases []EvaluationCaseResult, env RunVerdictContext) (ver
 	if len(cases) == 0 {
 		return EvalVerdictError, CauseSuiteEmpty
 	}
-	if len(cases) < 3 {
+	if len(cases) < EvalMinGateCases {
 		return EvalVerdictError, CauseSuiteTooSmall
 	}
 	passed, failed := 0, 0

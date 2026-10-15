@@ -3,6 +3,7 @@
 // client-side from agent versions × evaluation runs × run statistics. Kept as
 // pure functions so the aggregation and the regression rule are testable.
 
+import { ApiError } from './workspaceApi'
 import type { AgentEvaluationRun, Run } from './workspaceApi'
 
 /** Latest evaluation run per definition version (runs arrive newest-first). */
@@ -65,6 +66,47 @@ export interface Regression {
   previousVersion: number
   from: number
   to: number
+}
+
+/** How a gated-apply refusal renders in the UI: a locale key plus its
+ * interpolation params. `kind: 'suite_not_ready'` wraps a nested cause key —
+ * the framing and the cause are translated separately. */
+export type GateErrorView =
+  | { kind: 'message'; key: string; params?: Record<string, string> }
+  | { kind: 'suite_not_ready'; causeKey: string; causeParams?: Record<string, string>; rawCause: string }
+
+/** Map a gated-apply API error (docs/agent-quality-loop.md §7.1) to its locale
+ * view; null when the error carries no known gate code — callers fall back to
+ * the raw message. Pure so the mapping stays testable. */
+export function applyGateErrorView(err: unknown): GateErrorView | null {
+  if (!(err instanceof ApiError)) return null
+  const body = err.body ?? {}
+  const list = (value: unknown): string => (Array.isArray(value) ? value.join(', ') : '')
+  switch (err.code) {
+    case 'suite_not_ready':
+      switch (body.cause) {
+        case 'suite_empty':
+          return { kind: 'suite_not_ready', causeKey: 'agents.gate_cause_suite_empty', rawCause: body.cause }
+        case 'suite_too_small':
+          return { kind: 'suite_not_ready', causeKey: 'agents.gate_cause_suite_too_small', causeParams: { min: '3' }, rawCause: body.cause }
+        case 'judge_not_configured':
+          return { kind: 'suite_not_ready', causeKey: 'agents.gate_cause_judge_not_configured', rawCause: body.cause }
+        default:
+          return null
+      }
+    case 'gate_blocked':
+      return { kind: 'message', key: 'agents.gate_blocked', params: { cases: list(body.failed_cases) } }
+    case 'suite_stale':
+      return { kind: 'message', key: 'agents.gate_suite_stale', params: { cases: list(body.stale_cases) } }
+    case 'base_version_stale':
+      return {
+        kind: 'message',
+        key: 'agents.gate_base_version_stale',
+        params: { base: String(body.base_version ?? '?'), current: String(body.current_version ?? '?') },
+      }
+    default:
+      return null
+  }
 }
 
 /** Detect pass-rate regressions between consecutive definition versions:
