@@ -66,3 +66,37 @@ func TestArtifactChunkUTF8Boundary(t *testing.T) {
 	a5.chunk(3, 0)
 	require.Equal(t, "def", a5.Content)
 }
+
+// ValidateArtifactReviewers is the shared ask_human recipient contract: at
+// least one, non-empty, unique. org:/role: entries pass through unresolved —
+// expansion happens at notification time.
+func TestValidateArtifactReviewers(t *testing.T) {
+	require.Error(t, ValidateArtifactReviewers(nil))
+	require.Error(t, ValidateArtifactReviewers([]string{}))
+	require.Error(t, ValidateArtifactReviewers([]string{"", "user:ivanov"}))
+	require.Error(t, ValidateArtifactReviewers([]string{"user:ivanov", "user:ivanov"}))
+	require.NoError(t, ValidateArtifactReviewers([]string{"user:ivanov"}))
+	require.NoError(t, ValidateArtifactReviewers([]string{"org:platform", "role:lead", "project_owner", "writer"}))
+}
+
+// CheckArtifactRefsApproved names the offending manifest references: drafts
+// and missing rows both block the skill write with a 422.
+func TestCheckArtifactRefsApproved(t *testing.T) {
+	approved := []Artifact{
+		{ID: "coding-standard", Status: ArtifactApproved},
+		{ID: "release-checklist", Status: ArtifactApproved},
+	}
+	require.NoError(t, CheckArtifactRefsApproved(approved, []string{"coding-standard"}))
+	require.NoError(t, CheckArtifactRefsApproved(approved, nil))
+
+	draftInList := []Artifact{
+		{ID: "req-spec", Status: ArtifactDraft},
+	}
+	err := CheckArtifactRefsApproved(draftInList, []string{"req-spec"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "req-spec: draft")
+
+	err = CheckArtifactRefsApproved(nil, []string{"ghost"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ghost: missing")
+}

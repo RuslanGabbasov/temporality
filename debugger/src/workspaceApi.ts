@@ -453,8 +453,36 @@ export interface Artifact {
   size_bytes: number
   mime_type?: string
   org_unit_id?: string
+  /** Lifecycle (docs/artifact-lifecycle.md): draft → in_review →
+   * approved/rejected; agent-created rows start as drafts, human creates land
+   * approved. kind separates reference documents from saga work products. */
+  status?: 'draft' | 'in_review' | 'approved' | 'rejected'
+  kind?: 'reference' | 'work'
+  version?: number
+  origin_type?: 'human' | 'agent'
+  origin_user?: string
+  origin_run?: string
+  saga_id?: string
   created_at: string
   updated_at: string
+}
+
+/** One review round of one artifact version (docs/artifact-lifecycle.md §3.3):
+ * mode=all closes when every reviewer approved (a reject closes immediately),
+ * mode=any closes on the first decision. */
+export interface ArtifactReview {
+  id: string
+  artifact_id: string
+  artifact_version: number
+  reviewers: string[]
+  mode: 'all' | 'any'
+  status: 'open' | 'approved' | 'rejected' | 'cancelled'
+  note?: string
+  requested_by: string
+  requested_at: string
+  decisions?: Record<string, { decision: 'approve' | 'reject'; comment?: string; at: string }>
+  resolved_by?: string
+  resolved_at?: string
 }
 
 export interface MCPServer {
@@ -915,9 +943,15 @@ export const workspaceApi = {
     request<{ stored: boolean }>(`/v1/workspace/secrets/${id}/value`, { method: 'POST', body: JSON.stringify({ value }) }),
 
   // Reference artifacts (docs/artifact-registry.md phase 2): bodies load on
-  // demand — lists ship metadata only, the editor fetches the whole document.
-  listArtifacts: () =>
-    request<{ artifacts: Artifact[]; count: number }>('/v1/workspace/artifacts'),
+  // demand; lifecycle filters (status/kind/saga) narrow the listing.
+  listArtifacts: (params?: { status?: string; kind?: string; saga_id?: string }) => {
+    const query = new URLSearchParams()
+    if (params?.status) query.set('status', params.status)
+    if (params?.kind) query.set('kind', params.kind)
+    if (params?.saga_id) query.set('saga_id', params.saga_id)
+    const suffix = query.size > 0 ? `?${query.toString()}` : ''
+    return request<{ artifacts: Artifact[]; count: number }>(`/v1/workspace/artifacts${suffix}`)
+  },
   getArtifact: (id: string) =>
     request<{ artifact: Artifact; offset: number; next_offset: number; truncated: boolean }>(`/v1/workspace/artifacts/${id}`),
   createArtifact: (data: Partial<Artifact> & { id: string; title: string }) =>
@@ -926,6 +960,12 @@ export const workspaceApi = {
     request<Artifact>(`/v1/workspace/artifacts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteArtifact: (id: string) =>
     request<{ deleted: boolean }>(`/v1/workspace/artifacts/${id}`, { method: 'DELETE' }),
+  submitArtifact: (id: string, data: { reviewers: string[]; mode?: string; note?: string }) =>
+    request<ArtifactReview>(`/v1/workspace/artifacts/${id}/submit`, { method: 'POST', body: JSON.stringify(data) }),
+  listArtifactReviews: (id: string) =>
+    request<{ reviews: ArtifactReview[] }>(`/v1/workspace/artifacts/${id}/reviews`),
+  resolveArtifactReview: (id: string, reviewId: string, approve: boolean, comment: string) =>
+    request<{ review: ArtifactReview; artifact: Artifact }>(`/v1/workspace/artifacts/${id}/reviews/${reviewId}/${approve ? 'approve' : 'reject'}`, { method: 'POST', body: JSON.stringify({ comment }) }),
   artifactReferences: () =>
     request<{ references: Record<string, string[]> }>('/v1/workspace/artifacts/references'),
 

@@ -1,0 +1,343 @@
+package workspace
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// Artifact lifecycle state machine (docs/artifact-lifecycle.md §5). The store,
+// not the clients, owns the transitions: draft → in_review → approved/rejected,
+// with edits reopening rejected versions as drafts.
+
+// ErrArtifactLocked reports an edit attempt against a version whose status
+// forbids it (in_review: locked while a review is open).
+var ErrArtifactLocked = errors.New("artifact is locked")
+
+// Artifact statuses and kinds (migration 000064).
+const (
+	ArtifactDraft    = "draft"
+	ArtifactInReview = "in_review"
+	ArtifactApproved = "approved"
+	ArtifactRejected = "rejected"
+
+	ArtifactKindReference = "reference"
+	ArtifactKindWork      = "work"
+)
+
+// ArtifactReview is one review round of one artifact version
+// (docs/artifact-lifecycle.md §3.3). A version may go through several rounds;
+// each keeps its own decision set.
+type ArtifactReview struct {
+	ID              string                    `json:"id"`
+	ArtifactID      string                    `json:"artifact_id"`
+	ArtifactVersion int                       `json:"artifact_version"`
+	Reviewers       []string                  `json:"reviewers"`
+	Mode            string                    `json:"mode"` // all | any
+	Status          string                    `json:"status"`
+	Note            string                    `json:"note,omitempty"`
+	RequestedBy     string                    `json:"requested_by"`
+	RequestedAt     time.Time                 `json:"requested_at"`
+	Decisions       map[string]ReviewDecision `json:"decisions,omitempty"`
+	ResolvedBy      string                    `json:"resolved_by,omitempty"`
+	ResolvedAt      *time.Time                `json:"resolved_at,omitempty"`
+}
+
+// ReviewDecision is one reviewer's answer inside a review round.
+type ReviewDecision struct {
+	Decision string    `json:"decision"` // approve | reject
+	Comment  string    `json:"comment,omitempty"`
+	At       time.Time `json:"at"`
+}
+
+const artifactReviewColumns = `id, artifact_id, artifact_version, reviewers, mode, status, note, requested_by, requested_at, decisions, resolved_by, resolved_at`
+
+func scanArtifactReview(row interface{ Scan(dest ...any) error }) (ArtifactReview, error) {
+	var r ArtifactReview
+	var decisions []byte
+	var resolvedBy *string
+	err := row.Scan(&r.ID, &r.ArtifactID, &r.ArtifactVersion, &r.Reviewers, &r.Mode, &r.Status,
+		&r.Note, &r.RequestedBy, &r.RequestedAt, &decisions, &resolvedBy, &r.ResolvedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return r, ErrNotFound
+	}
+	if err != nil {
+		return r, err
+	}
+	r.ResolvedBy = derefPtr(resolvedBy)
+	if len(decisions) > 0 {
+		_ = json.Unmarshal(decisions, &r.Decisions)
+	}
+	return r, nil
+}
+
+// ValidateArtifactReviewers checks the recipient syntax shared with ask_human
+// (docs/inbound-messages.md §7): user:<id>, org:<unit>, role:<role>,
+// project_owner, or a bare workspace user id. org:/role: entries expand at
+// notification time, not here — the review row stores what was asked.
+func ValidateArtifactReviewers(reviewers []string) error {
+	if len(reviewers) == 0 {
+		return errors.New("at least one reviewer is required")
+	}
+	seen := make(map[string]bool, len(reviewers))
+	for _, who := range reviewers {
+		if who == "" || seen[who] {
+			return fmt.Errorf("reviewers must be non-empty and unique (got %q)", who)
+		}
+		seen[who] = true
+	}
+	return nil
+}
+
+// SubmitArtifactReview moves a draft/rejected version to in_review and opens
+// a review round. Idempotent per version: an already open round for this
+// version returns as-is without touching state or creating a second row.
+func (s *Store) SubmitArtifactReview(ctx context.Context, artifactID string, reviewers []string, mode, note, requestedBy string) (ArtifactReview, error) {
+	if err := ValidateArtifactReviewers(reviewers); err != nil {
+		return ArtifactReview{}, err
+	}
+	if mode == "" {
+		mode = "all"
+	}
+	if mode != "all" && mode != "any" {
+		return ArtifactReview{}, fmt.Errorf("mode must be all or any (got %q)", mode)
+	}
+	var version int
+	err := s.pool.QueryRow(ctx, `SELECT version FROM workspace_artifact WHERE id = $1`, artifactID).Scan(&version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ArtifactReview{}, ErrNotFound
+	}
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	// Idempotency: one open round per version.
+	existing, err := scanArtifactReview(s.pool.QueryRow(ctx,
+		`SELECT `+artifactReviewColumns+` FROM workspace_artifact_review
+		 WHERE artifact_id = $1 AND artifact_version = $2 AND status = 'open'`, artifactID, version))
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return ArtifactReview{}, err
+	}
+	// draft/rejected → in_review. An approved version cannot re-enter review:
+	// editing it opens a new draft version first (SaveArtifactEdit).
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_artifact SET status = 'in_review', updated_at = now() WHERE id = $1 AND status IN ('draft','rejected')`, artifactID)
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		var status string
+		if err := s.pool.QueryRow(ctx, `SELECT status FROM workspace_artifact WHERE id = $1`, artifactID).Scan(&status); err != nil {
+			return ArtifactReview{}, err
+		}
+		return ArtifactReview{}, fmt.Errorf("%w: artifact is %s; only draft or rejected versions enter review", ErrArtifactLocked, status)
+	}
+	review := ArtifactReview{
+		ID:         fmt.Sprintf("%s-v%d-%d", artifactID, version, time.Now().UTC().UnixNano()),
+		ArtifactID: artifactID, ArtifactVersion: version,
+		Reviewers: reviewers, Mode: mode, Status: "open",
+		Note: note, RequestedBy: requestedBy, RequestedAt: time.Now().UTC(),
+		Decisions: map[string]ReviewDecision{},
+	}
+	_, err = s.pool.Exec(ctx,
+		`INSERT INTO workspace_artifact_review (`+artifactReviewColumns+`)
+		 VALUES ($1,$2,$3,$4,$5,'open',$6,$7,$8,'{}'::jsonb,NULL,NULL)`,
+		review.ID, review.ArtifactID, review.ArtifactVersion, review.Reviewers, review.Mode,
+		review.Note, review.RequestedBy, review.RequestedAt)
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	return review, nil
+}
+
+// ResolveArtifactReview records one reviewer's decision and closes the round
+// by its mode: any — the first answer decides; all — a reject closes
+// immediately, an approve closes when every reviewer has approved. Closing
+// moves the artifact to approved/rejected. Double resolution is a conflict.
+func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID, reviewer string, approve bool, comment string) (ArtifactReview, Artifact, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	defer tx.Rollback(ctx)
+	review, err := scanArtifactReview(tx.QueryRow(ctx,
+		`SELECT `+artifactReviewColumns+` FROM workspace_artifact_review WHERE id = $1 FOR UPDATE`, reviewID))
+	if err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	if review.Status != "open" {
+		return ArtifactReview{}, Artifact{}, fmt.Errorf("%w: review is already %s", ErrConflict, review.Status)
+	}
+	listed := false
+	for _, who := range review.Reviewers {
+		if who == reviewer {
+			listed = true
+			break
+		}
+	}
+	if !listed {
+		return ArtifactReview{}, Artifact{}, fmt.Errorf("%w: %q is not a reviewer of this round", ErrConflict, reviewer)
+	}
+	if review.Decisions == nil {
+		review.Decisions = map[string]ReviewDecision{}
+	}
+	decision := "reject"
+	if approve {
+		decision = "approve"
+	}
+	review.Decisions[reviewer] = ReviewDecision{Decision: decision, Comment: comment, At: time.Now().UTC()}
+
+	closes, closedStatus := false, ""
+	if !approve {
+		closes, closedStatus = true, "rejected"
+	} else if review.Mode == "any" {
+		closes, closedStatus = true, "approved"
+	} else {
+		allApproved := true
+		for _, who := range review.Reviewers {
+			d, ok := review.Decisions[who]
+			if !ok || d.Decision != "approve" {
+				allApproved = false
+				break
+			}
+		}
+		if allApproved {
+			closes, closedStatus = true, "approved"
+		}
+	}
+	encoded, _ := json.Marshal(review.Decisions)
+	if closes {
+		now := time.Now().UTC()
+		review.Status = closedStatus
+		review.ResolvedBy = reviewer
+		review.ResolvedAt = &now
+		if _, err := tx.Exec(ctx,
+			`UPDATE workspace_artifact_review SET decisions = $2, status = $3, resolved_by = $4, resolved_at = $5 WHERE id = $1`,
+			review.ID, encoded, review.Status, reviewer, now); err != nil {
+			return ArtifactReview{}, Artifact{}, err
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE workspace_artifact SET status = $2, updated_at = now() WHERE id = $1`, review.ArtifactID, closedStatus); err != nil {
+			return ArtifactReview{}, Artifact{}, err
+		}
+	} else if _, err := tx.Exec(ctx,
+		`UPDATE workspace_artifact_review SET decisions = $2 WHERE id = $1`, review.ID, encoded); err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ArtifactReview{}, Artifact{}, err
+	}
+	artifact, err := s.GetArtifactRange(ctx, review.ArtifactID, 0, 0)
+	if err != nil {
+		return review, artifact, err
+	}
+	return review, artifact, nil
+}
+
+// CountArtifactSubmits returns how many review rounds one run opened in the
+// window (docs/artifact-lifecycle.md §9 quota for agent submits).
+func (s *Store) CountArtifactSubmits(ctx context.Context, runID string, since time.Time) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM workspace_artifact_review WHERE requested_by = 'kernel-internal' AND requested_at >= $1
+		 AND artifact_id IN (SELECT id FROM workspace_artifact WHERE origin_run = $2)`, since, runID).Scan(&n)
+	return n, err
+}
+
+// ListArtifactReviews returns the review rounds of one artifact, newest first.
+func (s *Store) ListArtifactReviews(ctx context.Context, artifactID string) ([]ArtifactReview, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+artifactReviewColumns+` FROM workspace_artifact_review
+		 WHERE artifact_id = $1 ORDER BY requested_at DESC`, artifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []ArtifactReview
+	for rows.Next() {
+		review, err := scanArtifactReview(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, review)
+	}
+	return result, rows.Err()
+}
+
+// ArtifactRefsApproved is the skill-manifest invariant (docs/artifact-lifecycle.md
+// §8): every artifacts[] reference must exist and hold an approved version.
+// The returned error names the offending ids with their statuses.
+func (s *Store) ArtifactRefsApproved(ctx context.Context, manifest json.RawMessage) error {
+	if len(manifest) == 0 {
+		return nil
+	}
+	var refs struct {
+		Artifacts []struct {
+			ID string `json:"id"`
+		} `json:"artifacts"`
+	}
+	if err := json.Unmarshal(manifest, &refs); err != nil {
+		return nil // malformed manifests fail their own validation elsewhere
+	}
+	if len(refs.Artifacts) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(refs.Artifacts))
+	for _, ref := range refs.Artifacts {
+		if ref.ID != "" {
+			ids = append(ids, ref.ID)
+		}
+	}
+	artifacts, err := s.ArtifactsByIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	return CheckArtifactRefsApproved(artifacts, ids)
+}
+
+// CheckArtifactRefsApproved is the pure half of the skill-manifest invariant:
+// against the resolved rows, every referenced id must exist and be approved.
+// Exported for tests and future call sites that already hold the rows.
+func CheckArtifactRefsApproved(artifacts []Artifact, ids []string) error {
+	byID := make(map[string]Artifact, len(artifacts))
+	for _, a := range artifacts {
+		byID[a.ID] = a
+	}
+	var offenders []string
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		a, ok := byID[id]
+		if !ok {
+			offenders = append(offenders, fmt.Sprintf("%s: missing", id))
+			continue
+		}
+		if a.Status != ArtifactApproved {
+			offenders = append(offenders, fmt.Sprintf("%s: %s", id, a.Status))
+		}
+	}
+	if len(offenders) > 0 {
+		return fmt.Errorf("artifact_not_approved: skills may reference approved artifacts only — %s", joinStrings(offenders, "; "))
+	}
+	return nil
+}
+
+func joinStrings(items []string, sep string) string {
+	out := ""
+	for i, item := range items {
+		if i > 0 {
+			out += sep
+		}
+		out += item
+	}
+	return out
+}

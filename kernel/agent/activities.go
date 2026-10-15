@@ -703,6 +703,12 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleArtifactSearch(ctx, request)
 	case "artifact_read":
 		return a.handleArtifactRead(ctx, request)
+	case "artifact_create":
+		return a.handleArtifactCreate(ctx, request)
+	case "artifact_update":
+		return a.handleArtifactUpdate(ctx, request)
+	case "artifact_submit":
+		return a.handleArtifactSubmit(ctx, request)
 	case "secret_list":
 		return a.handleSecretList(ctx, request)
 	case "knowledge_lookup":

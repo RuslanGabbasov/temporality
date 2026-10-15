@@ -265,6 +265,13 @@ func main() {
 		log.Error("migrate workspace v63 (artifact registry)", "error", err)
 		os.Exit(1)
 	}
+	// 000064 adds the artifact lifecycle (docs/artifact-lifecycle.md): status/
+	// kind/version/origin/saga columns and the review table. Existing rows
+	// become approved v1 reference documents — their authors signed them in.
+	if err = ws.Migrate(ctx, "migrations/000064_artifact_lifecycle.up.sql"); err != nil {
+		log.Error("migrate workspace v64 (artifact lifecycle)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -2334,6 +2341,9 @@ func main() {
 			return true
 		},
 		visibleUnits, time.Now, log)
+	// Artifact lifecycle routes (docs/artifact-lifecycle.md §6): submit a
+	// draft to review, list review rounds, resolve them by human decision.
+	RegisterArtifactLifecycleRoutes(mux, gate, ws, events)
 	// Rejecting keeps the proposal in history; a rejected proposal can never
 	// be applied — deciding twice is a conflict.
 	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/proposals/{id}/reject", func(w http.ResponseWriter, r *http.Request) {
@@ -3769,6 +3779,13 @@ func main() {
 			writeError(w, 422, err)
 			return
 		}
+		// Skill-manifest invariant (docs/artifact-lifecycle.md §8): artifacts[]
+		// may reference approved versions only — a draft or rejected work product
+		// never enters an active skill.
+		if err := ws.ArtifactRefsApproved(r.Context(), skill.Manifest); err != nil {
+			writeError(w, 422, err)
+			return
+		}
 		if skill.ID == "" {
 			writeError(w, 422, errors.New("id is required"))
 			return
@@ -3866,6 +3883,10 @@ func main() {
 			writeError(w, 422, err)
 			return
 		}
+		if err := ws.ArtifactRefsApproved(r.Context(), skill.Manifest); err != nil {
+			writeError(w, 422, err)
+			return
+		}
 		// Editing content must not re-scope a skill: bindings change only
 		// through the admin binding endpoint, so the payload value is ignored
 		// entirely and the previous binding is preserved.
@@ -3942,6 +3963,10 @@ func main() {
 		}
 		skill, err := req.toSkill(r.PathValue("skillID"))
 		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		if err := ws.ArtifactRefsApproved(r.Context(), skill.Manifest); err != nil {
 			writeError(w, 422, err)
 			return
 		}
@@ -4793,7 +4818,12 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		list, err := ws.ListArtifactsVisible(r.Context(), visibleUnits(r))
+		// Lifecycle filters (docs/artifact-lifecycle.md §9): status/kind exact
+		// match, saga_id traces one saga's work products.
+		filter := workspace.ArtifactFilter{
+			Status: r.URL.Query().Get("status"), Kind: r.URL.Query().Get("kind"), SagaID: r.URL.Query().Get("saga_id"),
+		}
+		list, err := ws.ListArtifactsFiltered(r.Context(), visibleUnits(r), filter)
 		if err != nil {
 			writeError(w, 500, err)
 			return
@@ -4818,11 +4848,36 @@ func main() {
 			writeError(w, 422, errors.New("id is required (derive it from the title)"))
 			return
 		}
+		// Origin split (docs/artifact-lifecycle.md §4): a human create is itself
+		// an approval act; the kernel service identity (agent tools) creates
+		// drafts that must clear a human review before skills may reference them.
+		if principal, ok := controlplane.FromContext(r.Context()); ok && principal.Subject == "kernel-internal" {
+			artifact.Status = workspace.ArtifactDraft
+			artifact.OriginType = "agent"
+			if artifact.OriginRun == "" {
+				writeError(w, 422, errors.New("origin_run is required for agent-created artifacts"))
+				return
+			}
+		} else {
+			artifact.Status = workspace.ArtifactApproved
+			artifact.OriginType = "human"
+			artifact.OriginUser = requestUserID(r)
+		}
 		if err := ws.CreateArtifact(r.Context(), &artifact); err != nil {
 			writeError(w, 409, err)
 			return
 		}
-		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditArtifactCreated, "artifact", artifact.ID, map[string]any{"title": artifact.Title, "provider": artifact.Provider})
+		auditAction := workspace.AuditArtifactCreated
+		if artifact.OriginType == "agent" {
+			auditAction = workspace.AuditArtifactProposed
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), auditAction, "artifact", artifact.ID, map[string]any{"title": artifact.Title, "provider": artifact.Provider, "kind": artifact.Kind, "status": artifact.Status})
+		if artifact.OriginType == "agent" {
+			emitArtifactLifecycleEvent(r.Context(), events, "artifact.proposed", artifact.ID, map[string]any{
+				"artifact_id": artifact.ID, "title": artifact.Title, "kind": artifact.Kind, "saga_id": artifact.SagaID,
+				"origin_run": artifact.OriginRun, "version": artifact.Version,
+			})
+		}
 		writeJSON(w, 201, artifact)
 	})
 	// Exact path beats the {artifactID} wildcard: the UI fetches the whole
@@ -4889,10 +4944,26 @@ func main() {
 			writeError(w, 422, err)
 			return
 		}
-		// Editing must not re-scope an artifact: bindings change only through
-		// the admin binding endpoint (same contract as agents and secrets).
+		// An edit without an explicit kind keeps the stored classification;
+		// origin (who/what created it) survives edits by design — it is history,
+		// not a mutable field. Editing must not re-scope an artifact either:
+		// bindings change only through the admin binding endpoint.
+		if req.Kind == "" {
+			artifact.Kind = current.Kind
+		}
+		if artifact.SagaID == "" {
+			artifact.SagaID = current.SagaID
+		}
 		artifact.OrgUnitID = current.OrgUnitID
-		if err := ws.UpdateArtifact(r.Context(), artifact); err != nil {
+		if err := ws.SaveArtifactEdit(r.Context(), artifact); err != nil {
+			if errors.Is(err, workspace.ErrArtifactLocked) {
+				writeError(w, 409, err)
+				return
+			}
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
 			writeError(w, 500, err)
 			return
 		}
@@ -7260,6 +7331,9 @@ type artifactRequest struct {
 	ExternalRef string `json:"external_ref"`
 	Content     string `json:"content"`
 	MimeType    string `json:"mime_type"`
+	Kind        string `json:"kind"`    // reference (default) | work
+	SagaID      string `json:"saga_id"` // saga work product link, optional
+	OriginRun   string `json:"origin_run"`
 	OrgUnitID   string `json:"org_unit_id"` // only set on create; updates keep the stored binding
 }
 
@@ -7294,6 +7368,12 @@ func (r artifactRequest) toArtifact(id string) (workspace.Artifact, error) {
 	if r.Provider == "builtin" && len(r.Content) > maxArtifactContentBytes {
 		return workspace.Artifact{}, fmt.Errorf("content exceeds %d bytes", maxArtifactContentBytes)
 	}
+	if r.Kind == "" {
+		r.Kind = workspace.ArtifactKindReference
+	}
+	if r.Kind != workspace.ArtifactKindReference && r.Kind != workspace.ArtifactKindWork {
+		return workspace.Artifact{}, fmt.Errorf("kind must be reference or work (got %q)", r.Kind)
+	}
 	return workspace.Artifact{
 		ID:          id,
 		Title:       strings.TrimSpace(r.Title),
@@ -7302,6 +7382,9 @@ func (r artifactRequest) toArtifact(id string) (workspace.Artifact, error) {
 		ExternalRef: r.ExternalRef,
 		Content:     r.Content,
 		MimeType:    strings.TrimSpace(r.MimeType),
+		Kind:        r.Kind,
+		SagaID:      strings.TrimSpace(r.SagaID),
+		OriginRun:   strings.TrimSpace(r.OriginRun),
 		OrgUnitID:   strings.TrimSpace(r.OrgUnitID),
 	}, nil
 }

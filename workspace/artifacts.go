@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
+	"strconv"
 	"time"
 	"unicode/utf8"
 
@@ -31,6 +33,17 @@ type Artifact struct {
 	ContentHash string `json:"content_hash,omitempty"`
 	SizeBytes   int64  `json:"size_bytes"`
 	MimeType    string `json:"mime_type,omitempty"`
+	// Lifecycle (docs/artifact-lifecycle.md §3): status is per version,
+	// kind separates reference documents from saga work products, origin
+	// records who created the artifact (human user or agent run) and stays
+	// fixed — the approver signs off knowing exactly what they approve.
+	Status     string `json:"status"`                // draft | in_review | approved | rejected
+	Kind       string `json:"kind"`                  // reference | work
+	Version    int    `json:"version"`               // 1-based; approved bodies are immutable per version
+	OriginType string `json:"origin_type"`           // human | agent
+	OriginUser string `json:"origin_user,omitempty"` // creator (human path)
+	OriginRun  string `json:"origin_run,omitempty"`  // creating run (agent path)
+	SagaID     string `json:"saga_id,omitempty"`     // traceability, not access (visibility stays org-scoped)
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
 	OrgUnitID string    `json:"org_unit_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -62,32 +75,58 @@ func (a *Artifact) normalize() {
 	a.SizeBytes = int64(len(a.Content))
 }
 
-const artifactColumns = `id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, org_unit_id, created_at, updated_at`
+const artifactColumns = `id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, org_unit_id, created_at, updated_at`
 
 func scanArtifact(row interface{ Scan(dest ...any) error }) (Artifact, error) {
 	var a Artifact
-	var orgUnitID *string
+	var orgUnitID, originUser, originRun, sagaID *string
 	if err := row.Scan(&a.ID, &a.Title, &a.Description, &a.Provider, &a.ExternalRef,
-		&a.Content, &a.ContentHash, &a.SizeBytes, &a.MimeType, &orgUnitID, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		&a.Content, &a.ContentHash, &a.SizeBytes, &a.MimeType,
+		&a.Status, &a.Kind, &a.Version, &a.OriginType, &originUser, &originRun, &sagaID, &orgUnitID, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return a, ErrNotFound
 		}
 		return a, err
 	}
+	a.OriginUser = derefPtr(originUser)
+	a.OriginRun = derefPtr(originRun)
+	a.SagaID = derefPtr(sagaID)
 	a.OrgUnitID = derefPtr(orgUnitID)
 	return a, nil
 }
 
 func (s *Store) CreateArtifact(ctx context.Context, artifact *Artifact) error {
 	artifact.normalize()
+	if artifact.Kind == "" {
+		artifact.Kind = "reference"
+	}
+	if artifact.Kind != "reference" && artifact.Kind != "work" {
+		return fmt.Errorf("kind must be reference or work (got %q)", artifact.Kind)
+	}
+	// Safe default: a row without an explicit status is a draft — approval is
+	// always an explicit human act, never a storage default (docs/artifact-lifecycle.md §4).
+	if artifact.Status == "" {
+		artifact.Status = "draft"
+	}
+	if artifact.Status != "draft" && artifact.Status != "approved" {
+		return fmt.Errorf("create accepts draft or approved status only (got %q)", artifact.Status)
+	}
+	if artifact.OriginType == "" {
+		artifact.OriginType = "human"
+	}
+	if artifact.Version == 0 {
+		artifact.Version = 1
+	}
 	now := time.Now().UTC()
 	artifact.CreatedAt = now
 	artifact.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_artifact (id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, org_unit_id, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		`INSERT INTO workspace_artifact (id, title, description, provider, external_ref, content, content_hash, size_bytes, mime_type, status, kind, version, origin_type, origin_user, origin_run, saga_id, org_unit_id, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
 		artifact.ID, artifact.Title, artifact.Description, artifact.Provider, artifact.ExternalRef,
 		artifact.Content, artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
+		artifact.Status, artifact.Kind, artifact.Version, artifact.OriginType,
+		nullString(artifact.OriginUser), nullString(artifact.OriginRun), nullString(artifact.SagaID),
 		nullString(artifact.OrgUnitID), artifact.CreatedAt, artifact.UpdatedAt)
 	return err
 }
@@ -143,16 +182,44 @@ func (s *Store) ListAllArtifacts(ctx context.Context) ([]Artifact, error) {
 	return scanArtifacts(rows)
 }
 
+// ArtifactFilter narrows a listing (docs/artifact-lifecycle.md §9): status and
+// kind are exact matches, saga_id traces a saga's work products. Zero values
+// mean "no constraint".
+type ArtifactFilter struct {
+	Status string
+	Kind   string
+	SagaID string
+}
+
 // ListArtifactsVisible honors the org-visibility rule shared by every
 // workspace resource: org_unit_id IS NULL (installation-wide) or a unit on
 // the caller's path. Bodies are stripped: listing must not ship megabytes.
 func (s *Store) ListArtifactsVisible(ctx context.Context, units []string) ([]Artifact, error) {
-	if units == nil {
-		return s.ListAllArtifacts(ctx)
+	return s.ListArtifactsFiltered(ctx, units, ArtifactFilter{})
+}
+
+// ListArtifactsFiltered is ListArtifactsVisible plus lifecycle filters.
+func (s *Store) ListArtifactsFiltered(ctx context.Context, units []string, f ArtifactFilter) ([]Artifact, error) {
+	query := `SELECT ` + artifactColumns + ` FROM workspace_artifact WHERE 1=1`
+	args := []any{}
+	if units != nil {
+		args = append(args, units)
+		query += ` AND (org_unit_id IS NULL OR org_unit_id = ANY($` + strconv.Itoa(len(args)) + `))`
 	}
-	rows, err := s.pool.Query(ctx,
-		`SELECT `+artifactColumns+` FROM workspace_artifact
-		 WHERE org_unit_id IS NULL OR org_unit_id = ANY($1) ORDER BY title, id`, units)
+	if f.Status != "" {
+		args = append(args, f.Status)
+		query += ` AND status = $` + strconv.Itoa(len(args))
+	}
+	if f.Kind != "" {
+		args = append(args, f.Kind)
+		query += ` AND kind = $` + strconv.Itoa(len(args))
+	}
+	if f.SagaID != "" {
+		args = append(args, f.SagaID)
+		query += ` AND saga_id = $` + strconv.Itoa(len(args))
+	}
+	query += ` ORDER BY title, id`
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -211,25 +278,60 @@ func (s *Store) ArtifactsByIDs(ctx context.Context, ids []string) ([]Artifact, e
 	return ordered, nil
 }
 
-// UpdateArtifact rewrites metadata and body; normalize recomputes the hash.
-// Like the agent update path, the org binding is preserved: bindings move
-// through the admin binding endpoint only.
-func (s *Store) UpdateArtifact(ctx context.Context, artifact Artifact) error {
+// SaveArtifactEdit applies an edit respecting the lifecycle (docs/artifact-lifecycle.md
+// §5): draft/rejected rewrite in place (an edit of a rejected version reopens
+// it as draft), approved opens the next version as draft — the approved body is
+// immutable, its trail lives in artifact.read events with content_hash — and
+// in_review refuses (the version is locked while a review is open). The org
+// binding is preserved: bindings move through the admin binding endpoint only.
+func (s *Store) SaveArtifactEdit(ctx context.Context, artifact Artifact) error {
 	artifact.normalize()
+	artifact.Status = "draft"
 	artifact.UpdatedAt = time.Now().UTC()
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_artifact
-		 SET title=$2, description=$3, provider=$4, external_ref=$5, content=$6, content_hash=$7, size_bytes=$8, mime_type=$9, updated_at=$10
-		 WHERE id=$1`,
+		 SET title=$2, description=$3, provider=$4, external_ref=$5, content=$6, content_hash=$7, size_bytes=$8, mime_type=$9, kind=$10, saga_id=$11, status='draft', updated_at=$12
+		 WHERE id=$1 AND status IN ('draft','rejected')`,
 		artifact.ID, artifact.Title, artifact.Description, artifact.Provider, artifact.ExternalRef,
-		artifact.Content, artifact.ContentHash, artifact.SizeBytes, artifact.MimeType, artifact.UpdatedAt)
+		artifact.Content, artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
+		artifact.Kind, nullString(artifact.SagaID), artifact.UpdatedAt)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	// Editing an approved version opens the next one as a draft: same id, the
+	// version pointer advances. With phase-1 storage (single body column) the
+	// previous body is gone from the table — its hash trail in artifact.read
+	// events keeps decisions reproducible; full snapshots are phase 3.
+	tag, err = s.pool.Exec(ctx,
+		`UPDATE workspace_artifact
+		 SET title=$2, description=$3, provider=$4, external_ref=$5, content=$6, content_hash=$7, size_bytes=$8, mime_type=$9, kind=$10, saga_id=$11, status='draft', version=version+1, updated_at=$12
+		 WHERE id=$1 AND status='approved'`,
+		artifact.ID, artifact.Title, artifact.Description, artifact.Provider, artifact.ExternalRef,
+		artifact.Content, artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
+		artifact.Kind, nullString(artifact.SagaID), artifact.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+	return s.artifactEditConflict(ctx, artifact.ID)
+}
+
+// artifactEditConflict distinguishes the reasons an edit landed on zero rows.
+func (s *Store) artifactEditConflict(ctx context.Context, id string) error {
+	var status string
+	err := s.pool.QueryRow(ctx, `SELECT status FROM workspace_artifact WHERE id = $1`, id).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: artifact is %s (locked while a review is open)", ErrArtifactLocked, status)
 }
 
 func (s *Store) DeleteArtifact(ctx context.Context, id string) error {

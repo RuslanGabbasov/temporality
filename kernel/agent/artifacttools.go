@@ -58,6 +58,9 @@ func (a *Activities) handleArtifactSearch(ctx context.Context, request ToolReque
 			Description string `json:"description"`
 			Provider    string `json:"provider"`
 			SizeBytes   int64  `json:"size_bytes"`
+			Status      string `json:"status"`
+			Kind        string `json:"kind"`
+			Version     int    `json:"version"`
 		} `json:"artifacts"`
 	}
 	if err := json.Unmarshal([]byte(body), &page); err != nil {
@@ -83,6 +86,7 @@ func (a *Activities) handleArtifactSearch(ctx context.Context, request ToolReque
 			scored = append(scored, scoredMatch{item: map[string]any{
 				"id": artifact.ID, "title": artifact.Title, "description": artifact.Description,
 				"provider": artifact.Provider, "size_bytes": artifact.SizeBytes,
+				"status": artifact.Status, "kind": artifact.Kind, "version": artifact.Version,
 			}, score: score})
 		}
 	}
@@ -126,6 +130,9 @@ func (a *Activities) handleArtifactRead(ctx context.Context, request ToolRequest
 			ContentHash string `json:"content_hash"`
 			SizeBytes   int64  `json:"size_bytes"`
 			MimeType    string `json:"mime_type"`
+			Status      string `json:"status"`
+			Kind        string `json:"kind"`
+			Version     int    `json:"version"`
 		} `json:"artifact"`
 		Offset     int  `json:"offset"`
 		NextOffset int  `json:"next_offset"`
@@ -152,6 +159,7 @@ func (a *Activities) handleArtifactRead(ctx context.Context, request ToolRequest
 			"truncated": truncated, "checksum": doc.hash, "size_bytes": len(doc.content),
 			"mime_type":    doc.mimeType,
 			"external_ref": page.Artifact.ExternalRef,
+			"status":       page.Artifact.Status, "kind": page.Artifact.Kind, "version": page.Artifact.Version,
 			"cached_until": doc.fetchedAt.Add(artifactCacheTTL).Format(time.RFC3339),
 			"refetched":    fetchedNow,
 		})
@@ -168,6 +176,7 @@ func (a *Activities) handleArtifactRead(ctx context.Context, request ToolRequest
 		"next_offset": page.NextOffset, "truncated": page.Truncated,
 		"checksum": page.Artifact.ContentHash, "size_bytes": page.Artifact.SizeBytes,
 		"mime_type": page.Artifact.MimeType,
+		"status":    page.Artifact.Status, "kind": page.Artifact.Kind, "version": page.Artifact.Version,
 	})
 	return ToolResult{Content: string(encoded)}, nil
 }
