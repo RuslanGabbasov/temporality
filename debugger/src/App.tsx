@@ -48,6 +48,7 @@ function pageFor(pathname: string): Page {
   if (Routes.experience.test(pathname)) return 'experience'
   if (Routes['agent-config'].test(pathname)) return 'agent-config'
   if (Routes.skills.test(pathname)) return 'skills'
+  if (Routes.artifacts.test(pathname)) return 'artifacts'
   if (Routes.mcp.test(pathname)) return 'mcp'
   if (Routes.secrets.test(pathname)) return 'secrets'
   if (Routes.providers.test(pathname)) return 'providers'

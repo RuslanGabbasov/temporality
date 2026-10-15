@@ -49,15 +49,15 @@ const NAV_ITEMS = [
   { path: '/agents', label: 'nav.runs' },
   { path: '/inbound', label: 'nav.inbound' },
   { path: '/observability', label: 'nav.knowledge' },
+  { path: '/artifacts', label: 'nav.artifacts' },
   { path: '/experience', label: 'nav.timeline' },
-  { path: '/triggers', label: 'nav.triggers' },
 ]
 
 // Configuration surfaces — grouped under the Settings dropdown.
 const CONFIG_ITEMS = [
   { path: '/agent-config', label: 'nav.agents' },
+  { path: '/triggers', label: 'nav.triggers' },
   { path: '/skills', label: 'nav.skills' },
-  { path: '/artifacts', label: 'nav.artifacts' },
   { path: '/mcp', label: 'nav.mcp' },
   { path: '/secrets', label: 'nav.secrets' },
   { path: '/providers', label: 'nav.providers' },
