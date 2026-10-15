@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react'
 import { API_BASE, authHeaders } from './api'
-import { observationApi, runEvents, type ObservationEvent } from './observationApi'
+import { observationApi, runEvents, type KnowledgeItem, type ObservationEvent } from './observationApi'
 import { workspaceApi, type Agent } from './workspaceApi'
 import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
@@ -41,6 +41,57 @@ function pendingApprovals(events: ObservationEvent[]) {
 }
 
 type RunStatus = 'completed' | 'failed' | 'running' | 'cancelled'
+
+type RunView = 'overview' | 'trace' | 'trajectory' | 'budget'
+const RUN_VIEWS: RunView[] = ['overview', 'trace', 'trajectory', 'budget']
+
+/** Inline doubt actions for knowledge referenced by a run: challenge keeps the
+ *  item visible but flagged (hints carry a caution), invalidation retires it.
+ *  Lives next to where the reader noticed the problem — the run itself. */
+function KnowledgeActions({ knowledgeID, project, actorID, onDone }: { knowledgeID: string; project: string; actorID: string; onDone: () => void }) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  async function act(kind: 'challenge' | 'invalidate') {
+    if (!reason.trim()) return
+    setBusy(true); setError('')
+    try {
+      const actor = { id: actorID, type: 'human' }
+      const body = { knowledge_id: knowledgeID, project, actor, reason: reason.trim() }
+      if (kind === 'challenge') await observationApi.challenge(body)
+      else await observationApi.invalidate(body)
+      setReason(''); setOpen(false); onDone()
+    } catch (failure) { setError(message(failure)) }
+    finally { setBusy(false) }
+  }
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} style={{ background: 'none', border: '1px dashed var(--tm-border)', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.1rem 0.45rem', lineHeight: 1.5, borderRadius: '4px', marginTop: '0.3rem' }}>
+        ⚑ {t('runs.knowledge_doubt') ?? 'Doubt this knowledge'}
+      </button>
+    )
+  }
+  return (
+    <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+      <div style={{ minWidth: '220px', flex: 1 }}>
+        <TextInput
+          id={`doubt-${knowledgeID}`}
+          size="sm"
+          labelText={t('knowledge.reason') ?? 'Reason'}
+          placeholder={t('runs.knowledge_reason_placeholder') ?? 'Why does this knowledge look wrong?'}
+          value={reason}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)}
+        />
+      </div>
+      <Button size="sm" kind="secondary" disabled={busy || !reason.trim()} onClick={() => void act('challenge')}>{t('runs.knowledge_challenge') ?? 'Challenge'}</Button>
+      <Button size="sm" kind="danger" disabled={busy || !reason.trim()} onClick={() => void act('invalidate')}>{t('runs.knowledge_invalidate') ?? 'Invalidate'}</Button>
+      <Button size="sm" kind="ghost" onClick={() => setOpen(false)}>✕</Button>
+      {error && <div style={{ width: '100%', fontSize: '0.75rem', color: '#f7768e' }}>{error}</div>}
+    </div>
+  )
+}
 
 /** Tool metadata for reconcile cards (from the retired Operations page). */
 function toolInfo(tool: string, server?: string): { icon: string; label: string; category: string } {
@@ -145,9 +196,13 @@ function buildRunRows(started: ObservationEvent[], statuses: Map<string, RunStat
  * the run's model.text_delta/model.reasoning events) is shown as the primary
  * content; the observability payload is reduced to what the summary line
  * doesn't already say. */
-function EventDetail({ event, t, project, response, reasoning }: { event: ObservationEvent; t: (key: string, vars?: Record<string, string>) => string; project: string; response?: string; reasoning?: string }) {
+function EventDetail({ event, t, project, response, reasoning, knowledgeDoubt }: { event: ObservationEvent; t: (key: string, vars?: Record<string, string>) => string; project: string; response?: string; reasoning?: string; knowledgeDoubt?: React.ReactNode }) {
   const [expanded, setExpanded] = useState(false)
   const d = event.data ?? {}
+  // Knowledge-bearing events (knowledge.*, hint.*) can be doubted in place:
+  // the reader is looking at the exact moment the knowledge was used/formed.
+  const knowledgeID = typeof d.knowledge_id === 'string' && d.knowledge_id
+    && (event.type.startsWith('knowledge.') || event.type.startsWith('hint.')) ? d.knowledge_id : ''
 
   // Human-readable failure explanation: Temporal wraps the real cause into
   // "child workflow execution error (…): activity error (…): cause" — peel it
@@ -255,6 +310,7 @@ function EventDetail({ event, t, project, response, reasoning }: { event: Observ
           )}
         </>
       )}
+      {knowledgeID && knowledgeDoubt}
     </div>
   )
 }
@@ -267,6 +323,16 @@ export default function AgentRuns({ project }: { project: string }) {
   // /agents?project=…&run=…) — an initializer, not an effect, so the first
   // loadRuns call sees it through its closure and skips auto-select.
   const [selected, setSelected] = useState(() => new URLSearchParams(window.location.search).get('run') ?? '')
+  // Detail tab (docs aside: the run page used to stack answer + approvals +
+  // disputes + trees + the whole trace + trajectory + budget in one column
+  // that could not be scrolled to the end). URL-initialized so a link can
+  // open the trace directly.
+  const [view, setView] = useState<RunView>(() => {
+    const initial = new URLSearchParams(window.location.search).get('view') as RunView | null
+    return initial && RUN_VIEWS.includes(initial) ? initial : 'overview'
+  })
+  const viewRef = useRef(view)
+  useEffect(() => { viewRef.current = view }, [view])
   // loadRuns reads the current selection through a ref so its identity doesn't
   // change (and re-trigger the list effect) every time the user picks a run.
   const selectedRef = useRef(selected)
@@ -295,7 +361,10 @@ export default function AgentRuns({ project }: { project: string }) {
   const [reconcileNote, setReconcileNote] = useState('')
   // Historical knowledge events (recorded before propositions were embedded in
   // events) carry bare knowledge ids — resolve them against the project list.
-  const [knowledgeById, setKnowledgeById] = useState<Map<string, string>>(new Map())
+  // Full items (not just propositions): the run's knowledge rows also show the
+  // current lifecycle state, which changes when the reader doubts one.
+  const [knowledgeItems, setKnowledgeItems] = useState<Map<string, KnowledgeItem>>(new Map())
+  const [knowledgeRevision, setKnowledgeRevision] = useState(0)
   const pending = useMemo(() => pendingApprovals(timeline), [timeline])
   // Ancestors of runs with unresolved ops light up too, so the delegation
   // chain points straight at the failure; subtree counts feed the row tags.
@@ -516,7 +585,7 @@ export default function AgentRuns({ project }: { project: string }) {
         const detail = await response.text()
         throw new Error(`${response.status} ${detail}`)
       }
-      const query = new URLSearchParams({ project: runProject, run })
+      const query = new URLSearchParams({ project: runProject, run, view: viewRef.current })
       window.history.replaceState(null, '', `/agents?${query}`)
       // Fetch trajectory extraction (deterministic patterns from event stream)
       try {
@@ -542,6 +611,15 @@ export default function AgentRuns({ project }: { project: string }) {
 
   useEffect(() => { void loadRuns(true) }, [loadRuns])
   useEffect(() => { if (selected) void loadRun(selected) }, [selected, loadRun])
+  // Tab switches update the URL so a trace/trajectory/budget view is
+  // shareable; loadRun preserves the current tab via viewRef.
+  useEffect(() => {
+    if (!selected) return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('view') === view) return
+    params.set('view', view)
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
+  }, [view, selected])
   useEffect(() => {
     if (!selected) return
     // Poll only the selected run's events, don't re-fetch the full run list
@@ -591,23 +669,37 @@ export default function AgentRuns({ project }: { project: string }) {
   useEffect(() => {
     workspaceApi.listAllAgents().then((page) => setAgents(page.agents)).catch(() => { /* names fall back to ids */ })
   }, [])
+  // The selected run's own project: detail endpoints (result, approval,
+  // nudge, knowledge doubt actions) need it even when the header filter is the
+  // global "All projects". Falls back to the filter for run ids the list
+  // hasn't loaded yet. Declared before the effects that depend on it.
+  const selectedProject = useMemo(
+    () => rows.find((row) => row.id === selected)?.project ?? project.trim(),
+    [rows, selected, project],
+  )
+
   // Knowledge propositions resolve historical knowledge.used/hint.* events.
+  // Scoped to the selected run's project (not the header filter): the global
+  // listing spans projects, and the doubt actions target the run's own store.
   useEffect(() => {
-    const projectID = project.trim()
-    if (!projectID) { setKnowledgeById(new Map()); return }
+    const projectID = selectedProject.trim()
+    if (!projectID) { setKnowledgeItems(new Map()); return }
     observationApi.knowledge(projectID)
       .then((page) => {
-        const map = new Map<string, string>()
-        for (const item of page.knowledge ?? []) map.set(item.id, item.proposition)
-        setKnowledgeById(map)
+        const map = new Map<string, KnowledgeItem>()
+        for (const item of page.knowledge ?? []) map.set(item.id, item)
+        setKnowledgeItems(map)
       })
       .catch(() => { /* bare ids stay as the fallback */ })
-  }, [project])
+  }, [selectedProject, knowledgeRevision])
   // Verdict buttons need the caller's role. Kernels without /whoami are
   // legacy no-auth deployments — treated as operator (the kernel still
   // enforces the ladder server-side on the reconcile call itself).
   useEffect(() => { void whoami().then(setIdentity).catch(() => setIdentity(null)) }, [])
   const operator = identity === null || canReconcile(identity.role)
+  // Manual knowledge verdicts need an actor id; fall back to a stable label
+  // for anonymous/no-auth kernels (the server records it as-is in the event).
+  const humanActorID = identity?.subject && identity.subject !== 'anonymous' ? identity.subject : 'human-ui'
 
   async function submitReconcile(op: UncertainOperation, effect: ReconcileEffect) {
     setBusy(true); setError('')
@@ -670,14 +762,6 @@ export default function AgentRuns({ project }: { project: string }) {
     } catch (failure) { setError(message(failure)) }
     finally { setBusy(false) }
   }
-
-  // The selected run's own project: detail endpoints (result, approval,
-  // nudge) need it even when the header filter is the global "All projects".
-  // Falls back to the filter for run ids the list hasn't loaded yet.
-  const selectedProject = useMemo(
-    () => rows.find((row) => row.id === selected)?.project ?? project.trim(),
-    [rows, selected, project],
-  )
 
   // Prefer the run result (REST); evicted child runs have none — fall back
   // to the agent.summary event, which survives in the journal. Older summary
@@ -940,6 +1024,34 @@ export default function AgentRuns({ project }: { project: string }) {
                   </Tile>
                 )}
 
+                {/* Detail tabs — trace, trajectory and budget are peer views of
+                    the same run; the old single column could not be scrolled
+                    to the end. Actionable cards (answer, approvals, reconcile)
+                    stay above the tabs on every view. */}
+                <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--tm-border)', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                  {([
+                    { key: 'overview' as RunView, label: t('runs.view_overview') ?? 'Overview', badge: selectedOps.length > 0 ? `⚠ ${selectedOps.length}` : '' },
+                    { key: 'trace' as RunView, label: t('runs.trace') ?? 'Trace', badge: String(trace.visible.length) },
+                    { key: 'trajectory' as RunView, label: t('runs.trajectory') ?? 'Trajectory', badge: '' },
+                    { key: 'budget' as RunView, label: t('runs.task_budget') ?? 'Budget', badge: '' },
+                  ]).map((v) => (
+                    <button
+                      key={v.key}
+                      onClick={() => setView(v.key)}
+                      style={{
+                        padding: '0.5rem 1rem', background: view === v.key ? 'var(--tm-elevated)' : 'transparent',
+                        border: 'none', borderBottom: view === v.key ? '2px solid var(--tm-teal)' : '2px solid transparent',
+                        color: view === v.key ? 'var(--tm-teal)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600,
+                        display: 'flex', alignItems: 'center', gap: '0.35rem',
+                      }}
+                    >
+                      {v.label}
+                      {v.badge && <span style={{ fontSize: '0.7rem', fontWeight: 400 }}>{v.badge}</span>}
+                    </button>
+                  ))}
+                </div>
+
+                {view === 'overview' && (<>
                 {/* Cross-agent knowledge disputes across the selected run's chain */}
                 <RunDisputes project={selectedProject} selected={selected} rows={rows} onOpenRun={setSelected} />
 
@@ -948,13 +1060,14 @@ export default function AgentRuns({ project }: { project: string }) {
 
                 {/* Plan DAG view — task graph of plan calls with live statuses */}
                 <PlanGraph project={selectedProject} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
+                </>)}
 
-                {/* Timeline — the main trace view */}
+                {view === 'trace' && (
                 <Tile>
                   <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{t('runs.trace') ?? 'Trace'} ({t('runs.events_count', { count: String(trace.visible.length) })})</Heading>
                   <Stack gap={0}>
                     {[...trace.visible].reverse().map((event, index) => {
-                      const info = eventSummary(event, t, (id) => knowledgeById.get(id))
+                      const info = eventSummary(event, t, (id) => knowledgeItems.get(id)?.proposition)
                       const turnKey = event.type === 'model.completed' ? `${runID(event)}:${event.data?.turn}` : undefined
                       // The newest trace row being model.started of the selected
                       // run means the call is in flight right now — render it as a
@@ -1024,16 +1137,23 @@ export default function AgentRuns({ project }: { project: string }) {
                             <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{shortTime(event.occurred_at)}</span>
                           </div>
                           <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>
-                            <EventDetail event={event} t={t} project={selectedProject} response={turnKey ? trace.responseByKey.get(turnKey) : undefined} reasoning={turnKey ? trace.reasoningByKey.get(turnKey) : undefined} />
+                            <EventDetail event={event} t={t} project={selectedProject} response={turnKey ? trace.responseByKey.get(turnKey) : undefined} reasoning={turnKey ? trace.reasoningByKey.get(turnKey) : undefined}
+                              knowledgeDoubt={typeof event.data?.knowledge_id === 'string' && event.data.knowledge_id
+                                ? <KnowledgeActions knowledgeID={String(event.data.knowledge_id)} project={selectedProject} actorID={humanActorID} onDone={() => setKnowledgeRevision((r) => r + 1)} />
+                                : undefined} />
                           </div>
                         </div>
                       )
                     })}
                   </Stack>
                 </Tile>
+                )}
 
-                {/* Trajectory extraction & run cost totals */}
-                {(trajectory || runCostData) && (
+                {view === 'trajectory' && (!(trajectory || runCostData) ? (
+                  <Tile style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '2rem' }}>
+                    <p>{t('runs.no_trajectory') ?? 'Trajectory extraction is not available for this run.'}</p>
+                  </Tile>
+                ) : (
                   <Tile>
                     <Heading style={{ fontSize: '0.875rem', marginBottom: '0.75rem' }}>{t('runs.trajectory') ?? 'Trajectory'}</Heading>
                     {/* Summary */}
@@ -1092,25 +1212,43 @@ export default function AgentRuns({ project }: { project: string }) {
                         ))}
                       </div>
                     )}
-                    {/* Knowledge events */}
+                    {/* Knowledge events — doubt/invalidate in place: the
+                        reader looking at a wrong proposition is the right
+                        moment to record the verdict */}
                     {trajectory.knowledge?.length > 0 && (
                       <div>
                         <h5 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>{t('runs.knowledge_heading') ?? 'Knowledge'}</h5>
-                        {trajectory.knowledge.map((k: any, i: number) => (
-                          <div key={i} style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>
-                            <Tag type={k.kind === 'proposed' ? 'blue' : k.kind === 'recalled' ? 'purple' : 'red'} size="sm">{k.kind}</Tag>
-                            <span style={{ marginLeft: '0.5rem' }}>{k.proposition || k.knowledge_id}</span>
-                          </div>
-                        ))}
+                        {trajectory.knowledge.map((k: any, i: number) => {
+                          const live = knowledgeItems.get(String(k.knowledge_id ?? ''))
+                          return (
+                            <div key={i} style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>
+                              <Tag type={k.kind === 'proposed' ? 'blue' : k.kind === 'recalled' ? 'purple' : 'red'} size="sm">{k.kind}</Tag>
+                              {live && live.state !== 'proposed' && live.state !== 'confirmed' && (
+                                <Tag type={live.state === 'invalidated' || live.state === 'superseded' || live.state === 'corrected' ? 'red' : 'warm-gray'} size="sm">{live.state}</Tag>
+                              )}
+                              <span style={{ marginLeft: '0.5rem' }}>{k.proposition || k.knowledge_id}</span>
+                              {k.knowledge_id && (
+                                <KnowledgeActions
+                                  knowledgeID={String(k.knowledge_id)}
+                                  project={selectedProject}
+                                  actorID={humanActorID}
+                                  onDone={() => setKnowledgeRevision((r) => r + 1)}
+                                />
+                              )}
+                            </div>
+                          )
+                        })}
                       </div>
                     )}
                     </>)}
                   </Tile>
-                )}
+                ))}
 
-                {/* Task budget — totals across every run of the task:
-                    conversation follow-ups and the whole delegation tree. */}
-                {taskCostData && taskCostData.run_count > 0 && (() => {
+                {view === 'budget' && (!(taskCostData && taskCostData.run_count > 0) ? (
+                  <Tile style={{ textAlign: 'center', color: 'var(--tm-text-3)', padding: '2rem' }}>
+                    <p>{t('runs.no_budget') ?? 'No task budget data for this run yet.'}</p>
+                  </Tile>
+                ) : (() => {
                   const running = taskCostData.runs.filter((r) => r.status === 'running').length
                   const anyCost = taskCostData.agents.some((a) => a.cost_usd > 0)
                   const agentLabel = (id: string) => {
@@ -1160,7 +1298,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     )}
                   </Tile>
                   )
-                })()}
+                })())}
               </Stack>
             )}
           </Section>

@@ -101,6 +101,8 @@ export const observationApi = {
     }),
   invalidate: (body: { knowledge_id: string; project: string; actor: ObservationActor; reason: string; evidence?: ObservationEvidence[] }) =>
     post<ObservationEvent>('/v1/observations/knowledge/invalidate', body),
+  challenge: (body: { knowledge_id: string; project: string; actor: ObservationActor; reason: string; evidence?: ObservationEvidence[] }) =>
+    post<ObservationEvent>('/v1/observations/knowledge/challenge', body),
   promote: (body: { knowledge_id: string; project: string; actor: ObservationActor; scope_kind: 'org_unit' | 'organization'; scope_id?: string; reason: string; evidence?: ObservationEvidence[] }) =>
     post<ObservationEvent>('/v1/observations/knowledge/promote', body),
   hints: (body: { project: string; query?: string; tool?: string; tool_result?: string; entities?: string[]; topics?: string[]; limit?: number }) =>

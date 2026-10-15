@@ -72,6 +72,7 @@ func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate, opt
 	mux.HandleFunc("GET /v1/observations/runs/state", s.runState)
 	mux.HandleFunc("GET /v1/observations/runs/compare", s.compareRuns)
 	mux.HandleFunc("POST /v1/observations/knowledge/invalidate", s.invalidateObservationKnowledge)
+	mux.HandleFunc("POST /v1/observations/knowledge/challenge", s.challengeObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/knowledge/promote", s.promoteObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/hints", s.activateObservationHints)
 	return logRequests(log, s.gate.Authenticate(mux))
@@ -838,6 +839,83 @@ type promoteObservationRequest struct {
 	ScopeID     string                 `json:"scope_id,omitempty"`
 	Reason      string                 `json:"reason"`
 	Evidence    []observation.Evidence `json:"evidence,omitempty"`
+}
+
+type challengeObservationRequest struct {
+	KnowledgeID string                 `json:"knowledge_id"`
+	Project     string                 `json:"project"`
+	Run         string                 `json:"run,omitempty"`
+	Actor       observation.Actor      `json:"actor"`
+	Reason      string                 `json:"reason"`
+	Evidence    []observation.Evidence `json:"evidence,omitempty"`
+}
+
+// challengeObservationKnowledge records a manual doubt: the knowledge stays
+// visible but is marked challenged, so hints offer it with a caution instead
+// of presenting it as an established rule (docs/knowledge-evolution.md §4).
+// Unlike invalidation it never retires the item — a later confirmation or
+// correction still decides its fate.
+func (s *Server) challengeObservationKnowledge(w http.ResponseWriter, r *http.Request) {
+	var input challengeObservationRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	input.KnowledgeID = strings.TrimSpace(input.KnowledgeID)
+	input.Project = strings.TrimSpace(input.Project)
+	input.Actor.ID = strings.TrimSpace(input.Actor.ID)
+	input.Reason = strings.TrimSpace(input.Reason)
+	if input.KnowledgeID == "" || input.Project == "" || input.Actor.ID == "" || input.Reason == "" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("knowledge_id, project, actor.id, and reason are required"))
+		return
+	}
+	if !s.gate.Allow(w, r, controlplane.RoleOperator, input.Project) {
+		return
+	}
+	events, chain, err := s.visibleKnowledgeEvents(r.Context(), input.Project, nil, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
+		return
+	}
+	knowledge, err := observation.ProjectKnowledge(events)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	knowledge = filterKnowledgeVisible(knowledge, input.Project, chain)
+	var target *observation.Knowledge
+	for i := range knowledge {
+		if knowledge[i].ID == input.KnowledgeID {
+			target = &knowledge[i]
+			break
+		}
+	}
+	if target == nil {
+		writeError(w, http.StatusNotFound, observation.ErrKnowledgeNotFound)
+		return
+	}
+	if target.State == "corrected" || target.State == "superseded" || target.State == "invalidated" {
+		writeError(w, http.StatusConflict, errors.New("knowledge is already retired"))
+		return
+	}
+	event := observation.Event{
+		Schema: observation.Schema, EventID: newUUID(), OccurredAt: s.now().UTC(),
+		Source:   observation.Source{ID: "temporality-manual", Integration: "temporality", Version: "1"},
+		Context:  observation.Context{Project: input.Project, Run: input.Run, Actor: input.Actor},
+		Type:     "knowledge.challenged",
+		Data:     map[string]any{"knowledge_id": input.KnowledgeID, "reason": input.Reason, "method": "manual"},
+		Evidence: input.Evidence,
+	}
+	if err = event.Validate(); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	event.ReceivedAt = s.now().UTC()
+	if _, err = s.store.AppendObservation(r.Context(), event); err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not record challenge"))
+		return
+	}
+	writeJSON(w, http.StatusCreated, event)
 }
 
 // filterKnowledgeVisible narrows a projected knowledge list to what the

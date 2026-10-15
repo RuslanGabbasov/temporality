@@ -1329,3 +1329,51 @@ func TestKnowledgeListSearchFacetsPagination(t *testing.T) {
 		}
 	})
 }
+
+// A manual challenge marks knowledge as doubtful without retiring it: hints
+// keep offering it (with a caution), and a later confirm/correct still can.
+func TestKnowledgeManualChallenge(t *testing.T) {
+	handler := newTestServer(t)
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{
+		"events": []observation.Event{proposedEvent("lighthouse", "evt-c1", "K1", "gatekeeper v2 authenticates via .token-file")},
+	}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/knowledge/challenge", map[string]any{
+		"knowledge_id": "K1", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"}, "reason": "looks wrong on staging",
+	}); res.StatusCode != http.StatusCreated {
+		t.Fatalf("challenge status = %d, body = %v", res.StatusCode, body)
+	}
+
+	_, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse", nil)
+	knowledge := body["knowledge"].([]any)
+	if state := knowledge[0].(map[string]any)["state"]; state != "challenged" {
+		t.Fatalf("state after challenge = %v, want challenged", state)
+	}
+
+	// A bare reason is mandatory — a drive-by doubt without justification is
+	// worthless in the audit trail.
+	if res, _ := doJSON(t, handler, "POST", "/v1/observations/knowledge/challenge", map[string]any{
+		"knowledge_id": "K1", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"}, "reason": "  ",
+	}); res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("challenge without reason status = %d, want 422", res.StatusCode)
+	}
+	if res, _ := doJSON(t, handler, "POST", "/v1/observations/knowledge/challenge", map[string]any{
+		"knowledge_id": "K404", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"}, "reason": "missing target",
+	}); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("challenge of unknown knowledge status = %d, want 404", res.StatusCode)
+	}
+
+	// Retired knowledge can no longer be doubted — invalidation wins.
+	if res, _ := doJSON(t, handler, "POST", "/v1/observations/knowledge/invalidate", map[string]any{
+		"knowledge_id": "K1", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"}, "reason": "confirmed wrong",
+	}); res.StatusCode != http.StatusCreated {
+		t.Fatalf("invalidate status = %d", res.StatusCode)
+	}
+	if res, _ := doJSON(t, handler, "POST", "/v1/observations/knowledge/challenge", map[string]any{
+		"knowledge_id": "K1", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"}, "reason": "too late",
+	}); res.StatusCode != http.StatusConflict {
+		t.Fatalf("challenge after invalidate status = %d, want 409", res.StatusCode)
+	}
+}
