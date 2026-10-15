@@ -2441,6 +2441,13 @@ button.header-nav-link {
   background: var(--tm-elevated);
   border: 1px solid var(--tm-border);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+
+  // Carbon's Loading stroke is tied to the default blue interactive token;
+  // the app accent (spinners, active tabs, links) is amber — keep the plate's
+  // spinner in the same accent instead of the one stray blue element.
+  .cds--loading__stroke {
+    stroke: var(--tm-amber);
+  }
 }
 
 .spinner-lg {
