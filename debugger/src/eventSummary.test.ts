@@ -404,6 +404,83 @@ describe('plan rework folding', () => {
   })
 })
 
+describe('quality loop and saga summaries', () => {
+  it('localizes saga register and attach events', () => {
+    const registered = eventSummary(event('saga.registered', { saga_id: 'saga-api-migration-a1b2c3d4', title: 'Миграция API', origin: 'agent-tool' }), t)
+    expect(registered.label).toBe('runs.event.saga_registered')
+    expect(registered.detail).toContain('Миграция API')
+    const attached = eventSummary(event('saga.attached', { saga_id: 'saga-x', task_id: 'task-12', note: 'продолжение работы' }), t)
+    expect(attached.label).toBe('runs.event.saga_attached')
+    expect(attached.detail).toContain('task-12')
+  })
+
+  it('localizes operation reconcile effects', () => {
+    const occurred = eventSummary(event('operation.reconciled', { operation_id: 'op-1', effect: 'occurred', note: 'проверено вручную' }), t)
+    expect(occurred.label).toBe('runs.event.operation_reconciled')
+    expect(occurred.detail).toContain('runs.event.reconcile_effect_occurred')
+    const none = eventSummary(event('operation.reconciled', { operation_id: 'op-1', effect: 'none' }), t)
+    expect(none.detail).toContain('runs.event.reconcile_effect_none')
+  })
+
+  it('localizes hitl verdict types with matching colors', () => {
+    const rejected = eventSummary(event('hitl.verdict.recorded', { type: 'rejected', answered_by: 'ruslan' }), t)
+    expect(rejected.label).toBe('runs.event.hitl_verdict')
+    expect(rejected.detail).toContain('runs.event.hitl_verdict_rejected')
+    expect(rejected.color).toBe('#f7768e')
+    const corrected = eventSummary(event('hitl.verdict.recorded', { type: 'corrected', answered_by: 'ruslan' }), t)
+    expect(corrected.detail).toContain('runs.event.hitl_verdict_corrected')
+    expect(corrected.color).toBe('#e6b85c')
+  })
+
+  it('localizes evaluation completion with counts colored by failures', () => {
+    const failed = eventSummary(event('agent.evaluation.completed', { agent_name: 'developer', version: 3, passed: 5, failed: 2, tokens_in: 100, tokens_out: 50 }), t)
+    expect(failed.label).toBe('runs.event.evaluation_completed')
+    expect(failed.detail).toContain('developer')
+    expect(failed.detail).toContain('v3')
+    expect(failed.color).toBe('#f7768e')
+    const green = eventSummary(event('agent.evaluation.completed', { agent_name: 'developer', version: 3, passed: 7, failed: 0 }), t)
+    expect(green.color).toBe('#9ece6a')
+  })
+
+  it('localizes gate lifecycle events with cause and justification', () => {
+    const blocked = eventSummary(event('agent.evaluation.gate.blocked', { agent_id: 'lead', proposal_id: 7, cause: 'gate_red', evaluation_run_id: 'run-uuid-1234' }), t)
+    expect(blocked.label).toBe('runs.event.eval_gate_blocked')
+    expect(blocked.detail).toContain('lead')
+    expect(blocked.detail).toContain('#7')
+    expect(blocked.color).toBe('#f7768e')
+    const overridden = eventSummary(event('agent.evaluation.gate.overridden', { agent_id: 'lead', proposal_id: 7, cause: 'gate_red', override_justification: 'hotfix window' }), t)
+    expect(overridden.label).toBe('runs.event.eval_gate_overridden')
+    expect(overridden.detail).toContain('hotfix window')
+    expect(overridden.color).toBe('#e6b85c')
+  })
+
+  it('localizes judge configuration and calibration', () => {
+    const configured = eventSummary(event('agent.evaluation.judge.configured', { model: 'gpt-4o', configured: true, source: 'env' }), t)
+    expect(configured.label).toBe('runs.event.judge_configured')
+    expect(configured.detail).toContain('gpt-4o')
+    expect(configured.detail).toContain('runs.event.judge_enabled')
+    const calibrated = eventSummary(event('agent.evaluation.judge.calibrated', { agent_id: 'lead', judge_model: 'gpt-4o', agreement_rate: 0.75, degraded: false }), t)
+    expect(calibrated.label).toBe('runs.event.judge_calibrated')
+    expect(calibrated.detail).toContain('75%')
+    const degraded = eventSummary(event('agent.evaluation.judge.calibrated', { agent_id: 'lead', agreement_rate: 0.6, degraded: true }), t)
+    expect(degraded.color).toBe('#e6b85c')
+  })
+
+  it('localizes schedule changes and eval case candidates', () => {
+    const schedule = eventSummary(event('agent.evaluation.schedule.changed', { interval_hours: 24 }), t)
+    expect(schedule.label).toBe('runs.event.quality_schedule_changed')
+    expect(schedule.detail).toContain('runs.event.interval_hours')
+    const created = eventSummary(event('eval.case_candidate.created', { agent_id: 'lead', run_id: 'r1', source: 'human_corrected', redaction_applied: true }), t)
+    expect(created.label).toBe('runs.event.eval_case_created')
+    expect(created.detail).toContain('lead')
+    expect(created.detail).toContain('runs.event.redaction_applied')
+    const decided = eventSummary(event('eval.case_candidate.decided', { candidate_id: 5, verdict: 'rejected', reviewed_by: 'ruslan' }), t)
+    expect(decided.label).toBe('runs.event.eval_case_decided')
+    expect(decided.detail).toContain('runs.event.eval_verdict_rejected')
+    expect(decided.color).toBe('#f7768e')
+  })
+})
+
 describe('restoreMarkdownLines', () => {
   it('keeps texts that already have line structure unchanged', () => {
     const text = '## Заголовок\n\n| a | b |\n|---|---|\n| 1 | 2 |'

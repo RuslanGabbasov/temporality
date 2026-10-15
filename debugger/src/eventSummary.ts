@@ -161,6 +161,16 @@ export function pseudoToolLabel(tool: unknown, t: TranslateFn): string {
   return name
 }
 
+/** Gate events share one payload shape (agent, proposal, cause, run); the
+ * agent answers "whose gate", the proposal and run tie the row to the apply
+ * it decided. Long uuids collapse to a short handle. */
+function evalGateDetail(d: Record<string, unknown>): string {
+  const run = d.evaluation_run_id != null && String(d.evaluation_run_id) !== '' ? shortId(d.evaluation_run_id) : ''
+  return [String(d.agent_id ?? ''), d.proposal_id != null ? `#${String(d.proposal_id)}` : '', String(d.cause ?? ''), run]
+    .filter(Boolean)
+    .join(' · ')
+}
+
 /** Format an event into a human-readable summary line. `propositionOf` resolves
  * knowledge ids to their text for events recorded before propositions were
  * embedded (historical runs still carry bare ids). */
@@ -505,6 +515,80 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       return { icon: '🔑', label: t('runs.event.secret_issued'), detail: String(d.secret ?? ''), color: '#9ece6a' }
     case 'secret.denied':
       return { icon: '🚫', label: t('runs.event.secret_denied'), detail: [String(d.secret ?? ''), String(d.reason ?? '')].filter(Boolean).join(' · '), color: '#f7768e' }
+    case 'saga.registered': {
+      // The title is what the reader recognises; the generated saga id only
+      // matters as a short handle for saga_attach.
+      return { icon: '🧭', label: t('runs.event.saga_registered'), detail: [String(d.title ?? ''), shortId(d.saga_id)].filter(Boolean).join(' · '), color: 'var(--tm-teal)' }
+    }
+    case 'saga.attached': {
+      // The task answers "which run joined the saga"; the note (optional)
+      // says why the binding moved.
+      return { icon: '🧭', label: t('runs.event.saga_attached'), detail: [String(d.task_id ?? ''), String(d.note ?? '').slice(0, 60)].filter(Boolean).join(' · '), color: 'var(--tm-teal)' }
+    }
+    case 'operation.reconciled': {
+      // The effect is the whole point of the row: did the unconfirmed tool
+      // call actually change the outside world or not.
+      const effect = d.effect === 'occurred' ? t('runs.event.reconcile_effect_occurred')
+        : d.effect === 'none' ? t('runs.event.reconcile_effect_none')
+          : d.effect === 'unknown' ? t('runs.event.reconcile_effect_unknown')
+            : String(d.effect ?? '')
+      return { icon: '⚖', label: t('runs.event.operation_reconciled'), detail: [effect, String(d.note ?? '').slice(0, 60)].filter(Boolean).join(' · '), color: 'var(--tm-text-3)' }
+    }
+    case 'hitl.verdict.recorded': {
+      // Verdict types come from workspace.Verdict: accepted | corrected | rejected.
+      const kind = String(d.type ?? '')
+      const verdict = kind === 'accepted' ? t('runs.event.hitl_verdict_accepted')
+        : kind === 'corrected' ? t('runs.event.hitl_verdict_corrected')
+          : kind === 'rejected' ? t('runs.event.hitl_verdict_rejected')
+            : kind
+      const color = kind === 'rejected' ? '#f7768e' : kind === 'corrected' ? '#e6b85c' : '#9ece6a'
+      return { icon: '⚖', label: t('runs.event.hitl_verdict'), detail: [verdict, String(d.answered_by ?? '')].filter(Boolean).join(' · '), color }
+    }
+    case 'agent.evaluation.completed': {
+      // passed/failed counts are the verdict; the agent and version tie the
+      // row to the evolution proposal it will gate.
+      const who = String(d.agent_name ?? d.agent_id ?? '')
+      const passed = d.passed != null ? t('runs.event.evaluation_passed_n', { count: String(d.passed) }) : ''
+      const failed = d.failed != null ? t('runs.event.evaluation_failed_n', { count: String(d.failed) }) : ''
+      const version = d.version != null ? `v${d.version}` : ''
+      return { icon: '🎓', label: t('runs.event.evaluation_completed'), detail: [who, version, passed, failed].filter(Boolean).join(' · '), color: Number(d.failed ?? 0) > 0 ? '#f7768e' : '#9ece6a' }
+    }
+    case 'agent.evaluation.gate.passed':
+      return { icon: '🚦', label: t('runs.event.eval_gate_passed'), detail: evalGateDetail(d), color: '#9ece6a' }
+    case 'agent.evaluation.gate.blocked':
+      return { icon: '🚦', label: t('runs.event.eval_gate_blocked'), detail: evalGateDetail(d), color: '#f7768e' }
+    case 'agent.evaluation.gate.overridden': {
+      // The justification is the audit trail of a promoted-red gate — the
+      // one thing a reviewer wants to read on this row.
+      const justification = String(d.override_justification ?? '').slice(0, 60)
+      return { icon: '🚦', label: t('runs.event.eval_gate_overridden'), detail: [evalGateDetail(d), justification].filter(Boolean).join(' · '), color: '#e6b85c' }
+    }
+    case 'agent.evaluation.gate.skipped':
+      return { icon: '🚦', label: t('runs.event.eval_gate_skipped'), detail: evalGateDetail(d), color: 'var(--tm-text-3)' }
+    case 'agent.evaluation.judge.configured': {
+      const model = String(d.model ?? '')
+      const state = d.configured ? t('runs.event.judge_enabled') : t('runs.event.judge_disabled')
+      return { icon: '⚖', label: t('runs.event.judge_configured'), detail: [model, state].filter(Boolean).join(' · '), color: '#7aa2f7' }
+    }
+    case 'agent.evaluation.judge.calibrated': {
+      // Agreement between the judge and human verdicts; degraded means the
+      // floor was missed and the judge cannot gate applies.
+      const agreement = d.agreement_rate != null ? `${Math.round(Number(d.agreement_rate) * 100)}%` : ''
+      const degraded = d.degraded ? t('runs.event.judge_degraded') : ''
+      return { icon: '⚖', label: t('runs.event.judge_calibrated'), detail: [String(d.agent_id ?? ''), String(d.judge_model ?? ''), agreement, degraded].filter(Boolean).join(' · '), color: d.degraded ? '#e6b85c' : '#9ece6a' }
+    }
+    case 'agent.evaluation.schedule.changed':
+      return { icon: '📅', label: t('runs.event.quality_schedule_changed'), detail: d.interval_hours != null ? t('runs.event.interval_hours', { count: String(d.interval_hours) }) : '', color: '#7aa2f7' }
+    case 'eval.case_candidate.created': {
+      const redaction = d.redaction_applied ? t('runs.event.redaction_applied') : ''
+      return { icon: '🧪', label: t('runs.event.eval_case_created'), detail: [String(d.agent_id ?? ''), String(d.source ?? ''), redaction].filter(Boolean).join(' · '), color: '#73daca' }
+    }
+    case 'eval.case_candidate.decided': {
+      const verdict = d.verdict === 'accepted' ? t('runs.event.eval_verdict_accepted')
+        : d.verdict === 'rejected' ? t('runs.event.eval_verdict_rejected')
+          : String(d.verdict ?? '')
+      return { icon: '🧪', label: t('runs.event.eval_case_decided'), detail: [verdict, String(d.reviewed_by ?? '')].filter(Boolean).join(' · '), color: d.verdict === 'rejected' ? '#f7768e' : '#9ece6a' }
+    }
     default:
       return { icon: '•', label: event.type, detail: '', color: 'var(--tm-text-3)' }
   }

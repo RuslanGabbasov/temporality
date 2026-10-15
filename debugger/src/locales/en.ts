@@ -388,6 +388,41 @@ export const en: Record<string, string> = {
     'runs.event.started': 'started',
     'runs.event.completed': 'completed',
 
+    // Sagas (docs/sagas.md): saga_register / saga_attach tool events
+    'runs.event.saga_registered': 'Saga registered',
+    'runs.event.saga_attached': 'Run attached to saga',
+
+    // Reconcile / HITL verdicts (specs/quality-loop.md)
+    'runs.event.operation_reconciled': 'Operation reconciled',
+    'runs.event.reconcile_effect_occurred': 'effect happened',
+    'runs.event.reconcile_effect_none': 'no effect',
+    'runs.event.reconcile_effect_unknown': 'effect unknown',
+    'runs.event.hitl_verdict': 'Human verdict recorded',
+    'runs.event.hitl_verdict_accepted': 'accepted',
+    'runs.event.hitl_verdict_corrected': 'corrected',
+    'runs.event.hitl_verdict_rejected': 'rejected',
+
+    // Quality loop: evaluation runs, gate, judge, schedule, eval-case candidates
+    'runs.event.evaluation_completed': 'Agent evaluation completed',
+    'runs.event.evaluation_passed_n': 'passed: {{count}}',
+    'runs.event.evaluation_failed_n': 'failed: {{count}}',
+    'runs.event.eval_gate_passed': 'Evaluation gate passed',
+    'runs.event.eval_gate_blocked': 'Evaluation gate blocked the apply',
+    'runs.event.eval_gate_overridden': 'Evaluation gate overridden',
+    'runs.event.eval_gate_skipped': 'Evaluation gate skipped',
+    'runs.event.judge_configured': 'Judge configured',
+    'runs.event.judge_enabled': 'enabled',
+    'runs.event.judge_disabled': 'disabled',
+    'runs.event.judge_calibrated': 'Judge calibrated',
+    'runs.event.judge_degraded': 'degraded',
+    'runs.event.quality_schedule_changed': 'Evaluation schedule changed',
+    'runs.event.interval_hours': 'interval: {{count}}h',
+    'runs.event.eval_case_created': 'Eval case candidate created',
+    'runs.event.eval_case_decided': 'Eval case candidate decided',
+    'runs.event.eval_verdict_accepted': 'accepted',
+    'runs.event.eval_verdict_rejected': 'rejected',
+    'runs.event.redaction_applied': 'redaction applied',
+
     // Live model-call progress (Runs trace)
     'runs.live.alive': 'streaming',
     'runs.live.stalled': 'no data for {{seconds}}s',

@@ -388,6 +388,41 @@ export const ru: Record<string, string> = {
     'runs.event.started': 'начато',
     'runs.event.completed': 'завершено',
 
+    // Sagas (docs/sagas.md): saga_register / saga_attach tool events
+    'runs.event.saga_registered': 'Сага зарегистрирована',
+    'runs.event.saga_attached': 'Запуск привязан к саге',
+
+    // Reconcile / HITL verdicts (specs/quality-loop.md)
+    'runs.event.operation_reconciled': 'Операция сверена',
+    'runs.event.reconcile_effect_occurred': 'эффект был',
+    'runs.event.reconcile_effect_none': 'эффекта не было',
+    'runs.event.reconcile_effect_unknown': 'эффект неизвестен',
+    'runs.event.hitl_verdict': 'Решение человека записано',
+    'runs.event.hitl_verdict_accepted': 'принято',
+    'runs.event.hitl_verdict_corrected': 'исправлено',
+    'runs.event.hitl_verdict_rejected': 'отклонено',
+
+    // Quality loop: evaluation runs, gate, judge, schedule, eval-case candidates
+    'runs.event.evaluation_completed': 'Оценка агента завершена',
+    'runs.event.evaluation_passed_n': 'пройдено: {{count}}',
+    'runs.event.evaluation_failed_n': 'провалено: {{count}}',
+    'runs.event.eval_gate_passed': 'Гейт оценки пройден',
+    'runs.event.eval_gate_blocked': 'Гейт оценки заблокировал применение',
+    'runs.event.eval_gate_overridden': 'Гейт оценки пропущен вручную',
+    'runs.event.eval_gate_skipped': 'Гейт оценки отключён',
+    'runs.event.judge_configured': 'Судья настроен',
+    'runs.event.judge_enabled': 'включён',
+    'runs.event.judge_disabled': 'выключен',
+    'runs.event.judge_calibrated': 'Калибровка судьи',
+    'runs.event.judge_degraded': 'деградация',
+    'runs.event.quality_schedule_changed': 'Расписание оценок изменено',
+    'runs.event.interval_hours': 'интервал: {{count}} ч',
+    'runs.event.eval_case_created': 'Кандидат eval-кейса создан',
+    'runs.event.eval_case_decided': 'Кандидат eval-кейса рассмотрен',
+    'runs.event.eval_verdict_accepted': 'принят',
+    'runs.event.eval_verdict_rejected': 'отклонён',
+    'runs.event.redaction_applied': 'редакция применена',
+
     // Live model-call progress (Runs trace)
     'runs.live.alive': 'стрим идёт',
     'runs.live.stalled': 'нет данных {{seconds}} с',
