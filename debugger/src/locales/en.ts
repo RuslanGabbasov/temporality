@@ -818,6 +818,8 @@ export const en: Record<string, string> = {
     'artifacts.provider_label': 'Provider',
     'artifacts.provider_builtin': 'builtin — body stored in the registry (≤ 2 MiB)',
     'artifacts.provider_url': 'url — body lives in an external system; the kernel fetches and caches it',
+    'artifacts.provider_short_builtin': 'In registry',
+    'artifacts.provider_short_url': 'External (URL)',
     'artifacts.external_ref_label': 'External reference',
     'artifacts.external_ref_helper': 'Absolute http(s) URL; the sandbox never dials out — the kernel proxies the fetch',
     'artifacts.content_label': 'Document body',

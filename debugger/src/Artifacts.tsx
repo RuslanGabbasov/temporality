@@ -69,6 +69,14 @@ export default function Artifacts() {
     return matchesFilter(filter, a.title, a.id, a.description)
   })
 
+  // Provider slugs (builtin/url) are storage mechanics, not user-facing
+  // vocabulary — the filter and the card tag show localized names, the raw
+  // slug stays available in the tag's title tooltip.
+  const providerLabel = (p: string) =>
+    p === 'builtin' ? (t('artifacts.provider_short_builtin') ?? 'In registry')
+      : p === 'url' ? (t('artifacts.provider_short_url') ?? 'External (URL)')
+        : p
+
   const startCreate = () => {
     setEditing(null)
     setForm({ id: '', title: '', description: '', provider: 'builtin', content: '', mime_type: 'text/markdown' })
@@ -136,16 +144,25 @@ export default function Artifacts() {
         <div style={{ maxWidth: '420px', flex: '1 1 260px' }}>
           <ListFilter value={filter} onChange={setFilter} placeholder={t('artifacts.filter_placeholder') ?? 'Filter artifacts…'} />
         </div>
-        <Select id="artifact-provider-filter" hideLabel labelText="provider" value={providerFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setProviderFilter(e.target.value)} style={{ maxWidth: '180px' }}>
-          <SelectItem value="" text={t('artifacts.filter_all_providers') ?? 'All providers'} />
-          <SelectItem value="builtin" text="builtin" />
-          <SelectItem value="url" text="url" />
-        </Select>
-        {org.units.length > 0 && (
-          <Select id="artifact-org-filter" hideLabel labelText="org" value={orgFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setOrgFilter(e.target.value)} style={{ maxWidth: '220px' }}>
-            <SelectItem value="" text={t('artifacts.filter_all_orgs') ?? 'All units'} />
-            {org.units.map((u) => <SelectItem key={u.id} value={u.id} text={u.name} />)}
+        {/* Carbon Select spreads `style` onto the inner <select> while the
+            .cds--select wrapper keeps width:100% — a bare Select in this flex
+            toolbar stretches to the whole row and the absolutely-positioned
+            chevron lands far outside the control. A wrapping div with
+            maxWidth is the boundary the wrapper respects. */}
+        <div style={{ maxWidth: '180px' }}>
+          <Select id="artifact-provider-filter" hideLabel labelText="provider" value={providerFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setProviderFilter(e.target.value)}>
+            <SelectItem value="" text={t('artifacts.filter_all_providers') ?? 'All providers'} />
+            <SelectItem value="builtin" text={providerLabel('builtin')} />
+            <SelectItem value="url" text={providerLabel('url')} />
           </Select>
+        </div>
+        {org.units.length > 0 && (
+          <div style={{ maxWidth: '220px' }}>
+            <Select id="artifact-org-filter" hideLabel labelText="org" value={orgFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setOrgFilter(e.target.value)}>
+              <SelectItem value="" text={t('artifacts.filter_all_orgs') ?? 'All units'} />
+              {org.units.map((u) => <SelectItem key={u.id} value={u.id} text={u.name} />)}
+            </Select>
+          </div>
         )}
       </div>
 
@@ -175,7 +192,7 @@ export default function Artifacts() {
                       <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem', wordBreak: 'break-word' }}>{a.description}</p>
                     )}
                     <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem', alignItems: 'center' }}>
-                      <Tag type={a.provider === 'builtin' ? 'blue' : 'gray'} size="sm">{a.provider}</Tag>
+                      <Tag type={a.provider === 'builtin' ? 'blue' : 'gray'} size="sm" title={a.provider}>{providerLabel(a.provider)}</Tag>
                       <Tag type="cool-gray" size="sm">{humanArtifactSize(a.size_bytes)}</Tag>
                       {usedBy.length > 0
                         ? <Tag type="green" size="sm" title={usedBy.join(', ')}>{t('artifacts.used_by', { n: String(usedBy.length) }) ?? `used by ${usedBy.length} skill(s)`}</Tag>

@@ -818,6 +818,8 @@ export const ru: Record<string, string> = {
     'artifacts.provider_label': 'Провайдер',
     'artifacts.provider_builtin': 'builtin — тело в реестре (≤ 2 МиБ)',
     'artifacts.provider_url': 'url — тело во внешней системе; ядро забирает и кэширует его',
+    'artifacts.provider_short_builtin': 'В реестре',
+    'artifacts.provider_short_url': 'Внешний (URL)',
     'artifacts.external_ref_label': 'Внешняя ссылка',
     'artifacts.external_ref_helper': 'Абсолютный http(s)-адрес; песочница наружу не ходит — проксирует ядро',
     'artifacts.content_label': 'Тело документа',
