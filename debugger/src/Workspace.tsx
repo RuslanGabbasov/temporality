@@ -328,10 +328,23 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     let liveText = ''
     let liveReasoning = ''
     let liveTool = ''
+    // Fragment of the last finished turn. It stays on screen while the next
+    // turn runs its tools — the bubble never blanks mid-run, so intermediate
+    // results remain readable until the next substantive text (or the final
+    // answer) replaces them. settledTurn guards against a stale live copy
+    // overwriting the journal-authoritative fragment.
+    let settledTurn = -1
+    let settledText = ''
+    let settledReasoning = ''
     const applyLive = (data: { type?: string; turn?: number; text?: string; reasoning?: string; tool?: string; args?: string }) => {
       if (data.type === 'done') { closeTokenStream(); return }
       const turn = Number(data.turn ?? 0)
       if (turn !== liveTurn) {
+        if (liveText && liveTurn > settledTurn) {
+          settledText = liveText
+          settledReasoning = liveReasoning
+          settledTurn = liveTurn
+        }
         liveTurn = turn
         liveText = ''
         liveReasoning = ''
@@ -343,7 +356,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       // model is preparing, so the bubble shows life on tool-only turns.
       if (data.tool) liveTool = data.tool
       else if (data.text) liveTool = ''
-      updateMsg(convId, runId, { content: liveText, reasoning: liveReasoning, liveTool: liveTool || undefined })
+      updateMsg(convId, runId, { content: liveText || settledText, reasoning: liveReasoning || settledReasoning, liveTool: liveTool || undefined })
     }
     tes.addEventListener('snapshot', (e) => {
       try { applyLive(JSON.parse((e as MessageEvent).data)) } catch { /* ignore */ }
@@ -370,43 +383,48 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     es.addEventListener('tool.completed', handleEvent('tool.completed'))
     es.addEventListener('knowledge.proposed', handleEvent('knowledge.proposed'))
 
-    // model.text_delta carries the model's response text — show it in real-time
+    // model.text_delta (journal) carries the authoritative full text of the
+    // finished turn — it corrects the live preview and becomes the fragment
+    // that stays visible through the next turn's tool work.
     es.addEventListener('model.text_delta', (e) => {
       try {
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         const text = d.text ?? ''
-        if (text) {
-          // Update the message content with the model's response
-          setConversations((prev) => prev.map((c) => {
-            if (c.id !== convId) return c
-            return { ...c, messages: c.messages.map((m) => {
-              if (m.runId !== runId) return m
-              // Only update if we don't already have a final answer
-              if (m.status && m.status !== 'running') return m
-              return { ...m, content: text }
-            })}
-          }))
-        }
+        const turn = Number(d.turn ?? 0)
+        if (!text || turn < liveTurn) return // stale: a newer turn already streams live
+        settledText = text
+        settledTurn = turn
+        setConversations((prev) => prev.map((c) => {
+          if (c.id !== convId) return c
+          return { ...c, messages: c.messages.map((m) => {
+            if (m.runId !== runId) return m
+            // Only update if we don't already have a final answer
+            if (m.status && m.status !== 'running') return m
+            return { ...m, content: text }
+          }) }
+        }))
       } catch { /* ignore */ }
     })
 
-    // model.reasoning carries the model's thinking/reasoning text
+    // model.reasoning (journal) carries the full thinking text of the finished
+    // turn — same fragment policy as model.text_delta above.
     es.addEventListener('model.reasoning', (e) => {
       try {
         const outer = JSON.parse(e.data)
         const d = outer.data ?? outer
         const text = d.text ?? ''
-        if (text) {
-          setConversations((prev) => prev.map((c) => {
-            if (c.id !== convId) return c
-            return { ...c, messages: c.messages.map((m) => {
-              if (m.runId !== runId) return m
-              if (m.status && m.status !== 'running') return m
-              return { ...m, reasoning: text }
-            })}
-          }))
-        }
+        const turn = Number(d.turn ?? 0)
+        if (!text || turn < liveTurn) return
+        settledReasoning = text
+        setConversations((prev) => prev.map((c) => {
+          if (c.id !== convId) return c
+          return { ...c, messages: c.messages.map((m) => {
+            if (m.runId !== runId) return m
+            if (m.status && m.status !== 'running') return m
+            return { ...m, reasoning: text }
+          }) }
+        }))
       } catch { /* ignore */ }
     })
 
@@ -617,13 +635,10 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     es.addEventListener('done', () => {
       es.close(); streamRef.current.delete(convId)
       closeTokenStream()
-      setConversations((prev) => {
-        const conv = prev.find((c) => c.id === convId)
-        const m = conv?.messages.find((x) => x.runId === runId)
-        if (m?.content) return prev
-        void fetchFinalAnswer(runId, convId)
-        return prev
-      })
+      // The final answer replaces the kept fragment — the REST copy also
+      // fills the terminal status and totals. Skipping the fetch when a
+      // fragment was on screen left policy-limited runs spinning forever.
+      void fetchFinalAnswer(runId, convId)
     })
 
     es.onerror = () => {
@@ -871,8 +886,8 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                       <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                     ) : null}
 
-                    {msg.role === 'assistant' && msg.status === 'running' && msg.liveTool && !msg.content && (
-                      <div style={{ color: 'var(--tm-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    {msg.role === 'assistant' && msg.status === 'running' && msg.liveTool && (
+                      <div style={{ color: 'var(--tm-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: msg.content ? '0.35rem' : 0 }}>
                         <span className='spinner' />
                         <span>⚙ {t('chat.tool_streaming', { tool: msg.liveTool }) ?? `streaming ${msg.liveTool}…`}</span>
                       </div>
