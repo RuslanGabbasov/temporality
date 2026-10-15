@@ -144,6 +144,104 @@ func TestAggregateTask(t *testing.T) {
 	}
 }
 
+func TestAggregateTaskApprovals(t *testing.T) {
+	cfg, _ := ParsePrices("m:1.00:2.00")
+	api := NewCostAPI(cfg, "", "")
+	base := time.Date(2026, 10, 11, 10, 0, 0, 0, time.UTC)
+	mk := func(typ, run, task string, at time.Time, data map[string]any) observation.Event {
+		return observation.Event{Type: typ, OccurredAt: at, Context: observation.Context{Run: run, Task: task}, Data: data}
+	}
+	events := []observation.Event{
+		mk("run.started", "r1", "t1", base, map[string]any{"agent_id": "lead", "title": "API migration"}),
+		mk("approval.requested", "r1", "t1", base.Add(1*time.Minute), map[string]any{"operation_id": "op-1", "arguments_hash": "h1"}),
+		mk("approval.granted", "r1", "t1", base.Add(6*time.Minute), map[string]any{"operation_id": "op-1", "arguments_hash": "h1"}),
+		mk("approval.requested", "r1", "t1", base.Add(10*time.Minute), map[string]any{"operation_id": "op-2", "arguments_hash": "h2"}),
+		mk("approval.requested", "r1", "t1", base.Add(20*time.Minute), map[string]any{"operation_id": "op-3", "arguments_hash": "h3"}),
+		mk("approval.rejected", "r1", "t1", base.Add(23*time.Minute), map[string]any{"operation_id": "op-3", "arguments_hash": "h3"}),
+		mk("approval.auto_granted", "r1", "t1", base.Add(25*time.Minute), nil),
+		mk("approval.requested", "r1", "t1", base.Add(30*time.Minute), map[string]any{"operation_id": "op-4", "arguments_hash": "h4"}),
+		mk("approval.timed_out", "r1", "t1", base.Add(50*time.Minute), map[string]any{"operation_id": "op-4", "arguments_hash": "h4"}),
+	}
+
+	got := api.aggregateTask("p", "t1", events)
+	ap := got.Approvals
+	if ap.Requested != 4 || ap.Granted != 1 || ap.Rejected != 1 || ap.TimedOut != 1 || ap.AutoGranted != 1 {
+		t.Fatalf("unexpected approval counts: %+v", ap)
+	}
+	if ap.Pending != 1 {
+		t.Fatalf("expected 1 pending approval (op-2), got %d", ap.Pending)
+	}
+	// granted 5m + rejected 3m + timed out 20m = 28m total, max 20m
+	if ap.WaitMS != 28*time.Minute.Milliseconds() {
+		t.Fatalf("expected 28m total wait, got %dms", ap.WaitMS)
+	}
+	if ap.MaxWaitMS != 20*time.Minute.Milliseconds() {
+		t.Fatalf("expected max wait 20m, got %dms", ap.MaxWaitMS)
+	}
+}
+
+func TestAggregateProjectBudget(t *testing.T) {
+	cfg, _ := ParsePrices("m:1.00:2.00")
+	api := NewCostAPI(cfg, "", "")
+	base := time.Date(2026, 10, 11, 10, 0, 0, 0, time.UTC)
+	api.now = func() time.Time { return base.Add(3 * time.Hour) }
+	mk := func(typ, run, task string, at time.Time, data map[string]any) observation.Event {
+		return observation.Event{Type: typ, OccurredAt: at, Context: observation.Context{Run: run, Task: task}, Data: data}
+	}
+	events := []observation.Event{
+		// Saga A: root with title + delegated child, both finished.
+		mk("run.started", "a1", "A", base, map[string]any{"agent_id": "lead", "title": "API migration"}),
+		mk("model.completed", "a1", "A", base.Add(1*time.Minute), map[string]any{"model": "m", "prompt_tokens": 1000, "completion_tokens": 400}),
+		mk("run.started", "a1/plan/01", "A", base.Add(2*time.Minute), map[string]any{"agent_id": "dev", "parent_run_id": "a1"}),
+		mk("model.completed", "a1/plan/01", "A", base.Add(3*time.Minute), map[string]any{"model": "m", "prompt_tokens": 500, "completion_tokens": 100}),
+		mk("approval.requested", "a1/plan/01", "A", base.Add(4*time.Minute), map[string]any{"operation_id": "op", "arguments_hash": "h"}),
+		mk("run.completed", "a1/plan/01", "A", base.Add(5*time.Minute), nil),
+		mk("approval.granted", "a1/plan/01", "A", base.Add(9*time.Minute), map[string]any{"operation_id": "op", "arguments_hash": "h"}),
+		mk("run.completed", "a1", "A", base.Add(10*time.Minute), nil),
+		// Saga B: newer, still running, one pending approval.
+		mk("run.started", "b1", "B", base.Add(1*time.Hour), map[string]any{"agent_id": "lead", "title": "Docs refresh"}),
+		mk("model.completed", "b1", "B", base.Add(61*time.Minute), map[string]any{"model": "m", "prompt_tokens": 200, "completion_tokens": 50}),
+		mk("approval.requested", "b1", "B", base.Add(62*time.Minute), map[string]any{"operation_id": "op", "arguments_hash": "h"}),
+		// Taskless event: must not create a phantom saga.
+		{Type: "model.completed", OccurredAt: base.Add(90 * time.Minute), Context: observation.Context{Run: "loose"}, Data: map[string]any{"model": "m", "prompt_tokens": 999, "completion_tokens": 999}},
+	}
+
+	got := api.aggregateProjectBudget("p", events)
+	if got.SagaCount != 2 || got.RunCount != 3 || got.ModelCalls != 3 {
+		t.Fatalf("unexpected top-level counts: %+v", got)
+	}
+	if got.TotalTokens != 2250 || got.TotalCostUSD != 2.80 {
+		t.Fatalf("unexpected totals: tokens=%d cost=%f", got.TotalTokens, got.TotalCostUSD)
+	}
+	if got.Approvals.Requested != 2 || got.Approvals.Granted != 1 || got.Approvals.Pending != 1 {
+		t.Fatalf("unexpected approval totals: %+v", got.Approvals)
+	}
+	if got.Approvals.WaitMS != 5*time.Minute.Milliseconds() {
+		t.Fatalf("expected 5m approval wait, got %dms", got.Approvals.WaitMS)
+	}
+	if len(got.Sagas) != 2 {
+		t.Fatalf("expected 2 sagas, got %d", len(got.Sagas))
+	}
+	// Newest saga first.
+	b := got.Sagas[0]
+	if b.TaskID != "B" || b.Title != "Docs refresh" || b.RootRunID != "b1" {
+		t.Fatalf("unexpected saga B: %+v", b)
+	}
+	if b.Running != 1 || b.LastEndedAt != nil {
+		t.Fatalf("saga B must be running: %+v", b)
+	}
+	a := got.Sagas[1]
+	if a.TaskID != "A" || a.Title != "API migration" || a.RootRunID != "a1" {
+		t.Fatalf("unexpected saga A: %+v", a)
+	}
+	if a.RunCount != 2 || a.AgentCount != 2 || a.Running != 0 {
+		t.Fatalf("unexpected saga A counts: %+v", a)
+	}
+	if a.Approvals.Granted != 1 || a.Approvals.WaitMS != 5*time.Minute.Milliseconds() {
+		t.Fatalf("unexpected saga A approvals: %+v", a.Approvals)
+	}
+}
+
 func TestAggregateTaskEmpty(t *testing.T) {
 	api := NewCostAPI(Config{}, "", "")
 	got := api.aggregateTask("p", "missing", nil)

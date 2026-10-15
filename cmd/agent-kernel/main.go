@@ -961,6 +961,13 @@ func main() {
 		}
 		costAPI.TaskCostHandler(w, r)
 	})
+	mux.HandleFunc("GET /v1/agent/cost/project-budget", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if !gate.Allow(w, r, controlplane.RoleReader, project) {
+			return
+		}
+		costAPI.ProjectBudgetHandler(w, r)
+	})
 	liveness := &temporalLiveness{client: temporalClient}
 	mux.HandleFunc("GET /v1/agent/operations", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")

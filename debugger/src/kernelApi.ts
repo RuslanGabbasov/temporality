@@ -206,10 +206,69 @@ export interface TaskCost {
   total_completion_tokens: number
   total_tokens: number
   total_cost_usd: number
+  approvals: ApprovalStats
   runs: TaskRunBreakdown[]
   agents: TaskAgentRollup[]
 }
 
 export function taskCost(project: string, taskID: string): Promise<TaskCost> {
   return request(`/v1/agent/cost/task?project=${encodeURIComponent(project)}&task=${encodeURIComponent(taskID)}`)
+}
+
+// Human-approval budget of a scope: decisions asked of people, how they
+// resolved and how long the work waited on them.
+export interface ApprovalStats {
+  requested: number
+  granted: number
+  rejected: number
+  timed_out: number
+  auto_granted?: number
+  pending?: number
+  wait_ms: number
+  max_wait_ms?: number
+}
+
+// One long-running task (saga) inside a project: totals across runs, agents
+// and delegation stages.
+export interface SagaRollup {
+  task_id: string
+  title?: string
+  root_run_id?: string
+  run_count: number
+  running: number
+  model_calls: number
+  agent_count: number
+  first_started_at?: string
+  last_ended_at?: string
+  elapsed_ms: number
+  active_ms: number
+  total_prompt_tokens: number
+  total_cached_tokens?: number
+  total_completion_tokens: number
+  total_tokens: number
+  total_cost_usd: number
+  approvals: ApprovalStats
+}
+
+// Project rollup: totals across every saga plus one row per saga.
+export interface ProjectBudget {
+  project: string
+  saga_count: number
+  run_count: number
+  model_calls: number
+  first_started_at?: string
+  last_ended_at?: string
+  elapsed_ms: number
+  active_ms: number
+  total_prompt_tokens: number
+  total_cached_tokens?: number
+  total_completion_tokens: number
+  total_tokens: number
+  total_cost_usd: number
+  approvals: ApprovalStats
+  sagas: SagaRollup[]
+}
+
+export function projectBudget(project: string): Promise<ProjectBudget> {
+  return request(`/v1/agent/cost/project-budget?project=${encodeURIComponent(project)}`)
 }

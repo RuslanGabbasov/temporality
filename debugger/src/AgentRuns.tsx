@@ -26,7 +26,8 @@ import PageLoading from './PageLoading'
 import { Time, Play, ChevronDown, ChevronRight } from '@carbon/icons-react'
 import ListFilter, { matchesFilter } from './ListFilter'
 import {
-  runCost, taskCost, type RunCost, type TaskCost,
+  runCost, taskCost, type RunCost, type TaskCost, type ApprovalStats,
+  projectBudget, type ProjectBudget,
   operations as fetchOperations, reconcile, canReconcile, whoami,
   type UncertainOperation, type ReconcileEffect, type Whoami,
 } from './kernelApi'
@@ -91,6 +92,18 @@ function KnowledgeActions({ knowledgeID, project, actorID, onDone }: { knowledge
       {error && <div style={{ width: '100%', fontSize: '0.75rem', color: '#f7768e' }}>{error}</div>}
     </div>
   )
+}
+
+/** Human-approval budget tooltip: the full breakdown behind a compact cell. */
+function approvalHint(t: (key: string, vars?: Record<string, string>) => string, ap: ApprovalStats): string {
+  return t('runs.approvals_hint', {
+    requested: String(ap.requested),
+    granted: String(ap.granted),
+    rejected: String(ap.rejected),
+    timed_out: String(ap.timed_out),
+    pending: String(ap.pending ?? 0),
+    wait: formatDuration(ap.wait_ms),
+  })
 }
 
 /** Tool metadata for reconcile cards (from the retired Operations page). */
@@ -343,6 +356,10 @@ export default function AgentRuns({ project }: { project: string }) {
   const [runCostData, setRunCostData] = useState<RunCost | null>(null)
   // Task budget spans every run of the task (follow-ups + delegation tree).
   const [taskCostData, setTaskCostData] = useState<TaskCost | null>(null)
+  // Project sagas rollup: totals per long-running task (the whole delegation
+  // DAG) — tokens, time, cost and the human-approval budget.
+  const [budgetData, setBudgetData] = useState<ProjectBudget | null>(null)
+  const [sagasOpen, setSagasOpen] = useState(false)
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
   const [reason, setReason] = useState('Reviewed in Agent Runs UI')
   const [busy, setBusy] = useState(false)
@@ -536,6 +553,15 @@ export default function AgentRuns({ project }: { project: string }) {
     } catch (failure) { if (!silent) setError(message(failure)) }
     finally { if (!autoSelect && !silent) setBusy(false) }
   }, [project, refreshOps])
+
+  // Project sagas: fetched independently of the run list so the panel can
+  // render while runs stream in. Failures keep the panel hidden (older
+  // kernels without the endpoint).
+  const loadBudget = useCallback(async () => {
+    if (!project.trim()) return
+    try { setBudgetData(await projectBudget(project.trim())) } catch { setBudgetData(null) }
+  }, [project])
+  useEffect(() => { void loadBudget() }, [loadBudget])
 
   const loadRun = useCallback(async (run: string, silent = false) => {
     if (!run) return
@@ -782,6 +808,66 @@ export default function AgentRuns({ project }: { project: string }) {
         <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />
       )}
 
+      {/* Project sagas: totals per long-running task (the whole delegation DAG)
+          — tokens, time, cost and the human-approval budget. Collapsed to a
+          one-line summary; rows jump to the saga's root run budget. */}
+      {budgetData && budgetData.saga_count > 0 && (
+        <div style={{ marginBottom: '1rem', border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-lg, 6px)', overflow: 'hidden' }}>
+          <button
+            onClick={() => setSagasOpen((open) => !open)}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', padding: '0.5rem 0.75rem', background: 'var(--tm-raised)', border: 'none', borderBottom: sagasOpen ? '1px solid var(--tm-border)' : 'none', color: 'var(--tm-text)', cursor: 'pointer', fontSize: '0.8rem' }}
+          >
+            {sagasOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <strong>{t('runs.sagas') ?? 'Project sagas'}</strong>
+            <span style={{ color: 'var(--tm-text-3)', display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'baseline' }}>
+              <span><strong style={{ color: 'var(--tm-text)' }}>{budgetData.saga_count}</strong> {pluralT(t, locale, 'runs.sagas_n', budgetData.saga_count)}</span>
+              <span><strong style={{ color: 'var(--tm-text)' }}>{budgetData.run_count}</strong> {pluralT(t, locale, 'runs.task_runs_n', budgetData.run_count)}</span>
+              <span><strong style={{ color: 'var(--tm-text)' }}>{budgetData.total_tokens.toLocaleString()}</strong> {t('runs.tokens') ?? 'tokens'}</span>
+              {budgetData.total_cost_usd > 0 && <span><strong style={{ color: 'var(--tm-text)' }}>${budgetData.total_cost_usd.toFixed(2)}</strong></span>}
+              {budgetData.approvals.requested > 0 && (
+                <span title={approvalHint(t, budgetData.approvals)}>👤 {budgetData.approvals.granted + budgetData.approvals.rejected}/{budgetData.approvals.requested}{(budgetData.approvals.pending ?? 0) > 0 ? ` · ⏳${budgetData.approvals.pending}` : ''}</span>
+              )}
+            </span>
+          </button>
+          {sagasOpen && (
+            <div style={{ padding: '0.6rem 0.75rem', overflowX: 'auto' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(11rem, 2.2fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.75rem', fontSize: '0.75rem', alignItems: 'baseline' }}>
+                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.saga_col') ?? 'Saga'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.task_col_runs') ?? 'Runs'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.task_agents_col') ?? 'Agents'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }}>⏱ {t('runs.task_elapsed') ?? 'elapsed'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }}>⚒ {t('runs.task_active') ?? 'active'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.tokens') ?? 'Tokens'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.cost') ?? 'Cost'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }}>👤 {t('runs.approvals_col') ?? 'Approvals'}</span>
+                {budgetData.sagas.map((saga) => (
+                  <Fragment key={saga.task_id}>
+                    <span
+                      onClick={() => { if (saga.root_run_id) { setSelected(saga.root_run_id); setView('budget') } }}
+                      title={saga.root_run_id ? (t('runs.saga_open') ?? 'Open the saga budget') : saga.task_id}
+                      style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: saga.root_run_id ? 'pointer' : 'default', textDecoration: saga.root_run_id ? 'underline dotted' : 'none', textUnderlineOffset: '2px' }}
+                    >
+                      {saga.title || saga.task_id}{saga.running > 0 && <Tag type="cool-gray" size="sm" style={{ marginLeft: '0.35rem' }}>{pluralT(t, locale, 'runs.task_running_n', saga.running)}</Tag>}
+                    </span>
+                    <span>{saga.run_count}</span>
+                    <span>{saga.agent_count}</span>
+                    <span>{formatDuration(saga.elapsed_ms)}</span>
+                    <span>{formatDuration(saga.active_ms)}</span>
+                    <span>{saga.total_tokens.toLocaleString()}</span>
+                    <span>{saga.total_cost_usd > 0 ? `$${saga.total_cost_usd.toFixed(2)}` : '—'}</span>
+                    <span title={approvalHint(t, saga.approvals)} style={{ whiteSpace: 'nowrap' }}>
+                      {saga.approvals.requested > 0
+                        ? <>✓{saga.approvals.granted} ✗{saga.approvals.rejected}{saga.approvals.timed_out > 0 ? ` ⏱${saga.approvals.timed_out}` : ''}{(saga.approvals.pending ?? 0) > 0 ? ` …${saga.approvals.pending}` : ''} · {formatDuration(saga.approvals.wait_ms)}</>
+                        : '—'}
+                    </span>
+                  </Fragment>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <Grid>
         {/* Run list */}
         <Column sm={4} md={3} lg={4} style={{ minWidth: 0 }}>
@@ -797,7 +883,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     aria-pressed={opsOnly}
                     style={{ background: opsOnly ? 'rgba(247,118,142,0.15)' : 'none', border: `1px solid ${opsOnly ? '#f7768e' : 'var(--tm-border)'}`, color: opsOnly ? '#f7768e' : 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.85rem', padding: '0.2rem 0.4rem', lineHeight: 1, borderRadius: '4px' }}
                   >⚠</button>
-                  <button onClick={() => { setSelected(''); setTimeline([]); void loadRuns(true) }} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
+                  <button onClick={() => { setSelected(''); setTimeline([]); void loadRuns(true); void loadBudget() }} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
                 </div>
               </div>
               <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_runs') ?? 'Filter runs…'} />
@@ -1274,6 +1360,11 @@ export default function AgentRuns({ project }: { project: string }) {
                       )}
                       {taskCostData.total_cost_usd > 0 && (
                         <span><strong>${taskCostData.total_cost_usd.toFixed(4)}</strong> {t('runs.cost') ?? 'cost'}</span>
+                      )}
+                      {taskCostData.approvals && taskCostData.approvals.requested > 0 && (
+                        <span title={approvalHint(t, taskCostData.approvals)} style={{ cursor: 'help' }}>
+                          👤 <strong>{taskCostData.approvals.granted + taskCostData.approvals.rejected}/{taskCostData.approvals.requested}</strong> {t('runs.approvals_col') ?? 'approvals'} · {formatDuration(taskCostData.approvals.wait_ms)}
+                        </span>
                       )}
                     </div>
                     {taskCostData.agents.length > 0 && (
