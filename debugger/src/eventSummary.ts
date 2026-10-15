@@ -515,6 +515,13 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       return { icon: '🔑', label: t('runs.event.secret_issued'), detail: String(d.secret ?? ''), color: '#9ece6a' }
     case 'secret.denied':
       return { icon: '🚫', label: t('runs.event.secret_denied'), detail: [String(d.secret ?? ''), String(d.reason ?? '')].filter(Boolean).join(' · '), color: '#f7768e' }
+    case 'artifact.read': {
+      // The doc title plus the chunk size tell the reader which reference
+      // document informed the run and how much of it the agent consumed.
+      const bytes = Number(d.bytes ?? 0)
+      const size = bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${bytes} B`
+      return { icon: '📄', label: t('runs.event.artifact_read'), detail: [String(d.title ?? ''), String(d.artifact_id ?? ''), size].filter(Boolean).join(' · '), color: 'var(--tm-teal)' }
+    }
     case 'saga.registered': {
       // The title is what the reader recognises; the generated saga id only
       // matters as a short handle for saga_attach.

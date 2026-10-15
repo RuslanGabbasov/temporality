@@ -340,6 +340,7 @@ export const ru: Record<string, string> = {
     'runs.event.skill_proposed': 'Предложен навык',
     'runs.event.secret_issued': 'Секрет выдан',
     'runs.event.secret_denied': 'Секрет отклонён',
+    'runs.event.artifact_read': 'Артефакт прочитан',
     'runs.event.skill_applied': 'Навык применён',
     'runs.event.extraction_started': 'Извлечение знаний',
     'runs.event.extraction_completed': 'Извлечение завершено',

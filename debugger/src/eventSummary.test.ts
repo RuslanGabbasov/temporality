@@ -422,6 +422,13 @@ describe('quality loop and saga summaries', () => {
     expect(none.detail).toContain('runs.event.reconcile_effect_none')
   })
 
+  it('localizes artifact read events with a human chunk size', () => {
+    const read = eventSummary(event('artifact.read', { artifact_id: 'coding-standard', title: 'Стандарт кодирования', checksum: 'sha256:abc', offset: 0, bytes: 12698 }), t)
+    expect(read.label).toBe('runs.event.artifact_read')
+    expect(read.detail).toContain('coding-standard')
+    expect(read.detail).toContain('12.4 KiB')
+  })
+
   it('localizes hitl verdict types with matching colors', () => {
     const rejected = eventSummary(event('hitl.verdict.recorded', { type: 'rejected', answered_by: 'ruslan' }), t)
     expect(rejected.label).toBe('runs.event.hitl_verdict')

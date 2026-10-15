@@ -2160,6 +2160,8 @@ var readOnlyTools = map[string]bool{
 	"fetch_image": true, "mcp__fetch_image": true,
 	"skill_search": true, "mcp__skill_search": true,
 	"skill_inspect": true, "mcp__skill_inspect": true,
+	"artifact_search": true, "mcp__artifact_search": true,
+	"artifact_read": true, "mcp__artifact_read": true,
 	"saga_list": true,
 }
 
@@ -2283,6 +2285,7 @@ var policySafeTools = map[string]bool{
 	"skill_search": true, "skill_inspect": true, "skill_validate": true,
 	"skill_history": true, "skill_executions": true, "skill_memory": true,
 	"skill_diff": true, "skill_evaluate": true, "knowledge_lookup": true,
+	"artifact_search": true, "artifact_read": true,
 	// Saga tools (docs/sagas.md) only write observation journal events — the
 	// system's own memory layer, no workspace or external effect.
 	"saga_register": true, "saga_attach": true,
@@ -2344,7 +2347,7 @@ func skillsPromptSection(refs []SkillRef) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("# Skills\nVersioned capability packages bound to you: each has a SKILL.md procedure and a manifest contract stored in the skill registry (not files in this workspace). When a task matches a skill, follow its procedure; skill_inspect shows the full text. Skill knowledge is contextual: record discoveries with remember (include skill_id and capability). If a task reveals a new repeatable capability, propose it with skill_propose — never hand-write skill files in the workspace.")
+	b.WriteString("# Skills\nVersioned capability packages bound to you: each has a SKILL.md procedure and a manifest contract stored in the skill registry (not files in this workspace). When a task matches a skill, follow its procedure; skill_inspect shows the full text and lists attached reference artifacts with their applicability notes. Load an artifact with artifact_read only when the task matches its description — never preemptively: these documents are long, and the budget is yours. Skill knowledge is contextual: record discoveries with remember (include skill_id and capability). If a task reveals a new repeatable capability, propose it with skill_propose — never hand-write skill files in the workspace.")
 	for _, ref := range refs {
 		b.WriteString("\n\n")
 		b.WriteString(ref.Digest)
@@ -2841,6 +2844,8 @@ func KernelTools() []llm.ToolDef {
 		{Name: "update_trigger", Description: "Update an existing trigger's configuration (enable/disable, change cron, update prompt, etc.)", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}, "enabled": map[string]any{"type": "boolean"}, "cron": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},
 		{Name: "delete_trigger", Description: "Delete a trigger by ID", Parameters: map[string]any{"type": "object", "properties": map[string]any{"trigger_id": map[string]any{"type": "string"}}, "required": []string{"trigger_id"}}},
 		{Name: "skill_search", Description: "List living skills in this project: versioned capability packages (SKILL.md instructions + manifest contract) stored in the skill registry, not files in the repo. Returns id, name, version, capabilities, tools", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "Optional space-separated keywords; a skill matches when any keyword occurs in id, name, capability or tool (case-insensitive); results are ranked by keyword coverage"}}}},
+		{Name: "artifact_search", Description: "Search the reference artifact registry: regulation documents, approved instructions and checklists that skills point at but never inline into the prompt. Returns id, title, description (the applicability condition), provider, size_bytes", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "Optional space-separated keywords; an artifact matches when any keyword occurs in id, title or description (case-insensitive); results are ranked by keyword coverage"}}}},
+		{Name: "artifact_read", Description: "Read a reference artifact's body in 32 KiB chunks (UTF-8-safe boundaries). Load an artifact when the task matches its description — not preemptively: these documents are long and the budget is yours. skill_inspect lists the artifacts attached to a skill with their applicability notes", Parameters: map[string]any{"type": "object", "properties": map[string]any{"artifact_id": map[string]any{"type": "string", "description": "Artifact id from artifact_search or a skill's artifact listing"}, "offset": map[string]any{"type": "integer", "description": "Byte offset of the next chunk (pass next_offset from the previous call)"}}, "required": []string{"artifact_id"}}},
 		{Name: "secret_list", Description: "List the secrets granted to this agent: names and descriptions only, never values. Granted secrets are injected automatically as SECRET_<NAME> environment variables into every run_command call — reference them from env, do not paste literals", Parameters: map[string]any{"type": "object", "properties": map[string]any{}}},
 		{Name: "knowledge_lookup", Description: "Fetch the full knowledge item (proposition, state, topics, entities, evidence, history) by its knowledge_id. Priming cues carry a knowledge_id handle; call this when a compact cue matters to your task and you need the grounds, details or lifecycle behind it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"knowledge_id": map[string]any{"type": "string", "description": "The knowledge_id from a priming cue or a prior run"}}, "required": []string{"knowledge_id"}}},
 		{Name: "saga_register", Description: "Register the current task's work as a saga — an explicitly tracked long-running effort that may span many runs, chat follow-ups and delegated agents. Call it once when starting work you expect to be long or multi-stage, or when asked to track a saga. The saga rides the task: every follow-up run and delegation joins it automatically. Registering an already-bound task returns the existing saga", Parameters: map[string]any{"type": "object", "properties": map[string]any{"title": map[string]any{"type": "string", "description": "Short human-readable saga title"}, "goal": map[string]any{"type": "string", "description": "Optional one-line goal/outcome of the saga"}}, "required": []string{"title"}}},

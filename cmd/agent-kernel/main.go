@@ -259,6 +259,12 @@ func main() {
 		log.Error("migrate workspace v62 (trigger config unwrap)", "error", err)
 		os.Exit(1)
 	}
+	// 000063 creates the reference artifact registry (docs/artifact-registry.md):
+	// documents skills point at from their manifests and agents load on demand.
+	if err = ws.Migrate(ctx, "migrations/000063_artifacts.up.sql"); err != nil {
+		log.Error("migrate workspace v63 (artifact registry)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -3790,7 +3796,51 @@ func main() {
 			writeError(w, 404, workspace.ErrNotFound)
 			return
 		}
-		writeJSON(w, 200, skill)
+		// skill_inspect enrichment (docs/artifact-registry.md §3.4): manifest
+		// references resolve to registry rows — title, applicability description,
+		// provider — never bodies, so the agent decides whether artifact_read is
+		// worth its tokens before spending them.
+		response := map[string]any{}
+		if raw, err := json.Marshal(skill); err == nil {
+			_ = json.Unmarshal(raw, &response)
+		}
+		var refs struct {
+			Artifacts []skills.ArtifactRef `json:"artifacts"`
+		}
+		if len(skill.Manifest) > 0 {
+			_ = json.Unmarshal(skill.Manifest, &refs)
+		}
+		if len(refs.Artifacts) > 0 {
+			ids := make([]string, 0, len(refs.Artifacts))
+			notes := make(map[string]string, len(refs.Artifacts))
+			for _, ref := range refs.Artifacts {
+				ids = append(ids, ref.ID)
+				if ref.Note != "" {
+					notes[ref.ID] = ref.Note
+				}
+			}
+			if rows, err := ws.ArtifactsByIDs(r.Context(), ids); err == nil {
+				views := make([]map[string]any, 0, len(rows))
+				for _, row := range rows {
+					if !workspace.OrgVisible(row.OrgUnitID, visibleUnits(r)) {
+						continue
+					}
+					view := map[string]any{
+						"id": row.ID, "title": row.Title, "description": row.Description,
+						"provider": row.Provider, "size_bytes": row.SizeBytes,
+					}
+					if row.ExternalRef != "" {
+						view["external_ref"] = row.ExternalRef
+					}
+					if notes[row.ID] != "" {
+						view["note"] = notes[row.ID]
+					}
+					views = append(views, view)
+				}
+				response["artifacts"] = views
+			}
+		}
+		writeJSON(w, 200, response)
 	})
 	mux.HandleFunc("PUT /v1/workspace/skills/{skillID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleWriter) {
@@ -4724,6 +4774,134 @@ func main() {
 			value = string(plaintext)
 		}
 		writeJSON(w, 200, map[string]string{"name": secret.Name, "value": value})
+	})
+
+	// Reference artifact registry (docs/artifact-registry.md). Artifacts are
+	// documents skills point at from their manifests; bodies never enter the
+	// prompt implicitly — the kernel reads them chunked for artifact_read.
+	mux.HandleFunc("GET /v1/workspace/artifacts", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		list, err := ws.ListArtifactsVisible(r.Context(), visibleUnits(r))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"artifacts": list, "count": len(list)})
+	})
+	mux.HandleFunc("POST /v1/workspace/artifacts", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req artifactRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		artifact, err := req.toArtifact("")
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		if artifact.ID == "" {
+			writeError(w, 422, errors.New("id is required (derive it from the title)"))
+			return
+		}
+		if err := ws.CreateArtifact(r.Context(), &artifact); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditArtifactCreated, "artifact", artifact.ID, map[string]any{"title": artifact.Title, "provider": artifact.Provider})
+		writeJSON(w, 201, artifact)
+	})
+	mux.HandleFunc("GET /v1/workspace/artifacts/{artifactID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		offset, limit := artifactRange(r)
+		artifact, err := ws.GetArtifactRange(r.Context(), r.PathValue("artifactID"), offset, limit)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		if !workspace.OrgVisible(artifact.OrgUnitID, visibleUnits(r)) {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		// Chunk framing lets the kernel page large documents without shipping
+		// megabytes per call; SizeBytes stays the whole-body size.
+		writeJSON(w, 200, map[string]any{
+			"artifact": artifact, "offset": offset, "next_offset": offset + len(artifact.Content),
+			"truncated": artifact.Provider == "builtin" && int64(offset+len(artifact.Content)) < artifact.SizeBytes,
+		})
+	})
+	mux.HandleFunc("PUT /v1/workspace/artifacts/{artifactID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req artifactRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		current, err := ws.GetArtifactRange(r.Context(), r.PathValue("artifactID"), 0, 0)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		artifact, err := req.toArtifact(current.ID)
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		// Editing must not re-scope an artifact: bindings change only through
+		// the admin binding endpoint (same contract as agents and secrets).
+		artifact.OrgUnitID = current.OrgUnitID
+		if err := ws.UpdateArtifact(r.Context(), artifact); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditArtifactUpdated, "artifact", artifact.ID, map[string]any{"title": artifact.Title})
+		updated, _ := ws.GetArtifactRange(r.Context(), artifact.ID, 0, 0)
+		updated.Content = ""
+		writeJSON(w, 200, updated)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/artifacts/{artifactID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		id := r.PathValue("artifactID")
+		// A referenced artifact is load-bearing for skill manifests: dropping
+		// it would silently break the skill's document trail. Remove the
+		// reference (new skill version) first — the error says exactly that.
+		refs, err := ws.ArtifactReferencedBy(r.Context(), id)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if len(refs) > 0 {
+			writeError(w, 409, fmt.Errorf("artifact is referenced by skills %s; remove the manifest references first", strings.Join(refs, ", ")))
+			return
+		}
+		if err := ws.DeleteArtifact(r.Context(), id); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditArtifactDeleted, "artifact", id, nil)
+		writeJSON(w, 200, map[string]bool{"deleted": true})
 	})
 
 	// Webhook triggers: POST /v1/workspace/webhook/{projectID}/{path}
@@ -7034,6 +7212,78 @@ type secretRequest struct {
 	Description string `json:"description"`
 	OrgUnitID   string `json:"org_unit_id"` // only set on create; updates keep the stored binding
 	Value       string `json:"value"`
+}
+
+// maxArtifactContentBytes caps a builtin artifact body (docs/artifact-registry.md
+// §5): the registry holds reference documents, not file storage.
+const maxArtifactContentBytes = 2 << 20 // 2 MiB
+
+type artifactRequest struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Provider    string `json:"provider"` // builtin (default) | url
+	ExternalRef string `json:"external_ref"`
+	Content     string `json:"content"`
+	MimeType    string `json:"mime_type"`
+	OrgUnitID   string `json:"org_unit_id"` // only set on create; updates keep the stored binding
+}
+
+// toArtifact validates the request and converts it into a workspace.Artifact.
+// ID is optional here (create derives it from the title); the caller sets or
+// checks it. Errors land in 422 responses, so every message names the field.
+func (r artifactRequest) toArtifact(id string) (workspace.Artifact, error) {
+	if r.Provider == "" {
+		r.Provider = "builtin"
+	}
+	if r.Provider != "builtin" && r.Provider != "url" {
+		return workspace.Artifact{}, fmt.Errorf("provider must be builtin or url (got %q)", r.Provider)
+	}
+	if strings.TrimSpace(r.Title) == "" {
+		return workspace.Artifact{}, errors.New("title is required")
+	}
+	if id == "" {
+		id = r.ID
+	}
+	if r.Provider == "url" {
+		ref, err := url.Parse(r.ExternalRef)
+		if err != nil || ref.Scheme != "http" && ref.Scheme != "https" || ref.Host == "" {
+			return workspace.Artifact{}, errors.New("external_ref must be an absolute http(s) URL for provider=url")
+		}
+		if r.Content != "" {
+			return workspace.Artifact{}, errors.New("content must be empty for provider=url: the body lives outside the registry")
+		}
+	}
+	if r.Provider == "builtin" && len(r.Content) == 0 {
+		return workspace.Artifact{}, errors.New("content is required for provider=builtin")
+	}
+	if r.Provider == "builtin" && len(r.Content) > maxArtifactContentBytes {
+		return workspace.Artifact{}, fmt.Errorf("content exceeds %d bytes", maxArtifactContentBytes)
+	}
+	return workspace.Artifact{
+		ID:          id,
+		Title:       strings.TrimSpace(r.Title),
+		Description: strings.TrimSpace(r.Description),
+		Provider:    r.Provider,
+		ExternalRef: r.ExternalRef,
+		Content:     r.Content,
+		MimeType:    strings.TrimSpace(r.MimeType),
+		OrgUnitID:   strings.TrimSpace(r.OrgUnitID),
+	}, nil
+}
+
+// artifactRange parses the offset/limit query pair for the artifact read
+// API. Negative values collapse to zero; limit=0 means "the whole body".
+func artifactRange(r *http.Request) (offset, limit int) {
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	if offset < 0 {
+		offset = 0
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	return offset, limit
 }
 
 // storeSecretValue encrypts and persists one secret value.

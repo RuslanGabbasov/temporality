@@ -340,6 +340,7 @@ export const en: Record<string, string> = {
     'runs.event.skill_proposed': 'Skill proposed',
     'runs.event.secret_issued': 'Secret issued',
     'runs.event.secret_denied': 'Secret denied',
+    'runs.event.artifact_read': 'Artifact read',
     'runs.event.skill_applied': 'Skill applied',
     'runs.event.extraction_started': 'Knowledge extraction',
     'runs.event.extraction_completed': 'Extraction finished',

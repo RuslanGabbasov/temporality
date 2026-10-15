@@ -129,3 +129,48 @@ func TestDigestBounded(t *testing.T) {
 		t.Fatalf("digest missing procedure: %q", d)
 	}
 }
+
+func TestArtifactRefs(t *testing.T) {
+	raw := `id: deploy-service
+version: 1.2.0
+name: Deploy service
+description: Deploys the service to staging
+capabilities: [build]
+tools: [run_command]
+artifacts:
+  - id: coding-standard
+    note: применимо к любому коду на Go
+  - id: release-checklist
+`
+	m, err := ParseManifest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Artifacts) != 2 || m.Artifacts[0].ID != "coding-standard" || m.Artifacts[0].Note == "" {
+		t.Fatalf("artifact refs: %+v", m.Artifacts)
+	}
+	if issues := m.Validate(); len(issues) != 0 {
+		t.Fatalf("valid refs must pass validation: %v", issues)
+	}
+	// A malformed id (uppercase / spaces) is exactly the mistake validation
+	// must catch — registry ids share the skill id grammar.
+	bad := m
+	bad.Artifacts = []ArtifactRef{{ID: "Coding Standard"}}
+	issues := bad.Validate()
+	if len(issues) != 1 || issues[0].Field != "artifacts[0]" {
+		t.Fatalf("expected one artifacts[0] issue, got %v", issues)
+	}
+}
+
+func TestDigestMentionsArtifactCount(t *testing.T) {
+	m, _ := ParseManifest(sampleManifest)
+	m.Artifacts = []ArtifactRef{{ID: "coding-standard"}, {ID: "release-checklist"}}
+	d := Digest(m.Name, m.Version, sampleMarkdown, m, 2000)
+	if !strings.Contains(d, "Artifacts: 2 reference doc(s)") {
+		t.Fatalf("digest must point at artifact_search, got: %q", d)
+	}
+	// The digest is a pointer, never the body: ids stay behind skill_inspect.
+	if strings.Contains(d, "coding-standard") {
+		t.Fatalf("digest leaked artifact ids: %q", d)
+	}
+}

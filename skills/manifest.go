@@ -12,6 +12,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ArtifactRef points at a registry artifact (docs/artifact-registry.md §3.2):
+// a reference document the skill needs but never inlines — the agent loads
+// it through artifact_read when the task matches the artifact's description.
+// The reference is versioned with the skill; the body lives its own life.
+type ArtifactRef struct {
+	ID   string `json:"id,omitempty" yaml:"id"`
+	Note string `json:"note,omitempty" yaml:"note"`
+}
+
 // Manifest is the parsed skill.yaml contract.
 type Manifest struct {
 	ID             string           `json:"id,omitempty" yaml:"id"`
@@ -27,6 +36,7 @@ type Manifest struct {
 	Postconditions []string         `json:"postconditions,omitempty" yaml:"postconditions"`
 	Evidence       EvidenceSpec     `json:"evidence,omitempty" yaml:"evidence"`
 	Evaluation     *EvaluationSpec  `json:"evaluation,omitempty" yaml:"evaluation"`
+	Artifacts      []ArtifactRef    `json:"artifacts,omitempty" yaml:"artifacts"`
 	Inferred       []string         `json:"inferred,omitempty" yaml:"-"` // fields inferred from SKILL.md (legacy loading)
 }
 
@@ -119,6 +129,11 @@ func (m Manifest) Validate() []Issue {
 			issues = append(issues, Issue{Field: "inputs." + name, Message: "type is required for declared inputs"})
 		}
 	}
+	for i, ref := range m.Artifacts {
+		if ref.ID == "" || !idPattern.MatchString(ref.ID) {
+			issues = append(issues, Issue{Field: fmt.Sprintf("artifacts[%d]", i), Message: "artifact id must reference the artifact registry (lowercase letters, digits and dashes)"})
+		}
+	}
 	switch m.Runtime.Sandbox {
 	case "", "required", "optional", "none":
 	default:
@@ -206,6 +221,12 @@ func Digest(name, version, markdown string, m Manifest, budget int) string {
 	}
 	if section, ok := markdownSection(markdown, "constraints"); ok {
 		fmt.Fprintf(&b, "\nConstraints: %s", firstSentences(section, 3))
+	}
+	// Artifacts are pointers, not content: the digest says only how many
+	// reference documents exist, and skill_inspect carries their ids and
+	// applicability descriptions (docs/artifact-registry.md §3.4).
+	if len(m.Artifacts) > 0 {
+		fmt.Fprintf(&b, "\nArtifacts: %d reference doc(s) (skill_inspect for ids)", len(m.Artifacts))
 	}
 	out := b.String()
 	if len(out) > budget {
