@@ -1079,6 +1079,10 @@ export const ru: Record<string, string> = {
     'timeline.misleads_abbr': 'споров',
     'timeline.open_in_runs': 'Открыть в Runs — дерево делегирования',
     'timeline.empty_project': 'По этому проекту пока нет событий.',
+    'timeline.loading': 'Загрузка опыта…',
+    'timeline.loaded_events_n_one': 'загружено {{count}} событие',
+    'timeline.loaded_events_n_few': 'загружено {{count}} события',
+    'timeline.loaded_events_n_other': 'загружено {{count}} событий',
     'timeline.empty_range': 'В выбранном периоде нет событий. Попробуйте расширить период.',
     'timeline.empty_no_project': 'Введите project ID и нажмите Open timeline.',
 

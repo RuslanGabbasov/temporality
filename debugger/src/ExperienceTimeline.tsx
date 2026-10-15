@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown } from '@carbon/icons-react'
 import { API_BASE } from './api'
-import { useT } from './i18n'
+import { pluralT, useI18n, useT } from './i18n'
 import { observationApi, type ObservationEvent } from './observationApi'
 import { aliveRowAt, buildRunChains, detectMisleads, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type MisleadSignal, type RunChain, type RunInfo } from './experience'
 import { useOrgUnits } from './orgUnits'
@@ -194,12 +194,12 @@ function tickStep(span: number, width: number): number {
 }
 
 export default function ExperienceTimeline({ project }: { project: string }) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const org = useOrgUnits()
   const params = new URLSearchParams(window.location.search)
   const [events, setEvents] = useState<ObservationEvent[]>([])
   const [loading, setLoading] = useState(false)
-  const [progress, setProgress] = useState('')
+  const [progress, setProgress] = useState<{ count: number; more: boolean } | null>(null)
   const [error, setError] = useState('')
   const [users, setUsers] = useState<User[]>([])
   const [range, setRange] = useState<RangeFilter>(() => { const v = params.get('range'); return (['24h','7d','30d','all'] as const).includes(v as RangeFilter) ? v as RangeFilter : '7d' })
@@ -256,14 +256,14 @@ export default function ExperienceTimeline({ project }: { project: string }) {
         collected.push(...page.events)
         cursor = page.next_cursor
         pages += 1
-        setProgress(`loaded ${collected.length} events${cursor ? '…' : ''}`)
+        setProgress({ count: collected.length, more: Boolean(cursor) })
         if (pages > 60) break
       } while (cursor)
       setEvents(collected)
       const query = new URLSearchParams({ project: projectID.trim() })
       window.history.replaceState(null, '', `/experience?${query}`)
     } catch (failure) { setError(message(failure)) }
-    finally { setLoading(false); setProgress('') }
+    finally { setLoading(false); setProgress(null) }
   }, [])
 
   const [initialised, setInitialised] = useState(false)
@@ -553,7 +553,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     return <div className="observability-shell" ref={shellRef}>
       <Header project={project} load={load} loading={loading} />
       {error && <div className="obs-error" role="alert">{error}<small>Проверьте, что журнал доступен на {API_BASE}.</small></div>}
-      {loading && <div className="status" role="status"><span className="spinner" /> Loading experience… {progress}</div>}
+      {loading && <div className="status" role="status"><span className="spinner" /> {t('timeline.loading')} {progress ? `${pluralT(t, locale, 'timeline.loaded_events_n', progress.count)}${progress.more ? '…' : ''}` : ''}</div>}
       {!loading && !error && <div className="obs-controls">
         <p className="obs-empty">{project
           ? (range === 'all'

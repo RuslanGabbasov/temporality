@@ -1079,6 +1079,10 @@ export const en: Record<string, string> = {
     'timeline.misleads_abbr': 'disputes',
     'timeline.open_in_runs': 'Open in Runs — delegation tree',
     'timeline.empty_project': 'No events for this project yet.',
+    'timeline.loading': 'Loading experience…',
+    'timeline.loaded_events_n_one': 'loaded {{count}} event',
+    'timeline.loaded_events_n_few': 'loaded {{count}} events',
+    'timeline.loaded_events_n_other': 'loaded {{count}} events',
     'timeline.empty_range': 'No events in the selected period. Try a wider one.',
     'timeline.empty_no_project': 'Enter a project ID and open the timeline.',
 
