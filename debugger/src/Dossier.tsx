@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, InlineNotification, Tag } from '@carbon/react'
+import { ChevronRight } from '@carbon/icons-react'
 import { authHeaders } from './api'
 import {
   observationApi,
@@ -212,8 +213,9 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
               {/* Primary sources (ТЗ §8.3 "открыть первоисточник"). */}
               {evidenceRefs.length > 0 && (
                 <div style={{ marginBottom: '0.7rem' }}>
-                  <button onClick={() => setSourcesOpen((v) => !v)} style={{ background: 'none', border: 'none', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.78rem', padding: 0 }}>
-                    {sourcesOpen ? '▾' : '▸'} {t('explorer.dossier_sources') ?? 'Primary sources'} ({evidenceRefs.length})
+                  <button onClick={() => setSourcesOpen((v) => !v)} style={{ background: 'none', border: 'none', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.78rem', padding: 0, display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <span className="chevron-rotate" style={{ display: 'inline-flex', ...(sourcesOpen ? { transform: 'rotate(90deg)' } : {}) }}><ChevronRight size={14} /></span>
+                    {t('explorer.dossier_sources') ?? 'Primary sources'} ({evidenceRefs.length})
                   </button>
                   {sourcesOpen && (
                     <div style={{ marginTop: '0.4rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronRight } from '@carbon/icons-react'
 import { observationApi, type ObservationEvent } from './observationApi'
 import { detectMisleads, foldExperience, type MisleadSignal } from './experience'
 import { shortTime } from './eventSummary'
@@ -105,7 +106,7 @@ export default function RunDisputes({ project, selected, rows, onOpenRun }: {
         <span className="run-disputes-icon">⚠</span>
         <strong>{t('runs.disputes.title')}</strong>
         <span className="run-disputes-count">{t('runs.disputes.count_chain', { count: String(signals.length) })}</span>
-        <span className="run-disputes-arrow">{open ? '▾' : '▸'}</span>
+        <span className="run-disputes-arrow"><ChevronRight size={12} className={open ? 'chevron-open' : ''} /></span>
       </button>
       {open && (
         <div>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Tag } from '@carbon/react'
+import { ChevronRight } from '@carbon/icons-react'
 import { observationApi, runEvents, type ObservationEvent } from './observationApi'
 import { type Agent } from './workspaceApi'
 import Markdown from './Markdown'
@@ -224,7 +225,7 @@ function DelegationNode({ project, info, agents, depth, onOpenRun }: DelegationN
         onClick={toggle}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } }}
       >
-        <span className="chat-delegation-arrow">{open ? '▾' : '▸'}</span>
+        <span className="chat-delegation-arrow"><ChevronRight size={12} className={open ? 'chevron-open' : ''} /></span>
         {info.taskId && <span className="chat-delegation-task">{info.taskId}</span>}
         <span className="chat-delegation-agent">{agentTitle}</span>
         {statusTag}

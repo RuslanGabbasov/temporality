@@ -1600,11 +1600,14 @@ button.header-nav-link {
 }
 
 .chat-delegation-arrow {
-  color: var(--tm-text-3);
-  font-size: 0.7rem;
-  width: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
   flex-shrink: 0;
+  color: var(--tm-text-3);
 }
+.chat-delegation-arrow .chevron-open { transform: rotate(90deg); }
 
 .chat-delegation-agent {
   font-weight: 500;
@@ -1762,11 +1765,29 @@ button.header-nav-link {
   font-size: 0.7rem;
 }
 
+// Shared expand-chevron hit area: the icon is 14px inside an 18px box, so
+// the small hierarchy toggles are actually clickable.
+.chevron-hit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  flex-shrink: 0;
+  border-radius: 4px;
+  color: var(--tm-text-3);
+}
+.chevron-hit:hover { color: var(--tm-text); }
+.chevron-rotate { transition: transform 0.15s ease; }
+.chevron-rotate.open { transform: rotate(90deg); }
+
 .run-disputes-arrow {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
   color: var(--tm-text-3);
-  font-size: 0.7rem;
 }
+.run-disputes-arrow .chevron-open { transform: rotate(90deg); }
 
 .run-disputes-item {
   border-top: 1px dashed var(--tm-border);

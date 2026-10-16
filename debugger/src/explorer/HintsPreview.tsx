@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button, InlineNotification, Tag, TextArea, TextInput, Tile } from '@carbon/react'
+import { ChevronRight } from '@carbon/icons-react'
 import { observationApi, type ObservationHint } from '../observationApi'
 import { stateLabel } from './shared'
 import { useT } from '../i18n'
@@ -42,7 +43,7 @@ export default function HintsPreview({ project }: { project: string }) {
           fontSize: '0.78rem', fontWeight: 600,
         }}
       >
-        <span style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block' }}>▸</span>
+        <span className="chevron-rotate" style={{ display: 'inline-flex', ...(open ? { transform: 'rotate(90deg)' } : {}) }}><ChevronRight size={14} /></span>
         {t('explorer.hints_title') ?? 'Priming preview'}
       </button>
       {open && (

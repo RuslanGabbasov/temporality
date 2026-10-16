@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef, type ChangeEvent, type ReactNode } from 'react'
 import { Button, Heading, InlineNotification, Tag, Tile } from '@carbon/react'
-import { Download, Renew, TrashCan, Upload } from '@carbon/icons-react'
+import { Download, Renew, TrashCan, Upload, ChevronRight, ChevronDown } from '@carbon/icons-react'
 import PageLoading from './PageLoading'
 import ProjectRequired from './ProjectRequired'
 import Markdown from './Markdown'
@@ -172,8 +172,8 @@ export default function Storage({ project }: { project: string }) {
             background: selectedHere ? 'var(--tm-elevated)' : 'transparent',
           }}
         >
-          <span style={{ width: '0.8rem', color: 'var(--tm-text-3)', flexShrink: 0, fontSize: '0.66rem' }}>
-            {entry.dir ? (loadingDir === k ? '…' : open ? '▾' : '▸') : ''}
+          <span className="chevron-hit">
+            {entry.dir && (loadingDir === k ? <span style={{ fontSize: '0.7rem' }}>…</span> : open ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
           </span>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{entry.name}</span>
           <span style={{ color: 'var(--tm-text-3)', fontSize: '0.66rem', whiteSpace: 'nowrap', flexShrink: 0 }}>

@@ -820,11 +820,17 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             const toggleGroup = () => setGroupOverrides((current) => ({ ...current, [group.id]: !expanded }))
             const bandCenter = view.groupBandY.get(group.id)
             return <g key={group.id} className={`run-group ${expanded ? 'expanded' : ''}`}>
-              <text x={8} y={headerY - 2} className="lane-label scope-label" onClick={toggleGroup} style={{ cursor: 'pointer', fill: group.failed ? '#f7768e' : undefined }}>
+              <g onClick={toggleGroup} style={{ cursor: 'pointer' }}>
                 <title>{expanded ? t('timeline.collapse') : t('timeline.expand')}</title>
-                {expanded ? '▾' : '▸'} {group.label.toUpperCase()}
-              </text>
-              <text x={8} y={headerY + 10} className="lane-sublabel">
+                {/* Invisible hit rect makes the whole header row clickable — the old
+                    bare text glyph was too small to aim at. */}
+                <rect x={2} y={headerY - 14} width={280} height={18} fill="transparent" />
+                {expanded
+                  ? <path d={`M10 ${headerY - 8} l4 4 l4 -4`} fill="none" stroke={group.failed ? '#f7768e' : 'var(--tm-text-3)'} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                  : <path d={`M12 ${headerY - 10} l4 4 l-4 4`} fill="none" stroke={group.failed ? '#f7768e' : 'var(--tm-text-3)'} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />}
+                <text x={24} y={headerY - 2} className="lane-label scope-label" style={{ fill: group.failed ? '#f7768e' : undefined }}>{group.label.toUpperCase()}</text>
+              </g>
+              <text x={24} y={headerY + 10} className="lane-sublabel">
                 {group.chains.length} {t('timeline.chains_abbr')} · {group.runs.length} {t('timeline.runs_abbr')}
                 {group.failed > 0 && <tspan fill="#f7768e"> · {group.failed} {t('timeline.failed_abbr')}</tspan>}
                 {group.knowledgeEvents > 0 && ` · ${group.knowledgeEvents} ${t('timeline.knowledge_abbr')}`}
@@ -893,7 +899,13 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                       {acts?.models.map((at, mi) => { const px = x(at); return px >= GUTTER && px <= GUTTER + track ? <circle key={`m${mi}`} cx={px} cy={yLane} r={1.8} fill="#e8e8e8" opacity={0.7} /> : null })}
                       {runMisleads.map((signal) => { const px = x(signal.at); if (px < GUTTER || px > GUTTER + track) return null; return <text key={`ms-${signal.knowledgeId}-${signal.at}`} x={px} y={yLane - RUN_LANE / 2 + 1} textAnchor="middle" fontSize={10} fill="#ff9e64" onClick={(click) => { click.stopPropagation(); setSelected(signal.knowledgeId) }} style={{ cursor: 'pointer' }}>
                         <title>{misleadTitle(signal, t)}</title>⚠</text> })}
-                      {runIndex === 0 && <text x={GUTTER - 8} y={yLane + 3} textAnchor="end" className="lane-sublabel" onClick={() => setChainOverrides((current) => ({ ...current, [chainRoot]: false }))} style={{ cursor: 'pointer' }}>▾</text>}
+                      {runIndex === 0 && (
+                        <g onClick={() => setChainOverrides((current) => ({ ...current, [chainRoot]: false }))} style={{ cursor: 'pointer' }}>
+                          <title>{t('timeline.collapse')}</title>
+                          <circle cx={GUTTER - 12} cy={yLane} r={9} fill="transparent" />
+                          <path d={`M${GUTTER - 16} ${yLane - 2} l4 4 l4 -4`} fill="none" stroke="var(--tm-text-3)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                        </g>
+                      )}
                     </g>
                   })}
                 </g>
@@ -934,11 +946,15 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             const retired = scope.rows.filter((row) => row.terminal).length
             const alive = rows.length - retired
             return <g key={scope.id} className="scope-section">
-              <text x={8} y={headerY - 2} className="lane-label scope-label" onClick={toggleLane} style={{ cursor: 'pointer' }}>
+              <g onClick={toggleLane} style={{ cursor: 'pointer' }}>
                 <title>{aggregated ? t('timeline.expand') : t('timeline.collapse')}</title>
-                {aggregated ? '▸' : '▾'} {scope.title.toUpperCase()}
-              </text>
-              <text x={8} y={headerY + 10} className="lane-sublabel">{rows.length} {t('timeline.exp_abbr')} · {scope.runs.length} {t('timeline.runs_abbr')} · {activations} {t('timeline.act_abbr')}{retired ? ` · ${retired} ${t('timeline.retired')}` : ''}</text>
+                <rect x={2} y={headerY - 14} width={280} height={18} fill="transparent" />
+                {aggregated
+                  ? <path d={`M12 ${headerY - 10} l4 4 l-4 4`} fill="none" stroke="var(--tm-text-3)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                  : <path d={`M10 ${headerY - 8} l4 4 l4 -4`} fill="none" stroke="var(--tm-text-3)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />}
+                <text x={24} y={headerY - 2} className="lane-label scope-label">{scope.title.toUpperCase()}</text>
+              </g>
+              <text x={24} y={headerY + 10} className="lane-sublabel">{rows.length} {t('timeline.exp_abbr')} · {scope.runs.length} {t('timeline.runs_abbr')} · {activations} {t('timeline.act_abbr')}{retired ? ` · ${retired} ${t('timeline.retired')}` : ''}</text>
               <line x1={GUTTER - 6} x2={width} y1={headerY + SCOPE_HEADER / 2 - 2} y2={headerY + SCOPE_HEADER / 2 - 2} stroke="#1c2530" strokeWidth={1} />
               {aggregated ? (() => {
                 const bandCenter = view.bandY.get(scope.id)!
