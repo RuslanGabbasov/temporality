@@ -334,6 +334,7 @@ export const en: Record<string, string> = {
     'chat.cancel_run': 'Cancel this run',
     'chat.branch_title': 'Branch conversation from this point',
     'chat.placeholder': 'Type a message… (Shift+Enter for newline)',
+    'chat.placeholder_running': 'Will be added to the running run as a task addendum…',
     'chat.attach_file': 'Attach files',
     'chat.uploading': 'Uploading…',
     'chat.remove_attachment': 'Remove attachment',
@@ -370,7 +371,6 @@ export const en: Record<string, string> = {
     'chat.stream.note_accepted': '⤳ Addendum accepted · consumed in turn {{turn}}',
     'chat.stream.note_dropped': '⚠ Addendum not delivered — turn budget exhausted',
     'chat.note.sent': '⤳ Sent to the current run',
-    'chat.note.hint': 'Your message will be added to the running run as an addendum to the task',
 
     // Runs
     'runs.title': 'Runs',

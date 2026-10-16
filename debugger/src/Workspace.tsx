@@ -1106,12 +1106,8 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                   )}
                 </div>
               )}
-              {/* Mid-run messages route into the running run as addenda — say
-               * so next to the input instead of surprising the user with a new
-               * run in the list. */}
-              {activeConv.messages.some((m) => m.role === 'assistant' && m.status === 'running' && m.runId) && (
-                <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginBottom: '0.4rem' }}>⤳ {t('chat.note.hint') ?? 'Your message will be added to the running run'}</div>
-              )}
+              {/* Mid-run messages route into the running run as addenda — the
+               * input's placeholder says so (was a separate notice line). */}
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end' }}>
                 <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => void onFilesPicked(e)} />
                 <Button
@@ -1132,7 +1128,11 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     hideLabel
                     value={inputValue}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInputValue(e.target.value)}
-                    placeholder={t('chat.placeholder') ?? 'Type a message… (Shift+Enter for newline)'}
+                    placeholder={
+                      activeConv.messages.some((m) => m.role === 'assistant' && m.status === 'running' && m.runId)
+                        ? (t('chat.placeholder_running') ?? 'Добавится к выполняющемуся запуску как дополнение к задаче…')
+                        : (t('chat.placeholder') ?? 'Введите сообщение… (Shift+Enter для новой строки)')
+                    }
                     rows={3}
                     onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendMessage() }

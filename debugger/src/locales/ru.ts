@@ -334,6 +334,7 @@ export const ru: Record<string, string> = {
     'chat.cancel_run': 'Остановить запуск',
     'chat.branch_title': 'Создать ветку разговора с этого момента',
     'chat.placeholder': 'Введите сообщение… (Shift+Enter для новой строки)',
+    'chat.placeholder_running': 'Добавится к выполняющемуся запуску как дополнение к задаче…',
     'chat.attach_file': 'Прикрепить файлы',
     'chat.uploading': 'Загрузка…',
     'chat.remove_attachment': 'Убрать вложение',
@@ -370,7 +371,6 @@ export const ru: Record<string, string> = {
     'chat.stream.note_accepted': '⤳ Дополнение принято · будет учтено в ходе {{turn}}',
     'chat.stream.note_dropped': '⚠ Дополнение не доставлено — бюджет хода исчерпан',
     'chat.note.sent': '⤳ Отправлено в текущий запуск',
-    'chat.note.hint': 'Сообщение будет добавлено к выполняющемуся запуску как дополнение к задаче',
 
     // Runs
     'runs.title': 'Запуски',
