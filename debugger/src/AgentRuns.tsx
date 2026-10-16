@@ -791,6 +791,19 @@ export default function AgentRuns({ project }: { project: string }) {
   const teamStarted = timeline.find((event) => event.type === 'team.started')
   const teamDone = timeline.find((event) => event.type === 'team.completed')
   const teamFailedEvent = timeline.find((event) => event.type === 'team.failed')
+  // Overview empty state: the tab opens by default, and until the run answers
+  // (no answer/stages/result yet, no delegations or plan) it would render
+  // nothing at all. Instead it onboards: current phase, progress counters and
+  // where to watch the run live.
+  const ownEvents = useMemo(
+    () => timeline.filter((event) => runID(event) === selected),
+    [timeline, selected])
+  const overviewEmpty = typeof answer !== 'string' && !Array.isArray(stages) && result?.result === undefined
+    && !ownEvents.some((event) => event.type === 'delegation.started' || event.type === 'plan.started' || event.type === 'plan.task.started')
+  const overviewRunning = selectedLive || (!result && ownEvents.some((event) => event.type === 'run.started') && !ownEvents.some((event) => event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled'))
+  const overviewLast = ownEvents[ownEvents.length - 1]
+  const overviewTurns = ownEvents.filter((event) => event.type === 'model.completed').length
+  const overviewStartedAt = ownEvents.find((event) => event.type === 'run.started')?.occurred_at
   return (
     <div style={{ padding: '1rem' }}>
       {error && (
@@ -1055,6 +1068,42 @@ export default function AgentRuns({ project }: { project: string }) {
                 )}
 
                 {view === 'overview' && (<>
+                {/* Empty-state onboarding: the overview tab opens by default,
+                    and until the run answers it would be blank. Show the current
+                    phase, progress counters and where to watch the run live. */}
+                {overviewEmpty && !busy && (
+                  <Tile>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                      <Heading style={{ fontSize: '0.875rem' }}>{overviewRunning ? t('runs.overview.in_progress') : t('runs.overview.no_result_yet')}</Heading>
+                      {overviewRunning && <Tag type="blue" size="sm">{t('chat.delegation.running')}</Tag>}
+                    </div>
+                    {overviewRunning && overviewStartedAt && (
+                      <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', margin: '0 0 0.5rem' }}>
+                        ⏱ {t('runs.overview.elapsed', { time: formatDuration(Math.max(0, nowTick - Date.parse(overviewStartedAt))) })}
+                      </p>
+                    )}
+                    {overviewLast && (() => {
+                      const info = eventSummary(overviewLast, t, (id) => knowledgeItems.get(id)?.proposition)
+                      const liveModel = overviewRunning && overviewLast.type === 'model.started' && tokenMetrics
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', padding: '0.5rem 0.75rem', background: 'var(--tm-raised)', borderRadius: '6px', fontSize: '0.8rem', marginBottom: '0.75rem' }}>
+                          <span style={{ color: info.color }}>{info.icon}</span>
+                          <strong>{info.label}</strong>
+                          {info.detail && <span style={{ color: 'var(--tm-text-3)', minWidth: 0, overflowWrap: 'anywhere' }}>{info.detail}</span>}
+                          {liveModel && tokenMetrics.tool && <span style={{ color: 'var(--tm-text-3)' }}>⚙ {tokenMetrics.tool}</span>}
+                          {liveModel && tokenMetrics.approxTokens > 0 && <span style={{ color: 'var(--tm-text-3)' }}>~{tokenMetrics.approxTokens} tok</span>}
+                          {liveModel && tokenMetrics.tps > 0 && <span style={{ color: 'var(--tm-text-3)' }}>{tokenMetrics.tps} tok/s</span>}
+                          {liveModel && tokenMetrics.streaming && <Tag type="green" size="sm">{t('runs.live.alive')}</Tag>}
+                          <Tag type="gray" size="sm">{t('runs.events_count', { count: String(ownEvents.length) })}</Tag>
+                          {overviewTurns > 0 && <Tag type="gray" size="sm">{overviewTurns} {t('runs.turns')}</Tag>}
+                        </div>
+                      )
+                    })()}
+                    <p style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', margin: '0 0 0.75rem' }}>{t('runs.overview.hint')}</p>
+                    <Button size="sm" kind="secondary" onClick={() => setView('trace')}>{t('runs.overview.open_trace')}</Button>
+                  </Tile>
+                )}
+
                 {/* Answer — the overview tab opens with what the run concluded */}
                 {typeof answer === 'string' && (
                   <Tile>
