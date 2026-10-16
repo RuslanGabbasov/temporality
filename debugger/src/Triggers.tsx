@@ -14,13 +14,15 @@ import {
   Column,
   Stack,
   Heading,
+  SelectItemGroup,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Add, Copy, Edit, TrashCan } from '@carbon/icons-react'
 import { workspaceApi, type Trigger, type Agent, type ExecutionIdentity, type Project } from './workspaceApi'
 import { copyText } from './clipboard'
 import { INTAKE_PROJECT_ID } from './kernelApi'
-import { useT } from './i18n'
+import { useT, useI18n } from './i18n'
+import { localizedEventGroups, eventInfo } from './eventCatalog'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
@@ -53,23 +55,14 @@ const deliveryTime = (iso: string) => {
 // Journal event types the kernel actually emits (cmd/agent-kernel). The
 // datalist is suggestions only — the input stays free-form so types added
 // later still work without a UI change.
-const EVENT_TYPE_SUGGESTIONS = [
-  'artifact.review.requested',
-  'artifact.read',
-  'artifact.review.approved',
-  'artifact.review.rejected',
-  'run.completed',
-  'tool.failed',
-  'tool.completed',
-  'secret.issued',
-  'mcp.call.failed',
-  'knowledge.proposed',
-  'trigger.accepted',
-  'trigger.rejected',
-]
+// Journal event types the kernel actually emits were moved into the localized
+// catalog (eventCatalog.ts) — the old datalist suggestions are retired. The
+// select below still offers a "custom type" escape hatch so types added after
+// the catalog keep working without a UI change.
 
 export default function Triggers({ project }: { project: string }) {
   const t = useT()
+  const { locale } = useI18n()
   const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
   const org = useOrgUnits()
   const [triggers, setTriggers] = useState<Trigger[]>([])
@@ -89,6 +82,9 @@ export default function Triggers({ project }: { project: string }) {
   // form.config.filter only on "Add", so a half-typed pair never reaches the API.
   const [eventDataField, setEventDataField] = useState('')
   const [eventDataValue, setEventDataValue] = useState('')
+  // "Other type…" mode for the event-type select: the raw input is shown
+  // instead of a catalog pick (also auto-on when editing an unknown type).
+  const [eventCustomType, setEventCustomType] = useState(false)
   // Per-trigger webhook delivery token (shown once, hash lives server-side):
   // generatedToken is displayed in a dedicated modal exactly like user tokens.
   const [generatedToken, setGeneratedToken] = useState<string | null>(null)
@@ -154,6 +150,7 @@ export default function Triggers({ project }: { project: string }) {
 
   const startCreate = (type: 'schedule' | 'webhook' | 'event') => {
     setEditing(null)
+    setEventCustomType(false)
     const defaultConfig = type === 'schedule'
       ? { cron: '0 9 * * 1-5', prompt: '', timezone: 'UTC' }
       : type === 'webhook'
@@ -175,6 +172,7 @@ export default function Triggers({ project }: { project: string }) {
 
   const startEdit = (trigger: Trigger) => {
     setEditing(trigger)
+    setEventCustomType(false)
     setForm({ ...trigger, config: typeof trigger.config === 'string' ? JSON.parse(trigger.config) : trigger.config })
     setShowForm(true)
   }
@@ -485,13 +483,66 @@ export default function Triggers({ project }: { project: string }) {
               </>
             )}
 
-            {/* Event config */}
+            {/* Event config: the type comes from the localized catalog
+                (eventCatalog.ts) — raw dotted names are meaningless to users.
+                A "custom" option keeps types emitted after the catalog valid. */}
             {form.type === 'event' && (
               <>
-                <TextInput id="trigger-event-type" labelText={t('triggers.event_type') ?? 'Event type'} list="trigger-event-type-options" value={form.config?.event_type ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, event_type: e.target.value } })} placeholder="tool.failed" helperText={t('triggers.event_type_hint') ?? 'Journal event type to watch — pick a suggestion or type any type the system emits.'} />
-                <datalist id="trigger-event-type-options">
-                  {EVENT_TYPE_SUGGESTIONS.map((type) => <option key={type} value={type} />)}
-                </datalist>
+                <Select
+                  id="trigger-event-type"
+                  labelText={t('triggers.event_type') ?? 'Event type'}
+                  value={((): string => {
+                    const current = (form.config?.event_type ?? '') as string
+                    if (eventCustomType || (current !== '' && !eventInfo(current))) return '__custom__'
+                    return current
+                  })()}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                    const value = e.target.value
+                    if (value === '__custom__') {
+                      setEventCustomType(true)
+                      return
+                    }
+                    setEventCustomType(false)
+                    setForm({ ...form, config: { ...form.config, event_type: value } })
+                  }}
+                >
+                  <SelectItem value="" text={t('triggers.event_type_pick') ?? 'Select an event…'} />
+                  {localizedEventGroups(locale).map(({ group, events }) => (
+                    <SelectItemGroup key={group.id} label={group[locale]}>
+                      {events.map((ev) => (
+                        <SelectItem key={ev.type} value={ev.type} text={ev.title} />
+                      ))}
+                    </SelectItemGroup>
+                  ))}
+                  <SelectItem value="__custom__" text={t('triggers.event_type_custom') ?? 'Other type…'} />
+                </Select>
+                {/* Below the select: raw input for "Other type…" (or a type
+                    unknown to the catalog, loaded from an existing trigger),
+                    the catalog description for a known type, nothing if empty. */}
+                {(() => {
+                  const current = (form.config?.event_type ?? '') as string
+                  if (eventCustomType || (current !== '' && !eventInfo(current))) {
+                    return (
+                      <TextInput
+                        id="trigger-event-type-custom"
+                        labelText={t('triggers.event_type_custom_label') ?? 'Custom event type'}
+                        value={current}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, event_type: e.target.value } })}
+                        placeholder="tool.failed"
+                        helperText={t('triggers.event_type_hint') ?? 'Journal event type to watch.'}
+                        style={{ marginBottom: '0.5rem' }}
+                      />
+                    )
+                  }
+                  if (current !== '') {
+                    return (
+                      <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '-0.25rem 0 0.5rem' }}>
+                        <code style={{ fontSize: '0.7rem' }}>{current}</code> — {eventInfo(current)?.[locale].desc}
+                      </p>
+                    )
+                  }
+                  return null
+                })()}
                 {/* Event filter: every entry must hold; empty filter = match all
                     events of the type. Only the validated keys are offered —
                     the server 422s unknown ones at save time. */}
