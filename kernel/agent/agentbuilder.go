@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/workspace"
@@ -179,7 +180,10 @@ func parseAgentDraft(content string) (AgentDraft, error) {
 		}
 		name := strings.Join(words, " ")
 		if name != "" {
-			name = strings.ToUpper(name[:1]) + name[1:]
+			// Uppercase the first rune, not byte: descriptions are often Cyrillic.
+			runes := []rune(name)
+			runes[0] = unicode.ToUpper(runes[0])
+			name = string(runes)
 		}
 		draft.Name = name
 	}

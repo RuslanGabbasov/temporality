@@ -13,9 +13,10 @@ import {
   Checkbox,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, Edit, TrashCan, Renew, Play } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, Renew, Play, MagicWand } from '@carbon/icons-react'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
+import GeneratingState from './GeneratingState'
 import { useConfirm } from './ConfirmDialog'
 import {
   workspaceApi,
@@ -29,6 +30,8 @@ import {
   type TeamStep,
   type TeamVersion,
   type TeamResolvePreview,
+  type TeamDraft,
+  type SkillDraftQuestion,
   type Agent,
   type Skill,
   type Project,
@@ -91,6 +94,10 @@ function slotToForm(slot: TeamSlot): TeamSlotForm {
     skillsText: (slot.requirements?.skills ?? []).join(', '),
   }
 }
+
+/** Wizard seed templates (wave E): suggested starting points for the builder,
+ *  not pre-created entities — the user always creates their own team. */
+const TEAM_TEMPLATES = ['code_delivery', 'research_fanout', 'delivery_qa_gate'] as const
 
 function emptySlotForm(n: number): TeamSlotForm {
   return {
@@ -202,6 +209,18 @@ export default function Teams({ project }: { project: string }) {
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
   const [launchFor, setLaunchFor] = useState<Team | null>(null)
+  // Wizard (wave E): description → agent-built draft → prefilled form.
+  // One clarification round by design, mirroring the skill builder.
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [wizardText, setWizardText] = useState('')
+  const [wizardBusy, setWizardBusy] = useState(false)
+  const [wizardError, setWizardError] = useState('')
+  const [draftQuestions, setDraftQuestions] = useState<SkillDraftQuestion[]>([])
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [builderProvenance, setBuilderProvenance] = useState<Partial<Record<'protocol' | 'defaults' | 'slots', boolean>>>({})
+  // Snapshot of the form exactly as the builder produced it: a difference
+  // against the live form means manual edits exist and regeneration must ask.
+  const [lastDraftForm, setLastDraftForm] = useState<TeamFormState | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -259,9 +278,93 @@ export default function Teams({ project }: { project: string }) {
     [teams, filter],
   )
 
+  // ── Wizard: natural language → agent-built draft ──────────────────────
+
+  const startWizard = () => {
+    setWizardText('')
+    setWizardError('')
+    setDraftQuestions([])
+    setAnswers({})
+    setWizardOpen(true)
+  }
+
+  const applyDraft = (draft: TeamDraft) => {
+    const prefilled: TeamFormState = {
+      id: '',
+      name: draft.name || '',
+      description: draft.description || '',
+      version: '1.0.0',
+      org_unit_id: '',
+      ...manifestToForm(draft.manifest),
+    }
+    setDraftQuestions(draft.questions ?? [])
+    setAnswers({})
+    setBuilderProvenance({ protocol: true, defaults: true, slots: true })
+    setLastDraftForm(prefilled)
+    setForm(prefilled)
+    setEditing(null)
+    setFormError('')
+    setShowForm(true)
+  }
+
+  const generate = async (extraAnswers?: Record<string, string>) => {
+    if (!wizardText.trim()) return
+    setWizardBusy(true); setWizardError('')
+    try {
+      let description = wizardText.trim()
+      const filled = Object.entries(extraAnswers ?? answers).filter(([, a]) => a.trim())
+      if (filled.length) {
+        description += '\n\nClarifications:\n' + filled.map(([i, a]) => {
+          const q = draftQuestions[Number(i)]?.question ?? ''
+          return `- ${q}\n  Answer: ${a.trim()}`
+        }).join('\n')
+      }
+      // Follow-up round: questions were already asked once — this call must
+      // not generate new ones (single clarification round by design).
+      const draft = await workspaceApi.draftTeam(description, draftQuestions.length > 0)
+      if ((draft.questions?.length ?? 0) > 0) {
+        // Questions live in the wizard: keep it open, collect the answers and
+        // run the one final round.
+        setDraftQuestions(draft.questions ?? [])
+        setAnswers({})
+        return
+      }
+      // Regenerating while the form holds manual edits replaces them — ask
+      // first instead of losing the work silently.
+      if (showForm && form && lastDraftForm && JSON.stringify(form) !== JSON.stringify(lastDraftForm)) {
+        if (!(await confirmDialog({
+          title: t('teams.regenerate_confirm_title') ?? 'Rebuild the draft?',
+          body: t('teams.regenerate_confirm') ?? 'The form holds manual edits — rebuilding replaces them with a fresh draft.',
+          confirmLabel: t('teams.regenerate') ?? 'Rebuild',
+        }))) return
+      }
+      applyDraft(draft)
+      setWizardOpen(false)
+    } catch (f) {
+      setWizardError(message(f))
+    } finally {
+      setWizardBusy(false)
+    }
+  }
+
+  // "Rebuild" from the form: reopen the wizard with the original description
+  // so the user can adjust it before regenerating.
+  const reopenWizard = () => {
+    setDraftQuestions([])
+    setAnswers({})
+    setWizardOpen(true)
+  }
+
+  const startManual = () => {
+    setWizardOpen(false)
+    startCreate()
+  }
+
   const startCreate = () => {
     setEditing(null)
     setFormError('')
+    setBuilderProvenance({})
+    setLastDraftForm(null)
     setForm({
       id: '', name: '', description: '', version: '1.0.0', org_unit_id: '',
       protocol: 'pipeline', maxRework: '', maxTurns: '', budgetUSD: '', parallelLimit: '',
@@ -273,6 +376,8 @@ export default function Teams({ project }: { project: string }) {
   const startEdit = (team: Team) => {
     setEditing(team)
     setFormError('')
+    setBuilderProvenance({})
+    setLastDraftForm(null)
     setForm({
       id: team.id,
       name: team.name,
@@ -361,6 +466,7 @@ export default function Teams({ project }: { project: string }) {
         <Heading>{t('teams.title') ?? 'Teams'}</Heading>
         <Stack orientation="horizontal" gap={3}>
           <Button kind="ghost" hasIconOnly renderIcon={Renew} iconDescription={t('action.refresh') ?? 'Refresh'} onClick={() => void load()} />
+          <Button kind="secondary" renderIcon={MagicWand} onClick={startWizard}>{t('teams.wizard_create') ?? 'Build a team'}</Button>
           <Button renderIcon={Add} onClick={startCreate}>{t('teams.new_team') ?? 'New Team'}</Button>
         </Stack>
       </div>
@@ -484,9 +590,82 @@ export default function Teams({ project }: { project: string }) {
           org={org}
           error={formError}
           saving={saving}
+          provenance={builderProvenance}
+          canRegenerate={Boolean(lastDraftForm) && wizardText.trim().length > 0}
+          onRegenerate={reopenWizard}
           onSave={() => void save()}
           onClose={() => setShowForm(false)}
         />
+      )}
+
+      {/* Wizard: describe the team in natural language */}
+      {wizardOpen && (
+        <AppModal onClose={() => setWizardOpen(false)} panelStyle={{ width: '640px' }}>
+          <Heading>{t('teams.wizard_title') ?? 'Build a team'}</Heading>
+          {wizardBusy ? (
+            <GeneratingState
+              title={t('teams.generating_title') ?? 'Building team draft…'}
+              hint={t('teams.generating_hint') ?? 'The builder agent turns your description into a protocol with role slots. This usually takes less than a minute.'}
+            />
+          ) : (
+            <>
+              <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
+                {t('teams.wizard_hint') ?? 'Describe the collaboration — the agent turns it into a structured team draft you can adjust afterwards.'}
+              </p>
+              {draftQuestions.length === 0 && (
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <div className="skill-subheading">{t('teams.wizard_templates') ?? 'Templates'}</div>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {TEAM_TEMPLATES.map((key) => (
+                      <Button key={key} size="sm" kind="secondary" onClick={() => setWizardText(t(`teams.template_${key}`) ?? '')}>
+                        {t(`teams.template_${key}_name`) ?? key}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <TextArea
+                id="team-wizard-description"
+                hideLabel
+                labelText={t('teams.wizard_label') ?? 'Describe what the team should do'}
+                rows={7}
+                value={wizardText}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setWizardText(e.target.value)}
+                placeholder={t('teams.wizard_placeholder') ?? 'A developer implements the task in the repository, a reviewer checks the change and sends it back…'}
+                autoFocus
+              />
+              {wizardError && <InlineNotification kind="error" title={t('teams.wizard_failed') ?? 'Generation failed'} subtitle={wizardError} lowContrast hideCloseButton style={{ marginTop: '0.5rem' }} />}
+              {draftQuestions.length > 0 && (
+                <div className="wizard-questions">
+                  <div className="skill-subheading">{t('teams.agent_questions') ?? 'The agent asks for clarification'}</div>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>
+                    {t('teams.agent_questions_hint') ?? 'Answer and send — the draft will be rebuilt once with your answers. No more questions follow: anything ambiguous gets sensible defaults.'}
+                  </p>
+                  {draftQuestions.map((q, i) => (
+                    <div key={i} style={{ marginBottom: '0.5rem' }}>
+                      <p style={{ margin: '0 0 0.25rem', fontSize: '0.8rem', color: 'var(--tm-text-2)' }}>{q.question}</p>
+                      <TextInput
+                        id={`team-answer-${i}`}
+                        hideLabel
+                        labelText=""
+                        value={answers[String(i)] ?? ''}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAnswers({ ...answers, [String(i)]: e.target.value })}
+                        placeholder={t('skills.answer_placeholder') ?? 'Your answer'}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="form-actions">
+                <Button kind="secondary" onClick={() => setWizardOpen(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
+                <Button kind="secondary" onClick={startManual}>{t('skills.wizard_manual') ?? 'Fill manually'}</Button>
+                <Button onClick={() => void generate()} disabled={wizardBusy || !wizardText.trim()}>
+                  {draftQuestions.length ? (t('skills.send_answers') ?? 'Send answers') : (t('teams.wizard_generate') ?? 'Build team')}
+                </Button>
+              </div>
+            </>
+          )}
+        </AppModal>
       )}
 
       {launchFor && (
@@ -665,7 +844,7 @@ function TeamEvolutionTab({ team, versions, t, onApply, onReject }: {
 
 /** Structured team editor — protocol select, slot cards, requirements as
  *  capability checkboxes + free-form skill ids, bindings as selects. */
-function TeamForm({ form, setForm, editing, agents, skills, org, error, saving, onSave, onClose }: {
+function TeamForm({ form, setForm, editing, agents, skills, org, error, saving, provenance, canRegenerate, onRegenerate, onSave, onClose }: {
   form: TeamFormState
   setForm: (form: TeamFormState) => void
   editing: Team | null
@@ -674,10 +853,15 @@ function TeamForm({ form, setForm, editing, agents, skills, org, error, saving, 
   org: ReturnType<typeof useOrgUnits>
   error: string
   saving: boolean
-  onSave: () => void
+  provenance: Partial<Record<'protocol' | 'defaults' | 'slots', boolean>>
+  canRegenerate: boolean
+  onRegenerate: () => void
+  onSave: () => Promise<void> | void
   onClose: () => void
 }) {
   const t = useT()
+  const builderTag = (section: 'protocol' | 'defaults' | 'slots') =>
+    provenance[section] ? <Tag size="sm" type="purple" title={t('teams.from_builder_hint') ?? ''}>{t('teams.from_builder') ?? 'builder'}</Tag> : null
   const patch = (partial: Partial<TeamFormState>) => setForm({ ...form, ...partial })
   const patchSlot = (index: number, partial: Partial<TeamSlotForm>) => {
     const slots = form.slots.map((slot, i) => (i === index ? { ...slot, ...partial } : slot))
@@ -715,7 +899,10 @@ function TeamForm({ form, setForm, editing, agents, skills, org, error, saving, 
         )}
 
         <div>
-          <div className="skill-subheading">{t('teams.protocol') ?? 'Protocol'}</div>
+          <div className="skill-subheading" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            {t('teams.protocol') ?? 'Protocol'}
+            {builderTag('protocol')}
+          </div>
           <Stack orientation="horizontal" gap={3}>
             <div style={{ flex: 1 }}>
               <Select id="team-protocol" hideLabel labelText="" value={form.protocol} onChange={(e) => patch({ protocol: e.target.value as TeamProtocolKind })}>
@@ -730,7 +917,10 @@ function TeamForm({ form, setForm, editing, agents, skills, org, error, saving, 
         </div>
 
         <div>
-          <div className="skill-subheading">{t('teams.defaults') ?? 'Defaults'}</div>
+          <div className="skill-subheading" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            {t('teams.defaults') ?? 'Defaults'}
+            {builderTag('defaults')}
+          </div>
           <Stack orientation="horizontal" gap={3}>
             <div style={{ flex: 1 }}>
               <TextInput id="team-max-turns" labelText={t('teams.max_turns') ?? 'Max turns'} placeholder="—" value={form.maxTurns} onChange={(e) => patch({ maxTurns: e.target.value })} />
@@ -768,7 +958,10 @@ function TeamForm({ form, setForm, editing, agents, skills, org, error, saving, 
         )}
 
         <div>
-          <div className="skill-subheading">{t('teams.slots') ?? 'Slots'}</div>
+          <div className="skill-subheading" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            {t('teams.slots') ?? 'Slots'}
+            {builderTag('slots')}
+          </div>
           <Stack gap={3}>
             {form.slots.map((slot, index) => (
               <div key={index} style={{ padding: '0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px', background: 'var(--tm-raised)' }}>
@@ -839,6 +1032,11 @@ function TeamForm({ form, setForm, editing, agents, skills, org, error, saving, 
       </Stack>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+        {canRegenerate && (
+          <Button kind="secondary" renderIcon={MagicWand} style={{ marginRight: 'auto' }} onClick={onRegenerate}>
+            {t('teams.regenerate') ?? 'Rebuild'}
+          </Button>
+        )}
         <Button kind="secondary" onClick={onClose}>{t('action.cancel') ?? 'Cancel'}</Button>
         <Button onClick={onSave} disabled={saving}>{saving ? (t('action.saving') ?? 'Saving…') : (t('action.save') ?? 'Save')}</Button>
       </div>

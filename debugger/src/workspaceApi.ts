@@ -532,6 +532,15 @@ export interface TeamResolvePreview {
   requirements?: string[]
 }
 
+/** Team builder wizard result (wave E): a prefilled team definition plus
+ *  clarifying questions the model could not resolve on its own. */
+export interface TeamDraft {
+  name: string
+  description: string
+  manifest: TeamManifest
+  questions?: SkillDraftQuestion[]
+}
+
 export interface TeamRunStartResult {
   run_id: string
   project: string
@@ -1064,6 +1073,11 @@ export const workspaceApi = {
   // requirements no visible agent satisfies.
   startTeamRun: (id: string, data: { project: string; goal: string; version?: string; bindings?: Record<string, string> }) =>
     request<TeamRunStartResult>(`/v1/agent/teams/${id}/runs`, { method: 'POST', body: JSON.stringify(data) }),
+
+  // Team creation wizard (wave E): natural language in, a validated manifest
+  // draft out. Creates nothing — the draft only prefills the form.
+  draftTeam: (description: string, final?: boolean) =>
+    request<TeamDraft>('/v1/workspace/teams/builder', { method: 'POST', body: JSON.stringify({ description, final: final ?? false }) }),
 
   // MCP servers (workspace-global registry)
   listMCPServers: () =>

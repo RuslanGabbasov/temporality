@@ -4320,6 +4320,40 @@ func main() {
 	// multi-agent compositions. The manifest (protocol + role slots) is data;
 	// the runtime compiles it into plan/delegate (Wave B). Users edit the
 	// structured form — team.yaml never surfaces as a user-facing format.
+	// Team creation wizard (docs/agent-teams.md §6, wave E): natural language
+	// in, a structured manifest draft out. Like the skill builder it creates
+	// nothing — the draft only prefills the form, saving goes through the
+	// regular team endpoints below.
+	mux.HandleFunc("POST /v1/workspace/teams/builder", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req struct {
+			Description string `json:"description"`
+			Final       bool   `json:"final"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Description) == "" {
+			writeError(w, 422, errors.New("description is required"))
+			return
+		}
+		// The roster grounds fixed bindings and skill requirements in agents
+		// this viewer can actually see (same visibility as launch resolution).
+		rosterAgents, rErr := ws.ListAgentsVisible(r.Context(), candidateVisibleUnits(r))
+		if rErr != nil {
+			writeError(w, 500, rErr)
+			return
+		}
+		draft, err := agent.BuildTeamDraft(r.Context(), activities.Model, req.Description, agent.FormatTeamRoster(rosterAgents), req.Final)
+		if err != nil {
+			writeError(w, 502, err)
+			return
+		}
+		writeJSON(w, 200, draft)
+	})
 	mux.HandleFunc("GET /v1/workspace/teams", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
