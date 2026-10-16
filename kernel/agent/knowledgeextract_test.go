@@ -532,3 +532,29 @@ func TestExtractKnowledgeWithoutAnyModelFailsActionably(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no model available for knowledge extraction")
 }
+
+func TestValidateExtractionCandidatesNormalizesAreas(t *testing.T) {
+	known := map[string]bool{"r/event/000001": true}
+	raw := []extractionCandidate{{
+		Kind:        "observation",
+		Proposition: "The deploy script requires the out directory to exist beforehand.",
+		Evidence:    []string{"r/event/000001"},
+		Topics:      []string{"  Deployment ", "deploy", "this topic is far too long to be a reasonable navigation label for the explorer area map", "", "ci"},
+		Entities:    []string{"docker-compose.yml", "Docker-Compose.yml", "pytest"},
+	}}
+	accepted, _, invalid := validateExtractionCandidates(raw, known, nil, nil, "repo")
+	require.Len(t, accepted, 1)
+	require.Equal(t, 0, invalid)
+	require.Equal(t, []string{"Deployment", "deploy", "ci"}, accepted[0].Topics, "whitespace collapsed, empties and overlong labels dropped, capped at 3")
+	require.Equal(t, []string{"docker-compose.yml", "pytest"}, accepted[0].Entities, "case-insensitive duplicates removed")
+
+	bare := []extractionCandidate{{
+		Kind:        "claim",
+		Proposition: "The migration runner requires network access to succeed.",
+		Evidence:    []string{"r/event/000001"},
+	}}
+	accepted, _, _ = validateExtractionCandidates(bare, known, nil, nil, "repo")
+	require.Len(t, accepted, 1)
+	require.Empty(t, accepted[0].Topics)
+	require.Empty(t, accepted[0].Entities)
+}

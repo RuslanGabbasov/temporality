@@ -361,3 +361,39 @@ func TestExtractionMarkersValidateAndProjectAway(t *testing.T) {
 		t.Fatalf("expected exactly the proposed knowledge, got %#v", knowledge)
 	}
 }
+
+func TestProjectKnowledgeConfirmMergesAreasForBackfill(t *testing.T) {
+	base := time.Date(2026, 10, 16, 10, 0, 0, 0, time.UTC)
+	// A pre-v4 node: proposed without topics/entities.
+	events := []Event{proposalEvent("e1", "ext/abc", "The fetch command accepts a -limit flag, not --count.", base, nil)}
+	// A later re-derivation confirms it and carries areas.
+	confirm := transitionEvent("e2", "ext/abc", "knowledge.confirmed", base.Add(time.Minute))
+	confirm.Data["topics"] = []any{"cli", "fetch"}
+	confirm.Data["entities"] = []any{"fetch-cli"}
+	events = append(events, confirm)
+	knowledge, err := ProjectKnowledge(events)
+	if err != nil {
+		t.Fatalf("projection failed: %v", err)
+	}
+	if len(knowledge) != 1 {
+		t.Fatalf("expected one node, got %d", len(knowledge))
+	}
+	if len(knowledge[0].Topics) != 2 || knowledge[0].Topics[0] != "cli" || knowledge[0].Topics[1] != "fetch" {
+		t.Fatalf("topics = %v, want [cli fetch]", knowledge[0].Topics)
+	}
+	if len(knowledge[0].Entities) != 1 || knowledge[0].Entities[0] != "fetch-cli" {
+		t.Fatalf("entities = %v, want [fetch-cli]", knowledge[0].Entities)
+	}
+
+	// A second confirm with overlapping labels must not duplicate them.
+	repeat := transitionEvent("e3", "ext/abc", "knowledge.confirmed", base.Add(2*time.Minute))
+	repeat.Data["topics"] = []any{"cli", "packaging"}
+	events = append(events, repeat)
+	knowledge, err = ProjectKnowledge(events)
+	if err != nil {
+		t.Fatalf("reprojection failed: %v", err)
+	}
+	if len(knowledge[0].Topics) != 3 || knowledge[0].Topics[2] != "packaging" {
+		t.Fatalf("topics = %v, want merge without duplicates", knowledge[0].Topics)
+	}
+}

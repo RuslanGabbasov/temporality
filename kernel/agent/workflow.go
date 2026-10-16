@@ -2580,7 +2580,7 @@ func emitExecutionObservation(ctx workflow.Context, state *eventState, proposal 
 	evidence := []observation.Evidence{{Ref: operationID, Type: "execution"}}
 	switch {
 	case !lookup.Exists:
-		data := map[string]any{"knowledge_id": proposal.KnowledgeID, "proposition": proposal.Proposition, "kind": "observation", "policy_id": proposal.Policy, "command": proposal.Command, "command_class": proposal.Class, "exit_code": 0, "operation_id": operationID, "arguments_hash": argumentsHash}
+		data := map[string]any{"knowledge_id": proposal.KnowledgeID, "proposition": proposal.Proposition, "kind": "observation", "policy_id": proposal.Policy, "command": proposal.Command, "command_class": proposal.Class, "topics": []string{proposal.Class}, "exit_code": 0, "operation_id": operationID, "arguments_hash": argumentsHash}
 		return emitKnowledgeEvent(ctx, state, "knowledge.proposed", data, evidence)
 	case lookup.State == "proposed" || lookup.State == "challenged":
 		data := map[string]any{"knowledge_id": proposal.KnowledgeID, "rule": ReverificationRule, "operation_id": operationID, "arguments_hash": argumentsHash, "command": proposal.Command}
@@ -2788,6 +2788,12 @@ func emitExtractedKnowledge(ctx workflow.Context, activityCtx workflow.Context, 
 		if candidate.Confidence > 0 {
 			data["confidence"] = candidate.Confidence
 		}
+		if len(candidate.Topics) > 0 {
+			data["topics"] = candidate.Topics
+		}
+		if len(candidate.Entities) > 0 {
+			data["entities"] = candidate.Entities
+		}
 		return emitKnowledgeEvent(activityCtx, state, "knowledge.proposed", data, evidence) == nil
 	}
 	var lookup KnowledgeLookupResult
@@ -2799,6 +2805,14 @@ func emitExtractedKnowledge(ctx workflow.Context, activityCtx workflow.Context, 
 	switch lookup.State {
 	case "proposed", "challenged":
 		data := map[string]any{"knowledge_id": candidate.KnowledgeID, "proposition": candidate.Proposition, "rule": ExtractionReverificationRule, "extractor_version": ExtractorVersion, "extraction_id": extractionID}
+		// Re-derivation may be the first extraction under v4+: the confirm
+		// event carries areas so the projection can backfill an older node.
+		if len(candidate.Topics) > 0 {
+			data["topics"] = candidate.Topics
+		}
+		if len(candidate.Entities) > 0 {
+			data["entities"] = candidate.Entities
+		}
 		return emitKnowledgeEvent(activityCtx, state, "knowledge.confirmed", data, evidence) == nil
 	case "confirmed":
 		data := map[string]any{"knowledge_id": candidate.KnowledgeID, "proposition": candidate.Proposition, "rule": ExtractionReuseRule, "extractor_version": ExtractorVersion, "extraction_id": extractionID}

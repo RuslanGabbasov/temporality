@@ -28,8 +28,10 @@ import (
 // ExtractorVersion identifies the extraction prompt and heuristics. Bumping it
 // changes extractionIdentity, so every run becomes eligible for re-extraction
 // under the new version (docs/knowledge-extraction.md §27). v3 adds judged
-// hint outcomes to the same model call (plan-priming-relevance.md §11).
-const ExtractorVersion = "knowledge-extractor.v3"
+// hint outcomes to the same model call (plan-priming-relevance.md §11). v4
+// asks for topics and entities per candidate so the knowledge base gets
+// navigable areas (explorer area map and facets) from every proposal.
+const ExtractorVersion = "knowledge-extractor.v4"
 
 // Extraction observability events. They are markers on the run's trajectory,
 // not knowledge lifecycle transitions, so the projection skips them.
@@ -95,6 +97,11 @@ type KnowledgeCandidate struct {
 	KnowledgeID string
 	Kind        string // observation | claim
 	Proposition string
+	// Topics and Entities power the explorer area map and facets; the
+	// projection lowercases nothing here — normalization happened in
+	// validation.
+	Topics      []string
+	Entities    []string
 	Confidence  float64
 	Evidence    []string // real event ids from the analysed run
 	Existing    bool
@@ -361,7 +368,7 @@ You read one completed agent run and decide which durable facts are worth rememb
 
 Answer with a single JSON object and nothing else. No markdown fences, no commentary.
 Schema:
-{"candidates": [{"kind": "observation|claim", "proposition": "...", "evidence": ["event id from the trajectory"], "confidence": 0.0-1.0, "contradicts": "optional: existing knowledge id this run disproves"}], "hint_outcomes": [{"hint_id": "id of an offered hint from the context", "outcome": "helpful|harmful"}]}
+{"candidates": [{"kind": "observation|claim", "proposition": "...", "topics": ["2-3 short lowercase themes"], "entities": ["named tools, files, services"], "evidence": ["event id from the trajectory"], "confidence": 0.0-1.0, "contradicts": "optional: existing knowledge id this run disproves"}], "hint_outcomes": [{"hint_id": "id of an offered hint from the context", "outcome": "helpful|harmful"}]}
 
 What qualifies:
 - Facts that will help a future run in this project: how it is built, tested, deployed; non-obvious tool or CLI behavior; environment quirks; verified workarounds; documentation that turned out to be stale.
@@ -370,6 +377,8 @@ What qualifies:
 
 Rules:
 - Every candidate MUST cite real event ids from the trajectory as evidence. No evidence, no candidate.
+- topics are 0-3 short lowercase general themes for navigation, e.g. "testing", "docker", "ci", "configuration". Prefer established words over invented ones.
+- entities are 0-3 concrete named artifacts the fact is about: tools ("pytest"), files ("docker-compose.yml"), services ("GitHub Actions"). Keep their natural spelling.
 - Do not restate what successful verification and build commands already record automatically (for example "tests pass").
 - Do not record the run's reasoning process, only its outcomes.
 - Do not restate items of the existing knowledge listed in the context unless this run independently re-verified them; a verified repeat is valuable — state it again as a candidate citing this run's evidence.
@@ -451,6 +460,8 @@ type extractionCompletion struct {
 type extractionCandidate struct {
 	Kind        string   `json:"kind"`
 	Proposition string   `json:"proposition"`
+	Topics      []string `json:"topics"`
+	Entities    []string `json:"entities"`
 	Evidence    []string `json:"evidence"`
 	Confidence  float64  `json:"confidence"`
 	Contradicts string   `json:"contradicts"`
@@ -560,6 +571,8 @@ func validateExtractionCandidates(raw []extractionCandidate, knownEvents map[str
 			KnowledgeID: id,
 			Kind:        kind,
 			Proposition: proposition,
+			Topics:      normalizeAreaLabels(item.Topics),
+			Entities:    normalizeAreaLabels(item.Entities),
 			Confidence:  confidence,
 			Evidence:    evidence,
 			Existing:    states[id] != "" && states[id] != "invalidated" && states[id] != "superseded" && states[id] != "corrected",
@@ -573,6 +586,30 @@ func validateExtractionCandidates(raw []extractionCandidate, knownEvents map[str
 // lifecycle transitions.
 func terminalKnowledgeState(state string) bool {
 	return state == "invalidated" || state == "superseded" || state == "corrected"
+}
+
+// normalizeAreaLabels cleans model-provided topics/entities into stable facet
+// values: collapsed whitespace, capped length and count, deduplicated
+// case-insensitively. Empty results are nil so the emit path omits the field.
+func normalizeAreaLabels(values []string) []string {
+	var normalized []string
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+		if value == "" || utf8.RuneCountInString(value) > 48 {
+			continue
+		}
+		key := strings.ToLower(value)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		normalized = append(normalized, value)
+		if len(normalized) == 3 {
+			break
+		}
+	}
+	return normalized
 }
 
 // agingCandidates selects stale proposals for the aging sweep (rule aging.v1):

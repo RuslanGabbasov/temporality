@@ -167,6 +167,11 @@ func ProjectKnowledge(events []Event) ([]Knowledge, error) {
 			item.LastUsedAt = &usedAt
 		case "knowledge.confirmed":
 			item.State = "confirmed"
+			// A re-derivation under a newer extractor may be the first event
+			// carrying topics/entities; merge them so pre-v4 nodes gradually
+			// gain areas instead of staying invisible on the explorer map.
+			item.Topics = appendUniqueStrings(item.Topics, stringList(event.Data["topics"]))
+			item.Entities = appendUniqueStrings(item.Entities, stringList(event.Data["entities"]))
 		case "knowledge.challenged":
 			item.State = "challenged"
 		case "knowledge.corrected":
@@ -424,6 +429,26 @@ func appendUniqueEvidence(existing []Evidence, additions ...Evidence) []Evidence
 		}
 		existing = append(existing, item)
 		seen[item.Ref] = true
+	}
+	return existing
+}
+
+// appendUniqueStrings merges label lists (topics, entities) case-sensitively:
+// extraction normalizes spelling, so an exact match means a repeat.
+func appendUniqueStrings(existing, additions []string) []string {
+	if len(additions) == 0 {
+		return existing
+	}
+	seen := make(map[string]bool, len(existing)+len(additions))
+	for _, item := range existing {
+		seen[item] = true
+	}
+	for _, item := range additions {
+		if item == "" || seen[item] {
+			continue
+		}
+		existing = append(existing, item)
+		seen[item] = true
 	}
 	return existing
 }
