@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="How the agent accumulates experience — the knowledge lifecycle, the area map, dossiers, contradictions, bitemporality.">
+<title>Knowledge — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../knowledge.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/knowledge.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row active" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Knowledge and experience</div>
+<h1>Knowledge</h1>
+<p class="docs-lead">How the agent accumulates experience — the knowledge lifecycle, the area map, dossiers, contradictions, bitemporality.</p>
+<p>Knowledge is the verified layer of experience: statements about the
+environment, tools and solutions, extracted from real trajectories. Unlike a
+&quot;memory dump&quot;, every piece of knowledge carries an author, provenance, a
+status and a change history. The <strong>Knowledge</strong> page (<code>/knowledge</code>) serves both
+humans and agents (the <code>knowledge_explore</code> tool).</p>
+<h2 id="lifecycle"><a class="anchor" href="#lifecycle" aria-label="Section link">#</a>Lifecycle</h2><pre><code>proposed → confirmed → (challenged → corrected | superseded | invalidated)
+</code></pre>
+<ul>
+<li><strong>Proposed</strong> — extracted from a run, not yet verified.</li>
+<li><strong>Confirmed</strong> — applied and worked (or confirmed by a human).</li>
+<li><strong>Challenged</strong> — a contradiction was found; under review.</li>
+<li><strong>Corrected / Superseded / Invalidated</strong> — terminal outcomes with the
+history preserved: who, when and why.</li>
+</ul>
+<p>&quot;Alive&quot; knowledge is what the system is ready to hint to the agent. Stale
+(&quot;at risk&quot;) items are shown with a marker and re-evaluated.</p>
+<h2 id="the-area-map"><a class="anchor" href="#the-area-map" aria-label="Section link">#</a>The area map</h2><p>A treemap groups knowledge by topics and entities: tile size — the amount of
+knowledge, color — the dominant state, a red badge — contradictions. Clicking
+an area applies a sticky filter to the knowledge list.</p>
+<p>The <strong>Tidy up</strong> button runs the judge model (the same one the quality loop
+uses): it merges duplicates and variants (&quot;playwright&quot;, &quot;playwright e2e&quot;) into
+canonical areas and hides garbage (file names and the like). Knowledge records
+are not modified — only the display &quot;lens&quot; is.</p>
+<h2 id="search-and-filters"><a class="anchor" href="#search-and-filters" aria-label="Section link">#</a>Search and filters</h2><ul>
+<li><strong>Compact filters</strong>: state, visibility scope, type (claim/observation), origin, topic, entity.</li>
+<li><strong>Semantic search</strong> — a question in plain words; results explain <em>why</em> they matched.</li>
+<li><strong>Bitemporal filters</strong> — look at the base &quot;as it was&quot;: at an event date or as of a moment of knowledge (who knew what when). Essential for incident retrospectives.</li>
+</ul>
+<h2 id="the-knowledge-dossier"><a class="anchor" href="#the-knowledge-dossier" aria-label="Section link">#</a>The knowledge dossier</h2><p>Clicking a knowledge item opens its dossier: the proposition, status and
+transition history, primary sources (links to specific run events), relations
+to other knowledge (supports/contradicts/derived from), usage statistics.</p>
+<p>From the dossier: <strong>challenge</strong>, <strong>correct</strong>, <strong>invalidate</strong> — with a reason
+and evidence. These are human actions; the agent flags doubts, but you move
+the lifecycle.</p>
+<h2 id="contradictions"><a class="anchor" href="#contradictions" aria-label="Section link">#</a>Contradictions</h2><p>The <strong>Contradictions</strong> tab collects pairs of knowledge items that state
+different things about the same subject: a side-by-side comparison and a
+resolution (keep one, correct, both are stale).</p>
+<h2 id="research-sessions"><a class="anchor" href="#research-sessions" aria-label="Section link">#</a>Research sessions</h2><p>The current question, filters and selected area are saved as a <strong>session</strong> you
+can return to later. The agent explores the base too, through the
+<code>knowledge_explore</code> tool (orient/search/expand/trace/compare/synthesize), and
+its research runs appear in a separate tab.</p>
+<p>The mechanics in depth — <code>docs/knowledge-model.md</code>, <code>docs/knowledge-evolution.md</code>,
+<code>docs/human-knowledge-explorer.md</code>.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="agents.html"><small>← Previous</small><strong>Agents and teams</strong></a>
+    <a class="pager-next" href="observability.html"><small>Next →</small><strong>Observability and storage</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

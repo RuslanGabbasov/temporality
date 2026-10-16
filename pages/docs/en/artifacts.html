@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="A registry of reference documents — coding policies, runbooks and templates agents load on demand.">
+<title>Artifacts — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../artifacts.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/artifacts.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row active" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Knowledge and experience</div>
+<h1>Artifacts</h1>
+<p class="docs-lead">A registry of reference documents — coding policies, runbooks and templates agents load on demand.</p>
+<p>An artifact is a reference document in a registry: a coding policy, a release
+runbook, an estimate template, an audit checklist. Only the reference enters
+the agent&#39;s prompt; the agent loads the body on demand (<code>artifact_search</code> /
+<code>artifact_read</code> with read auditing). A large policy does not eat the context
+yet is always there when needed.</p>
+<p>The <strong>Artifacts</strong> page (<code>/artifacts</code>); details — <code>docs/artifact-registry.md</code>.</p>
+<h2 id="artifact-types"><a class="anchor" href="#artifact-types" aria-label="Section link">#</a>Artifact types</h2><table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Where the body lives</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Text document</td>
+<td>Stored inside Temporality (markdown)</td>
+</tr>
+<tr>
+<td>External URL</td>
+<td>Proxied and cached by the kernel (corporate wiki, Confluence)</td>
+</tr>
+</tbody></table>
+<h2 id="approval-flow"><a class="anchor" href="#approval-flow" aria-label="Section link">#</a>Approval flow</h2><p>An artifact exists in two statuses: <strong>draft</strong> (an agent created it — say,
+requirements from an analysis) and <strong>approved</strong> (a human edited and confirmed
+it). Only approved artifacts are referenced from skills and prompts: &quot;see
+policy X&quot; means a human-verified version.</p>
+<p>A typical cycle: an analyst agent drafts the document → sends it to a human
+for approval (<code>ask_human</code> or an artifact notification) → the human edits it
+themselves or with the agent → approves → the document becomes available to
+all executor agents as a link from a skill.</p>
+<h2 id="relations"><a class="anchor" href="#relations" aria-label="Section link">#</a>Relations</h2><ul>
+<li><strong>Saga</strong> — an artifact can belong to a long-running effort (requirements for a feature inside a saga).</li>
+<li><strong>Skill</strong> — a skill&#39;s manifest references artifacts as reference material.</li>
+<li><strong>Project / department / organization</strong> — visibility scope: a company-wide policy is visible everywhere, a project&#39;s only inside the project.</li>
+</ul>
+<h2 id="tool-support"><a class="anchor" href="#tool-support" aria-label="Section link">#</a>Tool support</h2><p>Agents search artifacts semantically (<code>artifact_search</code>) and read them in
+chunks with auditing (<code>artifact_read</code>): every read is journaled — who read
+what, in which run.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="skills.html"><small>← Previous</small><strong>Skills</strong></a>
+    <a class="pager-next" href="inbound.html"><small>Next →</small><strong>Inbound and channels</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

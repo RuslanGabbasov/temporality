@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="From zero to your first agent task — installation, onboarding, the first run.">
+<title>Quick start — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../quickstart.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/quickstart.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row active" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Getting started</div>
+<h1>Quick start</h1>
+<p class="docs-lead">From zero to your first agent task — installation, onboarding, the first run.</p>
+<h2 id="requirements"><a class="anchor" href="#requirements" aria-label="Section link">#</a>Requirements</h2><ul>
+<li>Docker (Linux, macOS; Windows via WSL2). BuildKit recommended.</li>
+<li>~4 GB of free memory for the stack (PostgreSQL, Temporal, Journal, Kernel, UI).</li>
+<li>A key from any OpenAI-compatible provider (OpenAI, OpenRouter, local Ollama, etc.).</li>
+</ul>
+<h2 id="run-it"><a class="anchor" href="#run-it" aria-label="Section link">#</a>Run it</h2><pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git
+cd temporality
+cp .env.example .env
+# edit .env: TEMPORALITY_MODEL_BASE_URL / _ID / _API_KEY
+docker compose up --build -d
+</code></pre>
+<p>This starts PostgreSQL, the Journal (<code>:8080</code>), the UI (<code>:3000</code>), Temporal (UI <code>:8233</code>),
+the Agent Kernel (<code>:8090</code>), SearXNG (<code>127.0.0.1:8889</code>, meta-search for the agent)
+and a headless browser. <code>TEMPORALITY_MODEL_BASE_URL</code> + <code>_ID</code> are the mandatory
+minimum; the kernel refuses to start without them.</p>
+<p>Provider configuration examples:</p>
+<pre><code class="language-dotenv"># OpenAI
+TEMPORALITY_MODEL_BASE_URL=https://api.openai.com/v1
+TEMPORALITY_MODEL_ID=gpt-4.1-mini
+TEMPORALITY_MODEL_API_KEY=sk-...
+
+# Local Ollama
+TEMPORALITY_MODEL_BASE_URL=http://host.docker.internal:11434/v1
+TEMPORALITY_MODEL_ID=llama3.2
+TEMPORALITY_API_KEY=
+</code></pre>
+<p>Stop the stack keeping the data: <code>make stack-stop</code>.</p>
+<h2 id="onboarding"><a class="anchor" href="#onboarding" aria-label="Section link">#</a>Onboarding</h2><p>Open <code>http://localhost:3000</code>. On the first visit an onboarding wizard walks you
+through the required steps and hides navigation until they are done:</p>
+<ol>
+<li><strong>First project</strong> — a workspace for the agent&#39;s tasks.</li>
+<li><strong>Administrator</strong> — your user.</li>
+<li><strong>Model provider</strong> — base URL, key (stored in encrypted secrets), automatic model listing.</li>
+<li><strong>Agent</strong> — from a template or from a plain-language description.</li>
+<li><strong>Sandbox build</strong> — the image the agent&#39;s commands will run in (requires Docker daemon access).</li>
+</ol>
+<h2 id="your-first-task"><a class="anchor" href="#your-first-task" aria-label="Section link">#</a>Your first task</h2><p>Open <strong>Workspace</strong> — the agent chat — and write a task. The agent responds with
+streaming output; along the way it may:</p>
+<ul>
+<li>run commands in the sandbox (<code>/workspace</code> of the project is persistent storage),</li>
+<li>delegate subtasks to other agents (<code>plan</code>/<code>delegate</code>),</li>
+<li>ask you a question through an <strong>approval</strong> card (in the chat, mirrored in &quot;Runs&quot;),</li>
+<li>record a useful observation into the project&#39;s knowledge.</li>
+</ul>
+<p>When it finishes, look at <strong>Runs</strong> (the step-by-step trace) and <strong>Knowledge</strong>
+(what the agent learned from the task).</p>
+<h2 id="what-to-set-up-next"><a class="anchor" href="#what-to-set-up-next" aria-label="Section link">#</a>What to set up next</h2><ul>
+<li><strong>Channels</strong> — let the agent receive tasks from Matrix/Telegram/Slack and ask questions where you live: <a href="inbound.html">Inbound and channels</a>.</li>
+<li><strong>Triggers</strong> — tasks on a schedule or on events: <a href="triggers.html">Triggers</a>.</li>
+<li><strong>Skills</strong> — capture a repeating procedure: <a href="skills.html">Skills</a>.</li>
+<li><strong>Users and access</strong> — your team and RBAC: <a href="administration.html">Administration</a>.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="intro.html"><small>← Previous</small><strong>Introduction</strong></a>
+    <a class="pager-next" href="chat.html"><small>Next →</small><strong>Chat and runs</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

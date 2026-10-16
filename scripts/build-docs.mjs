@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// Builds the user documentation site: docs/user/*.md → pages/docs/*.html.
+// Builds the user documentation site from markdown sources:
+//   docs/user/*.md    → pages/docs/*.html      (Russian, primary)
+//   docs/user/en/*.md → pages/docs/en/*.html   (English mirror)
 //
-// - Sources carry YAML-ish front matter (title, order, description).
+// - Sources carry YAML-ish front matter (title, order, section, description).
 // - Output is committed, so GitHub Pages serves it without any CI.
 // - The chrome reuses the landing's palette and fonts (pages/styles.css)
 //   plus a docs-specific stylesheet (pages/docs/docs.css).
@@ -13,8 +15,53 @@ import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 
 import { join, basename } from 'node:path'
 
 const ROOT = new URL('..', import.meta.url).pathname
-const SRC = join(ROOT, 'docs', 'user')
-const OUT = join(ROOT, 'pages', 'docs')
+
+// ── language configuration ──────────────────────────────────────────────────
+
+const LANGS = [
+  {
+    code: 'ru',
+    srcDir: join(ROOT, 'docs', 'user'),
+    outDir: join(ROOT, 'pages', 'docs'),
+    rootPrefix: '..', // landing and assets, relative to outDir
+    cssHref: 'docs.css',
+    other: 'en', // the mirrored tree (slug-to-slug)
+    toggleLabel: 'EN',
+    editBase: 'docs/user',
+    strings: {
+      docsLabel: 'Документация',
+      editLabel: 'Изменить страницу',
+      backLabel: '← На сайт',
+      pagerPrev: '← Назад',
+      pagerNext: 'Далее →',
+      docsTitle: 'Temporality — руководство пользователя',
+      docsLead: 'Temporality наблюдает, как ИИ-агент выполняет задачи: что он знал и делал, откуда взялись знания, что подтвердилось, и возвращает проверенный опыт в следующие запуски. Этот раздел — практическое руководство: от запуска до повседневной работы.',
+      startLabel: 'Начать знакомство',
+      htmlLang: 'ru',
+    },
+  },
+  {
+    code: 'en',
+    srcDir: join(ROOT, 'docs', 'user', 'en'),
+    outDir: join(ROOT, 'pages', 'docs', 'en'),
+    rootPrefix: '../..',
+    cssHref: '../docs.css',
+    other: 'ru',
+    toggleLabel: 'RU',
+    editBase: 'docs/user/en',
+    strings: {
+      docsLabel: 'Docs',
+      editLabel: 'Edit this page',
+      backLabel: '← Back to site',
+      pagerPrev: '← Previous',
+      pagerNext: 'Next →',
+      docsTitle: 'Temporality — user guide',
+      docsLead: 'Temporality observes how an AI agent works: what it knew and did, where its knowledge came from, what held up — and returns verified experience to later runs. This section is a practical guide, from installation to everyday work.',
+      startLabel: 'Get started',
+      htmlLang: 'en',
+    },
+  },
+]
 
 // ── front matter ────────────────────────────────────────────────────────────
 
@@ -32,98 +79,100 @@ function parseFrontMatter(source) {
 
 // ── markdown → html ─────────────────────────────────────────────────────────
 
-const renderer = new marked.Renderer({ gfm: true })
-renderer.heading = function ({ tokens, depth }) {
-  const text = this.parser.parseInline(tokens)
-  const anchor = text.toLowerCase()
-    .replace(/<[^>]+>/g, '')
-    .replace(/[^\p{L}\p{N}\s-]/gu, '')
-    .trim()
-    .replace(/\s+/g, '-')
-  return `<h${depth} id="${anchor}"><a class="anchor" href="#${anchor}" aria-label="Ссылка на раздел">#</a>${text}</h${depth}>`
-}
-renderer.link = function ({ href, tokens }) {
-  const text = this.parser.parseInline(tokens)
-  const external = /^[a-z]+:/i.test(href)
-  return `<a href="${href}"${external ? ' target="_blank" rel="noreferrer"' : ''}>${text}${external ? '&nbsp;<span class="ext">↗</span>' : ''}</a>`
-}
-marked.use({ renderer, gfm: true, breaks: false })
-
-function renderMarkdown(body) {
-  return marked.parse(body)
-}
-
-// ── load pages ──────────────────────────────────────────────────────────────
-
-if (!existsSync(SRC)) {
-  console.error(`docs sources not found: ${SRC}`)
-  process.exit(1)
-}
-const files = readdirSync(SRC).filter((f) => f.endsWith('.md')).sort()
-const pages = files.map((file) => {
-  const { meta, body } = parseFrontMatter(readFileSync(join(SRC, file), 'utf8'))
-  // The leading `# Title` duplicates front-matter title and the page h1.
-  const stripped = body.replace(/^#\s+.+\n+/, '')
-  return {
-    slug: basename(file, '.md'),
-    order: Number(meta.order ?? 999),
-    section: meta.section ?? 'Прочее',
-    title: meta.title ?? basename(file),
-    description: meta.description ?? '',
-    body: stripped,
+function makeRenderer() {
+  const renderer = new marked.Renderer({ gfm: true })
+  renderer.heading = function ({ tokens, depth }) {
+    const text = this.parser.parseInline(tokens)
+    const anchor = text.toLowerCase()
+      .replace(/<[^>]+>/g, '')
+      .replace(/[^\p{L}\p{N}\s-]/gu, '')
+      .trim()
+      .replace(/\s+/g, '-')
+    return `<h${depth} id="${anchor}"><a class="anchor" href="#${anchor}" aria-label="Section link">#</a>${text}</h${depth}>`
   }
-}).sort((a, b) => a.order - b.order)
-
-const sections = []
-for (const page of pages) {
-  const last = sections[sections.length - 1]
-  if (last && last.name === page.section) last.pages.push(page)
-  else sections.push({ name: page.section, pages: [page] })
+  renderer.link = function ({ href, tokens }) {
+    const text = this.parser.parseInline(tokens)
+    const external = /^[a-z]+:/i.test(href)
+    return `<a href="${href}"${external ? ' target="_blank" rel="noreferrer"' : ''}>${text}${external ? '&nbsp;<span class="ext">↗</span>' : ''}</a>`
+  }
+  return renderer
 }
 
-// ── chrome ──────────────────────────────────────────────────────────────────
+// ── build one language tree ─────────────────────────────────────────────────
 
-const BRAND_SVG = `<a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a>`
+function buildLang(lang) {
+  const { srcDir, outDir, rootPrefix, strings } = lang
+  if (!existsSync(srcDir)) {
+    console.error(`docs sources not found: ${srcDir}`)
+    process.exit(1)
+  }
+  const renderer = makeRenderer()
+  marked.use({ renderer, gfm: true, breaks: false })
 
-function topbar(activeSlug) {
-  const docsLink = `<a class="nav-docs active" href="/docs/">Документация</a>`
-  const nav = [`<a href="../#product">Продукт</a>`, `<a href="../#guide">Руководство</a>`, `<a href="../#architecture">Архитектура</a>`].join('')
-  const github = `https://github.com/RuslanGabbasov/temporality`
-  return `<header class="topbar">${BRAND_SVG}<nav class="nav">${docsLink}${nav}</nav><div class="top-actions"><a class="github-link" href="${github}/blob/main/docs/user/${activeSlug}.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>`
-}
+  const files = readdirSync(srcDir).filter((f) => f.endsWith('.md')).sort()
+  const pages = files.map((file) => {
+    const { meta, body } = parseFrontMatter(readFileSync(join(srcDir, file), 'utf8'))
+    // The leading `# Title` duplicates front-matter title and the page h1.
+    const stripped = body.replace(/^#\s+.+\n+/, '')
+    return {
+      slug: basename(file, '.md'),
+      order: Number(meta.order ?? 999),
+      section: meta.section ?? '—',
+      title: meta.title ?? basename(file),
+      description: meta.description ?? '',
+      body: stripped,
+    }
+  }).sort((a, b) => a.order - b.order)
 
-function sidebar(activeSlug) {
-  const items = sections.map((section) => {
-    const rows = section.pages.map((page) =>
-      `<a class="docs-nav-row${page.slug === activeSlug ? ' active' : ''}" href="${page.slug}.html">${page.title}</a>`).join('\n')
-    return `<div class="docs-nav-section">${section.name}</div>\n${rows}`
-  }).join('\n')
-  return `<aside class="docs-sidebar"><nav>${items}</nav></aside>`
-}
+  const sections = []
+  for (const page of pages) {
+    const last = sections[sections.length - 1]
+    if (last && last.name === page.section) last.pages.push(page)
+    else sections.push({ name: page.section, pages: [page] })
+  }
 
-function pageHtml(page) {
-  const index = pages.indexOf(page)
-  const prev = pages[index - 1]
-  const next = pages[index + 1]
-  const pager = `
-  <nav class="docs-pager">
-    ${prev ? `<a class="pager-prev" href="${prev.slug}.html"><small>← Назад</small><strong>${prev.title}</strong></a>` : '<span></span>'}
-    ${next ? `<a class="pager-next" href="${next.slug}.html"><small>Далее →</small><strong>${next.title}</strong></a>` : ''}
-  </nav>`
-  const body = renderMarkdown(page.body)
-  const description = page.description.replace(/"/g, '&quot;')
-  return `<!doctype html>
-<html lang="ru">
+  const brandHref = `${rootPrefix}/`
+  const topbar = (slug) => {
+    const github = `https://github.com/RuslanGabbasov/temporality`
+    const toggleHref = lang.other === 'en' ? `en/${slug}.html` : `../${slug}.html`
+    const nav = lang.code === 'ru'
+      ? `<a href="${rootPrefix}/#product">Продукт</a><a href="${rootPrefix}/#guide">Руководство</a><a href="${rootPrefix}/#architecture">Архитектура</a>`
+      : `<a href="${rootPrefix}/#product">Product</a><a href="${rootPrefix}/#guide">Get started</a><a href="${rootPrefix}/#architecture">Architecture</a>`
+    return `<header class="topbar"><a class="brand" href="${brandHref}" aria-label="Temporality home"><img src="${rootPrefix}/assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">${strings.docsLabel}</a>${nav}</nav><div class="top-actions"><a class="lang-toggle" href="${toggleHref}" aria-label="Switch language">${lang.toggleLabel}</a><a class="github-link" href="${github}/blob/main/${lang.editBase}/${slug}.md" target="_blank" rel="noreferrer"><span>${strings.editLabel}</span><span class="arrow">↗</span></a></div></header>`
+  }
+
+  const sidebar = (activeSlug) => {
+    const items = sections.map((section) => {
+      const rows = section.pages.map((page) =>
+        `<a class="docs-nav-row${page.slug === activeSlug ? ' active' : ''}" href="${page.slug}.html">${page.title}</a>`).join('\n')
+      return `<div class="docs-nav-section">${section.name}</div>\n${rows}`
+    }).join('\n')
+    return `<aside class="docs-sidebar"><nav>${items}\n<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="${brandHref}">${strings.backLabel}</a></nav></aside>`
+  }
+
+  const head = (title, description) => `<!doctype html>
+<html lang="${strings.htmlLang}">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0F1F1D"><meta name="description" content="${description}">
-<title>${page.title} — Temporality</title>
-<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="${description.replace(/"/g, '&quot;')}">
+<title>${title}</title>
+<link rel="icon" href="${rootPrefix}/assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
+<link rel="stylesheet" href="${rootPrefix}/styles.css"><link rel="stylesheet" href="${lang.cssHref}">
 </head>
-<body class="docs-page">
+<body class="docs-page">`
+
+  const pageHtml = (page) => {
+    const index = pages.indexOf(page)
+    const prev = pages[index - 1]
+    const next = pages[index + 1]
+    const pager = `
+  <nav class="docs-pager">
+    ${prev ? `<a class="pager-prev" href="${prev.slug}.html"><small>${strings.pagerPrev}</small><strong>${prev.title}</strong></a>` : '<span></span>'}
+    ${next ? `<a class="pager-next" href="${next.slug}.html"><small>${strings.pagerNext}</small><strong>${next.title}</strong></a>` : ''}
+  </nav>`
+    return `${head(`${page.title} — Temporality`, page.description)}
 ${topbar(page.slug)}
 <main class="docs-layout">
 ${sidebar(page.slug)}
@@ -131,44 +180,30 @@ ${sidebar(page.slug)}
 <div class="docs-eyebrow">${page.section}</div>
 <h1>${page.title}</h1>
 ${page.description ? `<p class="docs-lead">${page.description}</p>` : ''}
-${body}
+${marked.parse(page.body)}
 ${pager}
 </article>
 </main>
 </body>
 </html>
 `
-}
+  }
 
-// ── docs index: landing page for the docs section ───────────────────────────
-
-function docsIndex() {
-  const intro = pages.find((p) => p.slug === 'intro')
-  const cards = sections.map((section) => {
-    const rows = section.pages.map((page) =>
-      `<a class="docs-card${page.slug === 'intro' ? '' : ''}" href="${page.slug}.html"><strong>${page.title}</strong><span>${page.description}</span></a>`).join('\n')
-    return `<div class="docs-card-group"><h3>${section.name}</h3>${rows}</div>`
-  }).join('\n')
-  return `<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Документация Temporality: быстрый старт, работа с агентом, знания и опыт, навыки, каналы, администрирование.">
-<title>Документация — Temporality</title>
-<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
-</head>
-<body class="docs-page">
+  const docsIndex = () => {
+    const cards = sections.map((section) => {
+      const rows = section.pages.map((page) =>
+        `<a class="docs-card" href="${page.slug}.html"><strong>${page.title}</strong><span>${page.description}</span></a>`).join('\n')
+      return `<div class="docs-card-group"><h3>${section.name}</h3>${rows}</div>`
+    }).join('\n')
+    return `${head(strings.docsTitle, strings.docsLead)}
 ${topbar('index')}
 <main class="docs-layout">
 ${sidebar('index')}
 <article class="docs-content">
-<div class="docs-eyebrow">Документация</div>
-<h1>Temporality — руководство пользователя</h1>
-<p class="docs-lead">Temporality наблюдает, как ИИ-агент выполняет задачи: что он знал и делал, откуда взялись знания, что подтвердилось, и возвращает проверенный опыт в следующие запуски. Этот раздел — практическое руководство: от запуска до повседневной работы.</p>
-${intro ? `<p><a class="btn btn-primary" href="intro.html"><span>Начать знакомство</span><span>→</span></a></p>` : ''}
+<div class="docs-eyebrow">${strings.docsLabel}</div>
+<h1>${strings.docsTitle.replace('Temporality — ', '')}</h1>
+<p class="docs-lead">${strings.docsLead}</p>
+<p><a class="btn btn-primary" href="intro.html"><span>${strings.startLabel}</span><span>→</span></a></p>
 <div class="docs-cards">
 ${cards}
 </div>
@@ -177,14 +212,22 @@ ${cards}
 </body>
 </html>
 `
+  }
+
+  mkdirSync(outDir, { recursive: true })
+  for (const page of pages) {
+    writeFileSync(join(outDir, `${page.slug}.html`), pageHtml(page))
+    console.log(`✓ ${lang.code}/${page.slug}.html`)
+  }
+  writeFileSync(join(outDir, 'index.html'), docsIndex())
+  console.log(`✓ ${lang.code}/index.html (${pages.length} pages)`)
 }
 
-mkdirSync(OUT, { recursive: true })
-writeFileSync(join(OUT, 'docs.css'), readFileSync(join(ROOT, 'docs', 'user', 'docs.css'), 'utf8'))
-for (const page of pages) {
-  writeFileSync(join(OUT, `${page.slug}.html`), pageHtml(page))
-  console.log(`✓ ${page.slug}.html`)
+// The shared stylesheet lives with the primary language tree.
+const cssSource = join(ROOT, 'docs', 'user', 'docs.css')
+for (const lang of LANGS) {
+  buildLang(lang)
 }
-writeFileSync(join(OUT, 'index.html'), docsIndex())
-console.log('✓ index.html')
-console.log(`\n${pages.length} pages → ${OUT}`)
+mkdirSync(join(ROOT, 'pages', 'docs'), { recursive: true })
+writeFileSync(join(ROOT, 'pages', 'docs', 'docs.css'), readFileSync(cssSource))
+console.log('✓ docs.css')

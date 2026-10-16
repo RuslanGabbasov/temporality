@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Start agents on a schedule, by webhook or on system events.">
+<title>Triggers — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../triggers.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/triggers.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row active" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Automation</div>
+<h1>Triggers</h1>
+<p class="docs-lead">Start agents on a schedule, by webhook or on system events.</p>
+<p>Triggers start agents without a human: on a schedule, by an inbound webhook or
+on a system event. The <strong>Triggers</strong> page (<code>/triggers</code>); the mechanics —
+<code>docs/triggers-and-escalations.md</code>.</p>
+<h2 id="cron-trigger"><a class="anchor" href="#cron-trigger" aria-label="Section link">#</a>Cron trigger</h2><p>A crontab-format schedule + project, agent and prompt. The classics: &quot;every
+morning at 09:00 — sweep monitoring and summarize incidents&quot;, &quot;every Friday —
+a sprint report draft&quot;. Every fire is a normal run: with a trace, a budget and
+approvals.</p>
+<h2 id="webhook-trigger"><a class="anchor" href="#webhook-trigger" aria-label="Section link">#</a>Webhook trigger</h2><p>An external system POSTs a task in: GitLab/GitHub CI failed, a request
+arrived, a ticket moved. Each trigger gets its <strong>own token</strong> (the generate
+button in the form) — no shared keys; input over HTTPS only, signatures are
+verified.</p>
+<h2 id="event-triggers"><a class="anchor" href="#event-triggers" aria-label="Section link">#</a>Event triggers</h2><p>A Journal event listener: &quot;when knowledge goes challenged&quot;, &quot;when a run
+fails&quot;, &quot;when an artifact draft is created&quot; — start a triage agent. The event
+constructor: type, source, data filters.</p>
+<h2 id="execution-identity"><a class="anchor" href="#execution-identity" aria-label="Section link">#</a>Execution identity</h2><p>On whose behalf the trigger starts tasks: a trigger is bound to an execution
+identity — run quotas and project visibility are counted against it. Channel
+tasks keep counting against the sender.</p>
+<h2 id="observing"><a class="anchor" href="#observing" aria-label="Section link">#</a>Observing</h2><p>Every fire is visible in &quot;Runs&quot; as a normal run (with a source marker), and
+the firing history is in the trigger&#39;s card. A failed trigger run is still a
+run: open it, understand the cause, restart it.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="inbound.html"><small>← Previous</small><strong>Inbound and channels</strong></a>
+    <a class="pager-next" href="administration.html"><small>Next →</small><strong>Administration</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

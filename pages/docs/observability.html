@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
 </head>
 <body class="docs-page">
-<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="/docs/">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/observability.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/observability.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/observability.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
 <main class="docs-layout">
 <aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
 <a class="docs-nav-row" href="intro.html">Введение</a>
@@ -28,12 +28,13 @@
 <a class="docs-nav-row" href="triggers.html">Триггеры</a>
 <div class="docs-nav-section">Администрирование</div>
 <a class="docs-nav-row" href="administration.html">Администрирование</a>
-<a class="docs-nav-row" href="reference.html">Справочник</a></nav></aside>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
 <article class="docs-content">
 <div class="docs-eyebrow">Знания и опыт</div>
 <h1>Наблюдаемость и хранилище</h1>
 <p class="docs-lead">Дашборд, трассы запусков, таймлайн опыта и файловое хранилище песочниц.</p>
-<h2 id="дашборд"><a class="anchor" href="#дашборд" aria-label="Ссылка на раздел">#</a>Дашборд</h2><p><strong>Дашборд</strong> (<code>/dashboard</code>) — сводка здоровья системы по выбранному окну
+<h2 id="дашборд"><a class="anchor" href="#дашборд" aria-label="Section link">#</a>Дашборд</h2><p><strong>Дашборд</strong> (<code>/dashboard</code>) — сводка здоровья системы по выбранному окну
 времени (час/сутки/неделя):</p>
 <ul>
 <li>health-полоса: запуски, в полёте, отказы модели, ожидающие подтверждения;</li>
@@ -43,17 +44,17 @@
 <li><strong>саги и задачи</strong>: бюджет, токены, время, человеческие подтверждения;</li>
 <li>виджет <strong>песочниц</strong>: живые контейнеры, интегральная нагрузка (CPU/память/сеть), ховер — кто и какой ран, клик — переход в трассу.</li>
 </ul>
-<h2 id="трасса-запуска"><a class="anchor" href="#трасса-запуска" aria-label="Ссылка на раздел">#</a>Трасса запуска</h2><p>Каждый ран раскрывается в ленту событий: вызовы модели (токены, латентность,
+<h2 id="трасса-запуска"><a class="anchor" href="#трасса-запуска" aria-label="Section link">#</a>Трасса запуска</h2><p>Каждый ран раскрывается в ленту событий: вызовы модели (токены, латентность,
 стрим), вызовы инструментов с аргументами и результатами, решения по
 подтверждениям, события знаний. Неопределённые операции помечаются и
 решаются через reconcile. Долгий вызов модели виден с признаками жизни
 (токен/сек, ожидание первого токена), его можно «подтолкнуть» или отменить.</p>
-<h2 id="таймлайн-опыта"><a class="anchor" href="#таймлайн-опыта" aria-label="Ссылка на раздел">#</a>Таймлайн опыта</h2><p><strong>Таймлайн</strong> (<code>/experience</code>) — временная развёртка знаний и ранов: какие
+<h2 id="таймлайн-опыта"><a class="anchor" href="#таймлайн-опыта" aria-label="Section link">#</a>Таймлайн опыта</h2><p><strong>Таймлайн</strong> (<code>/experience</code>) — временная развёртка знаний и ранов: какие
 знания появились/изменились, в каких ранах применялись, где сработали и где
 обманули. Группировка по скоупам, ретроспективный аудит: «что система знала
 на момент того решения». Инструмент расследования инцидентов и повторных
 ошибок.</p>
-<h2 id="хранилище-песочниц"><a class="anchor" href="#хранилище-песочниц" aria-label="Ссылка на раздел">#</a>Хранилище песочниц</h2><p>Страница <strong>Хранилище</strong> (<code>/storage</code>) — браузер персистентной файловой системы
+<h2 id="хранилище-песочниц"><a class="anchor" href="#хранилище-песочниц" aria-label="Section link">#</a>Хранилище песочниц</h2><p>Страница <strong>Хранилище</strong> (<code>/storage</code>) — браузер персистентной файловой системы
 проекта: воркспейс (<code>/workspace</code> проекта — то, что видят агенты и что
 переживает раны) и кэш тулчейнов. Возможности:</p>
 <ul>
@@ -63,7 +64,7 @@
 </ul>
 <p>Квоты проектов и занятость диска — на дашборде, виджет «Хранилище».
 Полная модель хранения — <code>docs/sandbox-storage.md</code>.</p>
-<h2 id="экспорт-и-аудит"><a class="anchor" href="#экспорт-и-аудит" aria-label="Ссылка на раздел">#</a>Экспорт и аудит</h2><p>Все события в Journal — append-only с идемпотентными id; по ним
+<h2 id="экспорт-и-аудит"><a class="anchor" href="#экспорт-и-аудит" aria-label="Section link">#</a>Экспорт и аудит</h2><p>Все события в Journal — append-only с идемпотентными id; по ним
 восстанавливается полная картина любого рана. Аудит доступа (кто читал
 секреты, кто менял ресурсы) — в соответствующих разделах администрирования.</p>
 

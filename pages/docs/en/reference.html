@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Environment variables, ports, UI pages and links to the in-depth documents.">
+<title>Reference — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../reference.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/reference.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<a class="docs-nav-row active" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Administration</div>
+<h1>Reference</h1>
+<p class="docs-lead">Environment variables, ports, UI pages and links to the in-depth documents.</p>
+<h2 id="environment-variables-essentials"><a class="anchor" href="#environment-variables-essentials" aria-label="Section link">#</a>Environment variables (essentials)</h2><table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>TEMPORALITY_MODEL_BASE_URL</code> / <code>_ID</code> / <code>_API_KEY</code></td>
+<td>—</td>
+<td>The default provider (required)</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS</code></td>
+<td><code>16384</code></td>
+<td>Generation limit; leave head room for reasoning models</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_ACTIVITY_TIMEOUT</code></td>
+<td><code>20m</code></td>
+<td>Ceiling for one model activity</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT</code></td>
+<td><code>2m</code></td>
+<td>First-token wait (adaptive, +60s per MB of prompt)</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_TOOL_ACTIVITY_TIMEOUT</code></td>
+<td><code>16m</code></td>
+<td>Ceiling for a <code>run_tool</code> activity</td>
+</tr>
+<tr>
+<td><code>KERNEL_TOOL_MAX_SECONDS</code></td>
+<td><code>900</code></td>
+<td>Ceiling for a single sandbox command</td>
+</tr>
+<tr>
+<td><code>KERNEL_SANDBOX_ROOT</code></td>
+<td><code>/tmp</code></td>
+<td>Root of the persistent workspaces</td>
+</tr>
+<tr>
+<td><code>KERNEL_DOCKER_BINARY</code></td>
+<td><code>docker</code></td>
+<td>Path to the docker CLI</td>
+</tr>
+<tr>
+<td><code>KERNEL_SECRET_MASTER_KEY</code></td>
+<td>—</td>
+<td>Secret encryption key (<code>openssl rand -hex 32</code>)</td>
+</tr>
+<tr>
+<td><code>KERNEL_AUTH_TOKENS</code> / <code>JOURNAL_AUTH_TOKENS</code></td>
+<td>empty</td>
+<td>Bearer tokens (<code>token:user:role:projects</code>; empty = auth off)</td>
+</tr>
+<tr>
+<td><code>KERNEL_RUN_QUOTAS</code></td>
+<td>empty</td>
+<td>Daily run quotas: <code>project:limit</code>, <code>*</code> — default</td>
+</tr>
+<tr>
+<td><code>KERNEL_MODEL_PRICES</code></td>
+<td>empty</td>
+<td>Token prices: <code>model:prompt:completion</code></td>
+</tr>
+<tr>
+<td><code>KERNEL_INTAKE_MAX_PER_HOUR</code></td>
+<td><code>10</code></td>
+<td>Per-sender limit for channel messages</td>
+</tr>
+<tr>
+<td><code>KERNEL_INTAKE_RETENTION_DAYS</code></td>
+<td><code>30</code></td>
+<td>How long inbound bodies are kept</td>
+</tr>
+<tr>
+<td><code>KERNEL_SEARXNG_URL</code></td>
+<td><code>http://searxng:8080</code></td>
+<td>Meta-search for <code>web_search</code> (empty = off)</td>
+</tr>
+<tr>
+<td><code>KERNEL_BROWSER_CDP_URL</code></td>
+<td>lightpanda</td>
+<td>Headless browser for <code>browser</code> (empty = off)</td>
+</tr>
+<tr>
+<td><code>KERNEL_CHANNEL__MATRIX__*</code>, <code>__TELEGRAM__*</code>, <code>__MATTERMOST__*</code>, <code>__SLACKBOT__*</code></td>
+<td>—</td>
+<td>Channel transports</td>
+</tr>
+</tbody></table>
+<p>The full list with semantics is in the root <code>README.md</code> and <code>docs/runbook.md</code>.</p>
+<h2 id="ports"><a class="anchor" href="#ports" aria-label="Section link">#</a>Ports</h2><table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Port</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UI (debugger)</td>
+<td><code>3000</code></td>
+</tr>
+<tr>
+<td>Journal API</td>
+<td><code>8080</code></td>
+</tr>
+<tr>
+<td>Agent Kernel API</td>
+<td><code>8090</code></td>
+</tr>
+<tr>
+<td>Temporal UI</td>
+<td><code>8233</code></td>
+</tr>
+<tr>
+<td>SearXNG</td>
+<td><code>127.0.0.1:8889</code></td>
+</tr>
+</tbody></table>
+<h2 id="ui-pages"><a class="anchor" href="#ui-pages" aria-label="Section link">#</a>UI pages</h2><table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Section</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>/dashboard</code></td>
+<td>Dashboard: health, models, projects, quality, sagas, sandboxes</td>
+</tr>
+<tr>
+<td><code>/workspace</code></td>
+<td>Agent chat</td>
+</tr>
+<tr>
+<td><code>/agents</code></td>
+<td>Runs and traces</td>
+</tr>
+<tr>
+<td><code>/knowledge</code></td>
+<td>Knowledge: the map, search, dossiers, contradictions</td>
+</tr>
+<tr>
+<td><code>/experience</code></td>
+<td>The experience timeline</td>
+</tr>
+<tr>
+<td><code>/storage</code></td>
+<td>Sandbox storage (files)</td>
+</tr>
+<tr>
+<td><code>/agent-config</code> · <code>/teams</code></td>
+<td>Agents and teams</td>
+</tr>
+<tr>
+<td><code>/skills</code> · <code>/artifacts</code></td>
+<td>Skills and artifacts</td>
+</tr>
+<tr>
+<td><code>/inbound</code> · <code>/triggers</code> · <code>/channels</code></td>
+<td>Inbound, triggers, channels</td>
+</tr>
+<tr>
+<td><code>/providers</code> · <code>/secrets</code> · <code>/sandbox</code></td>
+<td>Providers, secrets, sandboxes</td>
+</tr>
+<tr>
+<td><code>/users</code> · <code>/org</code></td>
+<td>Users and the org structure</td>
+</tr>
+</tbody></table>
+<h2 id="glossary"><a class="anchor" href="#glossary" aria-label="Section link">#</a>Glossary</h2><ul>
+<li><strong>Run</strong> — one agent execution over a task (a durable workflow).</li>
+<li><strong>Addendum</strong> — a user message appended to a running run.</li>
+<li><strong>Amendment</strong> — a channel message continuing an existing task.</li>
+<li><strong>Saga</strong> — tracked long-running work across several runs and agents.</li>
+<li><strong>Knowledge</strong> — a statement with provenance, a status and a history.</li>
+<li><strong>Hint</strong> — a compact excerpt of experience fed to the agent.</li>
+<li><strong>Skill</strong> — a versioned procedure with a contract and evaluations.</li>
+<li><strong>Artifact</strong> — a reference document in the registry, loaded on demand.</li>
+<li><strong>Reconcile</strong> — manually resolving an uncertain operation (happened / did not happen).</li>
+<li><strong>Judge</strong> — the LLM model evaluating answers in the quality loop.</li>
+</ul>
+<h2 id="engineering-documents"><a class="anchor" href="#engineering-documents" aria-label="Section link">#</a>Engineering documents</h2><p>The architecture and internals are described in the repository&#39;s <code>docs/</code>:
+<code>architecture.md</code> (overview), <code>event-model.md</code>, <code>knowledge-model.md</code>,
+<code>agent-quality-loop.md</code>, <code>living-skills.md</code>, <code>agent-delegation.md</code>,
+<code>inbound-messages.md</code>, <code>sandbox-security-matrix.md</code>,
+<code>failure-reconciliation.md</code>, <code>runbook.md</code> (operations) and others.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="administration.html"><small>← Previous</small><strong>Administration</strong></a>
+    
+  </nav>
+</article>
+</main>
+</body>
+</html>

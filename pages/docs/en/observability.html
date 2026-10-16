@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="The dashboard, run traces, the experience timeline and the sandbox file storage.">
+<title>Observability and storage — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../observability.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/observability.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row active" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Knowledge and experience</div>
+<h1>Observability and storage</h1>
+<p class="docs-lead">The dashboard, run traces, the experience timeline and the sandbox file storage.</p>
+<h2 id="the-dashboard"><a class="anchor" href="#the-dashboard" aria-label="Section link">#</a>The dashboard</h2><p>The <strong>Dashboard</strong> (<code>/dashboard</code>) is a health summary over a chosen time window
+(hour/day/week):</p>
+<ul>
+<li>the health strip: runs, in flight, model failures, pending approvals;</li>
+<li>providers and models: calls, p50/p95, retries, tokens, cost;</li>
+<li>projects grouped by org unit;</li>
+<li>the <strong>quality loop</strong>: gates, blocks, the judge and its agreement;</li>
+<li><strong>sagas and tasks</strong>: budget, tokens, time, human approvals;</li>
+<li>the <strong>sandboxes</strong> widget: live containers, integral load (CPU/memory/network), hover — who and which run, click — jump to the trace.</li>
+</ul>
+<h2 id="the-run-trace"><a class="anchor" href="#the-run-trace" aria-label="Section link">#</a>The run trace</h2><p>Every run expands into an event feed: model calls (tokens, latency, stream),
+tool calls with arguments and results, approval decisions, knowledge events.
+Uncertain operations are flagged and resolved through reconcile. A long model
+call shows signs of life (tokens/sec, first-token wait) and can be nudged or
+cancelled.</p>
+<h2 id="the-experience-timeline"><a class="anchor" href="#the-experience-timeline" aria-label="Section link">#</a>The experience timeline</h2><p>The <strong>Timeline</strong> (<code>/experience</code>) is a temporal unfolding of knowledge and
+runs: which knowledge appeared/changed, in which runs it was applied, where it
+worked and where it misled. Grouped by scopes, with retrospective audit: &quot;what
+did the system know at the moment of that decision&quot;. An incident
+retrospective and repeat-mistake tool.</p>
+<h2 id="sandbox-storage"><a class="anchor" href="#sandbox-storage" aria-label="Section link">#</a>Sandbox storage</h2><p>The <strong>Storage</strong> page (<code>/storage</code>) is a browser for the project&#39;s persistent
+filesystem: the workspace (<code>/workspace</code> of the project — what agents see and
+what survives runs) and the toolchain cache. Capabilities:</p>
+<ul>
+<li>a lazy tree with sizes and modification dates;</li>
+<li>preview: markdown with formatting, code with syntax highlighting, inline images;</li>
+<li>download, upload, delete of files and folders (deleting root areas is left to the background sweeper).</li>
+</ul>
+<p>Project quotas and disk usage live on the dashboard, the &quot;Storage&quot; widget.
+The full storage model — <code>docs/sandbox-storage.md</code>.</p>
+<h2 id="export-and-audit"><a class="anchor" href="#export-and-audit" aria-label="Section link">#</a>Export and audit</h2><p>All Journal events are append-only with idempotent ids; they reconstruct the
+full picture of any run. Access audit (who read secrets, who changed
+resources) lives in the corresponding administration sections.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="knowledge.html"><small>← Previous</small><strong>Knowledge</strong></a>
+    <a class="pager-next" href="skills.html"><small>Next →</small><strong>Skills</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

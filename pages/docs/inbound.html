@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
 </head>
 <body class="docs-page">
-<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="/docs/">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/inbound.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/inbound.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/inbound.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
 <main class="docs-layout">
 <aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
 <a class="docs-nav-row" href="intro.html">Введение</a>
@@ -28,7 +28,8 @@
 <a class="docs-nav-row" href="triggers.html">Триггеры</a>
 <div class="docs-nav-section">Администрирование</div>
 <a class="docs-nav-row" href="administration.html">Администрирование</a>
-<a class="docs-nav-row" href="reference.html">Справочник</a></nav></aside>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
 <article class="docs-content">
 <div class="docs-eyebrow">Автоматизация</div>
 <h1>Входящие и каналы</h1>
@@ -37,7 +38,7 @@
 чат — intake-конвейер разбирает сообщение и заводит работу нужному агенту.
 Страницы: <strong>Входящие</strong> (<code>/inbound</code>) — конвейер и статусы; <strong>Каналы</strong>
 (Настройки → Каналы доставки) — транспорты.</p>
-<h2 id="каналы-доставки"><a class="anchor" href="#каналы-доставки" aria-label="Ссылка на раздел">#</a>Каналы доставки</h2><p>Вопросы агента (<code>ask_human</code>) доставляются получателю в его предпочтительный
+<h2 id="каналы-доставки"><a class="anchor" href="#каналы-доставки" aria-label="Section link">#</a>Каналы доставки</h2><p>Вопросы агента (<code>ask_human</code>) доставляются получателю в его предпочтительный
 канал; настраиваются в профиле пользователя. Встроенный канал — почта
 вопросов в приложении (Runs → вопросы). Внешние транспорты:</p>
 <table>
@@ -78,7 +79,7 @@
 секреты обратно не возвращаются — только признак «установлен». Доставка не
 блокирует ран: сбой транспорта фиксируется событием, вопрос остаётся в UI.
 Ответ всегда даётся в приложении.</p>
-<h2 id="intake-конвейер"><a class="anchor" href="#intake-конвейер" aria-label="Ссылка на раздел">#</a>Intake-конвейер</h2><p>Сообщение пользователя по собственной инициативе проходит классификацию:</p>
+<h2 id="intake-конвейер"><a class="anchor" href="#intake-конвейер" aria-label="Section link">#</a>Intake-конвейер</h2><p>Сообщение пользователя по собственной инициативе проходит классификацию:</p>
 <table>
 <thead>
 <tr>
@@ -116,7 +117,7 @@
 (<code>KERNEL_INTAKE_MAX_PER_HOUR</code>) и сроком хранения тел
 (<code>KERNEL_INTAKE_RETENTION_DAYS</code>). Аудит цепочки «сообщение → intake-ран →
 ран задачи» — без тел сообщений.</p>
-<h2 id="что-видит-пользователь"><a class="anchor" href="#что-видит-пользователь" aria-label="Ссылка на раздел">#</a>Что видит пользователь</h2><p>В разделе <strong>Входящие</strong> — все сообщения со статусами (получено →
+<h2 id="что-видит-пользователь"><a class="anchor" href="#что-видит-пользователь" aria-label="Section link">#</a>Что видит пользователь</h2><p>В разделе <strong>Входящие</strong> — все сообщения со статусами (получено →
 классифицировано → уточняется → направлено) и результатом. В канале бот
 отвечает: куда легла задача, какое уточнение нужно, статус по запросу.</p>
 

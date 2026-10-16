@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Users and RBAC, the org structure, providers, secrets, sandboxes and quality settings.">
+<title>Administration — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../administration.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/administration.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row active" href="administration.html">Administration</a>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Administration</div>
+<h1>Administration</h1>
+<p class="docs-lead">Users and RBAC, the org structure, providers, secrets, sandboxes and quality settings.</p>
+<h2 id="users-and-rbac"><a class="anchor" href="#users-and-rbac" aria-label="Section link">#</a>Users and RBAC</h2><p>The <strong>Users</strong> page (<code>/users</code>): creation, roles, bearer tokens, notification
+channels. Roles are ordered: <code>reader &lt; writer &lt; operator &lt; admin</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Can</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>reader</td>
+<td>Read: dashboard, traces, knowledge, timeline</td>
+</tr>
+<tr>
+<td>writer</td>
+<td>Start tasks, create project resources</td>
+</tr>
+<tr>
+<td>operator</td>
+<td>Approvals, reconciling uncertain operations, knowledge invalidation</td>
+</tr>
+<tr>
+<td>admin</td>
+<td>Users, providers, channels, org structure, everything else</td>
+</tr>
+</tbody></table>
+<p>A project scope limits visibility: a user sees only the allowed projects (or
+all with <code>*</code>). The token is entered via Login in the header and kept in the
+browser.</p>
+<h2 id="org-structure"><a class="anchor" href="#org-structure" aria-label="Section link">#</a>Org structure</h2><p>The <strong>Organization</strong> page (<code>/org</code>, admin): the department tree, users on
+nodes, node <strong>policies</strong> (model/MCP/token/network/sandbox restrictions; a ban
+on channel tasks for a subtree) and inheritance modes. A project binds to a
+node and inherits its policies and visibility: team access is configured by
+the structure, not by lists.</p>
+<h2 id="providers-and-models"><a class="anchor" href="#providers-and-models" aria-label="Section link">#</a>Providers and models</h2><p>The <strong>Providers</strong> page (<code>/providers</code>): OpenAI-compatible endpoints (base URL,
+key, model list — fetched automatically). A run&#39;s model is routed to the
+provider that declares it; provider keys are stored as secret references.
+Token prices for cost reporting — <code>KERNEL_MODEL_PRICES</code>.</p>
+<h2 id="secrets"><a class="anchor" href="#secrets" aria-label="Section link">#</a>Secrets</h2><p>The <strong>Secrets</strong> page (<code>/secrets</code>): values are encrypted with AES-256-GCM using
+<code>KERNEL_SECRET_MASTER_KEY</code> and decrypted only inside the kernel. A secret is
+granted to an agent on the agent&#39;s card: the value arrives in <code>run_command</code> as
+a <code>SECRET_&lt;NAME&gt;</code> variable — the model sees the name, never the value. Grants
+are journaled (<code>secret.issued</code> / <code>secret.denied</code>), and the journal strips
+known token patterns from events as a second line of defense.</p>
+<h2 id="sandboxes"><a class="anchor" href="#sandboxes" aria-label="Section link">#</a>Sandboxes</h2><p>Sandbox profiles (Settings → Sandboxes): the image (built-in Go/Node/Python
+recipes or your own digest-pinned one), memory, CPU, tmpfs limits, cache
+variables. A profile is assigned to an agent; the agent&#39;s commands run in a
+container with no privileges, no network (unless enabled) and a read-only
+root. The kernel needs Docker daemon access only for this isolation — the
+agents themselves never see Docker.</p>
+<p>The persistent project filesystem is covered in <a href="observability.html#sandbox-storage">Observability</a>.</p>
+<h2 id="the-quality-loop"><a class="anchor" href="#the-quality-loop" aria-label="Section link">#</a>The quality loop</h2><p>In Agents → &quot;Quality settings&quot;:</p>
+<ul>
+<li><strong>the judge model</strong> — an installation-wide LLM judge for skill and agent evaluations (with agreement calibration below the threshold the judge degrades and the gate goes red);</li>
+<li><strong>the schedule</strong> — how often evaluation suites re-run.</li>
+</ul>
+<p>Applying agent and skill proposals is gated on a green evaluation run — see
+<a href="agents.html#agent-evolution">Agents</a>.</p>
+<h2 id="external-authentication"><a class="anchor" href="#external-authentication" aria-label="Section link">#</a>External authentication</h2><p>OIDC federation is supported (Keycloak, authentik and others): <code>docs/auth-federation.md</code>.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="triggers.html"><small>← Previous</small><strong>Triggers</strong></a>
+    <a class="pager-next" href="reference.html"><small>Next →</small><strong>Reference</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

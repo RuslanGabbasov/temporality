@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="What Temporality is, who it is for and what it is made of — a ten-minute overview of the system.">
+<title>Introduction — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../intro.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/intro.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row active" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Getting started</div>
+<h1>Introduction</h1>
+<p class="docs-lead">What Temporality is, who it is for and what it is made of — a ten-minute overview of the system.</p>
+<p><strong>Temporality</strong> is an open observability and experience-compounding system for AI agents.</p>
+<p>A conventional chat bot forgets everything between sessions, and its &quot;memory&quot; is a junk drawer of notes stuffed into context. Temporality works differently: the agent runs tasks in a durable runtime while the system records <strong>what it knew and did</strong> — where the knowledge came from, how it was applied, what held up and what turned out to be wrong, and how that experience changed over time. On the next task, verified experience comes back to the agent in a compact form that does not flood the context.</p>
+<pre><code class="language-text">Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge / Hints
+     ▲                      │                         │
+     └──────── hints ◀──────┴──── Experience Timeline ┘
+</code></pre>
+<h2 id="key-ideas"><a class="anchor" href="#key-ideas" aria-label="Section link">#</a>Key ideas</h2><ul>
+<li><strong>A run</strong> is a unit of agent work: a durable workflow on Temporal that survives restarts, deploys and laptop sleep. Every step is journaled.</li>
+<li><strong>Knowledge with provenance.</strong> Statements extracted from trajectories carry an author, a source, a lifecycle status (proposed → confirmed → challenged…) and a bitemporal history. Knowledge can be challenged, corrected, invalidated — and you can see who and when.</li>
+<li><strong>Hints</strong> — compact excerpts of relevant experience the system feeds the agent before a task. The agent can dig into full primary sources through research tools.</li>
+<li><strong>Sagas</strong> — explicitly tracked long-running work that outlives a single run: chat continuations, delegated agents and amendments join the saga automatically.</li>
+<li><strong>Artifacts</strong> — a registry of reference documents (policies, runbooks, checklists) agents load on demand instead of carrying them in the prompt.</li>
+<li><strong>Living skills</strong> — reusable procedures with a contract (what it does, when it applies, what to verify), versions, quality evaluations and human-governed evolution.</li>
+<li><strong>The quality loop</strong> — agent changes are applied only on top of a fresh green evaluation run: golden cases from production, human verdicts, a calibrated LLM judge.</li>
+<li><strong>Secure by default</strong> — commands run in a Docker sandbox with no network and no privileges, consequential actions require human approval, secrets are never visible to the agent, with RBAC and an org structure on top.</li>
+</ul>
+<h2 id="what-the-system-is-made-of"><a class="anchor" href="#what-the-system-is-made-of" aria-label="Section link">#</a>What the system is made of</h2><table>
+<thead>
+<tr>
+<th>Component</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Agent Kernel</strong></td>
+<td>The agent&#39;s durable runtime: model gateway, tools, sandbox, delegation, approvals, scheduling</td>
+</tr>
+<tr>
+<td><strong>Journal</strong></td>
+<td>Append-only event log; knowledge projection, hint selection, bitemporal queries</td>
+</tr>
+<tr>
+<td><strong>Workspace (chat)</strong></td>
+<td>Dialogue with the agent: streaming, attachments, approvals, amendments to running tasks</td>
+</tr>
+<tr>
+<td><strong>Debugger UI</strong></td>
+<td>Dashboard, run traces, the knowledge map, experience timeline, skills, artifacts, triggers, administration</td>
+</tr>
+<tr>
+<td><strong>Control Plane</strong></td>
+<td>Users, RBAC, org structure, tokens</td>
+</tr>
+</tbody></table>
+<p>All of it starts with a single <code>docker compose up</code> — PostgreSQL, Temporal, Journal, Kernel, the UI, plus optional SearXNG and a headless browser for web research.</p>
+<h2 id="who-it-is-for"><a class="anchor" href="#who-it-is-for" aria-label="Section link">#</a>Who it is for</h2><ul>
+<li><strong>Teams operating agents</strong> — see what the agent did and why, answer &quot;who changed what&quot;, find and fix recurring mistakes.</li>
+<li><strong>Teams growing agents</strong> — turn experience into verified knowledge and skills, change agent definitions safely through the quality loop.</li>
+<li><strong>Organizations</strong> — constrain agents with policies, keep data on your own infrastructure, manage access through the org structure.</li>
+</ul>
+<h2 id="where-to-look-next"><a class="anchor" href="#where-to-look-next" aria-label="Section link">#</a>Where to look next</h2><ul>
+<li><a href="quickstart.html">Quick start</a> — bring the system up and run the first task.</li>
+<li><a href="chat.html">Chat and runs</a> — conversations, approvals, amendments.</li>
+<li><a href="knowledge.html">Knowledge</a> — how the agent gains and loses experience.</li>
+<li>The &quot;In depth&quot; note in each article links to the matching engineering document in the repository&#39;s <code>docs/</code>.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <span></span>
+    <a class="pager-next" href="quickstart.html"><small>Next →</small><strong>Quick start</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

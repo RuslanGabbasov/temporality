@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Living skills — reusable agent procedures with a contract, versions and quality evaluations.">
+<title>Skills — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../skills.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/skills.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row active" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Knowledge and experience</div>
+<h1>Skills</h1>
+<p class="docs-lead">Living skills — reusable agent procedures with a contract, versions and quality evaluations.</p>
+<p>A living skill is a reusable agent procedure: what it does, when it applies,
+which tools it needs, how to verify the result. Unlike a prompt, a skill is
+versioned, has a contract and a suite of quality evaluations. The <strong>Skills</strong>
+page (<code>/skills</code>); details — <code>docs/living-skills.md</code>.</p>
+<h2 id="the-skill-contract"><a class="anchor" href="#the-skill-contract" aria-label="Section link">#</a>The skill contract</h2><p>The manifest (<code>SKILL.md</code> + metadata) describes:</p>
+<ul>
+<li><strong>the procedure</strong> — the steps the agent performs;</li>
+<li><strong>preconditions</strong> — when to apply it, what must be on input;</li>
+<li><strong>required tools and rights</strong> — a skill cannot get more than the agent has;</li>
+<li><strong>postconditions and checks</strong> — how to verify completion;</li>
+<li><strong>artifacts</strong> — reference documents (policies, instructions) the agent loads
+on demand via <code>artifact_read</code>, not from the prompt.</li>
+</ul>
+<h2 id="how-one-is-created"><a class="anchor" href="#how-one-is-created" aria-label="Section link">#</a>How one is created</h2><ol>
+<li><strong>From a description</strong> — describe the repeating procedure in plain words;
+the builder drafts the skill referencing only tools that actually exist.</li>
+<li><strong>Import</strong> — a folder or archive in the <a href="https://agentskills.io" target="_blank" rel="noreferrer">agentskills.io&nbsp;<span class="ext">↗</span></a> format.</li>
+<li><strong>Manually</strong> — the manifest editor.</li>
+</ol>
+<p>A new skill is a draft (0.x). It reaches production after human review.</p>
+<h2 id="quality-evaluations"><a class="anchor" href="#quality-evaluations" aria-label="Section link">#</a>Quality evaluations</h2><p>Golden cases attach to a skill: input → expected answer. An evaluation run
+(manual or scheduled) checks answers with patterns and an LLM judge with
+agreement calibration. The result is visible in the skill&#39;s card and on the
+quality dashboard.</p>
+<h2 id="evolution"><a class="anchor" href="#evolution" aria-label="Section link">#</a>Evolution</h2><p>The skill lives: the agent can propose a change (the <code>skill_propose</code> tool)
+based on repeated friction. Versions accumulate; applying a new version goes
+through the same quality loop. The tools <code>skill_history</code>, <code>skill_diff</code>,
+<code>skill_executions</code> give the full picture: who changed what and when, where the
+skill ran and what it &quot;remembered&quot; from executions (<code>skill_memory</code>).</p>
+<h2 id="how-the-agent-works-with-skills"><a class="anchor" href="#how-the-agent-works-with-skills" aria-label="Section link">#</a>How the agent works with skills</h2><p>In a run the agent has <code>skill_search</code> (find a match), <code>skill_inspect</code> (read
+the contract), <code>skill_validate</code> (check applicability). The skill is loaded
+into context on demand, not as a permanent prompt.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="observability.html"><small>← Previous</small><strong>Observability and storage</strong></a>
+    <a class="pager-next" href="artifacts.html"><small>Next →</small><strong>Artifacts</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

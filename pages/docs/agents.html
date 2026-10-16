@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
 </head>
 <body class="docs-page">
-<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="/docs/">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/agents.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/agents.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/agents.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
 <main class="docs-layout">
 <aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
 <a class="docs-nav-row" href="intro.html">Введение</a>
@@ -28,7 +28,8 @@
 <a class="docs-nav-row" href="triggers.html">Триггеры</a>
 <div class="docs-nav-section">Администрирование</div>
 <a class="docs-nav-row" href="administration.html">Администрирование</a>
-<a class="docs-nav-row" href="reference.html">Справочник</a></nav></aside>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
 <article class="docs-content">
 <div class="docs-eyebrow">Работа с агентом</div>
 <h1>Агенты и команды</h1>
@@ -36,7 +37,7 @@
 <p>Агент — это именованная конфигурация: модель, системный промпт-контракт
 (цель, ограничения, проверки завершения), инструменты, песочница, доступы.
 Управление — страница <strong>Агенты</strong> (<code>/agent-config</code>).</p>
-<h2 id="создание-агента"><a class="anchor" href="#создание-агента" aria-label="Ссылка на раздел">#</a>Создание агента</h2><p>Три пути:</p>
+<h2 id="создание-агента"><a class="anchor" href="#создание-агента" aria-label="Section link">#</a>Создание агента</h2><p>Три пути:</p>
 <ol>
 <li><strong>Из шаблона</strong> — готовые роли: Lead, Developer, Reviewer, QA, Analyst и др.</li>
 <li><strong>Из описания</strong> — напишите словами, что должен делать агент; сборщик
@@ -44,7 +45,7 @@
 подтверждения).</li>
 <li><strong>Вручную</strong> — полная форма: модель, инструменты, MCP-серверы, песочница.</li>
 </ol>
-<h2 id="что-настраивается"><a class="anchor" href="#что-настраивается" aria-label="Ссылка на раздел">#</a>Что настраивается</h2><table>
+<h2 id="что-настраивается"><a class="anchor" href="#что-настраивается" aria-label="Section link">#</a>Что настраивается</h2><table>
 <thead>
 <tr>
 <th>Настройка</th>
@@ -65,7 +66,7 @@
 </tr>
 <tr>
 <td>Песочница</td>
-<td>Профиль исполнения: образ, память, CPU, лимиты tmpfs, кэш-переменные (см. <a href="administration.html#sandbox-profili">Песочницы</a>)</td>
+<td>Профиль исполнения: образ, память, CPU, лимиты tmpfs, кэш-переменные (см. <a href="administration.html#песочницы">Песочницы</a>)</td>
 </tr>
 <tr>
 <td>Каналы уведомлений</td>
@@ -74,20 +75,20 @@
 </tbody></table>
 <p>Ограничения (<code>constraints</code>) и проверки завершения (<code>completion</code>) — часть
 контракта: они попадают в промпт и в проверку результата.</p>
-<h2 id="эволюция-агента"><a class="anchor" href="#эволюция-агента" aria-label="Ссылка на раздел">#</a>Эволюция агента</h2><p>Агент может сам предложить изменение своей конфигурации (тул
+<h2 id="эволюция-агента"><a class="anchor" href="#эволюция-агента" aria-label="Section link">#</a>Эволюция агента</h2><p>Агент может сам предложить изменение своей конфигурации (тул
 <code>agent_propose</code>): проблему с доказательствами (id ранов), изменение и
 ожидаемый эффект. Предложение попадает в карточку агента как черновик.</p>
 <p>Применение — только через <strong>контур качества</strong>: предложение применяется лишь
 поверх свежего зелёного оценочного прогона (golden-кейсы из реальных
 запусков, опционально LLM-судья с калибровкой). Человек решает; предложение
 не может расширить полномочия агента. Подробности — <code>docs/agent-quality-loop.md</code>.</p>
-<h2 id="команды-teams"><a class="anchor" href="#команды-teams" aria-label="Ссылка на раздел">#</a>Команды (teams)</h2><p>Команда — слот-манифест: роли (Developer, Reviewer, QA…), их биндинги на
+<h2 id="команды-teams"><a class="anchor" href="#команды-teams" aria-label="Section link">#</a>Команды (teams)</h2><p>Команда — слот-манифест: роли (Developer, Reviewer, QA…), их биндинги на
 конкретных агентов, протокол исполнения (pipeline/DAG), лимиты реворков и
 бюджет. Собирается из описания («Команда с контролем качества: Developer
 вносит изменение, Security и QA проверяют, Reviewer принимает») и версионируется.</p>
 <p>Запуск команды из чата или триггера стартует DAG-исполнение с ревью-гейтами —
 см. <code>docs/agent-teams.md</code>.</p>
-<h2 id="пропозалы-и-версии"><a class="anchor" href="#пропозалы-и-версии" aria-label="Ссылка на раздел">#</a>Пропозалы и версии</h2><p>Каждое применённое изменение создаёт новую версию определения агента;
+<h2 id="пропозалы-и-версии"><a class="anchor" href="#пропозалы-и-версии" aria-label="Section link">#</a>Пропозалы и версии</h2><p>Каждое применённое изменение создаёт новую версию определения агента;
 история версий и кто/почему менял — в карточке агента. Откат — выбор
 предыдущей версии.</p>
 

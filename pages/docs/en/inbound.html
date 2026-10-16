@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Connect Matrix, Telegram, Slack, Mattermost and webhooks — the agent receives tasks from your team's chat.">
+<title>Inbound and channels — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../inbound.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/inbound.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row active" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Automation</div>
+<h1>Inbound and channels</h1>
+<p class="docs-lead">Connect Matrix, Telegram, Slack, Mattermost and webhooks — the agent receives tasks from your team's chat.</p>
+<p>Temporality accepts tasks from messengers: you write in the team chat — the
+intake pipeline parses the message and starts the right agent on it. Pages:
+<strong>Inbound</strong> (<code>/inbound</code>) — the pipeline and statuses; <strong>Channels</strong>
+(Settings → Delivery channels) — transports.</p>
+<h2 id="delivery-channels"><a class="anchor" href="#delivery-channels" aria-label="Section link">#</a>Delivery channels</h2><p>Agent questions (<code>ask_human</code>) are delivered to the recipient in their
+preferred channel; configured in the user profile. The built-in channel is
+the in-app question mailbox (Runs → questions). External transports:</p>
+<table>
+<thead>
+<tr>
+<th>Channel</th>
+<th>Direction</th>
+<th>Setup</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Matrix</td>
+<td>question delivery</td>
+<td>homeserver + bot token; the address is a room ID</td>
+</tr>
+<tr>
+<td>Telegram</td>
+<td>question delivery</td>
+<td>bot token; the address is a chat ID</td>
+</tr>
+<tr>
+<td>Mattermost</td>
+<td>delivery + inbound (WebSocket)</td>
+<td>base URL + bot token</td>
+</tr>
+<tr>
+<td>Slack</td>
+<td>delivery + inbound (Events API)</td>
+<td>bot token + signing secret</td>
+</tr>
+<tr>
+<td>Webhook</td>
+<td>inbound</td>
+<td>signing secret</td>
+</tr>
+</tbody></table>
+<p>Channels are edited in the UI without a restart (DB values override env);
+secrets are never returned — only an &quot;is set&quot; marker. Delivery never blocks a
+run: a transport failure is recorded as an event and the question stays in the
+UI. Answers always happen in the app.</p>
+<h2 id="the-intake-pipeline"><a class="anchor" href="#the-intake-pipeline" aria-label="Section link">#</a>The intake pipeline</h2><p>A user-initiated message goes through classification:</p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>task</code></td>
+<td>A new task: resolve the project (by mention, <code>search_projects</code>, a clarifying question) → <code>start_task</code></td>
+</tr>
+<tr>
+<td><code>amendment</code></td>
+<td>An amendment: <code>run_status</code> lists your earlier runs, intake clarifies which one it belongs to and starts a continuation</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>A progress question — answered from data without starting work</td>
+</tr>
+<tr>
+<td><code>cancel</code></td>
+<td>Cancels an earlier run started by the same sender</td>
+</tr>
+<tr>
+<td><code>chatter</code></td>
+<td>No work — a polite reply</td>
+</tr>
+<tr>
+<td><code>reply</code></td>
+<td>An answer to the agent&#39;s question — delivered to the waiting run</td>
+</tr>
+</tbody></table>
+<p>The pipeline is enabled <strong>per project</strong> with the &quot;Accept tasks from channels&quot;
+toggle and constrained by org policies, a per-sender limit
+(<code>KERNEL_INTAKE_MAX_PER_HOUR</code>) and body retention (<code>KERNEL_INTAKE_RETENTION_DAYS</code>).
+The audit trail &quot;message → intake run → task run&quot; is kept without message bodies.</p>
+<h2 id="what-the-user-sees"><a class="anchor" href="#what-the-user-sees" aria-label="Section link">#</a>What the user sees</h2><p>The <strong>Inbound</strong> section lists messages with statuses (received → classified →
+clarifying → routed) and outcomes. In the channel the bot replies: where the
+task landed, what clarification it needs, status on request.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="artifacts.html"><small>← Previous</small><strong>Artifacts</strong></a>
+    <a class="pager-next" href="triggers.html"><small>Next →</small><strong>Triggers</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

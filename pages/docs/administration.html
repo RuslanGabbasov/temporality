@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
 </head>
 <body class="docs-page">
-<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="/docs/">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/administration.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/administration.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/administration.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
 <main class="docs-layout">
 <aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
 <a class="docs-nav-row" href="intro.html">Введение</a>
@@ -28,12 +28,13 @@
 <a class="docs-nav-row" href="triggers.html">Триггеры</a>
 <div class="docs-nav-section">Администрирование</div>
 <a class="docs-nav-row active" href="administration.html">Администрирование</a>
-<a class="docs-nav-row" href="reference.html">Справочник</a></nav></aside>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
 <article class="docs-content">
 <div class="docs-eyebrow">Администрирование</div>
 <h1>Администрирование</h1>
 <p class="docs-lead">Пользователи и RBAC, оргструктура, провайдеры, секреты, песочницы и настройки качества.</p>
-<h2 id="пользователи-и-rbac"><a class="anchor" href="#пользователи-и-rbac" aria-label="Ссылка на раздел">#</a>Пользователи и RBAC</h2><p>Страница <strong>Пользователи</strong> (<code>/users</code>): создание, роли, bearer-токены, каналы
+<h2 id="пользователи-и-rbac"><a class="anchor" href="#пользователи-и-rbac" aria-label="Section link">#</a>Пользователи и RBAC</h2><p>Страница <strong>Пользователи</strong> (<code>/users</code>): создание, роли, bearer-токены, каналы
 уведомлений. Роли упорядочены: <code>reader &lt; writer &lt; operator &lt; admin</code>.</p>
 <table>
 <thead>
@@ -62,36 +63,36 @@
 <p>Область проектов ограничивает видимость: пользователь видит только
 разрешённые проекты (или все при <code>*</code>). Токен вводится через Login в шапке и
 хранится в браузере.</p>
-<h2 id="оргструктура"><a class="anchor" href="#оргструктура" aria-label="Ссылка на раздел">#</a>Оргструктура</h2><p>Страница <strong>Организация</strong> (<code>/org</code>, admin): дерево подразделений, пользователи
+<h2 id="оргструктура"><a class="anchor" href="#оргструктура" aria-label="Section link">#</a>Оргструктура</h2><p>Страница <strong>Организация</strong> (<code>/org</code>, admin): дерево подразделений, пользователи
 на узлах, <strong>политики</strong> на узлах (ограничения моделей, MCP, токенов, сети,
 песочниц; запрет канальных задач для поддерева) и режимы наследования.
 Проект привязывается к узлу — наследует его политики и область видимости:
 доступы команд настраиваются структурой, а не списками.</p>
-<h2 id="провайдеры-и-модели"><a class="anchor" href="#провайдеры-и-модели" aria-label="Ссылка на раздел">#</a>Провайдеры и модели</h2><p>Страница <strong>Провайдеры</strong> (<code>/providers</code>): OpenAI-совместимые эндпоинты
+<h2 id="провайдеры-и-модели"><a class="anchor" href="#провайдеры-и-модели" aria-label="Section link">#</a>Провайдеры и модели</h2><p>Страница <strong>Провайдеры</strong> (<code>/providers</code>): OpenAI-совместимые эндпоинты
 (base URL, ключ, список моделей — автополучение). Модель запуска
 маршрутизируется в провайдер, который её декларирует; ключи провайдеров
 хранятся ссылками на секреты. Цены для отчётности по стоимости —
 <code>KERNEL_MODEL_PRICES</code>.</p>
-<h2 id="секреты"><a class="anchor" href="#секреты" aria-label="Ссылка на раздел">#</a>Секреты</h2><p>Страница <strong>Секреты</strong> (<code>/secrets</code>): значения шифруются AES-256-GCM ключом
+<h2 id="секреты"><a class="anchor" href="#секреты" aria-label="Section link">#</a>Секреты</h2><p>Страница <strong>Секреты</strong> (<code>/secrets</code>): значения шифруются AES-256-GCM ключом
 <code>KERNEL_SECRET_MASTER_KEY</code> и расшифровываются только внутри ядра. Агенту
 секрет выдаётся грантом на карточке агента: значение приходит в
 <code>run_command</code> как переменная <code>SECRET_&lt;ИМЯ&gt;</code> — модель видит имя, но не
 значение. Чтения журналируются (<code>secret.issued</code> / <code>secret.denied</code>), журнал
 дополнительно вымарывает известные паттерны токенов из событий.</p>
-<h2 id="песочницы"><a class="anchor" href="#песочницы" aria-label="Ссылка на раздел">#</a>Песочницы</h2><p>Профили песочниц (Настройки → Песочницы): образ (встроенные Go/Node/Python
+<h2 id="песочницы"><a class="anchor" href="#песочницы" aria-label="Section link">#</a>Песочницы</h2><p>Профили песочниц (Настройки → Песочницы): образ (встроенные Go/Node/Python
 рецепты или свой digest-pinned), память, CPU, лимиты tmpfs, кэш-переменные.
 Профиль назначается агенту; команды агента выполняются в контейнере без
 привилегий, без сети (если не включена), с read-only корнем. Доступ к Docker
 daemon ядру нужен только для этой изоляции — сами агенты Docker не видят.</p>
 <p>Персистентная файловая система проектов — в разделе <a href="observability.html#хранилище-песочниц">Наблюдаемость</a>.</p>
-<h2 id="контур-качества"><a class="anchor" href="#контур-качества" aria-label="Ссылка на раздел">#</a>Контур качества</h2><p>В Агентах → «Настройки качества»:</p>
+<h2 id="контур-качества"><a class="anchor" href="#контур-качества" aria-label="Section link">#</a>Контур качества</h2><p>В Агентах → «Настройки качества»:</p>
 <ul>
 <li><strong>модель-судья</strong> — installation-wide LLM-судья для оценок навыков и агентов (с калибровкой согласия ниже порога судья деградирует и гейт красный);</li>
 <li><strong>расписание</strong> — как часто пере-прогонять оценочные сьюты.</li>
 </ul>
 <p>Применение предложений агентов и версий навыков гейтится зелёным оценочным
 прогоном — см. <a href="agents.html#эволюция-агента">Агенты</a>.</p>
-<h2 id="аутентификация-внешняя"><a class="anchor" href="#аутентификация-внешняя" aria-label="Ссылка на раздел">#</a>Аутентификация внешняя</h2><p>Поддерживается OIDC-федерация (Keycloak, authentik и другие): <code>docs/auth-federation.md</code>.</p>
+<h2 id="аутентификация-внешняя"><a class="anchor" href="#аутентификация-внешняя" aria-label="Section link">#</a>Аутентификация внешняя</h2><p>Поддерживается OIDC-федерация (Keycloak, authentik и другие): <code>docs/auth-federation.md</code>.</p>
 
 
   <nav class="docs-pager">

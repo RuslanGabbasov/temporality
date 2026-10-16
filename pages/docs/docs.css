@@ -35,6 +35,10 @@
 .docs-content strong { color: var(--tm-cream); font-weight: 600; }
 .docs-content a { color: var(--tm-amber); }
 .docs-content a:hover { text-decoration: underline; }
+/* Buttons keep the landing's ink-on-amber: the generic link color above
+   would paint amber text onto the amber fill. */
+.docs-content a.btn { color: #1b211f; text-decoration: none; }
+.docs-content a.btn:hover { text-decoration: none; }
 .docs-content .ext { font-size: 11px; opacity: .7; }
 .docs-content ul, .docs-content ol { color: var(--tm-text-2); line-height: 1.8; padding-left: 22px; margin: 10px 0; }
 .docs-content li { margin: 4px 0; }

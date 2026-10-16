@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Creating and configuring agents — models, tools, sandboxes, evolution; agent teams as pipelines.">
+<title>Agents and teams — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../agents.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/agents.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row active" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Working with the agent</div>
+<h1>Agents and teams</h1>
+<p class="docs-lead">Creating and configuring agents — models, tools, sandboxes, evolution; agent teams as pipelines.</p>
+<p>An agent is a named configuration: a model, a system prompt contract (purpose,
+constraints, completion checks), tools, a sandbox, access grants. Managed on
+the <strong>Agents</strong> page (<code>/agent-config</code>).</p>
+<h2 id="creating-an-agent"><a class="anchor" href="#creating-an-agent" aria-label="Section link">#</a>Creating an agent</h2><p>Three ways:</p>
+<ol>
+<li><strong>From a template</strong> — ready-made roles: Lead, Developer, Reviewer, QA, Analyst and more.</li>
+<li><strong>From a description</strong> — describe in plain words what the agent should do;
+the builder drafts the name, purpose, constraints and completion checks
+(as a draft until you confirm).</li>
+<li><strong>Manually</strong> — the full form: model, tools, MCP servers, sandbox.</li>
+</ol>
+<h2 id="what-is-configurable"><a class="anchor" href="#what-is-configurable" aria-label="Section link">#</a>What is configurable</h2><table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>What it gives</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Model</td>
+<td>The model name; if the default provider does not have it, the call is routed to a provider that declares it</td>
+</tr>
+<tr>
+<td>Tools</td>
+<td>Allowlist/denylist over the shared catalog (files, commands, web, knowledge, skills, artifacts, MCP)</td>
+</tr>
+<tr>
+<td>Capabilities</td>
+<td>Declarative permissions (&quot;read files&quot;, &quot;network&quot;, &quot;modify files&quot;) — delegating agents and policies rely on them</td>
+</tr>
+<tr>
+<td>Sandbox</td>
+<td>The execution profile: image, memory, CPU, tmpfs limits, cache variables (see <a href="administration.html#sandbox-profiles">Administration</a>)</td>
+</tr>
+<tr>
+<td>Notification channels</td>
+<td>Where <code>ask_human</code> questions are delivered</td>
+</tr>
+</tbody></table>
+<p>Constraints and completion checks are part of the contract: they enter the
+prompt and the result verification.</p>
+<h2 id="agent-evolution"><a class="anchor" href="#agent-evolution" aria-label="Section link">#</a>Agent evolution</h2><p>The agent can propose changes to its own configuration (the <code>agent_propose</code>
+tool): the problem with evidence (run ids), the change and the expected
+effect. The proposal lands in the agent&#39;s card as a draft.</p>
+<p>Applying it goes through the <strong>quality loop</strong>: a proposal is applied only on
+top of a fresh green evaluation run (golden cases from real runs, optionally a
+calibrated LLM judge). A human decides; a proposal can never widen the agent&#39;s
+powers. Details — <code>docs/agent-quality-loop.md</code>.</p>
+<h2 id="teams"><a class="anchor" href="#teams" aria-label="Section link">#</a>Teams</h2><p>A team is a slot manifest: roles (Developer, Reviewer, QA…), their bindings to
+concrete agents, the execution protocol (pipeline/DAG), rework limits and a
+budget. Built from a description (&quot;A team with quality control: Developer
+implements, Security and QA review, Reviewer accepts&quot;) and versioned.</p>
+<p>Launching a team from chat or a trigger starts a DAG execution with review
+gates — see <code>docs/agent-teams.md</code>.</p>
+<h2 id="proposals-and-versions"><a class="anchor" href="#proposals-and-versions" aria-label="Section link">#</a>Proposals and versions</h2><p>Every applied change creates a new version of the agent definition; the
+version history with who and why is in the agent&#39;s card. Rollback is picking
+a previous version.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="chat.html"><small>← Previous</small><strong>Chat and runs</strong></a>
+    <a class="pager-next" href="knowledge.html"><small>Next →</small><strong>Knowledge</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

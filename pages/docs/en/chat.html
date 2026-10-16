@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Dialogue with the agent — from a message to a result: streaming, amendments, approvals, delegation.">
+<title>Chat and runs — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../chat.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/chat.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row active" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Working with the agent</div>
+<h1>Chat and runs</h1>
+<p class="docs-lead">Dialogue with the agent — from a message to a result: streaming, amendments, approvals, delegation.</p>
+<p>The agent&#39;s working surface is <strong>Workspace</strong> (<code>/workspace</code>). Every message
+starts a durable run: it lives in Temporal, is journaled step by step, and
+survives restarts.</p>
+<h2 id="how-a-task-is-submitted"><a class="anchor" href="#how-a-task-is-submitted" aria-label="Section link">#</a>How a task is submitted</h2><ul>
+<li>A regular message starts a <strong>new run</strong> in the conversation&#39;s context.</li>
+<li>If a run is already executing, your message becomes an <strong>addendum to the
+running task</strong> — the input placeholder says so (&quot;Will be added to the
+running run…&quot;). The run is not duplicated.</li>
+<li>Files can be attached to a message — they land in the project&#39;s
+<code>/workspace/inbox</code> and are available to the agent.</li>
+</ul>
+<p>The reply streams in chunks; reasoning-model &quot;thinking&quot; expands in a separate
+block. Markdown (including tables and code) is rendered.</p>
+<h2 id="approvals-human-in-the-loop"><a class="anchor" href="#approvals-human-in-the-loop" aria-label="Section link">#</a>Approvals (human in the loop)</h2><p>For consequential actions (writing files, commands with outward effects —
+depending on the agent&#39;s policy) the agent must get your decision. The
+question appears as a card in the chat and under <strong>Runs → questions</strong>. If the
+agent has notification channels configured, the question goes there too (see
+<a href="inbound.html">Inbound and channels</a>).</p>
+<p>Answers always happen in the app; external channels are delivery only.
+You can cancel a pending approval — the run continues another way or ends
+gracefully.</p>
+<h2 id="delegation-and-plans"><a class="anchor" href="#delegation-and-plans" aria-label="Section link">#</a>Delegation and plans</h2><p>For larger tasks the agent can decompose the work:</p>
+<ul>
+<li><strong><code>delegate</code></strong> — a subtask to another agent with its own prompt and turn budget.</li>
+<li><strong><code>plan</code></strong> — a task DAG with dependencies: independent branches run in
+parallel, dependent results are appended to followers&#39; prompts, review tasks
+act as acceptance gates (a rework verdict sends work back with feedback).</li>
+</ul>
+<p>Plan progress is visible right in the chat: tasks, statuses, dependencies.
+The full mechanism — <code>docs/agent-delegation.md</code>.</p>
+<h2 id="amendments"><a class="anchor" href="#amendments" aria-label="Section link">#</a>Amendments</h2><p>Via channels (and the intake pipeline) you can send an <strong>amendment to a task
+that is running or finished</strong>: the intake run asks a clarifying question when
+unsure which run you mean, then starts a continuation on the same context.
+See <a href="inbound.html">Inbound and channels</a>.</p>
+<h2 id="watching-the-work"><a class="anchor" href="#watching-the-work" aria-label="Section link">#</a>Watching the work</h2><ul>
+<li><strong>Runs</strong> (<code>/agents</code>) — the feed of runs and each run&#39;s trace: model calls,
+tools with arguments and results, tokens and cost, questions and approvals.</li>
+<li><strong>Uncertain operations.</strong> If a tool&#39;s effect could not be confirmed (a
+transport failure, a restart), the operation lands in the reconcile queue —
+you manually confirm &quot;happened / did not happen&quot; and the run continues
+correctly.</li>
+<li><strong>Sagas</strong> (<code>/dashboard → Sagas</code>) — long multi-agent efforts: a summary of
+budget, tokens, time and approvals; you can rename a saga, merge duplicates
+or bind an orphan task to it.</li>
+</ul>
+<h2 id="branching"><a class="anchor" href="#branching" aria-label="Section link">#</a>Branching</h2><p>Any message in a conversation can spawn a branch — continue the conversation
+from that point along a different path; the original branch stays untouched.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="quickstart.html"><small>← Previous</small><strong>Quick start</strong></a>
+    <a class="pager-next" href="agents.html"><small>Next →</small><strong>Agents and teams</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

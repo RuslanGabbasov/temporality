@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
 </head>
 <body class="docs-page">
-<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="/docs/">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/artifacts.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/artifacts.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/artifacts.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
 <main class="docs-layout">
 <aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
 <a class="docs-nav-row" href="intro.html">Введение</a>
@@ -28,7 +28,8 @@
 <a class="docs-nav-row" href="triggers.html">Триггеры</a>
 <div class="docs-nav-section">Администрирование</div>
 <a class="docs-nav-row" href="administration.html">Администрирование</a>
-<a class="docs-nav-row" href="reference.html">Справочник</a></nav></aside>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
 <article class="docs-content">
 <div class="docs-eyebrow">Знания и опыт</div>
 <h1>Артефакты</h1>
@@ -39,7 +40,7 @@
 <code>artifact_read</code> с аудитом чтения). Так большой регламент не съедает контекст,
 но всегда доступен, когда нужен.</p>
 <p>Страница <strong>Артефакты</strong> (<code>/artifacts</code>), детали — <code>docs/artifact-registry.md</code>.</p>
-<h2 id="типы-артефактов"><a class="anchor" href="#типы-артефактов" aria-label="Ссылка на раздел">#</a>Типы артефактов</h2><table>
+<h2 id="типы-артефактов"><a class="anchor" href="#типы-артефактов" aria-label="Section link">#</a>Типы артефактов</h2><table>
 <thead>
 <tr>
 <th>Тип</th>
@@ -55,7 +56,7 @@
 <td>Проксируется и кэшируется ядром (корпоративная вики, Confluence)</td>
 </tr>
 </tbody></table>
-<h2 id="согласование"><a class="anchor" href="#согласование" aria-label="Ссылка на раздел">#</a>Согласование</h2><p>Артефакт может существовать в двух статусах: <strong>черновик</strong> (агент создал —
+<h2 id="согласование"><a class="anchor" href="#согласование" aria-label="Section link">#</a>Согласование</h2><p>Артефакт может существовать в двух статусах: <strong>черновик</strong> (агент создал —
 например, требования из анализа) и <strong>утверждён</strong> (человек отредактировал и
 подтвердил). В навыки и промпты ссылаются только утверждённые: так
 «смотри регламент X» означает проверенную людьми версию.</p>
@@ -63,12 +64,12 @@
 согласование (<code>ask_human</code> или через артефакт-уведомление) → человек правит
 сам или с агентом → утверждает → документ становится доступным всем
 агентам-исполнителям как ссылка из навыка.</p>
-<h2 id="связи"><a class="anchor" href="#связи" aria-label="Ссылка на раздел">#</a>Связи</h2><ul>
+<h2 id="связи"><a class="anchor" href="#связи" aria-label="Section link">#</a>Связи</h2><ul>
 <li><strong>Сага</strong> — артефакт может принадлежать длительной работе (требования к фиче в рамках саги).</li>
 <li><strong>Навык</strong> — манифест навыка ссылается на артефакты как на справочные материалы.</li>
 <li><strong>Проект / отдел / организация</strong> — область видимости: общекорпоративный регламент виден везде, проектный — только в проекте.</li>
 </ul>
-<h2 id="инструментальная-поддержка"><a class="anchor" href="#инструментальная-поддержка" aria-label="Ссылка на раздел">#</a>Инструментальная поддержка</h2><p>Агенты ищут артефакты по смыслу (<code>artifact_search</code>) и читают чанками с
+<h2 id="инструментальная-поддержка"><a class="anchor" href="#инструментальная-поддержка" aria-label="Section link">#</a>Инструментальная поддержка</h2><p>Агенты ищут артефакты по смыслу (<code>artifact_search</code>) и читают чанками с
 аудитом (<code>artifact_read</code>): каждое чтение журналируется — кто, что и в каком
 ране читал.</p>
 
