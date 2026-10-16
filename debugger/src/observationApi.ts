@@ -83,6 +83,9 @@ export interface KnowledgeListFilters {
   scope?: string
   topic?: string
   entity?: string
+  /** Sticky area filter from the explorer's map: matches the value against
+   *  topic OR entity (the map merges both dimensions by name). */
+  area?: string
   /** Birth project of shared knowledge items (server calls it "origin" —
    * "project" is already the visibility parameter). */
   origin?: string
@@ -123,6 +126,7 @@ export const observationApi = {
       project, as_of: asOf, known_at: knownAt,
       q: filters?.q, state: filters?.state, scope: filters?.scope,
       topic: filters?.topic, entity: filters?.entity, origin: filters?.origin, kind: filters?.kind,
+      area: filters?.area,
       knowledge_id: filters?.knowledge_id,
       limit: filters?.limit, cursor: filters?.cursor,
     }),

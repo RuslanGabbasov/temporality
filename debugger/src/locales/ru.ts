@@ -1676,6 +1676,7 @@ export const ru: Record<string, string> = {
     'knowledge.knowledge_lifecycle': 'Жизненный цикл знаний',
     'knowledge.scopes': 'Области',
     'knowledge.by_scope': 'Знания по областям',
+    'knowledge.cluster_open_hint': 'Открыть знания с фильтром по этой области',
     'knowledge.showing': 'Показано',
     'knowledge.all': 'Все',
     'knowledge.enter_project': 'Введите ID проекта.',

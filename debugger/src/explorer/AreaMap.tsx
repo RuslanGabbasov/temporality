@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useT } from '../i18n'
 import type { ExploreArea } from '../observationApi'
 import { stateLabel } from './shared'
@@ -148,31 +148,19 @@ export default function AreaMap({ areas, selectedKey, onSelect }: {
 }) {
   const t = useT()
   const [hover, setHover] = useState<string | null>(null)
-  // The canvas follows the wrapper's actual size (the card stretches to the
-  // page bottom), so the treemap re-tiles on resize and text stays 1:1.
-  const wrapRef = useRef<HTMLDivElement | null>(null)
-  const [dims, setDims] = useState({ width: 320, height: 320 })
-  useEffect(() => {
-    const el = wrapRef.current
-    if (!el || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver((entries) => {
-      const rect = entries[0].contentRect
-      if (rect.width > 0 && rect.height > 0) {
-        setDims({ width: Math.max(220, Math.floor(rect.width)), height: Math.max(280, Math.floor(rect.height)) })
-      }
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
-  const positioned = useMemo(() => layoutAreas(areas, dims.width, dims.height), [areas, dims.width, dims.height])
+  // Fixed canvas: stretching the SVG with the card only made the same tiles
+  // taller; more clusters come from the orient query limit instead.
+  const width = 320
+  const height = 440
+  const positioned = useMemo(() => layoutAreas(areas, width, height), [areas])
 
   if (positioned.length === 0) {
     return <div style={{ padding: '1rem 0', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>{t('explorer.map_empty') ?? 'No areas recorded yet.'}</div>
   }
 
   return (
-    <div ref={wrapRef} style={{ height: '100%', minHeight: 280, display: 'flex', flexDirection: 'column' }}>
-      <svg role="group" aria-label={t('explorer.map_title') ?? 'Knowledge area map'} width="100%" height="100%" viewBox={`0 0 ${dims.width} ${dims.height}`} preserveAspectRatio="none" style={{ display: 'block', flex: 1, minHeight: 0 }}>
+    <div>
+      <svg role="group" aria-label={t('explorer.map_title') ?? 'Knowledge area map'} width="100%" viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
         {positioned.map(({ area, x, y, w, h }) => {
           const key = areaKey(area)
           const active = key === selectedKey

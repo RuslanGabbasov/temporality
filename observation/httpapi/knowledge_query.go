@@ -41,6 +41,10 @@ type knowledgeListQuery struct {
 	// the projected attribute. Single value per dimension, like state/scope.
 	Topic  string
 	Entity string
+	// Area is the sticky map filter: the name matches topic OR entity (the
+	// area map merges both dimensions by name, so a map click cannot know
+	// which one it was). Empty = off.
+	Area string
 	// Origin filters by the birth project of the item (Knowledge.Project) —
 	// named "origin" because the "project" parameter already scopes
 	// authorization and visibility.
@@ -64,6 +68,7 @@ func parseKnowledgeListQuery(values url.Values) (knowledgeListQuery, error) {
 		Scope:  strings.TrimSpace(values.Get("scope")),
 		Topic:  strings.TrimSpace(values.Get("topic")),
 		Entity: strings.TrimSpace(values.Get("entity")),
+		Area:   strings.TrimSpace(values.Get("area")),
 		Origin: strings.TrimSpace(values.Get("origin")),
 		Kind:   strings.TrimSpace(values.Get("kind")),
 	}
@@ -213,6 +218,12 @@ func knowledgeMatches(item observation.Knowledge, query knowledgeListQuery) bool
 		return false
 	}
 	if query.Entity != "" && !knowledgeValueMatches(item.Entities, query.Entity) {
+		return false
+	}
+	if query.Area != "" && !knowledgeValueMatches(item.Topics, query.Area) && !knowledgeValueMatches(item.Entities, query.Area) {
+		return false
+	}
+	if query.Area != "" && !knowledgeValueMatches(item.Topics, query.Area) && !knowledgeValueMatches(item.Entities, query.Area) {
 		return false
 	}
 	if query.Origin != "" && !strings.EqualFold(item.Project, query.Origin) {
@@ -381,7 +392,7 @@ func knowledgeAfterCursor(item observation.Knowledge, cursor knowledgePageCursor
 
 // filterKnowledgeList applies the query's state/scope/text/facet filters.
 func filterKnowledgeList(knowledge []observation.Knowledge, query knowledgeListQuery) []observation.Knowledge {
-	if query.State == "" && query.Scope == "" && len(query.Terms) == 0 && query.Topic == "" && query.Entity == "" && query.Origin == "" && query.Kind == "" {
+	if query.State == "" && query.Scope == "" && len(query.Terms) == 0 && query.Topic == "" && query.Entity == "" && query.Area == "" && query.Origin == "" && query.Kind == "" {
 		return knowledge
 	}
 	filtered := make([]observation.Knowledge, 0, len(knowledge))

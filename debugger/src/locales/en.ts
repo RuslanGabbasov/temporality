@@ -1676,6 +1676,7 @@ export const en: Record<string, string> = {
     'knowledge.knowledge_lifecycle': 'Knowledge Lifecycle',
     'knowledge.scopes': 'Scopes',
     'knowledge.by_scope': 'Knowledge by scope',
+    'knowledge.cluster_open_hint': 'Open knowledge filtered by this area',
     'knowledge.showing': 'Showing',
     'knowledge.all': 'All',
     'knowledge.enter_project': 'Enter a project ID.',

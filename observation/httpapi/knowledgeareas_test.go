@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"net/url"
 	"testing"
 
 	"github.com/temporality-project/temporality/observation"
@@ -40,4 +41,31 @@ func TestApplyAreaAliasesNoopWithoutMap(t *testing.T) {
 	if got := applyAreaAliases(items, nil); got[0].Topics[0] != "CI" {
 		t.Errorf("empty alias map must keep raw values: %v", got[0].Topics)
 	}
+}
+
+func TestKnowledgeAreaFilterMatchesTopicOrEntity(t *testing.T) {
+	query, err := parseKnowledgeListQuery(url.Values{"area": {"playwright"}})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	items := []observation.Knowledge{
+		{ID: "1", Topics: []string{"Playwright"}, Entities: nil},
+		{ID: "2", Topics: nil, Entities: []string{"playwright"}},
+		{ID: "3", Topics: []string{"ci"}, Entities: []string{"docker"}},
+	}
+	got := filterKnowledgeList(items, query)
+	if len(got) != 2 || got[0].ID != "1" || got[1].ID != "2" {
+		t.Fatalf("area filter = %v, want items 1 and 2 (case-insensitive, topic or entity)", ids(got))
+	}
+	if all := filterKnowledgeList(items, knowledgeListQuery{}); len(all) != 3 {
+		t.Fatalf("empty query must not filter: %v", ids(all))
+	}
+}
+
+func ids(items []observation.Knowledge) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.ID)
+	}
+	return out
 }

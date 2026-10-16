@@ -80,12 +80,15 @@ export default function Observability({ project }: { project: string }) {
   const compareUTC = utcValue(useDebounced(compareAsOf, 500))
 
   const clusters = useMemo(() => {
-    const groups = new Map<string, KnowledgeItem[]>()
+    const groups = new Map<string, { dimension: 'topic' | 'entity'; items: KnowledgeItem[] }>()
     for (const item of knowledge) {
-      const name = item.topics?.[0] || item.entities?.[0] || (t('knowledge.no_topic') ?? 'No topic')
-      groups.set(name, [...(groups.get(name) ?? []), item])
+      const fromTopic = (item.topics?.length ?? 0) > 0
+      const name = (fromTopic ? item.topics?.[0] : item.entities?.[0]) || item.topics?.[0] || item.entities?.[0] || (t('knowledge.no_topic') ?? 'No topic')
+      const group = groups.get(name)
+      if (group) group.items.push(item)
+      else groups.set(name, { dimension: fromTopic ? 'topic' : 'entity', items: [item] })
     }
-    return [...groups.entries()].sort((a, b) => b[1].length - a[1].length)
+    return [...groups.entries()].sort((a, b) => b[1].items.length - a[1].items.length)
   }, [knowledge, t])
 
   // Health summary
@@ -287,12 +290,21 @@ export default function Observability({ project }: { project: string }) {
             <Tile style={{ marginBottom: '1rem' }}>
               <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{t('knowledge.by_scope') ?? 'Knowledge by scope'}</Heading>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                {clusters.map(([name, items]) => {
-                  const alive = items.filter((k) => k.state !== 'invalidated' && k.state !== 'superseded' && !k.at_risk).length
+                {clusters.map(([name, group]) => {
+                  const alive = group.items.filter((k) => k.state !== 'invalidated' && k.state !== 'superseded' && !k.at_risk).length
+                  const params = new URLSearchParams({ project })
+                  params.set(group.dimension, name)
                   return (
-                    <div key={name} style={{ padding: '0.5rem 0.75rem', background: 'var(--tm-ink)', borderRadius: '6px', border: '1px solid var(--tm-border)', minWidth: '120px' }}>
+                    <div
+                      key={name}
+                      role="button" tabIndex={0}
+                      onClick={() => { window.location.href = `${window.location.origin}/knowledge?${params.toString()}` }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location.href = `${window.location.origin}/knowledge?${params.toString()}` } }}
+                      title={t('knowledge.cluster_open_hint') ?? `Open knowledge filtered by this ${group.dimension}`}
+                      style={{ padding: '0.5rem 0.75rem', background: 'var(--tm-ink)', borderRadius: '6px', border: '1px solid var(--tm-border)', minWidth: '120px', cursor: 'pointer' }}
+                    >
                       <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.25rem' }}>{name}</div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{items.length} items · {alive} alive</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{group.items.length} items · {alive} alive</div>
                     </div>
                   )
                 })}

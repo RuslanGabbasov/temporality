@@ -45,18 +45,6 @@ const STATE_TAG: Record<string, 'blue' | 'green' | 'warm-gray' | 'gray' | 'red'>
 const EMPTY_FILTERS = { state: '', scope: '', topic: '', entity: '', origin: '', kind: '' }
 type Filters = typeof EMPTY_FILTERS
 
-/** One navigation record of the research session (ТЗ §3.3): what moved, and
- *  the full explorer snapshot to restore on click. */
-interface NavRecord {
-  id: number
-  label: string
-  question: string
-  filters: Filters
-  areaKey: string
-  view: string
-  dossierID: string
-}
-
 type View = 'search' | 'conflicts' | 'agent'
 
 export default function KnowledgeExplorer({ project }: { project: string }) {
@@ -95,8 +83,6 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   const [areaSort, setAreaSort] = useState<'size' | 'name'>('size')
   const [normalizeBusy, setNormalizeBusy] = useState(false)
 
-  const [navStack, setNavStack] = useState<NavRecord[]>([])
-  const navSeq = useRef(0)
   const listSeq = useRef(0)
   const exploreSeq = useRef(0)
 
@@ -106,24 +92,6 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   const [currentSessionID, setCurrentSessionID] = useState(0)
 
   const debouncedQuestion = useDebounced(question)
-
-  const pushNav = useCallback((label: string, next: { question?: string; filters?: Filters; areaKey?: string; view?: string; dossierID?: string }) => {
-    setNavStack((stack) => {
-      const last = stack[stack.length - 1]
-      if (last && last.label === label && last.question === (next.question ?? last.question)) return stack
-      navSeq.current += 1
-      const record: NavRecord = {
-        id: navSeq.current,
-        label,
-        question: next.question ?? last?.question ?? '',
-        filters: next.filters ?? last?.filters ?? { ...EMPTY_FILTERS },
-        areaKey: next.areaKey ?? last?.areaKey ?? '',
-        view: next.view ?? last?.view ?? 'search',
-        dossierID: next.dossierID ?? (next.view && next.view !== 'search' ? '' : last?.dossierID ?? ''),
-      }
-      return [...stack.slice(-19), record]
-    })
-  }, [])
 
   /** URL carries the full research context so a link reproduces the view and
    *  the browser back/forward buttons move through it (ТЗ §3.3). */
@@ -172,7 +140,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     ;(async () => {
       try {
         const [orientRes, searchRes] = await Promise.all([
-          observationApi.explore({ project: project.trim(), operation: 'orient', question: debouncedQuestion.trim() || undefined, max_items: 24 }),
+          observationApi.explore({ project: project.trim(), operation: 'orient', question: debouncedQuestion.trim() || undefined, max_items: 48 }),
           debouncedQuestion.trim()
             ? observationApi.explore({ project: project.trim(), operation: 'search', question: debouncedQuestion.trim(), max_items: 100 })
             : Promise.resolve(null),
@@ -202,6 +170,9 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
         entity: filters.entity || undefined,
         origin: filters.origin || undefined,
         kind: filters.kind || undefined,
+        // Sticky area filter from the map: the key is `kind:name`, the server
+        // matches the name against topic OR entity.
+        area: selectedAreaKey ? selectedAreaKey.replace(/^(topic|entity):/, '') : undefined,
         limit: PAGE_SIZE,
         cursor: append && cursor ? cursor : undefined,
       })
@@ -218,61 +189,40 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     }
   }
 
-  useEffect(() => { void loadList(false) }, [project, debouncedQuestion, filters, revision])
+  useEffect(() => { void loadList(false) }, [project, debouncedQuestion, filters, revision, selectedAreaKey])
 
+  /** The selected area is a sticky list filter (topic OR entity match), not a
+   *  one-shot search: click toggles it, the map keeps the tile highlighted. */
   const selectArea = useCallback((area: ExploreArea) => {
     const key = areaKey(area)
-    setSelectedAreaKey(key)
-    setQuestion(area.name)
-    setSearchInput(area.name)
-    pushNav(area.name, { question: area.name, areaKey: key })
-  }, [pushNav])
+    setSelectedAreaKey((current) => (current === key ? '' : key))
+  }, [])
 
   const setFilter = useCallback((dimension: keyof Filters, value: string) => {
-    setFilters((current) => {
-      const next = { ...current, [dimension]: value || '' }
-      pushNav(`${t(`explorer.facet_${dimension}`) ?? dimension}: ${value}`, { filters: next })
-      return next
-    })
-  }, [pushNav, t])
+    setFilters((current) => ({ ...current, [dimension]: value || '' }))
+  }, [])
 
   const submitQuestion = useCallback(() => {
     setQuestion(searchInput)
     setSelectedAreaKey('')
     setView('search')
-    if (searchInput.trim()) pushNav(searchInput.trim(), { question: searchInput.trim(), areaKey: '', view: 'search' })
-  }, [pushNav, searchInput])
-
-  const restoreNav = useCallback((record: NavRecord) => {
-    setQuestion(record.question)
-    setSearchInput(record.question)
-    setFilters(record.filters)
-    setSelectedAreaKey(record.areaKey)
-    setView(record.view === 'conflicts' || record.view === 'agent' ? record.view : 'search')
-    setDossierID(record.dossierID)
-  }, [])
-
-  const switchView = useCallback((next: View) => {
-    setView(next)
-    setDossierID('')
-    const label = next === 'conflicts' ? (t('explorer.tab_conflicts') ?? 'Contradictions')
-      : next === 'agent' ? (t('explorer.tab_agent') ?? 'Agent research')
-        : (t('explorer.tab_search') ?? 'Search')
-    pushNav(label, { view: next, dossierID: '' })
-  }, [pushNav, t])
-
-  const openDossier = useCallback((id: string) => {
-    setDossierID(id)
-    pushNav(`${t('explorer.dossier') ?? 'Dossier'}: …${id.slice(-8)}`, { dossierID: id })
-  }, [pushNav, t])
+  }, [searchInput])
 
   const closeDossier = useCallback(() => {
     setDossierID('')
   }, [])
 
-  /** Restore a saved session (ТЗ §11): apply the research position and put
-   *  the navigation path back — knowledge itself is re-resolved from the
-   *  CURRENT projection, so the session honors revoked rights and changed
+  const switchView = useCallback((next: View) => {
+    setView(next)
+    setDossierID('')
+  }, [])
+
+  const openDossier = useCallback((id: string) => {
+    setDossierID(id)
+  }, [])
+
+  /** Restore a saved session (ТЗ §11): knowledge itself is re-resolved from
+   *  the CURRENT projection, so the session honors revoked rights and changed
    *  statements (§11.3). */
   const applySession = useCallback((state: SessionSnapshot) => {
     setQuestion(state.question)
@@ -281,8 +231,6 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     setSelectedAreaKey(state.areaKey)
     setView(state.view === 'conflicts' || state.view === 'agent' ? state.view : 'search')
     setDossierID(state.dossierID)
-    setNavStack(state.nav.map((record) => ({ ...record })))
-    navSeq.current = Math.max(navSeq.current, ...state.nav.map((record) => record.id), 0)
   }, [])
 
   /** Live research position for session saves; notes and conclusion are
@@ -294,10 +242,9 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     areaKey: selectedAreaKey,
     view,
     dossierID,
-    nav: navStack,
     notes: '',
     conclusion: '',
-  }), [question, searchInput, filters, selectedAreaKey, view, dossierID, navStack])
+  }), [question, searchInput, filters, selectedAreaKey, view, dossierID])
 
   /** Start a fresh research question from anywhere (dossier «research from
    *  this statement» etc.) — returns to the search view. */
@@ -306,8 +253,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     setSearchInput(nextQuestion)
     setView('search')
     setDossierID('')
-    if (nextQuestion.trim()) pushNav(nextQuestion.trim().slice(0, 28), { question: nextQuestion.trim(), view: 'search', dossierID: '' })
-  }, [pushNav])
+  }, [])
 
   const visibleAreas = useMemo(() => {
     const needle = areaFilter.trim().toLowerCase()
@@ -443,22 +389,6 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
         ))}
       </div>
 
-      {navStack.length > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-          <span title={t('explorer.nav_history_hint') ?? 'Screens you opened during this investigation. Click to return; × clears the history.'} style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{t('explorer.nav_history') ?? 'Path'}:</span>
-          {navStack.slice(-6).map((record) => (
-            <button key={record.id} style={chip(false)} onClick={() => restoreNav(record)} title={record.question}>
-              {record.label.length > 28 ? `${record.label.slice(0, 27)}…` : record.label}
-            </button>
-          ))}
-          <button
-            onClick={() => setNavStack((stack) => stack.slice(-1))}
-            title={t('explorer.nav_history_clear') ?? 'Clear history'}
-            style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.8rem', padding: '0.15rem 0.3rem', lineHeight: 1, borderRadius: '4px', flexShrink: 0 }}
-          >×</button>
-        </div>
-      )}
-
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: '1rem', flex: 1, minHeight: 0 }}>
         {/* Left: the area map — one widget: header with the filter and sort
             that used to live in the list below, then the treemap. The list was
@@ -524,10 +454,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
               <button
                 style={{ ...chip(true), marginLeft: 'auto' }}
                 title={t('explorer.relax_filters') ?? 'Clear filters'}
-                onClick={() => {
-                  setFilters({ ...EMPTY_FILTERS })
-                  pushNav(t('explorer.relax_filters') ?? 'Clear filters', { filters: { ...EMPTY_FILTERS } })
-                }}
+                onClick={() => setFilters({ ...EMPTY_FILTERS })}
               >✕ {activeFilterCount}</button>
             )}
           </div>
@@ -535,6 +462,13 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.5rem' }}>
             <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{t('explorer.results') ?? 'Results'}</div>
             <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{list.length} / {total}</div>
+            {selectedAreaKey && (
+              <button
+                style={{ ...chip(true), marginLeft: 'auto' }}
+                title={t('explorer.area_filter_hint') ?? 'Sticky area filter from the map — click to clear'}
+                onClick={() => setSelectedAreaKey('')}
+              >🗺 {selectedAreaKey.replace(/^(topic|entity):/, '')} ✕</button>
+            )}
           </div>
 
           {!hasAnyData && (
@@ -547,7 +481,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
               <div style={{ marginBottom: '0.35rem' }}>{t('explorer.no_results') ?? 'Nothing matched.'}</div>
               <div style={{ color: 'var(--tm-muted)', marginBottom: '0.6rem', fontSize: '0.75rem' }}>{t('explorer.no_results_hint') ?? ''}</div>
               {activeFilterCount > 0 && (
-                <Button size="sm" kind="ghost" onClick={() => { setFilters({ ...EMPTY_FILTERS }); pushNav(t('explorer.relax_filters') ?? 'Clear filters', { filters: { ...EMPTY_FILTERS } }) }}>
+                <Button size="sm" kind="ghost" onClick={() => setFilters({ ...EMPTY_FILTERS })}>
                   {t('explorer.relax_filters') ?? 'Clear filters'}
                 </Button>
               )}
