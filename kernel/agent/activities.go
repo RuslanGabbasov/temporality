@@ -601,6 +601,42 @@ func (a *Activities) emitModelAttempt(ctx context.Context, request ModelRequest,
 	_ = a.Events.Enqueue(ctx, event)
 }
 
+// sandboxRequest assembles the run_command sandbox request: the read-only
+// and network posture of the run plus the resolved profile overrides
+// (docs/sandbox-profiles.md §3.3). Network posture comes from the worker-wide
+// field PrepareRun keeps in sync with the current run (pre-existing behavior).
+func (a *Activities) sandboxRequest(request ToolRequest, command []string, timeout int, secretEnv []string) (sandbox.Request, error) {
+	net := ""
+	if a.NetworkAccess {
+		net = "bridge"
+	}
+	req := sandbox.Request{
+		Workspace:      request.WorkspacePath,
+		Command:        command,
+		TimeoutSeconds: timeout,
+		ReadOnly:       request.ReadOnly || request.Role == "reviewer" || request.Role == "qa",
+		Network:        net,
+		Env:            secretEnv,
+	}
+	if spec := request.Sandbox; spec != nil {
+		if spec.Image == "" {
+			// Never silently substitute the installation image for an assigned
+			// profile (docs/sandbox-profiles.md §4.3): a QA run needs Node, and a
+			// quiet fallback to the Go image would fail its commands in confusing
+			// ways instead of naming the fix.
+			return sandbox.Request{}, temporal.NewNonRetryableApplicationError(
+				fmt.Sprintf("sandbox profile %q is not built or missing — build it in Settings → Sandbox profiles", spec.Profile), "SandboxProfileNotBuilt", nil)
+		}
+		req.Image = spec.Image
+		req.Memory = spec.Memory
+		req.CPUs = spec.CPUs
+		req.ScratchSize = spec.ScratchSize
+		req.TmpSize = spec.TmpSize
+		req.CacheEnv = spec.CacheEnv
+	}
+	return req, nil
+}
+
 func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResult, error) {
 	if len(request.AllowedTools) > 0 && !allowedForAgent(request.AllowedTools, request.Name) {
 		// Defense in depth: the workflow already filters the tools advertised to
@@ -649,20 +685,20 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 			// Fault injection for live reconciliation drills: run the command for
 			// real (the effect lands), then report a worker-style crash so the
 			// workflow records tool.failed with effect=uncertain.
-			net := ""
-			if a.NetworkAccess {
-				net = "bridge"
+			sbReq, err := a.sandboxRequest(request, command, timeout, secretEnv)
+			if err != nil {
+				return ToolResult{}, err
 			}
-			if _, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.ReadOnly || request.Role == "reviewer" || request.Role == "qa", Network: net, Env: secretEnv}); err != nil {
+			if _, err := a.Sandbox.Execute(ctx, sbReq); err != nil {
 				return ToolResult{}, err
 			}
 			return ToolResult{}, fmt.Errorf("injected worker crash after effect (operation %s)", request.OperationID)
 		}
-		net := ""
-		if a.NetworkAccess {
-			net = "bridge"
+		sbReq, err := a.sandboxRequest(request, command, timeout, secretEnv)
+		if err != nil {
+			return ToolResult{}, err
 		}
-		result, err := a.Sandbox.Execute(ctx, sandbox.Request{Workspace: request.WorkspacePath, Command: command, TimeoutSeconds: timeout, ReadOnly: request.ReadOnly || request.Role == "reviewer" || request.Role == "qa", Network: net, Env: secretEnv})
+		result, err := a.Sandbox.Execute(ctx, sbReq)
 		if err != nil {
 			return ToolResult{}, err
 		}

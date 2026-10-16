@@ -40,6 +40,7 @@ import {
   type MCPServerTools,
   type MCPToolInfo,
   type Secret,
+  type SandboxProfile,
   type Run,
   type JudgeConfig,
   type QualitySchedule,
@@ -117,6 +118,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([])
   const [mcpTools, setMcpTools] = useState<MCPServerTools[]>([])
   const [secretsList, setSecretsList] = useState<Secret[]>([])
+  const [sandboxProfiles, setSandboxProfiles] = useState<SandboxProfile[]>([])
   const [builtinTools, setBuiltinTools] = useState<MCPToolInfo[]>([])
   // Installation-level quality settings (judge + schedule): loaded once,
   // saved through their own endpoints. Collapsed by default — a rarely used
@@ -195,7 +197,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [agentsData, providersData, skillsData, mcpData, toolsData, builtinsData, secretsData] = await Promise.all([
+      const [agentsData, providersData, skillsData, mcpData, toolsData, builtinsData, secretsData, profilesData] = await Promise.all([
         workspaceApi.listAllAgents(),
         workspaceApi.listProviders(),
         workspaceApi.listSkills(),
@@ -203,6 +205,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         workspaceApi.listMCPTools(),
         workspaceApi.listBuiltinAgents(),
         workspaceApi.listSecrets(),
+        workspaceApi.listSandboxProfiles(),
       ])
       setAgents(agentsData.agents ?? [])
       setPendingProposals(agentsData.pending_proposals ?? {})
@@ -213,6 +216,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       setBuiltinTools(toolsData.builtins ?? [])
       setBuiltins(builtinsData.builtins ?? [])
       setSecretsList(secretsData.secrets ?? [])
+      setSandboxProfiles(profilesData.profiles ?? [])
     } catch (f) { setError(message(f)) }
     finally { setLoading(false) }
   }, [project])
@@ -313,7 +317,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         constraints: cleanList(draft.constraints),
         completion: cleanList(draft.completion),
       },
-      sandbox_profile: draft.suggested?.sandbox || '',
+      sandbox_profile: '',
       network_access: draft.suggested?.network,
       skills: [],
       mcp_servers: [],
@@ -729,7 +733,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       ...prev,
       description: spec.description,
       definition: { ...spec.definition },
-      sandbox_profile: spec.sandbox_profile,
       network_access: spec.network_access,
       read_only: spec.read_only,
     }))
@@ -784,7 +787,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         completion: cleanList(regenDraft.completion),
       },
       model: regenDraft.suggested?.model || prev.model,
-      sandbox_profile: regenDraft.suggested?.sandbox || prev.sandbox_profile,
     }))
     setProvenance((prev) => ({
       ...prev,
@@ -1603,10 +1605,10 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                   <NumberInput id="agent-turns" label={t('agents.max_turns') ?? 'Max turns'} value={form.max_turns ?? 20} onChange={(_, { value }) => setForm({ ...form, max_turns: typeof value === 'number' ? value : 20 })} min={1} max={100} />
                 </div>
                 <Select id="agent-sandbox" labelText={t('agents.sandbox_profile') ?? 'Sandbox profile'} value={form.sandbox_profile ?? ''} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, sandbox_profile: e.target.value })}>
-                  <SelectItem value="" text={t('agents.default_label') ?? 'Default'} />
-                  <SelectItem value="restricted" text={t('agents.restricted') ?? 'Restricted'} />
-                  <SelectItem value="standard" text={t('agents.standard') ?? 'Standard'} />
-                  <SelectItem value="privileged" text={t('agents.privileged') ?? 'Privileged'} />
+                  <SelectItem value="" text={t('agents.sandbox_default') ?? 'Default (installation image)'} />
+                  {sandboxProfiles.map((p) => (
+                    <SelectItem key={p.id} value={p.id} text={`${p.name}${(p.toolchains ?? []).length > 0 ? ' · ' + (p.toolchains ?? []).join(', ') : ''}${p.available ? '' : ' — ' + (t('agents.sandbox_not_built') ?? 'not built')}`} />
+                  ))}
                 </Select>
                 <div style={{ display: 'flex', gap: '1rem' }}>
                   <Toggle id="agent-network" labelText={t('agents.network') ?? 'Network'} toggled={form.network_access ?? false} onToggle={(checked: boolean) => setForm({ ...form, network_access: checked })} />
@@ -1809,7 +1811,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     description: tpl.description,
                     model: '',
                     definition: { ...tpl.definition },
-                    sandbox_profile: tpl.sandbox_profile,
+                    sandbox_profile: '',
                     network_access: tpl.network_access,
                     read_only: tpl.read_only,
                     skills: [],
@@ -1822,7 +1824,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                   <strong>{tpl.name}</strong>
                   <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{tpl.description}</p>
                   <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
-                    <Tag type="gray" size="sm">{tpl.sandbox_profile}</Tag>
                     {tpl.network_access ? <Tag type="green" size="sm">{t('agents.network_label') ?? 'network'}</Tag> : <Tag type="red" size="sm">{t('agents.no_network') ?? 'no network'}</Tag>}
                     {disabledCaps(tpl.definition?.capabilities).map((key) => <Tag key={key} type="warm-gray" size="sm">{capLabel(key)} ✕</Tag>)}
                     {cleanList(tpl.definition?.completion).length > 0 && <Tag type="blue" size="sm">{t('agents.before_done') ?? 'completion checks'}</Tag>}

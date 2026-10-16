@@ -65,6 +65,7 @@ const CONFIG_ITEMS = [
   { path: '/skills', label: 'nav.skills' },
   { path: '/mcp', label: 'nav.mcp' },
   { path: '/secrets', label: 'nav.secrets' },
+  { path: '/sandbox', label: 'nav.sandbox' },
   { path: '/providers', label: 'nav.providers' },
   { path: '/users', label: 'nav.users' },
   { path: '/org', label: 'nav.org', adminOnly: true },

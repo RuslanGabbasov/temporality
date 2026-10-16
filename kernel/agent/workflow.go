@@ -132,6 +132,11 @@ type RunInput struct {
 	// §9): the root makes no model calls; the compiled protocol drives child
 	// AgentRuns through the regular plan/delegate machinery instead.
 	Team *TeamRunInput `json:"team,omitempty"`
+	// Sandbox is the resolved sandbox profile (docs/sandbox-profiles.md §3.2):
+	// image, resource overrides and cache env from the agent's assigned
+	// profile. Nil = the installation default image and the legacy Go cache
+	// env, i.e. exactly the behavior before profiles existed.
+	Sandbox *SandboxSpec `json:"sandbox,omitempty"`
 	// DelegationWidth caps concurrent child runs of this run's plans below the
 	// installation MaxDelegationWidth (team defaults.parallel_limit). 0 keeps
 	// the default.
@@ -254,6 +259,23 @@ type ToolRequest struct {
 	DeniedTools []string `json:"denied_tools,omitempty"`
 	// ReadOnly mounts the workspace read-only in the command sandbox.
 	ReadOnly bool `json:"read_only,omitempty"`
+	// Sandbox carries the run's resolved sandbox profile into the execution
+	// boundary (docs/sandbox-profiles.md §3.3); nil keeps the runner defaults.
+	Sandbox *SandboxSpec `json:"sandbox,omitempty"`
+}
+
+// SandboxSpec is the resolved sandbox profile of a run: the digest-pinned
+// image plus resource and cache-env overrides (docs/sandbox-profiles.md).
+// It rides unchanged from run-config resolution through the workflow to the
+// run_command activity — resolution never happens mid-run.
+type SandboxSpec struct {
+	Profile     string   `json:"profile,omitempty"` // profile id, for events and trace
+	Image       string   `json:"image,omitempty"`   // digest-pinned image reference
+	Memory      string   `json:"memory,omitempty"`
+	CPUs        string   `json:"cpus,omitempty"`
+	ScratchSize string   `json:"scratch_size,omitempty"`
+	TmpSize     string   `json:"tmp_size,omitempty"`
+	CacheEnv    []string `json:"cache_env,omitempty"`
 }
 
 type ToolResult struct {
@@ -1657,7 +1679,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						// Wall latency from the workflow clock covers scheduling, retries
 						// and execution — the honest end-to-end cost of the operation.
 						toolStarted := workflow.Now(ctx)
-						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets}).Get(ctx, &toolResult); err != nil {
+						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox}).Get(ctx, &toolResult); err != nil {
 							toolFailed = true
 							failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 							failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
@@ -1753,7 +1775,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				// Same wall-clock semantics as the approval path: scheduling,
 				// retries and execution in one number.
 				toolStarted := workflow.Now(ctx)
-				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets}).Get(ctx, &toolResult); err != nil {
+				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox}).Get(ctx, &toolResult); err != nil {
 					toolFailed = true
 					failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 					failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()

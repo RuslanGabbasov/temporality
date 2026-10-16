@@ -13,7 +13,6 @@ type AgentPromptInput struct {
 	Name        string
 	Description string // purpose: what this agent is responsible for
 	Definition  workspace.AgentDefinition
-	Sandbox     string // restricted | standard | privileged | ""
 }
 
 // CompileAgentPrompt assembles the system prompt from semantic components:

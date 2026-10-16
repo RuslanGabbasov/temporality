@@ -134,6 +134,25 @@ export interface Agent {
   updated_at: string
 }
 
+// Sandbox profile registry row (docs/sandbox-profiles.md §3.1) plus the local
+// availability flag: the digest-pinned image exists in the docker store.
+export interface SandboxProfile {
+  id: string
+  name: string
+  description?: string
+  image?: string
+  toolchains?: string[]
+  memory?: string
+  cpus?: string
+  scratch_size?: string
+  tmp_size?: string
+  cache_env?: string[]
+  builtin: boolean
+  available?: boolean
+  created_at: string
+  updated_at: string
+}
+
 export interface AgentVersion {
   agent_id: string
   version: number
@@ -234,7 +253,6 @@ export interface BuiltinAgentSpec {
   name: string
   description: string
   definition: AgentDefinition
-  sandbox_profile: string
   network_access?: boolean
   read_only?: boolean
   labels?: Record<string, string>
@@ -1023,6 +1041,17 @@ export const workspaceApi = {
     request<AgentProposal>(`/v1/workspace/agents/${id}/proposals/${proposalId}/reject`, { method: 'POST' }),
   listBuiltinAgents: () =>
     request<{ builtins: BuiltinAgentSpec[] }>('/v1/workspace/agents/builtins'),
+  // Sandbox profiles (docs/sandbox-profiles.md §6)
+  listSandboxProfiles: () =>
+    request<{ profiles: SandboxProfile[] }>('/v1/workspace/sandbox-profiles'),
+  buildSandboxProfile: (id: string) =>
+    request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${id}/build`, { method: 'POST' }),
+  createSandboxProfile: (data: Partial<SandboxProfile> & { id: string; name: string }) =>
+    request<SandboxProfile>('/v1/workspace/sandbox-profiles', { method: 'POST', body: JSON.stringify(data) }),
+  updateSandboxProfile: (id: string, data: Partial<SandboxProfile>) =>
+    request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSandboxProfile: (id: string) =>
+    request<{ deleted: string }>(`/v1/workspace/sandbox-profiles/${id}`, { method: 'DELETE' }),
   draftAgent: (description: string, final?: boolean) =>
     request<AgentDraft>('/v1/workspace/agents/draft', { method: 'POST', body: JSON.stringify({ description, final: final ?? false }) }),
 

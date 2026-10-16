@@ -43,6 +43,18 @@ type Request struct {
 	// through exec argv (no shell), but keys still get validated to keep docker
 	// CLI argument parsing unambiguous.
 	Env []string
+	// Sandbox-profile fields (docs/sandbox-profiles.md §3.3): empty values
+	// fall back to the runner's installation defaults, so requests without a
+	// profile behave exactly as before the registry existed.
+	Image       string // digest-pinned override of the runner image
+	Memory      string // --memory override
+	CPUs        string // --cpus override
+	PIDs        int    // --pids-limit override
+	ScratchSize string // /scratch tmpfs size override
+	TmpSize     string // /tmp tmpfs size override
+	// CacheEnv replaces the legacy Go cache env set with the profile's cache
+	// pointers (KEY=VALUE against /cache). Empty keeps GOCACHE/GOMODCACHE.
+	CacheEnv []string
 }
 
 type Result struct {
@@ -216,6 +228,24 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 	if err := validateEnv(request.Env); err != nil {
 		return Result{}, err
 	}
+	// A profile image must obey the same digest rule as the runner image
+	// (docs/sandbox-security-matrix.md): a mutable tag could drift under the
+	// sandbox between two commands of one run.
+	if request.Image != "" {
+		if err := validateImage(request.Image); err != nil {
+			return Result{}, fmt.Errorf("sandbox profile image: %w", err)
+		}
+	}
+	if err := validateEnv(request.CacheEnv); err != nil {
+		return Result{}, fmt.Errorf("sandbox cache env: %w", err)
+	}
+	for _, size := range []struct{ field, value string }{
+		{"memory", request.Memory}, {"cpus", request.CPUs}, {"scratch_size", request.ScratchSize}, {"tmp_size", request.TmpSize},
+	} {
+		if err := validateByteSize(size.value); err != nil {
+			return Result{}, fmt.Errorf("sandbox profile %s: %w", size.field, err)
+		}
+	}
 	workspace, err := d.ResolveWorkspace(request.Workspace)
 	if err != nil {
 		return Result{}, err
@@ -282,18 +312,12 @@ func (d *Docker) arguments(workspace string, request Request, name string) []str
 	// caches). /tmp stays noexec for plain temp files. HOME and TMPDIR point
 	// at /scratch so toolchain defaults work even when the workspace is
 	// mounted read-only (reviewer/qa roles).
-	scratchSize := d.ScratchSize
-	if scratchSize == "" {
-		scratchSize = "512m"
-	}
+	scratchSize := firstNonEmpty(request.ScratchSize, d.ScratchSize, "512m")
 	// Toolchains that ignore TMPDIR (some linkers, cgo, packaging steps)
 	// still land their temporaries in /tmp; 64m was too tight for real
 	// builds, so the cap is configurable and defaults to a size that
 	// survives a link step.
-	tmpSize := d.TmpSize
-	if tmpSize == "" {
-		tmpSize = "256m"
-	}
+	tmpSize := firstNonEmpty(request.TmpSize, d.TmpSize, "256m")
 	network := request.Network
 	if network == "" {
 		network = d.Network
@@ -301,30 +325,55 @@ func (d *Docker) arguments(workspace string, request Request, name string) []str
 	if network == "" {
 		network = "none"
 	}
-	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=" + network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(d.PIDs), "--memory", d.Memory, "--memory-swap", d.Memory, "--cpus", d.CPUs, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=" + tmpSize, "--tmpfs", "/scratch:rw,exec,nosuid,size=" + scratchSize, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode}
+	memory := firstNonEmpty(request.Memory, d.Memory)
+	cpus := firstNonEmpty(request.CPUs, d.CPUs)
+	pids := d.PIDs
+	if request.PIDs > 0 {
+		pids = request.PIDs
+	}
+	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=" + network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(pids), "--memory", memory, "--memory-swap", memory, "--cpus", cpus, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=" + tmpSize, "--tmpfs", "/scratch:rw,exec,nosuid,size=" + scratchSize, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode}
 	// Per-project persistent cache: a host directory under the sandbox root,
 	// outside any git workspace, so `git clean` and workspace resets cannot
 	// destroy toolchain caches. Toolchains see it at /cache; it stays writable
 	// even for read-only workspaces because it never carries project files.
-	if cache := d.projectCacheDir(workspace); cache != "" {
-		args = append(args, "--volume", cache+":/cache:rw",
-			"--env", "GOCACHE=/cache/go-build",
-			"--env", "GOMODCACHE=/cache/go-mod",
-			"--env", "GOTMPDIR=/scratch")
+	// A profile's CacheEnv replaces the legacy Go-only pointers with its own
+	// toolchain caches; GOTMPDIR is a /scratch concern, not a cache one, so it
+	// stays for everyone.
+	if cache := d.projectCacheDir(workspace, request.CacheEnv); cache != "" {
+		args = append(args, "--volume", cache+":/cache:rw", "--env", "GOTMPDIR=/scratch")
+		cacheEnv := request.CacheEnv
+		if len(cacheEnv) == 0 {
+			cacheEnv = []string{"GOCACHE=/cache/go-build", "GOMODCACHE=/cache/go-mod"}
+		}
+		for _, entry := range cacheEnv {
+			args = append(args, "--env", entry)
+		}
 	}
 	for _, entry := range request.Env {
 		args = append(args, "--env", entry)
 	}
-	args = append(args, d.Image)
+	image := firstNonEmpty(request.Image, d.Image)
+	args = append(args, image)
 	return append(args, request.Command...)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // projectCacheDir returns the host directory mounted at /cache for the
 // workspace's project, creating its toolchain subdirectories when needed.
 // Empty means "no cache mount": the runner has no root (unit-test harness) or
 // the workspace lives outside it (defensive; Execute resolves workspaces
-// first, so this never triggers in production).
-func (d *Docker) projectCacheDir(workspace string) string {
+// first, so this never triggers in production). Subdirectories come from the
+// profile's cache env — the legacy Go pair without a profile, the profile's
+// own toolchains with one.
+func (d *Docker) projectCacheDir(workspace string, cacheEnv []string) string {
 	if d.Root == "" || workspace == "" {
 		return ""
 	}
@@ -334,12 +383,37 @@ func (d *Docker) projectCacheDir(workspace string) string {
 	}
 	// The workspace base name is the project id; per-project caches never mix.
 	cache := filepath.Join(d.Root, "cache", filepath.Base(workspace))
-	for _, sub := range []string{"go-build", "go-mod"} {
+	subs := []string{"go-build", "go-mod"}
+	if len(cacheEnv) > 0 {
+		subs = cacheSubdirs(cacheEnv)
+	}
+	for _, sub := range subs {
 		if err := os.MkdirAll(filepath.Join(cache, sub), 0o777); err != nil {
 			return ""
 		}
 	}
 	return cache
+}
+
+// cacheSubdirs extracts the /cache subdirectories referenced by cache env
+// entries so the mount pre-creates them: "NPM_CONFIG_CACHE=/cache/npm"
+// yields "npm".
+func cacheSubdirs(cacheEnv []string) []string {
+	seen := make(map[string]bool)
+	var dirs []string
+	for _, entry := range cacheEnv {
+		idx := strings.IndexByte(entry, '=')
+		if idx < 0 {
+			continue
+		}
+		value := strings.TrimSuffix(strings.TrimPrefix(entry[idx+1:], "/cache/"), "/")
+		if value == "" || strings.Contains(value, "/") || seen[value] {
+			continue
+		}
+		seen[value] = true
+		dirs = append(dirs, value)
+	}
+	return dirs
 }
 
 func containerName() (string, error) {

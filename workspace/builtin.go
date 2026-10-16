@@ -11,14 +11,16 @@ package workspace
 
 // BuiltinAgentSpec describes one curated agent template.
 type BuiltinAgentSpec struct {
-	Slug           string            `json:"slug"`                     // stable template id
-	Name           string            `json:"name"`                     // display name
-	Description    string            `json:"description"`              // purpose
-	Definition     AgentDefinition   `json:"definition"`               // structured definition
-	SandboxProfile string            `json:"sandbox_profile"`          // restricted | standard | privileged
-	NetworkAccess  *bool             `json:"network_access,omitempty"` // nil = environment default
-	ReadOnly       *bool             `json:"read_only,omitempty"`      // nil = writable
-	Labels         map[string]string `json:"labels,omitempty"`         // reserved; created agents carry no label
+	Slug        string          `json:"slug"`        // stable template id
+	Name        string          `json:"name"`        // display name
+	Description string          `json:"description"` // purpose
+	Definition  AgentDefinition `json:"definition"`  // structured definition
+	// Sandbox profile ids are deliberately absent: the execution environment
+	// is assigned from the profile registry (docs/sandbox-profiles.md §8), not
+	// baked into templates.
+	NetworkAccess *bool             `json:"network_access,omitempty"` // nil = environment default
+	ReadOnly      *bool             `json:"read_only,omitempty"`      // nil = writable
+	Labels        map[string]string `json:"labels,omitempty"`         // reserved; created agents carry no label
 }
 
 func boolValue(v bool) *bool { return &v }
@@ -40,10 +42,9 @@ func BuiltinAgents() []BuiltinAgentSpec {
 					"Make sure the changed code compiles or passes the available verification.",
 				},
 			},
-			SandboxProfile: "standard",
-			NetworkAccess:  boolValue(false),
-			ReadOnly:       boolValue(false),
-			Labels:         map[string]string{"builtin": "true"},
+			NetworkAccess: boolValue(false),
+			ReadOnly:      boolValue(false),
+			Labels:        map[string]string{"builtin": "true"},
 		},
 		{
 			Slug:        "reviewer",
@@ -59,10 +60,9 @@ func BuiltinAgents() []BuiltinAgentSpec {
 					"Separate confirmed findings from suspicions in the report.",
 				},
 			},
-			SandboxProfile: "standard",
-			NetworkAccess:  boolValue(false),
-			ReadOnly:       boolValue(true),
-			Labels:         map[string]string{"builtin": "true"},
+			NetworkAccess: boolValue(false),
+			ReadOnly:      boolValue(true),
+			Labels:        map[string]string{"builtin": "true"},
 		},
 		{
 			Slug:        "researcher",
@@ -78,10 +78,9 @@ func BuiltinAgents() []BuiltinAgentSpec {
 					"Cite the source behind each material claim.",
 				},
 			},
-			SandboxProfile: "standard",
-			NetworkAccess:  boolValue(true),
-			ReadOnly:       boolValue(true),
-			Labels:         map[string]string{"builtin": "true"},
+			NetworkAccess: boolValue(true),
+			ReadOnly:      boolValue(true),
+			Labels:        map[string]string{"builtin": "true"},
 		},
 		{
 			Slug:        "qa",
@@ -99,10 +98,9 @@ func BuiltinAgents() []BuiltinAgentSpec {
 					"Report every defect with reproduction steps and observed evidence, or mark it as unreproduced.",
 				},
 			},
-			SandboxProfile: "standard",
-			NetworkAccess:  boolValue(false),
-			ReadOnly:       boolValue(false),
-			Labels:         map[string]string{"builtin": "true"},
+			NetworkAccess: boolValue(false),
+			ReadOnly:      boolValue(false),
+			Labels:        map[string]string{"builtin": "true"},
 		},
 		{
 			Slug:        "devops",
@@ -118,10 +116,9 @@ func BuiltinAgents() []BuiltinAgentSpec {
 					"Report the exact state the infrastructure was left in.",
 				},
 			},
-			SandboxProfile: "privileged",
-			NetworkAccess:  boolValue(true),
-			ReadOnly:       boolValue(false),
-			Labels:         map[string]string{"builtin": "true"},
+			NetworkAccess: boolValue(true),
+			ReadOnly:      boolValue(false),
+			Labels:        map[string]string{"builtin": "true"},
 		},
 	}
 }

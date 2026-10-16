@@ -17,7 +17,7 @@ import (
 )
 
 // AgentDraft is the wizard result: a prefilled agent definition plus
-// suggestions outside the definition (model, sandbox, network) and clarifying
+// suggestions outside the definition (model, network) and clarifying
 // questions the model could not resolve on its own.
 type AgentDraft struct {
 	Name         string                      `json:"name"`
@@ -30,10 +30,11 @@ type AgentDraft struct {
 }
 
 // AgentDraftSuggestion carries settings that live on the agent entity, not in
-// the definition; the user confirms or edits them in the form.
+// the definition; the user confirms or edits them in the form. The sandbox is
+// deliberately absent: the execution environment is assigned as a profile
+// (docs/sandbox-profiles.md §8), not generated from a description.
 type AgentDraftSuggestion struct {
 	Model   string `json:"model,omitempty"`
-	Sandbox string `json:"sandbox,omitempty"` // restricted | standard | privileged
 	Network *bool  `json:"network,omitempty"`
 }
 
@@ -53,7 +54,6 @@ type agentDraftCompletion struct {
 	Completion  []string `json:"completion"`
 	Suggested   struct {
 		Model   string `json:"model"`
-		Sandbox string `json:"sandbox"`
 		Network *bool  `json:"network"`
 	} `json:"suggested"`
 	Questions []DraftQuestion `json:"questions"`
@@ -71,7 +71,7 @@ Schema:
                     "network": false, "skills": true, "knowledge": true },
   "constraints": ["what the agent must never do, derived from the description"],
   "completion": ["verifiable checks the agent must perform before declaring the work done"],
-  "suggested": { "model": "", "sandbox": "restricted|standard|privileged", "network": false },
+  "suggested": { "model": "", "network": false },
   "questions": [ { "field": "definition path the question refers to", "question": "a concrete clarifying question" } ]
 }
 
@@ -82,7 +82,7 @@ Rules:
 - Completion criteria must be objectively verifiable (run tests, build passes, output validated); never inner qualities like "be careful".
 - Do not prescribe step-by-step procedures; the agent chooses its own trajectory.
 - Do not describe tools or skills — the harness supplies tool schemas and injects skills.
-- Suggested model may be empty. Suggested sandbox must be one of restricted, standard, privileged; empty when unclear.
+- Suggested model may be empty.
 - Ask at most 3 short questions, and only when the answer changes the definition.
 - Write description, constraints and completion in the same language as the user description.`
 
@@ -161,10 +161,6 @@ func parseAgentDraft(content string) (AgentDraft, error) {
 		},
 		Constraints: trimAll(parsed.Constraints),
 		Completion:  trimAll(parsed.Completion),
-	}
-	switch parsed.Suggested.Sandbox {
-	case "restricted", "standard", "privileged":
-		draft.Suggested.Sandbox = parsed.Suggested.Sandbox
 	}
 	draft.Suggested.Model = strings.TrimSpace(parsed.Suggested.Model)
 	draft.Suggested.Network = parsed.Suggested.Network

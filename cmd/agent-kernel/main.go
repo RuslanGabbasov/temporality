@@ -302,11 +302,25 @@ func main() {
 		log.Error("migrate workspace v69 (workspace user federation)", "error", err)
 		os.Exit(1)
 	}
+	// 000070 creates the sandbox profile registry (docs/sandbox-profiles.md):
+	// builtin catalog rows plus custom profiles; the dead
+	// restricted/standard/privileged values on agent cards migrate to the empty
+	// default (the installation image).
+	if err = ws.Migrate(ctx, "migrations/000070_sandbox_profiles.up.sql"); err != nil {
+		log.Error("migrate workspace v70 (sandbox profiles)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
 	// auto-seeding model, so no builtin is forced on an existing workspace.
 	cleanupSeededBuiltinAgents(ctx, log, ws)
+	// Builtin sandbox profile rows (docs/sandbox-profiles.md §5): seed the
+	// catalog; a missing seed degrades profile assignment to the explicit
+	// not-built error, so failure is logged, not fatal.
+	if err := ws.SeedSandboxProfiles(ctx); err != nil {
+		log.Error("seed builtin sandbox profiles", "error", err)
+	}
 	// Kernel→journal auth must be resolved before every consumer reads
 	// TEMPORALITY_API_TOKEN: the outbox publisher, the cost API and the
 	// activities' direct journal calls. On a fresh install the env is empty and
@@ -1970,6 +1984,10 @@ func main() {
 			writeError(w, 422, errors.New("name is required"))
 			return
 		}
+		if err := validateAgentSandboxProfile(r.Context(), ws, req.SandboxProfile); err != nil {
+			writeError(w, 422, err)
+			return
+		}
 		if req.ID == "" {
 			req.ID = slugify(req.Name)
 		}
@@ -2020,6 +2038,10 @@ func main() {
 		var req workspace.CreateAgentRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
 			writeError(w, 400, err)
+			return
+		}
+		if err := validateAgentSandboxProfile(r.Context(), ws, req.SandboxProfile); err != nil {
+			writeError(w, 422, err)
 			return
 		}
 		a := workspace.Agent{
@@ -2524,6 +2546,9 @@ func main() {
 	// knowledge-explorer investigations — list/read for everyone with read
 	// access, create/update/delete for writers.
 	RegisterResearchSessionRoutes(mux, gate, ws)
+	// Sandbox profile registry (docs/sandbox-profiles.md §6): the catalog of
+	// execution environments agents may be assigned to, plus builtin builds.
+	RegisterSandboxProfileRoutes(mux, gate, ws, events, dockerProfileBuilder{binary: sandboxDockerBinary()})
 	// agentskills.io import: folder or archive → parsed SKILL.md draft for the
 	// skill editor. Pure parse, no persistence — saving follows the normal flow.
 	RegisterSkillImportRoutes(mux, gate)
@@ -7225,7 +7250,8 @@ func runExecContextFor(principal controlplane.Principal, input *agent.RunInput, 
 		"skill_ids": skillIDs, "mcp_ids": mcpIDs,
 		"model": input.Model, "project_id": input.Project,
 		"actor": input.ActorID, "execution_identity_id": "",
-		"authorized_by": authorizedBy,
+		"authorized_by":   authorizedBy,
+		"sandbox_profile": sandboxProfileName(input),
 	}
 }
 
@@ -7362,7 +7388,7 @@ func agentVersionSnapshot(a workspace.Agent, author, promptSource, generatorMode
 		AgentID: a.ID, Version: a.DefinitionVersion, Definition: *a.Definition,
 		Description: a.Description,
 		CompiledPrompt: agent.EffectiveSystemPrompt(agent.AgentPromptInput{
-			Name: a.Name, Description: a.Description, Definition: *a.Definition, Sandbox: a.SandboxProfile,
+			Name: a.Name, Description: a.Description, Definition: *a.Definition,
 		}, "", a.SystemPrompt),
 		PromptSource: promptSource, GeneratorModel: generatorModel,
 		Author: author, CreatedAt: time.Now().UTC(),
@@ -7384,7 +7410,7 @@ func agentPromptPreview(a workspace.Agent) (source, prompt string) {
 			return "override", a.Definition.PromptOverride
 		}
 		return "definition", agent.CompileAgentPrompt(agent.AgentPromptInput{
-			Name: a.Name, Description: a.Description, Definition: *a.Definition, Sandbox: a.SandboxProfile,
+			Name: a.Name, Description: a.Description, Definition: *a.Definition,
 		})
 	}
 	if a.SystemPrompt != "" {
@@ -7439,6 +7465,25 @@ func resolveAgentRef(ctx context.Context, ws agentRefLookup, ref, project string
 	}
 }
 
+// validateAgentSandboxProfile guards agent save endpoints: an empty value is
+// the installation default; anything else must be a registry profile id. The
+// dead restricted/standard/privileged triple is rejected with a pointer to
+// what replaced it (docs/sandbox-profiles.md §9).
+func validateAgentSandboxProfile(ctx context.Context, ws *workspace.Store, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	switch value {
+	case "restricted", "standard", "privileged":
+		return fmt.Errorf("sandbox_profile %q is retired: assign a sandbox profile from the registry (Settings → Sandbox profiles)", value)
+	}
+	if _, err := ws.GetSandboxProfile(ctx, value); err != nil {
+		return fmt.Errorf("unknown sandbox profile %q", value)
+	}
+	return nil
+}
+
 func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Agent, input *agent.RunInput) {
 	if a == nil {
 		return
@@ -7464,7 +7509,7 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	useSkills := true
 	if a.Definition != nil {
 		input.SystemPrompt = agent.EffectiveSystemPrompt(agent.AgentPromptInput{
-			Name: a.Name, Description: a.Description, Definition: *a.Definition, Sandbox: a.SandboxProfile,
+			Name: a.Name, Description: a.Description, Definition: *a.Definition,
 		}, input.Role, a.SystemPrompt)
 		caps := a.Definition.Capabilities
 		if !caps.Cap(caps.ModifyFiles) {
@@ -7495,6 +7540,7 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	if a.ReadOnly != nil && *a.ReadOnly {
 		input.ReadOnly = true
 	}
+	resolveAgentSandbox(ctx, ws, a, input)
 	if useSkills {
 		resolveAgentSkills(ctx, ws, a, input)
 	}
@@ -7541,7 +7587,7 @@ func applyAgentDefaults(ctx context.Context, ws *workspace.Store, a *workspace.A
 		// effective prompt (definition + card prompt) applies as-is.
 		if callerPrompt == "" {
 			input.SystemPrompt = agent.EffectiveSystemPrompt(agent.AgentPromptInput{
-				Name: a.Name, Description: a.Description, Definition: *a.Definition, Sandbox: a.SandboxProfile,
+				Name: a.Name, Description: a.Description, Definition: *a.Definition,
 			}, input.Role, a.SystemPrompt)
 		}
 		caps := a.Definition.Capabilities
@@ -7575,6 +7621,7 @@ func applyAgentDefaults(ctx context.Context, ws *workspace.Store, a *workspace.A
 	if a.ReadOnly != nil && *a.ReadOnly {
 		input.ReadOnly = true
 	}
+	resolveAgentSandbox(ctx, ws, a, input)
 	if useSkills {
 		resolveAgentSkills(ctx, ws, a, input)
 		input.Skills = dedupeSkillRefs(input.Skills)
@@ -7587,6 +7634,37 @@ func applyAgentDefaults(ctx context.Context, ws *workspace.Store, a *workspace.A
 	}
 	input.DenyTools = dedupeStrings(input.DenyTools)
 	input.Secrets = a.Secrets
+}
+
+// resolveAgentSandbox carries the agent's sandbox profile into the run input
+// (docs/sandbox-profiles.md §3.2). An empty card value keeps nil — the runner's
+// installation image and the legacy Go cache env, exactly the pre-profile
+// behavior. A missing profile row or an unbuilt image yields a spec without
+// an image: run_command then fails with an explicit profile-not-built error
+// instead of silently substituting another toolchain (§4.3).
+func resolveAgentSandbox(ctx context.Context, ws *workspace.Store, a *workspace.Agent, input *agent.RunInput) {
+	if a == nil || strings.TrimSpace(a.SandboxProfile) == "" {
+		return
+	}
+	spec := &agent.SandboxSpec{Profile: a.SandboxProfile}
+	if profile, err := ws.GetSandboxProfile(ctx, a.SandboxProfile); err == nil && profile.Image != "" {
+		spec.Image = profile.Image
+		spec.Memory = profile.Memory
+		spec.CPUs = profile.CPUs
+		spec.ScratchSize = profile.ScratchSize
+		spec.TmpSize = profile.TmpSize
+		spec.CacheEnv = profile.CacheEnv
+	}
+	input.Sandbox = spec
+}
+
+// sandboxProfileName returns the run's sandbox profile id for the exec
+// context snapshot; empty means the installation default.
+func sandboxProfileName(input *agent.RunInput) string {
+	if input.Sandbox == nil {
+		return ""
+	}
+	return input.Sandbox.Profile
 }
 
 func dedupeStrings(values []string) []string {

@@ -311,11 +311,84 @@ func TestProjectCacheMountsPerProjectUnderRoot(t *testing.T) {
 		t.Fatalf("cache subdirectory must exist: %v", err)
 	}
 	// Foreign workspaces and runners without a root get no cache mount.
-	if runner.projectCacheDir(filepath.Join(t.TempDir(), "other")) != "" {
+	if runner.projectCacheDir(filepath.Join(t.TempDir(), "other"), nil) != "" {
 		t.Fatal("workspace outside the root must not get a cache mount")
 	}
-	if (&Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64)}).projectCacheDir(workspace) != "" {
+	if (&Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64)}).projectCacheDir(workspace, nil) != "" {
 		t.Fatal("runner without a root must not mount a cache")
+	}
+}
+
+// A sandbox profile overrides the image and resources, and its cache env
+// replaces the legacy Go pointers with the profile's toolchain caches
+// (docs/sandbox-profiles.md §3.3).
+func TestDockerArgumentsApplySandboxProfile(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "projects", "demo")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &Docker{Root: root, Image: "sandbox@sha256:" + strings.Repeat("a", 64), Memory: "1g", CPUs: "2", PIDs: 128, ScratchSize: "512m", TmpSize: "256m"}
+	profileImage := "temporality-sandbox-node@sha256:" + strings.Repeat("b", 64)
+	args := runner.arguments(workspace, Request{
+		Command:     []string{"node", "-v"},
+		Image:       profileImage,
+		Memory:      "2g",
+		CPUs:        "4",
+		PIDs:        256,
+		ScratchSize: "1g",
+		TmpSize:     "512m",
+		CacheEnv:    []string{"NPM_CONFIG_CACHE=/cache/npm"},
+	}, "n")
+	joined := strings.Join(args, " ")
+
+	if got := flagValue(args, "--memory"); got != "2g" {
+		t.Errorf("--memory = %q, want 2g", got)
+	}
+	if got := flagValue(args, "--cpus"); got != "4" {
+		t.Errorf("--cpus = %q, want 4", got)
+	}
+	if got := flagValue(args, "--pids-limit"); got != "256" {
+		t.Errorf("--pids-limit = %q, want 256", got)
+	}
+	if !strings.Contains(joined, "--tmpfs /scratch:rw,exec,nosuid,size=1g") {
+		t.Errorf("scratch override missing: %s", joined)
+	}
+	if !strings.Contains(joined, "--tmpfs /tmp:rw,noexec,nosuid,size=512m") {
+		t.Errorf("tmp override missing: %s", joined)
+	}
+	if !strings.Contains(joined, "--env NPM_CONFIG_CACHE=/cache/npm") {
+		t.Errorf("profile cache env missing: %s", joined)
+	}
+	if strings.Contains(joined, "GOCACHE") || strings.Contains(joined, "GOMODCACHE") {
+		t.Errorf("legacy Go caches must yield to the profile's caches: %s", joined)
+	}
+	// The image is the flag tail right before the command; assert by absence of
+	// the runner image and presence of the profile ref.
+	if strings.Contains(joined, "sandbox@sha256:"+strings.Repeat("a", 64)) {
+		t.Errorf("runner image must be replaced by the profile image: %s", joined)
+	}
+	if !strings.Contains(joined, profileImage+" node -v") {
+		t.Errorf("profile image must precede the command: %s", joined)
+	}
+	// The npm cache directory is pre-created like the Go ones were.
+	if info, err := os.Stat(filepath.Join(root, "cache", "demo", "npm")); err != nil || !info.IsDir() {
+		t.Fatalf("profile cache subdirectory must exist: %v", err)
+	}
+}
+
+// The digest rule holds for profile images exactly as for the runner image:
+// a mutable tag could drift under the sandbox between two commands.
+func TestExecuteRejectsTaggedProfileImage(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "repo")
+	if err := os.Mkdir(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &Docker{Root: root, Image: "sandbox@sha256:" + strings.Repeat("a", 64), Binary: "/nonexistent/docker", Memory: "1g", CPUs: "2", PIDs: 128}
+	_, err := runner.Execute(context.Background(), Request{Workspace: workspace, Command: []string{"ls"}, Image: "node:22-alpine"})
+	if err == nil || !strings.Contains(err.Error(), "sha256") {
+		t.Fatalf("tagged profile image must be rejected before any docker call, got %v", err)
 	}
 }
 

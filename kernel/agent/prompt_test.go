@@ -17,7 +17,6 @@ func TestCompileAgentPromptFullDefinition(t *testing.T) {
 			Constraints: []string{"Never touch infrastructure configuration.", "Never delete files."},
 			Completion:  []string{"Run the relevant tests.", "Make sure the build passes."},
 		},
-		Sandbox: "standard",
 	})
 
 	want := `You are Coder. Responsibility: Implements code changes, fixes bugs and verifies the result.

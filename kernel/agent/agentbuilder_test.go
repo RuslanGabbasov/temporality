@@ -14,7 +14,7 @@ func TestParseAgentDraftFull(t *testing.T) {
   "capabilities": { "modify_files": true, "run_commands": true, "network": false },
   "constraints": ["Не изменять инфраструктуру."],
   "completion": ["Запустить соответствующие тесты."],
-  "suggested": { "model": "mimo-v2.6-pro", "sandbox": "standard", "network": true },
+  "suggested": { "model": "mimo-v2.6-pro", "network": true },
   "questions": [{ "field": "constraints", "question": "Можно ли запускать миграции БД?" }, { "field": "", "question": "  " }]
 }` + "\n```"
 	draft, err := parseAgentDraft(raw)
@@ -33,7 +33,7 @@ func TestParseAgentDraftFull(t *testing.T) {
 	if len(draft.Constraints) != 1 || len(draft.Completion) != 1 {
 		t.Fatalf("constraints/completion not parsed: %+v", draft)
 	}
-	if draft.Suggested.Sandbox != "standard" || draft.Suggested.Model != "mimo-v2.6-pro" {
+	if draft.Suggested.Model != "mimo-v2.6-pro" || draft.Suggested.Network == nil || *draft.Suggested.Network != true {
 		t.Fatalf("suggestion not parsed: %+v", draft.Suggested)
 	}
 	if len(draft.Questions) != 1 {
@@ -51,9 +51,6 @@ func TestParseAgentDraftFallbacks(t *testing.T) {
 	}
 	if draft.Name != "Backend development on" {
 		t.Fatalf("name fallback from purpose expected, got %q", draft.Name)
-	}
-	if draft.Suggested.Sandbox != "" {
-		t.Fatalf("unknown/empty sandbox must be dropped, got %q", draft.Suggested.Sandbox)
 	}
 	if len(draft.Questions) != 0 || len(draft.Constraints) != 0 {
 		t.Fatalf("no questions/constraints expected")

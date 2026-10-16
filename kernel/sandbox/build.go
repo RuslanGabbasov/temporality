@@ -29,6 +29,59 @@ RUN apk add --no-cache git openssh-client ca-certificates curl jq bash python3 r
 // BuildImageTag is the tag the runtime build lands on before pinning.
 const BuildImageTag = "temporality-sandbox:latest"
 
+// ProfileDefinition is the build recipe of one builtin sandbox profile
+// (docs/sandbox-profiles.md §5). Dockerfiles live in code — the kernel image
+// does not carry the sandbox/ directory in its build context.
+type ProfileDefinition struct {
+	Profile    string
+	Tag        string
+	Dockerfile string
+}
+
+// ProfileDefinitions maps builtin profile ids to their build recipes. The
+// id set mirrors workspace.BuiltinSandboxProfiles; a cmd-level test keeps
+// the two catalogs from drifting apart.
+func ProfileDefinitions() map[string]ProfileDefinition {
+	return map[string]ProfileDefinition{
+		"node": {
+			Profile: "node",
+			Tag:     "temporality-sandbox-node:latest",
+			Dockerfile: `FROM node:22-alpine
+` + apkTools,
+		},
+		"python": {
+			Profile: "python",
+			Tag:     "temporality-sandbox-python:latest",
+			Dockerfile: `FROM python:3.12-alpine
+` + apkTools,
+		},
+		"browser-e2e": {
+			Profile: "browser-e2e",
+			Tag:     "temporality-sandbox-browser-e2e:latest",
+			// The official Playwright image ships Node and the matching browser
+			// build — assembling the pair by hand (alpine + apk chromium) breaks on
+			// every Playwright upgrade.
+			Dockerfile: `FROM mcr.microsoft.com/playwright:v1.49.0-jammy
+` + aptTools,
+		},
+	}
+}
+
+// apkTools is the shared CLI layer over alpine bases: the base image's own
+// comment block (sandbox/Dockerfile) explains each package.
+const apkTools = `# curl: agents fetch URLs without falling back to hand-written python
+# scripts; jq: idiomatic JSON handling for HTTP API responses.
+# bash: model-authored heredocs and scripts assume a POSIX-plus shell — plain
+# ash breaks them in subtle ways.
+# ripgrep: fast code search without fragile grep -r invocations.
+RUN apk add --no-cache git openssh-client ca-certificates curl jq bash ripgrep
+`
+
+// aptTools is the same CLI layer for debian-based bases (browser profile).
+const aptTools = `# Same CLI layer as the alpine profiles on a debian base.
+RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client ca-certificates curl jq bash ripgrep && rm -rf /var/lib/apt/lists/*
+`
+
 // buildTimeout bounds the whole docker build: pulling golang:1.27-alpine on a
 // slow link is the slow part; the apk layer is small.
 const buildTimeout = 15 * time.Minute
@@ -74,13 +127,22 @@ func socketError(output string, err error, uid int) error {
 // The build context is the Dockerfile alone, sent over stdin — no host
 // directory is ever mounted or sent to the daemon.
 func BuildEmbedded(ctx context.Context, binary string) (string, error) {
+	return BuildDefinition(ctx, binary, ProfileDefinition{Profile: "base", Tag: BuildImageTag, Dockerfile: EmbeddedDockerfile})
+}
+
+// BuildDefinition builds one profile recipe: same preflight, stdin-only
+// context, digest pinning and --pull=never verification as the base build.
+func BuildDefinition(ctx context.Context, binary string, def ProfileDefinition) (string, error) {
+	if strings.TrimSpace(def.Dockerfile) == "" || strings.TrimSpace(def.Tag) == "" {
+		return "", fmt.Errorf("sandbox profile definition is incomplete")
+	}
 	if err := PreflightSocket(ctx, binary); err != nil {
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(ctx, buildTimeout)
 	defer cancel()
-	build := exec.CommandContext(ctx, binary, "build", "-t", BuildImageTag, "-")
-	build.Stdin = strings.NewReader(EmbeddedDockerfile)
+	build := exec.CommandContext(ctx, binary, "build", "-t", def.Tag, "-")
+	build.Stdin = strings.NewReader(def.Dockerfile)
 	var output limitedBuffer
 	build.Stdout, build.Stderr = &output, &output
 	if err := build.Run(); err != nil {
@@ -90,7 +152,7 @@ func BuildEmbedded(ctx context.Context, binary string) (string, error) {
 		}
 		return "", fmt.Errorf("sandbox image build: %w: %s", err, output.String())
 	}
-	ref, err := pinnedRef(ctx, binary, BuildImageTag)
+	ref, err := pinnedRef(ctx, binary, def.Tag)
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +169,9 @@ func ImageAvailable(ctx context.Context, binary, ref string) bool {
 	return inspect.Run() == nil
 }
 
-// pinnedRef resolves a tag to its digest-pinned reference.
+// pinnedRef resolves a tag to its digest-pinned reference. The repository
+// name is derived from the tag (temporality-sandbox-node:latest →
+// temporality-sandbox-node), so profile builds pin under their own repo.
 func pinnedRef(ctx context.Context, binary, tag string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -121,7 +185,11 @@ func pinnedRef(ctx context.Context, binary, tag string) (string, error) {
 	if !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
 		return "", fmt.Errorf("unexpected image id %q for %s", digest, tag)
 	}
-	return "temporality-sandbox@" + digest, nil
+	repo := tag
+	if idx := strings.IndexByte(tag, ':'); idx > 0 {
+		repo = tag[:idx]
+	}
+	return repo + "@" + digest, nil
 }
 
 // verifyPinned proves the digest reference resolves in the local store by

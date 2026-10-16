@@ -84,6 +84,10 @@ const (
 	AuditAuthUserJITCreated      = "auth.user.jit_created"
 	AuditAuthUserDeactivated     = "auth.user.deactivated"
 	AuditAuthConfigUpdated       = "auth.config.updated"
+	AuditSandboxProfileCreated   = "sandbox.profile.created"
+	AuditSandboxProfileUpdated   = "sandbox.profile.updated"
+	AuditSandboxProfileDeleted   = "sandbox.profile.deleted"
+	AuditSandboxProfileBuilt     = "sandbox.profile.built"
 )
 
 // ErrAuditWriteFailed reports a failed access-audit INSERT on a path where
