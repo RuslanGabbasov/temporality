@@ -699,7 +699,7 @@ export const ru: Record<string, string> = {
     'skills.wizard_hint': 'Опишите навык своими словами — агент превратит описание в структурированный черновик, который можно поправить.',
     'skills.wizard_label': 'Опишите, как должен работать навык',
     'skills.wizard_placeholder': 'Проверять pull request: анализировать изменения, находить проблемы, проверять тесты и оставлять комментарии…',
-    'skills.wizard_generate': 'Сформировать навык',
+    'skills.wizard_generate': 'Сформировать',
     'skills.wizard_generating': 'Формирую…',
     'skills.wizard_failed': 'Не удалось сформировать',
     'skills.generating_title': 'Формируем черновик навыка…',
