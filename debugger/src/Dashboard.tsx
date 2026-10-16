@@ -92,10 +92,9 @@ interface Props {
 }
 
 /**
- * System dashboard (docs/system-dashboard.md): formerly the /project page,
- * rebuilt as the operational health surface — live health strip, provider/model stats,
- * per-project rollup with org grouping, the quality loop summary, plus the
- * former project overview (sagas) and knowledge observability as tabs.
+ * System dashboard (docs/system-dashboard.md): the operational health surface —
+ * live health strip, provider/model stats, per-project rollup with org grouping,
+ * the quality loop summary, plus sagas and knowledge observability as tabs.
  */
 export default function Dashboard({ project, setProject }: Props) {
   const { t, locale } = useI18n()

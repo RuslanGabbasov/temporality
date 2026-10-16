@@ -21,12 +21,10 @@ import ChannelSettingsPage from './ChannelSettings'
 import InboundMessages from './InboundMessages'
 
 const Routes = {
-  project: /^\/project(\/|$)/,
   dashboard: /^\/dashboard(\/|$)/,
   experience: /^\/experience(\/|$)/,
   agents: /^\/agents(\/|$)/,
   teams: /^\/teams(\/|$)/,
-  observability: /^\/observability(\/|$)/,
   knowledge: /^\/knowledge(\/|$)/,
   workspace: /^\/workspace(\/|$)/,
   'agent-config': /^\/agent-config(\/|$)/,
@@ -42,13 +40,9 @@ const Routes = {
   inbound: /^\/inbound(\/|$)/,
 } as const
 
-type Page = 'project' | 'dashboard' | 'experience' | 'agents' | 'teams' | 'observability' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
+type Page = 'dashboard' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
 
 function pageFor(pathname: string): Page {
-  // /observability is now a tab of the system dashboard (docs/system-dashboard.md
-  // §2): the legacy path redirects, carrying the knowledge params over.
-  if (Routes.observability.test(pathname)) return 'observability'
-  if (Routes.project.test(pathname)) return 'project'
   if (Routes.dashboard.test(pathname)) return 'dashboard'
   if (Routes.agents.test(pathname)) return 'agents'
   if (Routes.teams.test(pathname)) return 'teams'
@@ -78,22 +72,6 @@ export default function App() {
     window.addEventListener('popstate', navigate)
     return () => window.removeEventListener('popstate', navigate)
   }, [])
-
-  // Legacy /observability and /project redirect to /dashboard (the Observability
-  // page now lives inside the dashboard; its own `tab` param becomes `ktab`).
-  useEffect(() => {
-    if (page !== 'observability' && page !== 'project') return
-    const params = new URLSearchParams(window.location.search)
-    if (page === 'observability') {
-      const innerTab = params.get('tab')
-      params.delete('tab')
-      if (innerTab) params.set('ktab', innerTab)
-      params.set('tab', 'knowledge')
-    }
-    const qs = params.toString()
-    window.history.replaceState(null, '', qs ? `/dashboard?${qs}` : '/dashboard')
-    setPage('dashboard')
-  }, [page])
 
   return (
     <ThemePrefProvider>

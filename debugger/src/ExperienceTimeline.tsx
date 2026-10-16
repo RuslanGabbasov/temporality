@@ -1184,7 +1184,7 @@ function RowDetails({ row, lineage, forensic, onFocus, related, project }: { row
     <section style={{ marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid #202a38' }}>
       <h4>{t('timeline.investigate')}</h4>
       <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.35rem' }}>
-        <a href={`/observability?project=${encodeURIComponent(project)}&selected=${encodeURIComponent(row.knowledgeId)}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>{t('timeline.knowledge_page')}</a>
+        <a href={`/knowledge?project=${encodeURIComponent(project)}&dossier=${encodeURIComponent(row.knowledgeId)}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>{t('timeline.knowledge_page')}</a>
         {row.runs[0] && <a href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(row.runs[0])}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>{t('timeline.first_run_trace')}</a>}
         {row.runs.length > 1 && <a href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(row.runs[row.runs.length - 1])}`} style={{ color: '#57d7e8', fontSize: '0.7rem', textDecoration: 'none', padding: '0.2rem 0.5rem', border: '1px solid #344258', borderRadius: '4px' }}>{t('timeline.last_run_trace')}</a>}
       </div>

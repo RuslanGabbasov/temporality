@@ -3,10 +3,8 @@ export const en: Record<string, string> = {
     // Navigation
     'nav.timeline': 'Timeline',
     'nav.workspace': 'Workspace',
-    'nav.project': 'Overview',
     'nav.runs': 'Runs',
     'nav.knowledge': 'Knowledge',
-    'nav.observability': 'Observability',
     'nav.agents': 'Agents',
     'nav.skills': 'Skills',
     'nav.artifacts': 'Artifacts',

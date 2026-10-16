@@ -30,7 +30,7 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 
 | Path | Purpose |
 |---|---|
-| `/dashboard` | System dashboard — health strip, providers/models, per-project rollup, quality loop, sagas and tasks with a budget, knowledge observability (`/observability` is a legacy redirect) |
+| `/dashboard` | System dashboard — health strip, providers/models, per-project rollup, quality loop, sagas and tasks with a budget, knowledge observability |
 | `/workspace` | Agent chat — SSE streaming, reasoning, Markdown, conversations |
 | `/agent-config` | Agent management — CRUD, templates, full configuration |
 | `/agents` | Run traces — event timeline, trajectory extraction, inline reconciliation of uncertain operations |

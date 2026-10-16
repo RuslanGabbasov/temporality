@@ -3,10 +3,8 @@ export const ru: Record<string, string> = {
     // Navigation
     'nav.timeline': 'Таймлайн',
     'nav.workspace': 'Главная',
-    'nav.project': 'Обзор',
     'nav.runs': 'Запуски',
     'nav.knowledge': 'Знания',
-    'nav.observability': 'Наблюдаемость',
     'nav.agents': 'Агенты',
     'nav.skills': 'Навыки',
     'nav.artifacts': 'Артефакты',
