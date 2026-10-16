@@ -212,9 +212,9 @@ export default function Storage({ project }: { project: string }) {
   if (!project.trim()) return <ProjectRequired what={t('storage.title') ?? 'Storage'} />
 
   return (
-    <div style={{ padding: '1rem' }}>
+    <div style={{ padding: '1rem', height: 'calc(100vh - 3rem)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
       {confirmDialogNode}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexShrink: 0 }}>
         <div>
           <Heading style={{ fontSize: '1.1rem' }}>{t('storage.title') ?? 'Storage'}</Heading>
           <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', marginTop: '0.25rem' }}>{t('storage.subtitle')}</p>
@@ -223,14 +223,14 @@ export default function Storage({ project }: { project: string }) {
       </div>
       <input ref={uploadInput} type="file" multiple hidden onChange={(e) => void onUploadPicked(e)} />
       {error && <InlineNotification kind="error" lowContrast title={t('action.error') ?? 'Error'} subtitle={error} onCloseButtonClick={() => setError('')} style={{ marginBottom: '0.75rem' }} />}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 380px) 1fr', gap: '1rem', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 380px) 1fr', gap: '1rem', flex: 1, minHeight: 0 }}>
         {/* Left: the tree */}
-        <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', maxHeight: '62vh', overflowY: 'auto' }}>
+        <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', overflowY: 'auto', minHeight: 0 }}>
           {areaSection('workspace')}
           {areaSection('cache')}
         </div>
         {/* Right: details / preview */}
-        <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', maxHeight: '62vh', overflowY: 'auto', minHeight: '14rem' }}>
+        <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', overflowY: 'auto', minHeight: 0 }}>
           {!selected ? (
             <div style={{ color: 'var(--tm-muted)', fontSize: '0.78rem', padding: '1rem 0' }}>{t('storage.files_pick') ?? 'Pick a file to preview it.'}</div>
           ) : (
@@ -261,13 +261,13 @@ export default function Storage({ project }: { project: string }) {
               ) : !preview ? (
                 <div style={{ color: 'var(--tm-muted)', fontSize: '0.78rem' }}>…</div>
               ) : preview.kind === 'image' ? (
-                <img src={preview.content} alt={selected.entry.name} style={{ maxWidth: '100%', maxHeight: '48vh', borderRadius: '4px', border: '1px solid var(--tm-border)' }} />
+                <img src={preview.content} alt={selected.entry.name} style={{ maxWidth: '100%', borderRadius: '4px', border: '1px solid var(--tm-border)' }} />
               ) : preview.kind === 'markdown' ? (
-                <div style={{ maxHeight: '48vh', overflowY: 'auto', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', background: 'var(--tm-surface)' }}>
+                <div style={{ border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', background: 'var(--tm-surface)' }}>
                   <Markdown content={preview.content} />
                 </div>
               ) : (
-                <pre style={{ margin: 0, padding: '0.5rem', background: 'var(--tm-surface)', border: '1px solid var(--tm-border)', borderRadius: '4px', fontSize: '0.72rem', lineHeight: 1.45, overflow: 'auto', maxHeight: '48vh', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{preview.content}</pre>
+                <pre style={{ margin: 0, padding: '0.5rem', background: 'var(--tm-surface)', border: '1px solid var(--tm-border)', borderRadius: '4px', fontSize: '0.72rem', lineHeight: 1.45, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{preview.content}</pre>
               )}
             </>
           )}
