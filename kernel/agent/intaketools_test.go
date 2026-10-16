@@ -61,7 +61,7 @@ func TestIntakeSearchProjectsSendsSenderFromActor(t *testing.T) {
 func TestIntakeDecideValidatesClassificationLocally(t *testing.T) {
 	activities := &Activities{HTTP: http.DefaultClient, WorkspaceURL: "http://unused"}
 	result, err := activities.RunTool(context.Background(), ToolRequest{
-		RunID: "intake-m1", Name: "intake_decide",
+		RunID: "intake-m1", Project: IntakeProjectID, Name: "intake_decide",
 		Arguments: map[string]any{"classification": "urgent"},
 	})
 	if err != nil {
@@ -121,7 +121,7 @@ func TestIntakeStartTaskPostsPayloadAndReportsAPIErrors(t *testing.T) {
 	activities.WorkspaceURL = errorServer.URL
 	activities.HTTP = errorServer.Client()
 	result, err = activities.RunTool(context.Background(), ToolRequest{
-		RunID: "intake-m1", Name: "start_task",
+		RunID: "intake-m1", Project: IntakeProjectID, Name: "start_task",
 		Arguments: map[string]any{"project_id": "graphmap", "title": "t", "prompt": "p"},
 	})
 	if err != nil {
@@ -164,7 +164,7 @@ func TestIntakeRunStatusSendsSenderAndCapsLimit(t *testing.T) {
 
 	// No actor → error, never a sender-less listing of someone else's runs.
 	result, err = activities.RunTool(context.Background(), ToolRequest{
-		RunID: "r", Name: "run_status", Arguments: map[string]any{},
+		RunID: "r", Project: IntakeProjectID, Name: "run_status", Arguments: map[string]any{},
 	})
 	if err != nil {
 		t.Fatalf("run_status without actor: %v", err)
@@ -217,7 +217,7 @@ func TestIntakeCancelRunPostsRunIDAndSurfacesOwnershipError(t *testing.T) {
 	activities.WorkspaceURL = errorServer.URL
 	activities.HTTP = errorServer.Client()
 	result, err = activities.RunTool(context.Background(), ToolRequest{
-		RunID: "intake-m1", Name: "cancel_run",
+		RunID: "intake-m1", Project: IntakeProjectID, Name: "cancel_run",
 		Arguments: map[string]any{"run_id": "someone-elses-run"},
 	})
 	if err != nil {
@@ -229,12 +229,69 @@ func TestIntakeCancelRunPostsRunIDAndSurfacesOwnershipError(t *testing.T) {
 
 	// Missing run_id fails locally before any HTTP call.
 	result, err = activities.RunTool(context.Background(), ToolRequest{
-		RunID: "intake-m1", Name: "cancel_run", Arguments: map[string]any{},
+		RunID: "intake-m1", Project: IntakeProjectID, Name: "cancel_run", Arguments: map[string]any{},
 	})
 	if err != nil {
 		t.Fatalf("cancel_run missing arg: %v", err)
 	}
 	if !strings.Contains(result.Content, "error:") {
 		t.Fatalf("expected local validation error, got %q", result.Content)
+	}
+}
+
+// The intake dialog tools resolve the inbound message by the CURRENT run id,
+// so outside the intake project they are guaranteed 404s: the catalog must
+// not advertise them there (the amendment-run incident), and the activity
+// refuses them as defense in depth.
+func TestAdvertisedToolsCutIntakeDialogToolsOutsideIntake(t *testing.T) {
+	outside := advertisedTools(&RunInput{RunID: "r", Project: "omni"})
+	for _, tool := range outside {
+		if intakeDialogTools[tool.Name] {
+			t.Errorf("tool %q must not be advertised outside the intake project", tool.Name)
+		}
+	}
+	inside := advertisedTools(&RunInput{RunID: "r", Project: IntakeProjectID})
+	found := map[string]bool{}
+	for _, tool := range inside {
+		found[tool.Name] = true
+	}
+	for _, name := range []string{"intake_decide", "start_task", "run_status"} {
+		if !found[name] {
+			t.Errorf("intake run must still see %q; advertised = %v", name, names(found))
+		}
+	}
+}
+
+func TestAdvertisedToolsCutIntakeDialogToolsEvenWhenAllowlisted(t *testing.T) {
+	input := &RunInput{
+		RunID: "r", Project: "omni",
+		ToolAllowlist: []string{"intake_decide", "read_file", "run_command"},
+	}
+	for _, tool := range advertisedTools(input) {
+		if intakeDialogTools[tool.Name] {
+			t.Errorf("allowlisted %q must still be cut outside the intake project", tool.Name)
+		}
+	}
+}
+
+func names(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for name := range set {
+		out = append(out, name)
+	}
+	return out
+}
+
+func TestRunToolRefusesIntakeDialogToolsOutsideIntake(t *testing.T) {
+	activities := &Activities{}
+	result, err := activities.RunTool(context.Background(), ToolRequest{
+		RunID: "r", Project: "omni", Name: "intake_decide",
+		Arguments: map[string]any{"classification": "task"},
+	})
+	if err != nil {
+		t.Fatalf("expected a tool-result refusal, got activity error: %v", err)
+	}
+	if !strings.Contains(result.Content, "intake project") {
+		t.Fatalf("refusal = %q", result.Content)
 	}
 }

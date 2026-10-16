@@ -2199,6 +2199,15 @@ func compactJSON(v any, maxLen int) string {
 // run's tool allowlist when one is set.
 func advertisedTools(input *RunInput) []llm.ToolDef {
 	tools := append(KernelTools(), input.Tools...)
+	// The intake dialog tools only work in the intake project's own dialog
+	// runs (they resolve the inbound message by the CURRENT run id). In any
+	// other run they are advertised dead weight — the model sees "call it
+	// exactly once first" and burns a turn on a guaranteed 404. The cut is
+	// unconditional for non-intake runs: an allowlist cannot re-advertise a
+	// tool that cannot work there.
+	if input.Project != IntakeProjectID {
+		tools = slices.DeleteFunc(tools, func(tool llm.ToolDef) bool { return intakeDialogTools[tool.Name] })
+	}
 	if len(input.ToolAllowlist) == 0 && len(input.DenyTools) == 0 {
 		return tools
 	}
@@ -2370,6 +2379,22 @@ var sandboxAutoApprovedTools = map[string]bool{
 
 // policySafeTools are exempt from policy-mandated tool approval
 // (approval_mode: tools): observation, knowledge-recording and escalation
+// IntakeProjectID is the system project whose dialog agent classifies
+// inbound channel messages (docs/inbound-messages.md). Matches
+// cmd/agent-kernel's IntakeProjectID — declared here so the workflow can
+// scope the dialog tools without importing the kernel main package.
+const IntakeProjectID = "intake"
+
+// intakeDialogTools work only inside an intake dialog run: they resolve the
+// inbound message (its sender, its routed runs) by the CURRENT run id, so in
+// any other run they are guaranteed failures (404 "no inbound message for
+// this run"). advertisedTools cuts them from every non-intake run.
+var intakeDialogTools = map[string]bool{
+	"search_projects": true, "search_org_units": true,
+	"start_task": true, "intake_decide": true,
+	"run_status": true, "cancel_run": true,
+}
+
 // tools the policy regime itself relies on. Consequential tools —
 // run_command, write_file/edit_file, delegate, trigger writes, skill_propose,
 // mcp__ tools — still need a human decision. Read-only MCP tools are exempt

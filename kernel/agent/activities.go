@@ -671,6 +671,13 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return ToolResult{}, temporal.NewNonRetryableApplicationError(
 			fmt.Sprintf("tool %q is disabled for this agent", request.Name), "ToolNotAllowed", nil)
 	}
+	if intakeDialogTools[request.Name] && request.Project != IntakeProjectID {
+		// Second layer of the intake-tool scoping: the catalog no longer
+		// advertises these outside the intake project, and the execution
+		// boundary refuses them even if a crafted prompt sneaks a call through.
+		// A tool-result refusal (not an activity error): the run continues.
+		return ToolResult{Content: fmt.Sprintf("error: %s only works in the intake project's dialog runs (no inbound message is bound to this run)", request.Name)}, nil
+	}
 	switch request.Name {
 	case "echo":
 		value, _ := request.Arguments["text"].(string)
