@@ -150,7 +150,11 @@ function buildLang(lang) {
     return `<aside class="docs-sidebar"><nav>${items}\n<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="${brandHref}">${strings.backLabel}</a></nav></aside>`
   }
 
-  const head = (title, description) => `<!doctype html>
+  const head = (title, description) => {
+    // Cache-buster: a stale cached docs.css once made the primary button
+    // invisible (amber on amber) — the version forces fresh styles.
+    const v = process.env.DOCS_VERSION || new Date().toISOString().slice(0, 16)
+    return `<!doctype html>
 <html lang="${strings.htmlLang}">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -159,9 +163,10 @@ function buildLang(lang) {
 <link rel="icon" href="${rootPrefix}/assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="${rootPrefix}/styles.css"><link rel="stylesheet" href="${lang.cssHref}">
+<link rel="stylesheet" href="${rootPrefix}/styles.css?v=${v}"><link rel="stylesheet" href="${lang.cssHref}?v=${v}">
 </head>
 <body class="docs-page">`
+  }
 
   const pageHtml = (page) => {
     const index = pages.indexOf(page)
@@ -203,7 +208,7 @@ ${sidebar('index')}
 <div class="docs-eyebrow">${strings.docsLabel}</div>
 <h1>${strings.docsTitle.replace('Temporality — ', '')}</h1>
 <p class="docs-lead">${strings.docsLead}</p>
-<p><a class="btn btn-primary" href="intro.html"><span>${strings.startLabel}</span><span>→</span></a></p>
+<p><a class="btn btn-primary" style="color:#1b211f" href="intro.html"><span>${strings.startLabel}</span><span>→</span></a></p>
 <div class="docs-cards">
 ${cards}
 </div>
