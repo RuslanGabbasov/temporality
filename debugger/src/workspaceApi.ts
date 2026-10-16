@@ -1,4 +1,5 @@
 import { authHeaders } from './api'
+import type { ResearchSessionPayload } from './explorer/sessions'
 
 const KERNEL_API = '/kernel-api'
 
@@ -863,6 +864,19 @@ export interface User {
 
 const headers = () => ({ 'Content-Type': 'application/json', ...authHeaders() })
 
+/** Saved knowledge-explorer investigation (docs/human-knowledge-explorer.md
+ *  §11). `payload` is present on get/create/update responses; the list
+ *  endpoint omits it to stay light. */
+export interface ResearchSession {
+  id: number
+  project: string
+  title: string
+  created_by: string
+  payload?: ResearchSessionPayload | null
+  created_at: string
+  updated_at: string
+}
+
 /** Uploaded project file: `path` is inside the agent sandbox (/workspace/uploads/…). */
 export interface UploadedFile {
   name: string
@@ -1240,6 +1254,20 @@ export const workspaceApi = {
     request<{ review: ArtifactReview; artifact: Artifact }>(`/v1/workspace/artifacts/${id}/reviews/${reviewId}/${approve ? 'approve' : 'reject'}`, { method: 'POST', body: JSON.stringify({ comment }) }),
   artifactReferences: () =>
     request<{ references: Record<string, string[]> }>('/v1/workspace/artifacts/references'),
+
+  // Research sessions (docs/human-knowledge-explorer.md §11): saved
+  // knowledge-explorer investigations. The payload is references only; the
+  // list stays light, the full payload arrives on get.
+  listResearchSessions: (project: string) =>
+    request<{ sessions: ResearchSession[] }>(`/v1/workspace/research-sessions?project=${encodeURIComponent(project)}`),
+  createResearchSession: (data: { project: string; title: string; payload: ResearchSessionPayload }) =>
+    request<ResearchSession>('/v1/workspace/research-sessions', { method: 'POST', body: JSON.stringify(data) }),
+  getResearchSession: (id: number) =>
+    request<ResearchSession>(`/v1/workspace/research-sessions/${id}`),
+  updateResearchSession: (id: number, data: { title: string; payload: ResearchSessionPayload }) =>
+    request<ResearchSession>(`/v1/workspace/research-sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteResearchSession: (id: number) =>
+    request<{ deleted: boolean }>(`/v1/workspace/research-sessions/${id}`, { method: 'DELETE' }),
 
   // Users
   listUsers: () => request<{ users: User[] }>('/v1/workspace/users'),

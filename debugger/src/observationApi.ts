@@ -265,6 +265,21 @@ export interface ExploreConflict {
   resolution?: string
 }
 
+/** Synthesis dossier of the explore engine (observation/explore.go
+ *  ExploreSynthesis): established/disputed/retired are grounded in the
+ *  working set; gaps/next_actions are heuristics — the interpretation flag
+ *  keeps them visibly distinct from content (ТЗ §4.6, §12.3). */
+export interface ExploreSynthesis {
+  established?: ExploreKnowledgeCard[]
+  disputed?: ExploreKnowledgeCard[]
+  retired?: ExploreKnowledgeCard[]
+  conflicts?: ExploreConflict[]
+  gaps?: string[]
+  next_actions?: string[]
+  references?: string[]
+  interpretation: boolean
+}
+
 export interface ExploreResult {
   operation: string
   algorithm_version: string
@@ -273,7 +288,7 @@ export interface ExploreResult {
   relations?: ExploreRelation[]
   traces?: ExploreHistory[]
   conflicts?: ExploreConflict[]
-  synthesis?: unknown
+  synthesis?: ExploreSynthesis
   gaps?: string[]
   next_actions?: string[]
   limits: ExploreLimits

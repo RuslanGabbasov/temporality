@@ -203,3 +203,35 @@ UI-only поверх существующего движка explore (серве
   `view`/`dossier`; `observationApi` — типизация relations/traces/conflicts +
   фильтр `knowledge_id`; i18n ru/en; тесты (укладка графа, stateAsOf, базы
   конфликтов).
+
+## 10. Статус этапа 4 (реализовано)
+
+- Серверное хранилище сессий: миграция 000066
+  (`workspace_research_session`: project, title, created_by, payload jsonb,
+  updated_at), Store-методы (`workspace/researchsession.go`, список — без
+  payload), маршруты `/v1/workspace/research-sessions` (GET-список/GET-одна —
+  reader; POST/PUT/DELETE — writer) с аудитом
+  research.session.created/updated/deleted; валидация title ≤ 200, payload
+  ≤ 128 КБ; handler-тесты (RBAC, 422/404/400, аудиты).
+- Сессии в UI: панель «Сессии» в исследователе — сохранить текущее
+  положение (вопрос, фильтры, область, view, досье, стек переходов) с
+  заметками и выводом исследователя, открыть (позиция восстанавливается,
+  знания ре-резолвятся из текущей проекции — §11.3), «Сохранить как новую»
+  (§11.4), удалить; заметки/вывод помечены как слова исследователя, не
+  знание (§11.2). Payload v1 — только ссылки; толерантный парсинг
+  (`applySessionPayload`) переживает поля будущих версий, тесты на
+  roundtrip/устойчивость.
+- Исследование агента (§12): вкладка «Исследование агента» — выбор рана
+  (ввод + недавние), извлечение вызовов `knowledge_explore` из журнала
+  (tool.started + аргументы как JSON-строка), «Повторить сейчас» —
+  воспроизведение через explore по текущей базе с пометкой времени и
+  полноты; для synthesize — секции established/disputed/retired/conflicts/
+  gaps/next_actions/references с дисклеймером интерпретации и переходами в
+  досье; чистый парсер вызовов вынесен и покрыт тестами; `synthesis`
+  типизирован в клиенте (ExploreSynthesis).
+- Перенос из Observability: панель «Подбор подсказок (прайминг)»
+  (query/tool/tool_result → /hints) — сворачиваемый блок во вкладке поиска;
+  вкладка «Знания» удалена (overview + patterns остались), плитки здоровья
+  ведут в исследователь `/knowledge?state=…` (включая alive/at_risk);
+  lifecycle-действия и активационная цепочка давно в Explorer (этапы 2–3),
+  URL-синхронизация Observability почищена.

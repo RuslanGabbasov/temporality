@@ -34,7 +34,8 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 | `/workspace` | Agent chat — SSE streaming, reasoning, Markdown, conversations |
 | `/agent-config` | Agent management — CRUD, templates, full configuration |
 | `/agents` | Run traces — event timeline, trajectory extraction, inline reconciliation of uncertain operations |
-| `/observability` | Knowledge — search, facets, bitemporal filters, lifecycle, activation chains, projection |
+| `/knowledge` | Knowledge explorer — area map, faceted search, evidence dossiers, relation graph, bitemporal history, conflicts, research sessions, agent research replay |
+| `/observability` | Observability — knowledge base overview (health, cuts, comparison) and experience patterns |
 | `/experience` | Experience Timeline — memory lens, semantic zoom, retrospective audit |
 | `/skills` | Living Skills — contract, versions, executions, memory, evolution, skill builder |
 | `/artifacts` | Artifacts — reference document registry (regulations, instructions), skill linkage |

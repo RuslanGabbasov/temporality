@@ -279,6 +279,13 @@ func main() {
 		log.Error("migrate workspace v65 (human request thread)", "error", err)
 		os.Exit(1)
 	}
+	// 000066 creates the research-session store (docs/human-knowledge-
+	// explorer.md §11): saved knowledge-explorer investigations — references
+	// only, the projection is re-resolved on every open.
+	if err = ws.Migrate(ctx, "migrations/000066_research_sessions.up.sql"); err != nil {
+		log.Error("migrate workspace v66 (research sessions)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -2457,6 +2464,10 @@ func main() {
 	RegisterArtifactLifecycleRoutes(mux, gate, ws, events, &channelReviewNotifier{
 		ws: ws, settings: activities.ChannelSettings, client: activities.HTTP, log: log,
 	})
+	// Research sessions (docs/human-knowledge-explorer.md §11): saved
+	// knowledge-explorer investigations — list/read for everyone with read
+	// access, create/update/delete for writers.
+	RegisterResearchSessionRoutes(mux, gate, ws)
 	// agentskills.io import: folder or archive → parsed SKILL.md draft for the
 	// skill editor. Pure parse, no persistence — saving follows the normal flow.
 	RegisterSkillImportRoutes(mux, gate)

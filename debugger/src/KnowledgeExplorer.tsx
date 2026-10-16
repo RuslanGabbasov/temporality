@@ -10,6 +10,10 @@ import {
 import AreaMap, { areaKey } from './explorer/AreaMap'
 import ConflictPanel from './explorer/ConflictPanel'
 import LifecycleBar from './explorer/LifecycleBar'
+import AgentResearch from './explorer/AgentResearch'
+import HintsPreview from './explorer/HintsPreview'
+import SessionsPanel from './explorer/SessionsPanel'
+import { applySessionPayload, type SessionSnapshot } from './explorer/sessions'
 import Dossier from './Dossier'
 import { stateLabel, kindLabel } from './explorer/shared'
 import ProjectRequired from './ProjectRequired'
@@ -48,7 +52,7 @@ interface NavRecord {
   dossierID: string
 }
 
-type View = 'search' | 'conflicts'
+type View = 'search' | 'conflicts' | 'agent'
 
 export default function KnowledgeExplorer({ project }: { project: string }) {
   const t = useT()
@@ -66,7 +70,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   })
   const [selectedAreaKey, setSelectedAreaKey] = useState(initParams.get('area') ?? '')
   const [revision, setRevision] = useState(0)
-  const [view, setView] = useState<View>(initParams.get('view') === 'conflicts' ? 'conflicts' : 'search')
+  const [view, setView] = useState<View>(initParams.get('view') === 'conflicts' ? 'conflicts' : initParams.get('view') === 'agent' ? 'agent' : 'search')
   const [dossierID, setDossierID] = useState(initParams.get('dossier') ?? '')
 
   const [areas, setAreas] = useState<ExploreArea[]>([])
@@ -89,6 +93,11 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   const navSeq = useRef(0)
   const listSeq = useRef(0)
   const exploreSeq = useRef(0)
+
+  // Research sessions (ТЗ §11): panel visibility and the session currently
+  // bound to the editor (0 = the position is not saved yet).
+  const [sessionsOpen, setSessionsOpen] = useState(false)
+  const [currentSessionID, setCurrentSessionID] = useState(0)
 
   const debouncedQuestion = useDebounced(question)
 
@@ -130,7 +139,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     setSearchInput(params.get('q') ?? '')
     setQuestion(params.get('q') ?? '')
     setSelectedAreaKey(params.get('area') ?? '')
-    setView(params.get('view') === 'conflicts' ? 'conflicts' : 'search')
+    setView(params.get('view') === 'conflicts' ? 'conflicts' : params.get('view') === 'agent' ? 'agent' : 'search')
     setDossierID(params.get('dossier') ?? '')
     setFilters({
       state: params.get('state') ?? '',
@@ -233,14 +242,17 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     setSearchInput(record.question)
     setFilters(record.filters)
     setSelectedAreaKey(record.areaKey)
-    setView(record.view === 'conflicts' ? 'conflicts' : 'search')
+    setView(record.view === 'conflicts' || record.view === 'agent' ? record.view : 'search')
     setDossierID(record.dossierID)
   }, [])
 
   const switchView = useCallback((next: View) => {
     setView(next)
     setDossierID('')
-    pushNav(next === 'conflicts' ? (t('explorer.tab_conflicts') ?? 'Contradictions') : (t('explorer.tab_search') ?? 'Search'), { view: next, dossierID: '' })
+    const label = next === 'conflicts' ? (t('explorer.tab_conflicts') ?? 'Contradictions')
+      : next === 'agent' ? (t('explorer.tab_agent') ?? 'Agent research')
+        : (t('explorer.tab_search') ?? 'Search')
+    pushNav(label, { view: next, dossierID: '' })
   }, [pushNav, t])
 
   const openDossier = useCallback((id: string) => {
@@ -251,6 +263,35 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   const closeDossier = useCallback(() => {
     setDossierID('')
   }, [])
+
+  /** Restore a saved session (ТЗ §11): apply the research position and put
+   *  the navigation path back — knowledge itself is re-resolved from the
+   *  CURRENT projection, so the session honors revoked rights and changed
+   *  statements (§11.3). */
+  const applySession = useCallback((state: SessionSnapshot) => {
+    setQuestion(state.question)
+    setSearchInput(state.searchInput)
+    setFilters(state.filters)
+    setSelectedAreaKey(state.areaKey)
+    setView(state.view === 'conflicts' || state.view === 'agent' ? state.view : 'search')
+    setDossierID(state.dossierID)
+    setNavStack(state.nav.map((record) => ({ ...record })))
+    navSeq.current = Math.max(navSeq.current, ...state.nav.map((record) => record.id), 0)
+  }, [])
+
+  /** Live research position for session saves; notes and conclusion are
+   *  merged in by the panel — they are the researcher's words, not knowledge. */
+  const sessionPosition = useCallback((): SessionSnapshot => ({
+    question,
+    searchInput,
+    filters,
+    areaKey: selectedAreaKey,
+    view,
+    dossierID,
+    nav: navStack,
+    notes: '',
+    conclusion: '',
+  }), [question, searchInput, filters, selectedAreaKey, view, dossierID, navStack])
 
   /** Start a fresh research question from anywhere (dossier «research from
    *  this statement» etc.) — returns to the search view. */
@@ -325,15 +366,33 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
           />
           <Button size="sm" onClick={submitQuestion}>{t('knowledge.search') ?? 'Search'}</Button>
           <button onClick={() => setRevision((r) => r + 1)} disabled={listLoading} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
+          <button
+            onClick={() => setSessionsOpen((value) => !value)}
+            style={{
+              background: sessionsOpen ? 'var(--tm-elevated)' : 'none', border: `1px solid ${sessionsOpen ? 'var(--tm-teal)' : 'var(--tm-border)'}`,
+              color: sessionsOpen ? 'var(--tm-teal)' : 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.7rem',
+              padding: '0.3rem 0.6rem', lineHeight: 1.4, borderRadius: '999px', whiteSpace: 'nowrap',
+            }}
+          >{t('explorer.sessions_button') ?? 'Sessions'}{currentSessionID > 0 ? ' ●' : ''}</button>
         </div>
       </div>
+
+      <SessionsPanel
+        project={project}
+        open={sessionsOpen}
+        snapshot={sessionPosition}
+        currentID={currentSessionID}
+        onLoaded={(id, _title, state) => { setCurrentSessionID(id); applySession(state) }}
+        onClose={() => setSessionsOpen(false)}
+      />
 
       {exploreError && <InlineNotification kind="warning" title="Explore" subtitle={exploreError} onClose={() => setExploreError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
       {listError && <InlineNotification kind="error" title="Error" subtitle={listError} onClose={() => setListError('')} lowContrast style={{ marginBottom: '0.75rem'}} />}
 
-      {/* Research view tabs: search vs contradiction discovery (ТЗ §10). */}
+      {/* Research view tabs: search, contradiction discovery and the agent's
+          own research calls (ТЗ §10, §12). */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', borderBottom: '1px solid var(--tm-border)', marginBottom: '0.75rem' }}>
-        {(['search', 'conflicts'] as View[]).map((key) => (
+        {(['search', 'conflicts', 'agent'] as View[]).map((key) => (
           <button
             key={key}
             onClick={() => switchView(key)}
@@ -342,7 +401,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
               border: 'none', borderBottom: view === key && !dossierID ? '2px solid var(--tm-teal)' : '2px solid transparent',
               color: view === key && !dossierID ? 'var(--tm-teal)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600,
             }}
-          >{key === 'search' ? (t('explorer.tab_search') ?? 'Search') : (t('explorer.tab_conflicts') ?? 'Contradictions')}</button>
+          >{key === 'search' ? (t('explorer.tab_search') ?? 'Search') : key === 'conflicts' ? (t('explorer.tab_conflicts') ?? 'Contradictions') : (t('explorer.tab_agent') ?? 'Agent research')}</button>
         ))}
       </div>
 
@@ -417,8 +476,11 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
             />
           ) : view === 'conflicts' ? (
             <ConflictPanel project={project} revision={revision} onChanged={() => setRevision((r) => r + 1)} onOpenDossier={openDossier} />
+          ) : view === 'agent' ? (
+            <AgentResearch project={project} onOpenDossier={openDossier} />
           ) : (
           <>
+          <HintsPreview project={project} />
           <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.75rem', marginBottom: '0.75rem' }}>
             {facetRow(t('knowledge.state_label') ?? 'State', 'state', stateFacetValues)}
             {facetRow(t('knowledge.scope_label') ?? 'Scope', 'scope', facetValues(facets?.scopes))}
