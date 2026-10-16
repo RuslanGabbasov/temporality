@@ -278,3 +278,32 @@ func TestComputeHealthStatsEmptyWindow(t *testing.T) {
 		t.Fatalf("counters not zeroed: %+v %+v %+v", stats.Totals, stats.Runs, stats.Approvals)
 	}
 }
+
+func TestComputeHealthStatsProviderFallback(t *testing.T) {
+	// Legacy completed events carried provider but no model: their tokens and
+	// latency must land on the provider key (kernel/cost pricing attribution),
+	// not on an opaque "unknown" row.
+	base := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	events := []Event{
+		healthTestEvent("e1", "model.started", "r1", base, map[string]any{"turn": 1, "model": "glm-5.3"}),
+		healthTestEvent("e2", "model.completed", "r1", base.Add(time.Second), map[string]any{
+			"turn": 1, "provider": "api.z.ai", "latency_ms": 1500, "total_tokens": 5000,
+		}),
+	}
+	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Minute))
+	var legacy *HealthModelStats
+	for i := range stats.Models {
+		if stats.Models[i].Model == "api.z.ai" {
+			legacy = &stats.Models[i]
+		}
+		if stats.Models[i].Model == "unknown" {
+			t.Fatalf("unknown row must stay empty for provider-only events: %+v", stats.Models[i])
+		}
+	}
+	if legacy == nil {
+		t.Fatalf("provider row missing in %v", stats.Models)
+	}
+	if legacy.Completed != 1 || legacy.TotalTokens != 5000 || legacy.P50LatencyMS != 1500 {
+		t.Fatalf("provider row = %+v, want 1 completed / 5000 tokens / 1500ms", legacy)
+	}
+}

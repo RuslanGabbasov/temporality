@@ -1104,7 +1104,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		modelOpts := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
 		if err := executeModelWithNudge(ctx, activityCtx, state, modelOpts, modelReq, turn, &completion); err != nil {
 			failureDetail := boundedFailureDetail(err)
-			if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": turn, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
+			if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": turn, "model": input.Model, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
 				return result, eventErr
 			}
 			if eventErr := emit(activityCtx, state, "run.failed", map[string]any{"turn": turn, "error_type": "model_call_failed", "error": failureDetail}); eventErr != nil {
@@ -1113,7 +1113,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			result.Status = "failed"
 			return result, err
 		}
-		completedData := map[string]any{"turn": turn, "tool_call_count": len(completion.ToolCalls), "finish_reason": completion.Finish, "total_tokens": completion.Usage.TotalTokens}
+		completedData := map[string]any{"turn": turn, "model": input.Model, "tool_call_count": len(completion.ToolCalls), "finish_reason": completion.Finish, "total_tokens": completion.Usage.TotalTokens}
 		maps.Copy(completedData, modelObservability(completion))
 		if err := emit(activityCtx, state, "model.completed", completedData); err != nil {
 			return result, err
@@ -1941,7 +1941,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	modelCtx := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
 	if err := executeModelWithNudge(ctx, activityCtx, state, modelCtx, ModelRequest{Model: input.Model, Messages: finaleMessages, RunID: input.RunID, Turn: finaleTurn, Project: input.Project, PromptCacheKey: input.TaskID}, finaleTurn, &finale); err != nil {
 		failureDetail := boundedFailureDetail(err)
-		if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "forced_finale": true, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
+		if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": finaleTurn, "forced_finale": true, "model": input.Model, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
 			return result, eventErr
 		}
 		if eventErr := emit(activityCtx, state, "run.failed", map[string]any{"turn": finaleTurn, "error_type": "finale_model_call_failed", "error": failureDetail}); eventErr != nil {
@@ -1950,7 +1950,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		result.Status = "failed"
 		return result, err
 	}
-	finaleData := map[string]any{"turn": finaleTurn, "forced_finale": true, "tool_call_count": len(finale.ToolCalls), "finish_reason": finale.Finish, "total_tokens": finale.Usage.TotalTokens}
+	finaleData := map[string]any{"turn": finaleTurn, "forced_finale": true, "model": input.Model, "tool_call_count": len(finale.ToolCalls), "finish_reason": finale.Finish, "total_tokens": finale.Usage.TotalTokens}
 	maps.Copy(finaleData, modelObservability(finale))
 	if err := emit(activityCtx, state, "model.completed", finaleData); err != nil {
 		return result, err
@@ -2493,7 +2493,7 @@ func executeModelWithNudge(ctx workflow.Context, activityCtx workflow.Context, s
 			return nil
 		}
 		if applyNudge && temporal.IsCanceledError(err) {
-			if eventErr := emit(activityCtx, state, "model.nudged", map[string]any{"turn": turn, "actor_id": nudgeActor}); eventErr != nil {
+			if eventErr := emit(activityCtx, state, "model.nudged", map[string]any{"turn": turn, "model": request.Model, "actor_id": nudgeActor}); eventErr != nil {
 				return eventErr
 			}
 			continue

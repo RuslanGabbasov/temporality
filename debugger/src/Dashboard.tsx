@@ -295,9 +295,9 @@ export default function Dashboard({ project, setProject }: Props) {
               </ColHead>
               {health.models.map((m: HealthModelStats) => (
                 <div key={`${m.provider ?? ''}/${m.model}`} style={{ ...tableGrid("minmax(9rem, 2fr) minmax(5rem, 1fr) minmax(3.5rem, 0.7fr) minmax(3.5rem, 0.7fr) minmax(4.5rem, 1fr) minmax(5.5rem, 1.1fr) minmax(5rem, 1fr)"), fontSize: '0.78rem', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${m.model}${m.provider ? ` · ${m.provider}` : ''}`}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${m.model}${m.provider && m.provider !== m.model ? ` · ${m.provider}` : ''}`}>
                     {m.model}
-                    {m.provider && <span style={{ color: 'var(--tm-text-3)' }}> · {m.provider}</span>}
+                    {m.provider && m.provider !== m.model && <span style={{ color: 'var(--tm-text-3)' }}> · {m.provider}</span>}
                   </span>
                   <span>{m.calls}</span>
                   <span style={{ color: m.in_flight > 0 ? 'var(--tm-text)' : 'var(--tm-text-3)' }}>{m.in_flight}</span>

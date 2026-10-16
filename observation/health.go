@@ -110,6 +110,13 @@ func ComputeHealthStats(events []Event, since, now time.Time) HealthStats {
 	accumulator := func(event Event) *healthModelAccumulator {
 		model, _ := event.Data["model"].(string)
 		if model == "" {
+			// Legacy events (pre model-attribution fix) carried only the
+			// provider on completed events; keying those by provider keeps
+			// their tokens out of "unknown" and matches kernel/cost pricing
+			// attribution.
+			model, _ = event.Data["provider"].(string)
+		}
+		if model == "" {
 			model = "unknown"
 		}
 		agg := models[model]

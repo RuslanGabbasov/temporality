@@ -580,7 +580,7 @@ func (a *Activities) emitModelAttempt(ctx context.Context, request ModelRequest,
 	if reason == "stream_fallback" {
 		eventID += "/fallback"
 	}
-	data := map[string]any{"turn": request.Turn, "attempt": attempt, "reason": reason}
+	data := map[string]any{"turn": request.Turn, "model": request.Model, "attempt": attempt, "reason": reason}
 	if streamMs > 0 {
 		data["stream_ms"] = streamMs
 	}
