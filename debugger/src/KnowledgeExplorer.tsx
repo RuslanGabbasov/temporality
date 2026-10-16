@@ -354,24 +354,27 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     <div style={{ padding: '1rem' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, fontSize: '1.1rem' }}>{t('explorer.title') ?? 'Knowledge explorer'}</h2>
-        <div style={{ flex: 1, minWidth: '320px', display: 'flex', gap: '0.5rem' }}>
+        <div style={{ flex: 1, minWidth: '320px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <TextInput
             id="explorer-search"
+            size="sm"
             value={searchInput}
             placeholder={t('explorer.search_placeholder') ?? 'Question or keywords…'}
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submitQuestion() }}
             labelText=""
             hideLabel
+            style={{ flex: 1 }}
           />
           <Button size="sm" onClick={submitQuestion}>{t('knowledge.search') ?? 'Search'}</Button>
-          <button onClick={() => setRevision((r) => r + 1)} disabled={listLoading} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px' }} title="Refresh">↻</button>
+          <button onClick={() => setRevision((r) => r + 1)} disabled={listLoading} title={t('explorer.refresh_hint') ?? 'Refresh'} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px', flexShrink: 0 }}>↻</button>
           <button
             onClick={() => setSessionsOpen((value) => !value)}
+            title={t('explorer.sessions_hint_short') ?? 'Save the current investigation (question, filters, path) and come back to it later'}
             style={{
               background: sessionsOpen ? 'var(--tm-elevated)' : 'none', border: `1px solid ${sessionsOpen ? 'var(--tm-teal)' : 'var(--tm-border)'}`,
               color: sessionsOpen ? 'var(--tm-teal)' : 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.7rem',
-              padding: '0.3rem 0.6rem', lineHeight: 1.4, borderRadius: '999px', whiteSpace: 'nowrap',
+              padding: '0.3rem 0.6rem', lineHeight: 1.4, borderRadius: '999px', whiteSpace: 'nowrap', flexShrink: 0,
             }}
           >{t('explorer.sessions_button') ?? 'Sessions'}{currentSessionID > 0 ? ' ●' : ''}</button>
         </div>
@@ -407,12 +410,17 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
 
       {navStack.length > 1 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-          <span style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{t('explorer.nav_history') ?? 'Path'}:</span>
+          <span title={t('explorer.nav_history_hint') ?? 'Screens you opened during this investigation. Click to return; × clears the history.'} style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{t('explorer.nav_history') ?? 'Path'}:</span>
           {navStack.slice(-6).map((record) => (
             <button key={record.id} style={chip(false)} onClick={() => restoreNav(record)} title={record.question}>
               {record.label.length > 28 ? `${record.label.slice(0, 27)}…` : record.label}
             </button>
           ))}
+          <button
+            onClick={() => setNavStack((stack) => stack.slice(-1))}
+            title={t('explorer.nav_history_clear') ?? 'Clear history'}
+            style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.8rem', padding: '0.15rem 0.3rem', lineHeight: 1, borderRadius: '4px', flexShrink: 0 }}
+          >×</button>
         </div>
       )}
 

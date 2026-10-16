@@ -257,11 +257,15 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
                 </div>
               )}
 
-              <LifecycleBar project={project} knowledgeID={knowledgeID} onDone={onRefresh} onOpenDossier={onOpenDossier} />
-              <div style={{ marginTop: '0.6rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {/* Navigation cross-links before the lifecycle block: research
+                  and comparison are reads, the lifecycle section below is the
+                  only place that mutates the knowledge. */}
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem', paddingBottom: '0.6rem', borderBottom: '1px solid var(--tm-border)' }}>
                 <Button size="sm" kind="ghost" onClick={() => onQuestion(trace.proposition)}>{t('explorer.dossier_research') ?? 'Research from this statement'}</Button>
                 {contradictions.length > 0 && <Button size="sm" kind="ghost" onClick={() => setTab('conflicts')}>{t('explorer.dossier_compare') ?? 'Compare with counterparts'}</Button>}
               </div>
+
+              <LifecycleBar project={project} knowledgeID={knowledgeID} onDone={onRefresh} onOpenDossier={onOpenDossier} />
             </div>
           )}
 

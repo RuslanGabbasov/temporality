@@ -1445,7 +1445,9 @@ export const ru: Record<string, string> = {
     'explorer.kind_observation': 'Наблюдение',
     'explorer.offers': 'показов',
     'explorer.uses': 'использований',
-    'explorer.nav_history': 'Путь',
+    'explorer.nav_history': 'История переходов',
+    'explorer.nav_history_hint': 'Экраны, которые вы открывали в этом исследовании: нажмите, чтобы вернуться; × очищает историю.',
+    'explorer.nav_history_clear': 'Очистить историю',
     // Knowledge explorer stage 3: dossier, relations, history, conflicts
     'explorer.tab_search': 'Поиск',
     'explorer.tab_conflicts': 'Противоречия',
@@ -1466,6 +1468,8 @@ export const ru: Record<string, string> = {
     'explorer.dossier_compare': 'Сравнить с альтернативами',
     'explorer.dossier_not_found': 'Знание не найдено в видимой базе.',
     'explorer.dossier_cut_active': 'Активен битемпоральный срез — подробности на вкладке «История».',
+    'explorer.lifecycle_heading': 'Работа со знанием',
+    'explorer.lifecycle_reason': 'Причина (обязательна для любого действия)',
     'explorer.lifecycle_correct': 'Заменить',
     'explorer.lifecycle_correct_apply': 'Указать замену',
     'explorer.lifecycle_replacement': 'ID знания-приемника…',
@@ -1516,6 +1520,8 @@ export const ru: Record<string, string> = {
     'explorer.conflict_prefer_right': 'Оставить →',
     // Knowledge explorer stage 4: sessions, agent research, hints preview
     'explorer.sessions_button': 'Сессии',
+    'explorer.sessions_hint_short': 'Сохранить текущее расследование (вопрос, фильтры, путь) и вернуться к нему позже',
+    'explorer.refresh_hint': 'Обновить',
     'explorer.sessions_title_panel': 'Сессии исследования',
     'explorer.sessions_hint': 'Сохранённое состояние расследования: вопрос, фильтры и путь. Знания не копируются — при открытии подтягивается текущее состояние и текущие права.',
     'explorer.sessions_name': 'Название',

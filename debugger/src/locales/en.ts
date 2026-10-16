@@ -1445,7 +1445,9 @@ export const en: Record<string, string> = {
     'explorer.kind_observation': 'Observation',
     'explorer.offers': 'offers',
     'explorer.uses': 'uses',
-    'explorer.nav_history': 'Path',
+    'explorer.nav_history': 'Visited',
+    'explorer.nav_history_hint': 'Screens you opened during this investigation. Click to return; × clears the history.',
+    'explorer.nav_history_clear': 'Clear history',
     // Knowledge explorer stage 3: dossier, relations, history, conflicts
     'explorer.tab_search': 'Search',
     'explorer.tab_conflicts': 'Contradictions',
@@ -1466,6 +1468,8 @@ export const en: Record<string, string> = {
     'explorer.dossier_compare': 'Compare with counterparts',
     'explorer.dossier_not_found': 'Knowledge was not found in the visible base.',
     'explorer.dossier_cut_active': 'A bitemporal cut is active — the History tab explains it.',
+    'explorer.lifecycle_heading': 'Work with this knowledge',
+    'explorer.lifecycle_reason': 'Reason (required for every action)',
     'explorer.lifecycle_correct': 'Correct',
     'explorer.lifecycle_correct_apply': 'Set successor',
     'explorer.lifecycle_replacement': 'Knowledge id of the replacement…',
@@ -1516,6 +1520,8 @@ export const en: Record<string, string> = {
     'explorer.conflict_prefer_right': 'Keep →',
     // Knowledge explorer stage 4: sessions, agent research, hints preview
     'explorer.sessions_button': 'Sessions',
+    'explorer.sessions_hint_short': 'Save the current investigation (question, filters, path) and come back to it later',
+    'explorer.refresh_hint': 'Refresh',
     'explorer.sessions_title_panel': 'Research sessions',
     'explorer.sessions_hint': 'A saved investigation state: question, filters and path. Knowledge is never copied — opening resolves the current state and your current rights.',
     'explorer.sessions_name': 'Title',

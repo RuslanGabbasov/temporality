@@ -81,7 +81,7 @@ export function flattenUnits(units: OrgUnit[]): { unit: OrgUnit; depth: number }
 /** Availability selector for resource forms: "Whole organization" plus every
  * unit, indented by depth. Disabled in edit mode for non-admins — re-scoping
  * an existing resource goes through the admin binding endpoint. */
-export function OrgUnitSelect({ id, value, onChange, org, disabled, allowUnassigned, label }: {
+export function OrgUnitSelect({ id, value, onChange, org, disabled, allowUnassigned, label, size, hideLabel }: {
   id: string
   value: string
   onChange: (orgUnitID: string) => void
@@ -91,11 +91,16 @@ export function OrgUnitSelect({ id, value, onChange, org, disabled, allowUnassig
   allowUnassigned?: boolean
   /** Optional label override (users say "Primary unit"). */
   label?: string
+  /** Compact form for inline toolbars (LifecycleBar): sm + hidden label. */
+  size?: 'sm' | 'md'
+  hideLabel?: boolean
 }) {
   const t = useT()
   return (
     <Select
       id={id}
+      size={size}
+      hideLabel={hideLabel}
       labelText={label ?? (t('common.availability') ?? 'Availability')}
       value={value}
       disabled={disabled}

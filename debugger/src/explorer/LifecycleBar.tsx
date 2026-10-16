@@ -57,21 +57,30 @@ export default function LifecycleBar({ project, knowledgeID, onDone, onOpenDossi
     }
   }
 
+  const canApply = reason.trim() !== '' && !busy
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
       {error && <InlineNotification kind="error" title="Error" subtitle={error} onClose={() => setError('')} lowContrast />}
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        <TextInput
-          id={`explorer-reason-${knowledgeID}`}
-          size="sm" labelText="" hideLabel style={{ flex: 1, minWidth: '220px' }}
-          placeholder={t('runs.knowledge_reason_placeholder') ?? 'Reason'}
-          value={reason} onChange={(e) => setReason(e.target.value)}
-        />
-        <OrgUnitSelect id={`explorer-promote-unit-${knowledgeID}`} org={org} value={promoteScope} onChange={setPromoteScope} allowUnassigned label={t('knowledge.promote_scope') ?? 'Visible to'} />
-        <Button size="sm" kind="secondary" disabled={!reason.trim() || busy} onClick={() => void run('challenge')}>{t('runs.knowledge_challenge') ?? 'Challenge'}</Button>
-        <Button size="sm" kind="secondary" disabled={!reason.trim() || busy} onClick={() => void run('invalidate')}>{t('runs.knowledge_invalidate') ?? 'Invalidate'}</Button>
-        <Button size="sm" kind="secondary" disabled={!reason.trim() || busy} onClick={() => setShowCorrect((v) => !v)}>{t('explorer.lifecycle_correct') ?? 'Correct'}</Button>
-        <Button size="sm" kind="primary" disabled={!reason.trim() || busy} onClick={() => void run('promote')}>{t('knowledge.promote') ?? 'Promote'}</Button>
+      <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-muted)' }}>
+        {t('explorer.lifecycle_heading') ?? 'Work with this knowledge'}
+      </div>
+      <TextInput
+        id={`explorer-reason-${knowledgeID}`}
+        size="sm" labelText="" hideLabel
+        placeholder={t('explorer.lifecycle_reason') ?? 'Reason (required)'}
+        value={reason} onChange={(e) => setReason(e.target.value)}
+      />
+      {/* Two action groups, visually separated: publish (with its scope) on
+          the left, verdicts on the right. The scope select belongs to the
+          promote action only, so it lives inside its group. */}
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        <Button size="sm" kind="primary" disabled={!canApply} onClick={() => void run('promote')}>{t('knowledge.promote') ?? 'Promote'}</Button>
+        <OrgUnitSelect id={`explorer-promote-unit-${knowledgeID}`} org={org} value={promoteScope} onChange={setPromoteScope} allowUnassigned label={t('knowledge.promote_scope') ?? 'Visible to'} size="sm" hideLabel />
+        <span aria-hidden style={{ width: '1px', height: '1.4rem', background: 'var(--tm-border)', flexShrink: 0 }} />
+        <Button size="sm" kind="secondary" disabled={!canApply} onClick={() => void run('challenge')}>{t('runs.knowledge_challenge') ?? 'Challenge'}</Button>
+        <Button size="sm" kind="secondary" disabled={!canApply} onClick={() => void run('invalidate')}>{t('runs.knowledge_invalidate') ?? 'Invalidate'}</Button>
+        <Button size="sm" kind="secondary" disabled={!canApply || showCorrect} onClick={() => setShowCorrect(true)}>{t('explorer.lifecycle_correct') ?? 'Correct'}</Button>
       </div>
       {showCorrect && (
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -84,9 +93,10 @@ export default function LifecycleBar({ project, knowledgeID, onDone, onOpenDossi
           {replacement.trim() && onOpenDossier && (
             <Button size="sm" kind="ghost" onClick={() => onOpenDossier(replacement.trim())}>{t('explorer.dossier_open') ?? 'Open dossier'}</Button>
           )}
-          <Button size="sm" kind="secondary" disabled={!reason.trim() || !replacement.trim() || busy} onClick={() => void run('correct')}>
+          <Button size="sm" kind="secondary" disabled={!canApply || !replacement.trim()} onClick={() => void run('correct')}>
             {t('explorer.lifecycle_correct_apply') ?? 'Replace with successor'}
           </Button>
+          <Button size="sm" kind="ghost" onClick={() => setShowCorrect(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
         </div>
       )}
     </div>
