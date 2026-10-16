@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,57 +26,137 @@ type TeamRunInput struct {
 }
 
 // TeamSlotBinding is the launch-time resolution of one role slot: which agent
-// fills it and how it was chosen (fixed = manifest's fixed agent, matched =
-// preferred/user pick; automatic matching arrives with wave C).
+// fills it and how it was chosen — fixed = the manifest's fixed agent,
+// matched = user override, preferred pick or automatic role matching
+// (docs/agent-teams.md §7).
 type TeamSlotBinding struct {
 	AgentID string `json:"agent_id"`
 	Mode    string `json:"mode"` // fixed | matched
 }
 
-// TeamSlotBindings resolves manifest bindings for launch: fixed slots use
-// their agent, role slots use an explicit user binding or the manifest's
-// preferred agent. It returns a human-readable rejection for slots it cannot
-// resolve — a team must not start partially bound (docs/agent-teams.md §7).
-// Agent existence and visibility are enforced later by ActivityResolveAgent
-// (effect=none before any child starts).
-func TeamSlotBindings(manifest workspace.TeamManifest, overrides map[string]string) (map[string]TeamSlotBinding, string) {
-	bindings := make(map[string]TeamSlotBinding, len(manifest.Slots))
-	for _, override := range overrides {
-		_ = override // validated below; per-slot consumption follows
+// TeamSlotChoice explains one slot's resolution for the launch preview
+// (`GET /v1/agent/teams/{id}/resolve`): who fills it, why, and — when the
+// choice is ambiguous — which other candidates existed.
+type TeamSlotChoice struct {
+	SlotID       string   `json:"slot_id"`
+	AgentID      string   `json:"agent_id,omitempty"`
+	Mode         string   `json:"mode,omitempty"`         // fixed | matched
+	Reason       string   `json:"reason,omitempty"`       // human-readable why
+	Candidates   []string `json:"candidates,omitempty"`   // ambiguous role slots
+	Requirements []string `json:"requirements,omitempty"` // unresolvable role slots
+}
+
+// TeamBindingRejection is why a team cannot start as requested. Status splits
+// the two launch-time outcomes (plan wave C): 422 = no agent can ever satisfy
+// the slot here (unresolvable), 409 = several agents could and the caller must
+// pick one explicitly via `bindings`.
+type TeamBindingRejection struct {
+	Status       int      `json:"-"`
+	SlotID       string   `json:"slot_id,omitempty"`
+	Reason       string   `json:"reason"`
+	Candidates   []string `json:"candidates,omitempty"`
+	Requirements []string `json:"requirements,omitempty"`
+}
+
+func (e *TeamBindingRejection) Error() string { return e.Reason }
+
+// ResolveTeamBindings resolves every slot at launch (docs/agent-teams.md §7,
+// wave C). The roster is the caller's visible agents (already filtered to the
+// project scope); matching is deterministic and modest: capabilities and
+// skills must be a superset of the slot's requirements, preferred_agent_id is
+// a tie-breaker — never an obligation to pick a weaker candidate.
+//
+// fixed slots bind their agent (which must be in the roster); role slots bind
+// an explicit override, else the preferred agent among matching candidates,
+// else the single matching candidate; ambiguity without a preferred pick is a
+// 409 rejection listing the candidates, an empty match set is a 422 listing
+// the requirements. A team never starts partially bound: the first
+// unresolvable slot aborts with effect=none.
+func ResolveTeamBindings(manifest workspace.TeamManifest, roster []workspace.Agent, overrides map[string]string) (map[string]TeamSlotBinding, []TeamSlotChoice, *TeamBindingRejection) {
+	byID := make(map[string]workspace.Agent, len(roster))
+	for _, candidate := range roster {
+		byID[candidate.ID] = candidate
 	}
+	for slotID, agentID := range overrides {
+		if strings.TrimSpace(agentID) == "" {
+			continue
+		}
+		known := false
+		for _, slot := range manifest.Slots {
+			if slot.ID == slotID {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return nil, nil, &TeamBindingRejection{Status: 422, Reason: fmt.Sprintf("bindings reference unknown slot %q", slotID)}
+		}
+	}
+	bindings := make(map[string]TeamSlotBinding, len(manifest.Slots))
+	choices := make([]TeamSlotChoice, 0, len(manifest.Slots))
 	for _, slot := range manifest.Slots {
+		// Explicit launch-time override wins; it must land inside the roster so
+		// an invisible agent can never be smuggled into a team.
 		if agentID, ok := overrides[slot.ID]; ok && strings.TrimSpace(agentID) != "" {
+			agentID = strings.TrimSpace(agentID)
+			if _, visible := byID[agentID]; !visible {
+				return nil, choices, &TeamBindingRejection{Status: 422, SlotID: slot.ID, Reason: fmt.Sprintf("slot %q: agent %q is not available in this launch scope", slot.ID, agentID)}
+			}
 			mode := "matched"
 			if slot.Binding.Mode == workspace.TeamBindingFixed && agentID == slot.Binding.AgentID {
 				mode = "fixed"
 			}
-			bindings[slot.ID] = TeamSlotBinding{AgentID: strings.TrimSpace(agentID), Mode: mode}
+			bindings[slot.ID] = TeamSlotBinding{AgentID: agentID, Mode: mode}
+			choices = append(choices, TeamSlotChoice{SlotID: slot.ID, AgentID: agentID, Mode: mode, Reason: "explicit launch binding"})
 			continue
 		}
 		switch slot.Binding.Mode {
 		case workspace.TeamBindingFixed:
+			if _, visible := byID[slot.Binding.AgentID]; !visible {
+				return nil, choices, &TeamBindingRejection{Status: 422, SlotID: slot.ID, Reason: fmt.Sprintf("slot %q is fixed to agent %q which is not visible in this launch scope", slot.ID, slot.Binding.AgentID)}
+			}
 			bindings[slot.ID] = TeamSlotBinding{AgentID: slot.Binding.AgentID, Mode: "fixed"}
+			choices = append(choices, TeamSlotChoice{SlotID: slot.ID, AgentID: slot.Binding.AgentID, Mode: "fixed", Reason: "fixed binding from the team definition"})
 		default: // role
+			var candidates []string
+			for _, candidate := range roster {
+				if candidate.SatisfiesRequirements(slot.Requirements) {
+					candidates = append(candidates, candidate.ID)
+				}
+			}
+			requirements := append(append([]string{}, slot.Requirements.Capabilities...), slot.Requirements.Skills...)
+			sort.Strings(candidates)
+			if len(candidates) == 0 {
+				choices = append(choices, TeamSlotChoice{SlotID: slot.ID, Requirements: requirements, Reason: "no visible agent satisfies the slot requirements"})
+				return nil, choices, &TeamBindingRejection{
+					Status:       422,
+					SlotID:       slot.ID,
+					Reason:       fmt.Sprintf("slot %q has a role binding but no visible agent satisfies its requirements (%s)", slot.ID, strings.Join(requirements, ", ")),
+					Requirements: requirements,
+				}
+			}
 			preferred := strings.TrimSpace(slot.Binding.PreferredAgentID)
-			if preferred == "" {
-				return nil, fmt.Sprintf("slot %q has a role binding: pass an explicit agent in bindings or set preferred_agent_id in the team definition", slot.ID)
+			if len(candidates) == 1 {
+				agentID := candidates[0]
+				bindings[slot.ID] = TeamSlotBinding{AgentID: agentID, Mode: "matched"}
+				choices = append(choices, TeamSlotChoice{SlotID: slot.ID, AgentID: agentID, Mode: "matched", Reason: "the only visible agent satisfying the slot requirements"})
+				continue
 			}
-			bindings[slot.ID] = TeamSlotBinding{AgentID: preferred, Mode: "matched"}
+			if preferred != "" && contains(candidates, preferred) {
+				bindings[slot.ID] = TeamSlotBinding{AgentID: preferred, Mode: "matched"}
+				choices = append(choices, TeamSlotChoice{SlotID: slot.ID, AgentID: preferred, Mode: "matched", Reason: fmt.Sprintf("preferred_agent_id among %d matching candidates", len(candidates)), Candidates: candidates})
+				continue
+			}
+			choices = append(choices, TeamSlotChoice{SlotID: slot.ID, Candidates: candidates, Reason: "several agents match; pick one explicitly in bindings"})
+			return nil, choices, &TeamBindingRejection{
+				Status:     409,
+				SlotID:     slot.ID,
+				Reason:     fmt.Sprintf("slot %q has %d matching agents (%s); pass one explicitly in bindings or set preferred_agent_id in the team definition", slot.ID, len(candidates), strings.Join(candidates, ", ")),
+				Candidates: candidates,
+			}
 		}
 	}
-	for slotID := range overrides {
-		found := false
-		for _, slot := range manifest.Slots {
-			if slot.ID == slotID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, fmt.Sprintf("bindings reference unknown slot %q", slotID)
-		}
-	}
-	return bindings, ""
+	return bindings, choices, nil
 }
 
 // TeamIsLeadWorkers reports whether the protocol runs as a single lead run

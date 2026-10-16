@@ -95,37 +95,141 @@ func TestCompileTeamProgramProtocols(t *testing.T) {
 	})
 }
 
-func TestTeamSlotBindings(t *testing.T) {
+// rosterAgent builds a candidate with enabled capabilities (card semantics:
+// unset = allowed; delegation needs an explicit grant; Definition == nil is a
+// legacy agent that satisfies only requirement-free slots).
+func rosterAgent(id string, skills []string, capabilities ...string) workspace.Agent {
+	definition := &workspace.AgentDefinition{}
+	for _, name := range capabilities {
+		flag := true
+		switch name {
+		case "read_files":
+			definition.Capabilities.ReadFiles = &flag
+		case "modify_files":
+			definition.Capabilities.ModifyFiles = &flag
+		case "run_commands":
+			definition.Capabilities.RunCommands = &flag
+		case "network":
+			definition.Capabilities.Network = &flag
+		case "skills":
+			definition.Capabilities.Skills = &flag
+		case "knowledge":
+			definition.Capabilities.Knowledge = &flag
+		case "delegation":
+			definition.Capabilities.Delegation = &flag
+		}
+	}
+	return workspace.Agent{ID: id, Skills: skills, Definition: definition}
+}
+
+func TestResolveTeamBindings(t *testing.T) {
 	fixed := fixedSlot("coder", "agent-coder")
-	role := workspace.TeamSlot{ID: "reviewer", Binding: workspace.TeamBinding{Mode: workspace.TeamBindingRole, PreferredAgentID: "agent-reviewer"}}
+	rolePref := workspace.TeamSlot{ID: "reviewer", Binding: workspace.TeamBinding{Mode: workspace.TeamBindingRole, PreferredAgentID: "agent-reviewer"}}
 	roleNoPref := workspace.TeamSlot{ID: "qa", Binding: workspace.TeamBinding{Mode: workspace.TeamBindingRole}}
-	t.Run("fixed slot uses its agent", func(t *testing.T) {
-		bindings, reason := TeamSlotBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{fixed}}, nil)
-		require.Empty(t, reason)
+	t.Run("fixed slot binds its rostered agent", func(t *testing.T) {
+		roster := []workspace.Agent{rosterAgent("agent-coder", nil, "read_files")}
+		bindings, choices, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{fixed}}, roster, nil)
+		require.Nil(t, rejection)
 		require.Equal(t, TeamSlotBinding{AgentID: "agent-coder", Mode: "fixed"}, bindings["coder"])
+		require.Equal(t, "fixed", choices[0].Mode)
 	})
-	t.Run("role slot uses preferred agent", func(t *testing.T) {
-		bindings, reason := TeamSlotBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{role}}, nil)
-		require.Empty(t, reason)
-		require.Equal(t, TeamSlotBinding{AgentID: "agent-reviewer", Mode: "matched"}, bindings["reviewer"])
+	t.Run("fixed agent outside the roster is rejected", func(t *testing.T) {
+		_, _, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{fixed}}, nil, nil)
+		require.NotNil(t, rejection)
+		require.Equal(t, 422, rejection.Status)
+		require.Equal(t, "coder", rejection.SlotID)
 	})
-	t.Run("role slot without preferred or override is rejected", func(t *testing.T) {
-		_, reason := TeamSlotBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{roleNoPref}}, nil)
-		require.Contains(t, reason, `"qa"`)
+	t.Run("role slot matches candidates by capabilities", func(t *testing.T) {
+		slot := workspace.TeamSlot{ID: "builder", Requirements: workspace.TeamRequirements{Capabilities: []string{"modify_files", "run_commands"}}, Binding: workspace.TeamBinding{Mode: workspace.TeamBindingRole}}
+		// An explicitly disabled capability excludes the agent; an unset one counts
+		// as enabled (roster card semantics: unset means allowed).
+		reader := rosterAgent("agent-reader", nil, "read_files")
+		disabled := false
+		reader.Definition.Capabilities.ModifyFiles = &disabled
+		roster := []workspace.Agent{reader, rosterAgent("agent-builder", nil, "read_files", "modify_files", "run_commands")}
+		bindings, _, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{slot}}, roster, nil)
+		require.Nil(t, rejection)
+		require.Equal(t, "agent-builder", bindings["builder"].AgentID)
 	})
-	t.Run("request binding overrides and reports matched", func(t *testing.T) {
-		bindings, reason := TeamSlotBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{roleNoPref}}, map[string]string{"qa": "agent-qa"})
-		require.Empty(t, reason)
-		require.Equal(t, TeamSlotBinding{AgentID: "agent-qa", Mode: "matched"}, bindings["qa"])
+	t.Run("role slot without candidates is rejected with its requirements", func(t *testing.T) {
+		slot := workspace.TeamSlot{ID: "qa", Requirements: workspace.TeamRequirements{Capabilities: []string{"run_commands"}, Skills: []string{"verify"}}, Binding: workspace.TeamBinding{Mode: workspace.TeamBindingRole}}
+		_, _, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{slot}}, []workspace.Agent{rosterAgent("agent-reader", nil, "read_files")}, nil)
+		require.NotNil(t, rejection)
+		require.Equal(t, 422, rejection.Status)
+		require.Equal(t, "qa", rejection.SlotID)
+		require.Contains(t, rejection.Requirements, "run_commands")
+		require.Contains(t, rejection.Requirements, "verify")
+	})
+	t.Run("single candidate auto-binds", func(t *testing.T) {
+		roster := []workspace.Agent{rosterAgent("agent-only", nil, "run_commands")}
+		bindings, choices, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{roleNoPref}}, roster, nil)
+		require.Nil(t, rejection)
+		require.Equal(t, "agent-only", bindings["qa"].AgentID)
+		require.Equal(t, "matched", choices[0].Mode)
+	})
+	t.Run("preferred breaks the tie among several candidates", func(t *testing.T) {
+		roster := []workspace.Agent{rosterAgent("agent-a", nil, "run_commands"), rosterAgent("agent-reviewer", nil, "run_commands")}
+		bindings, _, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{rolePref}}, roster, nil)
+		require.Nil(t, rejection)
+		require.Equal(t, "agent-reviewer", bindings["reviewer"].AgentID)
+	})
+	t.Run("several candidates without preferred is a 409 listing them", func(t *testing.T) {
+		roster := []workspace.Agent{rosterAgent("agent-b", nil, "run_commands"), rosterAgent("agent-a", nil, "run_commands")}
+		_, choices, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{roleNoPref}}, roster, nil)
+		require.NotNil(t, rejection)
+		require.Equal(t, 409, rejection.Status)
+		require.Equal(t, []string{"agent-a", "agent-b"}, rejection.Candidates)
+		require.Empty(t, choices[0].AgentID)
+	})
+	t.Run("explicit override wins over matching", func(t *testing.T) {
+		roster := []workspace.Agent{rosterAgent("agent-a", nil, "run_commands"), rosterAgent("agent-b", nil, "run_commands")}
+		bindings, _, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{roleNoPref}}, roster, map[string]string{"qa": "agent-b"})
+		require.Nil(t, rejection)
+		require.Equal(t, "agent-b", bindings["qa"].AgentID)
+	})
+	t.Run("override pointing outside the roster is rejected", func(t *testing.T) {
+		roster := []workspace.Agent{rosterAgent("agent-coder", nil)}
+		_, _, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{roleNoPref}}, roster, map[string]string{"qa": "agent-ghost"})
+		require.NotNil(t, rejection)
+		require.Equal(t, 422, rejection.Status)
+		require.Contains(t, rejection.Reason, "agent-ghost")
 	})
 	t.Run("override equal to the fixed agent keeps fixed mode", func(t *testing.T) {
-		bindings, reason := TeamSlotBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{fixed}}, map[string]string{"coder": "agent-coder"})
-		require.Empty(t, reason)
+		roster := []workspace.Agent{rosterAgent("agent-coder", nil)}
+		bindings, _, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{fixed}}, roster, map[string]string{"coder": "agent-coder"})
+		require.Nil(t, rejection)
 		require.Equal(t, "fixed", bindings["coder"].Mode)
 	})
 	t.Run("unknown override slot is rejected", func(t *testing.T) {
-		_, reason := TeamSlotBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{fixed}}, map[string]string{"ghost": "agent-x"})
-		require.Contains(t, reason, `"ghost"`)
+		roster := []workspace.Agent{rosterAgent("agent-coder", nil)}
+		_, _, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{fixed}}, roster, map[string]string{"ghost": "agent-x"})
+		require.NotNil(t, rejection)
+		require.Equal(t, 422, rejection.Status)
+		require.Contains(t, rejection.Reason, `"ghost"`)
+	})
+	t.Run("legacy agents satisfy only requirement-free slots", func(t *testing.T) {
+		legacy := workspace.Agent{ID: "agent-legacy"}
+		needy := workspace.TeamSlot{ID: "ops", Requirements: workspace.TeamRequirements{Capabilities: []string{"read_files"}}, Binding: workspace.TeamBinding{Mode: workspace.TeamBindingRole}}
+		_, _, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{needy}}, []workspace.Agent{legacy}, nil)
+		require.NotNil(t, rejection)
+		require.Equal(t, 422, rejection.Status)
+		bindings, _, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{roleNoPref}}, []workspace.Agent{legacy}, nil)
+		require.Nil(t, rejection)
+		require.Equal(t, "agent-legacy", bindings["qa"].AgentID)
+	})
+	t.Run("delegation requirement needs an explicit grant", func(t *testing.T) {
+		lead := workspace.TeamSlot{ID: "lead", Requirements: workspace.TeamRequirements{Capabilities: []string{"delegation"}}, Binding: workspace.TeamBinding{Mode: workspace.TeamBindingRole}}
+		roster := []workspace.Agent{rosterAgent("agent-plain", nil, "read_files"), rosterAgent("agent-lead", nil, "read_files", "delegation")}
+		bindings, _, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{lead}}, roster, nil)
+		require.Nil(t, rejection)
+		require.Equal(t, "agent-lead", bindings["lead"].AgentID)
+	})
+	t.Run("skills requirement must be attached to the agent", func(t *testing.T) {
+		slot := workspace.TeamSlot{ID: "verifier", Requirements: workspace.TeamRequirements{Skills: []string{"verify"}}, Binding: workspace.TeamBinding{Mode: workspace.TeamBindingRole}}
+		roster := []workspace.Agent{rosterAgent("agent-noskill", nil), rosterAgent("agent-skilled", []string{"verify"})}
+		bindings, _, rejection := ResolveTeamBindings(workspace.TeamManifest{Slots: []workspace.TeamSlot{slot}}, roster, nil)
+		require.Nil(t, rejection)
+		require.Equal(t, "agent-skilled", bindings["verifier"].AgentID)
 	})
 }
 

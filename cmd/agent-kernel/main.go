@@ -687,9 +687,28 @@ func main() {
 				return
 			}
 		}
-		bindings, reason := agent.TeamSlotBindings(manifest, req.Bindings)
-		if reason != "" {
-			writeError(w, 422, errors.New(reason))
+		// Launch-time slot resolution (docs/agent-teams.md §7, wave C): the roster
+		// is this caller's visible agents filtered to the run's project scope —
+		// the same population the delegation roster serves. Role slots match on
+		// capabilities/skills with preferred as a tie-breaker; ambiguity is a 409
+		// listing candidates, an empty match is a 422 listing requirements.
+		rosterAgents, rErr := ws.ListAgentsVisible(r.Context(), candidateVisibleUnits(r))
+		if rErr != nil {
+			writeError(w, 500, rErr)
+			return
+		}
+		roster := make([]workspace.Agent, 0, len(rosterAgents))
+		for _, candidate := range rosterAgents {
+			if candidate.ProjectID == "" || candidate.ProjectID == req.Project {
+				roster = append(roster, candidate)
+			}
+		}
+		bindings, _, rejection := agent.ResolveTeamBindings(manifest, roster, req.Bindings)
+		if rejection != nil {
+			writeJSON(w, rejection.Status, map[string]any{
+				"error": rejection.Reason, "slot_id": rejection.SlotID,
+				"candidates": rejection.Candidates, "requirements": rejection.Requirements,
+			})
 			return
 		}
 		// Every bound agent must exist and be org-visible with an effective
@@ -779,6 +798,80 @@ func main() {
 		}
 		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamRunStarted, "team", team.ID, map[string]any{"run_id": runID, "version": input.Team.Version, "project": req.Project})
 		writeJSON(w, http.StatusAccepted, map[string]string{"run_id": runID, "project": req.Project, "team_id": team.ID, "workflow_id": run.GetID(), "temporal_run_id": run.GetRunID(), "status": "started"})
+	})
+	// Binding preview for the launch dialog (docs/agent-teams.md §7, wave C):
+	// resolves every slot against the caller's roster without starting anything.
+	// Ambiguous and unresolvable slots are reported per slot — a preview never
+	// fails as a whole.
+	mux.HandleFunc("GET /v1/agent/teams/{teamID}/resolve", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if project == "" {
+			writeError(w, 400, errors.New("project query parameter is required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleReader, project) {
+			return
+		}
+		team, err := ws.GetTeam(r.Context(), r.PathValue("teamID"))
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, errors.New("team not found"))
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		manifestRaw := team.Manifest
+		version := team.Version
+		if requested := strings.TrimSpace(r.URL.Query().Get("version")); requested != "" && requested != team.Version {
+			v, vErr := ws.GetTeamVersion(r.Context(), team.ID, requested)
+			if vErr != nil {
+				if errors.Is(vErr, workspace.ErrNotFound) {
+					writeError(w, 404, fmt.Errorf("team version %s not found", requested))
+					return
+				}
+				writeError(w, 500, vErr)
+				return
+			}
+			manifestRaw, version = v.Manifest, requested
+		}
+		manifest, mErr := workspace.ParseTeamManifest(manifestRaw)
+		if mErr != nil {
+			writeError(w, 422, mErr)
+			return
+		}
+		if principal, ok := controlplane.FromContext(r.Context()); ok && principal.VisibleUnits != nil && principal.Role < controlplane.RoleAdmin {
+			if !workspace.OrgVisible(team.OrgUnitID, principal.VisibleUnits) {
+				writeError(w, 403, fmt.Errorf("team %q is not available in your org scope", team.ID))
+				return
+			}
+		}
+		rosterAgents, rErr := ws.ListAgentsVisible(r.Context(), candidateVisibleUnits(r))
+		if rErr != nil {
+			writeError(w, 500, rErr)
+			return
+		}
+		roster := make([]workspace.Agent, 0, len(rosterAgents))
+		for _, candidate := range rosterAgents {
+			if candidate.ProjectID == "" || candidate.ProjectID == project {
+				roster = append(roster, candidate)
+			}
+		}
+		_, choices, rejection := agent.ResolveTeamBindings(manifest, roster, nil)
+		preview := map[string]any{"team_id": team.ID, "version": version, "project": project, "slots": choices, "resolvable": rejection == nil}
+		if rejection != nil {
+			preview["reason"] = rejection.Reason
+			if rejection.SlotID != "" {
+				preview["slot_id"] = rejection.SlotID
+			}
+			if len(rejection.Candidates) > 0 {
+				preview["candidates"] = rejection.Candidates
+			}
+			if len(rejection.Requirements) > 0 {
+				preview["requirements"] = rejection.Requirements
+			}
+		}
+		writeJSON(w, 200, preview)
 	})
 	mux.HandleFunc("GET /v1/agent/runs/{runID}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")

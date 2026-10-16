@@ -265,6 +265,86 @@ type AgentCapabilities struct {
 // matching pre-definition agent behavior.
 func (c AgentCapabilities) Cap(enabled *bool) bool { return enabled == nil || *enabled }
 
+// AgentCapabilityNames are the canonical capability names usable in team slot
+// requirements (docs/agent-teams.md §7). "write_files" is accepted as a
+// historical alias of modify_files (the spec example used it) and normalizes
+// to the same flag.
+var AgentCapabilityNames = []string{
+	"read_files", "modify_files", "run_commands", "network", "skills", "knowledge", "delegation",
+}
+
+// NormalizeAgentCapability maps a requirement name onto the canonical name;
+// the second return reports whether the name is known at all.
+func NormalizeAgentCapability(name string) (string, bool) {
+	if name == "write_files" {
+		return "modify_files", true
+	}
+	for _, known := range AgentCapabilityNames {
+		if name == known {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// SatisfiesCapability reports whether the agent fills one capability
+// requirement. Matching follows the roster card semantics (kernel/agent
+// roster.go): unset means allowed, an explicit false opts out, delegation
+// additionally requires an explicit grant because it is the inverted-default
+// exception, and a legacy agent without a structured definition reports no
+// capabilities at all (it satisfies only requirement-free slots).
+func (a Agent) SatisfiesCapability(name string) bool {
+	canonical, known := NormalizeAgentCapability(name)
+	if !known || a.Definition == nil {
+		return false
+	}
+	caps := a.Definition.Capabilities
+	if canonical == "delegation" {
+		return caps.Delegation != nil && *caps.Delegation
+	}
+	switch canonical {
+	case "read_files":
+		return caps.Cap(caps.ReadFiles)
+	case "modify_files":
+		return caps.Cap(caps.ModifyFiles)
+	case "run_commands":
+		return caps.Cap(caps.RunCommands)
+	case "network":
+		return caps.Cap(caps.Network)
+	case "skills":
+		return caps.Cap(caps.Skills)
+	case "knowledge":
+		return caps.Cap(caps.Knowledge)
+	}
+	return false
+}
+
+// SatisfiesRequirements reports whether the agent can fill a team role slot:
+// every required capability enabled and every required skill attached
+// (docs/agent-teams.md §7, wave C).
+func (a Agent) SatisfiesRequirements(requirements TeamRequirements) bool {
+	for _, capability := range requirements.Capabilities {
+		if !a.SatisfiesCapability(capability) {
+			return false
+		}
+	}
+	for _, skill := range requirements.Skills {
+		if !containsStringIn(a.Skills, skill) {
+			return false
+		}
+	}
+	return true
+}
+
+func containsStringIn(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 // AgentDefinition is the structured, human-edited part of an agent
 // (docs/evaluable-agent.md). The system prompt is compiled from it; users never
 // see YAML. Description (the agent's purpose) lives on Agent.Description.

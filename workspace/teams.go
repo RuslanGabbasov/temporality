@@ -185,6 +185,16 @@ func ValidateTeamManifest(raw []byte) error {
 		case TeamBindingRole:
 			// preferred_agent_id is optional; requirements may be empty (any
 			// visible agent can fill the role).
+			for _, capability := range slot.Requirements.Capabilities {
+				if _, known := NormalizeAgentCapability(capability); !known {
+					return fmt.Errorf("slot %q requires unknown capability %q (known: read_files, modify_files, run_commands, network, skills, knowledge, delegation)", slot.ID, capability)
+				}
+			}
+			for _, skill := range slot.Requirements.Skills {
+				if strings.TrimSpace(skill) == "" {
+					return fmt.Errorf("slot %q has an empty skill requirement", slot.ID)
+				}
+			}
 		case "":
 			return fmt.Errorf("slot %q: binding.mode is required (fixed or role)", slot.ID)
 		default:

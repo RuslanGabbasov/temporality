@@ -49,6 +49,18 @@ func TestValidateTeamManifest(t *testing.T) {
 		{"fixed without agent", func(m *TeamManifest) { m.Slots[0].Binding = TeamBinding{Mode: TeamBindingFixed} }, "fixed binding requires agent_id"},
 		{"role binding ok without preferred", func(m *TeamManifest) { m.Slots[0].Binding = TeamBinding{Mode: TeamBindingRole} }, ""},
 		{"unknown binding mode", func(m *TeamManifest) { m.Slots[0].Binding = TeamBinding{Mode: "auto"} }, "unknown binding mode"},
+		{"role slot with unknown capability", func(m *TeamManifest) {
+			m.Slots[0].Binding = TeamBinding{Mode: TeamBindingRole}
+			m.Slots[0].Requirements = TeamRequirements{Capabilities: []string{"telepathy"}}
+		}, "unknown capability"},
+		{"role slot with capability alias write_files", func(m *TeamManifest) {
+			m.Slots[0].Binding = TeamBinding{Mode: TeamBindingRole}
+			m.Slots[0].Requirements = TeamRequirements{Capabilities: []string{"write_files"}}
+		}, ""},
+		{"role slot with empty skill requirement", func(m *TeamManifest) {
+			m.Slots[0].Binding = TeamBinding{Mode: TeamBindingRole}
+			m.Slots[0].Requirements = TeamRequirements{Skills: []string{" "}}
+		}, "empty skill requirement"},
 		{"review_gate single slot", func(m *TeamManifest) {
 			m.Protocol.Kind = TeamProtocolReviewGate
 			m.Slots = m.Slots[:1]
