@@ -66,6 +66,7 @@ func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate, opt
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("POST /v1/observations/events", s.appendObservations)
 	mux.HandleFunc("GET /v1/observations/events", s.listObservations)
+	mux.HandleFunc("GET /v1/observations/events/{id}", s.getObservationEvent)
 	mux.HandleFunc("GET /v1/observations/knowledge", s.listObservationKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/diff", s.diffKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/chain", s.knowledgeChain)
@@ -230,6 +231,50 @@ func (s *Server) listObservations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": page.Events, "count": len(page.Events), "next_cursor": page.NextCursor})
+}
+
+func (s *Server) getObservationEvent(w http.ResponseWriter, r *http.Request) {
+	// Direct evidence lookup for the knowledge dossier (docs/human-knowledge-
+	// explorer.md §8): refs like r/event/000001 carry only the event id, so the
+	// resolution goes through the event_id filter instead of the (source, id)
+	// primary key. The optional source_id query param disambiguates when two
+	// producers reuse an id.
+	eventID := strings.TrimSpace(r.PathValue("id"))
+	if eventID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("event id is required"))
+		return
+	}
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	principal, allowed := s.gate.AllowQuery(w, r, controlplane.RoleReader, project)
+	if !allowed {
+		return
+	}
+	filter := observation.Filter{
+		Project: project, SourceID: strings.TrimSpace(r.URL.Query().Get("source_id")),
+		EventID: eventID, Limit: 2,
+	}
+	if filter.Project == "" {
+		// Same visibility rule as the listing: a global lookup stays inside the
+		// principal's visible projects.
+		if projects, all := principal.AllowedProjects(); !all {
+			if len(projects) == 0 {
+				writeError(w, http.StatusNotFound, observation.ErrNotFound)
+				return
+			}
+			filter.Projects = projects
+		}
+	}
+	page, err := s.store.ListObservationPage(r.Context(), filter, "")
+	if err != nil {
+		s.log.Error("get observation event", "error", err, "event_id", eventID)
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("could not load observation event: %w", err))
+		return
+	}
+	if len(page.Events) == 0 {
+		writeError(w, http.StatusNotFound, observation.ErrNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"event": page.Events[0]})
 }
 
 type invalidateObservationRequest struct {
@@ -1083,7 +1128,10 @@ func (s *Server) exploreObservationKnowledge(w http.ResponseWriter, r *http.Requ
 		knownAt = &parsed
 	}
 	switch input.Operation {
-	case observation.ExploreOrient, observation.ExploreSearch:
+	case observation.ExploreOrient:
+		// orient without a question is the full area map ranked by size — that
+		// is the landing view of the knowledge explorer, not an input error.
+	case observation.ExploreSearch:
 		if input.Question == "" {
 			writeError(w, http.StatusUnprocessableEntity, errors.New(input.Operation+" requires a question"))
 			return

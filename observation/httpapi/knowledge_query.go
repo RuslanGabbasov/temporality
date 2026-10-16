@@ -33,9 +33,19 @@ type knowledgeListQuery struct {
 	// Terms holds the q parameter split into lowercase words; every word must
 	// match somewhere, so multi-word queries degrade gracefully instead of
 	// becoming exact-substring searches.
-	Terms  []string
-	State  string
-	Scope  string
+	Terms []string
+	State string
+	Scope string
+	// Topic/Entity/Origin/Kind are the clickable facet dimensions of the
+	// research surface (docs/human-knowledge-explorer.md §6): exact match on
+	// the projected attribute. Single value per dimension, like state/scope.
+	Topic  string
+	Entity string
+	// Origin filters by the birth project of the item (Knowledge.Project) —
+	// named "origin" because the "project" parameter already scopes
+	// authorization and visibility.
+	Origin string
+	Kind   string
 	Limit  int // 0 = unlimited (full projection, legacy callers)
 	Cursor knowledgePageCursor
 }
@@ -50,8 +60,12 @@ type knowledgePageCursor struct {
 
 func parseKnowledgeListQuery(values url.Values) (knowledgeListQuery, error) {
 	query := knowledgeListQuery{
-		State: strings.TrimSpace(values.Get("state")),
-		Scope: strings.TrimSpace(values.Get("scope")),
+		State:  strings.TrimSpace(values.Get("state")),
+		Scope:  strings.TrimSpace(values.Get("scope")),
+		Topic:  strings.TrimSpace(values.Get("topic")),
+		Entity: strings.TrimSpace(values.Get("entity")),
+		Origin: strings.TrimSpace(values.Get("origin")),
+		Kind:   strings.TrimSpace(values.Get("kind")),
 	}
 	if raw := strings.TrimSpace(values.Get("q")); raw != "" {
 		for _, word := range strings.Fields(strings.ToLower(raw)) {
@@ -63,6 +77,9 @@ func parseKnowledgeListQuery(values url.Values) (knowledgeListQuery, error) {
 	}
 	if query.Scope != "" && !knowledgeScopeFilters[query.Scope] {
 		return query, errors.New("scope must be project, org_unit, or organization")
+	}
+	if query.Kind != "" && !knowledgeKindFilters[query.Kind] {
+		return query, errors.New("kind must be claim or observation")
 	}
 	if value := values.Get("limit"); value != "" {
 		limit, err := strconv.Atoi(value)
@@ -154,14 +171,54 @@ func knowledgeTextMatches(fields, terms []string) bool {
 	return true
 }
 
-// knowledgeMatches reports whether an item passes the query's scope, state
-// and text filters. Empty filter dimensions accept everything, so it doubles
-// as the facet building block.
+// knowledgeKindFilters are the authored kinds of knowledge items
+// (knowledge.go: model claims vs kernel heuristic observations); items
+// recorded before kinds existed project as claims.
+var knowledgeKindFilters = map[string]bool{"claim": true, "observation": true}
+
+// knowledgeKindGroup normalizes the item kind for filtering: the projection
+// already defaults empty kinds to "claim".
+func knowledgeKindGroup(item observation.Knowledge) string {
+	if item.Kind == "" {
+		return "claim"
+	}
+	return item.Kind
+}
+
+// knowledgeValueMatches is the exact (case-insensitive) match facet values
+// rely on — facet chips send back the exact string they counted.
+func knowledgeValueMatches(values []string, wanted string) bool {
+	if wanted == "" {
+		return true
+	}
+	for _, value := range values {
+		if strings.EqualFold(value, wanted) {
+			return true
+		}
+	}
+	return false
+}
+
+// knowledgeMatches reports whether an item passes the query's scope, state,
+// text and facet-value filters. Empty filter dimensions accept everything, so
+// it doubles as the facet building block.
 func knowledgeMatches(item observation.Knowledge, query knowledgeListQuery) bool {
 	if query.Scope != "" && knowledgeScopeGroup(item) != query.Scope {
 		return false
 	}
 	if query.State != "" && !knowledgeStateMatches(item, query.State) {
+		return false
+	}
+	if query.Topic != "" && !knowledgeValueMatches(item.Topics, query.Topic) {
+		return false
+	}
+	if query.Entity != "" && !knowledgeValueMatches(item.Entities, query.Entity) {
+		return false
+	}
+	if query.Origin != "" && !strings.EqualFold(item.Project, query.Origin) {
+		return false
+	}
+	if query.Kind != "" && knowledgeKindGroup(item) != query.Kind {
 		return false
 	}
 	if len(query.Terms) > 0 && !knowledgeTextMatches(knowledgeSearchFields(item), query.Terms) {
@@ -173,12 +230,24 @@ func knowledgeMatches(item observation.Knowledge, query knowledgeListQuery) bool
 type knowledgeFacets struct {
 	States map[string]int `json:"states"`
 	Scopes map[string]int `json:"scopes"`
+	// Topics/Entities/Projects/Kinds extend the facet dimensions for the
+	// research surface (docs/human-knowledge-explorer.md §6). Open-value
+	// dimensions are capped to the most frequent values.
+	Topics   map[string]int `json:"topics,omitempty"`
+	Entities map[string]int `json:"entities,omitempty"`
+	Projects map[string]int `json:"projects,omitempty"`
+	Kinds    map[string]int `json:"kinds,omitempty"`
 }
 
-// knowledgeFacetsFor counts states and scopes over the filtered set. Each
-// dimension is computed without its own filter (standard faceting), so the
-// chip counts always show what switching that chip would reveal; the other
-// dimensions (text search, bitemporal cutoffs, visibility) still apply.
+// knowledgeFacetValueCap bounds open-value facet dimensions: the explorer
+// needs the popular values to navigate, not the full long tail.
+const knowledgeFacetValueCap = 40
+
+// knowledgeFacetsFor counts every facet dimension over the filtered set.
+// Each dimension is computed without its own filter (standard faceting), so
+// the chip counts always show what switching that chip would reveal; the
+// other dimensions (text search, the remaining filters, bitemporal cutoffs,
+// visibility) still apply.
 func knowledgeFacetsFor(knowledge []observation.Knowledge, query knowledgeListQuery) knowledgeFacets {
 	facets := knowledgeFacets{
 		States: map[string]int{
@@ -186,9 +255,14 @@ func knowledgeFacetsFor(knowledge []observation.Knowledge, query knowledgeListQu
 			"corrected": 0, "superseded": 0, "invalidated": 0, "alive": 0, "at_risk": 0,
 		},
 		Scopes: map[string]int{"project": 0, "org_unit": 0, "organization": 0},
+		Kinds:  map[string]int{"claim": 0, "observation": 0},
 	}
+	// Dimension queries: the facet's own filter is cleared, every other
+	// dimension still applies.
+	withoutState := query
+	withoutState.State = ""
 	for _, item := range knowledge {
-		if !knowledgeMatches(item, knowledgeListQuery{Terms: query.Terms, Scope: query.Scope}) {
+		if !knowledgeMatches(item, withoutState) {
 			continue
 		}
 		facets.States[item.State]++
@@ -199,13 +273,84 @@ func knowledgeFacetsFor(knowledge []observation.Knowledge, query knowledgeListQu
 			facets.States["at_risk"]++
 		}
 	}
+	withoutScope := query
+	withoutScope.Scope = ""
 	for _, item := range knowledge {
-		if !knowledgeMatches(item, knowledgeListQuery{Terms: query.Terms, State: query.State}) {
+		if !knowledgeMatches(item, withoutScope) {
 			continue
 		}
 		facets.Scopes[knowledgeScopeGroup(item)]++
 	}
+	withoutKind := query
+	withoutKind.Kind = ""
+	for _, item := range knowledge {
+		if !knowledgeMatches(item, withoutKind) {
+			continue
+		}
+		facets.Kinds[knowledgeKindGroup(item)]++
+	}
+	// Open-value dimensions (topics/entities/projects) clear their own filter
+	// and land in temporary counters capped afterwards.
+	topics := map[string]int{}
+	withoutTopic := query
+	withoutTopic.Topic = ""
+	for _, item := range knowledge {
+		if !knowledgeMatches(item, withoutTopic) {
+			continue
+		}
+		for _, topic := range item.Topics {
+			topics[strings.ToLower(strings.TrimSpace(topic))]++
+		}
+	}
+	facets.Topics = capKnowledgeFacetValues(topics)
+	entities := map[string]int{}
+	withoutEntity := query
+	withoutEntity.Entity = ""
+	for _, item := range knowledge {
+		if !knowledgeMatches(item, withoutEntity) {
+			continue
+		}
+		for _, entity := range item.Entities {
+			entities[strings.ToLower(strings.TrimSpace(entity))]++
+		}
+	}
+	facets.Entities = capKnowledgeFacetValues(entities)
+	projects := map[string]int{}
+	withoutOrigin := query
+	withoutOrigin.Origin = ""
+	for _, item := range knowledge {
+		if !knowledgeMatches(item, withoutOrigin) {
+			continue
+		}
+		if item.Project != "" {
+			projects[item.Project]++
+		}
+	}
+	facets.Projects = capKnowledgeFacetValues(projects)
 	return facets
+}
+
+// capKnowledgeFacetValues keeps the most frequent values (ties broken
+// alphabetically) so open dimensions stay bounded and deterministic.
+func capKnowledgeFacetValues(values map[string]int) map[string]int {
+	if len(values) <= knowledgeFacetValueCap {
+		return values
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if values[keys[i]] != values[keys[j]] {
+			return values[keys[i]] > values[keys[j]]
+		}
+		return keys[i] < keys[j]
+	})
+	capped := make(map[string]int, knowledgeFacetValueCap)
+	for _, key := range keys[:knowledgeFacetValueCap] {
+		capped[key] = values[key]
+	}
+	return capped
 }
 
 // sortKnowledgeList pins the deterministic listing order: freshest update
@@ -234,9 +379,9 @@ func knowledgeAfterCursor(item observation.Knowledge, cursor knowledgePageCursor
 	return item.ID > cursor.ID
 }
 
-// filterKnowledgeList applies the query's state/scope/text filters.
+// filterKnowledgeList applies the query's state/scope/text/facet filters.
 func filterKnowledgeList(knowledge []observation.Knowledge, query knowledgeListQuery) []observation.Knowledge {
-	if query.State == "" && query.Scope == "" && len(query.Terms) == 0 {
+	if query.State == "" && query.Scope == "" && len(query.Terms) == 0 && query.Topic == "" && query.Entity == "" && query.Origin == "" && query.Kind == "" {
 		return knowledge
 	}
 	filtered := make([]observation.Knowledge, 0, len(knowledge))

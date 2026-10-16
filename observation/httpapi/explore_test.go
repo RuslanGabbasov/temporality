@@ -75,6 +75,26 @@ func TestKnowledgeExploreOperations(t *testing.T) {
 		t.Fatalf("orient areas missing: %v", body)
 	}
 
+	// orient without a question is the explorer's landing view: the full area
+	// map ranked by size, not an input error (docs/human-knowledge-explorer.md
+	// §4).
+	res, body = doJSON(t, handler, "POST", "/v1/observations/knowledge/explore", map[string]any{
+		"project": "lighthouse", "operation": "orient",
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("orient-without-question status = %d, body = %v", res.StatusCode, body)
+	}
+	areas := body["areas"].([]any)
+	if len(areas) == 0 {
+		t.Fatalf("orient without question must still map areas: %v", body)
+	}
+	// search still requires a question.
+	if res, _ := doJSON(t, handler, "POST", "/v1/observations/knowledge/explore", map[string]any{
+		"project": "lighthouse", "operation": "search",
+	}); res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("search without question status = %d, want 422", res.StatusCode)
+	}
+
 	// expand + trace run off targets.
 	res, body = doJSON(t, handler, "POST", "/v1/observations/knowledge/explore", map[string]any{
 		"project": "lighthouse", "operation": "trace", "targets": []string{"K2"},

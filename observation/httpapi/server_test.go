@@ -1321,6 +1321,7 @@ func TestKnowledgeListSearchFacetsPagination(t *testing.T) {
 			"/v1/observations/knowledge?project=lighthouse&limit=501",
 			"/v1/observations/knowledge?project=lighthouse&state=bogus",
 			"/v1/observations/knowledge?project=lighthouse&scope=bogus",
+			"/v1/observations/knowledge?project=lighthouse&kind=bogus",
 			"/v1/observations/knowledge?project=lighthouse&cursor=not-a-cursor",
 		} {
 			if res, _ := doJSON(t, handler, "GET", path, nil); res.StatusCode != http.StatusBadRequest {
@@ -1328,6 +1329,168 @@ func TestKnowledgeListSearchFacetsPagination(t *testing.T) {
 			}
 		}
 	})
+}
+
+// The research surface (docs/human-knowledge-explorer.md §6) navigates by
+// facet values, not just lifecycle state: topic/entity filters restrict the
+// listing, origin separates shared knowledge by birth project, and kind
+// separates claims from kernel observations. Facet counters follow the same
+// own-filter-exempt rule as states/scopes.
+func TestKnowledgeListTopicEntityOriginKindFilters(t *testing.T) {
+	handler := newTestServer(t)
+	base := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	ingest := []observation.Event{
+		proposedAtEvent("lighthouse", "evt-f1", "K1", "deploys run through the docker builder", base, map[string]any{
+			"topics": []string{"deploy"}, "entities": []string{"docker"},
+		}),
+		proposedAtEvent("lighthouse", "evt-f2", "K2", "the registry mirrors images nightly", base.Add(5*time.Minute), map[string]any{
+			"kind": "observation", "topics": []string{"deploy"}, "entities": []string{"registry"},
+		}),
+		proposedAtEvent("lighthouse", "evt-f3", "K3", "tests fail fast on missing fixtures", base.Add(10*time.Minute), map[string]any{
+			"topics": []string{"testing"},
+		}),
+		// Born shared in another project: visible here, origin distinguishes it.
+		proposedAtEvent("other", "evt-f4", "K4", "organization-wide deploy checklist", base.Add(15*time.Minute), map[string]any{
+			"scope_kind": "organization", "topics": []string{"deploy"},
+		}),
+	}
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": ingest}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	t.Run("value filters are exact and case-insensitive", func(t *testing.T) {
+		_, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&topic=deploy", nil)
+		requireIDs(t, body, "K4", "K2", "K1")
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&topic=DEPLOY", nil)
+		requireIDs(t, body, "K4", "K2", "K1")
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&entity=docker", nil)
+		requireIDs(t, body, "K1")
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&origin=other", nil)
+		requireIDs(t, body, "K4")
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&kind=observation", nil)
+		requireIDs(t, body, "K2")
+		// topic=deploy is a substring of nothing else: exact match means the
+		// testing-only K3 never leaks in.
+		_, body = doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&topic=deploy&entity=registry", nil)
+		requireIDs(t, body, "K2")
+	})
+
+	t.Run("facets extend to topics entities projects and kinds", func(t *testing.T) {
+		_, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse", nil)
+		facets := body["facets"].(map[string]any)
+		topics := facets["topics"].(map[string]any)
+		if topics["deploy"].(float64) != 3 || topics["testing"].(float64) != 1 {
+			t.Fatalf("topic facets = %v", topics)
+		}
+		entities := facets["entities"].(map[string]any)
+		if entities["docker"].(float64) != 1 || entities["registry"].(float64) != 1 {
+			t.Fatalf("entity facets = %v", entities)
+		}
+		projects := facets["projects"].(map[string]any)
+		if projects["lighthouse"].(float64) != 3 || projects["other"].(float64) != 1 {
+			t.Fatalf("project facets = %v", projects)
+		}
+		kinds := facets["kinds"].(map[string]any)
+		if kinds["claim"].(float64) != 3 || kinds["observation"].(float64) != 1 {
+			t.Fatalf("kind facets = %v", kinds)
+		}
+	})
+
+	t.Run("facet dimensions drop only their own filter", func(t *testing.T) {
+		_, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse&topic=deploy", nil)
+		facets := body["facets"].(map[string]any)
+		// The topic facet ignores the active topic filter (deploy 3, testing 1)…
+		topics := facets["topics"].(map[string]any)
+		if topics["deploy"].(float64) != 3 || topics["testing"].(float64) != 1 {
+			t.Fatalf("topic facets under topic filter = %v", topics)
+		}
+		// …while kinds, entities and projects apply it.
+		kinds := facets["kinds"].(map[string]any)
+		if kinds["claim"].(float64) != 2 || kinds["observation"].(float64) != 1 {
+			t.Fatalf("kind facets under topic filter = %v", kinds)
+		}
+		entities := facets["entities"].(map[string]any)
+		if entities["docker"].(float64) != 1 || entities["registry"].(float64) != 1 {
+			t.Fatalf("entity facets under topic filter = %v", entities)
+		}
+		projects := facets["projects"].(map[string]any)
+		if projects["lighthouse"].(float64) != 2 || projects["other"].(float64) != 1 {
+			t.Fatalf("project facets under topic filter = %v", projects)
+		}
+	})
+
+	t.Run("facet value counters cap at the most frequent values", func(t *testing.T) {
+		handler := newTestServer(t)
+		events := make([]observation.Event, 0, knowledgeFacetValueCap+10)
+		for i := 0; i < knowledgeFacetValueCap+10; i++ {
+			topic := fmt.Sprintf("topic-%02d", i)
+			extra := map[string]any{"topics": []string{topic}}
+			if i < 5 {
+				// The five hottest values must survive the cap.
+				extra["topics"] = []string{topic, "hot"}
+			}
+			events = append(events, proposedAtEvent("lighthouse", fmt.Sprintf("evt-cap-%d", i), fmt.Sprintf("KC%d", i), fmt.Sprintf("item %d", i), base.Add(time.Duration(i)*time.Minute), extra))
+		}
+		if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": events}); res.StatusCode != http.StatusOK {
+			t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+		}
+		_, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse", nil)
+		topics := body["facets"].(map[string]any)["topics"].(map[string]any)
+		if len(topics) != knowledgeFacetValueCap {
+			t.Fatalf("topic facet size = %d, want %d", len(topics), knowledgeFacetValueCap)
+		}
+		if topics["hot"].(float64) != 5 {
+			t.Fatalf("hot topic count = %v, want 5", topics["hot"])
+		}
+	})
+}
+
+// GET /v1/observations/events/{id} backs the dossier's evidence jumps
+// (docs/human-knowledge-explorer.md §8.3): refs carry only the event id.
+func TestGetObservationEventByID(t *testing.T) {
+	handler := newTestServer(t)
+	events := []observation.Event{
+		proposedEvent("lighthouse", "evt-a", "K1", "first knowledge item"),
+		proposedEvent("lighthouse", "evt-b", "K2", "second knowledge item"),
+	}
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": events}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	res, body := doJSON(t, handler, "GET", "/v1/observations/events/evt-a", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("get status = %d, body = %v", res.StatusCode, body)
+	}
+	event, ok := body["event"].(map[string]any)
+	if !ok || event["event_id"] != "evt-a" {
+		t.Fatalf("event payload = %v", body)
+	}
+
+	if res, _ := doJSON(t, handler, "GET", "/v1/observations/events/missing", nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing status = %d, want 404", res.StatusCode)
+	}
+
+	// Two producers may reuse an id: source_id disambiguates, project scopes.
+	clashing := proposedEvent("lighthouse", "evt-a", "K1", "first knowledge item")
+	clashing.Source.ID = "kernel-other"
+	clashing.OccurredAt = time.Date(2026, 9, 25, 13, 0, 0, 0, time.UTC)
+	if res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{"events": []observation.Event{clashing}}); res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest clash status = %d, body = %v", res.StatusCode, body)
+	}
+	_, body = doJSON(t, handler, "GET", "/v1/observations/events/evt-a?source_id=kernel-other", nil)
+	event = body["event"].(map[string]any)
+	if event["source"].(map[string]any)["id"] != "kernel-other" {
+		t.Fatalf("disambiguated source = %v", event["source"])
+	}
+	// The project filter constrains the search space, not the payload.
+	_, body = doJSON(t, handler, "GET", "/v1/observations/events/evt-a?project=lighthouse", nil)
+	event = body["event"].(map[string]any)
+	if event["context"].(map[string]any)["project"] != "lighthouse" {
+		t.Fatalf("event context = %v", event["context"])
+	}
+	if res, _ := doJSON(t, handler, "GET", "/v1/observations/events/evt-a?project=nowhere", nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("status with invisible project = %d, want 404", res.StatusCode)
+	}
 }
 
 // A manual challenge marks knowledge as doubtful without retiring it: hints

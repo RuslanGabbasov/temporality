@@ -48,7 +48,11 @@ const NAV_ITEMS = [
   { path: '/project', label: 'nav.project' },
   { path: '/agents', label: 'nav.runs' },
   { path: '/inbound', label: 'nav.inbound' },
-  { path: '/observability', label: 'nav.knowledge' },
+  // Knowledge explorer is the main research surface (docs/human-knowledge-
+  // explorer.md §3.1); the operational knowledge tab stays in Observability
+  // until stage 4 moves its lifecycle panel here.
+  { path: '/knowledge', label: 'nav.knowledge' },
+  { path: '/observability', label: 'nav.observability' },
   { path: '/artifacts', label: 'nav.artifacts' },
   { path: '/experience', label: 'nav.timeline' },
 ]

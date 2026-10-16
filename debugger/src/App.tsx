@@ -3,6 +3,7 @@ import Layout, { type AppState } from './Layout'
 import { I18nProvider } from './i18n'
 import { ThemePrefProvider } from './theme'
 import Observability from './Observability'
+import KnowledgeExplorer from './KnowledgeExplorer'
 import AgentRuns from './AgentRuns'
 import ExperienceTimeline from './ExperienceTimeline'
 import Workspace from './Workspace'
@@ -26,6 +27,7 @@ const Routes = {
   agents: /^\/agents(\/|$)/,
   teams: /^\/teams(\/|$)/,
   observability: /^\/observability(\/|$)/,
+  knowledge: /^\/knowledge(\/|$)/,
   workspace: /^\/workspace(\/|$)/,
   'agent-config': /^\/agent-config(\/|$)/,
   skills: /^\/skills(\/|$)/,
@@ -40,13 +42,14 @@ const Routes = {
   inbound: /^\/inbound(\/|$)/,
 } as const
 
-type Page = 'project' | 'experience' | 'agents' | 'teams' | 'observability' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
+type Page = 'project' | 'experience' | 'agents' | 'teams' | 'observability' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
 
 function pageFor(pathname: string): Page {
   if (Routes.project.test(pathname)) return 'project'
   if (Routes.agents.test(pathname)) return 'agents'
   if (Routes.teams.test(pathname)) return 'teams'
   if (Routes.observability.test(pathname)) return 'observability'
+  if (Routes.knowledge.test(pathname)) return 'knowledge'
   if (Routes.workspace.test(pathname)) return 'workspace'
   if (Routes.experience.test(pathname)) return 'experience'
   if (Routes['agent-config'].test(pathname)) return 'agent-config'
@@ -87,6 +90,8 @@ export default function App() {
             return <Teams project={project} />
           case 'observability':
             return <Observability project={project} />
+          case 'knowledge':
+            return <KnowledgeExplorer project={project} />
           case 'workspace':
             // @ts-ignore
             return <Workspace project={project} setProject={setProject} defaultAgentId={projectDefaultAgent} defaultModel={projectDefaultModel} />

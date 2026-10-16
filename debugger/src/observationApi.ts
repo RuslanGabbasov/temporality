@@ -28,6 +28,8 @@ export interface KnowledgeTransition {
 export interface KnowledgeItem {
   id: string
   proposition: string
+  /** "claim" (model-authored) vs "observation" (kernel heuristic). */
+  kind?: string
   topics?: string[]
   entities?: string[]
   state: string
@@ -67,8 +69,27 @@ export interface ObservationHint {
   history: KnowledgeTransition[]
 }
 
-export interface KnowledgeFacets { states: Record<string, number>; scopes: Record<string, number> }
-export interface KnowledgeListFilters { q?: string; state?: string; scope?: string; limit?: number; cursor?: string }
+export interface KnowledgeFacets {
+  states: Record<string, number>
+  scopes: Record<string, number>
+  topics?: Record<string, number>
+  entities?: Record<string, number>
+  projects?: Record<string, number>
+  kinds?: Record<string, number>
+}
+export interface KnowledgeListFilters {
+  q?: string
+  state?: string
+  scope?: string
+  topic?: string
+  entity?: string
+  /** Birth project of shared knowledge items (server calls it "origin" —
+   * "project" is already the visibility parameter). */
+  origin?: string
+  kind?: string
+  limit?: number
+  cursor?: string
+}
 
 async function request<T>(path: string, init?: RequestInit, query?: Record<string, string | number | undefined>): Promise<T> {
   const response = await fetch(apiUrl(path, query), {
@@ -97,6 +118,7 @@ export const observationApi = {
     '/v1/observations/knowledge', undefined, {
       project, as_of: asOf, known_at: knownAt,
       q: filters?.q, state: filters?.state, scope: filters?.scope,
+      topic: filters?.topic, entity: filters?.entity, origin: filters?.origin, kind: filters?.kind,
       limit: filters?.limit, cursor: filters?.cursor,
     }),
   invalidate: (body: { knowledge_id: string; project: string; actor: ObservationActor; reason: string; evidence?: ObservationEvidence[] }) =>
@@ -107,6 +129,20 @@ export const observationApi = {
     post<ObservationEvent>('/v1/observations/knowledge/promote', body),
   hints: (body: { project: string; query?: string; tool?: string; tool_result?: string; entities?: string[]; topics?: string[]; limit?: number }) =>
     post<{ activation_id: string; matcher: string; context_block: unknown; hints: ObservationHint[]; count: number }>('/v1/observations/hints', body),
+  explore: (body: {
+    project: string
+    operation: 'orient' | 'search' | 'expand' | 'trace' | 'compare' | 'synthesize'
+    question?: string
+    targets?: string[]
+    relations?: string[]
+    max_depth?: number
+    max_items?: number
+    include_candidates?: boolean
+    as_of?: string
+    known_at?: string
+  }) => post<ExploreResult>('/v1/observations/knowledge/explore', body),
+  eventById: (eventID: string, opts?: { source_id?: string; project?: string }) =>
+    request<{ event: ObservationEvent }>(`/v1/observations/events/${encodeURIComponent(eventID)}`, undefined, { source_id: opts?.source_id, project: opts?.project }),
 }
 
 /** All events of one run, oldest-first, following journal cursors to the end.
@@ -124,4 +160,62 @@ export async function runEvents(run: string, project?: string, cap = 4000): Prom
     cursor = page.next_cursor
   } while (cursor && collected.length < cap)
   return collected
+}
+
+// ── Explore engine contracts (observation/explore.go) ─────────────────────────
+// The read-only research surface: orient maps the areas, search explains why
+// each card matched (docs/human-knowledge-explorer.md §4–5).
+
+export interface ExploreKnowledgeCard {
+  knowledge_id: string
+  proposition: string
+  state: string
+  kind?: string
+  topics?: string[]
+  entities?: string[]
+  project?: string
+  scope_kind?: string
+  scope_id?: string
+  matched_by?: string[]
+  score?: number
+  depth?: number
+  via?: string
+  basis?: string
+  at_risk?: boolean
+  replacement_id?: string
+  evidence?: number
+}
+
+export interface ExploreArea {
+  name: string
+  kind: 'topic' | 'entity'
+  knowledge_count: number
+  states: Record<string, number>
+  score?: number
+  matched_by?: string[]
+  representative?: ExploreKnowledgeCard[]
+  contradictions?: number
+}
+
+export interface ExploreLimits {
+  max_items: number
+  max_depth: number
+  items_returned: number
+  truncated: boolean
+}
+
+export interface ExploreResult {
+  operation: string
+  algorithm_version: string
+  areas?: ExploreArea[]
+  results?: ExploreKnowledgeCard[]
+  relations?: unknown[]
+  traces?: unknown[]
+  conflicts?: unknown[]
+  synthesis?: unknown
+  gaps?: string[]
+  next_actions?: string[]
+  limits: ExploreLimits
+  completeness: string
+  notes?: string[]
 }
