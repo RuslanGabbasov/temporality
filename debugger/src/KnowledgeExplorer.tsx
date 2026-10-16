@@ -386,7 +386,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     .filter(([, count]) => count > 0)
 
   return (
-    <div style={{ padding: '1rem' }}>
+    <div style={{ padding: '1rem', height: 'calc(100vh - 3rem)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, fontSize: '1.1rem' }}>{t('explorer.title') ?? 'Knowledge explorer'}</h2>
         <div style={{ flex: 1, minWidth: '320px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -459,19 +459,20 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: '1rem', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: '1rem', flex: 1, minHeight: 0 }}>
         {/* Left: the area map — one widget: header with the filter and sort
             that used to live in the list below, then the treemap. The list was
-            the same data in a second shape, so it is gone (ТЗ §4). */}
-        <div>
-          <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.75rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+            the same data in a second shape, so it is gone (ТЗ §4). The card
+            stretches to the page bottom so the map fits as many clusters as
+            the screen allows. */}
+        <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.75rem', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexShrink: 0 }}>
               <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{t('explorer.map_title') ?? 'Area map'}</div>
               <button style={{ ...chip(false), marginLeft: 'auto', flexShrink: 0 }} disabled={normalizeBusy} onClick={() => void normalizeAreas()} title={t('explorer.area_normalize_hint') ?? undefined}>
                 {normalizeBusy ? '…' : (t('explorer.area_normalize') ?? 'Tidy up')}
               </button>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexShrink: 0 }}>
               <TextInput
                 id="explorer-areas-filter"
                 size="sm" value={areaFilter} labelText="" hideLabel
@@ -482,18 +483,19 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
               <button style={{ ...chip(areaSort === 'size'), flexShrink: 0 }} onClick={() => setAreaSort('size')}>{t('explorer.sort_size') ?? 'Size'}</button>
               <button style={{ ...chip(areaSort === 'name'), flexShrink: 0 }} onClick={() => setAreaSort('name')}>{t('explorer.sort_name') ?? 'A–Z'}</button>
             </div>
-            {normalizeNotice && <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.4rem' }}>{normalizeNotice}</div>}
+            {normalizeNotice && <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.4rem', flexShrink: 0 }}>{normalizeNotice}</div>}
             {areas.length > 0 && visibleAreas.length === 0 ? (
               <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', padding: '0.3rem 0' }}>{t('explorer.areas_no_match') ?? 'No areas match the filter.'}</div>
             ) : (
-              <AreaMap areas={visibleAreas} selectedKey={selectedAreaKey} onSelect={selectArea} />
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <AreaMap areas={visibleAreas} selectedKey={selectedAreaKey} onSelect={selectArea} />
+              </div>
             )}
           </div>
-        </div>
 
         {/* Right: dossier takes over the column; otherwise the view decides
             between contradiction discovery and the search results (ТЗ §3.2). */}
-        <div>
+        <div style={{ minHeight: 0, overflowY: 'auto' }}>
           {dossierID ? (
             <Dossier
               project={project}
