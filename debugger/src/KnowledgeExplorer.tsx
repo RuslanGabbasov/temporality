@@ -8,9 +8,12 @@ import {
   type KnowledgeItem,
 } from './observationApi'
 import AreaMap, { areaKey } from './explorer/AreaMap'
+import ConflictPanel from './explorer/ConflictPanel'
+import LifecycleBar from './explorer/LifecycleBar'
+import Dossier from './Dossier'
+import { stateLabel, kindLabel } from './explorer/shared'
 import ProjectRequired from './ProjectRequired'
 import { useT } from './i18n'
-import { useOrgUnits, OrgUnitSelect } from './orgUnits'
 
 /** Filters auto-apply, so the search input needs a debounce to avoid firing a
  *  request triple (orient + search + listing) per keystroke. */
@@ -41,22 +44,14 @@ interface NavRecord {
   question: string
   filters: Filters
   areaKey: string
+  view: string
+  dossierID: string
 }
 
-function stateLabel(state: string, t: (key: string) => string): string {
-  const key = `knowledge.state_${state}`
-  const text = t(key)
-  return text !== key ? text : state
-}
-
-function kindLabel(kind: string | undefined, t: (key: string) => string): string {
-  if (kind === 'observation') return t('explorer.kind_observation') ?? 'Observation'
-  return t('explorer.kind_claim') ?? 'Claim'
-}
+type View = 'search' | 'conflicts'
 
 export default function KnowledgeExplorer({ project }: { project: string }) {
   const t = useT()
-  const org = useOrgUnits()
   const initParams = new URLSearchParams(window.location.search)
 
   const [question, setQuestion] = useState(initParams.get('q') ?? '')
@@ -71,6 +66,8 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   })
   const [selectedAreaKey, setSelectedAreaKey] = useState(initParams.get('area') ?? '')
   const [revision, setRevision] = useState(0)
+  const [view, setView] = useState<View>(initParams.get('view') === 'conflicts' ? 'conflicts' : 'search')
+  const [dossierID, setDossierID] = useState(initParams.get('dossier') ?? '')
 
   const [areas, setAreas] = useState<ExploreArea[]>([])
   const [annotations, setAnnotations] = useState<Map<string, ExploreKnowledgeCard>>(new Map())
@@ -84,10 +81,6 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   const [listError, setListError] = useState('')
 
   const [expandedID, setExpandedID] = useState('')
-  const [reason, setReason] = useState('')
-  const [promoteScope, setPromoteScope] = useState('')
-  const [lifecycleBusy, setLifecycleBusy] = useState(false)
-  const [lifecycleError, setLifecycleError] = useState('')
 
   const [areaFilter, setAreaFilter] = useState('')
   const [areaSort, setAreaSort] = useState<'size' | 'name'>('size')
@@ -99,7 +92,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
 
   const debouncedQuestion = useDebounced(question)
 
-  const pushNav = useCallback((label: string, next: { question?: string; filters?: Filters; areaKey?: string }) => {
+  const pushNav = useCallback((label: string, next: { question?: string; filters?: Filters; areaKey?: string; view?: string; dossierID?: string }) => {
     setNavStack((stack) => {
       const last = stack[stack.length - 1]
       if (last && last.label === label && last.question === (next.question ?? last.question)) return stack
@@ -110,6 +103,8 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
         question: next.question ?? last?.question ?? '',
         filters: next.filters ?? last?.filters ?? { ...EMPTY_FILTERS },
         areaKey: next.areaKey ?? last?.areaKey ?? '',
+        view: next.view ?? last?.view ?? 'search',
+        dossierID: next.dossierID ?? (next.view && next.view !== 'search' ? '' : last?.dossierID ?? ''),
       }
       return [...stack.slice(-19), record]
     })
@@ -122,17 +117,21 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     url.set('project', project)
     if (question.trim()) url.set('q', question.trim()); else url.delete('q')
     if (selectedAreaKey) url.set('area', selectedAreaKey); else url.delete('area')
+    if (view !== 'search') url.set('view', view); else url.delete('view')
+    if (dossierID) url.set('dossier', dossierID); else url.delete('dossier')
     for (const [key, value] of Object.entries(filters)) {
       if (value) url.set(key, value)
     }
     window.history.replaceState(null, '', `${window.location.pathname}?${url.toString()}`)
-  }, [project, question, filters, selectedAreaKey])
+  }, [project, question, filters, selectedAreaKey, view, dossierID])
 
   const applyParams = useCallback(() => {
     const params = new URLSearchParams(window.location.search)
     setSearchInput(params.get('q') ?? '')
     setQuestion(params.get('q') ?? '')
     setSelectedAreaKey(params.get('area') ?? '')
+    setView(params.get('view') === 'conflicts' ? 'conflicts' : 'search')
+    setDossierID(params.get('dossier') ?? '')
     setFilters({
       state: params.get('state') ?? '',
       scope: params.get('scope') ?? '',
@@ -225,7 +224,8 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   const submitQuestion = useCallback(() => {
     setQuestion(searchInput)
     setSelectedAreaKey('')
-    if (searchInput.trim()) pushNav(searchInput.trim(), { question: searchInput.trim(), areaKey: '' })
+    setView('search')
+    if (searchInput.trim()) pushNav(searchInput.trim(), { question: searchInput.trim(), areaKey: '', view: 'search' })
   }, [pushNav, searchInput])
 
   const restoreNav = useCallback((record: NavRecord) => {
@@ -233,33 +233,34 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     setSearchInput(record.question)
     setFilters(record.filters)
     setSelectedAreaKey(record.areaKey)
+    setView(record.view === 'conflicts' ? 'conflicts' : 'search')
+    setDossierID(record.dossierID)
   }, [])
 
-  async function runLifecycle(action: 'challenge' | 'invalidate' | 'promote', item: KnowledgeItem) {
-    if (!reason.trim()) return
-    setLifecycleBusy(true); setLifecycleError('')
-    try {
-      const actor = { id: 'human', type: 'human' as const }
-      if (action === 'challenge') {
-        await observationApi.challenge({ knowledge_id: item.id, project, actor, reason: reason.trim() })
-      } else if (action === 'invalidate') {
-        await observationApi.invalidate({ knowledge_id: item.id, project, actor, reason: reason.trim() })
-      } else {
-        await observationApi.promote({
-          knowledge_id: item.id, project, actor,
-          scope_kind: promoteScope ? 'org_unit' : 'organization',
-          scope_id: promoteScope || undefined,
-          reason: reason.trim(),
-        })
-      }
-      setReason('')
-      setRevision((r) => r + 1)
-    } catch (e) {
-      setLifecycleError(e instanceof Error ? e.message : 'Request failed')
-    } finally {
-      setLifecycleBusy(false)
-    }
-  }
+  const switchView = useCallback((next: View) => {
+    setView(next)
+    setDossierID('')
+    pushNav(next === 'conflicts' ? (t('explorer.tab_conflicts') ?? 'Contradictions') : (t('explorer.tab_search') ?? 'Search'), { view: next, dossierID: '' })
+  }, [pushNav, t])
+
+  const openDossier = useCallback((id: string) => {
+    setDossierID(id)
+    pushNav(`${t('explorer.dossier') ?? 'Dossier'}: …${id.slice(-8)}`, { dossierID: id })
+  }, [pushNav, t])
+
+  const closeDossier = useCallback(() => {
+    setDossierID('')
+  }, [])
+
+  /** Start a fresh research question from anywhere (dossier «research from
+   *  this statement» etc.) — returns to the search view. */
+  const startQuestion = useCallback((nextQuestion: string) => {
+    setQuestion(nextQuestion)
+    setSearchInput(nextQuestion)
+    setView('search')
+    setDossierID('')
+    if (nextQuestion.trim()) pushNav(nextQuestion.trim().slice(0, 28), { question: nextQuestion.trim(), view: 'search', dossierID: '' })
+  }, [pushNav])
 
   const visibleAreas = useMemo(() => {
     const needle = areaFilter.trim().toLowerCase()
@@ -328,8 +329,22 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
       </div>
 
       {exploreError && <InlineNotification kind="warning" title="Explore" subtitle={exploreError} onClose={() => setExploreError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
-      {listError && <InlineNotification kind="error" title="Error" subtitle={listError} onClose={() => setListError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
-      {lifecycleError && <InlineNotification kind="error" title="Error" subtitle={lifecycleError} onClose={() => setLifecycleError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
+      {listError && <InlineNotification kind="error" title="Error" subtitle={listError} onClose={() => setListError('')} lowContrast style={{ marginBottom: '0.75rem'}} />}
+
+      {/* Research view tabs: search vs contradiction discovery (ТЗ §10). */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', borderBottom: '1px solid var(--tm-border)', marginBottom: '0.75rem' }}>
+        {(['search', 'conflicts'] as View[]).map((key) => (
+          <button
+            key={key}
+            onClick={() => switchView(key)}
+            style={{
+              padding: '0.45rem 0.9rem', background: view === key && !dossierID ? 'var(--tm-elevated)' : 'transparent',
+              border: 'none', borderBottom: view === key && !dossierID ? '2px solid var(--tm-teal)' : '2px solid transparent',
+              color: view === key && !dossierID ? 'var(--tm-teal)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600,
+            }}
+          >{key === 'search' ? (t('explorer.tab_search') ?? 'Search') : (t('explorer.tab_conflicts') ?? 'Contradictions')}</button>
+        ))}
+      </div>
 
       {navStack.length > 1 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
@@ -387,8 +402,23 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
           </div>
         </div>
 
-        {/* Right: facets + results */}
+        {/* Right: dossier takes over the column; otherwise the view decides
+            between contradiction discovery and the search results (ТЗ §3.2). */}
         <div>
+          {dossierID ? (
+            <Dossier
+              project={project}
+              knowledgeID={dossierID}
+              revision={revision}
+              onBack={closeDossier}
+              onOpenDossier={openDossier}
+              onQuestion={startQuestion}
+              onRefresh={() => setRevision((r) => r + 1)}
+            />
+          ) : view === 'conflicts' ? (
+            <ConflictPanel project={project} revision={revision} onChanged={() => setRevision((r) => r + 1)} onOpenDossier={openDossier} />
+          ) : (
+          <>
           <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.75rem', marginBottom: '0.75rem' }}>
             {facetRow(t('knowledge.state_label') ?? 'State', 'state', stateFacetValues)}
             {facetRow(t('knowledge.scope_label') ?? 'Scope', 'scope', facetValues(facets?.scopes))}
@@ -427,7 +457,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
               <div key={item.id} style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.6rem 0.75rem', marginBottom: '0.5rem' }}>
                 <div
                   role="button" tabIndex={0}
-                  onClick={() => { setExpandedID(expanded ? '' : item.id); if (!expanded) setReason('') }}
+                  onClick={() => { setExpandedID(expanded ? '' : item.id) }}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedID(expanded ? '' : item.id) } }}
                   style={{ cursor: 'pointer' }}
                 >
@@ -462,18 +492,10 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
                         {(item.evidence ?? []).slice(0, 6).map((e) => e.ref).join('  ')}
                       </div>
                     )}
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                      <TextInput
-                        id="explorer-reason"
-                        size="sm" labelText="" hideLabel style={{ flex: 1, minWidth: '220px' }}
-                        placeholder={t('runs.knowledge_reason_placeholder') ?? 'Reason'}
-                        value={reason} onChange={(e) => setReason(e.target.value)}
-                      />
-                      <OrgUnitSelect id="explorer-promote-unit" org={org} value={promoteScope} onChange={setPromoteScope} allowUnassigned label={t('knowledge.promote_scope') ?? 'Visible to'} />
-                      <Button size="sm" kind="secondary" disabled={!reason.trim() || lifecycleBusy} onClick={() => void runLifecycle('challenge', item)}>{t('runs.knowledge_challenge') ?? 'Challenge'}</Button>
-                      <Button size="sm" kind="secondary" disabled={!reason.trim() || lifecycleBusy} onClick={() => void runLifecycle('invalidate', item)}>{t('runs.knowledge_invalidate') ?? 'Invalidate'}</Button>
-                      <Button size="sm" kind="primary" disabled={!reason.trim() || lifecycleBusy} onClick={() => void runLifecycle('promote', item)}>{t('knowledge.promote') ?? 'Promote'}</Button>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                      <Button size="sm" kind="secondary" onClick={() => openDossier(item.id)}>{t('explorer.dossier_open') ?? 'Open dossier'}</Button>
                     </div>
+                    <LifecycleBar project={project} knowledgeID={item.id} onDone={() => setRevision((r) => r + 1)} onOpenDossier={openDossier} />
                   </div>
                 )}
               </div>
@@ -486,6 +508,8 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
                 {listLoading ? '…' : (t('knowledge.load_more') ?? 'Load more')}
               </Button>
             </div>
+          )}
+          </>
           )}
         </div>
       </div>

@@ -87,6 +87,10 @@ export interface KnowledgeListFilters {
    * "project" is already the visibility parameter). */
   origin?: string
   kind?: string
+  /** Exact-item lookup: the server filters the projection to this id (404
+   * when it is not visible in the project). Used by the conflict panel to
+   * resolve propositions behind compare results. */
+  knowledge_id?: string
   limit?: number
   cursor?: string
 }
@@ -119,9 +123,10 @@ export const observationApi = {
       project, as_of: asOf, known_at: knownAt,
       q: filters?.q, state: filters?.state, scope: filters?.scope,
       topic: filters?.topic, entity: filters?.entity, origin: filters?.origin, kind: filters?.kind,
+      knowledge_id: filters?.knowledge_id,
       limit: filters?.limit, cursor: filters?.cursor,
     }),
-  invalidate: (body: { knowledge_id: string; project: string; actor: ObservationActor; reason: string; evidence?: ObservationEvidence[] }) =>
+  invalidate: (body: { knowledge_id: string; project: string; actor: ObservationActor; reason: string; /** Successor knowledge: turns the invalidation into a correction (knowledge.superseded). */ replacement_id?: string; evidence?: ObservationEvidence[] }) =>
     post<ObservationEvent>('/v1/observations/knowledge/invalidate', body),
   challenge: (body: { knowledge_id: string; project: string; actor: ObservationActor; reason: string; evidence?: ObservationEvidence[] }) =>
     post<ObservationEvent>('/v1/observations/knowledge/challenge', body),
@@ -204,14 +209,70 @@ export interface ExploreLimits {
   truncated: boolean
 }
 
+export interface ExploreRelation {
+  from_id: string
+  to_id: string
+  type: string
+  /** explicit (recorded knowledge.linked event) | candidate (heuristic). */
+  basis: string
+  event_id?: string
+  depth?: number
+  note?: string
+}
+
+export interface ExploreHistoryStep {
+  event_id: string
+  type: string
+  state?: string
+  rule?: string
+  at: string
+  actor_id?: string
+  reason?: string
+}
+
+/** Hint telemetry recorded for the item (offer/use/ignore/outcome counters). */
+export interface ExploreTraceUsage {
+  hint_offers: number
+  hint_uses: number
+  hint_ignores: number
+  helpful_outcomes: number
+  harmful_outcomes: number
+  reuse_count: number
+}
+
+/** Provenance dossier of one knowledge item: full lifecycle steps plus usage
+ *  statistics, straight from the projection (ТЗ §4.4). */
+export interface ExploreHistory {
+  knowledge_id: string
+  proposition: string
+  state: string
+  created_at: string
+  created_by?: string
+  steps?: ExploreHistoryStep[]
+  usage: ExploreTraceUsage
+  replacement_id?: string
+  at_risk?: boolean
+  evidence?: ObservationEvidence[]
+}
+
+export interface ExploreConflict {
+  knowledge_ids: string[]
+  /** explicit:contradicts | candidate:same-topic-different-state | resolved:replacement. */
+  basis: string
+  detail: string
+  context_differences?: string[]
+  resolved: boolean
+  resolution?: string
+}
+
 export interface ExploreResult {
   operation: string
   algorithm_version: string
   areas?: ExploreArea[]
   results?: ExploreKnowledgeCard[]
-  relations?: unknown[]
-  traces?: unknown[]
-  conflicts?: unknown[]
+  relations?: ExploreRelation[]
+  traces?: ExploreHistory[]
+  conflicts?: ExploreConflict[]
   synthesis?: unknown
   gaps?: string[]
   next_actions?: string[]
