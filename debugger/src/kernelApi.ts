@@ -383,3 +383,68 @@ export function qualitySummary(project?: string): Promise<QualitySummary> {
   const suffix = project && project.trim() ? `?project=${encodeURIComponent(project.trim())}` : ''
   return request(`/v1/workspace/quality/summary${suffix}`)
 }
+
+// ── Storage inventory & host health (docs/sandbox-storage.md §5) ──────────
+
+export interface StorageTopPath {
+  path: string
+  bytes: number
+}
+
+export interface StorageProjectRow {
+  project: string
+  workspace_bytes: number
+  workspace_files: number
+  cache_bytes: number
+  quota_bytes: number
+  quota_used: number
+  top_paths: StorageTopPath[]
+  last_activity_at?: string
+}
+
+export interface StorageSnapshot {
+  generated_at: string
+  root: string
+  disk: { total_bytes: number; free_bytes: number }
+  truncated: boolean
+  projects: StorageProjectRow[]
+}
+
+export function storageOverview(): Promise<StorageSnapshot> {
+  return request('/v1/workspace/storage')
+}
+
+export interface StorageTreeNode {
+  name: string
+  path: string
+  bytes: number
+  files: number
+  mod_at?: string
+  children?: StorageTreeNode[]
+}
+
+export interface StorageProjectTree {
+  project: string
+  root: string
+  depth: number
+  truncated: boolean
+  workspace: StorageTreeNode
+  cache: StorageTreeNode
+  top_files: StorageTopPath[]
+}
+
+export function storageProjectTree(project: string, depth?: number): Promise<StorageProjectTree> {
+  const suffix = depth ? `?depth=${depth}` : ''
+  return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}${suffix}`)
+}
+
+export interface SystemHealth {
+  disk: { path: string; total_bytes: number; free_bytes: number }[]
+  cpu: { load1: number; load5: number; cores: number }
+  memory: { total_bytes: number; available_bytes: number }
+  docker: { images_bytes: number; containers_running: number; available: boolean }
+}
+
+export function systemHealth(): Promise<SystemHealth> {
+  return request('/v1/system/health')
+}

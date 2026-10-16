@@ -171,6 +171,7 @@ export const EVENT_CATALOG: EventMeta[] = [
   E('ops', 'notification.sent', 'Уведомление отправлено', 'Каналу доставлено уведомление.', 'Notification sent', 'A notification was delivered to a channel.'),
   E('ops', 'operation.reconciled', 'Операция сверена', 'Неопределённая операция закрыта решением человека.', 'Operation reconciled', 'An uncertain operation was closed by a human decision.'),
   E('ops', 'memory.read.failed', 'Ошибка чтения памяти', 'Не удалось прочитать запись памяти рана.', 'Memory read failed', 'A run memory record could not be read.'),
+  E('ops', 'storage.snapshot', 'Снапшот хранилища', 'Плановый обход песочницы: объёмы по проектам и свободное место.', 'Storage snapshot', 'Scheduled sandbox walk: per-project volumes and free space.'),
 ]
 
 /** Event lookup by raw type. */

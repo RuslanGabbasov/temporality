@@ -2549,6 +2549,13 @@ func main() {
 	// Sandbox profile registry (docs/sandbox-profiles.md §6): the catalog of
 	// execution environments agents may be assigned to, plus builtin builds.
 	RegisterSandboxProfileRoutes(mux, gate, ws, events, dockerProfileBuilder{binary: sandboxDockerBinary()})
+	// Storage inventory (docs/sandbox-storage.md §5, phase 1 read-only): the
+	// sandbox filesystem footprint, per-project trees and host health.
+	storageRoot := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_ROOT"))
+	storageSnapshots := &storageSnapshotCache{}
+	RegisterStorageRoutes(mux, gate, func(r *http.Request) (map[string][]string, error) {
+		return overviewVisibleProjects(r, ws)
+	}, storageRoot, sandboxDockerBinary(), storageSnapshots)
 	// agentskills.io import: folder or archive → parsed SKILL.md draft for the
 	// skill editor. Pure parse, no persistence — saving follows the normal flow.
 	RegisterSkillImportRoutes(mux, gate)
@@ -5607,6 +5614,11 @@ func main() {
 			}
 		}
 	}()
+
+	// Storage snapshot loop (docs/sandbox-storage.md §6, phase 1: read-only):
+	// hourly walk of the sandbox root refreshing the API cache and journaling
+	// the footprint. KERNEL_STORAGE_SWEEPER=off disables it; no deletions yet.
+	startStorageSnapshotLoop(storageRoot, storageSnapshots, events)
 
 	// Schedule trigger loop: polls all enabled schedule triggers every minute.
 	go func() {

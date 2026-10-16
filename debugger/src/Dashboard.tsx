@@ -1,13 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Heading, InlineNotification, Tag, Tile } from '@carbon/react'
 import { observationApi, type HealthStats, type HealthModelStats } from './observationApi'
 import {
   projectsOverview,
   qualitySummary,
   operations,
+  storageOverview,
+  systemHealth,
   type ProjectsOverview,
   type QualitySummary,
   type QualitySummaryAgent,
+  type StorageSnapshot,
+  type SystemHealth,
 } from './kernelApi'
 import ProjectOverview from './ProjectOverview'
 import Observability from './Observability'
@@ -104,6 +108,8 @@ export default function Dashboard({ project, setProject }: Props) {
   const [health, setHealth] = useState<HealthStats | null>(null)
   const [overview, setOverview] = useState<ProjectsOverview | null>(null)
   const [opsCount, setOpsCount] = useState<number | null>(null)
+  const [storage_, setStorage] = useState<StorageSnapshot | null>(null)
+  const [syshealth, setSyshealth] = useState<SystemHealth | null>(null)
   const [quality, setQuality] = useState<QualitySummary | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -119,14 +125,18 @@ export default function Dashboard({ project, setProject }: Props) {
     setError('')
     const since = new Date(Date.now() - window_.ms).toISOString()
     try {
-      const [stats, projects, ops] = await Promise.all([
+      const [stats, projects, ops, storageSnap, syshealthSnap] = await Promise.all([
         observationApi.healthStats(undefined, since),
         projectsOverview(window_.go),
         operations().catch(() => null),
+        storageOverview().catch(() => null),
+        systemHealth().catch(() => null),
       ])
       setHealth(stats)
       setOverview(projects)
       setOpsCount(ops ? ops.count : null)
+      setStorage(storageSnap)
+      setSyshealth(syshealthSnap)
       setUpdatedAt(new Date())
     } catch (failure) {
       setError(errorMessage(failure))
@@ -180,6 +190,14 @@ export default function Dashboard({ project, setProject }: Props) {
     }
     return [...groups.entries()].sort((a, b) => (a[0] === '' ? 1 : b[0] === '' ? -1 : a[0].localeCompare(b[0])))
   }, [overview])
+
+  // Top-5 storage consumers (docs/sandbox-storage.md §7.1): the dashboard
+  // summary, the full table lands with the phase-2 storage page.
+  const storageTop = useMemo(() => {
+    const rows = [...(storage_?.projects ?? [])]
+    rows.sort((a, b) => (b.workspace_bytes + b.cache_bytes) - (a.workspace_bytes + a.cache_bytes))
+    return rows.slice(0, 5)
+  }, [storage_])
 
   const pickProject = (id: string) => {
     setProject(id)
@@ -280,6 +298,100 @@ export default function Dashboard({ project, setProject }: Props) {
             )}
           </div>
 
+          {/* Storage footprint (docs/sandbox-storage.md §7.1) */}
+          {storage_ && (
+            <>
+              <PanelHeader title={t('dashboard.storage') ?? 'Storage'} hint={t('dashboard.storage_hint') ?? undefined} />
+              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', marginBottom: '1rem', fontSize: '0.78rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.45rem' }}>
+                  <span title={storage_.root} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '20rem', color: 'var(--tm-text-3)' }}>{storage_.root}</span>
+                  <span>
+                    <strong>{fmtBytes(storage_.disk.total_bytes - storage_.disk.free_bytes)}</strong> / {fmtBytes(storage_.disk.total_bytes)}
+                    <span style={{ color: 'var(--tm-text-3)' }}> · {t('dashboard.storage_free') ?? 'free'} {fmtBytes(storage_.disk.free_bytes)}</span>
+                  </span>
+                </div>
+                <div style={meterTrackStyle}>
+                  <div style={{ ...meterFillStyle, width: meterWidth(storage_.disk.total_bytes > 0 ? (storage_.disk.total_bytes - storage_.disk.free_bytes) / storage_.disk.total_bytes : 0), background: meterColor(storage_.disk.total_bytes > 0 ? (storage_.disk.total_bytes - storage_.disk.free_bytes) / storage_.disk.total_bytes : 0) }} />
+                </div>
+                {storage_.truncated && (
+                  <div style={{ color: 'var(--tm-warning)', margin: '0.4rem 0' }}>⚠ {t('dashboard.storage_truncated') ?? 'walk incomplete — numbers are partial'}</div>
+                )}
+                {storageTop.length > 0 ? (
+                  <div style={{ marginTop: '0.5rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(6rem, 1.3fr) minmax(5rem, 1fr) minmax(4.5rem, 0.7fr)', gap: '0.6rem', fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)', padding: '0.2rem 0' }}>
+                      <span>{t('dashboard.col_project') ?? 'Project'}</span>
+                      <span title={t('dashboard.storage_quota_hint') ?? undefined}>{t('dashboard.storage_quota') ?? 'quota'}</span>
+                      <span style={{ textAlign: 'right' }}>{t('dashboard.storage_occupied') ?? 'used'}</span>
+                    </div>
+                    {storageTop.map((row) => {
+                      const used = row.workspace_bytes + row.cache_bytes
+                      const hint = [`${t('dashboard.storage_workspace') ?? 'workspace'}: ${fmtBytes(row.workspace_bytes)} (${row.workspace_files.toLocaleString()})`, `${t('dashboard.storage_cache') ?? 'cache'}: ${fmtBytes(row.cache_bytes)}`, ...row.top_paths.map((p) => `${p.path}: ${fmtBytes(p.bytes)}`)].join('\n')
+                      return (
+                        <div key={row.project} title={hint} style={{ display: 'grid', gridTemplateColumns: 'minmax(6rem, 1.3fr) minmax(5rem, 1fr) minmax(4.5rem, 0.7fr)', gap: '0.6rem', alignItems: 'center', padding: '0.25rem 0', borderTop: '1px solid var(--tm-border)' }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: row.project === project ? 'var(--tm-teal)' : 'var(--tm-text)' }}>{row.project}</span>
+                          <div style={meterTrackStyle}>
+                            <div style={{ ...meterFillStyle, width: meterWidth(row.quota_used), background: meterColor(row.quota_used) }} />
+                          </div>
+                          <span style={{ color: 'var(--tm-text-3)', whiteSpace: 'nowrap', textAlign: 'right' }}>{fmtBytes(used)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ color: 'var(--tm-text-3)', marginTop: '0.5rem' }}>{t('dashboard.storage_empty') ?? 'No project storage yet'}</div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Server health (docs/sandbox-storage.md §5.4) */}
+          {syshealth && (
+            <>
+              <PanelHeader title={t('dashboard.server') ?? 'Server'} hint={t('dashboard.server_hint') ?? undefined} />
+              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', marginBottom: '1rem', fontSize: '0.78rem', display: 'grid', gridTemplateColumns: 'minmax(8rem, 0.8fr) minmax(10rem, 1.4fr)', rowGap: '0.45rem', alignItems: 'center' }}>
+                <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_load') ?? 'load 1/5m'}</span>
+                <span style={{ color: syshealth.cpu.cores > 0 && syshealth.cpu.load1 > syshealth.cpu.cores ? 'var(--tm-danger)' : 'var(--tm-text)' }}>
+                  {syshealth.cpu.load1.toFixed(2)} / {syshealth.cpu.load5.toFixed(2)}
+                  <span style={{ color: 'var(--tm-text-3)' }}> · {syshealth.cpu.cores} vCPU</span>
+                </span>
+                <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_memory') ?? 'Memory'}</span>
+                {syshealth.memory.total_bytes > 0 ? (() => {
+                  const used = syshealth.memory.total_bytes - syshealth.memory.available_bytes
+                  const ratio = used / syshealth.memory.total_bytes
+                  return (
+                    <span>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                        <span>{fmtBytes(used)} / {fmtBytes(syshealth.memory.total_bytes)}</span>
+                        <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.storage_free') ?? 'free'} {fmtBytes(syshealth.memory.available_bytes)}</span>
+                      </span>
+                      <span style={{ ...meterTrackStyle, display: 'block', marginTop: '0.2rem' }}>
+                        <span style={{ ...meterFillStyle, display: 'block', width: meterWidth(ratio), background: meterColor(ratio) }} />
+                      </span>
+                    </span>
+                  )
+                })() : <span style={{ color: 'var(--tm-text-3)' }}>—</span>}
+                {syshealth.disk.map((d) => (
+                  <Fragment key={d.path}>
+                    <span title={d.path} style={{ color: 'var(--tm-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('dashboard.server_disk') ?? 'disk'} {d.path}</span>
+                    <span style={{ color: d.total_bytes > 0 && d.free_bytes / d.total_bytes < 0.1 ? 'var(--tm-danger)' : 'var(--tm-text)' }}>
+                      {fmtBytes(d.free_bytes)}
+                      <span style={{ color: 'var(--tm-text-3)' }}> / {fmtBytes(d.total_bytes)}</span>
+                    </span>
+                  </Fragment>
+                ))}
+                <span style={{ color: 'var(--tm-text-3)' }}>docker</span>
+                {syshealth.docker.available ? (
+                  <span>
+                    {fmtBytes(syshealth.docker.images_bytes)}
+                    <span style={{ color: 'var(--tm-text-3)' }}> · {pluralT(t, locale, 'dashboard.containers_n', syshealth.docker.containers_running)}</span>
+                  </span>
+                ) : (
+                  <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_no_docker') ?? 'docker unreachable'}</span>
+                )}
+              </div>
+            </>
+          )}
+
           {/* Models / providers */}
           <PanelHeader title={t('dashboard.models') ?? 'Models & providers'} hint={t(windows_label(windowIdx)) ?? undefined} />
           {health && health.models.length > 0 ? (
@@ -378,6 +490,31 @@ export default function Dashboard({ project, setProject }: Props) {
 function windows_label(idx: number): string {
   return WINDOWS[idx]?.key ?? 'dashboard.window_day'
 }
+
+/** Storage-widget byte sizes: binary units up to TiB, matching quota units. */
+function fmtBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '—'
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++ }
+  return `${unit === 0 || value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`
+}
+
+/** Meter colors follow the health-strip thresholds: 80% warns, 100% alerts. */
+function meterColor(ratio: number): string {
+  if (ratio >= 1) return 'var(--tm-danger)'
+  if (ratio >= 0.8) return 'var(--tm-warning)'
+  return 'var(--tm-teal)'
+}
+
+function meterWidth(ratio: number): string {
+  if (!Number.isFinite(ratio) || ratio <= 0) return '0%'
+  return `${Math.min(100, ratio * 100).toFixed(1)}%`
+}
+
+const meterTrackStyle: CSSProperties = { height: '6px', borderRadius: '3px', background: 'var(--tm-border)', overflow: 'hidden' }
+const meterFillStyle: CSSProperties = { height: '100%', borderRadius: '3px' }
 
 function QualityTab({ quality, busy, t, navigate }: {
   quality: QualitySummary | null
