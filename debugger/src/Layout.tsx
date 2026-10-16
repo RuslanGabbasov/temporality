@@ -47,7 +47,6 @@ const NAV_ITEMS = [
   { path: '/workspace', label: 'nav.workspace' },
   { path: '/project', label: 'nav.project' },
   { path: '/agents', label: 'nav.runs' },
-  { path: '/teams', label: 'nav.teams' },
   { path: '/inbound', label: 'nav.inbound' },
   { path: '/observability', label: 'nav.knowledge' },
   { path: '/artifacts', label: 'nav.artifacts' },
@@ -57,6 +56,7 @@ const NAV_ITEMS = [
 // Configuration surfaces — grouped under the Settings dropdown.
 const CONFIG_ITEMS = [
   { path: '/agent-config', label: 'nav.agents' },
+  { path: '/teams', label: 'nav.teams' },
   { path: '/triggers', label: 'nav.triggers' },
   { path: '/skills', label: 'nav.skills' },
   { path: '/mcp', label: 'nav.mcp' },
