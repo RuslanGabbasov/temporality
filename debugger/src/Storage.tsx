@@ -15,6 +15,7 @@ import {
   type StorageFileEntry,
 } from './kernelApi'
 import { fmtBytes } from './format'
+import { highlightCode, languageForFile } from './syntax'
 
 type AreaName = 'workspace' | 'cache'
 
@@ -38,7 +39,7 @@ export default function Storage({ project }: { project: string }) {
   const [loadingDir, setLoadingDir] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<{ area: AreaName; entry: StorageFileEntry } | null>(null)
-  const [preview, setPreview] = useState<{ kind: 'text' | 'markdown' | 'image'; content: string } | null>(null)
+  const [preview, setPreview] = useState<{ kind: 'text' | 'markdown' | 'image'; content: string; html?: string } | null>(null)
   const [previewError, setPreviewError] = useState('')
   const [busy, setBusy] = useState(false)
   const uploadTarget = useRef<{ area: AreaName; dir: string }>({ area: 'workspace', dir: '' })
@@ -108,7 +109,11 @@ export default function Storage({ project }: { project: string }) {
         return
       }
       const kind = MARKDOWN_EXT.test(entry.name) ? 'markdown' : 'text'
-      setPreview({ kind, content: text.length > 256 << 10 ? text.slice(0, 256 << 10) : text })
+      const trimmed = text.length > 256 << 10 ? text.slice(0, 256 << 10) : text
+      // Syntax highlighting for known code extensions; everything else stays
+      // escaped plain text.
+      const language = kind === 'text' ? languageForFile(entry.name) : ''
+      setPreview({ kind, content: trimmed, html: highlightCode(trimmed, language) })
     } catch (f) { setPreviewError(message(f)) }
   }
 
@@ -267,7 +272,11 @@ export default function Storage({ project }: { project: string }) {
                   <Markdown content={preview.content} />
                 </div>
               ) : (
-                <pre style={{ margin: 0, padding: '0.5rem', background: 'var(--tm-surface)', border: '1px solid var(--tm-border)', borderRadius: '4px', fontSize: '0.72rem', lineHeight: 1.45, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{preview.content}</pre>
+                <pre
+                  className="code-preview hljs"
+                  style={{ margin: 0, padding: '0.5rem', background: 'var(--tm-surface)', border: '1px solid var(--tm-border)', borderRadius: '4px', fontSize: '0.72rem', lineHeight: 1.45, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                  dangerouslySetInnerHTML={{ __html: preview.html ?? '' }}
+                />
               )}
             </>
           )}

@@ -2226,6 +2226,28 @@ button.header-nav-link {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// highlight.js tokens (storage file preview) — mapped to the theme palette
+// instead of a stock hljs theme, so both light and dark modes stay in-system.
+// ═══════════════════════════════════════════════════════════════
+
+.code-preview.hljs { color: var(--tm-text); background: transparent; }
+.code-preview .hljs-keyword, .code-preview .hljs-selector-tag, .code-preview .hljs-literal,
+.code-preview .hljs-section, .code-preview .hljs-doctag, .code-preview .hljs-type,
+.code-preview .hljs-name, .code-preview .hljs-strong { color: var(--tm-info); font-weight: 600; }
+.code-preview .hljs-string, .code-preview .hljs-regexp, .code-preview .hljs-addition,
+.code-preview .hljs-attribute, .code-preview .hljs-meta .hljs-string { color: var(--tm-success); }
+.code-preview .hljs-number, .code-preview .hljs-symbol, .code-preview .hljs-bullet,
+.code-preview .hljs-link, .code-preview .hljs-meta, .code-preview .hljs-selector-id,
+.code-preview .hljs-selector-class { color: var(--tm-amber); }
+.code-preview .hljs-comment, .code-preview .hljs-quote { color: var(--tm-text-3); font-style: italic; }
+.code-preview .hljs-variable, .code-preview .hljs-template-variable, .code-preview .hljs-attr,
+.code-preview .hljs-property, .code-preview .hljs-params { color: var(--tm-teal); }
+.code-preview .hljs-title, .code-preview .hljs-title.class_, .code-preview .hljs-title.function_ { color: var(--tm-text); font-weight: 600; }
+.code-preview .hljs-built_in, .code-preview .hljs-builtin-name { color: var(--tm-info); }
+.code-preview .hljs-deletion { color: var(--tm-danger); }
+.code-preview .hljs-emphasis { font-style: italic; }
+
+// ═══════════════════════════════════════════════════════════════
 // Scrollbar
 // ═══════════════════════════════════════════════════════════════
 
