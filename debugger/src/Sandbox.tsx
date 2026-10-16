@@ -12,6 +12,8 @@ import {
 import PageLoading from './PageLoading'
 import { Add, TrashCan, Renew, Edit } from '@carbon/icons-react'
 import { workspaceApi, type SandboxProfile } from './workspaceApi'
+import { storageProjectTree, type StorageProjectTree, type StorageTreeNode, type StorageTopPath } from './kernelApi'
+import { fmtBytes } from './format'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
@@ -37,7 +39,7 @@ const emptyForm: ProfileForm = { id: '', name: '', description: '', image: '', t
 // Sandbox profile registry (docs/sandbox-profiles.md §8): the catalog of
 // execution environments, builtin recipes with a Build action and custom
 // profiles pointing at external digest-pinned images.
-export default function Sandbox() {
+export default function Sandbox({ project }: { project?: string }) {
   const t = useT()
   const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
   const [profiles, setProfiles] = useState<SandboxProfile[]>([])
@@ -195,6 +197,8 @@ export default function Sandbox() {
         </Stack>
       )}
 
+      <StorageBrowser project={project ?? ''} />
+
       {showForm && (
         <AppModal onClose={() => { setShowForm(false); setEditing(null) }} panelStyle={{ width: '640px' }}>
           <Heading>{editing ? t('sandbox.edit_heading') : t('sandbox.custom_heading')}</Heading>
@@ -220,6 +224,122 @@ export default function Sandbox() {
           </Stack>
         </AppModal>
       )}
+    </div>
+  )
+}
+
+/** Persistent sandbox filesystem browser (docs/sandbox-storage.md §7.1):
+ *  the per-project workspace/cache tree the agents actually work in, with
+ *  sizes, expandable folders and the largest files. Read-only — the sweepers
+ *  own cleanup. */
+function StorageBrowser({ project }: { project: string }) {
+  const t = useT()
+  const [tree, setTree] = useState<StorageProjectTree | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  const load = useCallback(async () => {
+    if (!project.trim()) return
+    setLoading(true)
+    setError('')
+    try {
+      setTree(await storageProjectTree(project.trim(), 4))
+      setExpanded(new Set())
+    } catch (f) { setError(message(f)) }
+    finally { setLoading(false) }
+  }, [project])
+
+  useEffect(() => { void load() }, [load])
+
+  const toggle = (path: string) => {
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+
+  const renderNode = (node: StorageTreeNode, depth: number) => {
+    const hasChildren = (node.children ?? []).length > 0
+    const open = expanded.has(node.path)
+    return (
+      <div key={node.path || node.name} style={{ paddingLeft: depth > 0 ? '1rem' : 0 }}>
+        <div
+          role={hasChildren ? 'button' : undefined}
+          tabIndex={hasChildren ? 0 : undefined}
+          onClick={() => hasChildren && toggle(node.path)}
+          onKeyDown={(e) => { if (hasChildren && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(node.path) } }}
+          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.15rem 0.2rem', cursor: hasChildren ? 'pointer' : 'default', borderRadius: '4px', fontSize: '0.78rem' }}
+        >
+          <span style={{ width: '0.9rem', color: 'var(--tm-text-3)', flexShrink: 0 }}>{hasChildren ? (open ? '▾' : '▸') : ''}</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}/</span>
+          {node.mod_at && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', flexShrink: 0 }} title={new Date(node.mod_at).toLocaleString()}>{new Date(node.mod_at).toLocaleDateString()}</span>}
+          <span style={{ marginLeft: 'auto', color: 'var(--tm-text-3)', fontSize: '0.7rem', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtBytes(node.bytes)} · {node.files.toLocaleString()} 📄</span>
+        </div>
+        {open && hasChildren && (node.children ?? []).map((child: StorageTreeNode) =>
+          child.children?.length ? renderNode(child, depth + 1) : renderLeaf(child, depth + 1))}
+      </div>
+    )
+  }
+
+  const renderLeaf = (node: StorageTreeNode, depth: number) => (
+    <div key={node.path || node.name} style={{ paddingLeft: '1rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.12rem 0.2rem', fontSize: '0.76rem', color: 'var(--tm-text-2)' }}>
+        <span style={{ width: '0.9rem', flexShrink: 0 }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}/</span>
+        <span style={{ marginLeft: 'auto', color: 'var(--tm-text-3)', fontSize: '0.7rem', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtBytes(node.bytes)} · {node.files.toLocaleString()} 📄</span>
+      </div>
+    </div>
+  )
+
+  const renderFile = (file: StorageTopPath) => (
+    <div key={file.path} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.15rem 0', borderTop: '1px solid var(--tm-border)', fontSize: '0.75rem' }}>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.path}>{file.path}</span>
+      <span style={{ marginLeft: 'auto', color: 'var(--tm-text-3)', fontSize: '0.7rem', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtBytes(file.bytes)}</span>
+    </div>
+  )
+
+  if (!project.trim()) return null
+
+  return (
+    <div style={{ marginTop: '2rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+        <div>
+          <Heading style={{ fontSize: '1rem' }}>{t('sandbox.storage_title')}</Heading>
+          <p style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', marginTop: '0.25rem' }}>{t('sandbox.storage_subtitle')}</p>
+        </div>
+        <Button size="sm" kind="ghost" renderIcon={Renew} disabled={loading} onClick={() => void load()}>{t('common.refresh')}</Button>
+      </div>
+      {error && <InlineNotification kind="error" lowContrast title={t('action.error')} subtitle={error} onCloseButtonClick={() => setError('')} style={{ marginBottom: '0.75rem' }} />}
+      {!project.trim() ? (
+        <Tile style={{ color: 'var(--tm-text-3)' }}>{t('sandbox.storage_no_project')}</Tile>
+      ) : loading ? (
+        <PageLoading />
+      ) : tree ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1rem', alignItems: 'start' }}>
+          <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.35rem' }}>
+              <span>{t('sandbox.storage_workspace')}</span>
+              <span>{fmtBytes(tree.workspace.bytes)} · {tree.workspace.files.toLocaleString()} 📄</span>
+            </div>
+            {renderNode(tree.workspace, 0)}
+          </div>
+          <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.35rem' }}>
+              <span>{t('sandbox.storage_cache')}</span>
+              <span>{fmtBytes(tree.cache.bytes)} · {tree.cache.files.toLocaleString()} 📄</span>
+            </div>
+            {renderNode(tree.cache, 0)}
+          </div>
+          <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>
+            <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.35rem' }}>{t('sandbox.storage_top')}</div>
+            {tree.top_files.map(renderFile)}
+            {tree.truncated && <p style={{ color: 'var(--tm-warning)', fontSize: '0.72rem', marginTop: '0.5rem' }}>⚠ {t('sandbox.storage_truncated')}</p>}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

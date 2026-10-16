@@ -19,6 +19,7 @@ import Observability from './Observability'
 import { useI18n, pluralT } from './i18n'
 import { formatDuration } from './eventSummary'
 import { sandboxLoad, maxSandboxNet, sandboxDiameter, sandboxColor, topSandboxes, sandboxShortName } from './sandboxWidgets'
+import { fmtBytes } from './format'
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed'
@@ -516,16 +517,6 @@ export default function Dashboard({ project, setProject }: Props) {
 
 function windows_label(idx: number): string {
   return WINDOWS[idx]?.key ?? 'dashboard.window_day'
-}
-
-/** Storage-widget byte sizes: binary units up to TiB, matching quota units. */
-function fmtBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return '—'
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++ }
-  return `${unit === 0 || value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`
 }
 
 /** Meter colors follow the health-strip thresholds: 80% warns, 100% alerts. */

@@ -104,7 +104,7 @@ export default function App() {
           case 'secrets':
             return <Secrets />
           case 'sandbox':
-            return <Sandbox />
+            return <Sandbox project={project} />
           case 'providers':
             return <Providers />
           case 'users':
