@@ -713,6 +713,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleSecretList(ctx, request)
 	case "knowledge_lookup":
 		return a.handleKnowledgeLookupTool(ctx, request)
+	case "knowledge_explore":
+		return a.handleKnowledgeExploreTool(ctx, request)
 	case "saga_register":
 		return a.handleSagaRegister(ctx, request)
 	case "saga_attach":
@@ -1234,6 +1236,86 @@ func (a *Activities) handleKnowledgeLookupTool(ctx context.Context, request Tool
 		return ToolResult{Content: fmt.Sprintf("error: knowledge lookup failed (HTTP %d): %s", status, truncate(string(body), 400))}, nil
 	}
 	return ToolResult{Content: compactJSON(string(body), 6000)}, nil
+}
+
+// handleKnowledgeExploreTool backs the agent-facing knowledge_explore tool:
+// the research surface over the project knowledge base (orient/search/expand/
+// trace/compare/synthesize). Read-only and project-scoped like knowledge_lookup;
+// the journal enforces visibility before the engine sees anything.
+func (a *Activities) handleKnowledgeExploreTool(ctx context.Context, request ToolRequest) (ToolResult, error) {
+	if request.Project == "" {
+		return ToolResult{Content: "error: project is required"}, nil
+	}
+	operation, _ := request.Arguments["operation"].(string)
+	if operation == "" {
+		return ToolResult{Content: "error: operation is required (orient, search, expand, trace, compare, synthesize)"}, nil
+	}
+	payload := map[string]any{"project": request.Project, "operation": operation}
+	if question, _ := request.Arguments["question"].(string); strings.TrimSpace(question) != "" {
+		payload["question"] = strings.TrimSpace(question)
+	}
+	payload["targets"] = toolStringList(request.Arguments["targets"])
+	payload["relations"] = toolStringList(request.Arguments["relations"])
+	if value, ok := toolInt(request.Arguments["max_depth"]); ok {
+		payload["max_depth"] = value
+	}
+	if value, ok := toolInt(request.Arguments["max_items"]); ok {
+		payload["max_items"] = value
+	}
+	if value, ok := request.Arguments["include_candidates"].(bool); ok {
+		payload["include_candidates"] = value
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, a.TemporalityURL+"/v1/observations/knowledge/explore", bytes.NewReader(encoded))
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	if a.APIToken != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+a.APIToken)
+	}
+	response, err := a.HTTP.Do(httpRequest)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return ToolResult{Content: "error: " + err.Error()}, nil
+	}
+	if status := response.StatusCode; status >= 400 {
+		return ToolResult{Content: fmt.Sprintf("error: knowledge explore failed (HTTP %d): %s", status, truncate(string(body), 400))}, nil
+	}
+	return ToolResult{Content: compactJSON(string(body), 6000)}, nil
+}
+
+// toolStringList coerces a tool argument into a clean string slice; model
+// tool calls deliver arrays as []any with string items.
+func toolStringList(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+			result = append(result, strings.TrimSpace(text))
+		}
+	}
+	return result
+}
+
+// toolInt coerces a numeric tool argument (delivered as float64 by JSON)
+// into an int when present.
+func toolInt(value any) (int, bool) {
+	number, ok := value.(float64)
+	if !ok {
+		return 0, false
+	}
+	return int(number), true
 }
 
 func (a *Activities) handleSkillAction(ctx context.Context, request ToolRequest) (ToolResult, error) {

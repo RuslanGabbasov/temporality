@@ -74,6 +74,7 @@ func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate, opt
 	mux.HandleFunc("POST /v1/observations/knowledge/invalidate", s.invalidateObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/knowledge/challenge", s.challengeObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/knowledge/promote", s.promoteObservationKnowledge)
+	mux.HandleFunc("POST /v1/observations/knowledge/explore", s.exploreObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/hints", s.activateObservationHints)
 	return logRequests(log, s.gate.Authenticate(mux))
 }
@@ -1028,6 +1029,119 @@ func (s *Server) promoteObservationKnowledge(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusCreated, event)
+}
+
+type knowledgeExploreObservationRequest struct {
+	Project           string   `json:"project"`
+	Operation         string   `json:"operation"`
+	Question          string   `json:"question,omitempty"`
+	Targets           []string `json:"targets,omitempty"`
+	Relations         []string `json:"relations,omitempty"`
+	MaxDepth          int      `json:"max_depth,omitempty"`
+	MaxItems          int      `json:"max_items,omitempty"`
+	IncludeCandidates bool     `json:"include_candidates,omitempty"`
+	AsOf              string   `json:"as_of,omitempty"`
+	KnownAt           string   `json:"known_at,omitempty"`
+}
+
+// exploreObservationKnowledge backs the read-only research surface
+// (docs/agent-knowledge-exploration.md §4): orient, search, expand, trace,
+// compare and synthesize over the caller's visible knowledge. Visibility,
+// bitemporal slicing and authorization resolve exactly like every other
+// knowledge endpoint — the engine only ever sees what the caller may see.
+func (s *Server) exploreObservationKnowledge(w http.ResponseWriter, r *http.Request) {
+	var input knowledgeExploreObservationRequest
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	input.Project = strings.TrimSpace(input.Project)
+	input.Operation = strings.TrimSpace(input.Operation)
+	input.Question = strings.TrimSpace(input.Question)
+	if input.Project == "" {
+		writeError(w, http.StatusBadRequest, errors.New("project is required"))
+		return
+	}
+	if !s.gate.Allow(w, r, controlplane.RoleReader, input.Project) {
+		return
+	}
+	var asOf, knownAt *time.Time
+	if input.AsOf != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, input.AsOf)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, errors.New("as_of must be RFC3339"))
+			return
+		}
+		asOf = &parsed
+	}
+	if input.KnownAt != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, input.KnownAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, errors.New("known_at must be RFC3339"))
+			return
+		}
+		knownAt = &parsed
+	}
+	switch input.Operation {
+	case observation.ExploreOrient, observation.ExploreSearch:
+		if input.Question == "" {
+			writeError(w, http.StatusUnprocessableEntity, errors.New(input.Operation+" requires a question"))
+			return
+		}
+	case observation.ExploreExpand, observation.ExploreTrace:
+		if len(input.Targets) == 0 {
+			writeError(w, http.StatusUnprocessableEntity, errors.New(input.Operation+" requires targets"))
+			return
+		}
+	case observation.ExploreCompare:
+		// compare without targets auto-detects conflicts across the visible
+		// base — that is its discovery mode, not an input error.
+	case observation.ExploreSynthesize:
+		if len(input.Targets) == 0 && input.Question == "" {
+			writeError(w, http.StatusUnprocessableEntity, errors.New(input.Operation+" requires targets or a question"))
+			return
+		}
+	default:
+		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("operation must be one of %s, %s, %s, %s, %s, %s", observation.ExploreOrient, observation.ExploreSearch, observation.ExploreExpand, observation.ExploreTrace, observation.ExploreCompare, observation.ExploreSynthesize))
+		return
+	}
+	if len([]rune(input.Question)) > 4096 {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("question exceeds the 4096 character limit"))
+		return
+	}
+	if len(input.Targets) > observation.ExploreMaxTargets {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("targets must contain at most %d ids", observation.ExploreMaxTargets))
+		return
+	}
+	if len(input.Relations) > observation.ExploreMaxRelations {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("relations must contain at most %d types", observation.ExploreMaxRelations))
+		return
+	}
+	if input.MaxItems < 0 || input.MaxItems > observation.ExploreMaxItems {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("max_items must be between 1 and %d", observation.ExploreMaxItems))
+		return
+	}
+	if input.MaxDepth < 0 || input.MaxDepth > observation.ExploreMaxDepth {
+		writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("max_depth must be between 1 and %d", observation.ExploreMaxDepth))
+		return
+	}
+	events, chain, err := s.visibleKnowledgeEvents(r.Context(), input.Project, asOf, knownAt)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
+		return
+	}
+	knowledge, err := observation.ProjectKnowledge(events)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	knowledge = filterKnowledgeVisible(knowledge, input.Project, chain)
+	result := observation.ExploreKnowledge(knowledge, observation.ExploreQuery{
+		Operation: input.Operation, Question: input.Question, Targets: input.Targets,
+		Relations: input.Relations, MaxDepth: input.MaxDepth, MaxItems: input.MaxItems,
+		IncludeCandidates: input.IncludeCandidates,
+	})
+	writeJSON(w, http.StatusOK, result)
 }
 
 type observationHintRequest struct {
