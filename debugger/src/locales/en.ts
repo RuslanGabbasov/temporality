@@ -144,6 +144,16 @@ export const en: Record<string, string> = {
     'dashboard.containers_n_one': 'container running',
     'dashboard.containers_n_few': 'containers running',
     'dashboard.containers_n_other': 'containers running',
+    'dashboard.sandboxes': 'Sandboxes',
+    'dashboard.sandboxes_hint': 'Active containers: size = combined load (CPU, memory, network), click opens the run',
+    'dashboard.sandboxes_none': 'No active sandboxes',
+    'dashboard.sandboxes_hover': 'Hover a bubble for the run digest',
+    'dashboard.sandboxes_more': '+{{n}} more',
+    'dashboard.sandboxes_agent': 'Agent',
+    'dashboard.sandboxes_actor': 'Initiator',
+    'dashboard.sandboxes_run': 'Run',
+    'dashboard.sandboxes_project': 'Project',
+    'dashboard.sandboxes_open_run': 'Open run',
 
     // Common actions
     'action.create': 'Create',

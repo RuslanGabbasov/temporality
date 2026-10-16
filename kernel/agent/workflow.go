@@ -247,7 +247,11 @@ type ToolRequest struct {
 	TaskID string `json:"task_id,omitempty"`
 	// ActorID is the run starter; send_file resolves them as the default
 	// recipient of agent-produced files.
-	ActorID   string         `json:"actor_id,omitempty"`
+	ActorID string `json:"actor_id,omitempty"`
+	// AgentID identifies the structured agent definition the run executes;
+	// sandbox containers carry it as a label so observability can show which
+	// agent occupies the host.
+	AgentID   string         `json:"agent_id,omitempty"`
 	Arguments map[string]any `json:"arguments"`
 	// AllowedTools mirrors RunInput.ToolAllowlist so the activity also
 	// rejects calls to tools that were never advertised to the model.
@@ -1713,7 +1717,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 						// Wall latency from the workflow clock covers scheduling, retries
 						// and execution — the honest end-to-end cost of the operation.
 						toolStarted := workflow.Now(ctx)
-						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox}).Get(ctx, &toolResult); err != nil {
+						if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox}).Get(ctx, &toolResult); err != nil {
 							toolFailed = true
 							failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 							failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()
@@ -1809,7 +1813,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				// Same wall-clock semantics as the approval path: scheduling,
 				// retries and execution in one number.
 				toolStarted := workflow.Now(ctx)
-				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox}).Get(ctx, &toolResult); err != nil {
+				if err := workflow.ExecuteActivity(toolCtx, ActivityRunTool, ToolRequest{RunID: input.RunID, OperationID: operationID, Name: call.Name, Role: input.Role, WorkspacePath: input.WorkspacePath, Project: input.Project, TaskID: input.TaskID, ActorID: input.ActorID, AgentID: input.AgentID, Arguments: call.Args, AllowedTools: input.ToolAllowlist, DeniedTools: input.DenyTools, ReadOnly: input.ReadOnly, Secrets: input.Secrets, Sandbox: input.Sandbox}).Get(ctx, &toolResult); err != nil {
 					toolFailed = true
 					failure := toolFailureData(operationID, argumentsHash, call.Name, call.Args, err)
 					failure["latency_ms"] = workflow.Now(ctx).Sub(toolStarted).Milliseconds()

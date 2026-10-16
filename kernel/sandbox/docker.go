@@ -10,10 +10,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +57,10 @@ type Request struct {
 	// CacheEnv replaces the legacy Go cache env set with the profile's cache
 	// pointers (KEY=VALUE against /cache). Empty keeps GOCACHE/GOMODCACHE.
 	CacheEnv []string
+	// Labels tag the container for observability (docker --label): the health
+	// endpoint lists running sandboxes with their run/agent/actor so the
+	// dashboard can show who consumes the host. Keys are used verbatim.
+	Labels map[string]string
 }
 
 type Result struct {
@@ -351,6 +357,11 @@ func (d *Docker) arguments(workspace string, request Request, name string) []str
 	}
 	for _, entry := range request.Env {
 		args = append(args, "--env", entry)
+	}
+	// Labels sorted by key: identical requests must produce identical argv,
+	// matching the deterministic-argv discipline of the rest of the runner.
+	for _, key := range slices.Sorted(maps.Keys(request.Labels)) {
+		args = append(args, "--label", key+"="+request.Labels[key])
 	}
 	image := firstNonEmpty(request.Image, d.Image)
 	args = append(args, image)

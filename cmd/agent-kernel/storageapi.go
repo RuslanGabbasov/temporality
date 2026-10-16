@@ -139,7 +139,8 @@ type storageProjectTreeView struct {
 
 type storageHealthView struct {
 	storage.HostHealth
-	Docker storage.DockerFootprint `json:"docker"`
+	Docker    storage.DockerFootprint    `json:"docker"`
+	Sandboxes []storage.SandboxContainer `json:"sandboxes,omitempty"`
 }
 
 // RegisterStorageRoutes mounts the read-only storage inventory and host
@@ -248,7 +249,7 @@ func RegisterStorageRoutes(mux *http.ServeMux, gate *controlplane.Gate, visibleP
 		}
 		health := storage.ReadHostHealth(paths...)
 		docker := storage.ReadDockerFootprint(r.Context(), dockerBinary)
-		writeJSON(w, 200, storageHealthView{HostHealth: health, Docker: docker})
+		writeJSON(w, 200, storageHealthView{HostHealth: health, Docker: docker, Sandboxes: storage.ReadSandboxContainers(r.Context(), dockerBinary)})
 	})
 }
 

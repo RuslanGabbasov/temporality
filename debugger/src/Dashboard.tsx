@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Heading, InlineNotification, Tag, Tile } from '@carbon/react'
-import { observationApi, type HealthStats, type HealthModelStats } from './observationApi'
+import { observationApi, type HealthStats, type HealthModelStats, type ObservationEvent } from './observationApi'
 import {
   projectsOverview,
   qualitySummary,
@@ -12,11 +12,13 @@ import {
   type QualitySummaryAgent,
   type StorageSnapshot,
   type SystemHealth,
+  type SandboxContainerInfo,
 } from './kernelApi'
 import ProjectOverview from './ProjectOverview'
 import Observability from './Observability'
 import { useI18n, pluralT } from './i18n'
 import { formatDuration } from './eventSummary'
+import { sandboxLoad, maxSandboxNet, sandboxDiameter, sandboxColor, topSandboxes, sandboxShortName } from './sandboxWidgets'
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed'
@@ -110,6 +112,9 @@ export default function Dashboard({ project, setProject }: Props) {
   const [opsCount, setOpsCount] = useState<number | null>(null)
   const [storage_, setStorage] = useState<StorageSnapshot | null>(null)
   const [syshealth, setSyshealth] = useState<SystemHealth | null>(null)
+  // Run id → title from run.started events: the sandbox digest shows the human
+  // name of the run, not the opaque id. Best-effort — failures leave ids.
+  const [runTitles, setRunTitles] = useState<Map<string, string>>(new Map())
   const [quality, setQuality] = useState<QualitySummary | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -125,18 +130,26 @@ export default function Dashboard({ project, setProject }: Props) {
     setError('')
     const since = new Date(Date.now() - window_.ms).toISOString()
     try {
-      const [stats, projects, ops, storageSnap, syshealthSnap] = await Promise.all([
+      const [stats, projects, ops, storageSnap, syshealthSnap, startedPage] = await Promise.all([
         observationApi.healthStats(undefined, since),
         projectsOverview(window_.go),
         operations().catch(() => null),
         storageOverview().catch(() => null),
         systemHealth().catch(() => null),
+        observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.started', limit: 200 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
       ])
       setHealth(stats)
       setOverview(projects)
       setOpsCount(ops ? ops.count : null)
       setStorage(storageSnap)
       setSyshealth(syshealthSnap)
+      const titles = new Map<string, string>()
+      for (const event of startedPage.events) {
+        const run = event.context?.run ?? ''
+        const title = event.data?.title
+        if (run && typeof title === 'string' && title.trim()) titles.set(run, title.trim())
+      }
+      setRunTitles(titles)
       setUpdatedAt(new Date())
     } catch (failure) {
       setError(errorMessage(failure))
@@ -394,6 +407,18 @@ export default function Dashboard({ project, setProject }: Props) {
           </div>
           )}
 
+          {/* Sandbox bubbles: one ball per active sandbox container, size and
+              color = integral load (CPU + memory + network). Hover shows the
+              digest (who initiated, which agent, which run), click opens the
+              run. Only the top-N load hogs get balls; the rest fold into +N. */}
+          {syshealth && syshealth.docker.available && (syshealth.sandboxes?.length ?? 0) > 0 && (
+            <SandboxBubbles
+              containers={syshealth.sandboxes ?? []}
+              runTitles={runTitles}
+              onOpenRun={(run, sandboxProject) => navigate(`/agents?project=${encodeURIComponent(sandboxProject)}&run=${encodeURIComponent(run)}`)}
+            />
+          )}
+
           {/* Models / providers */}
           <PanelHeader title={t('dashboard.models') ?? 'Models & providers'} hint={t(windows_label(windowIdx)) ?? undefined} />
           {health && health.models.length > 0 ? (
@@ -596,6 +621,105 @@ function QualityTab({ quality, busy, t, navigate }: {
       ) : !busy && (
         <Tile style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.no_agents') ?? 'No agents visible'}</Tile>
       )}
+    </>
+  )
+}
+
+/** Sandbox bubble cloud (dashboard): one ball per active sandbox container,
+ *  size and color encode the integral resource load so the run hogging the
+ *  host is visible at a glance. Hovering a ball swaps in a digest strip with
+ *  the run identity; clicking it opens the run. */
+function SandboxBubbles({ containers, runTitles, onOpenRun }: {
+  containers: SandboxContainerInfo[]
+  runTitles: Map<string, string>
+  onOpenRun: (run: string, project: string) => void
+}) {
+  const { t } = useI18n()
+  const [hovered, setHovered] = useState<string | null>(null)
+  const { top, rest } = useMemo(() => topSandboxes(containers), [containers])
+  const maxNet = useMemo(() => maxSandboxNet(containers), [containers])
+  const active = top.find((c) => c.name === hovered) ?? null
+  const activeRun = active?.labels?.['temporality.run'] ?? ''
+  const activeProject = active?.labels?.['temporality.project'] ?? ''
+  const activeTitle = activeRun ? (runTitles.get(activeRun) ?? activeRun) : activeRun
+
+  const digestRow = (label: string, value: ReactNode) => (
+    <span style={{ display: 'inline-flex', gap: '0.3rem', whiteSpace: 'nowrap' }}>
+      <span style={{ color: 'var(--tm-text-3)' }}>{label}</span>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '16rem' }}>{value || '—'}</span>
+    </span>
+  )
+
+  return (
+    <>
+      <PanelHeader title={t('dashboard.sandboxes') ?? 'Sandboxes'} hint={t('dashboard.sandboxes_hint') ?? undefined} />
+      <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.75rem', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.9rem', flexWrap: 'wrap' }}>
+          {top.map((container) => {
+            const score = sandboxLoad(container, maxNet)
+            const size = sandboxDiameter(score)
+            const run = container.labels?.['temporality.run'] ?? ''
+            const project = container.labels?.['temporality.project'] ?? ''
+            const agent = container.labels?.['temporality.agent'] ?? ''
+            const digest = [
+              `${t('dashboard.sandboxes_agent') ?? 'Agent'}: ${agent || '—'}`,
+              `${t('dashboard.sandboxes_actor') ?? 'Initiator'}: ${container.labels?.['temporality.actor'] || '—'}`,
+              `${t('dashboard.sandboxes_run') ?? 'Run'}: ${runTitles.get(run) || run || container.name}`,
+              `CPU ${container.cpu_percent.toFixed(0)}% · ${t('dashboard.server_memory') ?? 'Memory'} ${fmtBytes(container.mem_used_bytes)}/${fmtBytes(container.mem_limit_bytes)} · ${t('dashboard.sandboxes_project') ?? 'Project'}: ${project || '—'}`,
+            ].join('\n')
+            return (
+              <button
+                key={container.name}
+                onClick={() => run && project && onOpenRun(run, project)}
+                onMouseEnter={() => setHovered(container.name)}
+                onMouseLeave={() => setHovered((name) => (name === container.name ? null : name))}
+                title={digest}
+                aria-label={digest}
+                style={{
+                  width: size, height: size, borderRadius: '50%', cursor: run && project ? 'pointer' : 'default',
+                  border: `2px solid ${sandboxColor(score)}`,
+                  background: `color-mix(in srgb, ${sandboxColor(score)} 18%, transparent)`,
+                  color: 'var(--tm-text)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: 0, fontSize: '0.6rem', fontWeight: 600, overflow: 'hidden', flexShrink: 0,
+                }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 0.3rem' }}>
+                  {size >= 44 && agent ? agent : ''}
+                </span>
+              </button>
+            )
+          })}
+          {rest.length > 0 && (
+            <span
+              title={`${rest.length} · ${rest.map((c) => c.labels?.['temporality.agent'] || sandboxShortName(c.name)).join(', ')}`}
+              style={{ border: '1px dashed var(--tm-border)', borderRadius: '999px', padding: '0.3rem 0.7rem', color: 'var(--tm-text-3)', fontSize: '0.72rem' }}
+            >
+              {(t('dashboard.sandboxes_more', { n: String(rest.length) }) ?? `+${rest.length} more`)}
+            </span>
+          )}
+        </div>
+
+        {/* Digest strip for the hovered bubble — also the no-hover placeholder
+            keeps the row height stable. */}
+        <div style={{ borderTop: '1px solid var(--tm-border)', marginTop: '0.7rem', paddingTop: '0.5rem', fontSize: '0.72rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', minHeight: '1.6rem' }}>
+          {active ? (
+            <>
+              {digestRow(t('dashboard.sandboxes_agent') ?? 'Agent', active.labels?.['temporality.agent'])}
+              {digestRow(t('dashboard.sandboxes_actor') ?? 'Initiator', active.labels?.['temporality.actor'])}
+              {digestRow(t('dashboard.sandboxes_run') ?? 'Run', activeTitle)}
+              {digestRow(t('dashboard.sandboxes_project') ?? 'Project', activeProject)}
+              {digestRow('CPU', `${active.cpu_percent.toFixed(0)}% · ${fmtBytes(active.mem_used_bytes)}/${fmtBytes(active.mem_limit_bytes)} · ↓${fmtBytes(active.net_in_bytes)} ↑${fmtBytes(active.net_out_bytes)}`)}
+              {activeRun && activeProject && (
+                <a href={`/agents?project=${encodeURIComponent(activeProject)}&run=${encodeURIComponent(activeRun)}`} style={{ color: 'var(--tm-teal)', whiteSpace: 'nowrap' }}>
+                  {t('dashboard.sandboxes_open_run') ?? 'Open run'} →
+                </a>
+              )}
+            </>
+          ) : (
+            <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.sandboxes_hover') ?? 'Hover a bubble for the run digest'}</span>
+          )}
+        </div>
+      </div>
     </>
   )
 }

@@ -228,3 +228,25 @@ func TestRunToolMCPFaultCommitsEffectBeforeCrash(t *testing.T) {
 		t.Fatalf("the MCP effect must commit before the crash: %v", err)
 	}
 }
+
+func TestSandboxLabelsCarryRunIdentity(t *testing.T) {
+	labels := sandboxLabels(ToolRequest{
+		Project: "omni", RunID: "untitled-20261016", AgentID: "lead", ActorID: "ivan",
+	})
+	want := map[string]string{
+		"temporality.project": "omni",
+		"temporality.run":     "untitled-20261016",
+		"temporality.agent":   "lead",
+		"temporality.actor":   "ivan",
+	}
+	for key, value := range want {
+		if labels[key] != value {
+			t.Errorf("label %q = %q, want %q", key, labels[key], value)
+		}
+	}
+	// Ad-hoc runs without an agent definition must not get empty-valued labels.
+	bare := sandboxLabels(ToolRequest{RunID: "r"})
+	if _, ok := bare["temporality.agent"]; ok {
+		t.Errorf("empty agent must be omitted: %v", bare)
+	}
+}

@@ -459,11 +459,24 @@ export function storageProjectTree(project: string, depth?: number): Promise<Sto
   return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}${suffix}`)
 }
 
+export interface SandboxContainerInfo {
+  name: string
+  image: string
+  labels?: Record<string, string>
+  cpu_percent: number
+  mem_used_bytes: number
+  mem_limit_bytes: number
+  mem_percent: number
+  net_in_bytes: number
+  net_out_bytes: number
+}
+
 export interface SystemHealth {
   disk: { path: string; total_bytes: number; free_bytes: number }[]
   cpu: { load1: number; load5: number; cores: number }
   memory: { total_bytes: number; available_bytes: number }
   docker: { images_bytes: number; containers_running: number; available: boolean }
+  sandboxes?: SandboxContainerInfo[]
 }
 
 export function systemHealth(): Promise<SystemHealth> {

@@ -131,6 +131,24 @@ func TestDockerArgumentsEnforceIsolation(t *testing.T) {
 	}
 }
 
+func TestDockerArgumentsCarrySortedLabels(t *testing.T) {
+	runner := &Docker{Image: "sandbox@sha256:abc"}
+	args := runner.arguments("/w", Request{
+		Command: []string{"ls"},
+		Labels:  map[string]string{"temporality.run": "r-1", "temporality.agent": "lead", "temporality.project": "omni"},
+	}, "n")
+	joined := strings.Join(args, " ")
+	// Labels are appended sorted by key so identical requests yield identical argv.
+	want := "--label temporality.agent=lead --label temporality.project=omni --label temporality.run=r-1"
+	if !strings.Contains(joined, want) {
+		t.Errorf("docker args missing sorted labels %q: %s", want, joined)
+	}
+	noLabels := strings.Join(runner.arguments("/w", Request{Command: []string{"ls"}}, "n"), " ")
+	if strings.Contains(noLabels, "--label") {
+		t.Errorf("unlabeled request must not emit --label: %s", noLabels)
+	}
+}
+
 func TestScratchSizeMustBeAPositiveByteSize(t *testing.T) {
 	for _, valid := range []string{"", "64m", "1g", "268435456", "512M"} {
 		if err := validateByteSize(valid); err != nil {

@@ -144,6 +144,16 @@ export const ru: Record<string, string> = {
     'dashboard.containers_n_one': 'контейнер запущен',
     'dashboard.containers_n_few': 'контейнера запущено',
     'dashboard.containers_n_other': 'контейнеров запущено',
+    'dashboard.sandboxes': 'Песочницы',
+    'dashboard.sandboxes_hint': 'Активные контейнеры: размер — интегральная нагрузка (CPU, память, сеть), клик — переход к рану',
+    'dashboard.sandboxes_none': 'Нет активных песочниц',
+    'dashboard.sandboxes_hover': 'Наведите на шарик — дайджест рана',
+    'dashboard.sandboxes_more': '+{{n}} ещё',
+    'dashboard.sandboxes_agent': 'Агент',
+    'dashboard.sandboxes_actor': 'Инициатор',
+    'dashboard.sandboxes_run': 'Ран',
+    'dashboard.sandboxes_project': 'Проект',
+    'dashboard.sandboxes_open_run': 'Открыть ран',
 
     // Common actions
     'action.create': 'Создать',

@@ -617,6 +617,10 @@ func (a *Activities) sandboxRequest(request ToolRequest, command []string, timeo
 		ReadOnly:       request.ReadOnly || request.Role == "reviewer" || request.Role == "qa",
 		Network:        net,
 		Env:            secretEnv,
+		// Observability labels (docs/sandbox-storage.md): the health endpoint
+		// lists running sandboxes with their run/agent/actor so the dashboard
+		// can show who consumes the host.
+		Labels: sandboxLabels(request),
 	}
 	if spec := request.Sandbox; spec != nil {
 		if spec.Image == "" {
@@ -635,6 +639,23 @@ func (a *Activities) sandboxRequest(request ToolRequest, command []string, timeo
 		req.CacheEnv = spec.CacheEnv
 	}
 	return req, nil
+}
+
+// sandboxLabels tags a sandbox container with the run identity: only non-empty
+// values are emitted so ad-hoc runs without an agent definition still work.
+func sandboxLabels(request ToolRequest) map[string]string {
+	labels := map[string]string{}
+	for key, value := range map[string]string{
+		"temporality.project": request.Project,
+		"temporality.run":     request.RunID,
+		"temporality.agent":   request.AgentID,
+		"temporality.actor":   request.ActorID,
+	} {
+		if value != "" {
+			labels[key] = value
+		}
+	}
+	return labels
 }
 
 func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResult, error) {
