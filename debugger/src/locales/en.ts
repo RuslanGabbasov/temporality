@@ -37,6 +37,26 @@ export const en: Record<string, string> = {
     'project.no_sagas': 'No sagas registered yet — agents register them with the saga_register tool',
     'project.unbound': 'Tasks without a saga',
     'project.no_unbound': 'Every task belongs to a saga',
+    'project.saga_rename': 'Rename',
+    'project.saga_rename_title': 'Rename saga',
+    'project.saga_title_label': 'Title',
+    'project.saga_goal_label': 'Goal (optional)',
+    'project.saga_merge': 'Merge',
+    'project.saga_merge_title': 'Merge sagas',
+    'project.saga_merge_target': 'Merge into',
+    'project.saga_merge_hint': 'The selected sagas fold into the target: their tasks and spend move to it, the sources stay as redirect rows.',
+    'project.saga_merge_select': 'Select two or more sagas',
+    'project.saga_merged_into': 'merged into',
+    'project.saga_attach': 'Attach to saga',
+    'project.saga_attach_title': 'Attach task to saga',
+    'project.saga_attach_hint': 'The task moves to the selected saga; further accounting follows it.',
+    'project.saga_create': 'Create saga',
+    'project.saga_create_title': 'New saga',
+    'project.saga_create_hint': 'The saga is created and bound to this task right away.',
+    'project.saga_detach': 'Detach from saga',
+    'project.saga_none': 'No sagas in the project yet — create one',
+    'project.saga_actions_done': 'Done',
+    'project.task_col_actions': 'Actions',
 
     // System dashboard (docs/system-dashboard.md)
     'dashboard.title': 'System dashboard',
@@ -499,6 +519,9 @@ export const en: Record<string, string> = {
     // Sagas (docs/sagas.md): saga_register / saga_attach tool events
     'runs.event.saga_registered': 'Saga registered',
     'runs.event.saga_attached': 'Run attached to saga',
+    'runs.event.saga_renamed': 'Saga renamed',
+    'runs.event.saga_merged': 'Sagas merged',
+    'runs.event.saga_detached': 'Task detached from saga',
 
     // Reconcile / HITL verdicts (specs/quality-loop.md)
     'runs.event.operation_reconciled': 'Operation reconciled',

@@ -357,6 +357,144 @@ func TestAggregateTaskEmpty(t *testing.T) {
 	}
 }
 
+// Manual saga management (docs/sagas.md §8): rename re-titles the saga, merge
+// re-projects the sources' bindings onto the target and marks the sources,
+// detach drops a task back into the unbound pool — all by replaying the same
+// event stream the UI routes emit.
+func TestSagaRenameMergeDetachProjection(t *testing.T) {
+	cfg, _ := ParsePrices("")
+	api := NewCostAPI(cfg, "", "")
+	base := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	api.now = func() time.Time { return base.Add(2 * time.Hour) }
+	mk := func(typ, run, task string, at time.Time, data map[string]any) observation.Event {
+		return observation.Event{Type: typ, OccurredAt: at, Context: observation.Context{Run: run, Task: task}, Data: data}
+	}
+	// Two tasks with spend, each registered into its own saga; a third task
+	// bound to the second saga by hand (data.task_id, no context task — the
+	// human-UI shape).
+	events := []observation.Event{
+		mk("run.started", "r1", "T1", base, map[string]any{"agent_id": "lead", "title": "Draft spec"}),
+		mk("model.completed", "r1", "T1", base.Add(time.Minute), map[string]any{"model": "m", "prompt_tokens": 100, "completion_tokens": 20}),
+		mk("run.started", "r2", "T2", base.Add(10*time.Minute), map[string]any{"agent_id": "dev", "title": "Real spec"}),
+		mk("model.completed", "r2", "T2", base.Add(11*time.Minute), map[string]any{"model": "m", "prompt_tokens": 200, "completion_tokens": 40}),
+		mk("run.started", "r3", "T3", base.Add(20*time.Minute), map[string]any{"agent_id": "qa", "title": "QA pass"}),
+		mk("model.completed", "r3", "T3", base.Add(21*time.Minute), map[string]any{"model": "m", "prompt_tokens": 50, "completion_tokens": 10}),
+		mk("saga.registered", "r1", "T1", base.Add(2*time.Minute), map[string]any{"saga_id": "saga-draft-aaaaaa", "title": "Crufty name"}),
+		mk("saga.registered", "r2", "T2", base.Add(12*time.Minute), map[string]any{"saga_id": "saga-real-bbbbbb", "title": "Real saga"}),
+		mk("saga.attached", "", "", base.Add(22*time.Minute), map[string]any{"saga_id": "saga-real-bbbbbb", "task_id": "T3", "origin": "human-ui"}),
+		// Human fixes the first saga's title after the fact.
+		mk("saga.renamed", "", "", base.Add(30*time.Minute), map[string]any{"saga_id": "saga-draft-aaaaaa", "title": "Spec effort", "goal": "one spec to rule them all"}),
+		// The draft saga was a duplicate: merge it into the real one.
+		mk("saga.merged", "", "", base.Add(40*time.Minute), map[string]any{"saga_id": "saga-real-bbbbbb", "source_saga_ids": []any{"saga-draft-aaaaaa"}}),
+		// T3 was bound by mistake: detach it back to the unbound pool.
+		mk("saga.detached", "", "T3", base.Add(50*time.Minute), map[string]any{"task_id": "T3", "origin": "human-ui"}),
+	}
+
+	got := api.aggregateProjectBudget("p", events)
+	if got.SagaCount != 2 || got.TaskCount != 3 {
+		t.Fatalf("unexpected counts: %+v", got)
+	}
+	var real, draft SagaRollup
+	for _, saga := range got.Sagas {
+		switch saga.SagaID {
+		case "saga-real-bbbbbb":
+			real = saga
+		case "saga-draft-aaaaaa":
+			draft = saga
+		}
+	}
+	// Merge moved T1's spend onto the target alongside its own T2; the source
+	// keeps a redirect row.
+	if len(real.TaskIDs) != 2 || real.TaskIDs[0] != "T1" || real.TaskIDs[1] != "T2" {
+		t.Fatalf("merge must re-project T1 onto the target, got %v", real.TaskIDs)
+	}
+	if real.TotalTokens != (100+20)+(200+40) {
+		t.Fatalf("target saga must own both tasks' spend, got %d", real.TotalTokens)
+	}
+	if draft.MergedInto != "saga-real-bbbbbb" || len(draft.TaskIDs) != 0 || draft.TotalTokens != 0 {
+		t.Fatalf("merged source must be an empty redirect, got %+v", draft)
+	}
+	// Rename overrode the registered title and added a goal.
+	if draft.Title != "Spec effort" || draft.Goal != "one spec to rule them all" {
+		t.Fatalf("rename must override meta, got %+v", draft)
+	}
+	// Detach dropped T3 from every saga; it stays in the project rollup.
+	for _, task := range got.Tasks {
+		if task.TaskID == "T3" && task.SagaID != "" {
+			t.Fatalf("detached task must be unbound, got %q", task.SagaID)
+		}
+	}
+	if got.TotalTokens != (100+20)+(200+40)+(50+10) {
+		t.Fatalf("project totals must not lose detached spend, got %d", got.TotalTokens)
+	}
+}
+
+// A detached task can be re-bound by a later attach, and the latest rename
+// wins when there are several — the last-wins rules compose across event
+// types, not just within one.
+func TestSagaDetachThenRebindAndLastRenameWins(t *testing.T) {
+	cfg, _ := ParsePrices("")
+	api := NewCostAPI(cfg, "", "")
+	base := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	api.now = func() time.Time { return base.Add(time.Hour) }
+	mk := func(typ, run, task string, at time.Time, data map[string]any) observation.Event {
+		return observation.Event{Type: typ, OccurredAt: at, Context: observation.Context{Run: run, Task: task}, Data: data}
+	}
+	events := []observation.Event{
+		mk("run.started", "r1", "T", base, map[string]any{"agent_id": "lead", "title": "Work"}),
+		mk("saga.registered", "r9", "T9", base.Add(time.Minute), map[string]any{"saga_id": "saga-a-aaaaaa", "title": "A"}),
+		mk("saga.registered", "r8", "T8", base.Add(2*time.Minute), map[string]any{"saga_id": "saga-b-bbbbbb", "title": "B"}),
+		mk("saga.attached", "r1", "T", base.Add(3*time.Minute), map[string]any{"saga_id": "saga-a-aaaaaa"}),
+		mk("saga.detached", "", "T", base.Add(4*time.Minute), map[string]any{"task_id": "T"}),
+		mk("saga.attached", "", "", base.Add(5*time.Minute), map[string]any{"saga_id": "saga-b-bbbbbb", "task_id": "T"}),
+		mk("saga.renamed", "", "", base.Add(6*time.Minute), map[string]any{"saga_id": "saga-b-bbbbbb", "title": "B corrected first"}),
+		mk("saga.renamed", "", "", base.Add(7*time.Minute), map[string]any{"saga_id": "saga-b-bbbbbb", "title": "B corrected last"}),
+	}
+	got := api.aggregateProjectBudget("p", events)
+	if got.SagaCount != 2 {
+		t.Fatalf("unexpected saga count: %d", got.SagaCount)
+	}
+	for _, saga := range got.Sagas {
+		switch saga.SagaID {
+		case "saga-a-aaaaaa":
+			if len(saga.TaskIDs) != 0 {
+				t.Fatalf("detached-away saga must have no tasks, got %v", saga.TaskIDs)
+			}
+		case "saga-b-bbbbbb":
+			if len(saga.TaskIDs) != 1 || saga.TaskIDs[0] != "T" {
+				t.Fatalf("re-bound task must follow the latest attach, got %v", saga.TaskIDs)
+			}
+			if saga.Title != "B corrected last" {
+				t.Fatalf("latest rename must win, got %q", saga.Title)
+			}
+		}
+	}
+}
+
+// A saga created by hand without any task is a registered-only row: it shows
+// up in the project list with no spend and can be bound to later.
+func TestSagaManualCreateWithoutTask(t *testing.T) {
+	cfg, _ := ParsePrices("")
+	api := NewCostAPI(cfg, "", "")
+	base := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	api.now = func() time.Time { return base.Add(time.Hour) }
+	registered := observation.Event{
+		Type: "saga.registered", OccurredAt: base,
+		Context: observation.Context{Project: "p"},
+		Data:    map[string]any{"saga_id": "saga-manual-cccccc", "title": "Manual saga", "origin": "human-ui"},
+	}
+	got := api.aggregateProjectBudget("p", []observation.Event{registered})
+	if got.SagaCount != 1 || len(got.Sagas) != 1 {
+		t.Fatalf("manual saga must appear as a registered row, got %+v", got)
+	}
+	if got.Sagas[0].Title != "Manual saga" || len(got.Sagas[0].TaskIDs) != 0 {
+		t.Fatalf("unexpected manual saga row: %+v", got.Sagas[0])
+	}
+	if got.TaskCount != 0 {
+		t.Fatalf("taskless registration must not create a phantom task, got %d", got.TaskCount)
+	}
+}
+
 // ── Team telemetry (docs/agent-teams.md §10–§11) ──────────────────────────
 
 func teamEvent(project, runID, eventType string, at time.Time, data map[string]any) observation.Event {

@@ -80,10 +80,13 @@ Saga (явная регистрация)
 
 | Тип | Data | Context |
 |---|---|---|
-| `saga.registered` | `saga_id`, `title`, `goal?`, `origin=agent-tool` | Project, Run, Task, Actor |
-| `saga.attached` | `saga_id`, `task_id`, `note?` | Project, Run, Task, Actor |
+| `saga.registered` | `saga_id`, `title`, `goal?`, `origin` (`agent-tool` / `human-ui`), `task_id?` | Project, Run?, Task?, Actor |
+| `saga.attached` | `saga_id`, `task_id`, `note?`, `origin?` | Project, Run?, Task?, Actor |
+| `saga.renamed` | `saga_id`, `title?`, `goal?`, `origin=human-ui` | Project, Actor |
+| `saga.merged` | `saga_id` (цель), `source_saga_ids[]`, `origin=human-ui` | Project, Actor |
+| `saga.detached` | `task_id`, `origin=human-ui` | Project, Task, Actor |
 
-EventID включает `UnixNano` (`<run>/<type>/<nano>`) — повторные эмиссии после
+EventID включает `UnixNano` (`<run>/<type>/<nano>` или `saga-lifecycle/<saga>/<type>/<nano>` для ручных) — повторные эмиссии после
 ретрая активности не коллайдят. Дубликаты безопасны по смыслу: проекция
 сворачивает их по `saga_id`/`task_id`.
 
@@ -142,20 +145,49 @@ tie-break по идентификатору; внутри саги задачи 
 * тоталы проекта: задачи, саги, раны, elapsed/active, токены, стоимость,
   approvals;
 * таблица саг с раскрыванием в привязанные задачи;
-* таблица «Задачи без саги».
+* таблица «Задачи без саги»;
+* ручное управление (§8): переименование, объединение дублей, привязка задач.
 
 Из вкладки Runs секция саг убрана: раны — исполнение, саги — учёт. Пер-рановый
 budget-вью (`Task budget` по выбранному рану) остался в Runs без изменений.
 
 ---
 
-## 8. Что сознательно не сделано
+## 8. Ручное управление (UI, writer)
+
+Саги остаются event-sourced: ручные операции — это те же журнальные события,
+что и у тулов агента, только с `origin=human-ui` и человеческим актором.
+Никаких таблиц и переписываний истории — обе проекции (kernel/cost и
+saga_list) перекладывают события заново.
+
+API (`cmd/agent-kernel/sagalifecycle.go`, все writer-only, `?project=` обязателен):
+
+| Эндпоинт | Тело | Событие |
+|---|---|---|
+| `POST /v1/workspace/sagas` | `title`, `goal?`, `task_id?` | `saga.registered` |
+| `POST /v1/workspace/sagas/{id}/rename` | `title?`, `goal?` (хотя бы одно) | `saga.renamed` |
+| `POST /v1/workspace/sagas/{id}/merge` | `source_saga_ids[]` | `saga.merged` |
+| `POST /v1/workspace/tasks/{taskID}/saga` | `saga_id` (пустая — отвязать) | `saga.attached` / `saga.detached` |
+
+Правила проекции:
+
+* **rename**: последний `saga.renamed` по времени перекрывает title/goal
+  регистрации; пустые поля не затирают существующие;
+* **merge**: привязки саг-источников перепроецируются на цель (цепочки
+  слияний разворачиваются до финальной цели), источники остаются
+  строками-перенаправлениями (`merged_into`) без задач и затрат;
+  `saga_attach` к слитой саге отклоняется с подсказкой о цели;
+* **detach**: задача возвращается в пул «без саги», позднейший attach может
+  привязать её снова.
+
+Существование саги проверяется по `saga.registered`-событиям журнала —
+другие типы сагу не создают.
+
+### Что сознательно не сделано
 
 * **Закрытие саг** (`saga.close`). Сага без активности естественным образом
   «остывает» (running=0, последний ран давно). Явное закрытие имеет смысл
   ввести, когда появится вопрос «какие саги вообще живы» на сотнях саг.
-* **Ручное управление сагами из UI.** Сначала посмотреть, как агенты
-  пользуются турами; ручная коррекция привязок — следующий шаг.
 * **Саги между проектами.** Привязка проверяется в рамках одного проекта;
   кросс-проектные усилия требуют другой модели владения.
 

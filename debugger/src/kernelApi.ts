@@ -252,6 +252,7 @@ export interface SagaRollup {
   saga_id: string
   title?: string
   goal?: string
+  merged_into?: string
   task_ids: string[]
   root_run_id?: string
   registered_by_run?: string
@@ -319,6 +320,26 @@ export interface ProjectBudget {
 
 export function projectBudget(project: string): Promise<ProjectBudget> {
   return request(`/v1/agent/cost/project-budget?project=${encodeURIComponent(project)}`)
+}
+
+// ── Manual saga management (docs/sagas.md §8) ──────────────────────────────────
+// Event-sourced on the server: these calls only emit journal events, the
+// projection (rename/merge/detach replay) happens on read.
+
+export function sagaCreate(project: string, body: { title: string; goal?: string; task_id?: string }): Promise<{ saga_id: string; status: string }> {
+  return request(`/v1/workspace/sagas?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function sagaRename(project: string, sagaID: string, body: { title?: string; goal?: string }): Promise<{ status: string }> {
+  return request(`/v1/workspace/sagas/${encodeURIComponent(sagaID)}/rename?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function sagaMerge(project: string, targetSagaID: string, sourceSagaIDs: string[]): Promise<{ status: string }> {
+  return request(`/v1/workspace/sagas/${encodeURIComponent(targetSagaID)}/merge?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify({ source_saga_ids: sourceSagaIDs }) })
+}
+
+export function taskSagaBind(project: string, taskID: string, sagaID: string): Promise<{ status: string }> {
+  return request(`/v1/workspace/tasks/${encodeURIComponent(taskID)}/saga?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify({ saga_id: sagaID }) })
 }
 
 // ── System dashboard (docs/system-dashboard.md §3.2–§3.3) ─────────────────────

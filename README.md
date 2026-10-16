@@ -286,7 +286,8 @@ intake (классификация → уточнение → задача), с�
 рана и переходит между агентами. Инструменты `saga_register` / `saga_attach` /
 `saga_list`; привязка живёт на уровне задачи — продолжения чата и делегированные
 дети присоединяются к саге автоматически. Вкладка «Саги» дашборда (`/dashboard`)
-показывает саги и задачи со сводкой бюджета (`docs/sagas.md`).
+показывает саги и задачи со сводкой бюджета и позволяет управлять ими руками:
+переименовать, объединить дубли, привязать задачи без саги (`docs/sagas.md`).
 
 Веб-исследования: `web_fetch` (страница → readability → markdown), `web_search`
 (self-hosted SearXNG), `view_image` / `fetch_image` (изображения как
@@ -413,6 +414,10 @@ curl -X POST http://localhost:8090/v1/agent/operations/reconcile \
 | `GET /v1/workspace/runs/{id}/stream` | + model.text_delta, model.reasoning |
 | `GET /v1/agent/cost/task?project=P&task=T` | Бюджет задачи: все раны (продолжения чата + дерево делегирования) с суммой времени/токенов/стоимости |
 | `GET /v1/agent/cost/project-budget?project=P` | Бюджет проекта: тоталы и построчная разбивка по сагам и задачам (время/токены/стоимость/approvals) |
+| `POST /v1/workspace/sagas?project=P` | Создать сагу руками (необязательно — сразу с задачей) |
+| `POST /v1/workspace/sagas/{id}/rename?project=P` | Переименовать сагу / поправить цель |
+| `POST /v1/workspace/sagas/{id}/merge?project=P` | Объединить саги-дубликаты в одну |
+| `POST /v1/workspace/tasks/{taskID}/saga?project=P` | Привязать задачу к саге (пустая `saga_id` — отвязать) |
 
 ## Workspace
 

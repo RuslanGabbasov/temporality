@@ -169,6 +169,9 @@ export const EVENT_CATALOG: EventMeta[] = [
   // ── sagas ──
   E('sagas', 'saga.registered', 'Сага зарегистрирована', 'Зарегистрирована новая длинная история работ.', 'Saga registered', 'A new long-running work saga was registered.'),
   E('sagas', 'saga.attached', 'Ран привязан к саге', 'Запуск присоединён к существующей саге.', 'Run attached to saga', 'A run was attached to an existing saga.'),
+  E('sagas', 'saga.renamed', 'Сага переименована', 'Человек поправил название или цель саги.', 'Saga renamed', 'A human corrected a saga\'s title or goal.'),
+  E('sagas', 'saga.merged', 'Саги объединены', 'Дубликаты слиты в одну сагу: задачи и затраты перешли к ней.', 'Sagas merged', 'Duplicates were merged into one saga: tasks and spend moved to it.'),
+  E('sagas', 'saga.detached', 'Задача отвязана от саги', 'Задача вернулась в пул работ без саги.', 'Task detached from saga', 'A task moved back to the no-saga pool.'),
   // ── ops ──
   E('ops', 'notification.sent', 'Уведомление отправлено', 'Каналу доставлено уведомление.', 'Notification sent', 'A notification was delivered to a channel.'),
   E('ops', 'operation.reconciled', 'Операция сверена', 'Неопределённая операция закрыта решением человека.', 'Operation reconciled', 'An uncertain operation was closed by a human decision.'),

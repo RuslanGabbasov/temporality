@@ -2576,6 +2576,10 @@ func main() {
 	RegisterArtifactLifecycleRoutes(mux, gate, ws, events, &channelReviewNotifier{
 		ws: ws, settings: activities.ChannelSettings, client: activities.HTTP, log: log,
 	})
+	// Manual saga management (docs/sagas.md §8): rename, merge and task
+	// re-binding from the UI. Event-sourced like the agent tools — the routes
+	// only validate against the journal and emit through the same outbox.
+	RegisterSagaRoutes(mux, gate, events, observationURL, journalToken)
 	// Research sessions (docs/human-knowledge-explorer.md §11): saved
 	// knowledge-explorer investigations — list/read for everyone with read
 	// access, create/update/delete for writers.

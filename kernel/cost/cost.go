@@ -180,6 +180,7 @@ type SagaRollup struct {
 	SagaID                string        `json:"saga_id"`
 	Title                 string        `json:"title,omitempty"`
 	Goal                  string        `json:"goal,omitempty"`
+	MergedInto            string        `json:"merged_into,omitempty"` // set when the saga was merged into another; its bindings were re-projected
 	TaskIDs               []string      `json:"task_ids"`
 	RootRunID             string        `json:"root_run_id,omitempty"` // earliest bound task's root run
 	RegisteredByRun       string        `json:"registered_by_run,omitempty"`
@@ -368,7 +369,7 @@ func (a *CostAPI) ProjectBudgetHandler(w http.ResponseWriter, r *http.Request) {
 	events, err := a.queryEventsFiltered(r, project, "", "",
 		"run.started", "run.completed", "run.failed", "run.cancelled", "model.completed",
 		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted",
-		"saga.registered", "saga.attached")
+		"saga.registered", "saga.attached", "saga.detached", "saga.renamed", "saga.merged")
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -995,37 +996,69 @@ func (a *CostAPI) aggregateTask(project, taskID string, events []observation.Eve
 }
 
 // sagaMeta is the registered identity of a saga (docs/sagas.md): id, title,
-// goal and who registered it. Titles come from saga.registered events only —
-// attaches never rename.
+// goal and who registered it. Titles come from saga.registered, then the
+// latest saga.renamed overrides them — attaches never rename.
 type sagaMeta struct {
 	sagaID       string
 	title, goal  string
+	mergedInto   string
 	registeredBy string
 	registeredAt *time.Time
+}
+
+// sagaEventTask resolves the task an event talks about: agent-emitted events
+// carry it in context, human-UI ones in data.task_id.
+func sagaEventTask(ev observation.Event) string {
+	if ev.Context.Task != "" {
+		return ev.Context.Task
+	}
+	taskID, _ := ev.Data["task_id"].(string)
+	return taskID
 }
 
 // sagaBindings projects saga.* events into task→saga bindings plus saga meta.
 // Bindings compare by time, not journal arrival order (merged type queries are
 // not globally chronological), and the latest binding per task wins — a
-// re-attach moves the task to another saga. Bindings to unknown saga ids have
-// no effect.
+// re-attach moves the task to another saga, a saga.detached drops it back to
+// unbound. Renames override meta by the same last-wins rule. Merges re-project
+// every binding of the source saga onto its target and mark the source
+// mergedInto (chains resolve to the final target). Bindings to unknown saga
+// ids have no effect.
 func sagaBindings(events []observation.Event) (map[string]string, map[string]*sagaMeta) {
 	bindings := map[string]string{}
 	sagas := map[string]*sagaMeta{}
 	type binding struct {
-		sagaID string
-		at     time.Time
+		sagaID   string
+		detached bool
+		at       time.Time
 	}
 	latest := map[string]binding{}
+	type rename struct {
+		title, goal string
+		at          time.Time
+	}
+	renames := map[string]rename{}
+	type merge struct {
+		target string
+		at     time.Time
+	}
+	merges := map[string]merge{}
+	applyBinding := func(taskID, sagaID string, at time.Time) {
+		if taskID == "" {
+			return
+		}
+		if prev, ok := latest[taskID]; ok && prev.at.After(at) {
+			return
+		}
+		latest[taskID] = binding{sagaID: sagaID, at: at}
+	}
 	for _, ev := range events {
-		if ev.Type != "saga.registered" && ev.Type != "saga.attached" {
-			continue
-		}
-		sagaID, _ := ev.Data["saga_id"].(string)
-		if sagaID == "" || ev.Context.Task == "" {
-			continue
-		}
-		if ev.Type == "saga.registered" {
+		switch ev.Type {
+		case "saga.registered":
+			sagaID, _ := ev.Data["saga_id"].(string)
+			if sagaID == "" {
+				continue
+			}
 			meta := sagas[sagaID]
 			if meta == nil {
 				at := ev.OccurredAt
@@ -1038,15 +1071,87 @@ func sagaBindings(events []observation.Event) (map[string]string, map[string]*sa
 				}
 				sagas[sagaID] = meta
 			}
+			applyBinding(sagaEventTask(ev), sagaID, ev.OccurredAt)
+		case "saga.attached":
+			sagaID, _ := ev.Data["saga_id"].(string)
+			if sagaID == "" {
+				continue
+			}
+			applyBinding(sagaEventTask(ev), sagaID, ev.OccurredAt)
+		case "saga.detached":
+			taskID := sagaEventTask(ev)
+			if taskID == "" {
+				continue
+			}
+			if prev, ok := latest[taskID]; ok && prev.at.After(ev.OccurredAt) {
+				continue
+			}
+			latest[taskID] = binding{detached: true, at: ev.OccurredAt}
+		case "saga.renamed":
+			sagaID, _ := ev.Data["saga_id"].(string)
+			if sagaID == "" {
+				continue
+			}
+			if prev, ok := renames[sagaID]; ok && prev.at.After(ev.OccurredAt) {
+				continue
+			}
+			item := rename{at: ev.OccurredAt}
+			item.title, _ = ev.Data["title"].(string)
+			item.goal, _ = ev.Data["goal"].(string)
+			renames[sagaID] = item
+		case "saga.merged":
+			target, _ := ev.Data["saga_id"].(string)
+			if target == "" {
+				continue
+			}
+			sources, _ := ev.Data["source_saga_ids"].([]any)
+			for _, entry := range sources {
+				source, _ := entry.(string)
+				if source == "" || source == target {
+					continue
+				}
+				if prev, ok := merges[source]; ok && prev.at.After(ev.OccurredAt) {
+					continue
+				}
+				merges[source] = merge{target: target, at: ev.OccurredAt}
+			}
 		}
-		if prev, ok := latest[ev.Context.Task]; ok && prev.at.After(ev.OccurredAt) {
-			continue
+	}
+	for sagaID, item := range renames {
+		if meta := sagas[sagaID]; meta != nil {
+			if item.title != "" {
+				meta.title = item.title
+			}
+			if item.goal != "" {
+				meta.goal = item.goal
+			}
 		}
-		latest[ev.Context.Task] = binding{sagaID: sagaID, at: ev.OccurredAt}
+	}
+	// Merge chains: a target merged further on resolves to its final target.
+	resolve := func(sagaID string) string {
+		seen := map[string]bool{}
+		for {
+			next, ok := merges[sagaID]
+			if !ok || seen[sagaID] {
+				break
+			}
+			seen[sagaID] = true
+			sagaID = next.target
+		}
+		return sagaID
+	}
+	for _, meta := range sagas {
+		if merge, ok := merges[meta.sagaID]; ok {
+			meta.mergedInto = resolve(merge.target)
+		}
 	}
 	for taskID, b := range latest {
-		if _, known := sagas[b.sagaID]; known {
-			bindings[taskID] = b.sagaID
+		if b.detached || b.sagaID == "" {
+			continue
+		}
+		target := resolve(b.sagaID)
+		if _, known := sagas[target]; known {
+			bindings[taskID] = target
 		}
 	}
 	return bindings, sagas
@@ -1066,7 +1171,7 @@ func (a *CostAPI) aggregateProjectBudget(project string, events []observation.Ev
 	sagaAccs := map[string]*sagaAccumulator{}
 	for _, ev := range events {
 		taskID := ev.Context.Task
-		if taskID == "" || ev.Type == "saga.registered" || ev.Type == "saga.attached" {
+		if taskID == "" || strings.HasPrefix(ev.Type, "saga.") {
 			continue // taskless events have no task; saga events carry no spend
 		}
 		taskAcc := taskAccs[taskID]
@@ -1131,7 +1236,7 @@ func (a *CostAPI) aggregateProjectBudget(project string, events []observation.Ev
 	// registration stays visible.
 	for sagaID, meta := range sagaMetas {
 		rollup := SagaRollup{
-			SagaID: sagaID, Title: meta.title, Goal: meta.goal,
+			SagaID: sagaID, Title: meta.title, Goal: meta.goal, MergedInto: meta.mergedInto,
 			RegisteredByRun: meta.registeredBy, RegisteredAt: meta.registeredAt,
 			TaskIDs: []string{}, Approvals: ApprovalStats{},
 		}

@@ -260,7 +260,8 @@ Sagas: explicitly registered long-running efforts that outlive a single run
 and cross agent boundaries. Tools `saga_register` / `saga_attach` /
 `saga_list`; the binding lives at the task level, so chat follow-ups and
 delegated children join the saga automatically. The dashboard's Sagas tab (`/dashboard`) shows
-sagas and tasks with a budget rollup (`docs/sagas.md`).
+sagas and tasks with a budget rollup and manages them by hand: rename, merge
+duplicates, bind unbound tasks (`docs/sagas.md`).
 
 Web research: `web_fetch` (page → readability → markdown), `web_search`
 (self-hosted SearXNG), `view_image` / `fetch_image` (images as vision blocks)
@@ -386,6 +387,10 @@ scopes, success rates.
 | `GET /v1/workspace/runs/{id}/stream` | + model.text_delta, model.reasoning |
 | `GET /v1/agent/cost/task?project=P&task=T` | Task budget: every run (chat follow-ups + delegation tree) with summed time/tokens/cost |
 | `GET /v1/agent/cost/project-budget?project=P` | Project budget: totals plus per-saga and per-task rows (time/tokens/cost/approvals) |
+| `POST /v1/workspace/sagas?project=P` | Create a saga by hand (optionally binding a task right away) |
+| `POST /v1/workspace/sagas/{id}/rename?project=P` | Rename a saga / fix its goal |
+| `POST /v1/workspace/sagas/{id}/merge?project=P` | Merge duplicate sagas into one |
+| `POST /v1/workspace/tasks/{taskID}/saga?project=P` | Bind a task to a saga (empty `saga_id` detaches) |
 
 ## Workspace
 

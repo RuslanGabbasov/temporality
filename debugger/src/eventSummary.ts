@@ -537,6 +537,19 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       // says why the binding moved.
       return { icon: '🧭', label: t('runs.event.saga_attached'), detail: [String(d.task_id ?? ''), String(d.note ?? '').slice(0, 60)].filter(Boolean).join(' · '), color: 'var(--tm-teal)' }
     }
+    case 'saga.renamed': {
+      // The new title is the row; the old one lives in the event history.
+      return { icon: '🧭', label: t('runs.event.saga_renamed'), detail: [String(d.title ?? ''), String(d.goal ?? '').slice(0, 60)].filter(Boolean).join(' · '), color: 'var(--tm-teal)' }
+    }
+    case 'saga.merged': {
+      // Sources fold into the target: name the target and how many came in.
+      const sources = Array.isArray(d.source_saga_ids) ? d.source_saga_ids.length : 0
+      return { icon: '🧭', label: t('runs.event.saga_merged'), detail: [shortId(d.saga_id), sources > 0 ? `+${sources}` : ''].filter(Boolean).join(' · '), color: 'var(--tm-teal)' }
+    }
+    case 'saga.detached': {
+      // Back to the unbound pool: name the task that left its saga.
+      return { icon: '🧭', label: t('runs.event.saga_detached'), detail: String(d.task_id ?? ''), color: 'var(--tm-text-3)' }
+    }
     case 'operation.reconciled': {
       // The effect is the whole point of the row: did the unconfirmed tool
       // call actually change the outside world or not.

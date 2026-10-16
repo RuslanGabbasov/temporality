@@ -24,24 +24,35 @@ import (
 
 // sagaEvent is one saga.* journal event relevant to bindings.
 type sagaEvent struct {
-	Type       string // saga.registered | saga.attached
+	Type       string // saga.registered | saga.attached | saga.detached | saga.renamed | saga.merged
 	SagaID     string
 	Title      string
 	Goal       string
+	Sources    []string // saga.merged: source saga ids
 	TaskID     string
 	RunID      string
 	OccurredAt time.Time
 }
 
-// fetchSagaEvents pages through the project's saga.registered and saga.attached
-// journal events (the filter takes a single type, so two queries merge in
-// arrival order — same approach as kernel/cost queryEventsFiltered).
+// sagaEventTask resolves the task an event talks about: agent-emitted events
+// carry it in context, human-UI ones in data.task_id.
+func sagaEventTask(ev observation.Event) string {
+	if ev.Context.Task != "" {
+		return ev.Context.Task
+	}
+	taskID, _ := ev.Data["task_id"].(string)
+	return taskID
+}
+
+// fetchSagaEvents pages through the project's saga.* journal events (the
+// filter takes a single type, so per-type queries merge in arrival order —
+// same approach as kernel/cost queryEventsFiltered).
 func (a *Activities) fetchSagaEvents(ctx context.Context, project, taskID string) ([]sagaEvent, error) {
 	if project == "" {
 		return nil, fmt.Errorf("project is required")
 	}
 	var all []sagaEvent
-	for _, eventType := range []string{"saga.registered", "saga.attached"} {
+	for _, eventType := range []string{"saga.registered", "saga.attached", "saga.detached", "saga.renamed", "saga.merged"} {
 		cursor := ""
 		for {
 			endpoint := fmt.Sprintf("%s/v1/observations/events?project=%s&type=%s&limit=500", a.TemporalityURL, url.QueryEscape(project), eventType)
@@ -77,13 +88,28 @@ func (a *Activities) fetchSagaEvents(ctx context.Context, project, taskID string
 			}
 			for _, ev := range page.Events {
 				sagaID, _ := ev.Data["saga_id"].(string)
-				if sagaID == "" || ev.Context.Task == "" {
+				task := sagaEventTask(ev)
+				// Renames, merges and taskless manual registrations carry no
+				// saga_id/task — they still matter for the projection.
+				if sagaID == "" && ev.Type != "saga.detached" {
 					continue
 				}
-				item := sagaEvent{Type: ev.Type, SagaID: sagaID, TaskID: ev.Context.Task, RunID: ev.Context.Run, OccurredAt: ev.OccurredAt}
-				if ev.Type == "saga.registered" {
+				if task == "" && ev.Type != "saga.renamed" && ev.Type != "saga.merged" {
+					continue
+				}
+				item := sagaEvent{Type: ev.Type, SagaID: sagaID, TaskID: task, RunID: ev.Context.Run, OccurredAt: ev.OccurredAt}
+				if ev.Type == "saga.registered" || ev.Type == "saga.renamed" {
 					item.Title, _ = ev.Data["title"].(string)
 					item.Goal, _ = ev.Data["goal"].(string)
+				}
+				if ev.Type == "saga.merged" {
+					if raw, ok := ev.Data["source_saga_ids"].([]any); ok {
+						for _, entry := range raw {
+							if source, _ := entry.(string); source != "" {
+								item.Sources = append(item.Sources, source)
+							}
+						}
+					}
 				}
 				all = append(all, item)
 			}
@@ -98,7 +124,8 @@ func (a *Activities) fetchSagaEvents(ctx context.Context, project, taskID string
 
 // currentBinding returns the task's latest saga binding, if any. Bindings
 // are compared by time, not array order: fetchSagaEvents merges per-type
-// queries, so global chronological order is not guaranteed.
+// queries, so global chronological order is not guaranteed. A saga.detached
+// that is the latest event counts as "no binding".
 func currentBinding(events []sagaEvent, taskID string) (sagaEvent, bool) {
 	found := false
 	var binding sagaEvent
@@ -106,10 +133,16 @@ func currentBinding(events []sagaEvent, taskID string) (sagaEvent, bool) {
 		if ev.TaskID != taskID {
 			continue
 		}
+		if ev.Type != "saga.registered" && ev.Type != "saga.attached" && ev.Type != "saga.detached" {
+			continue
+		}
 		if !found || !ev.OccurredAt.Before(binding.OccurredAt) {
 			binding = ev
 			found = true
 		}
+	}
+	if found && binding.Type == "saga.detached" {
+		return sagaEvent{}, false
 	}
 	return binding, found
 }
@@ -143,7 +176,7 @@ func (a *Activities) handleSagaRegister(ctx context.Context, request ToolRequest
 		return ToolResult{Content: string(encoded)}, nil
 	}
 
-	sagaID := "saga-" + skillSlug(title) + "-" + shortHash(request.TaskID)
+	sagaID := SagaID(title, request.TaskID)
 	data := map[string]any{"saga_id": sagaID, "title": title, "origin": "agent-tool"}
 	if goal != "" {
 		data["goal"] = goal
@@ -184,6 +217,11 @@ func (a *Activities) handleSagaAttach(ctx context.Context, request ToolRequest) 
 	if !registered {
 		return ToolResult{Content: fmt.Sprintf("error: saga %q is not registered in this project; call saga_list for ids", sagaID)}, nil
 	}
+	// A merged source saga no longer owns its bindings: point the agent at the
+	// surviving target instead of silently re-projecting.
+	if target := sagaMerges(events)(sagaID); target != sagaID {
+		return ToolResult{Content: fmt.Sprintf("error: saga %q was merged into %q; attach to the target saga instead", sagaID, target)}, nil
+	}
 	if binding, ok := currentBinding(events, request.TaskID); ok && binding.SagaID == sagaID {
 		result := map[string]any{"saga_id": sagaID, "task_id": request.TaskID, "status": "already_attached"}
 		encoded, _ := json.Marshal(result)
@@ -206,9 +244,62 @@ type sagaSummary struct {
 	SagaID     string   `json:"saga_id"`
 	Title      string   `json:"title"`
 	Goal       string   `json:"goal,omitempty"`
+	MergedInto string   `json:"merged_into,omitempty"` // the saga survives only as a redirect
 	Tasks      []string `json:"tasks"`
 	Registered string   `json:"registered_at"`
 	ByRun      string   `json:"registered_by_run,omitempty"`
+}
+
+// sagaMerges folds saga.merged events into a source→target resolver: latest
+// merge per source wins by time, chains resolve to the final target.
+func sagaMerges(events []sagaEvent) func(string) string {
+	type merge struct {
+		target string
+		at     time.Time
+	}
+	merges := map[string]merge{}
+	for _, ev := range events {
+		if ev.Type != "saga.merged" {
+			continue
+		}
+		for _, source := range ev.Sources {
+			if source == "" || source == ev.SagaID {
+				continue
+			}
+			if prev, ok := merges[source]; ok && prev.at.After(ev.OccurredAt) {
+				continue
+			}
+			merges[source] = merge{target: ev.SagaID, at: ev.OccurredAt}
+		}
+	}
+	return func(sagaID string) string {
+		seen := map[string]bool{}
+		for {
+			next, ok := merges[sagaID]
+			if !ok || seen[sagaID] {
+				break
+			}
+			seen[sagaID] = true
+			sagaID = next.target
+		}
+		return sagaID
+	}
+}
+
+// sagaRenames folds saga.renamed events per saga: the latest one wins and
+// overrides the registered title/goal.
+func sagaRenames(events []sagaEvent) map[string]sagaEvent {
+	renames := map[string]sagaEvent{}
+	for _, ev := range events {
+		if ev.Type != "saga.renamed" || ev.SagaID == "" {
+			continue
+		}
+		if prev, ok := renames[ev.SagaID]; ok && prev.OccurredAt.After(ev.OccurredAt) {
+			continue
+		}
+		renames[ev.SagaID] = ev
+	}
+	return renames
 }
 
 func (a *Activities) handleSagaList(ctx context.Context, request ToolRequest) (ToolResult, error) {
@@ -219,6 +310,8 @@ func (a *Activities) handleSagaList(ctx context.Context, request ToolRequest) (T
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
 	}
+	resolveMerge := sagaMerges(events)
+	renames := sagaRenames(events)
 	sagas := map[string]*sagaSummary{}
 	registrationTime := map[string]time.Time{}
 	for _, ev := range events {
@@ -234,17 +327,40 @@ func (a *Activities) handleSagaList(ctx context.Context, request ToolRequest) (T
 		sagas[ev.SagaID] = &sagaSummary{SagaID: ev.SagaID, Title: ev.Title, Goal: ev.Goal, Tasks: []string{}, Registered: ev.OccurredAt.Format(time.RFC3339), ByRun: ev.RunID}
 		registrationTime[ev.SagaID] = ev.OccurredAt
 	}
+	// Human renames override the registered title/goal; merged sources keep
+	// their row as a redirect to the surviving target.
+	for sagaID, ev := range renames {
+		if saga := sagas[sagaID]; saga != nil {
+			if ev.Title != "" {
+				saga.Title = ev.Title
+			}
+			if ev.Goal != "" {
+				saga.Goal = ev.Goal
+			}
+		}
+	}
+	for sagaID, saga := range sagas {
+		if target := resolveMerge(sagaID); target != sagaID {
+			saga.MergedInto = target
+		}
+	}
 	// The task→saga projection: the latest binding per task wins (a re-attach
-	// moves the task), mirroring the cost rollup. Comparison is by time — the
-	// merged event list is not globally chronological.
+	// moves the task, a detach unbinds it), mirroring the cost rollup.
+	// Comparison is by time — the merged event list is not globally
+	// chronological. Bindings to merged sources follow the merge to its target.
 	type taskBinding struct {
 		sagaID string
 		at     time.Time
 	}
 	latest := map[string]taskBinding{}
 	for _, ev := range events {
-		if _, registered := registrationTime[ev.SagaID]; !registered {
-			continue // a binding to an unknown saga has no effect
+		if ev.Type != "saga.registered" && ev.Type != "saga.attached" && ev.Type != "saga.detached" {
+			continue
+		}
+		if ev.Type != "saga.detached" {
+			if _, registered := registrationTime[ev.SagaID]; !registered {
+				continue // a binding to an unknown saga has no effect
+			}
 		}
 		if prev, ok := latest[ev.TaskID]; ok && prev.at.After(ev.OccurredAt) {
 			continue
@@ -252,7 +368,11 @@ func (a *Activities) handleSagaList(ctx context.Context, request ToolRequest) (T
 		latest[ev.TaskID] = taskBinding{sagaID: ev.SagaID, at: ev.OccurredAt}
 	}
 	for taskID, binding := range latest {
-		if saga := sagas[binding.sagaID]; saga != nil {
+		if binding.sagaID == "" {
+			continue // detached: back to the unbound pool
+		}
+		target := resolveMerge(binding.sagaID)
+		if saga := sagas[target]; saga != nil {
 			saga.Tasks = append(saga.Tasks, taskID)
 		}
 	}
@@ -292,6 +412,14 @@ func (a *Activities) emitSagaEvent(ctx context.Context, request ToolRequest, eve
 		Data: data,
 	}
 	return a.Events.Enqueue(ctx, event)
+}
+
+// SagaID derives the saga id from a title and seed (docs/sagas.md):
+// "saga-" + slug(title) + "-" + shortHash(seed). The agent tool seeds it
+// with the task id (retries land on the same saga); the human-UI route seeds
+// it with the bound task or a title+actor+time nonce.
+func SagaID(title, seed string) string {
+	return "saga-" + skillSlug(title) + "-" + shortHash(seed)
 }
 
 // shortHash derives a stable 6-hex-char nonce (same task → same saga id, so

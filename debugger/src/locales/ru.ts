@@ -37,6 +37,26 @@ export const ru: Record<string, string> = {
     'project.no_sagas': 'Саги ещё не зарегистрированы — агент регистрирует их тулом saga_register',
     'project.unbound': 'Задачи без саги',
     'project.no_unbound': 'Все задачи привязаны к сагам',
+    'project.saga_rename': 'Переименовать',
+    'project.saga_rename_title': 'Переименование саги',
+    'project.saga_title_label': 'Название',
+    'project.saga_goal_label': 'Цель (необязательно)',
+    'project.saga_merge': 'Объединить',
+    'project.saga_merge_title': 'Объединение саг',
+    'project.saga_merge_target': 'Объединить в',
+    'project.saga_merge_hint': 'Выбранные саги будут слиты в указанную: их задачи и затраты перейдут к ней, сами они останутся строками-перенаправлениями.',
+    'project.saga_merge_select': 'Выберите две или более саг',
+    'project.saga_merged_into': 'объединена в',
+    'project.saga_attach': 'Привязать к саге',
+    'project.saga_attach_title': 'Привязка задачи к саге',
+    'project.saga_attach_hint': 'Задача перейдёт в выбранную сагу, дальнейший учёт пойдёт по ней.',
+    'project.saga_create': 'Создать сагу',
+    'project.saga_create_title': 'Новая сага',
+    'project.saga_create_hint': 'Сага будет создана и сразу привязана к этой задаче.',
+    'project.saga_detach': 'Отвязать от саги',
+    'project.saga_none': 'В проекте нет саг — создайте новую',
+    'project.saga_actions_done': 'Готово',
+    'project.task_col_actions': 'Действия',
 
     // System dashboard (docs/system-dashboard.md)
     'dashboard.title': 'Дашборд системы',
@@ -499,6 +519,9 @@ export const ru: Record<string, string> = {
     // Sagas (docs/sagas.md): saga_register / saga_attach tool events
     'runs.event.saga_registered': 'Сага зарегистрирована',
     'runs.event.saga_attached': 'Запуск привязан к саге',
+    'runs.event.saga_renamed': 'Сага переименована',
+    'runs.event.saga_merged': 'Саги объединены',
+    'runs.event.saga_detached': 'Задача отвязана от саги',
 
     // Reconcile / HITL verdicts (specs/quality-loop.md)
     'runs.event.operation_reconciled': 'Операция сверена',
