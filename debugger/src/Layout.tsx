@@ -54,6 +54,7 @@ const NAV_ITEMS = [
   // explorer.md §3.1); its operational counterpart lives inside the dashboard.
   { path: '/knowledge', label: 'nav.knowledge' },
   { path: '/artifacts', label: 'nav.artifacts' },
+  { path: '/storage', label: 'nav.storage' },
   { path: '/experience', label: 'nav.timeline' },
 ]
 

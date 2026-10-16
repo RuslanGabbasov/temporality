@@ -435,30 +435,6 @@ export function storageOverview(): Promise<StorageSnapshot> {
   return request('/v1/workspace/storage')
 }
 
-export interface StorageTreeNode {
-  name: string
-  path: string
-  bytes: number
-  files: number
-  mod_at?: string
-  children?: StorageTreeNode[]
-}
-
-export interface StorageProjectTree {
-  project: string
-  root: string
-  depth: number
-  truncated: boolean
-  workspace: StorageTreeNode
-  cache: StorageTreeNode
-  top_files: StorageTopPath[]
-}
-
-export function storageProjectTree(project: string, depth?: number): Promise<StorageProjectTree> {
-  const suffix = depth ? `?depth=${depth}` : ''
-  return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}${suffix}`)
-}
-
 // File-level browser over one project's persistent areas (workspace/cache).
 export interface StorageFileEntry {
   name: string
@@ -469,8 +445,19 @@ export interface StorageFileEntry {
   entries?: number
 }
 
+export interface StorageFileEntry {
+  name: string
+  path: string
+  dir: boolean
+  bytes: number
+  mod_at?: string
+  entries?: number
+}
+
+// NOTE the /file suffix — without it the request lands on the tree endpoint
+// and a JSON document gets rendered instead of the file content.
 function storageFileQuery(project: string, area: string, path: string): string {
-  return `/v1/workspace/storage/projects/${encodeURIComponent(project)}` +
+  return `/v1/workspace/storage/projects/${encodeURIComponent(project)}/file` +
     `?area=${encodeURIComponent(area)}&path=${encodeURIComponent(path)}`
 }
 

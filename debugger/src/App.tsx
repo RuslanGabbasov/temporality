@@ -17,6 +17,7 @@ import Artifacts from './Artifacts'
 import Mcp from './Mcp'
 import Secrets from './Secrets'
 import Sandbox from './Sandbox'
+import Storage from './Storage'
 import Org from './Org'
 import ChannelSettingsPage from './ChannelSettings'
 import InboundMessages from './InboundMessages'
@@ -34,6 +35,7 @@ const Routes = {
   mcp: /^\/mcp(\/|$)/,
   secrets: /^\/secrets(\/|$)/,
   sandbox: /^\/sandbox(\/|$)/,
+  storage: /^\/storage(\/|$)/,
   providers: /^\/providers(\/|$)/,
   users: /^\/users(\/$|)/,
   triggers: /^\/triggers(\/$|)/,
@@ -42,7 +44,7 @@ const Routes = {
   inbound: /^\/inbound(\/|$)/,
 } as const
 
-type Page = 'dashboard' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
+type Page = 'dashboard' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
 
 function pageFor(pathname: string): Page {
   if (Routes.dashboard.test(pathname)) return 'dashboard'
@@ -57,6 +59,7 @@ function pageFor(pathname: string): Page {
   if (Routes.mcp.test(pathname)) return 'mcp'
   if (Routes.secrets.test(pathname)) return 'secrets'
   if (Routes.sandbox.test(pathname)) return 'sandbox'
+  if (Routes.storage.test(pathname)) return 'storage'
   if (Routes.providers.test(pathname)) return 'providers'
   if (Routes.users.test(pathname)) return 'users'
   if (Routes.triggers.test(pathname)) return 'triggers'
@@ -105,6 +108,8 @@ export default function App() {
             return <Secrets />
           case 'sandbox':
             return <Sandbox project={project} />
+          case 'storage':
+            return <Storage project={project} />
           case 'providers':
             return <Providers />
           case 'users':
