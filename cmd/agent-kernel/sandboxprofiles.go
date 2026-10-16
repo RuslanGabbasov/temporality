@@ -157,9 +157,16 @@ func RegisterSandboxProfileRoutes(mux *http.ServeMux, gate *controlplane.Gate, w
 			return
 		}
 		actor := requestSubject(r)
-		_ = ws.RecordAccessAudit(r.Context(), actor, workspace.AuditSandboxProfileUpdated, "sandbox_profile", p.ID, map[string]any{"image": p.Image})
-		emitSandboxProfileEvent(r.Context(), events, "sandbox.profile.updated", p.ID, map[string]any{"profile": p.ID, "by": actor, "image": p.Image})
-		writeJSON(w, 200, p)
+		_ = ws.RecordAccessAudit(r.Context(), actor, workspace.AuditSandboxProfileUpdated, "sandbox_profile", p.ID, map[string]any{"image": p.Image, "memory": p.Memory, "cpus": p.CPUs})
+		emitSandboxProfileEvent(r.Context(), events, "sandbox.profile.updated", p.ID, map[string]any{"profile": p.ID, "by": actor, "image": p.Image, "memory": p.Memory, "cpus": p.CPUs})
+		// Respond with the stored row: a builtin PUT carries only resource
+		// overrides, the merged identity lives in the store.
+		updated, err := ws.GetSandboxProfile(r.Context(), p.ID)
+		if err != nil {
+			writeSandboxProfileError(w, err)
+			return
+		}
+		writeJSON(w, 200, updated)
 	})
 
 	mux.HandleFunc("DELETE /v1/workspace/sandbox-profiles/{id}", func(w http.ResponseWriter, r *http.Request) {

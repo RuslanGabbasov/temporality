@@ -81,7 +81,15 @@ func (f *fakeSandboxProfileStore) UpdateSandboxProfile(_ context.Context, p work
 		return workspace.ErrNotFound
 	}
 	if current.Builtin {
-		return fmt.Errorf("%w: %s", workspace.ErrProfileBuiltin, p.ID)
+		// Mirrors the real store: a builtin PUT only carries resource
+		// overrides; identity and image come from the stored row.
+		p.Name = current.Name
+		p.Description = current.Description
+		p.Toolchains = current.Toolchains
+		p.Image = current.Image
+		p.Builtin = true
+	} else {
+		p.Builtin = false
 	}
 	if err := workspace.ValidateSandboxProfile(p); err != nil {
 		return err
@@ -310,7 +318,8 @@ func TestCreateCustomProfile(t *testing.T) {
 	require.Equal(t, 400, status, body)
 }
 
-// Builtin rows cannot be deleted or rewritten through the API.
+// Builtin rows cannot be deleted; a PUT narrows to resource overrides and
+// never rewrites catalog identity.
 func TestBuiltinProfilesAreProtected(t *testing.T) {
 	store := newFakeSandboxProfileStore(builtinProfileFixture())
 	server := newSandboxProfileServer(t, store, &captureProfileOutbox{}, fakeProfileBuilders{})
@@ -319,6 +328,35 @@ func TestBuiltinProfilesAreProtected(t *testing.T) {
 	status, body := profileRequest(t, server, http.MethodDelete, "writertoken", "/v1/workspace/sandbox-profiles/node", "")
 	require.Equal(t, 409, status, body)
 
-	status, body = profileRequest(t, server, http.MethodPut, "writertoken", "/v1/workspace/sandbox-profiles/node", `{"name":"Rename"}`)
-	require.Equal(t, 409, status, body)
+	status, body = profileRequest(t, server, http.MethodPut, "writertoken", "/v1/workspace/sandbox-profiles/node",
+		`{"name":"Rename","memory":"3g","cpus":"1.5"}`)
+	require.Equal(t, 200, status, body)
+	require.Contains(t, body, `"memory":"3g"`)
+	require.Contains(t, body, `"cpus":"1.5"`)
+	require.NotContains(t, body, "Rename")
+
+	node, err := store.GetSandboxProfile(context.Background(), "node")
+	require.NoError(t, err)
+	require.Equal(t, "3g", node.Memory)
+	require.Equal(t, "1.5", node.CPUs)
+	require.Equal(t, "Node 22", node.Name)
+}
+
+// Rebuilding a builtin pins a fresh digest without touching tuned resources.
+func TestRebuildKeepsResourceOverrides(t *testing.T) {
+	node := builtinProfileFixture()
+	node.Memory = "3g"
+	node.CacheEnv = append(node.CacheEnv, "EXTRA_CACHE=/cache/extra")
+	store := newFakeSandboxProfileStore(node)
+	server := newSandboxProfileServer(t, store, &captureProfileOutbox{}, fakeProfileBuilders{})
+	defer server.Close()
+
+	status, body := profileRequest(t, server, http.MethodPost, "writertoken", "/v1/workspace/sandbox-profiles/node/build", "")
+	require.Equal(t, 200, status, body)
+
+	built, err := store.GetSandboxProfile(context.Background(), "node")
+	require.NoError(t, err)
+	require.Equal(t, "3g", built.Memory)
+	require.Contains(t, built.CacheEnv, "EXTRA_CACHE=/cache/extra")
+	require.NotEmpty(t, built.Image)
 }

@@ -250,32 +250,45 @@ func (s *Store) CreateSandboxProfile(ctx context.Context, p *SandboxProfile) err
 	return err
 }
 
-// UpdateSandboxProfile rewrites a custom profile. Builtin rows change only
-// through build (image) and kernel updates (catalog metadata refresh).
+// UpdateSandboxProfile rewrites a custom profile. A builtin row accepts only
+// resource overrides (memory, cpus, scratch/tmp sizes) and cache env: the
+// catalog identity (name, description, toolchains) travels with kernel
+// updates and the image is pinned by build, so a PUT never rewrites them.
 func (s *Store) UpdateSandboxProfile(ctx context.Context, p SandboxProfile) error {
+	existing, err := s.GetSandboxProfile(ctx, p.ID)
+	if err != nil {
+		return err
+	}
+	if existing.Builtin {
+		p.Name = existing.Name
+		p.Description = existing.Description
+		p.Toolchains = existing.Toolchains
+		p.Image = existing.Image
+		p.Builtin = true
+	} else {
+		p.Builtin = false
+	}
 	if err := ValidateSandboxProfile(p); err != nil {
 		return err
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_sandbox_profile
 		 SET name=$2, description=$3, image=$4, toolchains=$5, memory=$6, cpus=$7, scratch_size=$8, tmp_size=$9, cache_env=$10, updated_at=$11
-		 WHERE id=$1 AND builtin = FALSE`,
+		 WHERE id=$1`,
 		p.ID, p.Name, p.Description, p.Image, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, time.Now().UTC())
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		if _, err := s.GetSandboxProfile(ctx, p.ID); err != nil {
-			return err
-		}
-		return fmt.Errorf("%w: %s", ErrProfileBuiltin, p.ID)
+		return ErrNotFound
 	}
 	return nil
 }
 
-// SetSandboxProfileImage pins a freshly built digest into a builtin profile.
-// The catalog metadata (name, resources, cache env) travels with kernel
-// updates, so the build also refreshes it from the in-code catalog.
+// SetSandboxProfileImage pins a freshly built digest into a builtin profile
+// and refreshes the catalog metadata (name, description, toolchains) from the
+// in-code catalog. Locally tuned resource overrides and cache env survive the
+// rebuild: they are editable through the API and belong to the deployment.
 func (s *Store) SetSandboxProfileImage(ctx context.Context, id, image string) error {
 	var builtin SandboxProfile
 	found := false
@@ -294,9 +307,9 @@ func (s *Store) SetSandboxProfileImage(ctx context.Context, id, image string) er
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_sandbox_profile
-		 SET image=$2, name=$3, description=$4, toolchains=$5, memory=$6, cpus=$7, scratch_size=$8, tmp_size=$9, cache_env=$10, updated_at=now()
+		 SET image=$2, name=$3, description=$4, toolchains=$5, updated_at=now()
 		 WHERE id=$1 AND builtin = TRUE`,
-		id, image, builtin.Name, builtin.Description, builtin.Toolchains, builtin.Memory, builtin.CPUs, builtin.ScratchSize, builtin.TmpSize, builtin.CacheEnv)
+		id, image, builtin.Name, builtin.Description, builtin.Toolchains)
 	if err != nil {
 		return err
 	}

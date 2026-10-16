@@ -10,7 +10,7 @@ import {
   Heading,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, TrashCan, Renew } from '@carbon/icons-react'
+import { Add, TrashCan, Renew, Edit } from '@carbon/icons-react'
 import { workspaceApi, type SandboxProfile } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
@@ -48,6 +48,7 @@ export default function Sandbox() {
   const [form, setForm] = useState<ProfileForm>(emptyForm)
   const [filter, setFilter] = useState('')
   const [building, setBuilding] = useState('')
+  const [editing, setEditing] = useState<SandboxProfile | null>(null)
 
   const visible = profiles.filter((p) => matchesFilter(filter, p.name, p.id, p.description, ...(p.toolchains ?? [])))
 
@@ -87,10 +88,27 @@ export default function Sandbox() {
     } catch (f) { setError(message(f)) }
   }
 
+  const startEdit = (p: SandboxProfile) => {
+    setEditing(p)
+    setForm({
+      id: p.id,
+      name: p.name,
+      description: p.description ?? '',
+      image: p.image ?? '',
+      toolchains: (p.toolchains ?? []).join(', '),
+      memory: p.memory ?? '',
+      cpus: p.cpus ?? '',
+      scratch_size: p.scratch_size ?? '',
+      tmp_size: p.tmp_size ?? '',
+      cache_env: (p.cache_env ?? []).join('\n'),
+    })
+    setShowForm(true)
+  }
+
   const saveCustom = async () => {
     setError('')
     const payload = {
-      id: form.id.trim(),
+      id: editing ? editing.id : form.id.trim(),
       name: form.name.trim(),
       description: form.description,
       image: form.image.trim(),
@@ -102,7 +120,12 @@ export default function Sandbox() {
       cache_env: form.cache_env.split('\n').map((s) => s.trim()).filter(Boolean),
     }
     try {
-      await workspaceApi.createSandboxProfile(payload)
+      if (editing) {
+        await workspaceApi.updateSandboxProfile(editing.id, payload)
+        setEditing(null)
+      } else {
+        await workspaceApi.createSandboxProfile(payload)
+      }
       setShowForm(false)
       setForm(emptyForm)
       await load()
@@ -140,6 +163,7 @@ export default function Sandbox() {
                   <p style={{ color: 'var(--tm-text-2)', fontSize: '0.8rem', marginTop: '0.25rem' }}>{p.description}</p>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0 }}>
+                  <Button size="sm" kind="ghost" renderIcon={Edit} onClick={() => startEdit(p)}>{t('sandbox.edit')}</Button>
                   {p.builtin && (
                     <Button size="sm" kind="secondary" renderIcon={Renew} disabled={building === p.id} onClick={() => void build(p)}>
                       {building === p.id ? t('sandbox.building') : p.image ? t('sandbox.rebuild') : t('sandbox.build')}
@@ -172,15 +196,15 @@ export default function Sandbox() {
       )}
 
       {showForm && (
-        <AppModal onClose={() => setShowForm(false)} panelStyle={{ width: '640px' }}>
-          <Heading>{t('sandbox.custom_heading')}</Heading>
+        <AppModal onClose={() => { setShowForm(false); setEditing(null) }} panelStyle={{ width: '640px' }}>
+          <Heading>{editing ? t('sandbox.edit_heading') : t('sandbox.custom_heading')}</Heading>
           <Stack gap={3}>
             {error && <InlineNotification kind="error" lowContrast title={t('action.error')} subtitle={error} />}
-            <TextInput id="sp-id" labelText={t('sandbox.field_id')} value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} placeholder="rust" />
-            <TextInput id="sp-name" labelText={t('sandbox.field_name')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Rust toolchain" />
-            <TextArea id="sp-desc" labelText={t('sandbox.field_description')} rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-            <TextInput id="sp-image" labelText={t('sandbox.field_image')} value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} placeholder="registry.local/toolbox@sha256:…" />
-            <TextInput id="sp-toolchains" labelText={t('sandbox.field_toolchains')} value={form.toolchains} onChange={(e) => setForm({ ...form, toolchains: e.target.value })} placeholder="rust, wasm" />
+            <TextInput id="sp-id" labelText={t('sandbox.field_id')} value={form.id} disabled={!!editing} onChange={(e) => setForm({ ...form, id: e.target.value })} placeholder="rust" />
+            <TextInput id="sp-name" labelText={t('sandbox.field_name')} value={form.name} disabled={!!editing?.builtin} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Rust toolchain" />
+            <TextArea id="sp-desc" labelText={t('sandbox.field_description')} rows={2} value={form.description} disabled={!!editing?.builtin} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            <TextInput id="sp-image" labelText={t('sandbox.field_image')} value={form.image} disabled={!!editing?.builtin} onChange={(e) => setForm({ ...form, image: e.target.value })} placeholder="registry.local/toolbox@sha256:…" />
+            <TextInput id="sp-toolchains" labelText={t('sandbox.field_toolchains')} value={form.toolchains} disabled={!!editing?.builtin} onChange={(e) => setForm({ ...form, toolchains: e.target.value })} placeholder="rust, wasm" />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.5rem' }}>
               <TextInput id="sp-memory" labelText={t('sandbox.field_memory')} value={form.memory} onChange={(e) => setForm({ ...form, memory: e.target.value })} placeholder="2g" />
               <TextInput id="sp-cpus" labelText={t('sandbox.field_cpus')} value={form.cpus} onChange={(e) => setForm({ ...form, cpus: e.target.value })} placeholder="2" />
@@ -188,10 +212,10 @@ export default function Sandbox() {
               <TextInput id="sp-tmp" labelText={t('sandbox.field_tmp')} value={form.tmp_size} onChange={(e) => setForm({ ...form, tmp_size: e.target.value })} placeholder="512m" />
             </div>
             <TextArea id="sp-cache" labelText={t('sandbox.field_cache')} rows={2} value={form.cache_env} onChange={(e) => setForm({ ...form, cache_env: e.target.value })} placeholder={'CARGO_HOME=/cache/cargo'} />
-            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>{t('sandbox.custom_hint')}</p>
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>{editing?.builtin ? t('sandbox.edit_hint') : t('sandbox.custom_hint')}</p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-              <Button kind="secondary" onClick={() => setShowForm(false)}>{t('action.cancel')}</Button>
-              <Button onClick={() => void saveCustom()} disabled={!form.id.trim() || !form.name.trim()}>{t('action.create')}</Button>
+              <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel')}</Button>
+              <Button onClick={() => void saveCustom()} disabled={!form.id.trim() || !form.name.trim()}>{editing ? t('action.save') : t('action.create')}</Button>
             </div>
           </Stack>
         </AppModal>
