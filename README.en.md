@@ -30,12 +30,11 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 
 | Path | Purpose |
 |---|---|
-| `/project` | Project overview — sagas and tasks with a budget (tokens, time, cost, approvals), recent runs |
+| `/dashboard` | System dashboard — health strip, providers/models, per-project rollup, quality loop, sagas and tasks with a budget, knowledge observability (`/observability` is a legacy redirect) |
 | `/workspace` | Agent chat — SSE streaming, reasoning, Markdown, conversations |
 | `/agent-config` | Agent management — CRUD, templates, full configuration |
 | `/agents` | Run traces — event timeline, trajectory extraction, inline reconciliation of uncertain operations |
 | `/knowledge` | Knowledge explorer — area map, faceted search, evidence dossiers, relation graph, bitemporal history, conflicts, research sessions, agent research replay |
-| `/observability` | Observability — knowledge base overview (health, cuts, comparison) and experience patterns |
 | `/experience` | Experience Timeline — memory lens, semantic zoom, retrospective audit |
 | `/skills` | Living Skills — contract, versions, executions, memory, evolution, skill builder |
 | `/artifacts` | Artifacts — reference document registry (regulations, instructions), skill linkage |
@@ -260,8 +259,8 @@ agents with dependencies and predicates (`docs/agent-delegation.md`).
 Sagas: explicitly registered long-running efforts that outlive a single run
 and cross agent boundaries. Tools `saga_register` / `saga_attach` /
 `saga_list`; the binding lives at the task level, so chat follow-ups and
-delegated children join the saga automatically. The project overview
-(`/project`) shows sagas and tasks with a budget rollup (`docs/sagas.md`).
+delegated children join the saga automatically. The dashboard's Sagas tab (`/dashboard`) shows
+sagas and tasks with a budget rollup (`docs/sagas.md`).
 
 Web research: `web_fetch` (page → readability → markdown), `web_search`
 (self-hosted SearXNG), `view_image` / `fetch_image` (images as vision blocks)

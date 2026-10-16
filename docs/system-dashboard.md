@@ -21,7 +21,8 @@
 
 ## 2. Структура страницы
 
-Маршрут `/project` (пункт меню «Обзор») получает внутренние вкладки:
+Маршрут `/dashboard` (пункт меню «Дашборд»; до переименования — `/project`,
+который остаётся рабочим редиректом) получает внутренние вкладки:
 
 | Вкладка | Содержимое | Источник |
 |---|---|---|
@@ -30,8 +31,9 @@
 | Саги | текущий `ProjectOverview` (учёт по проекту) | `/v1/agent/cost/project-budget` |
 | Знания | переработанный Observability (битемпоральный обзор) | `/v1/observations/knowledge` |
 
-`/observability` остаётся рабочим маршрутом-алиасом (редирект на `/project` с
-вкладкой «Знания»), пункт из главного меню убирается.
+`/observability` и `/project` остаются рабочими маршрутами-алиасами (редирект
+на `/dashboard`; observability открывает вкладку «Знания»), пункта Observability
+в главном меню нет.
 
 ### 2.1. Вкладка «Обзор»
 
@@ -175,7 +177,7 @@ RoleReader. Видимость — как у списка агентов (`ListA
 1. Journal `stats/health` (+ память/postgres, тесты).
 2. Kernel `projects-overview` (+ `since` в пейджинге CostAPI).
 3. Kernel `quality/summary`.
-4. Фронтенд: `Dashboard.tsx` на `/project` с вкладками, переезд Observability,
+4. Фронтенд: `Dashboard.tsx` на `/dashboard` с вкладками, переезд Observability,
    меню, локали ru/en.
 5. Валидация: `go build ./...`, `go test ./... -count=1`, `npx tsc -b`,
    `npm test`; проверка вручную на стенде не входит в агентский прогон.

@@ -60,7 +60,7 @@ function stateLabel(state: string, t: (key: string, vars?: Record<string, string
 export default function Observability({ project }: { project: string }) {
   const t = useT()
   const initParams = new URLSearchParams(window.location.search)
-  // Embedded inside the dashboard (/project?tab=knowledge) the page-level `tab`
+  // Embedded inside the dashboard (/dashboard?tab=knowledge) the page-level `tab`
   // parameter belongs to the dashboard, so the inner tab lives under `ktab`.
   const [tab, setTab] = useState<Tab>((['overview', 'patterns'].includes(initParams.get('ktab') as Tab) ? initParams.get('ktab') : 'overview') as Tab)
   const [asOf, setAsOf] = useState(initParams.get('as_of') ?? '')

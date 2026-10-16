@@ -47,7 +47,7 @@ const NAV_ITEMS = [
   { path: '/workspace', label: 'nav.workspace' },
   // The system dashboard (docs/system-dashboard.md): health, quality, sagas
   // and knowledge observability in one operational surface.
-  { path: '/project', label: 'nav.dashboard' },
+  { path: '/dashboard', label: 'nav.dashboard' },
   { path: '/agents', label: 'nav.runs' },
   { path: '/inbound', label: 'nav.inbound' },
   // Knowledge explorer is the main research surface (docs/human-knowledge-

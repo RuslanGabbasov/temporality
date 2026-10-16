@@ -92,8 +92,8 @@ interface Props {
 }
 
 /**
- * System dashboard (docs/system-dashboard.md): the /project page rebuilt as the
- * operational health surface — live health strip, provider/model stats,
+ * System dashboard (docs/system-dashboard.md): formerly the /project page,
+ * rebuilt as the operational health surface — live health strip, provider/model stats,
  * per-project rollup with org grouping, the quality loop summary, plus the
  * former project overview (sagas) and knowledge observability as tabs.
  */
