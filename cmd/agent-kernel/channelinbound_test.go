@@ -27,6 +27,7 @@ type fakeInboundStore struct {
 	users      []workspace.User
 	answered   map[string]string
 	cancelled  []string
+	threads    map[string]string
 	audits     []string
 	cursor     workspace.ChannelCursor
 	inbound    []workspace.InboundMessage
@@ -65,6 +66,26 @@ func (s *fakeInboundStore) CancelHumanRequest(_ context.Context, id, _ string) e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cancelled = append(s.cancelled, id)
+	return nil
+}
+
+// SetHumanRequestThreadRef mirrors the store contract: fill-when-empty.
+func (s *fakeInboundStore) SetHumanRequestThreadRef(_ context.Context, id string, threadRef string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	found := false
+	for i := range s.requests {
+		if s.requests[i].ID != id {
+			continue
+		}
+		found = true
+		if s.requests[i].ThreadRef == "" {
+			s.requests[i].ThreadRef = threadRef
+		}
+	}
+	if !found {
+		return workspace.ErrNotFound
+	}
 	return nil
 }
 
@@ -398,6 +419,55 @@ func TestChannelInboundTeamAskMatchesAnyMember(t *testing.T) {
 	}
 	if store.answered["team-op"] != "approved by qa" {
 		t.Fatalf("row not answered: %+v", store.answered)
+	}
+}
+
+// TestChannelInboundPinsThreadOnThreadedReply covers the thread persistence
+// (docs/channels.md §9): an ask delivered with a pinned thread_ref matches a
+// reply in that thread exactly, and a threaded reply to an ask without a
+// ref pins the user's thread on the request row — the webhook and poll
+// feeds both land here through routeMessages.
+func TestChannelInboundPinsThreadOnThreadedReply(t *testing.T) {
+	store := &fakeInboundStore{
+		requests: []workspace.HumanRequest{
+			{
+				ID: "run/turn/01/ask_pinned", RunID: "run", ProjectID: "proj", ResolvedUser: "u1",
+				Channel: "matrix", Status: "delivered", Question: "Pinned?", ThreadRef: "1697000000.000100",
+				CreatedAt: time.Now().Add(-5 * time.Minute),
+			},
+			{
+				ID: "run/turn/01/ask_free", RunID: "run", ProjectID: "proj", ResolvedUser: "u1",
+				Channel: "matrix", Status: "delivered", Question: "Free?",
+				CreatedAt: time.Now().Add(-4 * time.Minute),
+			},
+		},
+		users: []workspace.User{{
+			ID: "u1", Name: "Human", Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", Enabled: true}},
+		}},
+	}
+	sig := &recordedSignal{}
+	loop := newInboundLoop(t, matrixHomeServer(t, nil), store, sig)
+	loop.routeMessages(context.Background(), []agent.InboundMessage{
+		// Lands in the pinned ask's thread despite the other ask being older.
+		{ID: "m1", Channel: "matrix", ChatID: "!r1:hs", Sender: "@human:hs", Text: "pinned answer",
+			Timestamp: time.Now().Add(-time.Minute), ReplyTo: "1697000000.000100"},
+		// No thread pointer: falls back to the oldest open ask and — being
+		// threaded — pins that thread on it.
+		{ID: "m2", Channel: "matrix", ChatID: "!r1:hs", Sender: "@human:hs", Text: "free answer",
+			Timestamp: time.Now(), ReplyTo: "1697000000.000900"},
+	}, nil)
+
+	if sig.count() != 2 {
+		t.Fatalf("expected two routed replies, got %d", sig.count())
+	}
+	if sig.calls[0].OperationID != "run/turn/01/ask_pinned" || sig.calls[0].Response != "pinned answer" {
+		t.Fatalf("exact thread match broken: %+v", sig.calls[0])
+	}
+	if sig.calls[1].OperationID != "run/turn/01/ask_free" || sig.calls[1].Response != "free answer" {
+		t.Fatalf("fallback match broken: %+v", sig.calls[1])
+	}
+	if store.requests[0].ThreadRef != "1697000000.000100" || store.requests[1].ThreadRef != "1697000000.000900" {
+		t.Fatalf("thread refs not pinned: %+v", store.requests)
 	}
 }
 

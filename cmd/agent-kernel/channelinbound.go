@@ -70,6 +70,7 @@ type channelInboundStore interface {
 	ListOpenHumanRequestDeliveries(ctx context.Context) ([]workspace.HumanRequestDelivery, error)
 	AnswerHumanRequest(ctx context.Context, id, response, answeredBy string) (workspace.HumanRequest, error)
 	CancelHumanRequest(ctx context.Context, id, actor string) error
+	SetHumanRequestThreadRef(ctx context.Context, id, threadRef string) error
 	ListUsers(ctx context.Context) ([]workspace.User, error)
 	RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error
 	ChannelCursor(ctx context.Context, channel string) (workspace.ChannelCursor, error)
@@ -251,6 +252,7 @@ func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, 
 					RunID:     row.RunID,
 					ProjectID: row.ProjectID,
 					UserID:    member,
+					ThreadRef: row.ThreadRef,
 					CreatedAt: row.CreatedAt,
 				})
 				if !seen[member] {
@@ -272,6 +274,7 @@ func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, 
 			RunID:     row.RunID,
 			ProjectID: row.ProjectID,
 			UserID:    row.ResolvedUser,
+			ThreadRef: row.ThreadRef,
 			CreatedAt: row.CreatedAt,
 		})
 		if !seen[row.ResolvedUser] {
@@ -289,6 +292,15 @@ func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, 
 // downloaded into the project workspace first, so the resumed run — and every
 // agent in the project — can read the attachment by path.
 func (l *channelInboundLoop) routeReply(ctx context.Context, reply agent.ChannelReply) {
+	// A threaded reply pins the conversation thread on the ask when it has
+	// none yet (docs/channels.md §9): the rest of the thread matches exactly,
+	// and follow-up questions of the run join it. Best-effort — a failed pin
+	// only costs the exact-match fast path, never the answer itself.
+	if reply.Message.ReplyTo != "" {
+		if err := l.store.SetHumanRequestThreadRef(ctx, reply.Ask.RequestID, reply.Message.ReplyTo); err != nil && !errors.Is(err, workspace.ErrNotFound) {
+			l.log.Warn("channel reply pin thread", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "error", err)
+		}
+	}
 	response := truncateForLog(reply.Message.Text, 4000)
 	if len(reply.Message.Files) > 0 {
 		saved, err := l.saveInboundFiles(ctx, reply)

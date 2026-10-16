@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,7 +18,7 @@ import (
 // delivery row per member; the first answer wins and supersedes the rest.
 
 const humanRequestColumns = `id, run_id, project_id, agent_id, agent_version, recipient, resolved_user, question, context,
-options, status, channel, response, answered_by, timeout_seconds, timeout_policy,
+options, status, channel, thread_ref, response, answered_by, timeout_seconds, timeout_policy,
 execution_identity_id, created_at, delivered_at, answered_at, expires_at`
 
 func scanHumanRequest(scanner interface{ Scan(dest ...any) error }) (HumanRequest, error) {
@@ -25,7 +26,7 @@ func scanHumanRequest(scanner interface{ Scan(dest ...any) error }) (HumanReques
 	var options []byte
 	var deliveredAt, answeredAt, expiresAt *time.Time
 	err := scanner.Scan(&r.ID, &r.RunID, &r.ProjectID, &r.AgentID, &r.AgentVersion, &r.Recipient, &r.ResolvedUser,
-		&r.Question, &r.Context, &options, &r.Status, &r.Channel, &r.Response, &r.AnsweredBy,
+		&r.Question, &r.Context, &options, &r.Status, &r.Channel, &r.ThreadRef, &r.Response, &r.AnsweredBy,
 		&r.TimeoutSeconds, &r.TimeoutPolicy, &r.ExecutionIdentityID,
 		&r.CreatedAt, &deliveredAt, &answeredAt, &expiresAt)
 	if err != nil {
@@ -59,11 +60,11 @@ func (s *Store) CreateHumanRequest(ctx context.Context, r *HumanRequest) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO human_request
 		 (id, run_id, project_id, agent_id, agent_version, recipient, resolved_user, question, context, options,
-		  status, channel, timeout_seconds, timeout_policy, execution_identity_id, created_at, expires_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now(),$16)
+		  status, channel, thread_ref, timeout_seconds, timeout_policy, execution_identity_id, created_at, expires_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now(),$17)
 		 ON CONFLICT (id) DO NOTHING`,
 		r.ID, r.RunID, r.ProjectID, r.AgentID, r.AgentVersion, r.Recipient, r.ResolvedUser, r.Question, r.Context,
-		marshalStrings(r.Options), r.Status, r.Channel, r.TimeoutSeconds, r.TimeoutPolicy,
+		marshalStrings(r.Options), r.Status, r.Channel, r.ThreadRef, r.TimeoutSeconds, r.TimeoutPolicy,
 		r.ExecutionIdentityID, expiresAt)
 	return err
 }
@@ -149,6 +150,31 @@ func (s *Store) supersedeDeliveries(ctx context.Context, requestIDs ...string) {
 	_, _ = s.pool.Exec(ctx,
 		`UPDATE human_request_delivery SET status = $2 WHERE request_id = ANY($1) AND status = 'delivered'`,
 		requestIDs, HumanDeliverySuperseded)
+}
+
+// SetHumanRequestThreadRef records the conversation thread of a delivered
+// question (slack ts, docs/channels.md §9). Fill-when-empty: the thread the
+// question opened (or the user's first threaded reply established) stays the
+// conversation anchor — later candidates never re-point it. ErrNotFound when
+// the row does not exist.
+func (s *Store) SetHumanRequestThreadRef(ctx context.Context, id, threadRef string) error {
+	if strings.TrimSpace(threadRef) == "" {
+		return nil
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE human_request SET thread_ref = $2 WHERE id = $1 AND thread_ref = ''`,
+		id, strings.TrimSpace(threadRef))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		// Either unknown id or the thread is already pinned — distinguish for
+		// the caller.
+		if _, err := s.GetHumanRequest(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // AnswerHumanRequest closes a request with the human's response. Only

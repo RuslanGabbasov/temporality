@@ -47,6 +47,16 @@ type ChannelDriver interface {
 // carry attachments.
 var ErrChannelFilesUnsupported = errors.New("channel does not deliver files")
 
+// ThreadedTextPoster is the optional driver extension for thread-capable
+// transports: same delivery contract as SendText, but it returns the posted
+// message's channel id (slack ts) so the kernel can pin the conversation
+// thread — follow-ups join it and threaded replies match their ask exactly
+// (docs/channels.md §9). The kernel uses it when the driver implements it;
+// SendText stays the mandatory baseline.
+type ThreadedTextPoster interface {
+	SendTextThreaded(ctx context.Context, client *http.Client, settings map[string]string, address string, msg OutboundText) (postedID string, err error)
+}
+
 // ChannelSpec is the driver's self-description for the kernel and UI.
 type ChannelSpec struct {
 	// Label is the human name shown in pickers.
@@ -71,6 +81,10 @@ type ChannelCapabilities struct {
 	// TwoWay: a reply in the channel routes back into the paused run, so
 	// deliveries carry a "reply here" hint.
 	TwoWay bool
+	// Threads: the channel carries conversation threads (slack threads,
+	// mattermost root posts). Questions can join a thread via OutboundText.
+	// Thread and threaded replies carry ReplyTo — see docs/channels.md §9.
+	Threads bool
 	// FilesOut: send_file can push attachments through this channel.
 	FilesOut bool
 	// FilesIn: inbound delivery accepts user attachments (FilesIn channels
@@ -105,6 +119,11 @@ type OutboundText struct {
 	TimeoutPolicy  string
 	// AnswerURL is the ready answer link ("" when the UI URL is unset).
 	AnswerURL string
+	// Thread posts this message into an existing conversation thread when
+	// the transport carries threads (Capabilities.Threads); "" = top-level.
+	// The kernel fills it from the previous ask's thread_ref so follow-up
+	// questions of one run stay in one conversation (docs/channels.md §9).
+	Thread string
 }
 
 // OutboundFile is one attachment pushed through a FilesOut channel.

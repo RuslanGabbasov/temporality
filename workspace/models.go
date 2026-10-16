@@ -101,14 +101,19 @@ type HumanRequest struct {
 	// under (specs/quality-loop.md §3): filled from workspace_agent.
 	// definition_version at creation, immutable afterwards. 0 = unknown
 	// (rows predating the column); such rows never enter per-version metrics.
-	AgentVersion        int        `json:"agent_version,omitempty"`
-	Recipient           string     `json:"recipient,omitempty"`
-	ResolvedUser        string     `json:"resolved_user,omitempty"`
-	Question            string     `json:"question"`
-	Context             string     `json:"context,omitempty"`
-	Options             []string   `json:"options"`
-	Status              string     `json:"status"`
-	Channel             string     `json:"channel,omitempty"`
+	AgentVersion int      `json:"agent_version,omitempty"`
+	Recipient    string   `json:"recipient,omitempty"`
+	ResolvedUser string   `json:"resolved_user,omitempty"`
+	Question     string   `json:"question"`
+	Context      string   `json:"context,omitempty"`
+	Options      []string `json:"options"`
+	Status       string   `json:"status"`
+	Channel      string   `json:"channel,omitempty"`
+	// ThreadRef is the conversation thread of the delivered question on
+	// thread-capable transports (slack ts; docs/channels.md §9): follow-ups of
+	// the same run join it and threaded replies match their ask exactly.
+	// Empty on web delivery and non-threaded channels.
+	ThreadRef           string     `json:"thread_ref,omitempty"`
 	Response            string     `json:"response,omitempty"`
 	AnsweredBy          string     `json:"answered_by,omitempty"`
 	TimeoutSeconds      int        `json:"timeout_seconds,omitempty"`

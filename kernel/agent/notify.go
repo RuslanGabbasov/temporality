@@ -50,6 +50,10 @@ type NotificationDelivery struct {
 	Channel   string `json:"channel"`
 	Status    string `json:"status"` // delivered | skipped | failed
 	Detail    string `json:"detail,omitempty"`
+	// ThreadRef is the conversation thread the question landed in on
+	// thread-capable transports (slack ts; docs/channels.md §9): the posted
+	// message id, or the thread a follow-up joined. Empty otherwise.
+	ThreadRef string `json:"thread_ref,omitempty"`
 	// DeliveredTo is the team fan-out breakdown (docs/inbound-messages.md §8):
 	// one entry per unit member. Empty for single-recipient requests.
 	DeliveredTo []DeliveryTarget `json:"delivered_to,omitempty"`
@@ -61,6 +65,9 @@ type DeliveryTarget struct {
 	Channel string `json:"channel"`
 	Status  string `json:"status"` // delivered | skipped | failed
 	Detail  string `json:"detail,omitempty"`
+	// ThreadRef is this member's conversation thread on thread-capable
+	// transports — slack-style threads are per posted copy.
+	ThreadRef string `json:"thread_ref,omitempty"`
 }
 
 // recipientChannels is the profile slice the delivery resolution needs.
@@ -159,10 +166,14 @@ func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChanne
 	settings := a.transports(ctx)
 	channel, mode := pickChannel(recipientChannels{Channels: target.Channels, Preferred: target.Preferred}, settings.Configured)
 	if mode != "web" {
-		if err := a.sendToChannel(ctx, channel.Type, channel.Address, request, settings); err != nil {
+		// Follow-ups of the same run join the previous ask's conversation
+		// thread (docs/channels.md §9) — new threads only for new runs.
+		thread := a.channelThread(ctx, channel.Type, request, target.ID)
+		postedID, err := a.sendToChannel(ctx, channel.Type, channel.Address, request, settings, thread)
+		if err != nil {
 			return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "failed", Detail: truncate(err.Error(), 300)}
 		}
-		return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "delivered"}
+		return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "delivered", ThreadRef: conversationThreadRef(thread, postedID)}
 	}
 	detail := "web inbox"
 	if target.Preferred != "" && target.Preferred != "web" {
@@ -236,11 +247,15 @@ func (a *Activities) deliverToUnit(ctx context.Context, request NotifyChannelReq
 		}
 		channel, mode := pickChannel(recipientChannels{Channels: member.Channels, Preferred: member.Preferred}, settings.Configured)
 		if mode != "web" {
-			if err := a.sendToChannel(ctx, channel.Type, channel.Address, request, settings); err != nil {
+			// Per-member thread: every copy opens (or joins) its own
+			// conversation thread in the member's chat.
+			thread := a.channelThread(ctx, channel.Type, request, member.ID)
+			postedID, err := a.sendToChannel(ctx, channel.Type, channel.Address, request, settings, thread)
+			if err != nil {
 				targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "failed", Detail: truncate(err.Error(), 200)})
 				continue
 			}
-			targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "delivered"})
+			targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "delivered", ThreadRef: conversationThreadRef(thread, postedID)})
 			delivered++
 			continue
 		}
@@ -273,12 +288,15 @@ func (a *Activities) recordHumanRequest(ctx context.Context, request NotifyChann
 	}
 	// Team fan-out: resolved_user/channel mirror the first reached member for
 	// backward-compatible display, while the delivery rows carry every member.
+	// thread_ref follows the same mirror — one conversation anchor per request.
 	resolvedUser, channel := delivery.Recipient, delivery.Channel
+	threadRef := delivery.ThreadRef
 	var deliveries []map[string]any
 	firstPicked := false
 	for _, target := range delivery.DeliveredTo {
 		if target.Status == "delivered" && !firstPicked {
 			resolvedUser, channel = target.UserID, target.Channel
+			threadRef = target.ThreadRef
 			firstPicked = true
 		}
 		status := target.Status
@@ -303,6 +321,7 @@ func (a *Activities) recordHumanRequest(ctx context.Context, request NotifyChann
 		"options":               request.Options,
 		"status":                delivery.Status,
 		"channel":               channel,
+		"thread_ref":            threadRef,
 		"timeout_seconds":       request.TimeoutSeconds,
 		"timeout_policy":        request.TimeoutPolicy,
 		"execution_identity_id": request.ExecutionIdentityID,
@@ -465,13 +484,70 @@ func pickChannel(profile recipientChannels, configured func(string) bool) (recip
 
 // sendToChannel dispatches one delivery to its channel driver
 // (channeldriver.go). Unknown types fall back to the web inbox via the
-// caller's failed status.
-func (a *Activities) sendToChannel(ctx context.Context, channelType, address string, request NotifyChannelRequest, settings ChannelSettings) error {
+// caller's failed status. thread asks the driver to post into an existing
+// conversation thread; the return is the posted message's channel id when the
+// driver can report it (slack ts — ThreadedTextPoster), "" otherwise.
+func (a *Activities) sendToChannel(ctx context.Context, channelType, address string, request NotifyChannelRequest, settings ChannelSettings, thread string) (postedID string, err error) {
 	driver := channelDriverByType(channelType)
 	if driver == nil {
-		return fmt.Errorf("no transport for channel %q", channelType)
+		return "", fmt.Errorf("no transport for channel %q", channelType)
 	}
-	return driver.SendText(ctx, a.HTTP, settings.Channels[channelType], address, outboundText(request, settings.UIURL))
+	msg := outboundText(request, settings.UIURL)
+	// Only thread-capable transports understand the pointer; everyone else
+	// would ignore it at best — drop it and post top-level.
+	if driver.Spec().Capabilities.Threads {
+		msg.Thread = thread
+	}
+	if poster, ok := driver.(ThreadedTextPoster); ok {
+		return poster.SendTextThreaded(ctx, a.HTTP, settings.Channels[channelType], address, msg)
+	}
+	return "", driver.SendText(ctx, a.HTTP, settings.Channels[channelType], address, msg)
+}
+
+// conversationThreadRef picks the conversation anchor for thread_ref: a
+// follow-up that joined an existing thread keeps it (the posted message's ts
+// is only a leaf inside it); a top-level post becomes the thread root itself,
+// so its ts is the ref the user's threaded replies will carry as thread_ts.
+func conversationThreadRef(thread, postedID string) string {
+	if strings.TrimSpace(thread) != "" {
+		return strings.TrimSpace(thread)
+	}
+	return strings.TrimSpace(postedID)
+}
+
+// channelThread finds the conversation thread of this run's previous ask to
+// the user on the same channel (human_request.thread_ref, docs/channels.md
+// §9): a follow-up question joins that thread instead of scattering across
+// the channel. Best-effort — lookup problems degrade to a fresh top-level
+// question, never to a failed delivery.
+func (a *Activities) channelThread(ctx context.Context, channelType string, request NotifyChannelRequest, userID string) string {
+	driver := channelDriverByType(channelType)
+	if driver == nil || !driver.Spec().Capabilities.Threads {
+		return ""
+	}
+	endpoint := fmt.Sprintf("%s/v1/workspace/human-requests?project=%s&user=%s",
+		a.WorkspaceURL, url.QueryEscape(request.Project), url.QueryEscape(userID))
+	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
+	if err != nil || status != http.StatusOK {
+		return ""
+	}
+	var list struct {
+		Requests []struct {
+			RunID     string `json:"run_id"`
+			Channel   string `json:"channel"`
+			ThreadRef string `json:"thread_ref"`
+		} `json:"requests"`
+	}
+	if json.Unmarshal([]byte(body), &list) != nil {
+		return ""
+	}
+	// Newest first: the latest ask of this run carries the live conversation.
+	for _, row := range list.Requests {
+		if row.RunID == request.RunID && row.Channel == channelType && row.ThreadRef != "" {
+			return row.ThreadRef
+		}
+	}
+	return ""
 }
 
 // outboundText renders the channel-neutral payload: Body is what text

@@ -272,6 +272,13 @@ func main() {
 		log.Error("migrate workspace v64 (artifact lifecycle)", "error", err)
 		os.Exit(1)
 	}
+	// 000065 adds human_request.thread_ref (docs/channels.md §9): the
+	// conversation thread of the delivered question — slack-style threads keep
+	// follow-ups and reply matching inside one conversation.
+	if err = ws.Migrate(ctx, "migrations/000065_human_request_thread.up.sql"); err != nil {
+		log.Error("migrate workspace v65 (human request thread)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -5571,6 +5578,14 @@ func main() {
 		if err := ws.CreateHumanRequest(r.Context(), &req); err != nil {
 			writeError(w, 500, err)
 			return
+		}
+		// The thread a retry re-posts into (activity replay after a partial
+		// failure) must still pin the conversation: create is a no-op on an
+		// existing row, so fill-when-empty here.
+		if req.ThreadRef != "" {
+			if err := ws.SetHumanRequestThreadRef(r.Context(), req.ID, req.ThreadRef); err != nil && !errors.Is(err, workspace.ErrNotFound) {
+				log.Warn("pin human request thread", "id", req.ID, "error", err)
+			}
 		}
 		emitHitlVerdict(r.Context(), events, req)
 		if req.Status == workspace.HumanStatusDelivered {

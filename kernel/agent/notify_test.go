@@ -306,6 +306,116 @@ func TestNotifyChannelDeliversViaMatrix(t *testing.T) {
 	require.Equal(t, "matrix", row["channel"])
 }
 
+// TestNotifyChannelSlackBotThreadsFollowUps covers the thread lifecycle end
+// to end (docs/channels.md §9): the first question posts top-level and its
+// ts becomes the request's thread_ref; a follow-up ask of the same run finds
+// the previous thread_ref and posts into the thread instead of scattering
+// across the channel. The lookup is best-effort: a workspace list that fails
+// degrades to a top-level post (covered by the other stub-backed tests).
+func TestNotifyChannelSlackBotThreadsFollowUps(t *testing.T) {
+	var seenPayloads []map[string]any
+	slack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		_ = json.Unmarshal(raw, &payload)
+		seenPayloads = append(seenPayloads, payload)
+		_, _ = w.Write([]byte(`{"ok":true,"ts":"1697000000.000100"}`))
+	}))
+	defer slack.Close()
+	original := slackAPIBase
+	slackAPIBase = slack.URL
+	t.Cleanup(func() { slackAPIBase = original })
+	t.Setenv("KERNEL_CHANNEL__SLACKBOT__BOT_TOKEN", "xoxb-test")
+	t.Setenv("KERNEL_CHANNEL__SLACKBOT__SIGNING_SECRET", "sekrit")
+
+	// The workspace stub serves the previous ask's thread_ref on the lookup
+	// route and records the upserts.
+	var upserts []map[string]any
+	workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/workspace/users" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"users":[{"id":"ruslan","name":"Ruslan","active":true,"channels":[{"type":"slackbot","address":"C123","enabled":true}],"preferred_channel":"slackbot"}]}`))
+		case r.URL.Path == "/v1/workspace/human-requests" && r.Method == http.MethodGet:
+			// Previous ask of run-9 already pinned its conversation thread.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"requests":[{"run_id":"run-9","channel":"slackbot","thread_ref":"1697000000.000100"}]}`))
+		case r.URL.Path == "/v1/workspace/human-requests" && r.Method == http.MethodPost:
+			raw, _ := io.ReadAll(r.Body)
+			var row map[string]any
+			_ = json.Unmarshal(raw, &row)
+			upserts = append(upserts, row)
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer workspace.Close()
+
+	activities := &Activities{HTTP: slack.Client(), WorkspaceURL: workspace.URL, WorkspaceToken: "internal"}
+	delivery, err := activities.NotifyChannel(context.Background(), NotifyChannelRequest{
+		Recipient: "user:ruslan", Question: "Follow-up: ship it?", OperationID: "run-9/turn/02/ask-2",
+		Project: "repo", RunID: "run-9",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "slackbot", delivery.Channel)
+	require.Equal(t, "delivered", delivery.Status)
+	// The follow-up joined the previous ask's thread and kept it as the ref.
+	require.Equal(t, "1697000000.000100", delivery.ThreadRef)
+	require.Len(t, seenPayloads, 1)
+	require.Equal(t, "C123", seenPayloads[0]["channel"])
+	require.Equal(t, "1697000000.000100", seenPayloads[0]["thread_ts"])
+	require.Len(t, upserts, 1)
+	require.Equal(t, "1697000000.000100", upserts[0]["thread_ref"])
+	require.Equal(t, "slackbot", upserts[0]["channel"])
+}
+
+// Without a previous thread the same slackbot delivery posts top-level and
+// pins the posted ts as the conversation root.
+func TestNotifyChannelSlackBotPinsPostedIDAsThread(t *testing.T) {
+	var seenPayload map[string]any
+	slack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &seenPayload)
+		_, _ = w.Write([]byte(`{"ok":true,"ts":"1697000000.000200"}`))
+	}))
+	defer slack.Close()
+	original := slackAPIBase
+	slackAPIBase = slack.URL
+	t.Cleanup(func() { slackAPIBase = original })
+	t.Setenv("KERNEL_CHANNEL__SLACKBOT__BOT_TOKEN", "xoxb-test")
+	t.Setenv("KERNEL_CHANNEL__SLACKBOT__SIGNING_SECRET", "sekrit")
+
+	var upsert map[string]any
+	workspace := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/workspace/users" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"users":[{"id":"ruslan","name":"Ruslan","active":true,"channels":[{"type":"slackbot","address":"C123","enabled":true}],"preferred_channel":"slackbot"}]}`))
+		case r.URL.Path == "/v1/workspace/human-requests" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"requests":[{"run_id":"run-10","channel":"slackbot","thread_ref":""}]}`))
+		case r.URL.Path == "/v1/workspace/human-requests" && r.Method == http.MethodPost:
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &upsert)
+			w.WriteHeader(http.StatusCreated)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer workspace.Close()
+
+	activities := &Activities{HTTP: slack.Client(), WorkspaceURL: workspace.URL, WorkspaceToken: "internal"}
+	delivery, err := activities.NotifyChannel(context.Background(), NotifyChannelRequest{
+		Recipient: "user:ruslan", Question: "First question", OperationID: "run-10/turn/01/ask-1",
+		Project: "repo", RunID: "run-10",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "1697000000.000200", delivery.ThreadRef)
+	require.NotContains(t, seenPayload, "thread_ts")
+	require.Equal(t, "1697000000.000200", upsert["thread_ref"])
+}
+
 // TestNotifyChannelFallsBackToWebWhenTransportNotConfigured keeps the loop
 // alive when the profile names a channel the kernel cannot send through.
 func TestNotifyChannelFallsBackToWebWhenTransportNotConfigured(t *testing.T) {

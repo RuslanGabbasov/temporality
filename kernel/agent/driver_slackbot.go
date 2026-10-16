@@ -37,8 +37,9 @@ func (slackBotDriver) Spec() ChannelSpec {
 		AddressHint:       "Slack channel ID, e.g. C0123456789 — the bot must be a member",
 		NotConfiguredHint: "Slack bot token + signing secret",
 		Capabilities: ChannelCapabilities{
-			Text:   true,
-			TwoWay: true,
+			Text:    true,
+			TwoWay:  true,
+			Threads: true,
 		},
 		Settings: []SettingField{
 			{Name: "bot_token", Label: "Bot token (xoxb-…)", Secret: true},
@@ -82,29 +83,49 @@ func (d slackBotDriver) Self(ctx context.Context, client *http.Client, settings 
 var slackAPIBase = "https://slack.com/api"
 
 func (slackBotDriver) SendText(ctx context.Context, client *http.Client, settings map[string]string, address string, msg OutboundText) error {
+	_, err := postSlackMessage(ctx, client, settings, address, msg)
+	return err
+}
+
+// SendTextThreaded is the ThreadedTextPoster extension: chat.postMessage
+// answers carry the posted message's ts, which the kernel pins as the
+// conversation thread (thread_ref) so follow-ups and reply matching stay in
+// one thread (docs/channels.md §9).
+func (slackBotDriver) SendTextThreaded(ctx context.Context, client *http.Client, settings map[string]string, address string, msg OutboundText) (string, error) {
+	return postSlackMessage(ctx, client, settings, address, msg)
+}
+
+// postSlackMessage renders one question through chat.postMessage and returns
+// the posted message's ts. A non-empty msg.Thread posts into that thread
+// (thread_ts) instead of the channel top level.
+func postSlackMessage(ctx context.Context, client *http.Client, settings map[string]string, address string, msg OutboundText) (string, error) {
 	token := TrimBearerPrefix(setting(settings, "bot_token"))
 	channelID := strings.TrimSpace(address)
 	if token == "" || channelID == "" {
-		return errors.New("slack bot transport is not configured")
+		return "", errors.New("slack bot transport is not configured")
 	}
 	// The transport is two-way: replies in the channel route back into the
 	// paused run, so say so next to the question.
 	payload := map[string]any{"channel": channelID, "text": msg.Body + "\n\nReply in this channel to answer."}
+	if thread := strings.TrimSpace(msg.Thread); thread != "" {
+		payload["thread_ts"] = thread
+	}
 	body, err := slackAPI(ctx, client, http.MethodPost, slackAPIBase+"/chat.postMessage", token, payload)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var decoded struct {
 		OK    bool   `json:"ok"`
 		Error string `json:"error"`
+		TS    string `json:"ts"`
 	}
 	if err := json.Unmarshal(body, &decoded); err != nil {
-		return err
+		return "", err
 	}
 	if !decoded.OK {
-		return fmt.Errorf("slack chat.postMessage: %s", decoded.Error)
+		return "", fmt.Errorf("slack chat.postMessage: %s", decoded.Error)
 	}
-	return nil
+	return decoded.TS, nil
 }
 
 func (slackBotDriver) SendFile(context.Context, *http.Client, map[string]string, string, OutboundFile) error {

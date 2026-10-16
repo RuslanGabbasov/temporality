@@ -126,7 +126,7 @@ func TestSlackBotSendText(t *testing.T) {
 		var buf bytes.Buffer
 		_, _ = buf.ReadFrom(r.Body)
 		gotPayload = buf.String()
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true,"ts":"1697000000.000200"}`))
 	}))
 	defer server.Close()
 	original := slackAPIBase
@@ -143,6 +143,9 @@ func TestSlackBotSendText(t *testing.T) {
 	if !strings.Contains(gotPayload, `"channel":"C123"`) || !strings.Contains(gotPayload, "Reply in this channel") {
 		t.Fatalf("payload %q", gotPayload)
 	}
+	if strings.Contains(gotPayload, "thread_ts") {
+		t.Fatalf("top-level post must not carry thread_ts: %q", gotPayload)
+	}
 }
 
 func TestSlackBotSendTextSurfacesErrorEnvelope(t *testing.T) {
@@ -157,5 +160,64 @@ func TestSlackBotSendTextSurfacesErrorEnvelope(t *testing.T) {
 	err := slackTestDriver().SendText(context.Background(), server.Client(), slackSettings(), "C404", OutboundText{Body: "x"})
 	if err == nil || !strings.Contains(err.Error(), "channel_not_found") {
 		t.Fatalf("expected envelope error, got %v", err)
+	}
+}
+
+// TestSlackBotThreadsFollowUpsAndReportsPostedID pins the thread contract
+// (docs/channels.md §9): a non-empty OutboundText.Thread posts into that
+// thread (thread_ts in the chat.postMessage payload), and the posted
+// message's ts comes back so the kernel can pin the conversation.
+func TestSlackBotThreadsFollowUpsAndReportsPostedID(t *testing.T) {
+	var gotPayload string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r.Body)
+		gotPayload = buf.String()
+		_, _ = w.Write([]byte(`{"ok":true,"ts":"1697000000.000777"}`))
+	}))
+	defer server.Close()
+	original := slackAPIBase
+	slackAPIBase = server.URL
+	t.Cleanup(func() { slackAPIBase = original })
+
+	driver := slackTestDriver()
+	postedID, err := driver.SendTextThreaded(context.Background(), server.Client(), slackSettings(), "C123",
+		OutboundText{Body: "Follow-up", Thread: "1697000000.000100"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if postedID != "1697000000.000777" {
+		t.Fatalf("posted message ts not decoded: %q", postedID)
+	}
+	if !strings.Contains(gotPayload, `"thread_ts":"1697000000.000100"`) {
+		t.Fatalf("thread pointer not sent: %q", gotPayload)
+	}
+}
+
+// A top-level post still reports its ts through the threaded call — the
+// kernel pins it as the conversation root the user's replies will thread on.
+func TestSlackBotTopLevelPostCarriesNoThreadTS(t *testing.T) {
+	var gotPayload string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r.Body)
+		gotPayload = buf.String()
+		_, _ = w.Write([]byte(`{"ok":true,"ts":"1697000000.000300"}`))
+	}))
+	defer server.Close()
+	original := slackAPIBase
+	slackAPIBase = server.URL
+	t.Cleanup(func() { slackAPIBase = original })
+
+	postedID, err := slackTestDriver().SendTextThreaded(context.Background(), server.Client(), slackSettings(), "C123",
+		OutboundText{Body: "First question"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if postedID != "1697000000.000300" {
+		t.Fatalf("posted message ts not decoded: %q", postedID)
+	}
+	if strings.Contains(gotPayload, "thread_ts") {
+		t.Fatalf("top-level post must not carry thread_ts: %q", gotPayload)
 	}
 }

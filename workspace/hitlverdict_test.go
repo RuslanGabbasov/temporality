@@ -76,7 +76,7 @@ func (r sliceRow) Scan(dest ...any) error {
 func TestScanHumanRequestIncludesAgentVersion(t *testing.T) {
 	now := time.Now()
 	values := sliceRow{"op-1", "run-1", "proj", "agent-a", 7, "user:ruslan", "ruslan",
-		"Deploy?", "", []byte(`["yes","no"]`), "answered", "web", "yes", "ruslan",
+		"Deploy?", "", []byte(`["yes","no"]`), "answered", "web", "", "yes", "ruslan",
 		300, "fallback", "", now, nil, nil, nil}
 	request, err := scanHumanRequest(values)
 	require.NoError(t, err)

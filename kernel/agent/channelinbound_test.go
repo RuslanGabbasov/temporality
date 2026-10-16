@@ -119,3 +119,85 @@ func TestMatchChannelReplies(t *testing.T) {
 		}
 	})
 }
+
+// TestMatchChannelRepliesThreads pins the thread contract (docs/channels.md
+// §9): a threaded reply (ReplyTo) matches the ask whose ThreadRef equals it
+// exactly — before and regardless of the chat+oldest fallback; without an
+// exact hit the fallback applies and a first threaded answer backfills the
+// ask's ThreadRef for the rest of the conversation.
+func TestMatchChannelRepliesThreads(t *testing.T) {
+	now := time.Now()
+	users := []UserChats{{UserID: "u1", Chats: []string{"C1"}}}
+	bot := "B0"
+	messages := func(ms ...InboundMessage) []InboundMessage { return ms }
+	msg := func(chat, sender string, at time.Time, body, replyTo string) InboundMessage {
+		return InboundMessage{ChatID: chat, Sender: sender, Text: body, Timestamp: at, ReplyTo: replyTo}
+	}
+
+	t.Run("exact thread hit beats the oldest ask", func(t *testing.T) {
+		asks := []PendingAsk{
+			{RequestID: "older-threadless", RunID: "run", UserID: "u1", CreatedAt: now.Add(-2 * time.Hour)},
+			{RequestID: "newer-threaded", RunID: "run", UserID: "u1", ThreadRef: "1697000000.000100", CreatedAt: now.Add(-time.Minute)},
+		}
+		replies := MatchChannelReplies(messages(msg("C1", "U1", now, "yes", "1697000000.000100")), asks, users, bot)
+		if len(replies) != 1 || replies[0].Ask.RequestID != "newer-threaded" {
+			t.Fatalf("threaded reply must hit its thread's ask: %+v", replies)
+		}
+	})
+
+	t.Run("thread of a closed ask does not steal the reply", func(t *testing.T) {
+		asks := []PendingAsk{
+			{RequestID: "answered", RunID: "run", UserID: "u1", ThreadRef: "1697000000.000100", CreatedAt: now.Add(-2 * time.Hour)},
+			{RequestID: "open", RunID: "run", UserID: "u1", CreatedAt: now.Add(-time.Minute)},
+		}
+		// The first message answers the ask that owns the thread; the second
+		// message in the same thread finds that ask closed and falls through
+		// to the open one instead of being dropped.
+		replies := MatchChannelReplies(messages(
+			msg("C1", "U1", now.Add(-time.Minute), "first", "1697000000.000100"),
+			msg("C1", "U1", now, "second", "1697000000.000100"),
+		), asks, users, bot)
+		if len(replies) != 2 || replies[0].Ask.RequestID != "answered" || replies[1].Ask.RequestID != "open" {
+			t.Fatalf("unexpected pairing: %+v", replies)
+		}
+	})
+
+	t.Run("threaded reply with no thread hit falls back and backfills", func(t *testing.T) {
+		asks := []PendingAsk{{RequestID: "op", RunID: "run", UserID: "u1", CreatedAt: now.Add(-time.Minute)}}
+		replies := MatchChannelReplies(messages(msg("C1", "U1", now, "here", "1697000000.000900")), asks, users, bot)
+		if len(replies) != 1 || replies[0].Ask.RequestID != "op" {
+			t.Fatalf("fallback broken: %+v", replies)
+		}
+		if replies[0].Ask.ThreadRef != "1697000000.000900" {
+			t.Fatalf("first threaded answer must backfill the thread ref: %+v", replies[0].Ask)
+		}
+	})
+
+	t.Run("backfilled thread serves the next reply exactly", func(t *testing.T) {
+		asks := []PendingAsk{
+			{RequestID: "newer", RunID: "run", UserID: "u1", CreatedAt: now.Add(-time.Minute)},
+			{RequestID: "older", RunID: "run", UserID: "u1", CreatedAt: now.Add(-2 * time.Hour)},
+		}
+		replies := MatchChannelReplies(messages(
+			msg("C1", "U1", now.Add(-30*time.Second), "first", "1697000000.000900"),
+			msg("C1", "U1", now, "second", "1697000000.000900"),
+		), asks, users, bot)
+		// The first threaded answer took the oldest ask (fallback) and pinned
+		// its thread; the second lands in the same thread and must match that
+		// same ask's conversation, not the newer one.
+		if len(replies) != 2 {
+			t.Fatalf("expected two routed replies, got %+v", replies)
+		}
+		if replies[0].Ask.RequestID != "older" || replies[1].Ask.RequestID != "newer" {
+			t.Fatalf("unexpected pairing: %+v", replies)
+		}
+	})
+
+	t.Run("thread hit from a foreign chat never matches", func(t *testing.T) {
+		asks := []PendingAsk{{RequestID: "op", RunID: "run", UserID: "u1", ThreadRef: "1697000000.000100", CreatedAt: now.Add(-time.Minute)}}
+		replies := MatchChannelReplies(messages(msg("C-other", "U1", now, "yes", "1697000000.000100")), asks, users, bot)
+		if len(replies) != 0 {
+			t.Fatalf("foreign chat matched through the thread: %+v", replies)
+		}
+	})
+}

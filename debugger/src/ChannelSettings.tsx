@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Button, TextInput, InlineNotification, Tag, Stack } from '@carbon/react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Accordion, AccordionItem, Button, TextInput, InlineNotification, Tag } from '@carbon/react'
 import { TrashCan, Save, Renew } from '@carbon/icons-react'
 import {
   workspaceApi,
@@ -27,6 +27,10 @@ interface SecretFieldState {
  * no UI work. The stored payload overlays the KERNEL_CHANNEL__* env vars per
  * field; secrets never travel back from the kernel — only a set-flag and a
  * non-reversible hint.
+ *
+ * One accordion section per channel: configured channels come first and open
+ * by default, the rest stay collapsed with a "not configured" tag. One Save
+ * persists the whole page.
  */
 export default function ChannelSettingsPage() {
   const t = useT()
@@ -39,6 +43,11 @@ export default function ChannelSettingsPage() {
   const [values, setValues] = useState<Record<string, string>>({})
   const [uiUrl, setUiUrl] = useState('')
   const [secrets, setSecrets] = useState<Record<string, SecretFieldState>>({})
+  // Which accordion sections are open, keyed by channel type.
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+  // Until the admin toggles a section, (re)loading applies the defaults
+  // (configured sections open); after that their choice survives reloads.
+  const userToggled = useRef(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -49,6 +58,40 @@ export default function ChannelSettingsPage() {
     setSecrets((current) => ({ ...current, [key]: { ...(current[key] ?? { typed: '', clear: false }), ...patch } }))
 
   const fieldKey = (type: string, name: string) => `${type}.${name}`
+
+  /** A channel is configured when the kernel registry says so; when the
+   * registry is unreachable, the masked settings view is the fallback —
+   * every schema field effectively set (stored or env). */
+  const channelConfigured = (
+    group: ChannelSettingsGroupSchema,
+    spec: ChannelTypeSpec | undefined,
+    data: ChannelSettings | null,
+  ): boolean => {
+    if (spec) return spec.configured
+    const fields = data?.channels[group.type] ?? {}
+    return group.fields.every((field) => {
+      const view: ChannelSettingsField | undefined = fields[field.name]
+      if (!view) return false
+      return field.secret ? view.set === true : view.source !== 'none'
+    })
+  }
+
+  const isConfigured = (group: ChannelSettingsGroupSchema): boolean =>
+    channelConfigured(group, types.find((s) => s.type === group.type), settings)
+
+  // Default sections: configured ones open (the first one when nothing is
+  // configured yet). Computed from freshly loaded data — state updates are
+  // async, so reading types/settings here would race one render behind.
+  const defaultOpen = (
+    schema: ChannelSettingsGroupSchema[],
+    registry: ChannelTypeSpec[],
+    data: ChannelSettings,
+  ): Record<string, boolean> => {
+    const configured = schema.filter((group) =>
+      channelConfigured(group, registry.find((s) => s.type === group.type), data))
+    const openTypes = configured.length > 0 ? configured : schema.slice(0, 1)
+    return Object.fromEntries(openTypes.map((group) => [group.type, true]))
+  }
 
   const apply = (data: ChannelSettings) => {
     setSettings(data)
@@ -75,6 +118,7 @@ export default function ChannelSettingsPage() {
       ])
       apply(data)
       setTypes(registry.types)
+      if (!userToggled.current) setOpen(defaultOpen(data.schema, registry.types, data))
     } catch (e) {
       setError(message(e))
     } finally {
@@ -114,6 +158,7 @@ export default function ChannelSettingsPage() {
       apply(data)
       const registry = await workspaceApi.channelTypes().catch(() => ({ types: [] as ChannelTypeSpec[] }))
       setTypes(registry.types)
+      if (!userToggled.current) setOpen(defaultOpen(data.schema, registry.types, data))
       setSaved(true)
     } catch (e) {
       setError(message(e))
@@ -121,6 +166,17 @@ export default function ChannelSettingsPage() {
       setSaving(false)
     }
   }
+
+  const toggleSection = (type: string, next: boolean) => {
+    userToggled.current = true
+    setOpen((current) => ({ ...current, [type]: next }))
+  }
+
+  // Configured channels first, schema order preserved within each group.
+  const groups = useMemo(() => {
+    const all = settings?.schema ?? []
+    return [...all].sort((a, b) => Number(isConfigured(b)) - Number(isConfigured(a)))
+  }, [settings, types])
 
   const sourceLabel = (source: string) =>
     source === 'database' ? (t('channels_admin.source_db') ?? 'settings')
@@ -201,56 +257,65 @@ export default function ChannelSettingsPage() {
         {t('channels_admin.intro') ?? 'Kernel-side credentials for delivering agent questions. Values set here take effect immediately and override the environment variables.'}
       </p>
 
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
-        {types.map((spec) => (
-          <Tag key={spec.type} size="sm" type={spec.configured ? 'green' : 'gray'}>
-            {spec.label}: {spec.configured ? (t('channels_admin.ready') ?? 'ready') : (spec.not_configured_hint ?? 'not configured')}
-          </Tag>
-        ))}
-      </div>
-
       {error && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={error} lowContrast />}
       {saved && <InlineNotification kind="success" title={t('channels_admin.saved') ?? 'Saved'} subtitle={t('channels_admin.saved_body') ?? 'Transport settings applied.'} lowContrast />}
 
-      <div style={{ maxWidth: '34rem' }}>
-        <Stack gap={4}>
-          {(settings?.schema ?? []).map((group) => (
-            <div key={group.type}>
-              <h3 style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{group.label}</h3>
-              {group.fields.map((field) =>
-                field.secret
-                  ? secretRow(group, field.name, field.label)
-                  : plainRow(group, field.name, field.label, field.name === 'homeserver' ? 'https://matrix.org' : ''),
-              )}
-            </div>
-          ))}
+      <div style={{ maxWidth: '40rem' }}>
+        <Accordion size="lg">
+          {groups.map((group) => {
+            const configured = isConfigured(group)
+            const hint = types.find((s) => s.type === group.type)?.not_configured_hint
+            return (
+              <AccordionItem
+                key={group.type}
+                title={
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                    {group.label}
+                    <Tag size="sm" type={configured ? 'green' : 'gray'} title={hint}>
+                      {configured
+                        ? (t('channels_admin.ready') ?? 'ready')
+                        : (t('channels_admin.not_set') ?? 'not configured')}
+                    </Tag>
+                  </span>
+                }
+                open={open[group.type] === true}
+                onToggle={(next: boolean) => toggleSection(group.type, next)}
+              >
+                {group.fields.map((field) =>
+                  field.secret
+                    ? secretRow(group, field.name, field.label)
+                    : plainRow(group, field.name, field.label, field.name === 'homeserver' ? 'https://matrix.org' : ''),
+                )}
+              </AccordionItem>
+            )
+          })}
+        </Accordion>
 
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-              <span className="cds--label" style={{ marginBottom: 0 }}>UI URL</span>
-              {settings && settings.ui_url.source !== 'none' && <Tag size="sm" type="gray">{sourceLabel(settings.ui_url.source)}</Tag>}
-            </div>
-            <TextInput
-              id="channel-ui-url"
-              labelText=""
-              placeholder={settings && settings.ui_url.source === 'env' ? settings.ui_url.value : 'http://localhost:3000'}
-              value={uiUrl}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUiUrl(e.target.value)}
-            />
-            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0.25rem 0 0' }}>
-              {t('channels_admin.ui_url_hint') ?? 'Base URL of this UI — used for answer links inside notifications.'}
-            </p>
+        <div style={{ marginTop: '1.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+            <span className="cds--label" style={{ marginBottom: 0 }}>UI URL</span>
+            {settings && settings.ui_url.source !== 'none' && <Tag size="sm" type="gray">{sourceLabel(settings.ui_url.source)}</Tag>}
           </div>
+          <TextInput
+            id="channel-ui-url"
+            labelText=""
+            placeholder={settings && settings.ui_url.source === 'env' ? settings.ui_url.value : 'http://localhost:3000'}
+            value={uiUrl}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUiUrl(e.target.value)}
+          />
+          <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: '0.25rem 0 0' }}>
+            {t('channels_admin.ui_url_hint') ?? 'Base URL of this UI — used for answer links inside notifications.'}
+          </p>
+        </div>
 
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <Button size="sm" renderIcon={Save} disabled={saving} onClick={() => void save()}>
-              {saving ? (t('common.saving') ?? 'Saving…') : (t('action.save') ?? 'Save')}
-            </Button>
-            <Button size="sm" kind="secondary" renderIcon={Renew} disabled={saving} onClick={() => void load()}>
-              {t('action.refresh') ?? 'Refresh'}
-            </Button>
-          </div>
-        </Stack>
+        <div className="form-actions" style={{ marginTop: '1rem' }}>
+          <Button size="sm" renderIcon={Save} disabled={saving} onClick={() => void save()}>
+            {saving ? (t('common.saving') ?? 'Saving…') : (t('action.save') ?? 'Save')}
+          </Button>
+          <Button size="sm" kind="secondary" renderIcon={Renew} disabled={saving} onClick={() => void load()}>
+            {t('action.refresh') ?? 'Refresh')}
+          </Button>
+        </div>
       </div>
     </div>
   )
