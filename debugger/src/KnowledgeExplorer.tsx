@@ -15,7 +15,7 @@ import HintsPreview from './explorer/HintsPreview'
 import SessionsPanel from './explorer/SessionsPanel'
 import { applySessionPayload, type SessionSnapshot } from './explorer/sessions'
 import Dossier from './Dossier'
-import { stateLabel, kindLabel } from './explorer/shared'
+import { stateLabel, kindLabel, scopeLabel } from './explorer/shared'
 import ProjectRequired from './ProjectRequired'
 import { useT } from './i18n'
 
@@ -326,22 +326,32 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     color: active ? 'var(--tm-teal)' : 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.7rem', whiteSpace: 'nowrap',
   })
 
-  const facetRow = (label: string, dimension: keyof Filters, values: [string, number][]) => (
-    <div key={dimension} style={{ marginBottom: '0.5rem' }}>
-      <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-muted)', marginBottom: '0.25rem' }}>{label}</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
-        {activeFilterCount > 0 && filters[dimension] && (
-          <button style={chip(false)} onClick={() => setFilter(dimension, '')}>{t('explorer.all') ?? 'All'}</button>
-        )}
-        {values.map(([value, count]) => (
-          <button key={value} style={chip(filters[dimension] === value)} onClick={() => setFilter(dimension, filters[dimension] === value ? '' : value)}>
-            {STATE_ORDER.includes(value) ? stateLabel(value, t) : value}
-            <span style={{ opacity: 0.6, marginLeft: '0.3rem' }}>{count}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
+  // Compact facet filter (same toolbar pattern as the timeline): a small
+  // labeled select per dimension instead of a wall of chip rows.
+  const facetSelect = (label: string, dimension: keyof Filters, values: [string, number][], labeler: (value: string) => string = (value) => value) => {
+    if (values.length === 0) return null
+    const active = filters[dimension]
+    // The active value may have dropped out of the current facet counts
+    // (other filters narrowed the set) — keep it selectable so the select
+    // never renders a blank value.
+    const missing = active && !values.some(([value]) => value === active)
+    return (
+      <label key={dimension} className="toolbar-select">
+        {label}
+        <select
+          value={active}
+          onChange={(e) => setFilter(dimension, e.target.value)}
+          style={active ? { borderColor: 'var(--tm-teal)', color: 'var(--tm-teal)' } : undefined}
+        >
+          <option value="">{t('explorer.all') ?? 'All'}</option>
+          {missing && <option value={active}>{labeler(active)}</option>}
+          {values.map(([value, count]) => (
+            <option key={value} value={value}>{labeler(value)} · {count}</option>
+          ))}
+        </select>
+      </label>
+    )
+  }
 
   const facetValues = (map?: Record<string, number>): [string, number][] =>
     Object.entries(map ?? {}).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -489,13 +499,23 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
           ) : (
           <>
           <HintsPreview project={project} />
-          <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.75rem', marginBottom: '0.75rem' }}>
-            {facetRow(t('knowledge.state_label') ?? 'State', 'state', stateFacetValues)}
-            {facetRow(t('knowledge.scope_label') ?? 'Scope', 'scope', facetValues(facets?.scopes))}
-            {facetRow(t('explorer.facet_topic') ?? 'Topic', 'topic', facetValues(facets?.topics).slice(0, 12))}
-            {facetRow(t('explorer.facet_entity') ?? 'Entity', 'entity', facetValues(facets?.entities).slice(0, 12))}
-            {facetRow(t('explorer.facet_origin') ?? 'Origin', 'origin', facetValues(facets?.projects))}
-            {facetRow(t('explorer.facet_kind') ?? 'Kind', 'kind', facetValues(facets?.kinds))}
+          <div className="experience-toolbar">
+            {facetSelect(t('explorer.facet_state') ?? 'State', 'state', stateFacetValues, (value) => stateLabel(value, t))}
+            {facetSelect(t('explorer.facet_scope') ?? 'Scope', 'scope', facetValues(facets?.scopes), (value) => scopeLabel(value, t))}
+            {facetSelect(t('explorer.facet_kind') ?? 'Kind', 'kind', facetValues(facets?.kinds), (value) => kindLabel(value, t))}
+            {facetSelect(t('explorer.facet_origin') ?? 'Origin', 'origin', facetValues(facets?.projects))}
+            {facetSelect(t('explorer.facet_topic') ?? 'Topic', 'topic', facetValues(facets?.topics))}
+            {facetSelect(t('explorer.facet_entity') ?? 'Entity', 'entity', facetValues(facets?.entities))}
+            {activeFilterCount > 0 && (
+              <button
+                style={{ ...chip(true), marginLeft: 'auto' }}
+                title={t('explorer.relax_filters') ?? 'Clear filters'}
+                onClick={() => {
+                  setFilters({ ...EMPTY_FILTERS })
+                  pushNav(t('explorer.relax_filters') ?? 'Clear filters', { filters: { ...EMPTY_FILTERS } })
+                }}
+              >✕ {activeFilterCount}</button>
+            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.5rem' }}>
