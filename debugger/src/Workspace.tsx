@@ -10,7 +10,7 @@ import {
   Heading,
 } from '@carbon/react'
 import { Add, ArrowDown, Attachment, Send, TrashCan } from '@carbon/icons-react'
-import { workspaceApi, type Agent, type UploadedFile } from './workspaceApi'
+import { workspaceApi, type Agent, type UploadedFile, ApiError } from './workspaceApi'
 import { runCost, taskCost } from './kernelApi'
 import Markdown, { linkifyWorkspacePaths } from './Markdown'
 import DelegationTree from './DelegationTree'
@@ -122,6 +122,12 @@ export function formatStreamEvent(type: string, outer: any, t: Translate, locale
       return t('chat.stream.learned', { proposition: String(d.proposition ?? '').slice(0, 60) })
     case 'run.completed':
       return t('chat.stream.completed', { turns: pluralT(t, locale, 'chat.stream.turns_n', Number(d.turns ?? 0)) })
+    case 'run.user_note':
+      // Confirmation that a mid-run chat message was drained into the model's
+      // conversation (turn = the turn that will consume it).
+      return t('chat.stream.note_accepted', { turn: String(d.turn ?? '') })
+    case 'run.note_dropped':
+      return t('chat.stream.note_dropped', { turn: String(d.turn ?? '') })
     case 'run.failed':
       return t('chat.stream.failed', { error: String(d.error ?? 'unknown') })
     default:
@@ -377,6 +383,16 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     }))
   }
 
+  /** Append one line to a running message's activity feed — the immediate
+   * confirmation for a mid-run note (the journaled run.user_note event lands
+   * only at the next turn boundary, minutes later). */
+  const appendStreamLine = (convId: string, runId: string, line: string) => {
+    setConversations((prev) => prev.map((c) => {
+      if (c.id !== convId) return c
+      return { ...c, messages: c.messages.map((m) => m.runId === runId ? { ...m, streamLines: [...(m.streamLines ?? []), line] } : m) }
+    }))
+  }
+
   const streamRun = (runId: string, convId: string, opts?: { tail?: boolean }) => {
     const token = localStorage.getItem('temporality_token') ?? ''
     // tail=1 asks the kernel to skip the journal backlog and replay only the
@@ -558,6 +574,12 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     })
 
     es.addEventListener('run.completed', handleEvent('run.completed'))
+
+    // Mid-run note acceptance: the workflow drained a user note into the
+    // conversation at this turn's boundary (the chat already showed an
+    // optimistic "sent" line when the signal was posted).
+    es.addEventListener('run.user_note', handleEvent('run.user_note'))
+    es.addEventListener('run.note_dropped', handleEvent('run.note_dropped'))
 
     // A cancelled run never emits run.completed/run.failed — without this the
     // message spinner runs forever (the server stream also used to never send
@@ -813,6 +835,32 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     }
     setConversations((prev) => prev.map((c) => c.id === updatedConv.id ? updatedConv : c))
 
+    // A message sent while this conversation's run is still executing is an
+    // addendum to THAT run (kernel.user_note signal lands at the nearest turn
+    // boundary), not a new parallel run over the whole history.
+    const runningMsg = updatedConv.messages.filter((m) => m.role === 'assistant' && m.status === 'running' && m.runId).pop()
+    if (runningMsg?.runId) {
+      const noteParts: string[] = []
+      if (content) noteParts.push(content)
+      // Files travel as sandbox paths only — same convention as the prompt.
+      if (sentAttachments.length) noteParts.push(sentAttachments.map((a) => `[Attached file: ${a.path}]`).join('\n'))
+      try {
+        await workspaceApi.appendRunNote(runningMsg.runId, noteParts.join('\n\n'), project)
+        appendStreamLine(updatedConv.id, runningMsg.runId, t('chat.note.sent') ?? 'Sent to the current run')
+        setLoading(false)
+        return
+      } catch (noteErr) {
+        if (!(noteErr instanceof ApiError && noteErr.status === 409)) {
+          setError(message(noteErr))
+          setLoading(false)
+          return
+        }
+        // 409: the run reached its terminal state between the UI update and
+        // the signal — fall through and start a fresh run over the full
+        // history, which already includes this message.
+      }
+    }
+
     try {
       // Build full conversation history as the prompt
       const historyLines: string[] = []
@@ -1057,6 +1105,12 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                     </span>
                   )}
                 </div>
+              )}
+              {/* Mid-run messages route into the running run as addenda — say
+               * so next to the input instead of surprising the user with a new
+               * run in the list. */}
+              {activeConv.messages.some((m) => m.role === 'assistant' && m.status === 'running' && m.runId) && (
+                <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginBottom: '0.4rem' }}>⤳ {t('chat.note.hint') ?? 'Your message will be added to the running run'}</div>
               )}
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end' }}>
                 <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => void onFilesPicked(e)} />

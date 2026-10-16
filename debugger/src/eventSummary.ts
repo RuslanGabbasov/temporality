@@ -191,6 +191,11 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       return { icon: '✓', label: t('runs.event.run_completed'), detail: `${d.turns ?? '?'} ${t('runs.turns')}`, color: '#9ece6a' }
     case 'run.failed':
       return { icon: '✗', label: t('runs.event.run_failed'), detail: explainKernelError(String(d.error ?? '')).cause.slice(0, 80), color: '#f7768e' }
+    case 'run.user_note':
+      // Mid-run chat addendum drained into the conversation (kernel.user_note).
+      return { icon: '⤳', label: t('runs.event.user_note'), detail: t('runs.event.user_note_detail', { turn: String(d.turn ?? '?') }), color: 'var(--tm-teal)' }
+    case 'run.note_dropped':
+      return { icon: '⚠', label: t('runs.event.note_dropped'), detail: t('runs.event.note_dropped_detail'), color: '#e0af68' }
     case 'turn.started':
       return { icon: '→', label: t('runs.turn', { turn: String(d.turn ?? '?') }), detail: t('runs.event.started'), color: 'var(--tm-text-3)' }
     case 'turn.completed':

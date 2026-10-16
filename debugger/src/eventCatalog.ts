@@ -52,6 +52,8 @@ export const EVENT_CATALOG: EventMeta[] = [
   E('runs', 'turn.started', 'Ход начат', 'Агент начал очередной ход внутри рана.', 'Turn started', 'The agent started another turn within the run.'),
   E('runs', 'turn.completed', 'Ход завершён', 'Ход агента завершился.', 'Turn completed', 'The agent turn finished.'),
   E('runs', 'agent.summary', 'Итоговый ответ агента', 'Финальный текстовый ответ рана для пользователя.', 'Agent summary', "The run's final text answer for the user."),
+  E('runs', 'run.user_note', 'Дополнение пользователя принято', 'Сообщение из чата, отправленное во время рана, встроено в контекст на ближайшей границе хода.', 'User note accepted', 'A chat message sent mid-run was appended to the context at the nearest turn boundary.'),
+  E('runs', 'run.note_dropped', 'Дополнение не доставлено', 'Бюджет рана исчерпан до того, как заметка достигла модели; она зафиксирована в журнале.', 'Note not delivered', "The run's budget ran out before the note reached the model; it is journaled instead."),
   // ── model ──
   E('model', 'model.started', 'Вызов модели начат', 'Начался запрос к провайдеру модели.', 'Model call started', 'A provider request started.'),
   E('model', 'model.completed', 'Вызов модели завершён', 'Провайдер вернул ответ; в данных — токены и длительность.', 'Model call completed', 'The provider answered; data carries tokens and duration.'),

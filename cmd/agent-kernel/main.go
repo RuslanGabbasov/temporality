@@ -1066,6 +1066,40 @@ func main() {
 		}
 		writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
 	})
+	mux.HandleFunc("POST /v1/agent/runs/{runID}/note", func(w http.ResponseWriter, r *http.Request) {
+		var note agent.UserNote
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&note); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(note.Text) == "" {
+			writeError(w, 400, errors.New("text is required"))
+			return
+		}
+		if note.ActorID == "" {
+			if principal, ok := controlplane.FromContext(r.Context()); ok && principal.UserID != "" {
+				note.ActorID = principal.UserID
+			}
+		}
+		project := r.URL.Query().Get("project")
+		if project == "" {
+			writeError(w, 400, errors.New("project query parameter is required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleWriter, project) {
+			return
+		}
+		sourceID := querySourceID(r, activities.SourceID)
+		workflowID := workflowIDFor(sourceID, project, r.PathValue("runID"))
+		// The workflow drains the note at the nearest turn boundary and appends
+		// it to the conversation; signaling a terminal run fails here with 409,
+		// which the client turns into a fresh-run fallback.
+		if err := temporalClient.SignalWorkflow(r.Context(), workflowID, "", agent.UserNoteSignal, note); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
+	})
 	mux.HandleFunc("GET /v1/agent/outbox", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleOperator) {
 			return

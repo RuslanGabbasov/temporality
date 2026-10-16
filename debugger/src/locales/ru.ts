@@ -313,10 +313,18 @@ export const ru: Record<string, string> = {
     'chat.stream.approval_granted': '✓ Подтверждено',
     'chat.stream.approval_rejected': '✗ Отклонено',
     'chat.stream.auto_approved': '✓ Автоподтверждено: {{tool}}',
+    'chat.stream.note_accepted': '⤳ Дополнение принято · будет учтено в ходе {{turn}}',
+    'chat.stream.note_dropped': '⚠ Дополнение не доставлено — бюджет хода исчерпан',
+    'chat.note.sent': '⤳ Отправлено в текущий запуск',
+    'chat.note.hint': 'Сообщение будет добавлено к выполняющемуся запуску как дополнение к задаче',
 
     // Runs
     'runs.title': 'Запуски',
     'runs.event.model_failed': 'Вызов модели не удался',
+    'runs.event.user_note': 'Дополнение пользователя принято',
+    'runs.event.user_note_detail': 'сообщение из чата учтено в ходе {{turn}}',
+    'runs.event.note_dropped': 'Дополнение не доставлено',
+    'runs.event.note_dropped_detail': 'бюджет запуска исчерпан до доставки',
     'runs.event.model_nudged': 'Вызов модели подтолкнут',
     'runs.event.model_nudged_detail': 'ход {{turn}} отменён и повторён вручную',
     'runs.event.model_attempt': 'Повтор вызова модели',

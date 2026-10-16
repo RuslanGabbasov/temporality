@@ -313,10 +313,18 @@ export const en: Record<string, string> = {
     'chat.stream.approval_granted': '✓ Approval granted',
     'chat.stream.approval_rejected': '✗ Approval rejected',
     'chat.stream.auto_approved': '✓ Auto-approved: {{tool}}',
+    'chat.stream.note_accepted': '⤳ Addendum accepted · consumed in turn {{turn}}',
+    'chat.stream.note_dropped': '⚠ Addendum not delivered — turn budget exhausted',
+    'chat.note.sent': '⤳ Sent to the current run',
+    'chat.note.hint': 'Your message will be added to the running run as an addendum to the task',
 
     // Runs
     'runs.title': 'Runs',
     'runs.event.model_failed': 'Model call failed',
+    'runs.event.user_note': 'User note accepted',
+    'runs.event.user_note_detail': 'chat message consumed in turn {{turn}}',
+    'runs.event.note_dropped': 'Note not delivered',
+    'runs.event.note_dropped_detail': "the run's budget ran out before delivery",
     'runs.event.model_nudged': 'Model call nudged',
     'runs.event.model_nudged_detail': 'turn {{turn}} cancelled and retried manually',
     'runs.event.model_attempt': 'Model call retry',

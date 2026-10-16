@@ -1072,6 +1072,12 @@ export const workspaceApi = {
       `/v1/workspace/tasks/${taskId}/runs`, { method: 'POST', body: JSON.stringify(data ?? {}) }),
   getRun: (runId: string) => request<Run>(`/v1/workspace/runs/${runId}`),
   cancelRun: (runId: string) => request<{ run_id: string; status: string }>(`/v1/workspace/runs/${runId}/cancel`, { method: 'POST' }),
+  // Mid-run user note (kernel.user_note signal): the message is appended to
+  // the RUNNING run's conversation at the nearest turn boundary instead of
+  // starting a parallel run. A 409 means the run is already terminal — the
+  // caller falls back to the normal new-run flow.
+  appendRunNote: (runId: string, text: string, project: string) =>
+    request<{ accepted: boolean }>(`/v1/agent/runs/${encodeURIComponent(runId)}/note?project=${encodeURIComponent(project)}`, { method: 'POST', body: JSON.stringify({ text }) }),
   getTrajectory: (runId: string) => request<any>(`/v1/workspace/runs/${runId}/trajectory`),
   getProjection: (projectId: string) => request<any>(`/v1/workspace/projects/${projectId}/projection`),
   compareRuns: (runA: string, runB: string) => request<any>(`/v1/workspace/runs/compare?a=${runA}&b=${runB}`),

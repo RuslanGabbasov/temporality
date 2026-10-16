@@ -33,6 +33,7 @@ const (
 	ActivityWriteTeamContract = "kernel.team_contract_write"
 	ApprovalSignal            = "kernel.approval"
 	NudgeSignal               = "kernel.nudge"
+	UserNoteSignal            = "kernel.user_note"
 
 	// MaxDelegationDepth bounds agent-to-agent delegation chains
 	// (docs/agent-delegation.md): depth 0 → 1 → 2 is allowed, a run at depth 2
@@ -307,6 +308,14 @@ type Approval struct {
 // normally pins the exact turn to avoid acting on a stale request.
 type Nudge struct {
 	Turn    int    `json:"turn"`
+	ActorID string `json:"actor_id,omitempty"`
+}
+
+// UserNote carries a chat message the user sent while the run was already in
+// progress: the workflow appends it to the conversation at the nearest turn
+// boundary instead of letting the client start a parallel run.
+type UserNote struct {
+	Text    string `json:"text"`
 	ActorID string `json:"actor_id,omitempty"`
 }
 
@@ -1069,6 +1078,13 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		if err := emit(activityCtx, state, "turn.started", map[string]any{"turn": turn}); err != nil {
 			return result, err
 		}
+		// User notes (chat messages sent mid-run) are drained at turn boundaries:
+		// the history stays append-only, so the prompt-cache prefix keeps its
+		// byte-stability, and the addendum reaches the model at the earliest turn
+		// that has not been built yet.
+		if _, noteErr := appendUserNotes(activityCtx, state, turn, &messages, pendingUserNotes(ctx)); noteErr != nil {
+			return result, noteErr
+		}
 		turnMessages := messages
 		if turn == input.MaxTurns {
 			// Budget awareness: without a reminder the model reliably spends the
@@ -1140,6 +1156,24 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 		}
 		if len(completion.ToolCalls) == 0 {
+			// A note that arrived while this answer was being generated reopens the
+			// task: the answer is recorded in history, the addendum is delivered
+			// after it, and one more turn is spent on the request. History order
+			// matters — the draft was produced WITHOUT seeing the note, so it must
+			// land before the note, not after. At the turn-budget edge the loop
+			// simply falls through to the deterministic finale.
+			if notes := pendingUserNotes(ctx); len(notes) > 0 {
+				usedTokens += completion.Usage.TotalTokens
+				usedCostUSD += modelCallCostUSD(input, completion.Usage)
+				messages = append(messages, llm.Message{Role: "assistant", Content: completion.Content})
+				if _, noteErr := appendUserNotes(activityCtx, state, turn, &messages, notes); noteErr != nil {
+					return result, noteErr
+				}
+				if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "reopened_by_note": true}); err != nil {
+					return result, err
+				}
+				continue
+			}
 			result.Answer = completion.Content
 			result.Status = "completed"
 			result.TotalTokens = usedTokens + completion.Usage.TotalTokens + subtree.tokens
@@ -1893,6 +1927,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			return result, nil
 		}
 	}
+	// Notes that arrived after the last drainable point (while the final turn's
+	// tools were running, or after a policy stop) can no longer reach the model:
+	// they are journaled as run.note_dropped instead of vanishing silently.
+	if err := dropUserNotes(ctx, activityCtx, state, input.MaxTurns); err != nil {
+		return result, err
+	}
 	// Deterministic finale: the model spent every turn on tool calls, or a policy
 	// limit (time/tokens/budget) stopped the loop. One more model call without
 	// tools must turn the accumulated conversation into a final answer, so a
@@ -2500,6 +2540,67 @@ func executeModelWithNudge(ctx workflow.Context, activityCtx workflow.Context, s
 		}
 		return err
 	}
+}
+
+// userNotePrefix frames a mid-run chat message so the model treats it as an
+// addendum to the original request rather than a new task.
+const userNotePrefix = "User follow-up for this task (sent while the run was in progress — treat it as an addendum to the original request, not a new task):\n\n"
+
+// pendingUserNotes drains user notes (chat messages signalled via
+// kernel.user_note while the run was in progress) from the signal channel
+// without touching the conversation. Empty texts are skipped.
+func pendingUserNotes(ctx workflow.Context) []UserNote {
+	channel := workflow.GetSignalChannel(ctx, UserNoteSignal)
+	var notes []UserNote
+	var note UserNote
+	for channel.ReceiveAsync(&note) {
+		if strings.TrimSpace(note.Text) != "" {
+			notes = append(notes, note)
+		}
+	}
+	return notes
+}
+
+func userNoteMessage(note UserNote) llm.Message {
+	return llm.Message{Role: "user", Content: userNotePrefix + strings.TrimSpace(note.Text)}
+}
+
+// appendUserNotes journals each note as run.user_note and appends it to the
+// conversation. Notes land at turn boundaries only: `messages` stays
+// append-only, so the prompt-cache prefix keeps its byte-stability, and the
+// model meets the addendum at the earliest turn that has not been built yet.
+// The returned count tells the caller whether the run should continue
+// instead of finishing.
+func appendUserNotes(activityCtx workflow.Context, state *eventState, turn int, messages *[]llm.Message, notes []UserNote) (int, error) {
+	count := 0
+	for _, note := range notes {
+		truncated := strings.TrimSpace(note.Text)
+		if len(truncated) > 4096 {
+			truncated = truncated[:4096]
+		}
+		if err := emit(activityCtx, state, "run.user_note", map[string]any{"turn": turn, "actor_id": note.ActorID, "text": truncated}); err != nil {
+			return count, err
+		}
+		*messages = append(*messages, userNoteMessage(note))
+		count++
+	}
+	return count, nil
+}
+
+// dropUserNotes journals notes that can no longer reach the model — the turn
+// or policy budget is exhausted and no further turn will be built — as
+// run.note_dropped. Mid-run user input must never vanish silently.
+func dropUserNotes(ctx workflow.Context, activityCtx workflow.Context, state *eventState, turn int) error {
+	for _, note := range pendingUserNotes(ctx) {
+		truncated := strings.TrimSpace(note.Text)
+		if len(truncated) > 4096 {
+			truncated = truncated[:4096]
+		}
+		if err := emit(activityCtx, state, "run.note_dropped", map[string]any{"turn": turn, "actor_id": note.ActorID, "text": truncated, "reason": "budget_exhausted"}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type eventState struct {

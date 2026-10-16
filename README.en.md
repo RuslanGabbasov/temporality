@@ -293,6 +293,15 @@ immediately (model calls are pure, the prompt prefix is stable via
 `prompt_cache_key`, so a retry is safe). The intervention is journaled as a
 `model.nudged` event.
 
+A chat message sent while a run is still executing does not start a parallel
+run — it lands in the current one as an addendum to the original request:
+`POST /v1/agent/runs/{runID}/note?project=…` with `{"text": …}` (writer).
+The workflow drains the note at the nearest turn boundary and appends it to
+the conversation (append-only, the prompt cache prefix stays intact). A
+would-be-final answer reopens the run for one more turn; when the turn budget
+is already spent the note is journaled as `run.note_dropped` instead of
+vanishing silently. Delivery is journaled as `run.user_note`.
+
 The same scenario is automated by the first-token watchdog
 (`TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT`, 2m by default): when the provider
 stays silent past the budget, the attempt is failed without the blocking
