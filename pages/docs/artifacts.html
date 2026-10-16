@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Реестр справочных документов — регламенты, инструкции и шаблоны, которыми агенты пользуются по требованию.">
+<title>Артефакты — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="/docs/">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/artifacts.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row active" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<a class="docs-nav-row" href="reference.html">Справочник</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Знания и опыт</div>
+<h1>Артефакты</h1>
+<p class="docs-lead">Реестр справочных документов — регламенты, инструкции и шаблоны, которыми агенты пользуются по требованию.</p>
+<p>Артефакт — справочный документ в реестре: регламент кодирования, инструкция
+по выкладке, шаблон сметы, чек-лист аудита. В промпт агента попадает только
+ссылка; тело агент подгружает по требованию (<code>artifact_search</code> /
+<code>artifact_read</code> с аудитом чтения). Так большой регламент не съедает контекст,
+но всегда доступен, когда нужен.</p>
+<p>Страница <strong>Артефакты</strong> (<code>/artifacts</code>), детали — <code>docs/artifact-registry.md</code>.</p>
+<h2 id="типы-артефактов"><a class="anchor" href="#типы-артефактов" aria-label="Ссылка на раздел">#</a>Типы артефактов</h2><table>
+<thead>
+<tr>
+<th>Тип</th>
+<th>Источник тела</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Текстовый документ</td>
+<td>Хранится в Temporality (markdown)</td>
+</tr>
+<tr>
+<td>Внешний URL</td>
+<td>Проксируется и кэшируется ядром (корпоративная вики, Confluence)</td>
+</tr>
+</tbody></table>
+<h2 id="согласование"><a class="anchor" href="#согласование" aria-label="Ссылка на раздел">#</a>Согласование</h2><p>Артефакт может существовать в двух статусах: <strong>черновик</strong> (агент создал —
+например, требования из анализа) и <strong>утверждён</strong> (человек отредактировал и
+подтвердил). В навыки и промпты ссылаются только утверждённые: так
+«смотри регламент X» означает проверенную людьми версию.</p>
+<p>Типовой цикл: агент-аналитик готовит документ → отправляет человеку на
+согласование (<code>ask_human</code> или через артефакт-уведомление) → человек правит
+сам или с агентом → утверждает → документ становится доступным всем
+агентам-исполнителям как ссылка из навыка.</p>
+<h2 id="связи"><a class="anchor" href="#связи" aria-label="Ссылка на раздел">#</a>Связи</h2><ul>
+<li><strong>Сага</strong> — артефакт может принадлежать длительной работе (требования к фиче в рамках саги).</li>
+<li><strong>Навык</strong> — манифест навыка ссылается на артефакты как на справочные материалы.</li>
+<li><strong>Проект / отдел / организация</strong> — область видимости: общекорпоративный регламент виден везде, проектный — только в проекте.</li>
+</ul>
+<h2 id="инструментальная-поддержка"><a class="anchor" href="#инструментальная-поддержка" aria-label="Ссылка на раздел">#</a>Инструментальная поддержка</h2><p>Агенты ищут артефакты по смыслу (<code>artifact_search</code>) и читают чанками с
+аудитом (<code>artifact_read</code>): каждое чтение журналируется — кто, что и в каком
+ране читал.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="skills.html"><small>← Назад</small><strong>Навыки</strong></a>
+    <a class="pager-next" href="inbound.html"><small>Далее →</small><strong>Входящие и каналы</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

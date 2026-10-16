@@ -1,6 +1,6 @@
 # Temporality
 
-**Русский** · [English](README.en.md)
+**Русский** · [English](README.en.md) · [Документация](https://ruslangabbasov.github.io/temporality/docs/)
 
 Temporality — система наблюдаемости и накопления опыта для ИИ-агентов.
 

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Что такое Temporality, зачем он нужен и из чего состоит — десятитысячный обзор системы.">
+<title>Введение — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="/docs/">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/intro.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row active" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<a class="docs-nav-row" href="reference.html">Справочник</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Начало</div>
+<h1>Введение</h1>
+<p class="docs-lead">Что такое Temporality, зачем он нужен и из чего состоит — десятитысячный обзор системы.</p>
+<p><strong>Temporality</strong> — открытая система наблюдаемости и накопления опыта для ИИ-агентов.</p>
+<p>Обычный чат-бот забывает всё между сессиями, а его «память» — свалка вставленных в контекст заметок. Temporality устроен иначе: агент выполняет задачи в durable-рантайме, а система в это время фиксирует <strong>что он знал и делал</strong>, откуда взялись знания, как они применялись, что подтвердилось, а что оказалось ложным — и как опыт менялся со временем. При следующей задаче проверенный опыт возвращается агенту в компактном виде, не перегружая контекст.</p>
+<pre><code class="language-text">Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge / Hints
+     ▲                      │                         │
+     └──────── hints ◀──────┴──── Experience Timeline ┘
+</code></pre>
+<h2 id="ключевые-идеи"><a class="anchor" href="#ключевые-идеи" aria-label="Ссылка на раздел">#</a>Ключевые идеи</h2><ul>
+<li><strong>Запуск (run)</strong> — единица работы агента: durable workflow на Temporal, который переживает перезапуски, деплои и сон ноутбука. Каждый шаг журналируется.</li>
+<li><strong>Знания с происхождением.</strong> Утверждения, извлечённые из траекторий, имеют автора, источник, статус жизненного цикла (предложено → подтверждено → оспорено…) и битемпоральную историю. Знание можно оспорить, исправить, инвалидировать — и увидеть, кем и когда.</li>
+<li><strong>Подсказки (hints)</strong> — компактные выдержки релевантного опыта, которые система подставляет агенту перед задачей. Агент может раскопать полные первоисточники через инструменты исследования.</li>
+<li><strong>Саги</strong> — явно отслеживаемая длительная работа, которая живёт дольше одного рана: продолжения чата, делегированные агенты и поправки присоединяются к саге автоматически.</li>
+<li><strong>Артефакты</strong> — реестр справочных документов (регламенты, инструкции, чек-листы), которые агенты подгружают по требованию, а не держат в промпте.</li>
+<li><strong>Навыки (living skills)</strong> — переиспользуемые процедуры с контрактом (что умеет, когда применимо, что проверять), версиями, оценками качества и управляемой человеком эволюцией.</li>
+<li><strong>Контур качества</strong> — изменения агента применяются только поверх свежего зелёного оценочного прогона: golden-кейсы, подтверждения человеком, LLM-судья с калибровкой.</li>
+<li><strong>Безопасность по умолчанию</strong> — песочница команд в Docker без сети и прав, подтверждения consequential-действий человеком, секреты, которые агент never видит, RBAC и оргструктура.</li>
+</ul>
+<h2 id="из-чего-состоит-система"><a class="anchor" href="#из-чего-состоит-система" aria-label="Ссылка на раздел">#</a>Из чего состоит система</h2><table>
+<thead>
+<tr>
+<th>Компонент</th>
+<th>Что делает</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Agent Kernel</strong></td>
+<td>Durable-рантайм агента: модельный шлюз, инструменты, песочница, делегирование, подтверждения, планирование</td>
+</tr>
+<tr>
+<td><strong>Journal</strong></td>
+<td>Append-only журнал событий; проекция знаний, подбор подсказок, битемпоральные запросы</td>
+</tr>
+<tr>
+<td><strong>Workspace (чат)</strong></td>
+<td>Диалог с агентом: стриминг, вложения, подтверждения, поправки к выполняющимся задачам</td>
+</tr>
+<tr>
+<td><strong>Debugger UI</strong></td>
+<td>Дашборд, трассы запусков, карта знаний, таймлайн опыта, навыки, артефакты, триггеры, администрирование</td>
+</tr>
+<tr>
+<td><strong>Control Plane</strong></td>
+<td>Пользователи, RBAC, оргструктура, токены</td>
+</tr>
+</tbody></table>
+<p>Всё это поднимается одной командой <code>docker compose up</code> — PostgreSQL, Temporal, Journal, Kernel, UI и опциональные SearXNG + headless-браузер для веб-исследований.</p>
+<h2 id="для-кого-это"><a class="anchor" href="#для-кого-это" aria-label="Ссылка на раздел">#</a>Для кого это</h2><ul>
+<li><strong>Команды, эксплуатирующие агентов</strong> — видеть, что агент делал и почему, отвечать на вопросы «кто и что изменил», находить и чинить повторяющиеся ошибки.</li>
+<li><strong>Команды, развивающие агентов</strong> — превращать опыт в проверенные знания и навыки, менять определения агентов безопасно, через контур качества.</li>
+<li><strong>Организации</strong> — ограничивать агентов политиками, держать данные у себя, разделять доступы через оргструктуру.</li>
+</ul>
+<h2 id="где-что-смотреть"><a class="anchor" href="#где-что-смотреть" aria-label="Ссылка на раздел">#</a>Где что смотреть</h2><ul>
+<li><a href="quickstart.html">Быстрый старт</a> — поднять систему и запустить первую задачу.</li>
+<li><a href="chat.html">Работа с агентом</a> — чат, подтверждения, поправки.</li>
+<li><a href="knowledge.html">Знания</a> — как агент накапливает и теряет опыт.</li>
+<li>Раздел «Подробнее» в каждом материале ссылается на соответствующий инженерный документ в <code>docs/</code> репозитория.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <span></span>
+    <a class="pager-next" href="quickstart.html"><small>Далее →</small><strong>Быстрый старт</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

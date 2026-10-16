@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Переменные окружения, порты, страницы интерфейса и ссылки на подробные документы.">
+<title>Справочник — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="/docs/">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/reference.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<a class="docs-nav-row active" href="reference.html">Справочник</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Администрирование</div>
+<h1>Справочник</h1>
+<p class="docs-lead">Переменные окружения, порты, страницы интерфейса и ссылки на подробные документы.</p>
+<h2 id="переменные-окружения-основные"><a class="anchor" href="#переменные-окружения-основные" aria-label="Ссылка на раздел">#</a>Переменные окружения (основные)</h2><table>
+<thead>
+<tr>
+<th>Переменная</th>
+<th>По умолчанию</th>
+<th>Описание</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>TEMPORALITY_MODEL_BASE_URL</code> / <code>_ID</code> / <code>_API_KEY</code></td>
+<td>—</td>
+<td>Провайдер по умолчанию (обязательны)</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS</code></td>
+<td><code>16384</code></td>
+<td>Лимит генерации; reasoning-моделям — с запасом</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_ACTIVITY_TIMEOUT</code></td>
+<td><code>20m</code></td>
+<td>Потолок одной модельной активности</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT</code></td>
+<td><code>2m</code></td>
+<td>Ожидание первого токена (адаптивно +60с/МБ промпта)</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_TOOL_ACTIVITY_TIMEOUT</code></td>
+<td><code>16m</code></td>
+<td>Потолок активности <code>run_tool</code></td>
+</tr>
+<tr>
+<td><code>KERNEL_TOOL_MAX_SECONDS</code></td>
+<td><code>900</code></td>
+<td>Потолок одной команды песочницы</td>
+</tr>
+<tr>
+<td><code>KERNEL_SANDBOX_ROOT</code></td>
+<td><code>/tmp</code></td>
+<td>Корень персистентных воркспейсов</td>
+</tr>
+<tr>
+<td><code>KERNEL_DOCKER_BINARY</code></td>
+<td><code>docker</code></td>
+<td>Путь к docker CLI</td>
+</tr>
+<tr>
+<td><code>KERNEL_SECRET_MASTER_KEY</code></td>
+<td>—</td>
+<td>Ключ шифрования секретов (<code>openssl rand -hex 32</code>)</td>
+</tr>
+<tr>
+<td><code>KERNEL_AUTH_TOKENS</code> / <code>JOURNAL_AUTH_TOKENS</code></td>
+<td>пусто</td>
+<td>Bearer-токены (<code>token:user:role:projects</code>; пусто = auth off)</td>
+</tr>
+<tr>
+<td><code>KERNEL_RUN_QUOTAS</code></td>
+<td>пусто</td>
+<td>Суточные квоты запусков: <code>project:limit</code>, <code>*</code> — дефолт</td>
+</tr>
+<tr>
+<td><code>KERNEL_MODEL_PRICES</code></td>
+<td>пусто</td>
+<td>Цены токенов: <code>model:prompt:completion</code></td>
+</tr>
+<tr>
+<td><code>KERNEL_INTAKE_MAX_PER_HOUR</code></td>
+<td><code>10</code></td>
+<td>Лимит канальных сообщений на отправителя</td>
+</tr>
+<tr>
+<td><code>KERNEL_INTAKE_RETENTION_DAYS</code></td>
+<td><code>30</code></td>
+<td>Срок хранения тел входящих</td>
+</tr>
+<tr>
+<td><code>KERNEL_SEARXNG_URL</code></td>
+<td><code>http://searxng:8080</code></td>
+<td>Метапоиск для <code>web_search</code> (пусто = off)</td>
+</tr>
+<tr>
+<td><code>KERNEL_BROWSER_CDP_URL</code></td>
+<td>lightpanda</td>
+<td>Headless-браузер для <code>browser</code> (пусто = off)</td>
+</tr>
+<tr>
+<td><code>KERNEL_CHANNEL__MATRIX__*</code>, <code>__TELEGRAM__*</code>, <code>__MATTERMOST__*</code>, <code>__SLACKBOT__*</code></td>
+<td>—</td>
+<td>Транспорты каналов</td>
+</tr>
+</tbody></table>
+<p>Полный список с семантикой — в корневом <code>README.md</code> и <code>docs/runbook.md</code>.</p>
+<h2 id="порты"><a class="anchor" href="#порты" aria-label="Ссылка на раздел">#</a>Порты</h2><table>
+<thead>
+<tr>
+<th>Сервис</th>
+<th>Порт</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UI (debugger)</td>
+<td><code>3000</code></td>
+</tr>
+<tr>
+<td>Journal API</td>
+<td><code>8080</code></td>
+</tr>
+<tr>
+<td>Agent Kernel API</td>
+<td><code>8090</code></td>
+</tr>
+<tr>
+<td>Temporal UI</td>
+<td><code>8233</code></td>
+</tr>
+<tr>
+<td>SearXNG</td>
+<td><code>127.0.0.1:8889</code></td>
+</tr>
+</tbody></table>
+<h2 id="страницы-интерфейса"><a class="anchor" href="#страницы-интерфейса" aria-label="Ссылка на раздел">#</a>Страницы интерфейса</h2><table>
+<thead>
+<tr>
+<th>Путь</th>
+<th>Раздел</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>/dashboard</code></td>
+<td>Дашборд: health, модели, проекты, качество, саги, песочницы</td>
+</tr>
+<tr>
+<td><code>/workspace</code></td>
+<td>Чат с агентом</td>
+</tr>
+<tr>
+<td><code>/agents</code></td>
+<td>Запуски и трассы</td>
+</tr>
+<tr>
+<td><code>/knowledge</code></td>
+<td>Знания: карта, поиск, досье, противоречия</td>
+</tr>
+<tr>
+<td><code>/experience</code></td>
+<td>Таймлайн опыта</td>
+</tr>
+<tr>
+<td><code>/storage</code></td>
+<td>Хранилище песочниц (файлы)</td>
+</tr>
+<tr>
+<td><code>/agent-config</code> · <code>/teams</code></td>
+<td>Агенты и команды</td>
+</tr>
+<tr>
+<td><code>/skills</code> · <code>/artifacts</code></td>
+<td>Навыки и артефакты</td>
+</tr>
+<tr>
+<td><code>/inbound</code> · <code>/triggers</code> · <code>/channels</code></td>
+<td>Входящие, триггеры, каналы</td>
+</tr>
+<tr>
+<td><code>/providers</code> · <code>/secrets</code> · <code>/sandbox</code></td>
+<td>Провайдеры, секреты, песочницы</td>
+</tr>
+<tr>
+<td><code>/users</code> · <code>/org</code></td>
+<td>Пользователи и оргструктура</td>
+</tr>
+</tbody></table>
+<h2 id="глоссарий"><a class="anchor" href="#глоссарий" aria-label="Ссылка на раздел">#</a>Глоссарий</h2><ul>
+<li><strong>Ран</strong> — один запуск агента над задачей (durable workflow).</li>
+<li><strong>Дополнение (addendum)</strong> — сообщение пользователя, долитое в выполняющийся ран.</li>
+<li><strong>Поправка (amendment)</strong> — канальное сообщение, продолжающее существующую задачу.</li>
+<li><strong>Сага</strong> — отслеживаемая длительная работа через несколько ранов и агентов.</li>
+<li><strong>Знание</strong> — утверждение с происхождением, статусом и историей.</li>
+<li><strong>Подсказка (hint)</strong> — компактная выдержка опыта, подставляемая агенту.</li>
+<li><strong>Навык</strong> — версионируемая процедура с контрактом и оценками.</li>
+<li><strong>Артефакт</strong> — справочный документ в реестре, подгружаемый по требованию.</li>
+<li><strong>Reconcile</strong> — ручное разрешение неопределённой операции (произошло/не произошло).</li>
+<li><strong>Судья</strong> — LLM-модель, оценивающая ответы в контуре качества.</li>
+</ul>
+<h2 id="инженерные-документы"><a class="anchor" href="#инженерные-документы" aria-label="Ссылка на раздел">#</a>Инженерные документы</h2><p>Архитектура и внутренние механизмы описаны в <code>docs/</code> репозитория: <code>architecture.md</code>
+(общая), <code>event-model.md</code>, <code>knowledge-model.md</code>, <code>agent-quality-loop.md</code>,
+<code>living-skills.md</code>, <code>agent-delegation.md</code>, <code>inbound-messages.md</code>,
+<code>sandbox-security-matrix.md</code>, <code>failure-reconciliation.md</code>, <code>runbook.md</code>
+(эксплуатация) и другие.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="administration.html"><small>← Назад</small><strong>Администрирование</strong></a>
+    
+  </nav>
+</article>
+</main>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Документация Temporality: быстрый старт, работа с агентом, знания и опыт, навыки, каналы, администрирование.">
+<title>Документация — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="/docs/">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/index.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<a class="docs-nav-row" href="reference.html">Справочник</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Документация</div>
+<h1>Temporality — руководство пользователя</h1>
+<p class="docs-lead">Temporality наблюдает, как ИИ-агент выполняет задачи: что он знал и делал, откуда взялись знания, что подтвердилось, и возвращает проверенный опыт в следующие запуски. Этот раздел — практическое руководство: от запуска до повседневной работы.</p>
+<p><a class="btn btn-primary" href="intro.html"><span>Начать знакомство</span><span>→</span></a></p>
+<div class="docs-cards">
+<div class="docs-card-group"><h3>Начало</h3><a class="docs-card" href="intro.html"><strong>Введение</strong><span>Что такое Temporality, зачем он нужен и из чего состоит — десятитысячный обзор системы.</span></a>
+<a class="docs-card" href="quickstart.html"><strong>Быстрый старт</strong><span>От нуля до первой задачи агента — установка, онбординг, первый запуск.</span></a></div>
+<div class="docs-card-group"><h3>Работа с агентом</h3><a class="docs-card" href="chat.html"><strong>Чат и запуски</strong><span>Диалог с агентом — от сообщения до результата: стриминг, поправки, подтверждения, делегирование.</span></a>
+<a class="docs-card" href="agents.html"><strong>Агенты и команды</strong><span>Создание и настройка агентов — модели, инструменты, песочницы, эволюция; команды агентов как конвейеры.</span></a></div>
+<div class="docs-card-group"><h3>Знания и опыт</h3><a class="docs-card" href="knowledge.html"><strong>Знания</strong><span>Как агент накапливает опыт — жизненный цикл знаний, карта областей, досье, противоречия, битемпоральность.</span></a>
+<a class="docs-card" href="observability.html"><strong>Наблюдаемость и хранилище</strong><span>Дашборд, трассы запусков, таймлайн опыта и файловое хранилище песочниц.</span></a>
+<a class="docs-card" href="skills.html"><strong>Навыки</strong><span>Живые навыки — переиспользуемые процедуры агентов с контрактом, версиями и оценками качества.</span></a>
+<a class="docs-card" href="artifacts.html"><strong>Артефакты</strong><span>Реестр справочных документов — регламенты, инструкции и шаблоны, которыми агенты пользуются по требованию.</span></a></div>
+<div class="docs-card-group"><h3>Автоматизация</h3><a class="docs-card" href="inbound.html"><strong>Входящие и каналы</strong><span>Подключаем Matrix, Telegram, Slack, Mattermost и вебхуки — агент получает задачи из чата вашей команды.</span></a>
+<a class="docs-card" href="triggers.html"><strong>Триггеры</strong><span>Запуск агентов по расписанию, вебхукам и событиям системы.</span></a></div>
+<div class="docs-card-group"><h3>Администрирование</h3><a class="docs-card" href="administration.html"><strong>Администрирование</strong><span>Пользователи и RBAC, оргструктура, провайдеры, секреты, песочницы и настройки качества.</span></a>
+<a class="docs-card" href="reference.html"><strong>Справочник</strong><span>Переменные окружения, порты, страницы интерфейса и ссылки на подробные документы.</span></a></div>
+</div>
+</article>
+</main>
+</body>
+</html>

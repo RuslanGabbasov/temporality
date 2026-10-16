@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="От нуля до первой задачи агента — установка, онбординг, первый запуск.">
+<title>Быстрый старт — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="/docs/">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/quickstart.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row active" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<a class="docs-nav-row" href="reference.html">Справочник</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Начало</div>
+<h1>Быстрый старт</h1>
+<p class="docs-lead">От нуля до первой задачи агента — установка, онбординг, первый запуск.</p>
+<h2 id="требования"><a class="anchor" href="#требования" aria-label="Ссылка на раздел">#</a>Требования</h2><ul>
+<li>Docker (Linux, macOS; Windows — через WSL2). Рекомендуется BuildKit.</li>
+<li>~4 ГБ свободной памяти для стека (PostgreSQL, Temporal, Journal, Kernel, UI).</li>
+<li>Ключ любого OpenAI-совместимого провайдера (OpenAI, OpenRouter, локальный Ollama и т.д.).</li>
+</ul>
+<h2 id="запуск"><a class="anchor" href="#запуск" aria-label="Ссылка на раздел">#</a>Запуск</h2><pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git
+cd temporality
+cp .env.example .env
+# отредактируйте .env: TEMPORALITY_MODEL_BASE_URL / _ID / _API_KEY
+docker compose up --build -d
+</code></pre>
+<p>Поднимаются: PostgreSQL, Journal (<code>:8080</code>), UI (<code>:3000</code>), Temporal (UI <code>:8233</code>),
+Agent Kernel (<code>:8090</code>), SearXNG (<code>127.0.0.1:8889</code>, метапоиск для агента) и
+headless-браузер Lightpanda. Пара <code>TEMPORALITY_MODEL_BASE_URL</code> + <code>_ID</code> —
+обязательный минимум; без них ядро не стартует.</p>
+<p>Примеры конфигурации провайдера:</p>
+<pre><code class="language-dotenv"># OpenAI
+TEMPORALITY_MODEL_BASE_URL=https://api.openai.com/v1
+TEMPORALITY_MODEL_ID=gpt-4.1-mini
+TEMPORALITY_MODEL_API_KEY=sk-...
+
+# Локальный Ollama
+TEMPORALITY_MODEL_BASE_URL=http://host.docker.internal:11434/v1
+TEMPORALITY_MODEL_ID=llama3.2
+TEMPORALITY_API_KEY=
+</code></pre>
+<p>Остановить стек, сохранив данные: <code>make stack-stop</code>.</p>
+<h2 id="онбординг"><a class="anchor" href="#онбординг" aria-label="Ссылка на раздел">#</a>Онбординг</h2><p>Откройте <code>http://localhost:3000</code>. При первом входе мастер онбординга проведёт
+через обязательные шаги и спрячет навигацию, пока они не пройдены:</p>
+<ol>
+<li><strong>Первый проект</strong> — рабочая область для задач агента.</li>
+<li><strong>Администратор</strong> — ваш пользователь.</li>
+<li><strong>Провайдер модели</strong> — base URL, ключ (сохраняется в зашифрованные секреты), автополучение списка моделей.</li>
+<li><strong>Агент</strong> — из готового шаблона или по описанию.</li>
+<li><strong>Сборка песочницы</strong> — образ, в котором будут выполняться команды агента (нужен доступ к Docker daemon).</li>
+</ol>
+<h2 id="первая-задача"><a class="anchor" href="#первая-задача" aria-label="Ссылка на раздел">#</a>Первая задача</h2><p>Откройте <strong>Workspace</strong> — чат с агентом — и напишите задачу. Агент ответит
+стримингом; по ходу работы он может:</p>
+<ul>
+<li>выполнить команды в песочнице (<code>/workspace</code> проекта — персистентное хранилище),</li>
+<li>делегировать подзадачи другим агентам (<code>plan</code>/<code>delegate</code>),</li>
+<li>задать вам вопрос через <strong>подтверждение</strong> (карточка в чате, дублируется в «Запусках»),</li>
+<li>записать полезное наблюдение в знания проекта.</li>
+</ul>
+<p>После завершения загляните в <strong>Запуски</strong> (трасса шаг за шагом) и <strong>Знания</strong>
+(что агент вынес из задачи).</p>
+<h2 id="что-настроить-дальше"><a class="anchor" href="#что-настроить-дальше" aria-label="Ссылка на раздел">#</a>Что настроить дальше</h2><ul>
+<li><strong>Каналы</strong> — чтобы агент получал задачи из Matrix/Telegram/Slack и задавал вопросы туда, где вам удобно: <a href="inbound.html">Входящие и каналы</a>.</li>
+<li><strong>Триггеры</strong> — задачи по расписанию или событию: <a href="triggers.html">Триггеры</a>.</li>
+<li><strong>Навыки</strong> — закрепить повторяющуюся процедуру: <a href="skills.html">Навыки</a>.</li>
+<li><strong>Пользователи и доступы</strong> — команда и RBAC: <a href="administration.html">Администрирование</a>.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="intro.html"><small>← Назад</small><strong>Введение</strong></a>
+    <a class="pager-next" href="chat.html"><small>Далее →</small><strong>Чат и запуски</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

@@ -13,3 +13,5 @@ __pycache__/
 
 # stray local go build output
 /agent-kernel
+
+node_modules/

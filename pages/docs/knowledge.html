@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Как агент накапливает опыт — жизненный цикл знаний, карта областей, досье, противоречия, битемпоральность.">
+<title>Знания — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="/docs/">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/knowledge.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row active" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<a class="docs-nav-row" href="reference.html">Справочник</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Знания и опыт</div>
+<h1>Знания</h1>
+<p class="docs-lead">Как агент накапливает опыт — жизненный цикл знаний, карта областей, досье, противоречия, битемпоральность.</p>
+<p>Знания — проверяемый слой опыта: утверждения об окружении, инструментах и
+решениях, извлечённые из реальных траекторий. В отличие от «памяти»-свалки,
+у каждого знания есть автор, происхождение, статус и история изменений.
+Страница <strong>Знания</strong> (<code>/knowledge</code>) — рабочая поверхность и для человека, и
+для агента (тул <code>knowledge_explore</code>).</p>
+<h2 id="жизненный-цикл"><a class="anchor" href="#жизненный-цикл" aria-label="Ссылка на раздел">#</a>Жизненный цикл</h2><pre><code>предложено → подтверждено → (оспорено → исправлено | заменено | инвалидировано)
+</code></pre>
+<ul>
+<li><strong>Предложено</strong> — извлечено из рана, ещё не проверено.</li>
+<li><strong>Подтверждено</strong> — применилось и сработало (или подтверждено человеком).</li>
+<li><strong>Оспорено</strong> — обнаружено противоречие; знание на проверке.</li>
+<li><strong>Исправлено / Заменено / Инвалидировано</strong> — терминальные исходы с
+сохранением истории: кто, когда и почему.</li>
+</ul>
+<p>«Живые» знания — то, что система готова подсказать агенту. Устаревшие
+(«под риском») показываются с пометкой и переоцениваются.</p>
+<h2 id="карта-областей"><a class="anchor" href="#карта-областей" aria-label="Ссылка на раздел">#</a>Карта областей</h2><p>Treemap-карта группирует знания по темам и сущностям: размер плитки —
+количество знаний, цвет — преобладающее состояние, красная метка —
+противоречия. Клик по области — стиковый фильтр списка знаний.</p>
+<p>Кнопка <strong>«Упорядочить»</strong> запускает модель-судью (та же, что в контуре
+качества): она сводит дубли и варианты («playwright», «playwright e2e») к
+каноничным областям и прячет мусор (имена файлов и т.п.). Знания при этом не
+изменяются — редактируется только «линза» отображения.</p>
+<h2 id="поиск-и-фильтры"><a class="anchor" href="#поиск-и-фильтры" aria-label="Ссылка на раздел">#</a>Поиск и фильтры</h2><ul>
+<li><strong>Компактные фильтры</strong>: состояние, область видимости, тип (утверждение/наблюдение), происхождение, тема, сущность.</li>
+<li><strong>Поиск по смыслу</strong> — вопрос словами; результаты объясняют, <em>почему</em> совпали.</li>
+<li><strong>Битемпоральные фильтры</strong> — посмотреть базу «как она была»: на дату события или в момент известности (кто и когда что знал). Полезно для разбора инцидентов.</li>
+</ul>
+<h2 id="досье-знания"><a class="anchor" href="#досье-знания" aria-label="Ссылка на раздел">#</a>Досье знания</h2><p>Клик по знанию открывает досье: формулировка, статус и история переходов,
+первоисточники (ссылки на конкретные события рана), связи с другими
+знаниями (подтверждает/противоречит/выведено из), статистика применений.</p>
+<p>Из досье: <strong>оспорить</strong>, <strong>исправить</strong>, <strong>инвалидировать</strong> — с причиной и
+доказательствами. Это действия человека; агент помечает сомнения, но
+жизненный цикл двигаете вы.</p>
+<h2 id="противоречия"><a class="anchor" href="#противоречия" aria-label="Ссылка на раздел">#</a>Противоречия</h2><p>Вкладка <strong>Противоречия</strong> собирает пары знаний, которые утверждают разное об
+одном: сравнение бок о бок и решение (оставить одно, исправить, оба —
+устарели).</p>
+<h2 id="исследовательские-сессии"><a class="anchor" href="#исследовательские-сессии" aria-label="Ссылка на раздел">#</a>Исследовательские сессии</h2><p>Текущий вопрос, фильтры и выбранная область сохраняются как <strong>сессия</strong> — к
+ней можно вернуться позже. Агент тоже исследует базу тула-ми
+<code>knowledge_explore</code> (orient/search/expand/trace/compare/synthesize), и его
+исследования видны отдельной вкладкой.</p>
+<p>Подробности механики — <code>docs/knowledge-model.md</code>, <code>docs/knowledge-evolution.md</code>,
+<code>docs/human-knowledge-explorer.md</code>.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="agents.html"><small>← Назад</small><strong>Агенты и команды</strong></a>
+    <a class="pager-next" href="observability.html"><small>Далее →</small><strong>Наблюдаемость и хранилище</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

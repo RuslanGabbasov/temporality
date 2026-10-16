@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Запуск агентов по расписанию, вебхукам и событиям системы.">
+<title>Триггеры — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="/docs/">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/triggers.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row active" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<a class="docs-nav-row" href="reference.html">Справочник</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Автоматизация</div>
+<h1>Триггеры</h1>
+<p class="docs-lead">Запуск агентов по расписанию, вебхукам и событиям системы.</p>
+<p>Триггеры запускают агентов без человека: по расписанию, входящему вебхуку
+или событию системы. Страница <strong>Триггеры</strong> (<code>/triggers</code>), механика —
+<code>docs/triggers-and-escalations.md</code>.</p>
+<h2 id="cron-триггер"><a class="anchor" href="#cron-триггер" aria-label="Ссылка на раздел">#</a>Cron-триггер</h2><p>Расписание в crontab-формате + проект, агент и промпт. Классика: «каждое
+утро в 09:00 — обход мониторинга и сводка инцидентов», «каждую пятницу —
+черновик отчёта по спринту». Каждый запуск — обычный ран: с трассой,
+бюджетом и подтверждениями.</p>
+<h2 id="вебхук-триггер"><a class="anchor" href="#вебхук-триггер" aria-label="Ссылка на раздел">#</a>Вебхук-триггер</h2><p>Внешняя система POST-ом заводит задачу: GitLab/GitHub CI упал, пришла заявка,
+обновился тикет. Каждому триггеру выдаётся <strong>персональный токен</strong> (кнопка
+генерации в форме) — не нужно раздавать общий ключ; вход только по HTTPS,
+подпись проверяется.</p>
+<h2 id="событийные-триггеры"><a class="anchor" href="#событийные-триггеры" aria-label="Ссылка на раздел">#</a>Событийные триггеры</h2><p>Слушатель событий Journal: «когда появилось знание со статусом
+оспорено», «когда ран завершился неудачей», «когда создан черновик
+артефакта» — запустить агента-разбирателя. Конструктор события: тип, источник,
+фильтры по данным.</p>
+<h2 id="execution-identity"><a class="anchor" href="#execution-identity" aria-label="Ссылка на раздел">#</a>Execution identity</h2><p>От чьего имени триггер заводит задачи: у триггера есть привязка к
+исполнительной идентичности — от неё считаются лимиты квот и видимость
+проектов. Канальные задачи продолжают считаться от отправителя.</p>
+<h2 id="наблюдение"><a class="anchor" href="#наблюдение" aria-label="Ссылка на раздел">#</a>Наблюдение</h2><p>Каждое срабатывание видно в «Запусках» как обычный ран (с меткой источника),
+а история срабатываний — в карточке триггера. Неудачный запуск триггера —
+тоже ран: его можно открыть, понять причину и перезапустить.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="inbound.html"><small>← Назад</small><strong>Входящие и каналы</strong></a>
+    <a class="pager-next" href="administration.html"><small>Далее →</small><strong>Администрирование</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>
