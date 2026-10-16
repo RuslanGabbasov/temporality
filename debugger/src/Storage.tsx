@@ -3,6 +3,7 @@ import { Button, Heading, InlineNotification, Tag, Tile } from '@carbon/react'
 import { Download, Renew, TrashCan, Upload } from '@carbon/icons-react'
 import PageLoading from './PageLoading'
 import ProjectRequired from './ProjectRequired'
+import Markdown from './Markdown'
 import { useConfirm } from './ConfirmDialog'
 import { useT } from './i18n'
 import {
@@ -18,6 +19,7 @@ import { fmtBytes } from './format'
 type AreaName = 'workspace' | 'cache'
 
 const TEXT_EXT = /\.(md|txt|log|json|ya?ml|toml|go|ts|tsx|js|py|sh|sql|css|html|csv|env|conf|ini|xml|svg)$/i
+const MARKDOWN_EXT = /\.(md|markdown)$/i
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg)$/i
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -36,7 +38,7 @@ export default function Storage({ project }: { project: string }) {
   const [loadingDir, setLoadingDir] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<{ area: AreaName; entry: StorageFileEntry } | null>(null)
-  const [preview, setPreview] = useState<{ kind: 'text' | 'image'; content: string } | null>(null)
+  const [preview, setPreview] = useState<{ kind: 'text' | 'markdown' | 'image'; content: string } | null>(null)
   const [previewError, setPreviewError] = useState('')
   const [busy, setBusy] = useState(false)
   const uploadTarget = useRef<{ area: AreaName; dir: string }>({ area: 'workspace', dir: '' })
@@ -105,7 +107,8 @@ export default function Storage({ project }: { project: string }) {
         setPreviewError(t('storage.files_binary') ?? 'Binary file — download to view.')
         return
       }
-      setPreview({ kind: 'text', content: text.length > 256 << 10 ? text.slice(0, 256 << 10) : text })
+      const kind = MARKDOWN_EXT.test(entry.name) ? 'markdown' : 'text'
+      setPreview({ kind, content: text.length > 256 << 10 ? text.slice(0, 256 << 10) : text })
     } catch (f) { setPreviewError(message(f)) }
   }
 
@@ -259,6 +262,10 @@ export default function Storage({ project }: { project: string }) {
                 <div style={{ color: 'var(--tm-muted)', fontSize: '0.78rem' }}>…</div>
               ) : preview.kind === 'image' ? (
                 <img src={preview.content} alt={selected.entry.name} style={{ maxWidth: '100%', maxHeight: '48vh', borderRadius: '4px', border: '1px solid var(--tm-border)' }} />
+              ) : preview.kind === 'markdown' ? (
+                <div style={{ maxHeight: '48vh', overflowY: 'auto', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', background: 'var(--tm-surface)' }}>
+                  <Markdown content={preview.content} />
+                </div>
               ) : (
                 <pre style={{ margin: 0, padding: '0.5rem', background: 'var(--tm-surface)', border: '1px solid var(--tm-border)', borderRadius: '4px', fontSize: '0.72rem', lineHeight: 1.45, overflow: 'auto', maxHeight: '48vh', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{preview.content}</pre>
               )}
