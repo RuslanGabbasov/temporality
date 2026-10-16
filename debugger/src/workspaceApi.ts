@@ -424,6 +424,123 @@ export interface SkillInput {
   org_unit_id?: string // honored on create; updates keep the stored binding
 }
 
+// Agent teams (docs/agent-teams.md). A team is a versioned definition of a
+// multi-agent composition; the manifest is structured data — team.yaml never
+// appears in the API surface, the UI edits protocol/slots/defaults directly.
+
+/** Team protocol kinds — the small topology vocabulary (§6). */
+export type TeamProtocolKind = 'pipeline' | 'lead_workers' | 'fan_out' | 'review_gate' | 'dag'
+export const TEAM_PROTOCOL_KINDS: TeamProtocolKind[] = ['pipeline', 'lead_workers', 'fan_out', 'review_gate', 'dag']
+
+export interface TeamStep {
+  id: string
+  slot_id: string
+  depends_on?: string[]
+  review_of?: string[]
+}
+
+export interface TeamProtocol {
+  kind: TeamProtocolKind
+  max_rework?: number
+  steps?: TeamStep[]
+}
+
+/** The seven canonical capabilities (write_files aliases modify_files
+ *  server-side; the UI offers the canonical names only). */
+export const TEAM_CAPABILITIES = ['read_files', 'modify_files', 'run_commands', 'network', 'skills', 'knowledge', 'delegation'] as const
+
+export interface TeamRequirements {
+  capabilities?: string[]
+  skills?: string[]
+}
+
+export interface TeamBinding {
+  mode: 'fixed' | 'role'
+  agent_id?: string
+  preferred_agent_id?: string
+}
+
+export interface TeamSlot {
+  id: string
+  title: string
+  responsibility?: string
+  requirements?: TeamRequirements
+  contract?: string
+  binding: TeamBinding
+}
+
+export interface TeamDefaults {
+  max_turns?: number
+  budget_usd?: number
+  parallel_limit?: number
+}
+
+export interface TeamManifest {
+  protocol: TeamProtocol
+  slots: TeamSlot[]
+  defaults?: TeamDefaults
+}
+
+export interface Team {
+  id: string
+  name: string
+  description: string
+  version: string
+  manifest: TeamManifest
+  org_unit_id?: string
+  /** Lifecycle status of the current version row: "draft" awaits a human
+   *  apply and is never launched; empty when no version row matches. */
+  version_status?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface TeamVersion {
+  team_id: string
+  version: string
+  manifest: TeamManifest
+  origin?: string
+  change_summary?: string
+  observed_problem?: string
+  proposed_change?: string
+  expected_effect?: string
+  source_runs?: string[]
+  status: string
+  created_at: string
+}
+
+/** One slot's resolution from the launch preview (wave C): who fills it,
+ *  why, and — when ambiguous — which candidates existed. */
+export interface TeamSlotChoice {
+  slot_id: string
+  agent_id?: string
+  mode?: string // fixed | matched
+  reason?: string
+  candidates?: string[]
+  requirements?: string[]
+}
+
+export interface TeamResolvePreview {
+  team_id: string
+  version: string
+  project: string
+  slots: TeamSlotChoice[]
+  resolvable: boolean
+  reason?: string
+  slot_id?: string
+  candidates?: string[]
+  requirements?: string[]
+}
+
+export interface TeamRunStartResult {
+  run_id: string
+  project: string
+  team_id: string
+  workflow_id: string
+  temporal_run_id: string
+  status: string
+}
+
 export interface Secret {
   id: string
   name: string
@@ -914,6 +1031,39 @@ export const workspaceApi = {
     request<{ executions: SkillExecution[] }>(`/v1/workspace/skills/${id}/executions`),
   listSkillMemory: (id: string) =>
     request<{ memory: SkillMemoryItem[] }>(`/v1/workspace/skills/${id}/memory`),
+
+  // Teams (docs/agent-teams.md). CRUD mirrors skills: a human save (PUT) is
+  // itself the approval for the same version string; draft versions come from
+  // the (wave E) builder / (wave G) evolution proposals and need an explicit
+  // apply before they can launch.
+  listTeams: () =>
+    request<{ teams: Team[]; count: number }>('/v1/workspace/teams'),
+  getTeam: (id: string) => request<Team>(`/v1/workspace/teams/${id}`),
+  createTeam: (data: { id?: string; name: string; description?: string; version?: string; manifest: TeamManifest; org_unit_id?: string }) =>
+    request<Team>('/v1/workspace/teams', { method: 'POST', body: JSON.stringify(data) }),
+  updateTeam: (id: string, data: { name: string; description?: string; version?: string; manifest: TeamManifest }) =>
+    request<Team>(`/v1/workspace/teams/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteTeam: (id: string) =>
+    request<{ deleted: boolean }>(`/v1/workspace/teams/${id}`, { method: 'DELETE' }),
+  listTeamVersions: (id: string) =>
+    request<{ versions: TeamVersion[] }>(`/v1/workspace/teams/${id}/versions`),
+  applyTeamVersion: (id: string, version: string) =>
+    request<Team>(`/v1/workspace/teams/${id}/versions/${version}/apply`, { method: 'POST' }),
+  rejectTeamVersion: (id: string, version: string) =>
+    request<TeamVersion>(`/v1/workspace/teams/${id}/versions/${version}/reject`, { method: 'POST' }),
+  // Launch preview (wave C): resolves every slot against the caller's roster
+  // without starting anything — a preview never fails as a whole, ambiguous
+  // and unresolvable slots are reported per slot.
+  resolveTeam: (id: string, project: string, version?: string) => {
+    const query = new URLSearchParams({ project })
+    if (version) query.set('version', version)
+    return request<TeamResolvePreview>(`/v1/agent/teams/${id}/resolve?${query.toString()}`)
+  },
+  // Start a team run: bindings are explicit launch-time overrides (slot →
+  // agent); a 409 lists candidates for an ambiguous slot, a 422 lists the
+  // requirements no visible agent satisfies.
+  startTeamRun: (id: string, data: { project: string; goal: string; version?: string; bindings?: Record<string, string> }) =>
+    request<TeamRunStartResult>(`/v1/agent/teams/${id}/runs`, { method: 'POST', body: JSON.stringify(data) }),
 
   // MCP servers (workspace-global registry)
   listMCPServers: () =>

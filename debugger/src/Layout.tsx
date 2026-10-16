@@ -47,6 +47,7 @@ const NAV_ITEMS = [
   { path: '/workspace', label: 'nav.workspace' },
   { path: '/project', label: 'nav.project' },
   { path: '/agents', label: 'nav.runs' },
+  { path: '/teams', label: 'nav.teams' },
   { path: '/inbound', label: 'nav.inbound' },
   { path: '/observability', label: 'nav.knowledge' },
   { path: '/artifacts', label: 'nav.artifacts' },

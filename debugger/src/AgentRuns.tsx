@@ -785,6 +785,12 @@ export default function AgentRuns({ project }: { project: string }) {
   const rootEvent = timeline.find((event) => event.type === 'run.started')
   const rawTitle = rootEvent?.data?.title
   const runTitle = typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle.trim() : ''
+  // Team runs surface their rollup in the header (docs/agent-teams.md §9):
+  // tokens/cost/rework come from team.completed; a team without it either
+  // failed (team.failed names the broken step) or is still running.
+  const teamStarted = timeline.find((event) => event.type === 'team.started')
+  const teamDone = timeline.find((event) => event.type === 'team.completed')
+  const teamFailedEvent = timeline.find((event) => event.type === 'team.failed')
   return (
     <div style={{ padding: '1rem' }}>
       {error && (
@@ -867,6 +873,26 @@ export default function AgentRuns({ project }: { project: string }) {
                   <Heading style={{ fontSize: '1.1rem' }}>{runTitle || selected}</Heading>
                   {runTitle && (
                     <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', fontFamily: 'monospace', marginTop: '0.25rem', overflowWrap: 'anywhere' }}>{selected}</div>
+                  )}
+                  {teamStarted && (
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                      <Tag type="cyan" size="sm">👥 {String(teamStarted.data?.team_name ?? teamStarted.data?.team_id ?? '')}</Tag>
+                      {typeof teamStarted.data?.version === 'string' && teamStarted.data.version && <Tag type="gray" size="sm">v{teamStarted.data.version}</Tag>}
+                      {teamDone ? (
+                        <>
+                          <Tag type="green" size="sm">{t('chat.delegation.completed')}</Tag>
+                          {typeof teamDone.data?.total_tokens === 'number' && <Tag type="gray" size="sm">{teamDone.data.total_tokens} tok</Tag>}
+                          {typeof teamDone.data?.cost_usd === 'number' && <Tag type="gray" size="sm">${teamDone.data.cost_usd.toFixed(4)}</Tag>}
+                          {typeof teamDone.data?.rework_rounds === 'number' && teamDone.data.rework_rounds > 0 && (
+                            <Tag type="purple" size="sm">{t('runs.event.team_rework_rounds', { count: String(teamDone.data.rework_rounds) })}</Tag>
+                          )}
+                        </>
+                      ) : teamFailedEvent ? (
+                        <Tag type="red" size="sm">{t('runs.event.team_failed')}{typeof teamFailedEvent.data?.step === 'string' && teamFailedEvent.data.step ? ` · ${teamFailedEvent.data.step}` : ''}</Tag>
+                      ) : (
+                        <Tag type="blue" size="sm">{t('chat.delegation.running')}</Tag>
+                      )}
+                    </div>
                   )}
                 </div>
 

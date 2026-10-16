@@ -8,6 +8,7 @@ import ExperienceTimeline from './ExperienceTimeline'
 import Workspace from './Workspace'
 import ProjectOverview from './ProjectOverview'
 import Agents from './Agents'
+import Teams from './Teams'
 import Providers from './Providers'
 import Users from './Users'
 import Triggers from './Triggers'
@@ -23,6 +24,7 @@ const Routes = {
   project: /^\/project(\/|$)/,
   experience: /^\/experience(\/|$)/,
   agents: /^\/agents(\/|$)/,
+  teams: /^\/teams(\/|$)/,
   observability: /^\/observability(\/|$)/,
   workspace: /^\/workspace(\/|$)/,
   'agent-config': /^\/agent-config(\/|$)/,
@@ -38,11 +40,12 @@ const Routes = {
   inbound: /^\/inbound(\/|$)/,
 } as const
 
-type Page = 'project' | 'experience' | 'agents' | 'observability' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
+type Page = 'project' | 'experience' | 'agents' | 'teams' | 'observability' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
 
 function pageFor(pathname: string): Page {
   if (Routes.project.test(pathname)) return 'project'
   if (Routes.agents.test(pathname)) return 'agents'
+  if (Routes.teams.test(pathname)) return 'teams'
   if (Routes.observability.test(pathname)) return 'observability'
   if (Routes.workspace.test(pathname)) return 'workspace'
   if (Routes.experience.test(pathname)) return 'experience'
@@ -80,6 +83,8 @@ export default function App() {
             return <ProjectOverview project={project} />
           case 'agents':
             return <AgentRuns project={project} />
+          case 'teams':
+            return <Teams project={project} />
           case 'observability':
             return <Observability project={project} />
           case 'workspace':
