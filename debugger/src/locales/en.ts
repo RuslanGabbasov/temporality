@@ -687,7 +687,7 @@ export const en: Record<string, string> = {
     'skills.editor.condition_placeholder': 'Describe a condition',
     'skills.editor.evidence': 'Evidence required',
     'skills.editor.evaluation': 'Evaluation suite',
-    'skills.editor.artifacts': 'Reference artifacts',
+    'skills.editor.artifacts': 'Artifacts',
     'skills.editor.artifacts_hint': 'Documents the skill points at without inlining: the agent loads them with artifact_read when the task matches.',
     'skills.editor.add_artifact': 'Attach artifact',
     'skills.editor.artifact_note_placeholder': 'When this document matters',
@@ -799,9 +799,11 @@ export const en: Record<string, string> = {
     'mcp.clear_all': 'Clear all',
 
     // Reference artifacts (docs/artifact-registry.md)
-    'artifacts.title': 'Reference Artifacts',
+    'artifacts.title': 'Artifacts',
     'artifacts.new': 'New Artifact',
     'artifacts.edit': 'Edit Artifact',
+    'artifacts.edit_locked_approved': 'The approved body is immutable',
+    'artifacts.edit_locked_review': 'Locked while a review is open',
     'artifacts.delete_confirm': 'Delete artifact "{{name}}"? Skills referencing it will lose the document.',
     'artifacts.empty': 'No reference artifacts yet',
     'artifacts.empty_hint': 'Regulations, approved instructions and checklists live here. Skills reference them from the manifest; agents load the body on demand instead of keeping it in the prompt.',

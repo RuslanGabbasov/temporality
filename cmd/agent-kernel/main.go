@@ -2350,7 +2350,10 @@ func main() {
 		visibleUnits, time.Now, log)
 	// Artifact lifecycle routes (docs/artifact-lifecycle.md §6): submit a
 	// draft to review, list review rounds, resolve them by human decision.
-	RegisterArtifactLifecycleRoutes(mux, gate, ws, events)
+	// Reviewer notices ride the channel registry (§6 Phase 1), best-effort.
+	RegisterArtifactLifecycleRoutes(mux, gate, ws, events, &channelReviewNotifier{
+		ws: ws, settings: activities.ChannelSettings, client: activities.HTTP, log: log,
+	})
 	// Rejecting keeps the proposal in history; a rejected proposal can never
 	// be applied — deciding twice is a conflict.
 	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/proposals/{id}/reject", func(w http.ResponseWriter, r *http.Request) {
@@ -3862,6 +3865,14 @@ func main() {
 					view := map[string]any{
 						"id": row.ID, "title": row.Title, "description": row.Description,
 						"provider": row.Provider, "size_bytes": row.SizeBytes,
+						"status": row.Status, "version": row.Version,
+					}
+					// Invariant warning (docs/artifact-lifecycle.md §8): a referenced
+					// artifact that lost its approved version (rollback edge) must not
+					// silently pass for verified — the skill keeps working, the agent
+					// learns to double-check before leaning on the document.
+					if row.Status != workspace.ArtifactApproved {
+						view["warning"] = fmt.Sprintf("artifact is %s (v%d): not approved — treat as unverified and do not rely on it as an established rule", row.Status, row.Version)
 					}
 					if row.ExternalRef != "" {
 						view["external_ref"] = row.ExternalRef

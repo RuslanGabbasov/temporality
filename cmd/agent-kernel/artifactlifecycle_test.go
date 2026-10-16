@@ -26,6 +26,7 @@ type fakeArtifactLifecycleStore struct {
 	artifact workspace.Artifact
 	review   workspace.ArtifactReview
 	reviews  []workspace.ArtifactReview
+	users    []workspace.User
 
 	submitCount int
 	resolveErr  error
@@ -55,22 +56,59 @@ func (f *fakeArtifactLifecycleStore) SubmitArtifactReview(_ context.Context, art
 	return f.review, nil
 }
 
-func (f *fakeArtifactLifecycleStore) ResolveArtifactReview(_ context.Context, reviewID, reviewer string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error) {
+func (f *fakeArtifactLifecycleStore) GetArtifactReview(_ context.Context, reviewID string) (workspace.ArtifactReview, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if reviewID != f.review.ID {
+		return workspace.ArtifactReview{}, workspace.ErrNotFound
+	}
+	return f.review, nil
+}
+
+func (f *fakeArtifactLifecycleStore) ResolveArtifactReview(_ context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if reviewID != f.review.ID {
+		return workspace.ArtifactReview{}, workspace.Artifact{}, workspace.ErrNotFound
+	}
 	if f.resolveErr != nil {
 		return workspace.ArtifactReview{}, workspace.Artifact{}, f.resolveErr
 	}
 	decision := "reject"
-	status := workspace.ArtifactRejected
 	if approve {
-		decision, status = "approve", workspace.ArtifactApproved
+		decision = "approve"
 	}
-	f.review.Status = status
-	f.review.Decisions = map[string]workspace.ReviewDecision{
-		reviewer: {Decision: decision, Comment: comment, At: time.Now().UTC()},
+	if f.review.Decisions == nil {
+		f.review.Decisions = map[string]workspace.ReviewDecision{}
 	}
-	f.artifact.Status = status
+	for _, entry := range entries {
+		f.review.Decisions[entry] = workspace.ReviewDecision{Decision: decision, Comment: comment, At: time.Now().UTC(), DecidedBy: decidedBy}
+	}
+	// Same closure rule as the store: reject closes, any closes on first
+	// answer, all closes when every entry approved.
+	closes, closedStatus := false, workspace.ArtifactRejected
+	if approve {
+		if f.review.Mode == "any" {
+			closes, closedStatus = true, workspace.ArtifactApproved
+		} else {
+			all := true
+			for _, who := range f.review.Reviewers {
+				d, ok := f.review.Decisions[who]
+				if !ok || d.Decision != "approve" {
+					all = false
+					break
+				}
+			}
+			if all {
+				closes, closedStatus = true, workspace.ArtifactApproved
+			}
+		}
+	}
+	if closes {
+		f.review.Status = closedStatus
+		f.review.ResolvedBy = decidedBy
+		f.artifact.Status = closedStatus
+	}
 	return f.review, f.artifact, nil
 }
 
@@ -82,6 +120,12 @@ func (f *fakeArtifactLifecycleStore) ListArtifactReviews(_ context.Context, _ st
 
 func (f *fakeArtifactLifecycleStore) CountArtifactSubmits(_ context.Context, _ string, _ time.Time) (int, error) {
 	return f.submitCount, f.countErr
+}
+
+func (f *fakeArtifactLifecycleStore) ListUsers(_ context.Context) ([]workspace.User, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.users, nil
 }
 
 func (f *fakeArtifactLifecycleStore) RecordAccessAudit(_ context.Context, actor, action, entityKind, entityID string, details map[string]any) error {
@@ -117,13 +161,17 @@ func (c *captureArtifactOutbox) byType(eventType string) []observation.Event {
 
 // newArtifactLifecycleServer mounts the lifecycle router the way main wires
 // it: real RBAC gate (writer, reader and the kernel service identity), fake
-// store and outbox.
+// store and outbox. notify defaults to none; tests pass a capture.
 func newArtifactLifecycleServer(t *testing.T, store *fakeArtifactLifecycleStore, outbox *captureArtifactOutbox) *httptest.Server {
+	return newArtifactLifecycleServerWithNotifier(t, store, outbox, nil)
+}
+
+func newArtifactLifecycleServerWithNotifier(t *testing.T, store *fakeArtifactLifecycleStore, outbox *captureArtifactOutbox, notify ArtifactReviewNotifier) *httptest.Server {
 	t.Helper()
-	gate, err := controlplane.NewGate("readertoken:reader:reader:*\nwritertoken:writer:writer:*\ninternaltoken:kernel-internal:operator:*")
+	gate, err := controlplane.NewGate("readertoken:reader:reader:*\nwritertoken:writer:writer:*\nadmintoken:admin:admin:*\ninternaltoken:kernel-internal:operator:*")
 	require.NoError(t, err)
 	mux := http.NewServeMux()
-	RegisterArtifactLifecycleRoutes(mux, gate, store, outbox)
+	RegisterArtifactLifecycleRoutes(mux, gate, store, outbox, notify)
 	return httptest.NewServer(gate.Authenticate(mux))
 }
 
@@ -200,10 +248,13 @@ func TestArtifactDecisionRefusesKernelInternal(t *testing.T) {
 }
 
 // A human approve closes the round, moves the artifact to approved, audits
-// the decision and emits artifact.review.approved.
+// the decision and emits artifact.review.approved. The reviewer entry may be
+// a group (org:/role:/project_owner): the decision lands under the entry,
+// decided_by names the principal.
 func TestArtifactApproveClosesRound(t *testing.T) {
 	store := defaultArtifactFixture()
 	store.review = workspace.ArtifactReview{ID: "round-1", ArtifactID: "req-spec", ArtifactVersion: 2, Reviewers: []string{"writer"}, Mode: "all", Status: "open"}
+	store.users = []workspace.User{{ID: "writer", Name: "Writer", Role: "writer", Active: true}}
 	outbox := &captureArtifactOutbox{}
 	server := newArtifactLifecycleServer(t, store, outbox)
 	defer server.Close()
@@ -217,6 +268,48 @@ func TestArtifactApproveClosesRound(t *testing.T) {
 	require.Equal(t, "writer", approved[0].Data["resolved_by"])
 	require.Len(t, store.audits, 1)
 	require.Equal(t, workspace.AuditArtifactReviewApproved, store.audits[0].action)
+}
+
+// Group reviewer entries resolve through the principal's profile: a member
+// of org:core decides for that entry, and a principal matching several
+// entries (own id + unit) records the decision under each. A principal
+// matching nothing gets 409.
+func TestArtifactDecisionMatchesGroupEntries(t *testing.T) {
+	store := defaultArtifactFixture()
+	store.review = workspace.ArtifactReview{ID: "round-1", ArtifactID: "req-spec", ArtifactVersion: 2,
+		Reviewers: []string{"org:core", "role:admin", "user:stranger"}, Mode: "all", Status: "open"}
+	store.users = []workspace.User{
+		{ID: "writer", Name: "Writer", Role: "writer", OrgUnitID: "core", Active: true},
+		{ID: "admin", Name: "Admin", Role: "admin", OrgUnitID: "core", Active: true},
+	}
+	outbox := &captureArtifactOutbox{}
+	server := newArtifactLifecycleServer(t, store, outbox)
+	defer server.Close()
+
+	// The writer satisfies org:core only — one decision, the round stays open
+	// (mode=all still waits for role:admin and user:stranger).
+	status, body := artifactPost(t, server, "writertoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/approve", `{}`)
+	require.Equal(t, 200, status)
+	require.Contains(t, body, `"status":"open"`)
+	require.Contains(t, body, `"decisions":{"org:core"`)
+	require.Contains(t, body, `"decided_by":"writer"`)
+	// role:admin stays in reviewers but has no decision recorded.
+	require.NotContains(t, body, `"role:admin":{"decision"`)
+
+	// The admin satisfies org:core (member) and role:admin — the decision lands
+	// under both entries, closing the round for everything but user:stranger.
+	store.review = workspace.ArtifactReview{ID: "round-1", ArtifactID: "req-spec", ArtifactVersion: 2,
+		Reviewers: []string{"org:core", "role:admin"}, Mode: "all", Status: "open"}
+	status, body = artifactPost(t, server, "admintoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/approve", `{}`)
+	require.Equal(t, 200, status)
+	require.Contains(t, body, `"status":"approved"`)
+
+	// A principal outside the round: 409, nothing recorded.
+	store.review = workspace.ArtifactReview{ID: "round-1", ArtifactID: "req-spec", ArtifactVersion: 2,
+		Reviewers: []string{"user:stranger"}, Mode: "all", Status: "open"}
+	status, body = artifactPost(t, server, "writertoken", "/v1/workspace/artifacts/req-spec/reviews/round-1/approve", `{}`)
+	require.Equal(t, 409, status)
+	require.Contains(t, body, "not a reviewer")
 }
 
 // A reader may watch the queue but never touch it: 403 on decisions.
@@ -233,6 +326,8 @@ func TestArtifactDecisionReaderForbidden(t *testing.T) {
 // Double resolution and decisions from non-reviewers are 409 conflicts.
 func TestArtifactDoubleResolutionIs409(t *testing.T) {
 	store := defaultArtifactFixture()
+	store.review = workspace.ArtifactReview{ID: "round-1", ArtifactID: "req-spec", ArtifactVersion: 2, Reviewers: []string{"writer"}, Mode: "all", Status: "open"}
+	store.users = []workspace.User{{ID: "writer", Name: "Writer", Role: "writer", Active: true}}
 	store.resolveErr = fmt.Errorf("%w: review is already approved", workspace.ErrConflict)
 	outbox := &captureArtifactOutbox{}
 	server := newArtifactLifecycleServer(t, store, outbox)

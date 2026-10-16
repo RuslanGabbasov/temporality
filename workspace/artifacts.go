@@ -279,11 +279,13 @@ func (s *Store) ArtifactsByIDs(ctx context.Context, ids []string) ([]Artifact, e
 }
 
 // SaveArtifactEdit applies an edit respecting the lifecycle (docs/artifact-lifecycle.md
-// §5): draft/rejected rewrite in place (an edit of a rejected version reopens
-// it as draft), approved opens the next version as draft — the approved body is
-// immutable, its trail lives in artifact.read events with content_hash — and
-// in_review refuses (the version is locked while a review is open). The org
-// binding is preserved: bindings move through the admin binding endpoint only.
+// §5, §9): draft/rejected rewrite in place (an edit of a rejected version reopens
+// it as draft), in_review refuses (the version is locked while a review is
+// open), approved refuses too — the approved body is immutable, and with
+// phase-1 storage (single body column) there is no way to open a next draft
+// version without destroying the approved one, so the edit is a 409 pointing
+// at that limitation (versioned bodies arrive with phase 3). The org binding
+// is preserved either way: bindings move through the admin binding endpoint only.
 func (s *Store) SaveArtifactEdit(ctx context.Context, artifact Artifact) error {
 	artifact.normalize()
 	artifact.Status = "draft"
@@ -292,23 +294,6 @@ func (s *Store) SaveArtifactEdit(ctx context.Context, artifact Artifact) error {
 		`UPDATE workspace_artifact
 		 SET title=$2, description=$3, provider=$4, external_ref=$5, content=$6, content_hash=$7, size_bytes=$8, mime_type=$9, kind=$10, saga_id=$11, status='draft', updated_at=$12
 		 WHERE id=$1 AND status IN ('draft','rejected')`,
-		artifact.ID, artifact.Title, artifact.Description, artifact.Provider, artifact.ExternalRef,
-		artifact.Content, artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
-		artifact.Kind, nullString(artifact.SagaID), artifact.UpdatedAt)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() > 0 {
-		return nil
-	}
-	// Editing an approved version opens the next one as a draft: same id, the
-	// version pointer advances. With phase-1 storage (single body column) the
-	// previous body is gone from the table — its hash trail in artifact.read
-	// events keeps decisions reproducible; full snapshots are phase 3.
-	tag, err = s.pool.Exec(ctx,
-		`UPDATE workspace_artifact
-		 SET title=$2, description=$3, provider=$4, external_ref=$5, content=$6, content_hash=$7, size_bytes=$8, mime_type=$9, kind=$10, saga_id=$11, status='draft', version=version+1, updated_at=$12
-		 WHERE id=$1 AND status='approved'`,
 		artifact.ID, artifact.Title, artifact.Description, artifact.Provider, artifact.ExternalRef,
 		artifact.Content, artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
 		artifact.Kind, nullString(artifact.SagaID), artifact.UpdatedAt)
@@ -331,7 +316,14 @@ func (s *Store) artifactEditConflict(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	return fmt.Errorf("%w: artifact is %s (locked while a review is open)", ErrArtifactLocked, status)
+	switch status {
+	case ArtifactApproved:
+		return fmt.Errorf("%w: artifact is approved — the approved body is immutable; a new version path arrives with versioned storage (docs/artifact-lifecycle.md §9)", ErrArtifactLocked)
+	case ArtifactInReview:
+		return fmt.Errorf("%w: artifact is in_review — the version is locked while a review is open", ErrArtifactLocked)
+	default:
+		return fmt.Errorf("%w: artifact is %s", ErrArtifactLocked, status)
+	}
 }
 
 func (s *Store) DeleteArtifact(ctx context.Context, id string) error {

@@ -39,7 +39,20 @@ type cachedArtifact struct {
 func (a *Activities) handleArtifactSearch(ctx context.Context, request ToolRequest) (ToolResult, error) {
 	// Artifacts are workspace-global; the list endpoint ships metadata rows
 	// without bodies, so the search payload stays small at any registry size.
+	// Lifecycle filters (docs/artifact-lifecycle.md §7) pass through: status=
+	// and kind= narrow before matching, e.g. status=approved for established
+	// documents, kind=work for saga work products.
+	params := url.Values{}
+	if v, _ := request.Arguments["status"].(string); strings.TrimSpace(v) != "" {
+		params.Set("status", strings.TrimSpace(v))
+	}
+	if v, _ := request.Arguments["kind"].(string); strings.TrimSpace(v) != "" {
+		params.Set("kind", strings.TrimSpace(v))
+	}
 	endpoint := fmt.Sprintf("%s/v1/workspace/artifacts", a.WorkspaceURL)
+	if len(params) > 0 {
+		endpoint += "?" + params.Encode()
+	}
 	body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
@@ -61,6 +74,7 @@ func (a *Activities) handleArtifactSearch(ctx context.Context, request ToolReque
 			Status      string `json:"status"`
 			Kind        string `json:"kind"`
 			Version     int    `json:"version"`
+			OriginType  string `json:"origin_type"`
 		} `json:"artifacts"`
 	}
 	if err := json.Unmarshal([]byte(body), &page); err != nil {
@@ -87,6 +101,7 @@ func (a *Activities) handleArtifactSearch(ctx context.Context, request ToolReque
 				"id": artifact.ID, "title": artifact.Title, "description": artifact.Description,
 				"provider": artifact.Provider, "size_bytes": artifact.SizeBytes,
 				"status": artifact.Status, "kind": artifact.Kind, "version": artifact.Version,
+				"origin_type": artifact.OriginType,
 			}, score: score})
 		}
 	}

@@ -480,7 +480,7 @@ export interface ArtifactReview {
   note?: string
   requested_by: string
   requested_at: string
-  decisions?: Record<string, { decision: 'approve' | 'reject'; comment?: string; at: string }>
+  decisions?: Record<string, { decision: 'approve' | 'reject'; comment?: string; at: string; decided_by?: string }>
   resolved_by?: string
   resolved_at?: string
 }

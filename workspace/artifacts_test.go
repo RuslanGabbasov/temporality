@@ -79,6 +79,41 @@ func TestValidateArtifactReviewers(t *testing.T) {
 	require.NoError(t, ValidateArtifactReviewers([]string{"org:platform", "role:lead", "project_owner", "writer"}))
 }
 
+// MatchArtifactReviewers is the decision-side half of the ask_human recipient
+// syntax: entries are satisfied by the principal's profile, group entries by
+// any member, and an account without an active row satisfies nothing.
+func TestMatchArtifactReviewers(t *testing.T) {
+	users := []User{
+		{ID: "writer", Name: "Olga", Role: "writer", OrgUnitID: "core", Active: true},
+		{ID: "admin", Name: "Ruslan", Role: "admin", OrgUnitID: "core", Active: true},
+		{ID: "ghost", Name: "Ghost", Role: "writer", Active: false},
+	}
+	entries := []string{"user:writer", "writer", "Olga", "org:core", "role:admin", "project_owner", "user:admin"}
+
+	matched := MatchArtifactReviewers("writer", users, entries)
+	require.Contains(t, matched, "user:writer")
+	require.Contains(t, matched, "writer")
+	require.Contains(t, matched, "Olga")
+	require.Contains(t, matched, "org:core")
+	require.NotContains(t, matched, "role:admin")
+	require.NotContains(t, matched, "project_owner")
+
+	matched = MatchArtifactReviewers("admin", users, entries)
+	require.Contains(t, matched, "org:core")
+	require.Contains(t, matched, "role:admin")
+	require.Contains(t, matched, "project_owner")
+	require.Contains(t, matched, "user:admin")
+
+	// Name-based principal resolution: the token subject may be the login name.
+	matched = MatchArtifactReviewers("Ruslan", users, entries)
+	require.Contains(t, matched, "role:admin")
+
+	require.Empty(t, MatchArtifactReviewers("nobody", users, entries))
+	// Deactivated accounts never decide.
+	require.Empty(t, MatchArtifactReviewers("ghost", users, []string{"user:ghost", "role:writer"}))
+	require.Empty(t, MatchArtifactReviewers("writer", []User{{ID: "writer"}}, entries))
+}
+
 // CheckArtifactRefsApproved names the offending manifest references: drafts
 // and missing rows both block the skill write with a 422.
 func TestCheckArtifactRefsApproved(t *testing.T) {

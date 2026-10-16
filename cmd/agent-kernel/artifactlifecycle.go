@@ -36,9 +36,11 @@ import (
 type artifactLifecycleStore interface {
 	GetArtifactRange(ctx context.Context, id string, offset, limit int) (workspace.Artifact, error)
 	SubmitArtifactReview(ctx context.Context, artifactID string, reviewers []string, mode, note, requestedBy string) (workspace.ArtifactReview, error)
-	ResolveArtifactReview(ctx context.Context, reviewID, reviewer string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error)
+	GetArtifactReview(ctx context.Context, reviewID string) (workspace.ArtifactReview, error)
+	ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error)
 	ListArtifactReviews(ctx context.Context, artifactID string) ([]workspace.ArtifactReview, error)
 	CountArtifactSubmits(ctx context.Context, runID string, since time.Time) (int, error)
+	ListUsers(ctx context.Context) ([]workspace.User, error)
 	RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error
 }
 
@@ -95,9 +97,17 @@ func emitArtifactLifecycleEvent(ctx context.Context, events artifactLifecycleOut
 	}
 }
 
+// ArtifactReviewNotifier fans a review request out to its reviewers'
+// channels (docs/artifact-lifecycle.md §6 Phase 1): plain text with a link,
+// best-effort — the review row stays the source of truth, the decision lands
+// in the UI. nil disables notifications without touching the routes.
+type ArtifactReviewNotifier interface {
+	NotifyArtifactReviewRequested(ctx context.Context, artifact workspace.Artifact, review workspace.ArtifactReview)
+}
+
 // RegisterArtifactLifecycleRoutes mounts submit/review endpoints. Create and
 // edit stay in main.go; this router owns everything past the draft state.
-func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws artifactLifecycleStore, events artifactLifecycleOutbox) {
+func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws artifactLifecycleStore, events artifactLifecycleOutbox, notify ArtifactReviewNotifier) {
 	// Open a review round for the artifact's current version. 202 + the round:
 	// the decision arrives later, through approve/reject below. Idempotent per
 	// open round — a retried submit returns the same row without a second one.
@@ -154,6 +164,16 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			"artifact_id": artifactID, "title": artifact.Title, "version": artifact.Version,
 			"review_id": review.ID, "reviewers": review.Reviewers, "mode": review.Mode, "note": review.Note, "requested_by": requestedBy,
 		})
+		// Phase-1 reviewer notification (§6): each expanded reviewer gets a
+		// text notice in their channel. Best-effort and off the request path —
+		// a slow transport must not hold the 202.
+		if notify != nil {
+			notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
+			go func() {
+				defer cancel()
+				notify.NotifyArtifactReviewRequested(notifyCtx, artifact, review)
+			}()
+		}
 		writeJSON(w, 202, review)
 	})
 
@@ -191,7 +211,32 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 					return
 				}
 			}
-			review, artifact, err := ws.ResolveArtifactReview(r.Context(), r.PathValue("reviewID"), requestUserID(r), approve, strings.TrimSpace(req.Comment))
+			principal := requestUserID(r)
+			// Reviewer matching (docs/artifact-lifecycle.md §6): the round stores
+			// ask_human-syntax entries, and the deciding principal may satisfy
+			// several at once (their own id and their unit) — the decision lands
+			// under each matched entry. Without an active workspace profile or a
+			// matching entry this is not their round: 409, same as before.
+			users, err := ws.ListUsers(r.Context())
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			review, err := ws.GetArtifactReview(r.Context(), r.PathValue("reviewID"))
+			if err != nil {
+				if errors.Is(err, workspace.ErrNotFound) {
+					writeError(w, 404, err)
+					return
+				}
+				writeError(w, 500, err)
+				return
+			}
+			entries := workspace.MatchArtifactReviewers(principal, users, review.Reviewers)
+			if len(entries) == 0 {
+				writeError(w, 409, fmt.Errorf("%q is not a reviewer of this round", principal))
+				return
+			}
+			review, artifact, err := ws.ResolveArtifactReview(r.Context(), r.PathValue("reviewID"), entries, principal, approve, strings.TrimSpace(req.Comment))
 			if err != nil {
 				writeError(w, artifactReviewErrorStatus(err), err)
 				return
@@ -202,12 +247,12 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			if approve {
 				decision, eventType, auditAction = "approve", "artifact.review.approved", workspace.AuditArtifactReviewApproved
 			}
-			_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), auditAction, "artifact", review.ArtifactID, map[string]any{
+			_ = ws.RecordAccessAudit(r.Context(), principal, auditAction, "artifact", review.ArtifactID, map[string]any{
 				"review_id": review.ID, "decision": decision, "version": review.ArtifactVersion, "comment": req.Comment,
 			})
 			emitArtifactLifecycleEvent(r.Context(), events, eventType, review.ArtifactID, map[string]any{
 				"artifact_id": review.ArtifactID, "title": artifact.Title, "version": review.ArtifactVersion,
-				"review_id": review.ID, "decision": decision, "resolved_by": requestUserID(r), "comment": req.Comment,
+				"review_id": review.ID, "decision": decision, "resolved_by": principal, "comment": req.Comment,
 			})
 			writeJSON(w, 200, map[string]any{"review": review, "artifact": artifact})
 		}

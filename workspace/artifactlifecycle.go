@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -47,11 +48,14 @@ type ArtifactReview struct {
 	ResolvedAt      *time.Time                `json:"resolved_at,omitempty"`
 }
 
-// ReviewDecision is one reviewer's answer inside a review round.
+// ReviewDecision is one reviewer's answer inside a review round. Group
+// entries (org:/role:/project_owner) may be satisfied by any member: the
+// decision is keyed by the entry, DecidedBy names the concrete principal.
 type ReviewDecision struct {
-	Decision string    `json:"decision"` // approve | reject
-	Comment  string    `json:"comment,omitempty"`
-	At       time.Time `json:"at"`
+	Decision  string    `json:"decision"` // approve | reject
+	Comment   string    `json:"comment,omitempty"`
+	At        time.Time `json:"at"`
+	DecidedBy string    `json:"decided_by,omitempty"` // concrete principal behind a group entry
 }
 
 const artifactReviewColumns = `id, artifact_id, artifact_version, reviewers, mode, status, note, requested_by, requested_at, decisions, resolved_by, resolved_at`
@@ -158,9 +162,19 @@ func (s *Store) SubmitArtifactReview(ctx context.Context, artifactID string, rev
 
 // ResolveArtifactReview records one reviewer's decision and closes the round
 // by its mode: any — the first answer decides; all — a reject closes
-// immediately, an approve closes when every reviewer has approved. Closing
-// moves the artifact to approved/rejected. Double resolution is a conflict.
-func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID, reviewer string, approve bool, comment string) (ArtifactReview, Artifact, error) {
+// immediately, an approve closes when every reviewer entry has approved.
+// Closing moves the artifact to approved/rejected. Double resolution is a
+// conflict.
+//
+// entries are the reviewer entries the deciding principal satisfies (see
+// MatchArtifactReviewers): a group entry (org:core) is decided by any of its
+// members, and one principal may satisfy several entries at once — the
+// decision then lands under each of them. decidedBy is the concrete
+// principal, kept on every decision and in resolved_by.
+func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (ArtifactReview, Artifact, error) {
+	if len(entries) == 0 {
+		return ArtifactReview{}, Artifact{}, fmt.Errorf("%w: %q is not a reviewer of this round", ErrConflict, decidedBy)
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return ArtifactReview{}, Artifact{}, err
@@ -174,15 +188,19 @@ func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID, reviewer st
 	if review.Status != "open" {
 		return ArtifactReview{}, Artifact{}, fmt.Errorf("%w: review is already %s", ErrConflict, review.Status)
 	}
-	listed := false
-	for _, who := range review.Reviewers {
-		if who == reviewer {
-			listed = true
-			break
+	// Every entry must be listed on the round — the handler matched the
+	// principal against the round's reviewer entries, not free-form strings.
+	for _, entry := range entries {
+		listed := false
+		for _, who := range review.Reviewers {
+			if who == entry {
+				listed = true
+				break
+			}
 		}
-	}
-	if !listed {
-		return ArtifactReview{}, Artifact{}, fmt.Errorf("%w: %q is not a reviewer of this round", ErrConflict, reviewer)
+		if !listed {
+			return ArtifactReview{}, Artifact{}, fmt.Errorf("%w: %q is not a reviewer of this round", ErrConflict, entry)
+		}
 	}
 	if review.Decisions == nil {
 		review.Decisions = map[string]ReviewDecision{}
@@ -191,7 +209,9 @@ func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID, reviewer st
 	if approve {
 		decision = "approve"
 	}
-	review.Decisions[reviewer] = ReviewDecision{Decision: decision, Comment: comment, At: time.Now().UTC()}
+	for _, entry := range entries {
+		review.Decisions[entry] = ReviewDecision{Decision: decision, Comment: comment, At: time.Now().UTC(), DecidedBy: decidedBy}
+	}
 
 	closes, closedStatus := false, ""
 	if !approve {
@@ -215,11 +235,11 @@ func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID, reviewer st
 	if closes {
 		now := time.Now().UTC()
 		review.Status = closedStatus
-		review.ResolvedBy = reviewer
+		review.ResolvedBy = decidedBy
 		review.ResolvedAt = &now
 		if _, err := tx.Exec(ctx,
 			`UPDATE workspace_artifact_review SET decisions = $2, status = $3, resolved_by = $4, resolved_at = $5 WHERE id = $1`,
-			review.ID, encoded, review.Status, reviewer, now); err != nil {
+			review.ID, encoded, review.Status, decidedBy, now); err != nil {
 			return ArtifactReview{}, Artifact{}, err
 		}
 		if _, err := tx.Exec(ctx,
@@ -238,6 +258,56 @@ func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID, reviewer st
 		return review, artifact, err
 	}
 	return review, artifact, nil
+}
+
+// GetArtifactReview loads one review round: the decision handler matches the
+// principal against the round's entries before resolving.
+func (s *Store) GetArtifactReview(ctx context.Context, reviewID string) (ArtifactReview, error) {
+	return scanArtifactReview(s.pool.QueryRow(ctx,
+		`SELECT `+artifactReviewColumns+` FROM workspace_artifact_review WHERE id = $1`, reviewID))
+}
+
+// MatchArtifactReviewers returns the reviewer entries the principal
+// satisfies (docs/artifact-lifecycle.md §6 — the ask_human recipient syntax):
+// user:<id> and bare ids/names match the principal directly, role:/org:
+// match the principal's workspace profile, project_owner degrades to the
+// installation admin (docs/org-structure.md §14 — projects carry no owner
+// yet). An account without an active workspace row satisfies nothing:
+// deactivated reviewers must not decide.
+func MatchArtifactReviewers(principal string, users []User, entries []string) []string {
+	var self *User
+	for i := range users {
+		if users[i].ID == principal || users[i].Name == principal {
+			self = &users[i]
+			break
+		}
+	}
+	if self == nil || !self.Active {
+		return nil
+	}
+	var matched []string
+	for _, entry := range entries {
+		switch {
+		case entry == "project_owner":
+			if self.Role == "admin" {
+				matched = append(matched, entry)
+			}
+		case strings.HasPrefix(entry, "role:"):
+			if self.Role == strings.TrimSpace(strings.TrimPrefix(entry, "role:")) {
+				matched = append(matched, entry)
+			}
+		case strings.HasPrefix(entry, "org:"):
+			if self.OrgUnitID == strings.TrimSpace(strings.TrimPrefix(entry, "org:")) {
+				matched = append(matched, entry)
+			}
+		default:
+			name := strings.TrimSpace(strings.TrimPrefix(entry, "user:"))
+			if name != "" && (name == self.ID || name == self.Name) {
+				matched = append(matched, entry)
+			}
+		}
+	}
+	return matched
 }
 
 // CountArtifactSubmits returns how many review rounds one run opened in the

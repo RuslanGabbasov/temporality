@@ -163,7 +163,9 @@ export default function Skills() {
         const [toolsData, serversData, artifactsData] = await Promise.all([
           workspaceApi.listMCPTools(),
           workspaceApi.listMCPServers(),
-          workspaceApi.listArtifacts().catch(() => ({ artifacts: [] as never[] })),
+          // Skills may reference approved artifacts only (docs/artifact-lifecycle.md
+          // §8), so the manifest picker never suggests drafts or reviews.
+          workspaceApi.listArtifacts({ status: 'approved' }).catch(() => ({ artifacts: [] as never[] })),
         ])
         if (cancelled) return
         const tools = new Set<string>()

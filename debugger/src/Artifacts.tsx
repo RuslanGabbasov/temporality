@@ -328,7 +328,10 @@ export default function Artifacts() {
                         {t('artifacts.submit_review') ?? 'Send to review'}
                       </Button>
                     )}
-                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription="Edit" onClick={() => void startEdit(a)} />
+                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'}
+                      disabled={a.status === 'approved' || a.status === 'in_review'}
+                      title={a.status === 'approved' ? (t('artifacts.edit_locked_approved') ?? 'The approved body is immutable') : a.status === 'in_review' ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
+                      onClick={() => void startEdit(a)} />
                     <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(a)} />
                   </Stack>
                 </div>
@@ -488,7 +491,7 @@ export default function Artifacts() {
                 {r.note && <p style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>{r.note}</p>}
                 {Object.entries(r.decisions ?? {}).map(([who, d]) => (
                   <p key={who} style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
-                    <strong>{who}</strong>: {d.decision}{d.comment ? ` — ${d.comment}` : ''} ({fmtTime(d.at)})
+                    <strong>{who}{d.decided_by && d.decided_by !== who ? ` (${d.decided_by})` : ''}</strong>: {d.decision}{d.comment ? ` — ${d.comment}` : ''} ({fmtTime(d.at)})
                   </p>
                 ))}
               </Tile>

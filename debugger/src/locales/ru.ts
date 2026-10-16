@@ -687,7 +687,7 @@ export const ru: Record<string, string> = {
     'skills.editor.condition_placeholder': 'Опишите условие',
     'skills.editor.evidence': 'Обязательные подтверждения',
     'skills.editor.evaluation': 'Набор проверок',
-    'skills.editor.artifacts': 'Справочные артефакты',
+    'skills.editor.artifacts': 'Артефакты',
     'skills.editor.artifacts_hint': 'Документы, на которые навык ссылается без включения в промпт: агент подгружает их через artifact_read при совпадении задачи.',
     'skills.editor.add_artifact': 'Привязать артефакт',
     'skills.editor.artifact_note_placeholder': 'Когда этот документ важен',
@@ -799,9 +799,11 @@ export const ru: Record<string, string> = {
     'mcp.clear_all': 'Снять выбор',
 
     // Reference artifacts (docs/artifact-registry.md)
-    'artifacts.title': 'Справочные артефакты',
+    'artifacts.title': 'Артефакты',
     'artifacts.new': 'Новый артефакт',
     'artifacts.edit': 'Редактирование артефакта',
+    'artifacts.edit_locked_approved': 'Утверждённое тело неизменяемо',
+    'artifacts.edit_locked_review': 'Пока идёт согласование, версия заблокирована',
     'artifacts.delete_confirm': 'Удалить артефакт «{{name}}»? Навыки, ссылающиеся на него, потеряют документ.',
     'artifacts.empty': 'Пока нет справочных артефактов',
     'artifacts.empty_hint': 'Здесь живут регламенты, утверждённые инструкции и чек-листы. Навыки ссылаются на них из манифеста; агент подгружает тело по требованию вместо постоянного присутствия в промпте.',
