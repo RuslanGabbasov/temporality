@@ -161,6 +161,15 @@ export const en: Record<string, string> = {
     'sandbox.storage_top': 'Largest files',
     'sandbox.storage_truncated': 'The walk did not finish — numbers are partial',
     'sandbox.storage_no_project': 'Pick a project to browse its files.',
+    'sandbox.files_pick': 'Pick a file on the left — its preview and actions appear here.',
+    'sandbox.files_download': 'Download',
+    'sandbox.files_upload': 'Upload',
+    'sandbox.files_delete_title': 'Delete {{name}}?',
+    'sandbox.files_delete_body': 'The file or folder is deleted permanently. Deleting the whole workspace area from the browser is not allowed — that is the sweeper\'s job.',
+    'sandbox.files_binary': 'Binary file — download it to view.',
+    'sandbox.files_dir': 'folder',
+    'sandbox.files_items': 'items',
+    'sandbox.files_empty': 'Empty.',
 
     // Common actions
     'action.create': 'Create',

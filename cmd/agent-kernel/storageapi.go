@@ -20,6 +20,7 @@ import (
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/storage"
 	"github.com/temporality-project/temporality/observation"
+	"github.com/temporality-project/temporality/workspace"
 )
 
 // storageCacheTTL bounds how long a snapshot serves before the next GET
@@ -147,7 +148,7 @@ type storageHealthView struct {
 // health API. visibleProjects resolves the caller's project visibility (the
 // same ladder as the runs list); an empty root means the kernel runs without
 // a sandbox root and the storage routes answer 503.
-func RegisterStorageRoutes(mux *http.ServeMux, gate *controlplane.Gate, visibleProjects func(*http.Request) (map[string][]string, error), root, dockerBinary string, cache *storageSnapshotCache) {
+func RegisterStorageRoutes(mux *http.ServeMux, gate *controlplane.Gate, visibleProjects func(*http.Request) (map[string][]string, error), root, dockerBinary string, cache *storageSnapshotCache, ws *workspace.Store) {
 	mux.HandleFunc("GET /v1/workspace/storage", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -238,6 +239,8 @@ func RegisterStorageRoutes(mux *http.ServeMux, gate *controlplane.Gate, visibleP
 		}
 		writeJSON(w, 200, view)
 	})
+
+	registerStorageFileRoutes(mux, gate, visibleProjects, root, ws)
 
 	mux.HandleFunc("GET /v1/system/health", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {

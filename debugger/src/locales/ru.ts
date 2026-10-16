@@ -161,6 +161,15 @@ export const ru: Record<string, string> = {
     'sandbox.storage_top': 'Крупнейшие файлы',
     'sandbox.storage_truncated': 'Обход не завершился — цифры частичные',
     'sandbox.storage_no_project': 'Выберите проект, чтобы посмотреть его файлы.',
+    'sandbox.files_pick': 'Выберите файл слева — здесь будут предпросмотр и действия.',
+    'sandbox.files_download': 'Скачать',
+    'sandbox.files_upload': 'Загрузить',
+    'sandbox.files_delete_title': 'Удалить {{name}}?',
+    'sandbox.files_delete_body': 'Файл или папка будут удалены безвозвратно. Удаление всего воркспейса из браузера запрещено — это работа чистильщика.',
+    'sandbox.files_binary': 'Бинарный файл — скачайте, чтобы посмотреть.',
+    'sandbox.files_dir': 'папка',
+    'sandbox.files_items': 'элементов',
+    'sandbox.files_empty': 'Пусто.',
 
     // Common actions
     'action.create': 'Создать',

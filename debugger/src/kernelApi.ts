@@ -459,6 +459,66 @@ export function storageProjectTree(project: string, depth?: number): Promise<Sto
   return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}${suffix}`)
 }
 
+// File-level browser over one project's persistent areas (workspace/cache).
+export interface StorageFileEntry {
+  name: string
+  path: string
+  dir: boolean
+  bytes: number
+  mod_at?: string
+  entries?: number
+}
+
+function storageFileQuery(project: string, area: string, path: string): string {
+  return `/v1/workspace/storage/projects/${encodeURIComponent(project)}` +
+    `?area=${encodeURIComponent(area)}&path=${encodeURIComponent(path)}`
+}
+
+export function storageListDir(project: string, area: 'workspace' | 'cache', path: string): Promise<{ entries: StorageFileEntry[] }> {
+  return request(`/v1/workspace/storage/projects/${encodeURIComponent(project)}/dir?area=${encodeURIComponent(area)}&path=${encodeURIComponent(path)}`)
+}
+
+/** Raw file content for inline preview (text) and object URLs (images). */
+export async function storageFileContent(project: string, area: 'workspace' | 'cache', path: string): Promise<Response> {
+  const response = await fetch(`${KERNEL_API}${storageFileQuery(project, area, path)}`, { headers: authHeaders() })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response
+}
+
+/** Direct content URL is not usable for <img>/<a> with header auth — callers
+ *  fetch via storageFileContent and object URLs; download goes through
+ *  storageDownloadFile so auth headers ride along. */
+export function storageFileURL(project: string, area: 'workspace' | 'cache', path: string, download = false): string {
+  return `${KERNEL_API}${storageFileQuery(project, area, path)}${download ? '&download=1' : ''}`
+}
+
+/** Download via fetch so auth headers ride along, then hand the blob to the
+ *  browser's save dialog. */
+export async function storageDownloadFile(project: string, area: 'workspace' | 'cache', path: string): Promise<void> {
+  const response = await storageFileContent(project, area, path)
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = path.split('/').pop() || 'file'
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+export function storageDeleteFile(project: string, area: 'workspace' | 'cache', path: string): Promise<{ deleted: string }> {
+  return request(storageFileQuery(project, area, path), { method: 'DELETE' })
+}
+
+export async function storageUploadFile(project: string, area: 'workspace' | 'cache', path: string, data: Blob | ArrayBuffer, overwrite = false): Promise<{ path: string }> {
+  const response = await fetch(`${KERNEL_API}/v1/workspace/storage/projects/${encodeURIComponent(project)}/files?area=${encodeURIComponent(area)}&path=${encodeURIComponent(path)}${overwrite ? '&overwrite=1' : ''}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream', ...authHeaders() },
+    body: data,
+  })
+  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text().catch(() => response.statusText)}`)
+  return response.json()
+}
+
 export interface SandboxContainerInfo {
   name: string
   image: string

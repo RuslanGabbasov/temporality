@@ -2593,7 +2593,7 @@ func main() {
 	storageSnapshots := &storageSnapshotCache{}
 	RegisterStorageRoutes(mux, gate, func(r *http.Request) (map[string][]string, error) {
 		return overviewVisibleProjects(r, ws)
-	}, storageRoot, sandboxDockerBinary(), storageSnapshots)
+	}, storageRoot, sandboxDockerBinary(), storageSnapshots, ws)
 	// agentskills.io import: folder or archive → parsed SKILL.md draft for the
 	// skill editor. Pure parse, no persistence — saving follows the normal flow.
 	RegisterSkillImportRoutes(mux, gate)

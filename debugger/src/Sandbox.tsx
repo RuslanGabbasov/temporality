@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef, type ChangeEvent, type ReactNode } from 'react'
 import {
   Button,
   TextInput,
@@ -10,9 +10,16 @@ import {
   Heading,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, TrashCan, Renew, Edit } from '@carbon/icons-react'
+import { Add, TrashCan, Renew, Edit, Download, Upload } from '@carbon/icons-react'
 import { workspaceApi, type SandboxProfile } from './workspaceApi'
-import { storageProjectTree, type StorageProjectTree, type StorageTreeNode, type StorageTopPath } from './kernelApi'
+import {
+  storageListDir,
+  storageFileContent,
+  storageDownloadFile,
+  storageDeleteFile,
+  storageUploadFile,
+  type StorageFileEntry,
+} from './kernelApi'
 import { fmtBytes } from './format'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
@@ -228,118 +235,267 @@ export default function Sandbox({ project }: { project?: string }) {
   )
 }
 
-/** Persistent sandbox filesystem browser (docs/sandbox-storage.md §7.1):
- *  the per-project workspace/cache tree the agents actually work in, with
- *  sizes, expandable folders and the largest files. Read-only — the sweepers
- *  own cleanup. */
+// ── Persistent storage browser (docs/sandbox-storage.md §7.1) ────────────────
+// Finder-style two-pane browser over a project's persistent sandbox areas:
+// left — a lazy-loaded tree (workspace + cache as independent roots), right —
+// the selected entry with preview (text/image), download, upload and delete.
+// Read actions need reader rights; mutations are writer-gated server-side and
+// confirmed here.
+
+type AreaName = 'workspace' | 'cache'
+
+const TEXT_EXT = /\.(md|txt|log|json|ya?ml|toml|go|ts|tsx|js|py|sh|sql|css|html|csv|env|conf|ini|xml|svg)$/i
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg)$/i
+
 function StorageBrowser({ project }: { project: string }) {
   const t = useT()
-  const [tree, setTree] = useState<StorageProjectTree | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
+  const [areas, setAreas] = useState<Record<AreaName, StorageFileEntry[] | null>>({ workspace: null, cache: null })
+  const [loaded, setLoaded] = useState<Record<AreaName, boolean>>({ workspace: false, cache: false })
+  const [children, setChildren] = useState<Record<string, StorageFileEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [loadingDir, setLoadingDir] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const [selected, setSelected] = useState<{ area: AreaName; entry: StorageFileEntry } | null>(null)
+  const [preview, setPreview] = useState<{ kind: 'text' | 'image'; content: string } | null>(null)
+  const [previewError, setPreviewError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const uploadTarget = useRef<{ area: AreaName; dir: string }>({ area: 'workspace', dir: '' })
+  const uploadInput = useRef<HTMLInputElement | null>(null)
+
+  const key = (area: AreaName, path: string) => `${area}:${path}`
 
   const load = useCallback(async () => {
     if (!project.trim()) return
-    setLoading(true)
     setError('')
     try {
-      setTree(await storageProjectTree(project.trim(), 4))
+      const [ws, cache] = await Promise.all([
+        storageListDir(project.trim(), 'workspace', ''),
+        storageListDir(project.trim(), 'cache', ''),
+      ])
+      setAreas({ workspace: ws.entries, cache: cache.entries })
+      setLoaded({ workspace: true, cache: true })
+      setChildren({})
       setExpanded(new Set())
-    } catch (f) { setError(message(f)) }
-    finally { setLoading(false) }
+      setSelected(null)
+      setPreview(null)
+    } catch (f) { setError(f instanceof Error ? f.message : 'Request failed') }
   }, [project])
 
   useEffect(() => { void load() }, [load])
 
-  const toggle = (path: string) => {
+  const loadChildren = async (area: AreaName, dirPath: string) => {
+    const k = key(area, dirPath)
+    setLoadingDir(k)
+    setError('')
+    try {
+      const page = await storageListDir(project.trim(), area, dirPath)
+      setChildren((current) => ({ ...current, [k]: page.entries }))
+    } catch (f) { setError(f instanceof Error ? f.message : 'Request failed') }
+    finally { setLoadingDir(null) }
+  }
+
+  const toggleDir = (area: AreaName, entry: StorageFileEntry) => {
+    const k = key(area, entry.path)
     setExpanded((current) => {
       const next = new Set(current)
-      if (next.has(path)) next.delete(path)
-      else next.add(path)
+      if (next.has(k)) next.delete(k)
+      else {
+        next.add(k)
+        if (!children[k]) void loadChildren(area, entry.path)
+      }
       return next
     })
   }
 
-  const renderNode = (node: StorageTreeNode, depth: number) => {
-    const hasChildren = (node.children ?? []).length > 0
-    const open = expanded.has(node.path)
+  const openFile = async (area: AreaName, entry: StorageFileEntry) => {
+    setSelected({ area, entry })
+    setPreview(null)
+    setPreviewError('')
+    if (entry.bytes > 2 << 20) return // 2 MiB preview cap — download instead
+    try {
+      const response = await storageFileContent(project.trim(), area, entry.path)
+      if (IMAGE_EXT.test(entry.name)) {
+        const blob = await response.blob()
+        setPreview({ kind: 'image', content: URL.createObjectURL(blob) })
+      } else if (TEXT_EXT.test(entry.name) || entry.bytes < 256 << 10) {
+        const text = await response.text()
+        // Binary payload smuggled as text shows garbage — a NUL byte in the
+        // first chunk is the cheap detector.
+        if (text.slice(0, 2048).includes('\u0000')) setPreviewError(t('sandbox.files_binary') ?? 'Binary file — download to view.')
+        else setPreview({ kind: 'text', content: text.length > 256 << 10 ? text.slice(0, 256 << 10) : text })
+      } else {
+        setPreviewError(t('sandbox.files_binary') ?? 'Binary file — download to view.')
+      }
+    } catch (f) { setPreviewError(f instanceof Error ? f.message : 'Request failed') }
+  }
+
+  const download = async (area: AreaName, entry: StorageFileEntry) => {
+    try { await storageDownloadFile(project.trim(), area, entry.path) } catch (f) { setError(f instanceof Error ? f.message : 'Request failed') }
+  }
+
+  const remove = async (area: AreaName, entry: StorageFileEntry) => {
+    const ok = await confirmDialog({
+      title: t('sandbox.files_delete_title', { name: entry.name }),
+      body: t('sandbox.files_delete_body'),
+      danger: true,
+    })
+    if (!ok) return
+    setBusy(true); setError('')
+    try {
+      await storageDeleteFile(project.trim(), area, entry.path)
+      // Refresh the parent listing (or the area root when deleting there).
+      const parentPath = entry.path.includes('/') ? entry.path.slice(0, entry.path.lastIndexOf('/')) : ''
+      if (parentPath === '') await load()
+      else await loadChildren(area, parentPath)
+      setSelected(null); setPreview(null)
+    } catch (f) { setError(f instanceof Error ? f.message : 'Request failed') }
+    finally { setBusy(false) }
+  }
+
+  const startUpload = (area: AreaName, dirPath: string) => {
+    uploadTarget.current = { area, dir: dirPath }
+    uploadInput.current?.click()
+  }
+
+  const onUploadPicked = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files
+    const target = uploadTarget.current
+    event.target.value = ''
+    if (!files || files.length === 0) return
+    setBusy(true); setError('')
+    try {
+      for (const file of Array.from(files)) {
+        const path = target.dir ? `${target.dir}/${file.name}` : file.name
+        await storageUploadFile(project.trim(), target.area, path, file)
+      }
+      if (target.dir) await loadChildren(target.area, target.dir)
+      else await load()
+    } catch (f) { setError(f instanceof Error ? f.message : 'Request failed') }
+    finally { setBusy(false) }
+  }
+
+  const row = (area: AreaName, entry: StorageFileEntry, depth: number): ReactNode => {
+    const k = key(area, entry.path)
+    const open = expanded.has(k)
+    const selectedHere = selected?.area === area && selected.entry.path === entry.path
     return (
-      <div key={node.path || node.name} style={{ paddingLeft: depth > 0 ? '1rem' : 0 }}>
+      <div key={k}>
         <div
-          role={hasChildren ? 'button' : undefined}
-          tabIndex={hasChildren ? 0 : undefined}
-          onClick={() => hasChildren && toggle(node.path)}
-          onKeyDown={(e) => { if (hasChildren && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(node.path) } }}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.15rem 0.2rem', cursor: hasChildren ? 'pointer' : 'default', borderRadius: '4px', fontSize: '0.78rem' }}
+          role="button" tabIndex={0}
+          onClick={() => (entry.dir ? toggleDir(area, entry) : void openFile(area, entry))}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); entry.dir ? toggleDir(area, entry) : void openFile(area, entry) } }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.16rem 0.3rem', cursor: 'pointer', borderRadius: '4px',
+            fontSize: '0.78rem', paddingLeft: `${0.3 + depth * 0.9}rem`,
+            background: selectedHere ? 'var(--tm-elevated)' : 'transparent',
+          }}
         >
-          <span style={{ width: '0.9rem', color: 'var(--tm-text-3)', flexShrink: 0 }}>{hasChildren ? (open ? '▾' : '▸') : ''}</span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}/</span>
-          {node.mod_at && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', flexShrink: 0 }} title={new Date(node.mod_at).toLocaleString()}>{new Date(node.mod_at).toLocaleDateString()}</span>}
-          <span style={{ marginLeft: 'auto', color: 'var(--tm-text-3)', fontSize: '0.7rem', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtBytes(node.bytes)} · {node.files.toLocaleString()} 📄</span>
+          <span style={{ width: '0.8rem', color: 'var(--tm-text-3)', flexShrink: 0, fontSize: '0.66rem' }}>
+            {entry.dir ? (loadingDir === k ? '…' : open ? '▾' : '▸') : ''}
+          </span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{entry.name}</span>
+          <span style={{ color: 'var(--tm-text-3)', fontSize: '0.66rem', whiteSpace: 'nowrap', flexShrink: 0 }}>
+            {entry.dir ? `${entry.entries ?? 0}` : fmtBytes(entry.bytes)}
+          </span>
         </div>
-        {open && hasChildren && (node.children ?? []).map((child: StorageTreeNode) =>
-          child.children?.length ? renderNode(child, depth + 1) : renderLeaf(child, depth + 1))}
+        {entry.dir && open && (children[k] ?? []).map((child) => row(area, child, depth + 1))}
       </div>
     )
   }
 
-  const renderLeaf = (node: StorageTreeNode, depth: number) => (
-    <div key={node.path || node.name} style={{ paddingLeft: '1rem' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.12rem 0.2rem', fontSize: '0.76rem', color: 'var(--tm-text-2)' }}>
-        <span style={{ width: '0.9rem', flexShrink: 0 }} />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}/</span>
-        <span style={{ marginLeft: 'auto', color: 'var(--tm-text-3)', fontSize: '0.7rem', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtBytes(node.bytes)} · {node.files.toLocaleString()} 📄</span>
+  const areaSection = (area: AreaName) => {
+    const entries = areas[area]
+    const label = area === 'workspace' ? (t('sandbox.storage_workspace') ?? 'Workspace') : (t('sandbox.storage_cache') ?? 'Cache')
+    return (
+      <div style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.25rem' }}>
+          <span style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--tm-text-3)' }}>{label}</span>
+          <button
+            title={t('sandbox.files_upload') ?? 'Upload files here'}
+            onClick={() => startUpload(area, '')}
+            style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.8rem', padding: '0 0.25rem', lineHeight: 1 }}
+          >＋</button>
+        </div>
+        {entries === null ? (
+          <div style={{ fontSize: '0.72rem', color: 'var(--tm-muted)', padding: '0.2rem 0' }}>{t('sandbox.storage_no_project') ?? 'Pick a project.'}</div>
+        ) : entries.length === 0 ? (
+          <div style={{ fontSize: '0.72rem', color: 'var(--tm-muted)', padding: '0.2rem 0' }}>{t('sandbox.files_empty') ?? 'Empty.'}</div>
+        ) : (
+          entries.map((entry) => row(area, entry, 0))
+        )}
       </div>
-    </div>
-  )
+    )
+  }
 
-  const renderFile = (file: StorageTopPath) => (
-    <div key={file.path} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.15rem 0', borderTop: '1px solid var(--tm-border)', fontSize: '0.75rem' }}>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.path}>{file.path}</span>
-      <span style={{ marginLeft: 'auto', color: 'var(--tm-text-3)', fontSize: '0.7rem', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtBytes(file.bytes)}</span>
-    </div>
-  )
-
-  if (!project.trim()) return null
+  const selectedIsText = selected ? (TEXT_EXT.test(selected.entry.name) || !IMAGE_EXT.test(selected.entry.name)) : false
 
   return (
     <div style={{ marginTop: '2rem' }}>
+      {confirmDialogNode}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
         <div>
           <Heading style={{ fontSize: '1rem' }}>{t('sandbox.storage_title')}</Heading>
           <p style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', marginTop: '0.25rem' }}>{t('sandbox.storage_subtitle')}</p>
         </div>
-        <Button size="sm" kind="ghost" renderIcon={Renew} disabled={loading} onClick={() => void load()}>{t('common.refresh')}</Button>
+        <Button size="sm" kind="ghost" renderIcon={Renew} disabled={loadingDir !== null || busy} onClick={() => void load()}>{t('common.refresh')}</Button>
       </div>
+      <input ref={uploadInput} type="file" multiple hidden onChange={(e) => void onUploadPicked(e)} />
       {error && <InlineNotification kind="error" lowContrast title={t('action.error')} subtitle={error} onCloseButtonClick={() => setError('')} style={{ marginBottom: '0.75rem' }} />}
       {!project.trim() ? (
         <Tile style={{ color: 'var(--tm-text-3)' }}>{t('sandbox.storage_no_project')}</Tile>
-      ) : loading ? (
-        <PageLoading />
-      ) : tree ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1rem', alignItems: 'start' }}>
-          <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.35rem' }}>
-              <span>{t('sandbox.storage_workspace')}</span>
-              <span>{fmtBytes(tree.workspace.bytes)} · {tree.workspace.files.toLocaleString()} 📄</span>
-            </div>
-            {renderNode(tree.workspace, 0)}
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 380px) 1fr', gap: '1rem', alignItems: 'start' }}>
+          {/* Left: the tree */}
+          <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', maxHeight: '60vh', overflowY: 'auto' }}>
+            {areaSection('workspace')}
+            {areaSection('cache')}
           </div>
-          <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.35rem' }}>
-              <span>{t('sandbox.storage_cache')}</span>
-              <span>{fmtBytes(tree.cache.bytes)} · {tree.cache.files.toLocaleString()} 📄</span>
-            </div>
-            {renderNode(tree.cache, 0)}
-          </div>
-          <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>
-            <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.35rem' }}>{t('sandbox.storage_top')}</div>
-            {tree.top_files.map(renderFile)}
-            {tree.truncated && <p style={{ color: 'var(--tm-warning)', fontSize: '0.72rem', marginTop: '0.5rem' }}>⚠ {t('sandbox.storage_truncated')}</p>}
+          {/* Right: details / preview */}
+          <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', maxHeight: '60vh', overflowY: 'auto', minHeight: '12rem' }}>
+            {!selected ? (
+              <div style={{ color: 'var(--tm-muted)', fontSize: '0.78rem', padding: '1rem 0' }}>{t('sandbox.files_pick') ?? 'Pick a file to preview it.'}</div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                  <strong style={{ fontSize: '0.85rem', overflowWrap: 'anywhere' }}>{selected.entry.name}</strong>
+                  {selected.entry.dir
+                    ? <Tag type="blue" size="sm">{t('sandbox.files_dir') ?? 'folder'}</Tag>
+                    : <Tag type="gray" size="sm">{fmtBytes(selected.entry.bytes)}</Tag>}
+                  {selected.entry.mod_at && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem' }}>{new Date(selected.entry.mod_at).toLocaleString()}</span>}
+                  <span style={{ marginLeft: 'auto', display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+                    <Button size="sm" kind="ghost" renderIcon={Upload} onClick={() => startUpload(selected.area, selected.entry.dir ? selected.entry.path : parentOf(selected.entry.path))}>{t('sandbox.files_upload') ?? 'Upload'}</Button>
+                    {!selected.entry.dir && (
+                      <Button size="sm" kind="ghost" renderIcon={Download} onClick={() => void download(selected.area, selected.entry)}>{t('sandbox.files_download') ?? 'Download'}</Button>
+                    )}
+                    <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} disabled={busy} onClick={() => void remove(selected.area, selected.entry)}>{t('action.delete')}</Button>
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', marginBottom: '0.5rem', overflowWrap: 'anywhere' }}>
+                  {selected.area === 'workspace' ? (t('sandbox.storage_workspace') ?? 'Workspace') : (t('sandbox.storage_cache') ?? 'Cache')}/{selected.entry.path}
+                </div>
+                {selected.entry.dir ? (
+                  <div style={{ color: 'var(--tm-muted)', fontSize: '0.78rem' }}>
+                    {children[key(selected.area, selected.entry.path)]?.length ?? selected.entry.entries ?? 0} {t('sandbox.files_items') ?? 'items'} — раскройте папку в дереве слева.
+                  </div>
+                ) : previewError ? (
+                  <div style={{ color: 'var(--tm-muted)', fontSize: '0.78rem' }}>{previewError}</div>
+                ) : !preview ? (
+                  <div style={{ color: 'var(--tm-muted)', fontSize: '0.78rem' }}>…</div>
+                ) : preview.kind === 'image' ? (
+                  <img src={preview.content} alt={selected.entry.name} style={{ maxWidth: '100%', maxHeight: '45vh', borderRadius: '4px', border: '1px solid var(--tm-border)' }} />
+                ) : selectedIsText || preview.content ? (
+                  <pre style={{ margin: 0, padding: '0.5rem', background: 'var(--tm-surface)', border: '1px solid var(--tm-border)', borderRadius: '4px', fontSize: '0.72rem', lineHeight: 1.45, overflow: 'auto', maxHeight: '45vh', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{preview.content}</pre>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
-      ) : null}
+      )}
     </div>
   )
+}
+
+function parentOf(path: string): string {
+  return path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
 }
