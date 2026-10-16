@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -158,6 +159,31 @@ func (s *Store) ListObservationPage(ctx context.Context, filter observation.Filt
 }
 
 type observationScanner interface{ Scan(...any) error }
+
+// HealthEvents loads the dashboard aggregation window in a single pass
+// (docs/system-dashboard.md §3.1): the same columns as ListObservationPage but
+// no page limit — the aggregate must see the whole window, and paging 500-row
+// chunks per dashboard poll would dwarf the query itself.
+func (s *Store) HealthEvents(ctx context.Context, since time.Time, projects []string) ([]observation.Event, error) {
+	types := append([]string(nil), observation.HealthEventTypes...)
+	rows, err := s.pool.Query(ctx, `SELECT source_id,event_id,schema,occurred_at,received_at,integration,source_version,project_id,run_id,task_id,actor_id,actor_type,parent_event_id,type,data,evidence
+		FROM observation_events
+		WHERE occurred_at >= $1 AND type = ANY($2) AND (cardinality($3::text[]) = 0 OR project_id = ANY($3))`,
+		since, textList(types), textList(projects))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	events := make([]observation.Event, 0)
+	for rows.Next() {
+		event, scanErr := scanObservation(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
 
 // textList normalizes a filter list so pgx always binds an array literal:
 // cardinality of a bound empty array is 0, which makes the ANY/ID filters

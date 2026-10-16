@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -1264,16 +1265,24 @@ func (a *CostAPI) queryEventsFiltered(r *http.Request, project, runID, taskID st
 }
 
 func (a *CostAPI) queryEventsFilteredCtx(ctx context.Context, project, runID, taskID string, eventTypes ...string) ([]observation.Event, error) {
+	return a.queryEventsFilteredSince(ctx, project, runID, taskID, nil, eventTypes...)
+}
+
+// queryEventsFilteredSince pages through journal events like
+// queryEventsFilteredCtx but bounds the scan by since (nil = unbounded, the
+// behaviour of the classic queries): the journal drops events older than the
+// bound server-side, so windowed aggregations do not page through history.
+func (a *CostAPI) queryEventsFilteredSince(ctx context.Context, project, runID, taskID string, since *time.Time, eventTypes ...string) ([]observation.Event, error) {
 	var all []observation.Event
 	for _, eventType := range eventTypes {
-		if err := a.queryOneType(ctx, project, runID, taskID, eventType, &all); err != nil {
+		if err := a.queryOneType(ctx, project, runID, taskID, eventType, &all, since); err != nil {
 			return nil, err
 		}
 	}
 	return all, nil
 }
 
-func (a *CostAPI) queryOneType(ctx context.Context, project, runID, taskID, eventType string, all *[]observation.Event) error {
+func (a *CostAPI) queryOneType(ctx context.Context, project, runID, taskID, eventType string, all *[]observation.Event, since *time.Time) error {
 	cursor := ""
 	for {
 		url := fmt.Sprintf("%s/v1/observations/events?project=%s&type=%s&limit=500", a.journalURL, project, eventType)
@@ -1282,6 +1291,9 @@ func (a *CostAPI) queryOneType(ctx context.Context, project, runID, taskID, even
 		}
 		if taskID != "" {
 			url += "&task=" + taskID
+		}
+		if since != nil {
+			url += "&since=" + neturl.QueryEscape(since.Format(time.RFC3339Nano))
 		}
 		if cursor != "" {
 			url += "&cursor=" + cursor

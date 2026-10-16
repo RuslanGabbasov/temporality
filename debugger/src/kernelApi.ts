@@ -303,3 +303,66 @@ export interface ProjectBudget {
 export function projectBudget(project: string): Promise<ProjectBudget> {
   return request(`/v1/agent/cost/project-budget?project=${encodeURIComponent(project)}`)
 }
+
+// ── System dashboard (docs/system-dashboard.md §3.2–§3.3) ─────────────────────
+
+export interface OverviewProjectRow {
+  project: string
+  org_units?: string[]
+  runs_started: number
+  runs_running: number
+  runs_failed: number
+  model_calls: number
+  total_tokens: number
+  total_cost_usd: number
+  pending_approvals: number
+  last_activity_at?: string
+}
+
+export interface ProjectsOverview {
+  window: string
+  generated_at: string
+  projects: OverviewProjectRow[]
+}
+
+export function projectsOverview(window?: string): Promise<ProjectsOverview> {
+  const suffix = window && window.trim() ? `?window=${encodeURIComponent(window.trim())}` : ''
+  return request(`/v1/agent/cost/projects-overview${suffix}`)
+}
+
+export interface QualitySummaryEvaluation {
+  at: string
+  verdict: string
+  passed: number
+  failed: number
+  pass_rate: number
+  judge_agreement?: number
+}
+
+export interface QualitySummaryAgent {
+  agent_id: string
+  name: string
+  project: string
+  definition_version: number
+  last_evaluation?: QualitySummaryEvaluation
+  pending_proposals: number
+  stale_goldens: number
+}
+
+export interface QualitySummary {
+  agents: QualitySummaryAgent[]
+  loop: {
+    window_days: number
+    gate_passed: number
+    gate_blocked: number
+    gate_overridden: number
+    override_rate: number
+    judge_degraded_runs: number
+    evaluation_runs: number
+  }
+}
+
+export function qualitySummary(project?: string): Promise<QualitySummary> {
+  const suffix = project && project.trim() ? `?project=${encodeURIComponent(project.trim())}` : ''
+  return request(`/v1/workspace/quality/summary${suffix}`)
+}

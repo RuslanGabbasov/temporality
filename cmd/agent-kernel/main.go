@@ -1089,6 +1089,21 @@ func main() {
 		}
 		costAPI.ProjectBudgetHandler(w, r)
 	})
+	// Projects overview (docs/system-dashboard.md §3.2): server-side window
+	// aggregation per project. The gate only checks the reader role — project
+	// visibility is resolved the same way as GET /v1/workspace/projects and
+	// applied to the aggregated rows, so a scoped reader sees their own slice.
+	mux.HandleFunc("GET /v1/agent/cost/projects-overview", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		visible, err := overviewVisibleProjects(r, ws)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		costAPI.ProjectsOverviewHandlerWithVisible(w, r, visible)
+	})
 	// Team run rollup (docs/agent-teams.md §10): the whole child-run tree of
 	// one team program run — tokens, cost, durations, approvals, rework.
 	mux.HandleFunc("GET /v1/agent/cost/team-run", func(w http.ResponseWriter, r *http.Request) {
@@ -8372,6 +8387,38 @@ func actorFromRequest(r *http.Request) observation.Actor {
 		return observation.Actor{ID: principal.Subject, Type: "human"}
 	}
 	return observation.Actor{ID: "anonymous", Type: "human"}
+}
+
+// overviewVisibleProjects resolves which projects the caller may see in the
+// cost projects overview, with their org units — the same resolution as
+// GET /v1/workspace/projects: admins, service tokens and org-unassigned users
+// (nil org chain) get every project, an org-scoped user gets their visible
+// list. A resolution failure must surface as a 500 upstream: an empty map is
+// never allowed to degrade into "show everything" for a user who sees
+// nothing.
+func overviewVisibleProjects(r *http.Request, ws *workspace.Store) (map[string][]string, error) {
+	var userID string
+	var isAdmin bool
+	units := candidateVisibleUnits(r)
+	if principal, ok := controlplane.FromContext(r.Context()); ok {
+		isAdmin = principal.Role >= controlplane.RoleAdmin
+		// Try to find user by token to get their ID
+		token, _ := controlplane.BearerToken(r)
+		if token != "" {
+			if user, err := ws.GetUserByToken(r.Context(), token); err == nil {
+				userID = user.ID
+			}
+		}
+	}
+	projects, err := ws.ListProjectsForUser(r.Context(), userID, isAdmin, units)
+	if err != nil {
+		return nil, err
+	}
+	visible := make(map[string][]string, len(projects))
+	for _, p := range projects {
+		visible[p.ID] = p.OrgUnitIDs
+	}
+	return visible, nil
 }
 
 // TokenDoneEvent is the terminal frame of the ephemeral token stream.

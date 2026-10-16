@@ -21,6 +21,8 @@ type qualityStore interface {
 	GetAgent(ctx context.Context, id string) (workspace.Agent, error)
 	AgentQualityReport(ctx context.Context, agentID string) (workspace.QualityReport, error)
 	AgentVersionsDiff(ctx context.Context, agentID string, from, to int) (workspace.VersionDiff, error)
+	ListAgentsVisible(ctx context.Context, units []string) ([]workspace.Agent, error)
+	QualitySummary(ctx context.Context, agents []workspace.Agent, windowDays int) (workspace.QualitySummary, error)
 }
 
 // qualityOutbox is the durable-outbox surface agent.quality.dashboard_viewed
@@ -102,6 +104,39 @@ func RegisterQualityRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws quali
 			return
 		}
 		writeJSON(w, 200, diff)
+	})
+
+	// GET /quality/summary (docs/system-dashboard.md §3.3): the quality tab's
+	// server-side rollup — per visible agent the last evaluation, stale goldens
+	// and pending proposals, plus the 7-day loop health (gates, override rate,
+	// judge degradation). A summary view emits no product metric, unlike the
+	// per-agent dashboard above (§9 counts served views, this is a listing).
+	mux.HandleFunc("GET /v1/workspace/quality/summary", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		agents, err := ws.ListAgentsVisible(r.Context(), visibleUnits(r))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		// Optional project filter: org-neutral agents (no project binding)
+		// stay in every project view.
+		if project := strings.TrimSpace(r.URL.Query().Get("project")); project != "" {
+			kept := make([]workspace.Agent, 0, len(agents))
+			for _, a := range agents {
+				if a.ProjectID == "" || a.ProjectID == project {
+					kept = append(kept, a)
+				}
+			}
+			agents = kept
+		}
+		summary, err := ws.QualitySummary(r.Context(), agents, 7)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, summary)
 	})
 }
 

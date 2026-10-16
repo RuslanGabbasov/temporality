@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/temporality-project/temporality/observation"
 )
@@ -130,4 +131,38 @@ func (s *Store) ListObservationPage(ctx context.Context, filter observation.Filt
 		page.NextCursor = observation.EncodeCursor(page.Events[len(page.Events)-1])
 	}
 	return page, nil
+}
+
+// HealthEvents feeds the dashboard aggregation (docs/system-dashboard.md §3.1):
+// every health-relevant event of the window in one slice, ignoring the
+// listing page limit — the aggregate must see the whole window, not a page.
+func (s *Store) HealthEvents(_ context.Context, since time.Time, projects []string) ([]observation.Event, error) {
+	healthTypes := make(map[string]bool, len(observation.HealthEventTypes))
+	for _, eventType := range observation.HealthEventTypes {
+		healthTypes[eventType] = true
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]observation.Event, 0)
+	for _, event := range s.observationEvents {
+		if event.OccurredAt.Before(since) ||
+			!healthTypes[event.Type] ||
+			len(projects) > 0 && !containsStringValue(projects, event.Context.Project) {
+			continue
+		}
+		result = append(result, event)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if !result[i].OccurredAt.Equal(result[j].OccurredAt) {
+			return result[i].OccurredAt.Before(result[j].OccurredAt)
+		}
+		if !result[i].ReceivedAt.Equal(result[j].ReceivedAt) {
+			return result[i].ReceivedAt.Before(result[j].ReceivedAt)
+		}
+		if result[i].Source.ID != result[j].Source.ID {
+			return result[i].Source.ID < result[j].Source.ID
+		}
+		return result[i].EventID < result[j].EventID
+	})
+	return result, nil
 }

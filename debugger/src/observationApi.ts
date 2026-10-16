@@ -148,6 +148,8 @@ export const observationApi = {
   }) => post<ExploreResult>('/v1/observations/knowledge/explore', body),
   eventById: (eventID: string, opts?: { source_id?: string; project?: string }) =>
     request<{ event: ObservationEvent }>(`/v1/observations/events/${encodeURIComponent(eventID)}`, undefined, { source_id: opts?.source_id, project: opts?.project }),
+  healthStats: (project?: string, since?: string) =>
+    request<HealthStats>('/v1/observations/stats/health', undefined, { project, since }),
 }
 
 /** All events of one run, oldest-first, following journal cursors to the end.
@@ -165,6 +167,34 @@ export async function runEvents(run: string, project?: string, cap = 4000): Prom
     cursor = page.next_cursor
   } while (cursor && collected.length < cap)
   return collected
+}
+
+// ── Health stats (observation/health.go) ──────────────────────────────────────
+// Server-side aggregation over a time window (docs/system-dashboard.md §3.1):
+// the dashboard renders these counters, it never folds raw events client-side.
+
+export interface HealthModelStats {
+  model: string
+  provider?: string
+  calls: number
+  completed: number
+  failed: number
+  in_flight: number
+  retries: number
+  nudged: number
+  p50_latency_ms: number
+  p95_latency_ms: number
+  total_tokens: number
+  cached_tokens: number
+}
+
+export interface HealthStats {
+  since: string
+  generated_at: string
+  models: HealthModelStats[]
+  totals: { model_calls: number; model_failures: number; in_flight: number; nudged: number }
+  runs: { started: number; completed: number; failed: number; cancelled: number; running_now: number }
+  approvals: { requested: number; granted: number; rejected: number; timed_out: number; auto_granted: number; pending: number; wait_ms_avg: number }
 }
 
 // ── Explore engine contracts (observation/explore.go) ─────────────────────────

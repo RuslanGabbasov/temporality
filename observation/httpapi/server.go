@@ -67,6 +67,7 @@ func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate, opt
 	mux.HandleFunc("POST /v1/observations/events", s.appendObservations)
 	mux.HandleFunc("GET /v1/observations/events", s.listObservations)
 	mux.HandleFunc("GET /v1/observations/events/{id}", s.getObservationEvent)
+	mux.HandleFunc("GET /v1/observations/stats/health", s.observationHealthStats)
 	mux.HandleFunc("GET /v1/observations/knowledge", s.listObservationKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/diff", s.diffKnowledge)
 	mux.HandleFunc("GET /v1/observations/knowledge/chain", s.knowledgeChain)
@@ -231,6 +232,67 @@ func (s *Server) listObservations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": page.Events, "count": len(page.Events), "next_cursor": page.NextCursor})
+}
+
+// healthStatsSource is the optional store capability behind the dashboard
+// aggregation: stores that can load a whole window in one pass implement it,
+// the rest answer 501 rather than degrade to a single listing page.
+type healthStatsSource interface {
+	HealthEvents(ctx context.Context, since time.Time, projects []string) ([]observation.Event, error)
+}
+
+// observationHealthStats serves the system-dashboard health aggregation
+// (docs/system-dashboard.md §3.1): one window, aggregated server-side.
+func (s *Server) observationHealthStats(w http.ResponseWriter, r *http.Request) {
+	// Same auth and scoping as the event listing: a concrete project is checked
+	// by the gate, an empty one aggregates the principal's visible projects
+	// (docs/activity-scoping.md §5).
+	principal, allowed := s.gate.AllowQuery(w, r, controlplane.RoleReader, r.URL.Query().Get("project"))
+	if !allowed {
+		return
+	}
+	// The aggregation needs a whole window in one pass; stores that cannot do
+	// that say so instead of silently degrading to the first listing page.
+	source, ok := s.store.(healthStatsSource)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, errors.New("health stats not supported by this store"))
+		return
+	}
+	now := s.now()
+	since := now.Add(-time.Hour)
+	if value := r.URL.Query().Get("since"); value != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, errors.New("since must be RFC3339"))
+			return
+		}
+		// Longer windows would scan the journal beyond any dashboard need; the
+		// 31-day cap keeps the unbounded single-pass query bounded.
+		if now.Sub(parsed) > 31*24*time.Hour {
+			writeError(w, http.StatusBadRequest, errors.New("since must be within the last 31 days"))
+			return
+		}
+		since = parsed
+	}
+	var projects []string
+	if project := r.URL.Query().Get("project"); project != "" {
+		projects = []string{project}
+	} else if visible, all := principal.AllowedProjects(); !all {
+		if len(visible) == 0 {
+			// Nothing visible: zeroed counters with the window fields, not an
+			// error — the dashboard renders an empty but well-formed state.
+			writeJSON(w, http.StatusOK, observation.ComputeHealthStats(nil, since, now))
+			return
+		}
+		projects = visible
+	}
+	events, err := source.HealthEvents(r.Context(), since, projects)
+	if err != nil {
+		s.log.Error("health stats window query", "error", err, "project", r.URL.Query().Get("project"))
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("could not compute health stats: %w", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, observation.ComputeHealthStats(events, since, now))
 }
 
 func (s *Server) getObservationEvent(w http.ResponseWriter, r *http.Request) {

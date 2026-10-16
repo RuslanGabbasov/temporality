@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/temporality-project/temporality/controlplane"
@@ -19,15 +20,22 @@ import (
 // fakeQualityStore satisfies the qualityStore interface without a database;
 // counters let the tests assert how far a request got.
 type fakeQualityStore struct {
-	agent       workspace.Agent
-	report      workspace.QualityReport
-	diff        workspace.VersionDiff
-	agentErr    error
-	reportErr   error
-	diffErr     error
-	agentCalls  int
-	reportCalls int
-	diffCalls   int
+	agent        workspace.Agent
+	report       workspace.QualityReport
+	diff         workspace.VersionDiff
+	agents       []workspace.Agent
+	summary      workspace.QualitySummary
+	agentErr     error
+	reportErr    error
+	diffErr      error
+	listErr      error
+	summaryErr   error
+	agentCalls   int
+	reportCalls  int
+	diffCalls    int
+	listCalls    int
+	summaryCalls int
+	listedUnits  []string
 }
 
 func (f *fakeQualityStore) GetAgent(_ context.Context, _ string) (workspace.Agent, error) {
@@ -43,6 +51,27 @@ func (f *fakeQualityStore) AgentQualityReport(_ context.Context, _ string) (work
 func (f *fakeQualityStore) AgentVersionsDiff(_ context.Context, _ string, _, _ int) (workspace.VersionDiff, error) {
 	f.diffCalls++
 	return f.diff, f.diffErr
+}
+
+func (f *fakeQualityStore) ListAgentsVisible(_ context.Context, units []string) ([]workspace.Agent, error) {
+	f.listCalls++
+	f.listedUnits = units
+	return f.agents, f.listErr
+}
+
+func (f *fakeQualityStore) QualitySummary(_ context.Context, agents []workspace.Agent, windowDays int) (workspace.QualitySummary, error) {
+	f.summaryCalls++
+	if f.summaryErr != nil {
+		return workspace.QualitySummary{}, f.summaryErr
+	}
+	if f.summary.Agents != nil {
+		return f.summary, nil
+	}
+	return workspace.BuildQualitySummary(agents,
+		map[string]workspace.AgentEvaluationRun{
+			"agent-a": {Verdict: "pass", Passed: 8, Failed: 2, JudgeModel: "judge", CreatedAt: time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)},
+		},
+		map[string]float64{"judge": 0.91}, nil, nil, nil, 3, 0, windowDays), nil
 }
 
 type captureQualityOutbox struct {
@@ -230,4 +259,47 @@ func TestVersionDiffErrorsAndSuccess(t *testing.T) {
 // the metric is best-effort beside the report (§9).
 func TestEmitQualityDashboardViewNilOutbox(t *testing.T) {
 	emitQualityDashboardView(context.Background(), nil, workspace.Agent{ID: "agent-a"}, observation.Actor{})
+}
+
+// TestQualitySummaryRoute: a reader gets the §3.3 rollup over their visible
+// agents, the optional project filter keeps org-neutral agents, and the
+// summary view emits no dashboard_viewed metric (it is a listing, not a
+// served per-agent dashboard).
+func TestQualitySummaryRoute(t *testing.T) {
+	store := &fakeQualityStore{agents: []workspace.Agent{
+		{ID: "agent-a", Name: "A", ProjectID: "proj", OrgUnitID: "unit-a"},
+		{ID: "agent-b", Name: "B", OrgUnitID: "unit-a"},
+	}}
+	outbox := &captureQualityOutbox{}
+	server := newQualityServer(t, store, outbox, []string{"unit-a"})
+	defer server.Close()
+
+	status, body := qualityGet(t, server, "/v1/workspace/quality/summary", "readertoken")
+	require.Equal(t, http.StatusOK, status)
+	var summary workspace.QualitySummary
+	require.NoError(t, json.Unmarshal([]byte(body), &summary))
+	require.Len(t, summary.Agents, 2)
+	require.Equal(t, "agent-a", summary.Agents[0].AgentID)
+	require.Equal(t, 7, summary.Loop.WindowDays)
+	require.Equal(t, []string{"unit-a"}, store.listedUnits, "visibility follows the org chain")
+	require.Equal(t, 1, store.summaryCalls)
+	require.Empty(t, outbox.events, "the summary view emits no product metric")
+
+	// Project filter: org-neutral agent-b stays, proj-bound agent-a drops.
+	store.summaryCalls = 0
+	status, body = qualityGet(t, server, "/v1/workspace/quality/summary?project=other", "readertoken")
+	require.Equal(t, http.StatusOK, status)
+	require.NoError(t, json.Unmarshal([]byte(body), &summary))
+	require.Len(t, summary.Agents, 1)
+	require.Equal(t, "agent-b", summary.Agents[0].AgentID)
+	require.Equal(t, 1, store.summaryCalls)
+
+	// Storage failures answer 500 without leaking partial data.
+	broken := &fakeQualityStore{listErr: errors.New("boom")}
+	server2 := newQualityServer(t, broken, outbox, nil)
+	defer server2.Close()
+	status, body = qualityGet(t, server2, "/v1/workspace/quality/summary", "readertoken")
+	require.Equal(t, http.StatusInternalServerError, status)
+	require.Contains(t, body, "boom")
+	require.Zero(t, broken.summaryCalls)
 }

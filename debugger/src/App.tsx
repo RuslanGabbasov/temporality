@@ -2,12 +2,11 @@ import { useEffect, useState } from 'react'
 import Layout, { type AppState } from './Layout'
 import { I18nProvider } from './i18n'
 import { ThemePrefProvider } from './theme'
-import Observability from './Observability'
+import Dashboard from './Dashboard'
 import KnowledgeExplorer from './KnowledgeExplorer'
 import AgentRuns from './AgentRuns'
 import ExperienceTimeline from './ExperienceTimeline'
 import Workspace from './Workspace'
-import ProjectOverview from './ProjectOverview'
 import Agents from './Agents'
 import Teams from './Teams'
 import Providers from './Providers'
@@ -45,10 +44,12 @@ const Routes = {
 type Page = 'project' | 'experience' | 'agents' | 'teams' | 'observability' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
 
 function pageFor(pathname: string): Page {
+  // /observability is now a tab of the system dashboard (docs/system-dashboard.md
+  // §2): the legacy path redirects, carrying the knowledge params over.
+  if (Routes.observability.test(pathname)) return 'observability'
   if (Routes.project.test(pathname)) return 'project'
   if (Routes.agents.test(pathname)) return 'agents'
   if (Routes.teams.test(pathname)) return 'teams'
-  if (Routes.observability.test(pathname)) return 'observability'
   if (Routes.knowledge.test(pathname)) return 'knowledge'
   if (Routes.workspace.test(pathname)) return 'workspace'
   if (Routes.experience.test(pathname)) return 'experience'
@@ -76,6 +77,19 @@ export default function App() {
     return () => window.removeEventListener('popstate', navigate)
   }, [])
 
+  // Legacy /observability → /project?tab=knowledge (the Observability page now
+  // lives inside the dashboard; its own `tab` param becomes `ktab`).
+  useEffect(() => {
+    if (page !== 'observability') return
+    const params = new URLSearchParams(window.location.search)
+    const innerTab = params.get('tab')
+    params.delete('tab')
+    if (innerTab) params.set('ktab', innerTab)
+    params.set('tab', 'knowledge')
+    window.history.replaceState(null, '', `/project?${params.toString()}`)
+    setPage('project')
+  }, [page])
+
   return (
     <ThemePrefProvider>
     <I18nProvider>
@@ -83,13 +97,11 @@ export default function App() {
       {({ project, setProject, projectDefaultAgent, projectDefaultModel, refreshProjects }: AppState) => {
         switch (page) {
           case 'project':
-            return <ProjectOverview project={project} />
+            return <Dashboard project={project} setProject={setProject} />
           case 'agents':
             return <AgentRuns project={project} />
           case 'teams':
             return <Teams project={project} />
-          case 'observability':
-            return <Observability project={project} />
           case 'knowledge':
             return <KnowledgeExplorer project={project} />
           case 'workspace':

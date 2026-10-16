@@ -1587,3 +1587,152 @@ func TestObservationHintsScopedToTeamRunTree(t *testing.T) {
 		t.Fatalf("unrelated run must not see team-scoped knowledge, got %v", hints)
 	}
 }
+
+func TestObservationHealthStats(t *testing.T) {
+	// The dashboard aggregate (docs/system-dashboard.md §3.1) is computed
+	// server-side over the whole window, with the same project scoping as the
+	// event listing: a scoped reader sees only its project, a principal with no
+	// visible projects gets a zeroed but well-formed answer.
+	store := memory.New()
+	gate, err := controlplane.NewGate("scoped-token-1234567890:alice:reader:lighthouse;admin-token-1234567890:root:admin:*")
+	if err != nil {
+		t.Fatalf("NewGate: %v", err)
+	}
+	// Static token entries require at least one project; workspace DB tokens do
+	// not, which is how a zero-visible-project principal exists in production.
+	gate.SetDBTokens(map[string]controlplane.Principal{"empty-token-1234567890": {Subject: "nobody", Role: controlplane.RoleReader}})
+	handler := New(store, slog.New(slog.NewTextHandler(io.Discard, nil)), gate)
+
+	now := time.Now().UTC()
+	healthEvent := func(project, id, run, eventType string, offset time.Duration, data map[string]any) observation.Event {
+		return observation.Event{
+			Schema: observation.Schema, EventID: id, OccurredAt: now.Add(offset),
+			Source:  observation.Source{ID: "kernel-test", Integration: "agent-kernel", Version: "1"},
+			Context: observation.Context{Project: project, Run: run, Actor: observation.Actor{ID: "coder", Type: "agent"}},
+			Type:    eventType, Data: data,
+		}
+	}
+	approvalData := func(operationID string) map[string]any {
+		return map[string]any{"operation_id": operationID, "arguments_hash": "sha256:" + operationID}
+	}
+	// lighthouse: one in-flight gpt-5.2 call, one completed claude call with
+	// tokens, one running run and one pending approval. forge: noise that must
+	// stay invisible to the scoped reader.
+	ingest := []observation.Event{
+		healthEvent("lighthouse", "h1", "run-1", "run.started", -9*time.Minute, nil),
+		healthEvent("lighthouse", "h2", "run-1", "model.started", -8*time.Minute, map[string]any{"turn": 1, "model": "gpt-5.2"}),
+		healthEvent("lighthouse", "h3", "run-1", "model.started", -7*time.Minute, map[string]any{"turn": 2, "model": "claude-sonnet"}),
+		healthEvent("lighthouse", "h4", "run-1", "model.completed", -6*time.Minute, map[string]any{"turn": float64(2), "model": "claude-sonnet", "provider": "anthropic", "latency_ms": 1500, "total_tokens": 1200}),
+		healthEvent("lighthouse", "h5", "run-2", "run.started", -5*time.Minute, nil),
+		healthEvent("lighthouse", "h6", "run-2", "run.completed", -4*time.Minute, nil),
+		healthEvent("lighthouse", "h7", "run-1", "approval.requested", -3*time.Minute, approvalData("op-1")),
+		healthEvent("lighthouse", "h8", "run-1", "model.attempt", -2*time.Minute, map[string]any{"turn": 1}),
+		healthEvent("forge", "h9", "run-x", "model.started", -2*time.Minute, map[string]any{"turn": 1, "model": "forge-model"}),
+		healthEvent("forge", "h10", "run-x", "model.started", -1*time.Minute, map[string]any{"turn": 2, "model": "forge-model"}),
+	}
+	res, body := doJSONWithToken(t, handler, "POST", "/v1/observations/events", "admin-token-1234567890", map[string]any{"events": ingest})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest = %d %v", res.StatusCode, body)
+	}
+
+	modelByName := func(body map[string]any, name string) map[string]any {
+		t.Helper()
+		for _, raw := range body["models"].([]any) {
+			if entry := raw.(map[string]any); entry["model"] == name {
+				return entry
+			}
+		}
+		return nil
+	}
+	intValue := func(body map[string]any, key string) int {
+		t.Helper()
+		return int(body[key].(float64))
+	}
+
+	// Scoped reader: global aggregation constrained to lighthouse.
+	res, body = doJSONWithToken(t, handler, "GET", "/v1/observations/stats/health", "scoped-token-1234567890", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("scoped health stats = %d %v", res.StatusCode, body)
+	}
+	gpt := modelByName(body, "gpt-5.2")
+	if gpt == nil || intValue(gpt, "calls") != 1 || intValue(gpt, "in_flight") != 1 {
+		t.Fatalf("gpt-5.2 = %v, want calls=1 in_flight=1", gpt)
+	}
+	claude := modelByName(body, "claude-sonnet")
+	if claude == nil || intValue(claude, "completed") != 1 || intValue(claude, "in_flight") != 0 || intValue(claude, "total_tokens") != 1200 {
+		t.Fatalf("claude-sonnet = %v, want completed=1 in_flight=0 total_tokens=1200", claude)
+	}
+	if modelByName(body, "forge-model") != nil {
+		t.Fatalf("scoped reader must not see forge models: %v", body["models"])
+	}
+	totals := body["totals"].(map[string]any)
+	if int(totals["model_calls"].(float64)) != 2 || int(totals["in_flight"].(float64)) != 1 {
+		t.Fatalf("totals = %v, want model_calls=2 in_flight=1", totals)
+	}
+	runs := body["runs"].(map[string]any)
+	if int(runs["started"].(float64)) != 2 || int(runs["running_now"].(float64)) != 1 {
+		t.Fatalf("runs = %v, want started=2 running_now=1", runs)
+	}
+	approvals := body["approvals"].(map[string]any)
+	if int(approvals["requested"].(float64)) != 1 || int(approvals["pending"].(float64)) != 1 {
+		t.Fatalf("approvals = %v, want requested=1 pending=1", approvals)
+	}
+
+	// Zero visible projects: zeros with the window fields, not an error.
+	res, body = doJSONWithToken(t, handler, "GET", "/v1/observations/stats/health", "empty-token-1234567890", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("zero-visible health stats = %d %v", res.StatusCode, body)
+	}
+	if models := body["models"].([]any); len(models) != 0 {
+		t.Fatalf("zero-visible models = %v, want empty", models)
+	}
+	if body["since"] == nil || body["generated_at"] == nil {
+		t.Fatalf("zero-visible answer lost the window fields: %v", body)
+	}
+
+	// An explicit project filter behaves like the listing's: allowed project
+	// in, foreign project 403.
+	res, body = doJSONWithToken(t, handler, "GET", "/v1/observations/stats/health?project=forge", "scoped-token-1234567890", nil)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("scoped foreign project = %d, want 403", res.StatusCode)
+	}
+	res, body = doJSONWithToken(t, handler, "GET", "/v1/observations/stats/health?project=lighthouse", "scoped-token-1234567890", nil)
+	if res.StatusCode != http.StatusOK || intValue(body["totals"].(map[string]any), "model_calls") != 2 {
+		t.Fatalf("scoped own project = %d %v, want 200 with model_calls=2", res.StatusCode, body)
+	}
+
+	// since older than 31 days is rejected; the 31-day boundary is not.
+	ancient := now.Add(-32 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	res, body = doJSONWithToken(t, handler, "GET", "/v1/observations/stats/health?since="+ancient, "admin-token-1234567890", nil)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("ancient since = %d %v, want 400", res.StatusCode, body)
+	}
+	if msg, _ := body["error"].(string); !strings.Contains(msg, "31 days") {
+		t.Fatalf("ancient since error = %q, want the 31-day cap message", msg)
+	}
+	// RFC3339 truncates sub-second precision, so stay a minute inside the cap
+	// to keep the parsed since from tipping over 31 days old.
+	boundary := now.Add(-31*24*time.Hour + time.Minute).UTC().Format(time.RFC3339)
+	res, _ = doJSONWithToken(t, handler, "GET", "/v1/observations/stats/health?since="+boundary, "admin-token-1234567890", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("31-day boundary since = %d, want 200", res.StatusCode)
+	}
+	// A malformed since is a 400 too.
+	res, _ = doJSONWithToken(t, handler, "GET", "/v1/observations/stats/health?since=yesterday", "admin-token-1234567890", nil)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("malformed since = %d, want 400", res.StatusCode)
+	}
+}
+
+// The aggregation needs a store that can load a whole window in one pass;
+// stores without that capability answer 501 instead of degrading to a page.
+func TestObservationHealthStatsUnsupportedStore(t *testing.T) {
+	handler := New(failingListStore{}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	res, body := doJSON(t, handler, "GET", "/v1/observations/stats/health", nil)
+	if res.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("unsupported store = %d %v, want 501", res.StatusCode, body)
+	}
+	if msg, _ := body["error"].(string); !strings.Contains(msg, "health stats") {
+		t.Fatalf("501 body = %v, want the health stats notice", body)
+	}
+}

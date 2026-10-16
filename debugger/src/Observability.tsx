@@ -60,7 +60,9 @@ function stateLabel(state: string, t: (key: string, vars?: Record<string, string
 export default function Observability({ project }: { project: string }) {
   const t = useT()
   const initParams = new URLSearchParams(window.location.search)
-  const [tab, setTab] = useState<Tab>((['overview', 'patterns'].includes(initParams.get('tab') as Tab) ? initParams.get('tab') : 'overview') as Tab)
+  // Embedded inside the dashboard (/project?tab=knowledge) the page-level `tab`
+  // parameter belongs to the dashboard, so the inner tab lives under `ktab`.
+  const [tab, setTab] = useState<Tab>((['overview', 'patterns'].includes(initParams.get('ktab') as Tab) ? initParams.get('ktab') : 'overview') as Tab)
   const [asOf, setAsOf] = useState(initParams.get('as_of') ?? '')
   const [compareAsOf, setCompareAsOf] = useState(initParams.get('compare') ?? '')
   const [knownAt, setKnownAt] = useState(initParams.get('known_at') ?? '')
@@ -113,7 +115,7 @@ export default function Observability({ project }: { project: string }) {
   useEffect(() => {
     const urlP = new URLSearchParams(window.location.search)
     urlP.set('project', project)
-    urlP.set('tab', tab)
+    urlP.set('ktab', tab)
     if (asOf) urlP.set('as_of', asOf); else urlP.delete('as_of')
     if (compareAsOf) urlP.set('compare', compareAsOf); else urlP.delete('compare')
     if (knownAt) urlP.set('known_at', knownAt); else urlP.delete('known_at')
