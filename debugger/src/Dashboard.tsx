@@ -412,7 +412,7 @@ export default function Dashboard({ project, setProject }: Props) {
               color = integral load (CPU + memory + network). Hover shows the
               digest (who initiated, which agent, which run), click opens the
               run. Only the top-N load hogs get balls; the rest fold into +N. */}
-          {syshealth && syshealth.docker.available && (syshealth.sandboxes?.length ?? 0) > 0 && (
+          {syshealth && syshealth.docker.available && (
             <SandboxBubbles
               containers={syshealth.sandboxes ?? []}
               runTitles={runTitles}
@@ -646,7 +646,9 @@ function SandboxBubbles({ containers, runTitles, onOpenRun }: {
       <PanelHeader title={t('dashboard.sandboxes') ?? 'Sandboxes'} hint={t('dashboard.sandboxes_hint') ?? undefined} />
       <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.75rem', marginBottom: '1rem' }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.9rem', flexWrap: 'wrap' }}>
-          {top.map((container) => {
+          {top.length === 0 ? (
+            <span style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem' }}>{t('dashboard.sandboxes_none') ?? 'No active sandboxes'}</span>
+          ) : top.map((container) => {
             const score = sandboxLoad(container, maxNet)
             const size = sandboxDiameter(score)
             const run = container.labels?.['temporality.run'] ?? ''
@@ -706,8 +708,10 @@ function SandboxBubbles({ containers, runTitles, onOpenRun }: {
                 </a>
               )}
             </>
-          ) : (
+          ) : top.length > 0 ? (
             <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.sandboxes_hover') ?? 'Hover a bubble for the run digest'}</span>
+          ) : (
+            <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.sandboxes_none') ?? 'No active sandboxes'}</span>
           )}
         </div>
       </div>
