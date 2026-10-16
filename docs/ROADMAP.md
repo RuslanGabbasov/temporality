@@ -252,7 +252,7 @@ Source spec: `docs/inbound-messages.md`.
 
 ## P2 — Advanced
 
-- [ ] **Read-after-write probes** — operation → observable trace → probe → hint to operator. Probe gives a hint, does NOT automatically issue authoritative verdict.
+- [ ] **Read-after-write probes** — operation → observable trace → probe → hint to operator. Probe gives a hint, does NOT automatically issue authoritative verdict. Первая реализация (kernel/probe, 2026) удалена как нерабочая по предпосылкам: FileProbe ждал `>` отдельным argv-токеном (реальные команды несут редиректы внутри `sh -c`-строки), MCPProbe читал назад собственный журнал ядра; вернуться к идее при возвращении боли — с дизайном от реальной формы аргументов и внешних следов.
 - [ ] **Cost accounting v2** — cost per run, cost per project, aggregation, token quotas
 - [ ] **Memory population overview** — active/stale/invalidated counts over time
 - [ ] **Cross-project knowledge** — knowledge that spans multiple projects
