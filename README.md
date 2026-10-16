@@ -466,6 +466,7 @@ Dev-сервер debugger (`npm --prefix debugger run dev`) проксирует
 - Модель событий: [`docs/event-model.md`](docs/event-model.md)
 - Архитектура: [`docs/architecture.md`](docs/architecture.md)
 - Управление секретами: [`docs/secrets-management.md`](docs/secrets-management.md)
+- Федеративная аутентификация: [`docs/auth-federation.md`](docs/auth-federation.md)
 - Контур качества агентов: [`docs/agent-quality-loop.md`](docs/agent-quality-loop.md)
 - Реестр артефактов: [`docs/artifact-registry.md`](docs/artifact-registry.md)
 - Саги: [`docs/sagas.md`](docs/sagas.md)

@@ -439,6 +439,7 @@ The debugger dev server (`npm --prefix debugger run dev`) proxies `/api` to
 - Event model: [`docs/event-model.md`](docs/event-model.md)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
 - Secrets management: [`docs/secrets-management.md`](docs/secrets-management.md)
+- Auth federation: [`docs/auth-federation.md`](docs/auth-federation.md)
 - Agent quality loop: [`docs/agent-quality-loop.md`](docs/agent-quality-loop.md)
 - Artifact registry: [`docs/artifact-registry.md`](docs/artifact-registry.md)
 - Sagas: [`docs/sagas.md`](docs/sagas.md)
