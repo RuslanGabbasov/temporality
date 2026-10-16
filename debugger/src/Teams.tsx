@@ -31,6 +31,8 @@ import {
   type TeamVersion,
   type TeamResolvePreview,
   type TeamDraft,
+  type TeamMetrics,
+  type TeamRunCost,
   type SkillDraftQuestion,
   type Agent,
   type Skill,
@@ -199,6 +201,11 @@ export default function Teams({ project }: { project: string }) {
   const [filter, setFilter] = useState('')
   const [versions, setVersions] = useState<TeamVersion[]>([])
   const [runs, setRuns] = useState<TeamRunRow[]>([])
+  // Version telemetry (wave G) loads with the team; the detector proposal
+  // lands as a draft version in the same list.
+  const [metrics, setMetrics] = useState<TeamMetrics | null>(null)
+  const [detecting, setDetecting] = useState(false)
+  const [detectNote, setDetectNote] = useState('')
   // Launch dialog + edit form data (agents, skills, projects) are shared.
   const [agents, setAgents] = useState<Agent[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
@@ -260,18 +267,23 @@ export default function Teams({ project }: { project: string }) {
     setTab('main')
     setRuns([])
     setVersions([])
+    setMetrics(null)
     try {
-      const [versionData, startedPage, completedPage, failedPage, cancelledPage] = await Promise.all([
+      const [versionData, startedPage, completedPage, failedPage, cancelledPage, metricsData] = await Promise.all([
         workspaceApi.listTeamVersions(team.id).catch(() => ({ versions: [] as TeamVersion[] })),
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'team.started', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[] })),
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'team.completed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[] })),
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'team.failed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[] })),
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.cancelled', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[] })),
+        // Telemetry is project-scoped; the current project selection is the
+        // honest default (teams usually run where you work with them).
+        project.trim() ? workspaceApi.teamMetrics(team.id, project).catch(() => null) : Promise.resolve(null),
       ])
       setVersions(versionData.versions ?? [])
       setRuns(teamRunsFromEvents(team.id, startedPage.events, completedPage.events, failedPage.events, cancelledPage.events))
+      setMetrics(metricsData)
     } catch { /* per-team panels degrade to empty, the main list shows errors */ }
-  }, [])
+  }, [project])
 
   const visibleTeams = useMemo(
     () => teams.filter((team) => matchesFilter(filter, team.name, team.id, team.description)),
@@ -455,6 +467,27 @@ export default function Teams({ project }: { project: string }) {
     finally { setLoading(false) }
   }
 
+  // Wave G: deterministic detector — repeated reviewer rejections of one
+  // slot pair become a draft evolution version with evidence attached.
+  const detectEvolution = async (team: Team) => {
+    if (!project.trim()) {
+      setDetectNote(t('teams.metrics_no_project') ?? 'Pick a project first: telemetry is project-scoped.')
+      return
+    }
+    setDetecting(true); setDetectNote('')
+    try {
+      const result = await workspaceApi.detectTeamEvolution(team.id, project)
+      if (result.detected) {
+        const fresh = await workspaceApi.getTeam(team.id)
+        await openTeam(fresh)
+        setTab('evolution')
+      } else {
+        setDetectNote(result.reason ?? (t('teams.detect_none') ?? 'No repeated slot disputes found in this project.'))
+      }
+    } catch (f) { setError(message(f)) }
+    finally { setDetecting(false) }
+  }
+
   const isDraft = selected?.version_status === 'draft'
 
   return (
@@ -560,11 +593,16 @@ export default function Teams({ project }: { project: string }) {
               <div className="skill-card-body">
                 {tab === 'main' && <TeamMainTab team={selected} versions={versions.length} runs={runs.length} t={t} />}
                 {tab === 'slots' && <TeamSlotsTab team={selected} agentName={agentName} t={t} />}
-                {tab === 'runs' && <TeamRunsTab runs={runs} t={t} />}
+                {tab === 'runs' && <TeamRunsTab runs={runs} project={project} t={t} />}
                 {tab === 'evolution' && (
                   <TeamEvolutionTab
                     team={selected}
                     versions={versions}
+                    metrics={metrics}
+                    project={project}
+                    detecting={detecting}
+                    detectNote={detectNote}
+                    onDetect={() => void detectEvolution(selected)}
                     t={t}
                     onApply={(version) => void applyVersion(selected, version)}
                     onReject={(version) => void rejectVersion(selected, version)}
@@ -766,19 +804,52 @@ function TeamSlotsTab({ team, agentName, t }: { team: Team; agentName: (id: stri
   )
 }
 
-function TeamRunsTab({ runs, t }: { runs: TeamRunRow[]; t: Translate }) {
+/** Runs tab: one row per team run (wave D) plus a lazily loaded run-tree
+ *  rollup (wave G) — click a row to see every child run with its tokens,
+ *  cost and duration, plus the approval budget of the whole tree. */
+function TeamRunsTab({ runs, project, t }: { runs: TeamRunRow[]; project: string; t: Translate }) {
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [rollup, setRollup] = useState<TeamRunCost | null>(null)
+  const [rollupBusy, setRollupBusy] = useState(false)
+  const [rollupError, setRollupError] = useState('')
+
+  useEffect(() => { setExpanded(null); setRollup(null); setRollupError('') }, [runs])
+
+  const toggle = async (runId: string) => {
+    if (expanded === runId) { setExpanded(null); return }
+    setExpanded(runId)
+    setRollup(null); setRollupError(''); setRollupBusy(true)
+    try {
+      setRollup(await workspaceApi.teamRunCost(project, runId))
+    } catch (f) {
+      setRollupError(message(f))
+    } finally {
+      setRollupBusy(false)
+    }
+  }
+
   if (runs.length === 0) return <p style={{ color: 'var(--tm-text-3)' }}>{t('teams.no_runs') ?? 'This team has not run yet.'}</p>
+  const formatMS = (ms: number) => {
+    if (ms <= 0) return '—'
+    const minutes = Math.round(ms / 60000)
+    if (minutes < 60) return `${minutes}m`
+    return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+  }
   return (
     <Stack gap={2}>
       {runs.map((run) => (
         <div key={run.run_id} style={{ padding: '0.6rem 0.75rem', background: 'var(--tm-raised)', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', fontSize: '0.8rem' }}>
+          <div
+            style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', fontSize: '0.8rem', cursor: 'pointer' }}
+            onClick={() => void toggle(run.run_id)}
+            title={t('teams.rollup_hint') ?? 'Click for the run-tree rollup'}
+          >
             {run.status === 'completed' && <Tag type="green" size="sm">{t('chat.delegation.completed') ?? 'completed'}</Tag>}
             {run.status === 'failed' && <Tag type="red" size="sm">{t('chat.delegation.failed') ?? 'failed'}</Tag>}
             {run.status === 'running' && <Tag type="blue" size="sm">{t('chat.delegation.running') ?? 'running'}</Tag>}
             {run.status === 'cancelled' && <Tag type="warm-gray" size="sm">{t('status.cancelled') ?? 'cancelled'}</Tag>}
             {run.version && <Tag size="sm">v{run.version}</Tag>}
-            <a href={`/agents?project=${encodeURIComponent(run.project)}&run=${encodeURIComponent(run.run_id)}`} style={{ color: 'var(--tm-teal)', fontFamily: 'monospace', fontSize: '0.72rem' }}>{run.run_id}</a>
+            <a href={`/agents?project=${encodeURIComponent(run.project)}&run=${encodeURIComponent(run.run_id)}`} style={{ color: 'var(--tm-teal)', fontFamily: 'monospace', fontSize: '0.72rem' }} onClick={(e) => e.stopPropagation()}>{run.run_id}</a>
             <span style={{ color: 'var(--tm-text-3)', marginLeft: 'auto', fontSize: '0.72rem' }}>{new Date(run.started_at).toLocaleString()}</span>
           </div>
           {run.goal && <div style={{ fontSize: '0.8rem', color: 'var(--tm-text-2)', marginTop: '0.25rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{run.goal}</div>}
@@ -790,22 +861,149 @@ function TeamRunsTab({ runs, t }: { runs: TeamRunRow[]; t: Translate }) {
               {run.failed_step && <span style={{ color: '#f7768e' }}>{t('teams.failed_step') ?? 'step'}: {run.failed_step}</span>}
             </div>
           )}
+          {expanded === run.run_id && (
+            <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.5rem', fontSize: '0.75rem' }}>
+              {rollupBusy && <span style={{ color: 'var(--tm-text-3)' }}>{t('teams.rollup_loading') ?? 'Loading run-tree rollup…'}</span>}
+              {rollupError && <span style={{ color: '#f7768e' }}>{rollupError}</span>}
+              {rollup && (
+                <Stack gap={2}>
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', color: 'var(--tm-text-3)' }}>
+                    <span><strong>{rollup.run_count}</strong> {t('teams.rollup_runs') ?? 'runs'}</span>
+                    <span><strong>{rollup.model_calls}</strong> {t('teams.rollup_calls') ?? 'model calls'}</span>
+                    <span>⏱ {formatMS(rollup.elapsed_ms)}</span>
+                    <span><strong>{rollup.total_tokens.toLocaleString()}</strong> tok</span>
+                    {(rollup.total_cached_tokens ?? 0) > 0 && <span>↻ <strong>{(rollup.total_cached_tokens ?? 0).toLocaleString()}</strong></span>}
+                    {rollup.total_cost_usd > 0 && <span><strong>${rollup.total_cost_usd.toFixed(4)}</strong></span>}
+                    {rollup.approvals && rollup.approvals.requested > 0 && (
+                      <span>👤 <strong>{rollup.approvals.granted + rollup.approvals.rejected}/{rollup.approvals.requested}</strong></span>
+                    )}
+                  </div>
+                  {rollup.runs.length > 0 && (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="tm-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem' }}>
+                        <thead>
+                          <tr style={{ color: 'var(--tm-text-3)', textAlign: 'left' }}>
+                            <th style={{ padding: '0.2rem 0.4rem' }}>{t('teams.rollup_run') ?? 'Run'}</th>
+                            <th style={{ padding: '0.2rem 0.4rem' }}>{t('teams.rollup_agent') ?? 'Agent'}</th>
+                            <th style={{ padding: '0.2rem 0.4rem' }}>{t('teams.rollup_status') ?? 'Status'}</th>
+                            <th style={{ padding: '0.2rem 0.4rem' }}>{t('teams.rollup_duration') ?? 'Duration'}</th>
+                            <th style={{ padding: '0.2rem 0.4rem' }}>{t('teams.metrics_tokens') ?? 'Tokens'}</th>
+                            <th style={{ padding: '0.2rem 0.4rem' }}>{t('teams.metrics_cost') ?? 'Cost'}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rollup.runs.map((row) => (
+                            <tr key={row.run_id} style={{ borderTop: '1px solid var(--tm-border)' }}>
+                              <td style={{ padding: '0.2rem 0.4rem', fontFamily: 'monospace', maxWidth: '18rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.run_id}>{row.run_id}</td>
+                              <td style={{ padding: '0.2rem 0.4rem' }}>{row.agent_id || '—'}</td>
+                              <td style={{ padding: '0.2rem 0.4rem' }}>{row.status}</td>
+                              <td style={{ padding: '0.2rem 0.4rem' }}>{formatMS(row.duration_ms)}</td>
+                              <td style={{ padding: '0.2rem 0.4rem' }}>{row.total_tokens.toLocaleString()}</td>
+                              <td style={{ padding: '0.2rem 0.4rem' }}>{row.cost_usd > 0 ? `$${row.cost_usd.toFixed(4)}` : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </Stack>
+              )}
+            </div>
+          )}
         </div>
       ))}
     </Stack>
   )
 }
 
-function TeamEvolutionTab({ team, versions, t, onApply, onReject }: {
+function TeamEvolutionTab({ team, versions, metrics, project, detecting, detectNote, onDetect, t, onApply, onReject }: {
   team: Team
   versions: TeamVersion[]
+  metrics: TeamMetrics | null
+  project: string
+  detecting: boolean
+  detectNote: string
+  onDetect: () => void
   t: Translate
   onApply: (version: string) => void
   onReject: (version: string) => void
 }) {
-  if (versions.length === 0) return <p style={{ color: 'var(--tm-text-3)' }}>{t('teams.no_versions') ?? 'No versions recorded.'}</p>
+  const formatMS = (ms: number) => {
+    if (ms <= 0) return '—'
+    const minutes = Math.round(ms / 60000)
+    if (minutes < 60) return `${minutes}m`
+    return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+  }
   return (
-    <div className="skill-evolution-timeline">
+    <Stack gap={4}>
+      {/* Version telemetry (wave G): what each revision actually did */}
+      {metrics && (metrics.versions?.length ?? 0) > 0 && project.trim() && (
+        <div>
+          <div className="skill-subheading">{t('teams.metrics_title') ?? 'Version telemetry'}</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="tm-table" style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ color: 'var(--tm-text-3)', textAlign: 'left' }}>
+                  <th style={{ padding: '0.3rem 0.5rem' }}>{t('teams.metrics_version') ?? 'Version'}</th>
+                  <th style={{ padding: '0.3rem 0.5rem' }}>{t('teams.metrics_runs') ?? 'Runs'}</th>
+                  <th style={{ padding: '0.3rem 0.5rem' }}>{t('teams.metrics_first_try') ?? 'First try'}</th>
+                  <th style={{ padding: '0.3rem 0.5rem' }}>{t('teams.metrics_rework') ?? 'Rework Ø'}</th>
+                  <th style={{ padding: '0.3rem 0.5rem' }}>{t('teams.metrics_duration') ?? 'Time'}</th>
+                  <th style={{ padding: '0.3rem 0.5rem' }}>{t('teams.metrics_tokens') ?? 'Tokens'}</th>
+                  <th style={{ padding: '0.3rem 0.5rem' }}>{t('teams.metrics_cost') ?? 'Cost'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.versions.map((entry) => (
+                  <tr key={entry.version} style={{ borderTop: '1px solid var(--tm-border)' }}>
+                    <td style={{ padding: '0.3rem 0.5rem', fontFamily: 'monospace' }}>v{entry.version}</td>
+                    <td style={{ padding: '0.3rem 0.5rem' }}>{entry.runs} ({entry.completed}✓ / {entry.failed}✗)</td>
+                    <td style={{ padding: '0.3rem 0.5rem' }}>{entry.runs > 0 ? `${Math.round(entry.accept_first_try * 100 / entry.runs)}%` : '—'}</td>
+                    <td style={{ padding: '0.3rem 0.5rem' }}>{entry.avg_rework_rounds.toFixed(1)}</td>
+                    <td style={{ padding: '0.3rem 0.5rem' }}>{formatMS(entry.duration_ms)}</td>
+                    <td style={{ padding: '0.3rem 0.5rem' }}>{entry.total_tokens.toLocaleString()}</td>
+                    <td style={{ padding: '0.3rem 0.5rem' }}>{entry.total_cost_usd > 0 ? `$${entry.total_cost_usd.toFixed(2)}` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {(metrics.versions.some((v) => (v.disputes?.length ?? 0) > 0)) && (
+            <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--tm-text-2)' }}>
+              <div className="skill-subheading" style={{ marginTop: '0.5rem' }}>{t('teams.disputes_title') ?? 'Slot disputes'}</div>
+              {metrics.versions.flatMap((v) => (v.disputes ?? []).map((d, i) => (
+                <div key={`${v.version}-${d.slot_id}-${i}`} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', padding: '0.2rem 0' }}>
+                  <Tag size="sm">v{v.version}</Tag>
+                  <span style={{ fontFamily: 'monospace' }}>{d.slot_id}</span>
+                  <span style={{ color: 'var(--tm-text-3)' }}>←</span>
+                  <span style={{ fontFamily: 'monospace' }}>{d.rejected_by}</span>
+                  <span>×{d.rejections} {t('teams.disputes_in') ?? 'in'} {d.runs}</span>
+                  {d.last_feedback && <span style={{ color: 'var(--tm-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '26rem' }} title={d.last_feedback}>"{d.last_feedback}"</span>}
+                </div>
+              )))}
+            </div>
+          )}
+        </div>
+      )}
+      {metrics && (metrics.versions?.length ?? 0) === 0 && project.trim() && (
+        <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('teams.metrics_empty') ?? 'No team runs with telemetry in this project yet.'}</p>
+      )}
+      {!project.trim() && (
+        <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('teams.metrics_no_project') ?? 'Pick a project first: telemetry is project-scoped.'}</p>
+      )}
+
+      {/* Wave G detector: repeated rejections become a draft proposal */}
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        <Button size="sm" kind="secondary" disabled={detecting || !project.trim()} onClick={onDetect}>
+          {detecting ? (t('teams.detecting') ?? 'Analyzing…') : (t('teams.detect') ?? 'Detect evolution')}
+        </Button>
+        {detectNote && <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{detectNote}</span>}
+      </div>
+
+      {versions.length === 0 ? (
+        <p style={{ color: 'var(--tm-text-3)' }}>{t('teams.no_versions') ?? 'No versions recorded.'}</p>
+      ) : (
+        <div className="skill-evolution-timeline">
       {[...versions].reverse().map((version) => {
         const isDraft = version.status === 'draft'
         const isCurrent = version.version === team.version
@@ -838,7 +1036,9 @@ function TeamEvolutionTab({ team, versions, t, onApply, onReject }: {
           </div>
         )
       })}
-    </div>
+        </div>
+      )}
+    </Stack>
   )
 }
 

@@ -1082,6 +1082,15 @@ func main() {
 		}
 		costAPI.ProjectBudgetHandler(w, r)
 	})
+	// Team run rollup (docs/agent-teams.md §10): the whole child-run tree of
+	// one team program run — tokens, cost, durations, approvals, rework.
+	mux.HandleFunc("GET /v1/agent/cost/team-run", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if !gate.Allow(w, r, controlplane.RoleReader, project) {
+			return
+		}
+		costAPI.TeamRunCostHandler(w, r)
+	})
 	liveness := &temporalLiveness{client: temporalClient}
 	mux.HandleFunc("GET /v1/agent/operations", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
@@ -4558,6 +4567,121 @@ func main() {
 		}
 		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamVersionRejected, "team", r.PathValue("teamID"), map[string]any{"version": version.Version})
 		writeJSON(w, 200, version)
+	})
+
+	// Version telemetry (docs/agent-teams.md §10–§11): per-version volume,
+	// accept-first-try, rework, spend and slot disputes from the team's runs
+	// in the requested project.
+	mux.HandleFunc("GET /v1/workspace/teams/{teamID}/metrics", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if !gate.Allow(w, r, controlplane.RoleReader, project) {
+			return
+		}
+		costAPI.TeamMetricsHandler(w, r, r.PathValue("teamID"))
+	})
+
+	// Evolution detector (docs/agent-teams.md §11): deterministic scan for
+	// slot pairs rejected again and again across runs of the current version.
+	// A signal becomes a draft version (origin=agent_proposal) with the
+	// evidence attached; applying stays a human decision on the Evolution tab.
+	mux.HandleFunc("POST /v1/workspace/teams/{teamID}/evolution/detect", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		project := r.URL.Query().Get("project")
+		teamID := r.PathValue("teamID")
+		team, err := ws.GetTeam(r.Context(), teamID)
+		if err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		metrics, err := costAPI.TeamMetrics(r.Context(), project, teamID)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		signals := cost.DetectTeamEvolution(metrics, team.Version)
+		if len(signals) == 0 {
+			writeJSON(w, 200, map[string]any{"detected": false, "team_id": teamID, "version": team.Version})
+			return
+		}
+		// One proposal per detection: the strongest signal, all disputes listed
+		// in the change summary so the human sees the full picture.
+		signal := signals[0]
+		var manifest workspace.TeamManifest
+		if err := json.Unmarshal(team.Manifest, &manifest); err != nil {
+			writeError(w, 422, errors.New("stored team manifest is not valid JSON: "+err.Error()))
+			return
+		}
+		enriched := false
+		var problemLines []string
+		for _, dispute := range cost.DisputesOf(metrics, team.Version) {
+			problemLines = append(problemLines, fmt.Sprintf("%s → %s ×%d", dispute.SlotID, dispute.RejectedBy, dispute.Rejections))
+		}
+		for i := range manifest.Slots {
+			slot := &manifest.Slots[i]
+			if slot.ID != signal.Dispute.SlotID {
+				continue
+			}
+			requirement := "Recurring reviewer expectation (evolution proposal): " + strings.TrimSpace(signal.Dispute.LastFeedback)
+			if requirement == "Recurring reviewer expectation (evolution proposal): " {
+				requirement += "align the output with the " + signal.Dispute.RejectedBy + " review checklist"
+			}
+			if !strings.Contains(slot.Contract, requirement) {
+				if slot.Contract != "" {
+					slot.Contract += ". " + requirement
+				} else {
+					slot.Contract = requirement
+				}
+				enriched = true
+			}
+		}
+		if !enriched {
+			// Either the contract already carries the expectation or the disputed
+			// slot no longer exists — nothing to change, and an honest "no
+			// proposal" beats a no-op draft.
+			reason := "contract already reflects the recurring expectation"
+			if signal.Dispute.SlotID != "" {
+				found := false
+				for i := range manifest.Slots {
+					if manifest.Slots[i].ID == signal.Dispute.SlotID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					reason = "disputed slot " + signal.Dispute.SlotID + " is no longer part of the team"
+				}
+			}
+			writeJSON(w, 200, map[string]any{"detected": false, "team_id": teamID, "version": team.Version, "reason": reason})
+			return
+		}
+		updated, err := json.Marshal(manifest)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		version, err := ws.ProposeTeamVersion(r.Context(), teamID, "", updated, workspace.TeamProvenance{
+			Origin:          workspace.TeamOriginAgentProposal,
+			SourceRuns:      signal.Dispute.SourceRuns,
+			ObservedProblem: signal.ObservedProblem,
+			ProposedChange:  signal.ProposedChange,
+			ExpectedEffect:  signal.ExpectedEffect,
+		})
+		if err != nil {
+			if errors.Is(err, workspace.ErrConflict) {
+				writeError(w, 409, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamVersionProposed, "team", teamID, map[string]any{"version": version.Version, "origin": version.Origin, "detector": "slot-disputes", "disputes": strings.Join(problemLines, "; ")})
+		writeJSON(w, 201, map[string]any{"detected": true, "version": version})
 	})
 
 	// MCP servers (workspace-global registry; stdio / sse / http)

@@ -1,6 +1,8 @@
 package cost
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -352,5 +354,112 @@ func TestAggregateTaskEmpty(t *testing.T) {
 	got := api.aggregateTask("p", "missing", nil)
 	if got.RunCount != 0 || got.TotalTokens != 0 || got.ElapsedMS != 0 {
 		t.Fatalf("expected zeroed task cost, got %+v", got)
+	}
+}
+
+// ── Team telemetry (docs/agent-teams.md §10–§11) ──────────────────────────
+
+func teamEvent(project, runID, eventType string, at time.Time, data map[string]any) observation.Event {
+	return observation.Event{
+		Schema: observation.Schema, EventID: "evt-" + eventType + "-" + runID + fmt.Sprintf("-%d", at.UnixNano()), OccurredAt: at,
+		Source:  observation.Source{ID: "kernel-test", Integration: "agent-kernel", Version: "1"},
+		Context: observation.Context{Project: project, Run: runID, Actor: observation.Actor{ID: "ops", Type: "human"}},
+		Type:    eventType, Data: data,
+	}
+}
+
+func TestAggregateTeamRunCostRollsUpTheTree(t *testing.T) {
+	api := NewCostAPI(Config{}, "http://journal.invalid", "")
+	base := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	events := []observation.Event{
+		teamEvent("repo", "team-1", "team.started", base, map[string]any{"team_id": "delivery", "version": "2"}),
+		teamEvent("repo", "team-1", "run.started", base, map[string]any{"agent_id": "lead"}),
+		teamEvent("repo", "team-1/program", "run.started", base.Add(time.Minute), nil),
+		teamEvent("repo", "team-1/plan/01-coder", "run.started", base.Add(2*time.Minute), map[string]any{"agent_id": "coder"}),
+		teamEvent("repo", "team-1/plan/01-coder", "model.completed", base.Add(3*time.Minute), map[string]any{"model": "m", "prompt_tokens": 100, "completion_tokens": 50}),
+		teamEvent("repo", "team-1/plan/01-coder", "run.completed", base.Add(4*time.Minute), nil),
+		// A run of another team tree in the same project: must be ignored.
+		teamEvent("repo", "other-run", "model.completed", base.Add(5*time.Minute), map[string]any{"model": "m", "prompt_tokens": 999, "completion_tokens": 999}),
+		teamEvent("repo", "team-1", "team.completed", base.Add(6*time.Minute), map[string]any{"team_id": "delivery", "version": "2", "status": "completed", "total_tokens": 150, "cost_usd": 0.01, "rework_rounds": 1}),
+	}
+	rollup := api.aggregateTeamRunCost("repo", "team-1", events)
+	if rollup.TeamID != "delivery" || rollup.Version != "2" {
+		t.Fatalf("team meta = %+v", rollup)
+	}
+	if rollup.Status != "completed" || rollup.ReworkRounds != 1 {
+		t.Fatalf("status/rework = %s/%d", rollup.Status, rollup.ReworkRounds)
+	}
+	// Tree runs: root + program frame + coder child; the foreign run excluded.
+	if rollup.RunCount != 3 {
+		t.Fatalf("run_count = %d, want 3 (root, program frame, coder)", rollup.RunCount)
+	}
+	if rollup.TotalTokens != 150 {
+		t.Fatalf("total_tokens = %d, want 150 from the coder call only", rollup.TotalTokens)
+	}
+}
+
+func TestAggregateTeamMetricsVersionsAndDisputes(t *testing.T) {
+	api := NewCostAPI(Config{}, "http://journal.invalid", "")
+	base := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	events := []observation.Event{
+		// v1: two runs — one clean, one with a rework rejection.
+		teamEvent("repo", "run-a", "team.started", base, map[string]any{"team_id": "delivery", "version": "1"}),
+		teamEvent("repo", "run-a", "team.completed", base.Add(10*time.Minute), map[string]any{"team_id": "delivery", "version": "1", "status": "completed", "total_tokens": 100, "cost_usd": 0.01, "rework_rounds": 0}),
+		teamEvent("repo", "run-b", "team.started", base.Add(time.Hour), map[string]any{"team_id": "delivery", "version": "1"}),
+		teamEvent("repo", "run-b/program", "plan.task.rejected", base.Add(time.Hour+5*time.Minute), map[string]any{"task_id": "coder", "rejected_by": "reviewer", "round": 1, "feedback": "tests missing"}),
+		teamEvent("repo", "run-b", "team.completed", base.Add(time.Hour+20*time.Minute), map[string]any{"team_id": "delivery", "version": "1", "status": "completed", "total_tokens": 200, "cost_usd": 0.02, "rework_rounds": 1}),
+		// Another team in the same project: ignored by team_id.
+		teamEvent("repo", "run-x", "team.started", base.Add(2*time.Hour), map[string]any{"team_id": "other-team", "version": "1"}),
+	}
+	metrics := api.aggregateTeamMetrics("delivery", "repo", events)
+	if len(metrics.Versions) != 1 {
+		t.Fatalf("versions = %d, want 1", len(metrics.Versions))
+	}
+	v1 := metrics.Versions[0]
+	if v1.Version != "1" || v1.Runs != 2 || v1.Completed != 2 || v1.Failed != 0 {
+		t.Fatalf("v1 volume = %+v", v1)
+	}
+	if v1.AcceptFirstTry != 1 {
+		t.Fatalf("accept_first_try = %d, want 1 (run-a had zero rework)", v1.AcceptFirstTry)
+	}
+	if v1.AvgReworkRounds != 0.5 {
+		t.Fatalf("avg_rework = %v, want 0.5", v1.AvgReworkRounds)
+	}
+	if v1.TotalTokens != 300 || v1.TotalCostUSD != 0.03 {
+		t.Fatalf("totals = %d tokens / %v usd", v1.TotalTokens, v1.TotalCostUSD)
+	}
+	if len(v1.Disputes) != 1 {
+		t.Fatalf("disputes = %+v, want the coder/reviewer pair", v1.Disputes)
+	}
+	dispute := v1.Disputes[0]
+	if dispute.SlotID != "coder" || dispute.RejectedBy != "reviewer" || dispute.Rejections != 1 || dispute.Runs != 1 {
+		t.Fatalf("dispute = %+v", dispute)
+	}
+	if dispute.LastFeedback != "tests missing" || len(dispute.SourceRuns) != 1 || dispute.SourceRuns[0] != "run-b" {
+		t.Fatalf("dispute evidence = %+v", dispute)
+	}
+}
+
+func TestDetectTeamEvolutionNeedsRepeatedPattern(t *testing.T) {
+	one := TeamSlotDispute{SlotID: "coder", RejectedBy: "reviewer", Rejections: 3, Runs: 1}
+	two := TeamSlotDispute{SlotID: "qa", RejectedBy: "reviewer", Rejections: 2, Runs: 2, LastFeedback: "checklist"}
+	stale := TeamSlotDispute{SlotID: "old", RejectedBy: "reviewer", Rejections: 5, Runs: 3}
+
+	metrics := TeamMetrics{TeamID: "delivery", Versions: []TeamVersionMetrics{
+		{Version: "1", Disputes: []TeamSlotDispute{stale}},
+		{Version: "2", Disputes: []TeamSlotDispute{one, two}},
+	}}
+	signals := DetectTeamEvolution(metrics, "2")
+	if len(signals) != 1 {
+		t.Fatalf("signals = %+v, want only the repeated qa/reviewer pair", signals)
+	}
+	if signals[0].Dispute.SlotID != "qa" {
+		t.Fatalf("signal slot = %q", signals[0].Dispute.SlotID)
+	}
+	if !strings.Contains(signals[0].ProposedChange, "checklist") {
+		t.Fatalf("proposal must carry the recurring feedback: %q", signals[0].ProposedChange)
+	}
+	if !strings.Contains(signals[0].ObservedProblem, "reviewer") || !strings.Contains(signals[0].ObservedProblem, "qa") {
+		t.Fatalf("problem must name the pair: %q", signals[0].ObservedProblem)
 	}
 }

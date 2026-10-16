@@ -79,11 +79,11 @@ Source spec: `docs/agent-teams.md` (21 раздел / 8 фаз).
 - [x] Артефакты контрактов: ответ завершённого слота (кроме ревьюеров) пишется activity `kernel.team_contract_write` в `team/{run}/contracts/{slot}.md` (best-effort, доработки перезаписывают файл); зависимые слоты получают текст контракта в промпте + ссылку на файл.
 - [x] Scoped hints: `RunInput.TeamRootRunID` распространяется по дереву ранов (слоты плана, делегаты, лид); `HintRequest.TeamRoot` → `team_root` в `/v1/observations/hints`; журнал собирает знания, чьи proposal/confirmation события лежат под этим рутом (`<root>` или `<root>/…`), и `FindHints` допускает их без лексического матчинга (tier как у topic-матча, lifecycle-гейты и issued-suppression сохраняются).
 
-### Волна G. Телеметрия и эволюция — M/L — фаза 7
+### Волна G. Телеметрия и эволюция — M/L — фаза 7 — **готово**
 
-- [ ] Rollup-эндпоинт `/v1/agent/cost/team-run?run_id=` (агрегация по дереву дочерних ранов) + `rework_rounds` из `plan.task.*`.
-- [ ] Метрики версии определения: accept-first-try, средние rework-циклы, стоимость/длительность, доля споров → таблица/запрос, вкладка «Эволюция» с версиями и причинами изменений.
-- [ ] Evolution proposals: детектор устойчивых паттернов (частые отклонения конкретной пары слотов) → `ProposeTeamVersion` с provenance (observed_problem/proposed_change/expected_effect); UI accept/reject с проваливанием в evidence.
+- [x] Rollup-эндпоинт `GET /v1/agent/cost/team-run?project=&run_id=` (kernel/cost): агрегация по дереву дочерних ранов (`<root>` и `<root>/…`) — тоталы, построчная разбивка ранов, approvals, rework из team.completed; в UI — раскрытие строки запуска на вкладке «Запуски».
+- [x] Метрики версий: `GET /v1/workspace/teams/{id}/metrics?project=` — runs/completed/failed, accept-first-try, средние rework, токены/стоимость/длительность, споры слотов (пары исполнитель←ревьюер из `plan.task.rejected`); таблица на вкладке «Эволюция».
+- [x] Evolution proposals: детерминированный детектор `POST /v1/workspace/teams/{id}/evolution/detect?project=` — пара слотов отклоняется ≥2 раз в ≥2 ранах текущей версии → draft-версия (origin=agent_proposal) с provenance (observed_problem/proposed_change/expected_effect, source_runs) и дополненным контрактом исполнителя (повторяющийся фидбек ревьюера); существующий UI accept/reject с проваливанием в evidence (ссылки на раны).
 
 ### Волна H. Миграция примера — S — фаза 8
 

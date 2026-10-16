@@ -5,7 +5,9 @@
 package cost
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -371,6 +373,366 @@ func (a *CostAPI) ProjectBudgetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, a.aggregateProjectBudget(project, events))
+}
+
+// TeamRunCost is the honest rollup of one team program run: every event of
+// the run tree — the root and ids prefixed "<root>/" — folded into totals, a
+// per-run breakdown and the team lifecycle snapshot (docs/agent-teams.md §10).
+type TeamRunCost struct {
+	Project               string             `json:"project"`
+	RunID                 string             `json:"run_id"`
+	TeamID                string             `json:"team_id,omitempty"`
+	Version               string             `json:"version,omitempty"`
+	Status                string             `json:"status,omitempty"`
+	ReworkRounds          int                `json:"rework_rounds,omitempty"`
+	RunCount              int                `json:"run_count"`
+	ModelCalls            int                `json:"model_calls"`
+	FirstStartedAt        *time.Time         `json:"first_started_at,omitempty"`
+	LastEndedAt           *time.Time         `json:"last_ended_at,omitempty"`
+	ElapsedMS             int64              `json:"elapsed_ms"`
+	ActiveMS              int64              `json:"active_ms"`
+	TotalPromptTokens     int                `json:"total_prompt_tokens"`
+	TotalCachedTokens     int                `json:"total_cached_tokens"`
+	TotalCompletionTokens int                `json:"total_completion_tokens"`
+	TotalTokens           int                `json:"total_tokens"`
+	TotalCostUSD          float64            `json:"total_cost_usd"`
+	Approvals             ApprovalStats      `json:"approvals"`
+	Runs                  []TaskRunBreakdown `json:"runs"`
+}
+
+// TeamRunCostHandler returns the token/time/cost rollup of a team run tree.
+// The root run makes no model calls itself; the value is in the aggregation
+// over its slot children, their delegates and the reviewers between them.
+func (a *CostAPI) TeamRunCostHandler(w http.ResponseWriter, r *http.Request) {
+	project := r.URL.Query().Get("project")
+	runID := r.URL.Query().Get("run_id")
+	if project == "" || runID == "" {
+		writeError(w, 400, "project and run_id are required")
+		return
+	}
+	events, err := a.queryEventsFiltered(r, project, "", "",
+		"run.started", "run.completed", "run.failed", "run.cancelled", "model.completed",
+		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted",
+		"team.started", "team.completed", "team.failed")
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, a.aggregateTeamRunCost(project, runID, events))
+}
+
+// aggregateTeamRunCost folds the events of one run tree (run id == root or
+// prefixed "<root>/") into a TeamRunCost. Events of other runs in the project
+// are ignored; a tree with no events yet still answers with empty totals.
+func (a *CostAPI) aggregateTeamRunCost(project, runID string, events []observation.Event) TeamRunCost {
+	out := TeamRunCost{Project: project, RunID: runID}
+	saga := newSagaAccumulator()
+	inTree := func(run string) bool { return run == runID || strings.HasPrefix(run, runID+"/") }
+	var teamStarted, teamEnded *observation.Event
+	for i := range events {
+		ev := events[i]
+		if !inTree(ev.Context.Run) {
+			continue
+		}
+		switch ev.Type {
+		case "team.started":
+			if ev.Context.Run == runID {
+				teamStarted = &events[i]
+			}
+		case "team.completed", "team.failed":
+			if ev.Context.Run == runID {
+				teamEnded = &events[i]
+			}
+		default:
+			a.ingestSagaEvent(saga, ev)
+		}
+	}
+	if teamStarted != nil {
+		out.TeamID, _ = teamStarted.Data["team_id"].(string)
+		out.Version, _ = teamStarted.Data["version"].(string)
+	}
+	if teamEnded != nil {
+		if teamEnded.Type == "team.failed" {
+			out.Status = "failed"
+		} else {
+			out.Status = "completed"
+			out.ReworkRounds = toInt(teamEnded.Data["rework_rounds"])
+		}
+	}
+	totals := a.finalizeSaga(saga, a.now())
+	out.RunCount = totals.runCount
+	out.ModelCalls = totals.modelCalls
+	out.FirstStartedAt = totals.firstStartedAt
+	out.LastEndedAt = totals.lastEndedAt
+	out.ElapsedMS = totals.elapsedMS
+	out.ActiveMS = totals.activeMS
+	out.TotalPromptTokens = totals.promptTokens
+	out.TotalCachedTokens = totals.cachedTokens
+	out.TotalCompletionTokens = totals.completionTokens
+	out.TotalTokens = totals.totalTokens
+	out.TotalCostUSD = totals.costUSD
+	out.Approvals = saga.approvals.stats()
+	out.Runs = totals.runs
+	return out
+}
+
+// TeamSlotDispute counts reviewer rejections of one executor slot inside one
+// team's runs (docs/agent-teams.md §11): a pair rejected again and again is
+// the strongest evolution signal a team emits.
+type TeamSlotDispute struct {
+	SlotID       string   `json:"slot_id"`
+	RejectedBy   string   `json:"rejected_by"`
+	Rejections   int      `json:"rejections"`
+	Runs         int      `json:"runs"`
+	LastRound    int      `json:"last_round,omitempty"`
+	LastFeedback string   `json:"last_feedback,omitempty"`
+	SourceRuns   []string `json:"source_runs,omitempty"`
+}
+
+// TeamVersionMetrics folds one version's team runs into the numbers the
+// Evolution tab shows: volume, outcomes, first-try acceptance, rework,
+// spend and disputes.
+type TeamVersionMetrics struct {
+	Version           string            `json:"version"`
+	Runs              int               `json:"runs"`
+	Completed         int               `json:"completed"`
+	Failed            int               `json:"failed"`
+	AcceptFirstTry    int               `json:"accept_first_try"`
+	TotalReworkRounds int               `json:"total_rework_rounds"`
+	AvgReworkRounds   float64           `json:"avg_rework_rounds"`
+	TotalTokens       int               `json:"total_tokens"`
+	TotalCostUSD      float64           `json:"total_cost_usd"`
+	DurationMS        int64             `json:"duration_ms"` // sum of per-run wall time
+	Disputes          []TeamSlotDispute `json:"disputes,omitempty"`
+}
+
+// TeamMetrics is the per-version metric set of one team.
+type TeamMetrics struct {
+	TeamID   string               `json:"team_id"`
+	Project  string               `json:"project"`
+	Versions []TeamVersionMetrics `json:"versions"`
+}
+
+// TeamMetricsHandler returns per-version metrics of one team's runs in a
+// project: volume, accept-first-try, rework, spend and slot disputes.
+func (a *CostAPI) TeamMetricsHandler(w http.ResponseWriter, r *http.Request, teamID string) {
+	metrics, err := a.TeamMetrics(r.Context(), r.URL.Query().Get("project"), teamID)
+	if err != nil {
+		if errors.Is(err, errProjectRequired) {
+			writeError(w, 400, "project is required")
+			return
+		}
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, metrics)
+}
+
+// errProjectRequired separates validation from transport in the ctx-based
+// team metrics entry point.
+var errProjectRequired = errors.New("project is required")
+
+// TeamMetrics loads a team's lifecycle events from the journal and folds them
+// into per-version metrics (docs/agent-teams.md §10).
+func (a *CostAPI) TeamMetrics(ctx context.Context, project, teamID string) (TeamMetrics, error) {
+	if project == "" {
+		return TeamMetrics{}, errProjectRequired
+	}
+	events, err := a.queryEventsCtx(ctx, project,
+		"team.started", "team.completed", "team.failed", "plan.task.rejected")
+	if err != nil {
+		return TeamMetrics{}, err
+	}
+	return a.aggregateTeamMetrics(teamID, project, events), nil
+}
+
+// DisputesOf lists the slot disputes recorded against one version.
+func DisputesOf(metrics TeamMetrics, version string) []TeamSlotDispute {
+	for _, entry := range metrics.Versions {
+		if entry.Version == version {
+			return entry.Disputes
+		}
+	}
+	return nil
+}
+
+// aggregateTeamMetrics folds a team's lifecycle events into per-version
+// metrics. team.started/team.completed pair up by run id; plan.task.rejected
+// events of those runs (context.run "<root>/program") count slot disputes.
+func (a *CostAPI) aggregateTeamMetrics(teamID, project string, events []observation.Event) TeamMetrics {
+	metrics := TeamMetrics{TeamID: teamID, Project: project}
+	type runInfo struct {
+		version string
+		started time.Time
+		ended   time.Time
+		status  string
+		rework  int
+		tokens  int
+		costUSD float64
+		seenEnd bool
+	}
+	runs := map[string]*runInfo{}
+	order := []string{}
+	for _, ev := range events {
+		switch ev.Type {
+		case "team.started":
+			if id, _ := ev.Data["team_id"].(string); id != teamID {
+				continue
+			}
+			info := runs[ev.Context.Run]
+			if info == nil {
+				info = &runInfo{}
+				runs[ev.Context.Run] = info
+				order = append(order, ev.Context.Run)
+			}
+			info.version, _ = ev.Data["version"].(string)
+			info.started = ev.OccurredAt
+		case "team.completed", "team.failed":
+			info := runs[ev.Context.Run]
+			if info == nil {
+				continue
+			}
+			if info.seenEnd && !ev.OccurredAt.After(info.ended) {
+				continue
+			}
+			info.seenEnd = true
+			info.ended = ev.OccurredAt
+			if ev.Type == "team.failed" {
+				info.status = "failed"
+			} else {
+				info.status = "completed"
+				info.rework = toInt(ev.Data["rework_rounds"])
+			}
+			info.tokens = toInt(ev.Data["total_tokens"])
+			info.costUSD, _ = ev.Data["cost_usd"].(float64)
+		}
+	}
+	// Disputes: rejections land on the root's "/program" frame; map them onto
+	// the owning team run by prefix.
+	type disputeKey struct{ slot, reviewer string }
+	disputes := map[disputeKey]*TeamSlotDispute{}
+	disputeRuns := map[disputeKey]map[string]bool{}
+	for _, ev := range events {
+		if ev.Type != "plan.task.rejected" {
+			continue
+		}
+		var root string
+		for _, candidate := range order {
+			if ev.Context.Run == candidate || strings.HasPrefix(ev.Context.Run, candidate+"/") {
+				root = candidate
+				break
+			}
+		}
+		if root == "" {
+			continue
+		}
+		slot, _ := ev.Data["task_id"].(string)
+		reviewer, _ := ev.Data["rejected_by"].(string)
+		if slot == "" || reviewer == "" {
+			continue
+		}
+		key := disputeKey{slot, reviewer}
+		dispute := disputes[key]
+		if dispute == nil {
+			dispute = &TeamSlotDispute{SlotID: slot, RejectedBy: reviewer}
+			disputes[key] = dispute
+			disputeRuns[key] = map[string]bool{}
+		}
+		dispute.Rejections++
+		dispute.LastRound = toInt(ev.Data["round"])
+		if feedback, _ := ev.Data["feedback"].(string); feedback != "" {
+			dispute.LastFeedback = feedback
+		}
+		disputeRuns[key][root] = true
+	}
+	byVersion := map[string]*TeamVersionMetrics{}
+	for _, root := range order {
+		info := runs[root]
+		entry := byVersion[info.version]
+		if entry == nil {
+			entry = &TeamVersionMetrics{Version: info.version}
+			byVersion[info.version] = entry
+		}
+		entry.Runs++
+		if info.status == "completed" {
+			entry.Completed++
+			entry.TotalReworkRounds += info.rework
+			if info.rework == 0 {
+				entry.AcceptFirstTry++
+			}
+		} else if info.status == "failed" {
+			entry.Failed++
+		}
+		if info.seenEnd {
+			entry.DurationMS += info.ended.Sub(info.started).Milliseconds()
+		}
+		entry.TotalTokens += info.tokens
+		entry.TotalCostUSD += info.costUSD
+	}
+	for key, dispute := range disputes {
+		for root := range disputeRuns[key] {
+			dispute.SourceRuns = append(dispute.SourceRuns, root)
+		}
+		sort.Strings(dispute.SourceRuns)
+		dispute.Runs = len(dispute.SourceRuns)
+		// A dispute belongs to the version of its latest source run — teams
+		// evolve to fix it, so it must follow the most recent evidence.
+		if len(dispute.SourceRuns) > 0 {
+			latest := dispute.SourceRuns[len(dispute.SourceRuns)-1]
+			if info := runs[latest]; info != nil {
+				if entry := byVersion[info.version]; entry != nil {
+					entry.Disputes = append(entry.Disputes, *dispute)
+				}
+			}
+		}
+	}
+	versions := make([]TeamVersionMetrics, 0, len(byVersion))
+	for _, entry := range byVersion {
+		if entry.Completed > 0 {
+			entry.AvgReworkRounds = float64(entry.TotalReworkRounds) / float64(entry.Completed)
+		}
+		sort.Slice(entry.Disputes, func(i, j int) bool { return entry.Disputes[i].Rejections > entry.Disputes[j].Rejections })
+		versions = append(versions, *entry)
+	}
+	sort.Slice(versions, func(i, j int) bool { return versions[i].Version < versions[j].Version })
+	metrics.Versions = versions
+	return metrics
+}
+
+// TeamEvolutionSignal is one detected evolution candidate: a slot pair whose
+// rejections repeat across runs (docs/agent-teams.md §11). The detector is
+// deterministic — no model — and only reports, the human decides.
+type TeamEvolutionSignal struct {
+	Dispute         TeamSlotDispute `json:"dispute"`
+	ObservedProblem string          `json:"observed_problem"`
+	ProposedChange  string          `json:"proposed_change"`
+	ExpectedEffect  string          `json:"expected_effect"`
+}
+
+// DetectTeamEvolution turns version metrics into evolution signals. A pair
+// qualifies when rejections repeat (>= 2 rounds) across at least two runs of
+// the current version — single-run friction is noise, a pattern is a signal.
+func DetectTeamEvolution(metrics TeamMetrics, currentVersion string) []TeamEvolutionSignal {
+	var signals []TeamEvolutionSignal
+	for _, version := range metrics.Versions {
+		if version.Version != currentVersion {
+			continue
+		}
+		for _, dispute := range version.Disputes {
+			if dispute.Rejections < 2 || dispute.Runs < 2 {
+				continue
+			}
+			signal := TeamEvolutionSignal{Dispute: dispute}
+			signal.ObservedProblem = fmt.Sprintf("reviewer slot %q rejected executor slot %q in %d run(s), %d rework round(s) in total", dispute.RejectedBy, dispute.SlotID, dispute.Runs, dispute.Rejections)
+			signal.ProposedChange = fmt.Sprintf("strengthen the output contract of slot %q with the recurring reviewer expectation", dispute.SlotID)
+			signal.ExpectedEffect = "fewer rework rounds: the executor sees the recurring requirement up front instead of learning it from rejections"
+			if feedback := strings.TrimSpace(dispute.LastFeedback); feedback != "" {
+				signal.ProposedChange += ": " + feedback
+			}
+			signals = append(signals, signal)
+		}
+	}
+	return signals
 }
 
 // taskRunAgg accumulates one run while scanning task events; terminal
@@ -889,20 +1251,29 @@ func (a *CostAPI) queryEvents(r *http.Request, project, runID string) ([]observa
 	return a.queryEventsFiltered(r, project, runID, "", "model.completed")
 }
 
+// queryEventsCtx is the context-based variant for non-handler callers.
+func (a *CostAPI) queryEventsCtx(ctx context.Context, project string, eventTypes ...string) ([]observation.Event, error) {
+	return a.queryEventsFilteredCtx(ctx, project, "", "", eventTypes...)
+}
+
 // queryEventsFiltered pages through journal events. Extra event types beyond
 // the first are OR-queried with separate requests (the journal filter takes a
 // single type) and results are merged in arrival order.
 func (a *CostAPI) queryEventsFiltered(r *http.Request, project, runID, taskID string, eventTypes ...string) ([]observation.Event, error) {
+	return a.queryEventsFilteredCtx(r.Context(), project, runID, taskID, eventTypes...)
+}
+
+func (a *CostAPI) queryEventsFilteredCtx(ctx context.Context, project, runID, taskID string, eventTypes ...string) ([]observation.Event, error) {
 	var all []observation.Event
 	for _, eventType := range eventTypes {
-		if err := a.queryOneType(r, project, runID, taskID, eventType, &all); err != nil {
+		if err := a.queryOneType(ctx, project, runID, taskID, eventType, &all); err != nil {
 			return nil, err
 		}
 	}
 	return all, nil
 }
 
-func (a *CostAPI) queryOneType(r *http.Request, project, runID, taskID, eventType string, all *[]observation.Event) error {
+func (a *CostAPI) queryOneType(ctx context.Context, project, runID, taskID, eventType string, all *[]observation.Event) error {
 	cursor := ""
 	for {
 		url := fmt.Sprintf("%s/v1/observations/events?project=%s&type=%s&limit=500", a.journalURL, project, eventType)
@@ -915,7 +1286,7 @@ func (a *CostAPI) queryOneType(r *http.Request, project, runID, taskID, eventTyp
 		if cursor != "" {
 			url += "&cursor=" + cursor
 		}
-		req, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return err
 		}

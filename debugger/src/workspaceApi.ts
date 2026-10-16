@@ -541,6 +541,73 @@ export interface TeamDraft {
   questions?: SkillDraftQuestion[]
 }
 
+/** Honest rollup of one team program run: every event of the run tree folded
+ *  into totals, a per-run breakdown and approvals (wave G). */
+export interface TeamRunCost {
+  project: string
+  run_id: string
+  team_id?: string
+  version?: string
+  status?: string
+  rework_rounds?: number
+  run_count: number
+  model_calls: number
+  first_started_at?: string
+  last_ended_at?: string
+  elapsed_ms: number
+  active_ms: number
+  total_prompt_tokens: number
+  total_cached_tokens?: number
+  total_completion_tokens: number
+  total_tokens: number
+  total_cost_usd: number
+  approvals?: { requested: number; granted: number; rejected: number; timed_out: number; auto_granted: number; pending: number; wait_ms: number; max_wait_ms: number }
+  runs: Array<{
+    run_id: string
+    parent_run_id?: string
+    agent_id?: string
+    status: string
+    started_at: string
+    ended_at?: string
+    duration_ms: number
+    model_calls: number
+    total_tokens: number
+    cost_usd: number
+  }>
+}
+
+/** Reviewer rejections of one executor slot across a team's runs (wave G). */
+export interface TeamSlotDispute {
+  slot_id: string
+  rejected_by: string
+  rejections: number
+  runs: number
+  last_round?: number
+  last_feedback?: string
+  source_runs?: string[]
+}
+
+/** Per-version telemetry of one team (wave G). */
+export interface TeamVersionMetrics {
+  version: string
+  runs: number
+  completed: number
+  failed: number
+  accept_first_try: number
+  total_rework_rounds: number
+  avg_rework_rounds: number
+  total_tokens: number
+  total_cost_usd: number
+  duration_ms: number
+  disputes?: TeamSlotDispute[]
+}
+
+export interface TeamMetrics {
+  team_id: string
+  project: string
+  versions: TeamVersionMetrics[]
+}
+
 export interface TeamRunStartResult {
   run_id: string
   project: string
@@ -1073,6 +1140,19 @@ export const workspaceApi = {
   // requirements no visible agent satisfies.
   startTeamRun: (id: string, data: { project: string; goal: string; version?: string; bindings?: Record<string, string> }) =>
     request<TeamRunStartResult>(`/v1/agent/teams/${id}/runs`, { method: 'POST', body: JSON.stringify(data) }),
+
+  // Team telemetry (wave G): run-tree rollup, per-version metrics and the
+  // deterministic evolution detector.
+  teamRunCost: (project: string, runId: string) => {
+    const query = new URLSearchParams({ project, run_id: runId })
+    return request<TeamRunCost>(`/v1/agent/cost/team-run?${query.toString()}`)
+  },
+  teamMetrics: (id: string, project: string) => {
+    const query = new URLSearchParams({ project })
+    return request<TeamMetrics>(`/v1/workspace/teams/${id}/metrics?${query.toString()}`)
+  },
+  detectTeamEvolution: (id: string, project: string) =>
+    request<{ detected: boolean; version?: TeamVersion; reason?: string }>(`/v1/workspace/teams/${id}/evolution/detect?project=${encodeURIComponent(project)}`, { method: 'POST' }),
 
   // Team creation wizard (wave E): natural language in, a validated manifest
   // draft out. Creates nothing — the draft only prefills the form.
