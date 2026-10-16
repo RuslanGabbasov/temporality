@@ -279,7 +279,7 @@ export default function ChannelSettingsPage() {
                   </span>
                 }
                 open={open[group.type] === true}
-                onToggle={(next: boolean) => toggleSection(group.type, next)}
+                onHeadingClick={({ isOpen }) => toggleSection(group.type, isOpen)}
               >
                 {group.fields.map((field) =>
                   field.secret
@@ -313,7 +313,7 @@ export default function ChannelSettingsPage() {
             {saving ? (t('common.saving') ?? 'Saving…') : (t('action.save') ?? 'Save')}
           </Button>
           <Button size="sm" kind="secondary" renderIcon={Renew} disabled={saving} onClick={() => void load()}>
-            {t('action.refresh') ?? 'Refresh')}
+            {t('action.refresh') ?? 'Refresh'}
           </Button>
         </div>
       </div>
