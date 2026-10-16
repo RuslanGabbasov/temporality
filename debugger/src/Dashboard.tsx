@@ -298,11 +298,13 @@ export default function Dashboard({ project, setProject }: Props) {
             )}
           </div>
 
-          {/* Storage footprint (docs/sandbox-storage.md §7.1) */}
-          {storage_ && (
-            <>
-              <PanelHeader title={t('dashboard.storage') ?? 'Storage'} hint={t('dashboard.storage_hint') ?? undefined} />
-              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', marginBottom: '1rem', fontSize: '0.78rem' }}>
+          {/* Storage + Server health side by side (docs/sandbox-storage.md §5.4, §7.1) */}
+          {(storage_ || syshealth) && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1rem', alignItems: 'start', marginBottom: '1rem' }}>
+            {storage_ && (
+              <section style={{ minWidth: 0 }}>
+                <PanelHeader title={t('dashboard.storage') ?? 'Storage'} hint={t('dashboard.storage_hint') ?? undefined} />
+                <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.45rem' }}>
                   <span title={storage_.root} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '20rem', color: 'var(--tm-text-3)' }}>{storage_.root}</span>
                   <span>
@@ -341,14 +343,12 @@ export default function Dashboard({ project, setProject }: Props) {
                   <div style={{ color: 'var(--tm-text-3)', marginTop: '0.5rem' }}>{t('dashboard.storage_empty') ?? 'No project storage yet'}</div>
                 )}
               </div>
-            </>
-          )}
-
-          {/* Server health (docs/sandbox-storage.md §5.4) */}
-          {syshealth && (
-            <>
-              <PanelHeader title={t('dashboard.server') ?? 'Server'} hint={t('dashboard.server_hint') ?? undefined} />
-              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', marginBottom: '1rem', fontSize: '0.78rem', display: 'grid', gridTemplateColumns: 'minmax(8rem, 0.8fr) minmax(10rem, 1.4fr)', rowGap: '0.45rem', alignItems: 'center' }}>
+              </section>
+            )}
+            {syshealth && (
+              <section style={{ minWidth: 0 }}>
+                <PanelHeader title={t('dashboard.server') ?? 'Server'} hint={t('dashboard.server_hint') ?? undefined} />
+                <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem', display: 'grid', gridTemplateColumns: 'minmax(7rem, 0.8fr) minmax(9rem, 1.4fr)', rowGap: '0.45rem', alignItems: 'center' }}>
                 <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_load') ?? 'load 1/5m'}</span>
                 <span style={{ color: syshealth.cpu.cores > 0 && syshealth.cpu.load1 > syshealth.cpu.cores ? 'var(--tm-danger)' : 'var(--tm-text)' }}>
                   {syshealth.cpu.load1.toFixed(2)} / {syshealth.cpu.load5.toFixed(2)}
@@ -389,7 +389,9 @@ export default function Dashboard({ project, setProject }: Props) {
                   <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_no_docker') ?? 'docker unreachable'}</span>
                 )}
               </div>
-            </>
+              </section>
+            )}
+          </div>
           )}
 
           {/* Models / providers */}
