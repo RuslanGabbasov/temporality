@@ -191,6 +191,23 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [sso, setSso] = useState<AuthMethods | null>(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showConfigMenu, setShowConfigMenu] = useState(false)
+  // Click-outside closes whichever header dropdown is open (settings menu,
+  // project panel, user menu). Each container keeps its own toggle: clicks
+  // inside a container never reach this branch.
+  const configMenuRef = useRef<HTMLDivElement>(null)
+  const projectPanelRef = useRef<HTMLDivElement>(null)
+  const userMenuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      if (!configMenuRef.current?.contains(target)) setShowConfigMenu(false)
+      if (!projectPanelRef.current?.contains(target)) setShowProjectPanel(false)
+      if (!userMenuRef.current?.contains(target)) setShowUserMenu(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [])
   const [showChannels, setShowChannels] = useState(false)
   const { locale, setLocale, t } = useI18n()
   const { theme, setTheme, resolved } = useTheme()
@@ -542,7 +559,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
               )}
             </a>
           ))}
-          <div className="header-config-dropdown">
+          <div className="header-config-dropdown" ref={configMenuRef}>
             <button
               className={`header-nav-link ${CONFIG_ITEMS.some((i) => activePage === i.path.slice(1)) ? 'active' : ''}`}
               onClick={() => setShowConfigMenu(!showConfigMenu)}
@@ -582,7 +599,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
         <HeaderGlobalBar>
           {/* Project selector — hidden during onboarding */}
           {!onboarding && (
-          <div style={{ position: 'relative', marginRight: '0.5rem' }}>
+          <div style={{ position: 'relative', marginRight: '0.5rem' }} ref={projectPanelRef}>
             <button
               onClick={() => { setShowProjectPanel(!showProjectPanel); if (!showProjectPanel) { setShowUserMenu(false); setShowConfigMenu(false) } }}
               style={{
@@ -667,7 +684,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
           </div>
           )}
           {/* User menu */}
-          <div style={{ position: 'relative', marginRight: '0.5rem' }}>
+          <div style={{ position: 'relative', marginRight: '0.5rem' }} ref={userMenuRef}>
             <button
               onClick={() => { setShowUserMenu(!showUserMenu); if (!showUserMenu) { setShowProjectPanel(false); setShowConfigMenu(false) } }}
               style={{
