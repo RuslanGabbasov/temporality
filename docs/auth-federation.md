@@ -316,6 +316,31 @@ Secret для `client_secret_ref` — обычный Secret ресурс
 к вашему IdP», опция — «вот готовый Authentik рядом» (пример compose-профиля
 в docs, не в основном стеке).
 
+### 10.1. Dev-стенд с Authentik
+
+`docker-compose.authentik.yml` в корне репозитория — опциональный спутник
+для приёмки SSO на дев-стенде: свой postgres/valkey, своя сеть, к стеку
+Temporality не привязан вовсе. Запуск:
+
+```bash
+docker compose -f docker-compose.authentik.yml up -d
+# админка: http://localhost:9000 (akadmin; пароль — в логах server при
+# первом старте: grep "Generated password")
+```
+
+Дальше в админке Authentik:
+
+1. **Applications → Create → Web application**: redirect URI
+   `<origin стенда>/kernel-api/v1/auth/oidc/callback`.
+2. Скопировать client id/secret в Temporality: issuer
+   `http://localhost:9000/application/o/<slug>/`, client secret — через
+   secret reference (`secret://authentik/client`).
+3. Клеймы: Authentik из коробки отдаёт `preferred_username` и `email` —
+   дефолты конфига Temporality менять не нужно.
+
+Фаза 1 принимает стенд и с Keycloak: с точки зрения ядра это тот же
+OIDC-флоу, меняется только issuer.
+
 ---
 
 ## 11. Безопасность и аудит

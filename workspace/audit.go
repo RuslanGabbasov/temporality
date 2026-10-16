@@ -78,6 +78,12 @@ const (
 	AuditIntakeCancelled         = "intake.cancelled"
 	AuditEvalGateOverridden      = "agent.evaluation.gate.overridden"
 	AuditEvalGateSkipped         = "agent.evaluation.gate.skipped"
+	AuditAuthLoginSucceeded      = "auth.login.succeeded"
+	AuditAuthLoginFailed         = "auth.login.failed"
+	AuditAuthLogout              = "auth.logout"
+	AuditAuthUserJITCreated      = "auth.user.jit_created"
+	AuditAuthUserDeactivated     = "auth.user.deactivated"
+	AuditAuthConfigUpdated       = "auth.config.updated"
 )
 
 // ErrAuditWriteFailed reports a failed access-audit INSERT on a path where

@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
@@ -464,5 +465,59 @@ func TestMaxRoleAt(t *testing.T) {
 				t.Fatalf("MaxRoleAt(%q, %q) = %s, want %s", tc.unitID, tc.unitPath, got, tc.want)
 			}
 		})
+	}
+}
+
+// Browser cookie sessions (docs/auth-federation.md §5.2-§5.3): a request
+// without a bearer falls through to the session cookie; the resolver owns
+// expiry semantics, the gate only consumes the verdict.
+func TestAuthenticateSessionCookie(t *testing.T) {
+	handler, gate := newAuthedHandler(t)
+	gate.SetSessionResolver(func(_ context.Context, sessionID string) (Principal, bool) {
+		if sessionID != "sess-live" {
+			return Principal{}, false
+		}
+		return Principal{Subject: "jdoe", Role: RoleReader, Projects: []string{"lighthouse"}}, true
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/observations/events", nil)
+	request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "sess-live"})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, request)
+	if rec.Code != http.StatusOK || rec.Body.String() != `{"subject":"jdoe"}` {
+		t.Fatalf("live session cookie = %d %s, want 200 jdoe", rec.Code, rec.Body.String())
+	}
+
+	// Unknown or expired cookie: indistinguishable from no cookie.
+	request = httptest.NewRequest(http.MethodGet, "/v1/observations/events", nil)
+	request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "sess-expired"})
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, request)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expired session cookie = %d, want 401", rec.Code)
+	}
+
+	// A valid bearer wins over any cookie: API clients are unaffected.
+	request = httptest.NewRequest(http.MethodGet, "/v1/observations/events", nil)
+	request.Header.Set("Authorization", "Bearer read-token-1234567890")
+	request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "sess-expired"})
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, request)
+	if rec.Code != http.StatusOK || rec.Body.String() != `{"subject":"alice"}` {
+		t.Fatalf("bearer over cookie = %d %s, want 200 alice", rec.Code, rec.Body.String())
+	}
+}
+
+// Without a resolver cookies never authenticate — bearer tokens remain the
+// only path (e.g. a kernel built before the federation wiring).
+func TestAuthenticateSessionCookieWithoutResolver(t *testing.T) {
+	handler, _ := newAuthedHandler(t)
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/observations/events", nil)
+	request.AddCookie(&http.Cookie{Name: SessionCookie, Value: "sess-live"})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, request)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("cookie without resolver = %d, want 401", rec.Code)
 	}
 }

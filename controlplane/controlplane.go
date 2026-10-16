@@ -166,10 +166,43 @@ func (p Principal) AllowedProjects() (projects []string, all bool) {
 // enabled but never enables the gate by itself, so a fresh installation can
 // bootstrap through the anonymous admin until the first user exists.
 type Gate struct {
-	byToken       map[string]Principal
-	internalToken string
-	dbMu          sync.RWMutex
-	dbByToken     map[string]Principal
+	byToken        map[string]Principal
+	internalToken  string
+	dbMu           sync.RWMutex
+	dbByToken      map[string]Principal
+	sessionMu      sync.RWMutex
+	sessionResolve SessionResolver
+}
+
+// SessionCookie is the browser session cookie name (docs/auth-federation.md
+// §5.2): httpOnly, the value is the random auth_session id.
+const SessionCookie = "tm_session"
+
+// SessionResolver resolves a session id to its principal. The workspace layer
+// owns expiry checks and sliding renewal; the gate only consumes the verdict
+// so controlplane stays free of storage concerns.
+type SessionResolver func(ctx context.Context, sessionID string) (Principal, bool)
+
+// SetSessionResolver installs the resolver used for cookie-authenticated
+// requests. Without one (nil gate or never wired) cookies simply never
+// authenticate — bearer tokens remain the only path.
+func (g *Gate) SetSessionResolver(resolve SessionResolver) {
+	if g == nil {
+		return
+	}
+	g.sessionMu.Lock()
+	g.sessionResolve = resolve
+	g.sessionMu.Unlock()
+}
+
+func (g *Gate) sessionPrincipal(ctx context.Context, sessionID string) (Principal, bool) {
+	g.sessionMu.RLock()
+	resolve := g.sessionResolve
+	g.sessionMu.RUnlock()
+	if resolve == nil {
+		return Principal{}, false
+	}
+	return resolve(ctx, sessionID)
 }
 
 // SetInternalToken installs the loopback self-access token. It is only
@@ -304,7 +337,7 @@ func (g *Gate) Authenticate(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		token, ok := BearerToken(r)
+		token, _ := BearerToken(r)
 		principal, known := g.byToken[token]
 		if !known {
 			principal, known = g.dbPrincipal(token)
@@ -312,7 +345,19 @@ func (g *Gate) Authenticate(next http.Handler) http.Handler {
 		if !known && token != "" && g.internalToken != "" && token == g.internalToken {
 			principal, known = Principal{Subject: "kernel-internal", Role: RoleOperator, Projects: []string{"*"}}, true
 		}
-		if !ok || !known {
+		// Browser sessions: no bearer at all (or an unknown one) falls through to
+		// the session cookie — the SPA authenticates this way after the OIDC
+		// callback (docs/auth-federation.md §5.2-§5.3). A present-but-invalid
+		// cookie is indistinguishable from no cookie: same 401.
+		if !known {
+			if cookie, cErr := r.Cookie(SessionCookie); cErr == nil && cookie.Value != "" {
+				principal, known = g.sessionPrincipal(r.Context(), cookie.Value)
+			}
+		}
+		// ok from BearerToken is irrelevant here: a header that doesn't parse
+		// yields an empty token, which never resolves — so "known" alone decides.
+		// A cookie session resolves without any header at all (browser SPA).
+		if !known {
 			writeError(w, http.StatusUnauthorized, "a valid bearer token is required")
 			return
 		}

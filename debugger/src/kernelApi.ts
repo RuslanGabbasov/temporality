@@ -108,6 +108,23 @@ export function whoami(): Promise<Whoami> {
   return request('/v1/agent/whoami')
 }
 
+// Federation login surface (docs/auth-federation.md §8-§9): which buttons the
+// login screen may offer. Fetched without credentials — before any exist.
+export interface AuthMethods {
+  sso: { enabled: boolean; display_name: string }
+  local: boolean
+}
+
+export function authMethods(): Promise<AuthMethods> {
+  return request('/v1/auth/methods')
+}
+
+// Best-effort server-side session drop (204, no body): a stale cookie is
+// cleared either way, so failures are irrelevant for the client flow.
+export function authLogout(): Promise<void> {
+  return fetch(`${KERNEL_API}/v1/auth/logout`, { method: 'POST' }).then(() => undefined)
+}
+
 // First-run bootstrap status (docs/ROADMAP.md — onboarding): tells the wizard
 // which pieces (admin user, provider, sandbox image) are still missing.
 // INTAKE_PROJECT_ID mirrors the kernel-side system project (cmd/agent-kernel

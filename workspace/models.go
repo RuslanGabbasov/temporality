@@ -542,6 +542,13 @@ type User struct {
 	// belongs to; empty = unassigned, sees everything (transition semantics).
 	OrgUnitID string `json:"org_unit_id,omitempty"`
 	Active    bool   `json:"active"`
+	// Federation identity (docs/auth-federation.md §6): the (issuer, external_id)
+	// pair links the user to its IdP identity — the JIT key. sourced is "local"
+	// for manually created users and "federated" for JIT-provisioned ones.
+	ExternalIssuer string     `json:"external_issuer,omitempty"`
+	ExternalID     string     `json:"external_id,omitempty"`
+	Sourced        string     `json:"sourced,omitempty"`
+	LastLoginAt    *time.Time `json:"last_login_at,omitempty"`
 	// Communication channels + preferred delivery. Preferred "" or "web"
 	// means the UI inbox; otherwise it must reference an enabled channel.
 	Channels         []UserChannel `json:"channels,omitempty"`

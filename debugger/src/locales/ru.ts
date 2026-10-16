@@ -166,6 +166,8 @@ export const ru: Record<string, string> = {
     'login.password': 'Пароль',
     'login.invalid': 'Неверный логин или пароль',
     'login.signing_in': 'Входим…',
+    'login.sso_button': 'Войти через {{name}}',
+    'login.sso_or': 'или',
 
     // New entity buttons
     'new.project': 'Новый проект',

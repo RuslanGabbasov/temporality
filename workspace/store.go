@@ -1088,10 +1088,13 @@ func (s *Store) CreateUser(ctx context.Context, u *User) error {
 		u.Active = true
 	}
 	channels, _ := json.Marshal(channelList(u.Channels))
+	if u.Sourced == "" {
+		u.Sourced = "local"
+	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_user (id, name, email, role, token, password_hash, org_unit_id, active, channels, preferred_channel, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-		u.ID, u.Name, u.Email, u.Role, u.Token, u.PasswordHash, nullString(u.OrgUnitID), u.Active, channels, u.PreferredChannel, u.CreatedAt, u.UpdatedAt)
+		`INSERT INTO workspace_user (id, name, email, role, token, password_hash, org_unit_id, active, channels, preferred_channel, external_issuer, external_id, sourced, last_login_at, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+		u.ID, u.Name, u.Email, u.Role, u.Token, u.PasswordHash, nullString(u.OrgUnitID), u.Active, channels, u.PreferredChannel, u.ExternalIssuer, u.ExternalID, u.Sourced, nullTime(u.LastLoginAt), u.CreatedAt, u.UpdatedAt)
 	return err
 }
 
@@ -1282,6 +1285,13 @@ func nullString(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func nullTime(t *time.Time) interface{} {
+	if t == nil {
+		return nil
+	}
+	return *t
 }
 
 func nullRawMessage(b json.RawMessage) interface{} {

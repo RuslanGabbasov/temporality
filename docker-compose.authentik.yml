@@ -1,0 +1,88 @@
+# Authentik dev broker — an OPTIONAL companion for testing SSO on a dev stand
+# (docs/auth-federation.md §10). NOT part of the main stack: the production
+# answer is "point the kernel at your corporate IdP". Start explicitly:
+#
+#   docker compose -f docker-compose.authentik.yml up -d
+#
+# Then in the Authentik admin (http://localhost:9000, akadmin / the generated
+# password from `docker compose ... logs server | grep "Generated password"`):
+#   1. Create an OIDC provider: type "Web application", redirect URI
+#      <temporality origin>/kernel-api/v1/auth/oidc/callback.
+#   2. Copy the client id/secret into Temporality (PUT /v1/workspace/auth/config
+#      or the admin UI once it ships): issuer http://localhost:9000/application/o/temporality/,
+#      client_secret_ref secret://authentik/client.
+#   3. Claim mapping: Authentik ships preferred_username and email by default —
+#      the kernel's claim-name config can stay on its defaults.
+#
+# Everything lives on its own network with its own postgres/valkey: the broker
+# never touches the temporality database, the kernel reaches it as any external
+# IdP would (through the browser's origin).
+
+name: temporality-authentik
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD: authentik-dev
+    volumes:
+      - authentik-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentik"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # Authentik dropped redis for valkey; same wire protocol.
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+
+  server:
+    image: ghcr.io/goauthentik/server:latest
+    command: server
+    environment:
+      AUTHENTIK_SECRET_KEY: dev-secret-key-change-me
+      AUTHENTIK_REDIS__HOST: valkey
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: authentik-dev
+      # Dev stand: plain HTTP and the container port behind it.
+      AUTHENTIK_WEB__PORT: 9000
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9443:9443"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/goauthentik/server:latest
+    command: worker
+    environment:
+      AUTHENTIK_SECRET_KEY: dev-secret-key-change-me
+      AUTHENTIK_REDIS__HOST: valkey
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: authentik-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+    restart: unless-stopped
+
+volumes:
+  authentik-db:
+  authentik-media:
+  authentik-templates:

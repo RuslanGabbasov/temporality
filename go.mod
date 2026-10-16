@@ -5,6 +5,8 @@ go 1.26.0
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
 	github.com/coder/websocket v1.8.15
+	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -13,6 +15,7 @@ require (
 	go.temporal.io/sdk v1.46.0
 	golang.org/x/crypto v0.51.0
 	golang.org/x/image v0.47.0
+	golang.org/x/oauth2 v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -42,7 +45,6 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect

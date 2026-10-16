@@ -166,6 +166,8 @@ export const en: Record<string, string> = {
     'login.password': 'Password',
     'login.invalid': 'Invalid login or password',
     'login.signing_in': 'Signing in…',
+    'login.sso_button': 'Sign in with {{name}}',
+    'login.sso_or': 'or',
 
     // New entity buttons
     'new.project': 'New project',

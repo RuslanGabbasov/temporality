@@ -286,6 +286,22 @@ func main() {
 		log.Error("migrate workspace v66 (research sessions)", "error", err)
 		os.Exit(1)
 	}
+	// 000067-000069 create the auth-federation surface (docs/auth-federation.md
+	// §7): the single IdP config row, server-side browser sessions, one-time
+	// OIDC request state, claim mappings (schema lands with phase 1, application
+	// in phase 2) and the federation identity on workspace_user.
+	if err = ws.Migrate(ctx, "migrations/000067_auth_oidc.up.sql"); err != nil {
+		log.Error("migrate workspace v67 (auth oidc)", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000068_auth_claim_mapping.up.sql"); err != nil {
+		log.Error("migrate workspace v68 (auth claim mapping)", "error", err)
+		os.Exit(1)
+	}
+	if err = ws.Migrate(ctx, "migrations/000069_workspace_user_federation.up.sql"); err != nil {
+		log.Error("migrate workspace v69 (workspace user federation)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -500,43 +516,48 @@ func main() {
 	// below): unauthenticated callers may reach exactly this one endpoint.
 	// Every failure is the same generic 401 — unknown login, wrong password,
 	// inactive user and "no password configured" are indistinguishable, so
-	// the endpoint cannot be used to enumerate users.
-	mux.HandleFunc("POST /v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Login    string `json:"login"`
-			Password string `json:"password"`
+	// the endpoint cannot be used to enumerate users. Registration sits below
+	// (registerPasswordLogin) — it shares authDeps with the federation wiring.
+	//
+	// Auth federation phase 1 (docs/auth-federation.md §5-§8): OIDC login,
+	// server-side browser sessions, JIT provisioning and the admin IdP-config
+	// surface. The provider cache memoizes discovery; the session resolver
+	// teaches the gate to accept the cookie the callback issues.
+	authSessionTTL := 12 * time.Hour
+	if raw := strings.TrimSpace(os.Getenv("KERNEL_SESSION_TTL")); raw != "" {
+		if parsed, pErr := time.ParseDuration(raw); pErr == nil && parsed > 0 {
+			authSessionTTL = parsed
+		} else {
+			log.Warn("KERNEL_SESSION_TTL is not a valid duration, using 12h", "value", raw)
 		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14)).Decode(&req); err != nil {
-			writeError(w, 400, err)
-			return
+	}
+	authAbsoluteTTL := 7 * 24 * time.Hour
+	if raw := strings.TrimSpace(os.Getenv("KERNEL_SESSION_ABSOLUTE_TTL")); raw != "" {
+		if parsed, pErr := time.ParseDuration(raw); pErr == nil && parsed > 0 {
+			authAbsoluteTTL = parsed
+		} else {
+			log.Warn("KERNEL_SESSION_ABSOLUTE_TTL is not a valid duration, using 168h", "value", raw)
 		}
-		login := strings.TrimSpace(req.Login)
-		if login == "" || req.Password == "" {
-			writeError(w, 401, errors.New("invalid login or password"))
-			return
-		}
-		user, err := ws.GetUserByLogin(r.Context(), login)
-		if err != nil {
-			writeError(w, 401, errors.New("invalid login or password"))
-			return
-		}
-		if !workspace.CheckPassword(user.PasswordHash, req.Password) {
-			writeError(w, 401, errors.New("invalid login or password"))
-			return
-		}
-		token := user.Token
-		if token == "" {
-			// Password-capable users always leave with a bearer token: mint one
-			// on first login so the gate accepts subsequent requests.
-			token = generateToken()
-			if err := ws.UpdateUserToken(r.Context(), user.ID, token); err != nil {
-				writeError(w, 500, err)
-				return
-			}
-			refreshUserTokens()
-		}
-		writeJSON(w, 200, map[string]any{"token": token, "user_id": user.ID, "subject": user.Name})
-	})
+	}
+	if authAbsoluteTTL < authSessionTTL {
+		authAbsoluteTTL = authSessionTTL
+	}
+	oidcProviders := newOIDCProviderCache()
+	authDeps := authDependencies{
+		store: ws,
+		resolveKey: func(ctx context.Context, ref string) (string, error) {
+			return resolveProviderAPIKey(ctx, ws, ref, secretMasterKey)
+		},
+		log:          log,
+		sessionTTL:   authSessionTTL,
+		absoluteTTL:  authAbsoluteTTL,
+		cookieSecure: strings.EqualFold(strings.TrimSpace(os.Getenv("KERNEL_COOKIE_SECURE")), "true"),
+	}
+	registerAuthRoutes(mux, authDeps, gate, oidcProviders)
+	registerPasswordLogin(mux, authDeps, ws, refreshUserTokens)
+	gate.SetSessionResolver(sessionPrincipalResolver(ws, func(ctx context.Context, userID string) (controlplane.Principal, bool) {
+		return ws.PrincipalForUser(ctx, log, userID)
+	}, log, authSessionTTL, authAbsoluteTTL))
 	mux.HandleFunc("POST /v1/agent/runs", func(w http.ResponseWriter, r *http.Request) {
 		var input agent.RunInput
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&input); err != nil {
@@ -5549,6 +5570,19 @@ func main() {
 		}
 	}()
 
+	// Auth garbage sweep (docs/auth-federation.md §5.2): expired sessions and
+	// stale one-time login states leave rows behind — the hourly pass keeps
+	// both tables from growing with abandoned logins.
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := ws.PurgeAuthGarbage(context.Background(), time.Now().UTC()); err != nil {
+				slog.Warn("purge auth garbage", "error", err)
+			}
+		}
+	}()
+
 	// Schedule trigger loop: polls all enabled schedule triggers every minute.
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
@@ -6579,6 +6613,21 @@ func main() {
 			mux.ServeHTTP(w, r)
 			return
 		}
+		// Federation login surface (docs/auth-federation.md §5): methods feed
+		// the login screen, start/callback drive the OIDC redirect flow, logout
+		// must work with a stale cookie. None can exist behind the bearer gate.
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/auth/methods" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/auth/oidc/") {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/auth/logout" {
+			mux.ServeHTTP(w, r)
+			return
+		}
 		// Webhook trigger deliveries authorize against the matched trigger's
 		// own token (or fall back to the writer gate inside the handler), so
 		// they enter the mux directly — an unknown per-trigger token must
@@ -6620,6 +6669,12 @@ func stripKernelAPIProxyPrefix(r *http.Request) {
 	const proxyPrefix = "/kernel-api"
 	if r.URL.Path != proxyPrefix && !strings.HasPrefix(r.URL.Path, proxyPrefix+"/") {
 		return
+	}
+	// Record the prefix for derivations that must address the kernel the way
+	// the browser does — the OIDC redirect_uri (docs/auth-federation.md §5.1)
+	// is built as publicOrigin + prefix + path.
+	if r.Header.Get("X-Forwarded-Prefix") == "" {
+		r.Header.Set("X-Forwarded-Prefix", proxyPrefix)
 	}
 	r.URL.Path = strings.TrimPrefix(r.URL.Path, proxyPrefix)
 	if r.URL.Path == "" {

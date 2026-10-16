@@ -21,7 +21,7 @@ import { TOKEN_STORAGE_KEY, authToken, authHeaders, storedProject, rememberProje
 import Onboarding from './Onboarding'
 import { LOCALES, useI18n, useT, type Locale } from './i18n'
 import { useTheme } from './theme'
-import { whoami, login as apiLogin, INTAKE_PROJECT_ID, type Whoami } from './kernelApi'
+import { whoami, login as apiLogin, authMethods, authLogout, INTAKE_PROJECT_ID, type Whoami, type AuthMethods } from './kernelApi'
 import ChannelsDialog from './ChannelsDialog'
 import AppModal from './Modal'
 import { workspaceApi, type OrgUnit } from './workspaceApi'
@@ -187,6 +187,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [identity, setIdentity] = useState<Whoami | null>(null)
+  const [sso, setSso] = useState<AuthMethods | null>(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showConfigMenu, setShowConfigMenu] = useState(false)
   const [showChannels, setShowChannels] = useState(false)
@@ -352,11 +353,20 @@ export default function Layout({ children, activePage }: LayoutProps) {
   useEffect(() => {
     void whoami().then((id) => {
       setIdentity(id)
-      // Tokenless fresh installation: anonymous callers are admins, so the
-      // login screen would only block the onboarding wizard.
-      if (!id.auth_enabled) setLoggedIn(true)
+      // Any 200 means the gate let the request through: a tokenless fresh
+      // install (anonymous admin) or a live cookie session from the OIDC
+      // callback (docs/auth-federation.md §5) — either way the login screen
+      // has nothing to offer.
+      setLoggedIn(true)
     }).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    // Login-screen decoration: the SSO button appears only when the kernel
+    // has a live IdP config. Failures leave the plain local form — a kernel
+    // without the federation surface still logs in.
+    if (!loggedIn) void authMethods().then(setSso).catch(() => {})
+  }, [loggedIn])
 
   useEffect(() => {
     const loadAgents = async () => {
@@ -431,10 +441,15 @@ export default function Layout({ children, activePage }: LayoutProps) {
   }
 
   const doLogout = () => {
-    localStorage.removeItem(TOKEN_STORAGE_KEY)
-    setLoggedIn(false)
-    setToken('')
-    window.location.reload()
+    // Drop the server-side session first so the cookie dies together with
+    // the tab; a stale bearer token in localStorage goes next. Best effort:
+    // reload clears the client either way.
+    void authLogout().catch(() => {}).finally(() => {
+      localStorage.removeItem(TOKEN_STORAGE_KEY)
+      setLoggedIn(false)
+      setToken('')
+      window.location.reload()
+    })
   }
 
   // Project CRUD
@@ -963,6 +978,25 @@ export default function Layout({ children, activePage }: LayoutProps) {
             <img src="/temporality.svg" alt="Temporality" style={{ height: '48px', marginBottom: '1rem' }} />
             <h1 style={{ fontSize: '1.25rem', fontWeight: 500, marginBottom: '0.5rem', color: 'var(--tm-text)' }}>Temporality</h1>
             <p style={{ color: 'var(--tm-text-2)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>{t('login.description') ?? 'Sign in to the Temporality workspace.'}</p>
+            {sso?.sso.enabled && (
+              <>
+                <Button
+                  kind="primary"
+                  onClick={() => { window.location.href = `${KERNEL_API}/v1/auth/oidc/start` }}
+                  style={{ width: '100%', marginBottom: '0.75rem' }}
+                >
+                  {t('login.sso_button', { name: sso.sso.display_name || 'SSO' })}
+                </Button>
+                {/* Local credentials stay below the SSO button: admins keep the
+                  break-glass path (docs/auth-federation.md §5.5) and tokenless
+                  service flows keep the API-token mode. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.75rem 0', color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>
+                  <span style={{ flex: 1, height: '1px', background: 'var(--tm-border)' }} />
+                  {t('login.sso_or') ?? 'or'}
+                  <span style={{ flex: 1, height: '1px', background: 'var(--tm-border)' }} />
+                </div>
+              </>
+            )}
             <LoginFields
               mode={loginMode}
               onModeChange={setLoginMode}
