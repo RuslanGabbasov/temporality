@@ -130,6 +130,17 @@ func main() {
 				_, err := ws.GetOrgUnit(ctx, unitID)
 				return err == nil
 			}),
+			httpapi.WithTopicAliases(func(ctx context.Context, project string) (map[string]httpapi.AreaAlias, error) {
+				raw, err := ws.AreaAliases(ctx, project)
+				if err != nil {
+					return nil, err
+				}
+				aliases := make(map[string]httpapi.AreaAlias, len(raw))
+				for value, alias := range raw {
+					aliases[value] = httpapi.AreaAlias{Canonical: alias.Canonical, Hidden: alias.Hidden}
+				}
+				return aliases, nil
+			}),
 		)
 	}
 	server := &http.Server{

@@ -88,6 +88,9 @@ const (
 	AuditSandboxProfileUpdated   = "sandbox.profile.updated"
 	AuditSandboxProfileDeleted   = "sandbox.profile.deleted"
 	AuditSandboxProfileBuilt     = "sandbox.profile.built"
+	// AuditKnowledgeAreasNormalized records a judge-driven area normalization
+	// sweep (docs/human-knowledge-explorer.md §4.2).
+	AuditKnowledgeAreasNormalized = "knowledge.areas.normalized"
 )
 
 // ErrAuditWriteFailed reports a failed access-audit INSERT on a path where

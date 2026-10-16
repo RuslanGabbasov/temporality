@@ -6575,6 +6575,8 @@ func main() {
 	RegisterQualityRoutes(mux, gate, ws, events, visibleUnits)
 	// LLM-judge configuration and calibration (specs/quality-loop.md §6).
 	RegisterJudgeRoutes(mux, gate, ws, activities, events, visibleUnits, log)
+	// Judge-driven knowledge-area normalization (docs/human-knowledge-explorer.md §4.2).
+	RegisterKnowledgeAreaRoutes(mux, gate, ws, secretMasterKey, observationURL, journalToken, log)
 	// Scheduled quality runs (docs/agent-quality-loop.md §8.1): the cadence is
 	// an operator setting the loop re-reads every minute, so UI changes apply
 	// without a restart. Anchored on the newest scheduled run row.

@@ -126,12 +126,12 @@ export function squarify(values: number[], width: number, height: number): Rect[
   return rects
 }
 
-/** Sort by descending size, then tile the canvas. */
+/** Tile the canvas in the caller's order (KnowledgeExplorer sorts by size or
+ *  name and also applies the area filter; the layout itself stays order-agnostic). */
 export function layoutAreas(areas: ExploreArea[], width = 320, height = 260): PositionedArea[] {
-  const sorted = [...areas].sort((a, b) => (b.knowledge_count || 0) - (a.knowledge_count || 0) || a.name.localeCompare(b.name))
-  if (sorted.length === 0) return []
-  const rects = squarify(sorted.map((a) => a.knowledge_count || 1), width, height)
-  return sorted.map((area, i) => ({ area, ...rects[i] }))
+	if (areas.length === 0) return []
+	const rects = squarify(areas.map((a) => a.knowledge_count || 1), width, height)
+	return areas.map((area, i) => ({ area, ...rects[i] }))
 }
 
 /** Truncate a label to the number of characters that fit the tile width

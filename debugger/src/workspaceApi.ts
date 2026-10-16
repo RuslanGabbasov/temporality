@@ -196,6 +196,14 @@ export interface JudgeConfig {
   source?: string
 }
 
+// Result of the judge-driven knowledge-area normalization sweep: how many
+// raw values were merged into canonical ones and how many were hidden.
+export interface AreaNormalizationResult {
+  areas: number
+  merged: number
+  hidden: number
+}
+
 // Scheduled quality-run cadence (GET/PUT /v1/workspace/quality-schedule):
 // interval_hours=0 disables; next_run_at is the approximate fire time.
 export interface QualitySchedule {
@@ -1023,6 +1031,10 @@ export const workspaceApi = {
     request<QualitySchedule>('/v1/workspace/quality-schedule'),
   updateQualitySchedule: (intervalHours: number) =>
     request<QualitySchedule>('/v1/workspace/quality-schedule', { method: 'PUT', body: JSON.stringify({ interval_hours: intervalHours }) }),
+  // Judge-driven knowledge-area normalization: merge duplicate/raw topic and
+  // entity values into canonical areas, hide garbage (file names etc.).
+  normalizeKnowledgeAreas: (project: string) =>
+    request<AreaNormalizationResult>('/v1/workspace/knowledge-areas/normalize', { method: 'POST', body: JSON.stringify({ project }) }),
   createAgentProposal: (id: string, data: { problem: string; change: string; effect?: string; description?: string; definition?: { constraints?: string[]; completion?: string[] }; evidence?: string[] }) =>
     request<AgentProposal>(`/v1/workspace/agents/${id}/proposals`, { method: 'POST', body: JSON.stringify(data) }),
   // Gated apply (docs/agent-quality-loop.md §7.1): the answer is one of two

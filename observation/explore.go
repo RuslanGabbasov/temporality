@@ -447,13 +447,18 @@ func (e exploreEngine) orient(result *ExploreResult, query ExploreQuery) {
 		items  []Knowledge
 		tokens map[string]bool
 	}
+	// One name = one area regardless of whether the value was tagged as a
+	// topic or an entity: two same-named tiles read as duplicates to the user
+	// (the kind stays for the fallback label, topics win).
 	areas := make(map[string]*areaAggregate)
 	addArea := func(name, kind string, item Knowledge) {
-		key := kind + "\x00" + name
+		key := name
 		area, ok := areas[key]
 		if !ok {
 			area = &areaAggregate{name: name, kind: kind, tokens: make(map[string]bool)}
 			areas[key] = area
+		} else if area.kind != kind && kind == "topic" {
+			area.kind = "topic"
 		}
 		area.items = append(area.items, item)
 		for token := range knowledgeFeatureTokens(name) {
@@ -517,7 +522,7 @@ func (e exploreEngine) orient(result *ExploreResult, query ExploreQuery) {
 	// Representative items: the three best question matches inside each area
 	// (or the freshest when there is no question).
 	for i := range scoredAreas {
-		areaKey := scoredAreas[i].Kind + "\x00" + scoredAreas[i].Name
+		areaKey := scoredAreas[i].Name
 		area := areas[areaKey]
 		var cards []ExploreKnowledgeCard
 		for _, item := range area.items {

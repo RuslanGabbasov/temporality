@@ -17,7 +17,12 @@ import { applySessionPayload, type SessionSnapshot } from './explorer/sessions'
 import Dossier from './Dossier'
 import { stateLabel, kindLabel, scopeLabel } from './explorer/shared'
 import ProjectRequired from './ProjectRequired'
+import { workspaceApi } from './workspaceApi'
 import { useT } from './i18n'
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'Request failed'
+}
 
 /** Filters auto-apply, so the search input needs a debounce to avoid firing a
  *  request triple (orient + search + listing) per keystroke. */
@@ -88,6 +93,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
 
   const [areaFilter, setAreaFilter] = useState('')
   const [areaSort, setAreaSort] = useState<'size' | 'name'>('size')
+  const [normalizeBusy, setNormalizeBusy] = useState(false)
 
   const [navStack, setNavStack] = useState<NavRecord[]>([])
   const navSeq = useRef(0)
@@ -312,6 +318,25 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
         : a.name.localeCompare(b.name))
   }, [areas, areaFilter, areaSort])
 
+  // Judge-судья сводит варианты областей к каноничным и прячет мусорные
+  // (имена файлов и т.п.). After success the map re-fetches via revision; the
+  // summary lands in a neutral notice line, not the error notification.
+  const [normalizeNotice, setNormalizeNotice] = useState('')
+  const normalizeAreas = useCallback(async () => {
+    setNormalizeBusy(true)
+    setExploreError('')
+    setNormalizeNotice('')
+    try {
+      const result = await workspaceApi.normalizeKnowledgeAreas(project)
+      setNormalizeNotice(t('explorer.area_normalize_done', { merged: String(result.merged ?? 0), hidden: String(result.hidden ?? 0) }))
+      setRevision((r) => r + 1)
+    } catch (failure) {
+      setExploreError(errorMessage(failure))
+    } finally {
+      setNormalizeBusy(false)
+    }
+  }, [project, t])
+
   // "No data" vs "no results" (ТЗ §6.2, §13.4): the orient map ignores the
   // listing filters, so it reliably separates an empty knowledge base from an
   // over-filtered one.
@@ -435,16 +460,18 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: '1rem', alignItems: 'start' }}>
-        {/* Left: area map + alternative list (ТЗ §4) */}
+        {/* Left: the area map — one widget: header with the filter and sort
+            that used to live in the list below, then the treemap. The list was
+            the same data in a second shape, so it is gone (ТЗ §4). */}
         <div>
           <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.75rem' }}>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.25rem' }}>{t('explorer.map_title') ?? 'Area map'}</div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)', marginBottom: '0.5rem' }}>{t('explorer.map_hint') ?? ''}</div>
-            <AreaMap areas={areas} selectedKey={selectedAreaKey} onSelect={selectArea} />
-          </div>
-          <div style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.75rem', marginTop: '0.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{t('explorer.map_title') ?? 'Area map'}</div>
+              <button style={{ ...chip(false), marginLeft: 'auto', flexShrink: 0 }} disabled={normalizeBusy} onClick={() => void normalizeAreas()} title={t('explorer.area_normalize_hint') ?? undefined}>
+                {normalizeBusy ? '…' : (t('explorer.area_normalize') ?? 'Tidy up')}
+              </button>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{t('explorer.areas') ?? 'Areas'}</div>
               <TextInput
                 id="explorer-areas-filter"
                 size="sm" value={areaFilter} labelText="" hideLabel
@@ -455,27 +482,12 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
               <button style={{ ...chip(areaSort === 'size'), flexShrink: 0 }} onClick={() => setAreaSort('size')}>{t('explorer.sort_size') ?? 'Size'}</button>
               <button style={{ ...chip(areaSort === 'name'), flexShrink: 0 }} onClick={() => setAreaSort('name')}>{t('explorer.sort_name') ?? 'A–Z'}</button>
             </div>
-            <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
-              {visibleAreas.map((area) => (
-                <div
-                  key={areaKey(area)}
-                  role="button" tabIndex={0}
-                  onClick={() => selectArea(area)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectArea(area) } }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.4rem', cursor: 'pointer', borderRadius: '4px',
-                    background: areaKey(area) === selectedAreaKey ? 'var(--tm-elevated)' : 'transparent',
-                  }}
-                >
-                  <span style={{ fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{area.name}</span>
-                  {(area.contradictions ?? 0) > 0 && <span title={t('explorer.contradictions') ?? 'contradictions'} style={{ color: 'var(--tm-danger)', fontSize: '0.7rem' }}>⚠ {area.contradictions}</span>}
-                  <span style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{area.knowledge_count}</span>
-                </div>
-              ))}
-              {visibleAreas.length === 0 && (
-                <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', padding: '0.3rem 0' }}>{t('explorer.map_empty') ?? 'No areas recorded yet.'}</div>
-              )}
-            </div>
+            {normalizeNotice && <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.4rem' }}>{normalizeNotice}</div>}
+            {areas.length > 0 && visibleAreas.length === 0 ? (
+              <div style={{ fontSize: '0.75rem', color: 'var(--tm-muted)', padding: '0.3rem 0' }}>{t('explorer.areas_no_match') ?? 'No areas match the filter.'}</div>
+            ) : (
+              <AreaMap areas={visibleAreas} selectedKey={selectedAreaKey} onSelect={selectArea} />
+            )}
           </div>
         </div>
 

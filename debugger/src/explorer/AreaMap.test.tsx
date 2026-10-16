@@ -33,10 +33,12 @@ describe('layoutAreas', () => {
     expect(bigArea + smallArea).toBeCloseTo(320 * 260, -1)
   })
 
-  it('sorts by descending size and stays deterministic', () => {
-    const input = [area('b', 2), area('a', 9), area('c', 5)]
+  it('preserves caller order and stays deterministic', () => {
+    // Sorting belongs to the caller (size/name filter modes); the layout only
+    // tiles. Same input → same output, input order decides placement.
+    const input = [area('a', 9), area('c', 5), area('b', 2)]
     const first = layoutAreas(input)
-    const second = layoutAreas([...input].reverse())
+    const second = layoutAreas([...input])
     expect(first.map((p) => p.area.name)).toEqual(['a', 'c', 'b'])
     expect(second.map((p) => p.area.name)).toEqual(first.map((p) => p.area.name))
     expect(first[0].w * first[0].h).toBeGreaterThanOrEqual(first[1].w * first[1].h)

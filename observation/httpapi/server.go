@@ -37,6 +37,9 @@ type Server struct {
 	// optional: without them the journal serves project-local and
 	// organization-scoped knowledge, but org_unit targeting is unavailable.
 	unitExists func(ctx context.Context, unitID string) bool
+	// topicAliases resolves the project's judge-normalized area map. Optional:
+	// without it areas render with their raw topic/entity values.
+	topicAliases func(ctx context.Context, project string) (map[string]AreaAlias, error)
 }
 
 // Option customizes the journal server.
@@ -52,6 +55,64 @@ func WithProjectUnits(fn func(ctx context.Context, project string) ([]string, er
 // WithUnitExists wires org-unit existence validation for scope promotion.
 func WithUnitExists(fn func(ctx context.Context, unitID string) bool) Option {
 	return func(s *Server) { s.unitExists = fn }
+}
+
+// AreaAlias is one judge decision about a raw topic/entity value: which
+// canonical area it belongs to (empty = keep as-is) or that it is not an
+// area at all (hidden). Applied when aggregating areas and facets; the
+// knowledge records themselves stay untouched.
+type AreaAlias struct {
+	Canonical string `json:"canonical,omitempty"`
+	Hidden    bool   `json:"hidden,omitempty"`
+}
+
+// WithTopicAliases wires the project → alias-map reader (the normalized map
+// the kernel's judge sweep stores in the workspace KV). An error or a nil
+// hook degrades to raw values — normalization is a lens, never a hard
+// dependency.
+func WithTopicAliases(fn func(ctx context.Context, project string) (map[string]AreaAlias, error)) Option {
+	return func(s *Server) { s.topicAliases = fn }
+}
+
+// applyAreaAliases rewrites the topic/entity lists through the alias map:
+// hidden values are dropped, aliased values collapse into their canonical
+// name. Duplicate entries after the mapping are removed; order of survivors
+// is preserved.
+func applyAreaAliases(items []observation.Knowledge, aliases map[string]AreaAlias) []observation.Knowledge {
+	if len(aliases) == 0 || items == nil {
+		return items
+	}
+	remap := func(values []string) []string {
+		if len(values) == 0 {
+			return nil
+		}
+		result := make([]string, 0, len(values))
+		seen := make(map[string]bool, len(values))
+		for _, value := range values {
+			alias, ok := aliases[strings.ToLower(strings.TrimSpace(value))]
+			if ok && alias.Hidden {
+				continue
+			}
+			if ok && alias.Canonical != "" {
+				value = alias.Canonical
+			}
+			trimmed := strings.TrimSpace(value)
+			if trimmed == "" || seen[trimmed] {
+				continue
+			}
+			seen[trimmed] = true
+			result = append(result, trimmed)
+		}
+		if len(result) == 0 {
+			return nil
+		}
+		return result
+	}
+	for i := range items {
+		items[i].Topics = remap(items[i].Topics)
+		items[i].Entities = remap(items[i].Entities)
+	}
+	return items
 }
 
 // New serves the journal API. A nil gate disables authentication (local
@@ -462,6 +523,21 @@ func mergeObservationEvents(groups ...[]observation.Event) []observation.Event {
 	return merged
 }
 
+// withAreaAliases projects the knowledge topics/entities through the
+// judge-normalized alias map. A missing hook or a read error keeps the raw
+// values — normalization must never break the listing.
+func (s *Server) withAreaAliases(ctx context.Context, project string, knowledge []observation.Knowledge) []observation.Knowledge {
+	if s.topicAliases == nil || len(knowledge) == 0 {
+		return knowledge
+	}
+	aliases, err := s.topicAliases(ctx, project)
+	if err != nil {
+		s.log.Warn("load area aliases; areas stay raw", "project", project, "error", err)
+		return knowledge
+	}
+	return applyAreaAliases(knowledge, aliases)
+}
+
 // knowledgeVisibleTo decides whether a projected knowledge item is visible to
 // a project: its own items always are, organization scope is global, and an
 // org_unit scope requires the unit to be in the project's visibility chain.
@@ -523,6 +599,7 @@ func (s *Server) listObservationKnowledge(w http.ResponseWriter, r *http.Request
 		return
 	}
 	knowledge = filterKnowledgeVisible(knowledge, project, chain)
+	knowledge = s.withAreaAliases(r.Context(), project, knowledge)
 	if knowledgeID := r.URL.Query().Get("knowledge_id"); knowledgeID != "" {
 		filtered := knowledge[:0]
 		for _, item := range knowledge {
@@ -1246,6 +1323,7 @@ func (s *Server) exploreObservationKnowledge(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	knowledge = filterKnowledgeVisible(knowledge, input.Project, chain)
+	knowledge = s.withAreaAliases(r.Context(), input.Project, knowledge)
 	result := observation.ExploreKnowledge(knowledge, observation.ExploreQuery{
 		Operation: input.Operation, Question: input.Question, Targets: input.Targets,
 		Relations: input.Relations, MaxDepth: input.MaxDepth, MaxItems: input.MaxItems,
