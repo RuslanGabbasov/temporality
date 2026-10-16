@@ -17,7 +17,7 @@ import {
   Checkbox,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, Edit, TrashCan, Copy, Star, Renew } from '@carbon/icons-react'
+import { Add, Edit, TrashCan, Copy, Star, Renew, Settings } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
@@ -239,20 +239,18 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   }, [])
   useEffect(() => { void loadQualitySettings() }, [loadQualitySettings])
 
-  const saveJudge = async () => {
+  // One Save for both knobs: judge model and re-run cadence change together
+  // in practice, and two identical buttons on two fields read as a bug.
+  const saveQualitySettings = async () => {
     setQualityBusy(true); setQualityError('')
     try {
-      const judge = await workspaceApi.updateJudgeConfig(judgeDraft.trim())
+      const [judge, sched] = await Promise.all([
+        workspaceApi.updateJudgeConfig(judgeDraft.trim()),
+        workspaceApi.updateQualitySchedule(Number(scheduleDraft) || 0),
+      ])
       setJudgeConfig(judge)
-    } catch (e) { setQualityError(message(e)) }
-    finally { setQualityBusy(false) }
-  }
-
-  const saveSchedule = async () => {
-    setQualityBusy(true); setQualityError('')
-    try {
-      const sched = await workspaceApi.updateQualitySchedule(Number(scheduleDraft) || 0)
       setSchedule(sched)
+      setQualityOpen(false)
     } catch (e) { setQualityError(message(e)) }
     finally { setQualityBusy(false) }
   }
@@ -828,56 +826,10 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <Heading>{t('agents.title') ?? 'Agents'}</Heading>
         <Stack orientation="horizontal" gap={2}>
+          <Button kind="ghost" renderIcon={Settings} iconDescription={t('quality.show_settings') ?? 'Quality settings'} onClick={() => setQualityOpen(true)}>{t('quality.show_settings') ?? 'Quality settings'}</Button>
           <Button kind="secondary" onClick={() => setShowTemplates(true)}>{t('agents.from_template') ?? 'From template'}</Button>
           <Button renderIcon={Add} onClick={openWizard}>{t('agents.new_agent') ?? 'New Agent'}</Button>
         </Stack>
-      </div>
-
-      {/* Installation-level quality settings: judge model and scheduled
-          re-runs. Collapsed by default — an operator surface, not part of the
-          everyday agent browsing flow. */}
-      <div style={{ marginBottom: '1rem', borderBottom: '1px solid var(--tm-border)' }}>
-        <Button size="sm" kind="ghost" onClick={() => setQualityOpen(!qualityOpen)} style={{ padding: 0 }}>
-          {qualityOpen ? (t('quality.hide_settings') ?? 'Hide quality settings') : (t('quality.show_settings') ?? 'Quality settings')}
-        </Button>
-        {qualityOpen && (
-          <div style={{ padding: '0.75rem 0' }}>
-            {qualityError && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={qualityError} onClose={() => setQualityError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
-            <Stack orientation="horizontal" gap={4}>
-              <div style={{ minWidth: 260 }}>
-                <Select id="quality-judge-model" labelText={t('quality.judge_model') ?? 'Judge model'} value={judgeDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setJudgeDraft(e.target.value)}>
-                  <SelectItem value="" text={t('quality.judge_off') ?? '— off —'} />
-                  {providers.flatMap((p) => (p.models ?? []).map((m) => (
-                    <SelectItem key={`${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
-                  )))}
-                </Select>
-                {judgeConfig && (
-                  <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>
-                    {judgeConfig.configured
-                      ? (t('quality.judge_status_on', { source: judgeConfig.source === 'setting' ? (t('quality.source_setting') ?? 'UI') : (t('quality.source_env') ?? 'env') }) ?? `active (${judgeConfig.source})`)
-                      : (t('quality.judge_status_off') ?? 'judge is off')}
-                  </p>
-                )}
-                <Button size="sm" disabled={qualityBusy} onClick={() => void saveJudge()} style={{ marginTop: '0.5rem' }}>{t('action.save') ?? 'Save'}</Button>
-              </div>
-              <div style={{ minWidth: 220 }}>
-                <Select id="quality-schedule" labelText={t('quality.schedule_interval') ?? 'Re-run suites every'} value={scheduleDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setScheduleDraft(e.target.value)}>
-                  <SelectItem value="0" text={t('quality.schedule_off') ?? '— off —'} />
-                  <SelectItem value="6" text={t('quality.schedule_6h') ?? '6 hours'} />
-                  <SelectItem value="12" text={t('quality.schedule_12h') ?? '12 hours'} />
-                  <SelectItem value="24" text={t('quality.schedule_24h') ?? '24 hours'} />
-                  <SelectItem value="168" text={t('quality.schedule_7d') ?? '7 days'} />
-                </Select>
-                {schedule?.enabled && schedule.next_run_at && (
-                  <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>
-                    {t('quality.next_run') ?? 'next run'}: {new Date(schedule.next_run_at).toLocaleString()}
-                  </p>
-                )}
-                <Button size="sm" disabled={qualityBusy} onClick={() => void saveSchedule()} style={{ marginTop: '0.5rem' }}>{t('action.save') ?? 'Save'}</Button>
-              </div>
-            </Stack>
-          </div>
-        )}
       </div>
 
       {/* Master-detail: agent list on the left, full profile with tabs on the right */}
@@ -1834,6 +1786,48 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             <div className="form-actions">
               <Button kind="secondary" onClick={() => setShowTemplates(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
             </div>
+        </AppModal>
+      )}
+
+      {/* Installation-level quality settings (judge model + re-run schedule):
+          one modal, one Save. The button lives in the page header — an
+          operator surface, not part of the everyday agent browsing flow. */}
+      {qualityOpen && (
+        <AppModal onClose={() => setQualityOpen(false)} panelStyle={{ width: '520px' }}>
+          <Heading>{t('quality.settings_title') ?? 'Quality settings'}</Heading>
+          <p style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', margin: '0.25rem 0 1rem' }}>{t('quality.settings_hint') ?? ''}</p>
+          {qualityError && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={qualityError} onClose={() => setQualityError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
+          <Select id="quality-judge-model" labelText={t('quality.judge_model') ?? 'Judge model'} value={judgeDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setJudgeDraft(e.target.value)}>
+            <SelectItem value="" text={t('quality.judge_off') ?? '— off —'} />
+            {providers.flatMap((p) => (p.models ?? []).map((m) => (
+              <SelectItem key={`${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
+            )))}
+          </Select>
+          {judgeConfig && (
+            <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>
+              {judgeConfig.configured
+                ? (t('quality.judge_status_on', { source: judgeConfig.source === 'setting' ? (t('quality.source_setting') ?? 'UI') : (t('quality.source_env') ?? 'env') }) ?? `active (${judgeConfig.source})`)
+                : (t('quality.judge_status_off') ?? 'judge is off')}
+            </p>
+          )}
+          <div style={{ marginTop: '1rem' }}>
+            <Select id="quality-schedule" labelText={t('quality.schedule_interval') ?? 'Re-run suites every'} value={scheduleDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setScheduleDraft(e.target.value)}>
+              <SelectItem value="0" text={t('quality.schedule_off') ?? '— off —'} />
+              <SelectItem value="6" text={t('quality.schedule_6h') ?? '6 hours'} />
+              <SelectItem value="12" text={t('quality.schedule_12h') ?? '12 hours'} />
+              <SelectItem value="24" text={t('quality.schedule_24h') ?? '24 hours'} />
+              <SelectItem value="168" text={t('quality.schedule_7d') ?? '7 days'} />
+            </Select>
+            {schedule?.enabled && schedule.next_run_at && (
+              <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>
+                {t('quality.next_run') ?? 'next run'}: {new Date(schedule.next_run_at).toLocaleString()}
+              </p>
+            )}
+          </div>
+          <div className="form-actions">
+            <Button kind="secondary" disabled={qualityBusy} onClick={() => setQualityOpen(false)}>{t('action.cancel') ?? 'Cancel'}</Button>
+            <Button disabled={qualityBusy} onClick={() => void saveQualitySettings()}>{qualityBusy ? '…' : (t('action.save') ?? 'Save')}</Button>
+          </div>
         </AppModal>
       )}
     </div>
