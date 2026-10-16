@@ -124,3 +124,40 @@ func TestValidateTeamManifestEmptyBody(t *testing.T) {
 		}
 	}
 }
+
+func TestTeamManifestStringShorthands(t *testing.T) {
+	// Models and hand-written manifests often collapse a struct with one
+	// dominant field onto a plain string; the unmarshalers must accept both.
+	raw := []byte(`{
+		"protocol": "review_gate",
+		"slots": [
+			{ "id": "coder", "title": "Coder", "binding": { "mode": "fixed", "agent_id": "coder-1" } },
+			{ "id": "reviewer", "title": "Reviewer", "binding": "role" }
+		]
+	}`)
+	var manifest TeamManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("unmarshal with string shorthands: %v", err)
+	}
+	if manifest.Protocol.Kind != "review_gate" || manifest.Protocol.MaxRework != 0 || manifest.Protocol.Steps != nil {
+		t.Fatalf("protocol = %+v, want kind-only value", manifest.Protocol)
+	}
+	if manifest.Slots[1].Binding.Mode != "role" || manifest.Slots[1].Binding.AgentID != "" {
+		t.Fatalf("binding = %+v, want mode-only value", manifest.Slots[1].Binding)
+	}
+	// The canonical object form keeps working and round-trips unchanged.
+	canonical, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var again TeamManifest
+	if err := json.Unmarshal(canonical, &again); err != nil {
+		t.Fatalf("round-trip unmarshal: %v", err)
+	}
+	if again.Protocol.Kind != manifest.Protocol.Kind || again.Slots[1].Binding.Mode != manifest.Slots[1].Binding.Mode {
+		t.Fatalf("round-trip changed the manifest: %+v vs %+v", again, manifest)
+	}
+	if err := ValidateTeamManifest(canonical); err != nil {
+		t.Fatalf("validate canonical form: %v", err)
+	}
+}

@@ -104,6 +104,35 @@ func TestParseTeamDraftNormalizesEnums(t *testing.T) {
 	}
 }
 
+func TestParseTeamDraftStringShorthands(t *testing.T) {
+	// Regression: models collapse "protocol" and "binding" onto plain strings
+	// even when the schema asks for objects; the draft must still parse.
+	draft, err := parseTeamDraft(`{
+  "name": "Quality & Security Gate",
+  "description": "Команда с контролем качества и аудитом безопасности.",
+  "manifest": {
+    "protocol": "review-gate",
+    "slots": [
+      { "id": "developer", "title": "Developer", "binding": "role" },
+      { "id": "reviewer", "title": "Reviewer", "binding": { "mode": "role" } }
+    ]
+  }
+}`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var manifest workspace.TeamManifest
+	if err := json.Unmarshal(draft.Manifest, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Protocol.Kind != workspace.TeamProtocolReviewGate {
+		t.Fatalf("protocol = %q, want review_gate (normalized)", manifest.Protocol.Kind)
+	}
+	if manifest.Slots[0].Binding.Mode != workspace.TeamBindingRole {
+		t.Fatalf("string binding not accepted: %+v", manifest.Slots[0].Binding)
+	}
+}
+
 func TestParseTeamDraftReasoningWrapped(t *testing.T) {
 	draft, err := parseTeamDraft("<think>нужен конвейер…</think>\n" + `{"name":"Delivery","description":"Правки и ревью.","manifest":{"protocol":{"kind":"pipeline"},"slots":[{"id":"dev","binding":{"mode":"role"}}]}}`)
 	if err != nil {

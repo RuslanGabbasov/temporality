@@ -105,6 +105,28 @@ type TeamProtocol struct {
 	Steps []TeamStep `json:"steps,omitempty"`
 }
 
+// UnmarshalJSON tolerates the string shorthand "protocol": "review_gate"
+// alongside the canonical object form: models and hand-written manifests often
+// collapse a struct with one dominant field onto a plain string. The string is
+// the kind; every knob keeps its zero value. Synonyms are normalized and the
+// kind is validated downstream.
+func (p *TeamProtocol) UnmarshalJSON(data []byte) error {
+	var kind string
+	if err := json.Unmarshal(data, &kind); err == nil {
+		p.Kind = kind
+		p.MaxRework = 0
+		p.Steps = nil
+		return nil
+	}
+	type plain TeamProtocol
+	var value plain
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*p = TeamProtocol(value)
+	return nil
+}
+
 // TeamStep is one step of a dag-protocol team: which slot executes it, what it
 // depends on and which steps it reviews.
 type TeamStep struct {
@@ -138,6 +160,27 @@ type TeamBinding struct {
 	Mode             string `json:"mode"`
 	AgentID          string `json:"agent_id,omitempty"`
 	PreferredAgentID string `json:"preferred_agent_id,omitempty"`
+}
+
+// UnmarshalJSON tolerates the string shorthand "binding": "role" alongside
+// the canonical object form: models and hand-written manifests often collapse
+// a struct with one dominant field onto a plain string. A bare string carries
+// no agent id, so a fixed binding degrades to a role binding downstream.
+func (b *TeamBinding) UnmarshalJSON(data []byte) error {
+	var mode string
+	if err := json.Unmarshal(data, &mode); err == nil {
+		b.Mode = mode
+		b.AgentID = ""
+		b.PreferredAgentID = ""
+		return nil
+	}
+	type plain TeamBinding
+	var value plain
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*b = TeamBinding(value)
+	return nil
 }
 
 // TeamDefaults are launch knobs applied to every step unless overridden.
