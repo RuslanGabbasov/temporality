@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown } from '@carbon/icons-react'
+import { CenterToFit, ChevronDown } from '@carbon/icons-react'
 import { API_BASE } from './api'
 import { pluralT, useI18n, useT } from './i18n'
 import { observationApi, type ObservationEvent } from './observationApi'
@@ -688,7 +688,6 @@ export default function ExperienceTimeline({ project }: { project: string }) {
             </ul>
           </div>}
         </div>
-        <button className="toolbar-btn" onClick={() => { setWindow(null); setFocus(null); setLaneOverrides({ execution: true }) }}>{t('timeline.fit')}</button>
         <div className="tune-picker">
           {tuneOpen && <div className="run-picker-backdrop" onClick={() => setTuneOpen(false)} />}
           <button className={`tune-toggle ${tuneOpen ? 'open' : ''} ${fineCount ? 'filtered' : ''}`} onClick={() => setTuneOpen((open) => !open)}>
@@ -779,6 +778,8 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     </div>
     <main className={`experience-grid ${selected ? '' : 'no-details'}`}>
       <section className="obs-panel experience-canvas" ref={canvasRef}>
+        <button className="timeline-fit-float" title={t('timeline.fit_hint')} aria-label={t('timeline.fit')} onClick={() => { setWindow(null); setFocus(null); setLaneOverrides({ execution: true }) }}><CenterToFit size={16} /></button>
+        <div className="experience-canvas-scroll">
         <svg ref={svgRef} width={width} height={view.height} className="experience-svg"
           onPointerDown={(down) => {
             if (down.button !== 0) return
@@ -1075,6 +1076,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
           </defs>
         </svg>
         <p className="experience-hint">{t('timeline.hint')}</p>
+        </div>
       </section>
       {selectedRow && <aside className="obs-panel experience-detail">
         <button className="detail-close" title={t('timeline.close_details')} onClick={() => setSelected('')} aria-label="Close details">×</button>

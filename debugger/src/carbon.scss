@@ -2732,7 +2732,27 @@ button.header-nav-link {
 // Timeline grid
 .experience-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 0; }
 .experience-grid.no-details { grid-template-columns: minmax(0, 1fr); }
-.experience-canvas { overflow-x: auto; }
+.experience-canvas { position: relative; }
+.experience-canvas-scroll { overflow-x: auto; min-width: 0; }
+.timeline-fit-float {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--tm-border);
+  border-radius: var(--tm-radius-sm);
+  background: var(--tm-elevated);
+  color: var(--tm-text-3);
+  cursor: pointer;
+  transition: color var(--tm-duration-fast), border-color var(--tm-duration-fast);
+}
+.timeline-fit-float:hover { color: var(--tm-teal); border-color: var(--tm-teal); }
 .experience-svg { display: block; cursor: grab; user-select: none; }
 .experience-svg:active { cursor: grabbing; }
 

@@ -1665,6 +1665,7 @@ export const en: Record<string, string> = {
 
     // Timeline - Controls
     'timeline.fit': 'fit',
+    'timeline.fit_hint': 'fit the full time span into view',
     'timeline.reset': 'reset',
     'timeline.tune': 'tune',
     'timeline.tune.layers': 'layers',

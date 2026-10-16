@@ -1665,6 +1665,7 @@ export const ru: Record<string, string> = {
 
     // Timeline - Controls
     'timeline.fit': 'вписать',
+    'timeline.fit_hint': 'вписать все данные в окно просмотра',
     'timeline.reset': 'сбросить',
     'timeline.tune': 'настройка',
     'timeline.tune.layers': 'слои',
