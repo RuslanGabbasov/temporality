@@ -85,9 +85,9 @@ Source spec: `docs/agent-teams.md` (21 раздел / 8 фаз).
 - [x] Метрики версий: `GET /v1/workspace/teams/{id}/metrics?project=` — runs/completed/failed, accept-first-try, средние rework, токены/стоимость/длительность, споры слотов (пары исполнитель←ревьюер из `plan.task.rejected`); таблица на вкладке «Эволюция».
 - [x] Evolution proposals: детерминированный детектор `POST /v1/workspace/teams/{id}/evolution/detect?project=` — пара слотов отклоняется ≥2 раз в ≥2 ранах текущей версии → draft-версия (origin=agent_proposal) с provenance (observed_problem/proposed_change/expected_effect, source_runs) и дополненным контрактом исполнителя (повторяющийся фидбек ревьюера); существующий UI accept/reject с проваливанием в evidence (ссылки на раны).
 
-### Волна H. Миграция примера — S — фаза 8
+### Волна H. Миграция примера — S — фаза 8 — **отменена**
 
-- [ ] LeadCoderReviewerQA → шаблон команды `pipeline`; перевод UI-ссылок на пример; удаление `examples/lead_coder_reviewer_qa` и спец-эндпоинтов.
+- [x] ~~LeadCoderReviewerQA → шаблон команды `pipeline`…~~ Решено не делать: пример живёт своей жизнью как отдельный workflow и не мешает; миграция не даёт ценности, сорвана пользователем.
 
 ## 3. Тестирование и приёмка (по §20 спеки)
 
