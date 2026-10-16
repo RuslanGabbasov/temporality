@@ -138,6 +138,11 @@ export default function Skills() {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [provenance, setProvenance] = useState<Record<string, SectionProvenance>>({})
   const [filter, setFilter] = useState('')
+  // agentskills.io import (folder/archive → parsed draft): importWarnings ride
+  // along into the edit form so the user sees what the importer dropped.
+  const [importBusy, setImportBusy] = useState(false)
+  const [importError, setImportError] = useState('')
+  const [importWarnings, setImportWarnings] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -211,10 +216,11 @@ export default function Skills() {
   const startWizard = () => {
     setWizardText('')
     setWizardError('')
+    setImportError('')
     setWizardOpen(true)
   }
 
-  const applyDraft = (draft: { name: string; description: string; markdown: string; manifest: Record<string, unknown> }, questions: SkillDraftQuestion[]) => {
+  const applyDraft = (draft: { name: string; description: string; version?: string; markdown: string; manifest: Record<string, unknown> }, questions: SkillDraftQuestion[]) => {
     const manifest = (draft.manifest ?? {}) as Record<string, unknown>
     const prov: Record<string, SectionProvenance> = {}
     for (const key of ['inputs', 'outputs', 'capabilities', 'tools', 'runtime', 'preconditions', 'postconditions', 'evidence', 'evaluation']) {
@@ -233,7 +239,7 @@ export default function Skills() {
       id: '',
       name: draft.name || '',
       description: draft.description || '',
-      version: '1.0.0',
+      version: draft.version || '1.0.0',
       markdown: draft.markdown || STARTER_MARKDOWN,
       manifest,
       org_unit_id: '',
@@ -271,8 +277,27 @@ export default function Skills() {
     setValidation(null)
     setDraftQuestions([])
     setProvenance({})
+    setImportWarnings([])
     setForm({ id: '', name: '', description: '', version: '1.0.0', markdown: STARTER_MARKDOWN, manifest: STARTER_MANIFEST, org_unit_id: '' })
     setShowForm(true)
+  }
+
+  // ── Import: agentskills.io folder or archive → draft ──────────────────
+
+  const runImport = async (fileList: FileList | null) => {
+    const files = Array.from(fileList ?? [])
+    if (files.length === 0) return
+    setImportBusy(true); setImportError('')
+    try {
+      const result = await workspaceApi.importSkill(files)
+      setImportWarnings(result.warnings ?? [])
+      applyDraft({ ...result, version: result.version || '1.0.0' }, [])
+      setWizardOpen(false)
+    } catch (f) {
+      setImportError(message(f))
+    } finally {
+      setImportBusy(false)
+    }
   }
 
   // ── CRUD ──────────────────────────────────────────────────────────────
@@ -821,6 +846,28 @@ export default function Skills() {
               autoFocus
             />
             {wizardError && <InlineNotification kind="error" title={t('skills.wizard_failed') ?? 'Generation failed'} subtitle={wizardError} lowContrast hideCloseButton style={{ marginTop: '0.5rem' }} />}
+            {/* agentskills.io import: archive or folder pick → parsed draft.
+                Hidden inputs keep the native pickers; folder input relies on
+                webkitdirectory (Chromium/WebKit; Firefox partial). */}
+            <div style={{ border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ fontSize: '0.875rem', fontWeight: 600 }}>{t('skills.import_title') ?? 'Import from Agent Skills format'}</div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: 0 }}>
+                {t('skills.import_hint') ?? 'A folder or .zip/.tar.gz archive with SKILL.md (agentskills.io). The parsed draft opens in the editor — nothing is saved until you review it.'}
+              </p>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <Button size="sm" kind="secondary" disabled={importBusy} onClick={() => document.getElementById('skill-import-archive')?.click()}>
+                  {t('skills.import_archive') ?? 'Archive…'}
+                </Button>
+                <Button size="sm" kind="secondary" disabled={importBusy} onClick={() => document.getElementById('skill-import-folder')?.click()}>
+                  {t('skills.import_folder') ?? 'Folder…'}
+                </Button>
+                {importBusy && <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', alignSelf: 'center' }}>{t('skills.import_busy') ?? 'Parsing…'}</span>}
+              </div>
+              <input id="skill-import-archive" type="file" accept=".zip,.tar.gz,.tgz,.tar" hidden onChange={(e) => { void runImport(e.target.files); e.target.value = '' }} />
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- webkitdirectory is non-standard */}
+              <input id="skill-import-folder" type="file" hidden ref={(el) => { if (el) el.setAttribute('webkitdirectory', '') }} onChange={(e) => { void runImport(e.target.files); e.target.value = '' }} />
+              {importError && <InlineNotification kind="error" title={t('skills.import_failed') ?? 'Import failed'} subtitle={importError} lowContrast hideCloseButton />}
+            </div>
             {draftQuestions.length > 0 && (
               <div className="wizard-questions">
                 <div className="skill-subheading">{t('skills.agent_questions') ?? 'The agent asks for clarification'}</div>
@@ -871,6 +918,15 @@ export default function Skills() {
               setAnswers={setAnswers}
               onSendAnswers={() => { setShowForm(false); setWizardOpen(true); void generate(answers) }}
               saving={loading}
+              banner={importWarnings.length > 0 ? (
+                <InlineNotification
+                  kind="warning"
+                  title={t('skills.import_warnings') ?? 'Import notes'}
+                  subtitle={importWarnings.join(' · ')}
+                  lowContrast
+                  onCloseButtonClick={() => setImportWarnings([])}
+                />
+              ) : undefined}
             />
         </AppModal>
       )}
@@ -885,7 +941,7 @@ type SkillFormTab = 'general' | 'instructions' | 'contract' | 'runtime'
 /** Shared CRUD fields: used by the create/edit modal (and available for inline editing). */
 function SkillFormFields({
   form, setForm, editing, org, provenance, onTouch, suggestions, validation, onValidate, onSave, onCancel,
-  questions, answers, setAnswers, onSendAnswers, saving,
+  questions, answers, setAnswers, onSendAnswers, saving, banner,
 }: {
   form: SkillFormState
   setForm: React.Dispatch<React.SetStateAction<SkillFormState>>
@@ -903,6 +959,7 @@ function SkillFormFields({
   setAnswers: React.Dispatch<React.SetStateAction<Record<string, string>>>
   onSendAnswers: () => void
   saving: boolean
+  banner?: React.ReactNode
 }) {
   const t = useT()
   const [tab, setTab] = useState<SkillFormTab>('general')
@@ -915,6 +972,8 @@ function SkillFormFields({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', minHeight: 0, flex: 1 }}>
       <Heading>{editing ? (t('skills.edit_skill') ?? 'Edit Skill') : (t('skills.new_skill') ?? 'New Skill')}</Heading>
+
+      {banner}
 
       {questions.length > 0 && (
         <div className="wizard-questions">

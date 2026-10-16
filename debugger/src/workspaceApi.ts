@@ -415,6 +415,13 @@ export interface SkillDraft {
   questions?: SkillDraftQuestion[]
 }
 
+/** agentskills.io import result: a draft plus notes about what the importer
+ * could not carry over verbatim (license, unknown files, tool names). */
+export interface SkillImportResult extends SkillDraft {
+  version?: string
+  warnings?: string[]
+}
+
 export interface SkillInput {
   name: string
   description: string
@@ -1103,6 +1110,27 @@ export const workspaceApi = {
     request<SkillValidation>(`/v1/workspace/skills/${id}/validate`, { method: 'POST', body: JSON.stringify(data) }),
   draftSkill: (description: string, final?: boolean) =>
     request<SkillDraft>('/v1/workspace/skills/draft', { method: 'POST', body: JSON.stringify({ description, final: final ?? false }) }),
+  // agentskills.io import (multipart — bypasses the JSON request() helper).
+  // `paths` mirrors `files`: Go's multipart reader strips directories from
+  // filenames, so folder uploads (webkitRelativePath) travel side by side.
+  importSkill: async (files: File[]): Promise<SkillImportResult> => {
+    const body = new FormData()
+    for (const file of files) {
+      const relative = (file as File & { webkitRelativePath?: string }).webkitRelativePath
+      body.append('paths', relative && relative.length > 0 ? relative : file.name)
+      body.append('files', file)
+    }
+    const response = await fetch(`${KERNEL_API}/v1/workspace/skills/import`, {
+      method: 'POST',
+      body,
+      headers: authHeaders(),
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      throw new Error(payload.error ?? `HTTP ${response.status}`)
+    }
+    return response.json()
+  },
   listSkillExecutions: (id: string) =>
     request<{ executions: SkillExecution[] }>(`/v1/workspace/skills/${id}/executions`),
   listSkillMemory: (id: string) =>

@@ -2457,6 +2457,9 @@ func main() {
 	RegisterArtifactLifecycleRoutes(mux, gate, ws, events, &channelReviewNotifier{
 		ws: ws, settings: activities.ChannelSettings, client: activities.HTTP, log: log,
 	})
+	// agentskills.io import: folder or archive → parsed SKILL.md draft for the
+	// skill editor. Pure parse, no persistence — saving follows the normal flow.
+	RegisterSkillImportRoutes(mux, gate)
 	// Rejecting keeps the proposal in history; a rejected proposal can never
 	// be applied — deciding twice is a conflict.
 	mux.HandleFunc("POST /v1/workspace/agents/{agentID}/proposals/{id}/reject", func(w http.ResponseWriter, r *http.Request) {
