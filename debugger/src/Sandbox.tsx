@@ -132,7 +132,7 @@ export default function Sandbox() {
           {visible.map((p) => (
             <Tile key={p.id}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
-                <div>
+                <div style={{ opacity: p.image ? 1 : 0.55 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
                     <strong>{p.name}</strong>
                     <span style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>{p.id}{p.builtin ? '' : ' · custom'}</span>
@@ -142,7 +142,7 @@ export default function Sandbox() {
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0 }}>
                   {p.builtin && (
                     <Button size="sm" kind="secondary" renderIcon={Renew} disabled={building === p.id} onClick={() => void build(p)}>
-                      {building === p.id ? t('sandbox.building') : t('sandbox.build')}
+                      {building === p.id ? t('sandbox.building') : p.image ? t('sandbox.rebuild') : t('sandbox.build')}
                     </Button>
                   )}
                   {!p.builtin && (
@@ -150,7 +150,7 @@ export default function Sandbox() {
                   )}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.5rem', flexWrap: 'wrap', alignItems: 'center', opacity: p.image ? 1 : 0.55 }}>
                 {(p.toolchains ?? []).map((tc) => <Tag key={tc} type="blue" size="sm">{tc}</Tag>)}
                 {p.image
                   ? (p.available

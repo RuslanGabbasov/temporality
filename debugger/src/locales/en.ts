@@ -1121,6 +1121,7 @@ export const en: Record<string, string> = {
     'sandbox.subtitle': 'Catalog of execution environments: builtin recipes with a Build action and custom profiles on top of external images. Assign a profile on the agent card.',
     'sandbox.add_custom': 'Custom profile',
     'sandbox.build': 'Build',
+    'sandbox.rebuild': 'Rebuild',
     'sandbox.building': 'Building image…',
     'sandbox.building_hint': 'The build runs on the machine with Docker and can take a few minutes.',
     'sandbox.built': 'built',

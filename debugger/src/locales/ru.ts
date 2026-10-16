@@ -1121,6 +1121,7 @@ export const ru: Record<string, string> = {
     'sandbox.subtitle': 'Каталог сред исполнения: встроенные рецепты со сборкой и пользовательские профили поверх внешних образов. Профиль назначается на карточке агента.',
     'sandbox.add_custom': 'Свой профиль',
     'sandbox.build': 'Собрать',
+    'sandbox.rebuild': 'Пересобрать',
     'sandbox.building': 'Собираем образ…',
     'sandbox.building_hint': 'Сборка идёт на машине с Docker и может занять несколько минут.',
     'sandbox.built': 'собран',
