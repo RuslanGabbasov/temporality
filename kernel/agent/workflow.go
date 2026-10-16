@@ -30,6 +30,7 @@ const (
 	ActivityGenerateTitle     = "kernel.generate_run_title"
 	ActivityExtractKnowledge  = "kernel.extract_knowledge"
 	ActivitySummarizeChildRun = "kernel.summarize_child_run"
+	ActivityWriteTeamContract = "kernel.team_contract_write"
 	ApprovalSignal            = "kernel.approval"
 	NudgeSignal               = "kernel.nudge"
 
@@ -135,6 +136,11 @@ type RunInput struct {
 	// installation MaxDelegationWidth (team defaults.parallel_limit). 0 keeps
 	// the default.
 	DelegationWidth int `json:"delegation_width,omitempty"`
+	// TeamRootRunID names the root run of the team program this run belongs to
+	// (docs/agent-teams.md §8): every slot and delegate carries it so shared
+	// context — the team scratch directory, run-scoped knowledge hints — reaches
+	// the whole tree. Empty for runs outside a team.
+	TeamRootRunID string `json:"team_root_run_id,omitempty"`
 }
 
 // subtreeTotals accumulates the spend of a run's child runs as their results
@@ -293,6 +299,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if input.SourceID == "" {
 		input.SourceID = "temporality-agent-kernel"
 	}
+	// The team root seeds the shared context handle: every child run of the
+	// program (slots, reviewers, delegates below them) inherits it so scratch
+	// paths and run-scoped hints stay addressable across the tree.
+	if input.Team != nil && input.TeamRootRunID == "" {
+		input.TeamRootRunID = input.RunID
+	}
 	input.MaxTurns = normalizeTurnBudget(input.MaxTurns)
 	if input.ApprovalTimeoutSeconds <= 0 {
 		input.ApprovalTimeoutSeconds = 3600
@@ -351,7 +363,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// hints would never be consumed (docs/agent-teams.md §9).
 	if input.Team == nil && !input.SkipKnowledge {
 		hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
-		if err := workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills}).Get(ctx, &priorHints); err != nil {
+		if err := workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints); err != nil {
 			// Retrieval is best-effort, but the miss is still part of the trajectory.
 			if eventErr := emit(activityCtx, state, "memory.read.failed", map[string]any{"error_type": "activation_unavailable"}); eventErr != nil {
 				return result, eventErr
@@ -735,6 +747,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 				child.RunID = childRunID
 				child.Prompt = planTaskPrompt(task, answers, planAnswers)
+				if input.Team != nil {
+					// Team context (docs/agent-teams.md §8): the scratch dir every slot
+					// shares plus the contract files of upstream slots — text rides in
+					// the prompt, files persist for humans and later stages.
+					child.Prompt += teamContextPrompt(input.TeamRootRunID, task)
+				}
 				if feedback := reworkFeedback[task.ID]; feedback != "" {
 					// Rework round: the reviewer rejected the previous result. The
 					// task gets the concrete fix instructions plus its last answer —
@@ -759,6 +777,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				child.ParentRunID = input.RunID
 				child.ParentFrameID = state.frame
 				child.ParentEventID = state.previousEventID
+				child.TeamRootRunID = input.TeamRootRunID
 				taskDeps := task.DependsOn
 				if taskDeps == nil {
 					taskDeps = []string{}
@@ -973,6 +992,15 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			outcomesByTask[p.taskID] = outcome
 			if err := emit(activityCtx, state, "plan.task.completed", completedData); err != nil {
 				return "", nil, err
+			}
+			if input.Team != nil && input.TeamRootRunID != "" && len(specTask.ReviewOf) == 0 {
+				// Persist the slot contract into the team scratch (docs/agent-teams.md
+				// §8): dependents already get the text in their prompt, the file serves
+				// humans and any stage that wants the full deliverable. Best effort —
+				// a failed write never fails the team. Rework rounds overwrite it.
+				contractCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 15 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
+				var contractPath string
+				_ = workflow.ExecuteActivity(contractCtx, ActivityWriteTeamContract, TeamContractRequest{Project: input.Project, RunID: input.TeamRootRunID, TaskID: p.taskID, Answer: answer}).Get(contractCtx, &contractPath)
 			}
 			for _, dependent := range dag.Dependents[p.taskID] {
 				dag.DepsLeft[dependent]--
@@ -1260,6 +1288,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			childInput.ParentRunID = input.RunID
 			childInput.ParentFrameID = state.frame
 			childInput.ParentEventID = state.previousEventID
+			childInput.TeamRootRunID = input.TeamRootRunID
 			childCtx := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{WorkflowID: WorkflowID(input.SourceID, input.Project, childRunID)})
 			childFuture := workflow.ExecuteChildWorkflow(childCtx, "AgentRun", childInput)
 			// Awaiting the child execution separately splits failures into

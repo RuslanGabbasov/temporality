@@ -219,3 +219,39 @@ func TestFindHintsMatchTierStillDominatesKind(t *testing.T) {
 		t.Fatalf("an entity-matched observation must still outrank a term-matched claim, got %q first", hints[0].KnowledgeID)
 	}
 }
+
+func TestFindHintsTeamRunKnowledgeAdmittedWithoutLexicalMatch(t *testing.T) {
+	// Team-run scoping (docs/agent-teams.md §8): knowledge confirmed inside
+	// the team's own run tree is visible to every slot even when nothing in
+	// the slot's task matches it lexically — later slots inherit what earlier
+	// slots learned mid-run.
+	base := time.Date(2026, 10, 16, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		hintProposalEvent("e1", "k-team", "claim", "Integration tests in this repo need Docker running first", nil, base),
+	}
+	knowledge := hintKnowledge(t, events)
+	hints := FindHints(knowledge, HintQuery{Text: "rename the marketing landing page headline", TeamRunKnowledgeIDs: []string{"k-team"}, Limit: 8})
+	if len(hints) != 1 || hints[0].KnowledgeID != "k-team" {
+		t.Fatalf("team-run knowledge must be admitted without a lexical match, got %+v", hints)
+	}
+	if len(hints[0].MatchedBy) != 1 || hints[0].MatchedBy[0] != "team-run" {
+		t.Fatalf("match reason must explain the team-run admission, got %v", hints[0].MatchedBy)
+	}
+	// Without the team-run handle the same query yields an honest zero.
+	hints = FindHints(knowledge, HintQuery{Text: "rename the marketing landing page headline", Limit: 8})
+	if len(hints) != 0 {
+		t.Fatalf("irrelevant task without team scope must yield zero hints, got %+v", hints)
+	}
+	// Lifecycle gates still apply: a retired team-run item never surfaces.
+	retired := append(events, transitionEvent("e2", "k-team", "knowledge.invalidated", base.Add(time.Minute)))
+	hints = FindHints(hintKnowledge(t, retired), HintQuery{Text: "rename the marketing landing page headline", TeamRunKnowledgeIDs: []string{"k-team"}, Limit: 8})
+	if len(hints) != 0 {
+		t.Fatalf("invalidated team-run knowledge must stay gated, got %+v", hints)
+	}
+	// Entity matches keep outranking the team-run tier.
+	both := append(events, hintProposalEvent("e3", "k-entity", "claim", "The gatekeeper CLI requires an oauth token", []string{"gatekeeper"}, base.Add(2*time.Minute)))
+	hints = FindHints(hintKnowledge(t, both), HintQuery{Text: "authenticate to gatekeeper", Entities: []string{"gatekeeper"}, TeamRunKnowledgeIDs: []string{"k-team"}, Limit: 8})
+	if len(hints) != 2 || hints[0].KnowledgeID != "k-entity" {
+		t.Fatalf("entity match must outrank team-run admission, got %+v", hints)
+	}
+}

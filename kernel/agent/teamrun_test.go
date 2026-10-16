@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"path"
 	"strings"
 	"testing"
 
@@ -238,6 +239,10 @@ func TestResolveTeamBindings(t *testing.T) {
 type teamRunTestEnv struct {
 	env      *testsuite.TestWorkflowEnvironment
 	recorded []observation.Event
+	// contracts captures the team-contract writes of the run (wave F): the
+	// activity is mocked — the file writes themselves are unit-tested against
+	// a fake sandbox in TestWriteTeamContract.
+	contracts []TeamContractRequest
 }
 
 func newTeamRunTestEnv(t *testing.T) *teamRunTestEnv {
@@ -253,6 +258,10 @@ func newTeamRunTestEnv(t *testing.T) *teamRunTestEnv {
 		return nil
 	}, activity.RegisterOptions{Name: ActivityRecordEvent})
 	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	env.RegisterActivityWithOptions(func(_ context.Context, request TeamContractRequest) (string, error) {
+		out.contracts = append(out.contracts, request)
+		return path.Join(TeamScratchDir(request.RunID), "contracts", request.TaskID+".md"), nil
+	}, activity.RegisterOptions{Name: ActivityWriteTeamContract})
 	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
 		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, ActorID: request.ActorID, MaxTurns: 8}, nil
 	}, activity.RegisterOptions{Name: ActivityResolveAgent})
@@ -471,4 +480,69 @@ func TestTeamRunLeadWorkers(t *testing.T) {
 	require.Equal(t, 42, result.TotalTokens)
 	require.Len(t, e.eventsOfType("delegation.started"), 1)
 	require.Len(t, e.eventsOfType("team.completed"), 1)
+}
+
+// ── Wave F: team context (scratch, contracts, scoped hints) ─────────────
+
+func TestTeamContextPrompt(t *testing.T) {
+	t.Run("scratch dir with upstream contract files", func(t *testing.T) {
+		prompt := teamContextPrompt("team-run-1", PlanTask{DependsOn: []string{"coder", "reviewer"}})
+		require.Contains(t, prompt, "team/team-run-1/")
+		require.Contains(t, prompt, "team/team-run-1/contracts/coder.md")
+		require.Contains(t, prompt, "team/team-run-1/contracts/reviewer.md")
+	})
+	t.Run("no deps mention only the scratch dir", func(t *testing.T) {
+		prompt := teamContextPrompt("team-run-1", PlanTask{})
+		require.Contains(t, prompt, "team/team-run-1/")
+		require.NotContains(t, prompt, "contracts")
+	})
+}
+
+func TestTeamRunPipelineWritesSlotContracts(t *testing.T) {
+	e := newTeamRunTestEnv(t)
+	coder := fixedSlot("coder", "agent-coder")
+	qa := fixedSlot("qa", "agent-qa")
+	e.env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		prompt := request.Messages[1].Content
+		switch {
+		case strings.Contains(prompt, `slot "coder"`):
+			return llm.Completion{Content: "CODER-CONTRACT", Usage: llm.Usage{TotalTokens: 10}}, nil
+		default:
+			return llm.Completion{Content: "QA-CONTRACT", Usage: llm.Usage{TotalTokens: 5}}, nil
+		}
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	e.env.ExecuteWorkflow("AgentRun", teamRunInput(workspace.TeamProtocolPipeline, []workspace.TeamSlot{coder, qa}, teamBindings(coder, qa)))
+	require.True(t, e.env.IsWorkflowCompleted())
+	require.NoError(t, e.env.GetWorkflowError())
+	// Every completed executor slot persisted its contract under the root run.
+	byTask := map[string]TeamContractRequest{}
+	for _, request := range e.contracts {
+		byTask[request.TaskID] = request
+	}
+	require.Len(t, byTask, 2)
+	require.Equal(t, "team-run-1", byTask["coder"].RunID)
+	require.Equal(t, "repo-a", byTask["coder"].Project)
+	require.Contains(t, byTask["coder"].Answer, "CODER-CONTRACT")
+	require.Contains(t, byTask["qa"].Answer, "QA-CONTRACT")
+	// The dependent slot's prompt carries the text contract AND the file ref.
+}
+
+func TestTeamRunChildrenCarryTeamRootHints(t *testing.T) {
+	e := newTeamRunTestEnv(t)
+	coder := fixedSlot("coder", "agent-coder")
+	var hintRoots []string
+	e.env.RegisterActivityWithOptions(func(_ context.Context, request HintRequest) ([]Hint, error) {
+		hintRoots = append(hintRoots, request.TeamRoot)
+		return nil, nil
+	}, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	e.env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		return llm.Completion{Content: "DONE", Usage: llm.Usage{TotalTokens: 1}}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	e.env.ExecuteWorkflow("AgentRun", teamRunInput(workspace.TeamProtocolPipeline, []workspace.TeamSlot{coder}, teamBindings(coder)))
+	require.True(t, e.env.IsWorkflowCompleted())
+	require.NoError(t, e.env.GetWorkflowError())
+	require.NotEmpty(t, hintRoots, "slot runs must fetch hints")
+	for _, root := range hintRoots {
+		require.Equal(t, "team-run-1", root, "every hint request of the tree carries the team root")
+	}
 }

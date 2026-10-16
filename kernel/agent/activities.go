@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -1730,6 +1731,9 @@ func faultAfterEffect(runID, toolName, operationID string) bool {
 
 func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([]Hint, error) {
 	payload := map[string]any{"project": request.Project, "run": request.RunID, "task": request.TaskID, "actor": map[string]string{"id": request.ActorID, "type": "agent"}, "query": request.Query, "limit": 8}
+	if request.TeamRoot != "" {
+		payload["team_root"] = request.TeamRoot
+	}
 	if len(request.Skills) > 0 {
 		// Skill digests already ride in the agent prompt; the journal uses them
 		// as novelty context so hints that restate a skill lose rank (§7).
@@ -1768,6 +1772,110 @@ func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([
 	return reply.Hints, nil
 }
 
+// TeamContractRequest asks the kernel to persist a completed slot's contract
+// into the team scratch (docs/agent-teams.md §8):
+// <project workspace>/team/<run_id>/contracts/<task_id>.md. RunID is the team
+// ROOT run (no path separators); TaskID is the slot id (or dag step id).
+type TeamContractRequest struct {
+	Project string
+	RunID   string
+	TaskID  string
+	Answer  string
+}
+
+// TeamScratchDir returns the workspace-relative scratch directory of a team
+// run: team/<root run id>/. The path is the contract between the runtime and
+// the slot prompts — both sides derive it, nobody passes absolute paths.
+func TeamScratchDir(rootRunID string) string { return "team/" + rootRunID }
+
+// WriteTeamContract persists a slot contract file into the team scratch.
+// Idempotent by construction: rework rounds rewrite the same path with the
+// newest answer, retries rewrite the same content.
+func (a *Activities) WriteTeamContract(ctx context.Context, request TeamContractRequest) (string, error) {
+	if request.Project == "" || request.RunID == "" || request.TaskID == "" {
+		return "", errors.New("project, run and task are required")
+	}
+	if !sandboxConfigured(a.Sandbox) {
+		return "", errors.New("sandbox is not configured")
+	}
+	safeRun := sanitizeFileToken(request.RunID)
+	safeTask := sanitizeFileToken(request.TaskID)
+	if safeRun == "" || safeRun == "." || safeRun == ".." || safeTask == "" || safeTask == "." || safeTask == ".." {
+		return "", fmt.Errorf("run or task id %q has no usable path token", request.RunID+"/"+request.TaskID)
+	}
+	projectDir := filepath.Join(a.Sandbox.SandboxRoot(), "projects", request.Project)
+	if err := os.MkdirAll(projectDir, 0o777); err != nil {
+		return "", fmt.Errorf("create project workspace: %w", err)
+	}
+	// Same resolution as PrepareRun: the kernel and the sandbox must agree on
+	// the host path of the project workspace (symlinked roots included).
+	projectDir, err := a.Sandbox.ResolveWorkspace(projectDir)
+	if err != nil {
+		return "", err
+	}
+	rel := path.Join(TeamScratchDir(safeRun), "contracts", safeTask+".md")
+	abs := filepath.Join(projectDir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o777); err != nil {
+		return "", fmt.Errorf("create team scratch: %w", err)
+	}
+	body := "# Contract: " + request.TaskID + "\n\nTeam run: " + request.RunID + "\nProject: " + request.Project + "\n\n" + strings.TrimSpace(request.Answer) + "\n"
+	if err := os.WriteFile(abs, []byte(body), 0o666); err != nil {
+		return "", fmt.Errorf("write team contract: %w", err)
+	}
+	return rel, nil
+}
+
+// SweepTeamScratch removes team scratch directories whose newest change is
+// older than ttl (docs/agent-teams.md §8): contracts outlive the run for
+// inspection, not forever.
+func (a *Activities) SweepTeamScratch(now time.Time, ttl time.Duration) (int, error) {
+	if ttl <= 0 || !sandboxConfigured(a.Sandbox) {
+		return 0, nil
+	}
+	projects := filepath.Join(a.Sandbox.SandboxRoot(), "projects")
+	projectEntries, err := os.ReadDir(projects)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	removed := 0
+	for _, project := range projectEntries {
+		teams := filepath.Join(projects, project.Name(), "team")
+		runEntries, err := os.ReadDir(teams)
+		if err != nil {
+			continue // no scratch for this project
+		}
+		for _, run := range runEntries {
+			if !run.IsDir() {
+				continue
+			}
+			info, err := run.Info()
+			if err != nil || now.Sub(info.ModTime()) <= ttl {
+				continue
+			}
+			if err := os.RemoveAll(filepath.Join(teams, run.Name())); err == nil {
+				removed++
+			}
+		}
+	}
+	return removed, nil
+}
+
+// sanitizeFileToken keeps only filename-safe characters so ids from manifests
+// can never traverse out of the scratch directory.
+func sanitizeFileToken(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func env(name, fallback string) string {
 	if value := os.Getenv(name); value != "" {
 		return value
@@ -1781,6 +1889,10 @@ type HintRequest struct {
 	TaskID  string `json:"task_id"`
 	ActorID string `json:"actor_id"`
 	Query   string `json:"query"`
+	// TeamRoot names the team program root run (docs/agent-teams.md §8): the
+	// journal additionally admits knowledge confirmed inside that run tree to
+	// every slot, even when the lexical matcher would not rank it.
+	TeamRoot string `json:"team_root,omitempty"`
 	// Skills are the run's resolved skills: their digests already sit in the
 	// agent prompt, so the journal demotes knowledge that only restates them
 	// (plan-priming-relevance.md §7) instead of spending hint budget on it.

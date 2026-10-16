@@ -19,6 +19,12 @@ type HintQuery struct {
 	// IssuedKnowledgeIDs lists knowledge already offered earlier in the same
 	// run: re-offering it spends budget on repetition.
 	IssuedKnowledgeIDs []string
+	// TeamRunKnowledgeIDs names knowledge confirmed inside the querying agent's
+	// team run tree (docs/agent-teams.md §8): every slot sees what earlier slots
+	// learned, even when the lexical matcher would not rank it for this slot's
+	// prompt. They are admitted as direct candidates a tier below entity
+	// matches — visible everywhere, outranked by exact hits.
+	TeamRunKnowledgeIDs []string
 }
 
 // HintSkill is one active skill of the querying agent: identity plus the
@@ -123,6 +129,28 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 		}
 		direct[item.ID] = candidate
 		candidates = append(candidates, candidate)
+	}
+	// Team-run knowledge (docs/agent-teams.md §8): admitted without a lexical
+	// match so later slots inherit what earlier slots confirmed mid-run. They
+	// anchor graph expansion like any direct match, keeping dedup coherent.
+	if len(query.TeamRunKnowledgeIDs) > 0 {
+		teamRun := normalizedSet(query.TeamRunKnowledgeIDs)
+		for _, item := range knowledge {
+			// Knowledge ids are case-sensitive by identity but the handle is
+			// matched case-insensitively, like every other query field.
+			if !teamRun[strings.ToLower(item.ID)] || issued[item.ID] {
+				continue
+			}
+			if _, already := direct[item.ID]; already {
+				continue
+			}
+			candidate, ok := makeHintCandidate(item, []string{"team-run"}, 1, skillTokens)
+			if !ok {
+				continue
+			}
+			direct[item.ID] = candidate
+			candidates = append(candidates, candidate)
+		}
 	}
 	// Add one-hop graph neighbors after direct matches. The relationship and
 	// source node are returned as the reason, so this expansion is inspectable.

@@ -1161,6 +1161,11 @@ type observationHintRequest struct {
 	ActiveSkills []observation.HintSkill `json:"active_skills,omitempty"`
 	// IssuedKnowledgeIDs suppresses knowledge already offered in this run.
 	IssuedKnowledgeIDs []string `json:"issued_knowledge_ids,omitempty"`
+	// TeamRunRoot names the team program root run (docs/agent-teams.md §8):
+	// knowledge proposed or confirmed by any run under that root (the root
+	// itself or ids prefixed "<root>/") is additionally admitted to the hints
+	// of every slot of the team.
+	TeamRunRoot string `json:"team_root,omitempty"`
 }
 
 func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request) {
@@ -1204,6 +1209,10 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnprocessableEntity, errors.New("issued_knowledge_ids must contain at most 64 ids"))
 		return
 	}
+	if len([]rune(input.TeamRunRoot)) > 256 {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("team_root exceeds the 256 character limit"))
+		return
+	}
 	events, chain, err := s.visibleKnowledgeEvents(r.Context(), input.Project, nil, nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
@@ -1215,14 +1224,33 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 		return
 	}
 	knowledge = filterKnowledgeVisible(knowledge, input.Project, chain)
-	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit, ActiveSkills: input.ActiveSkills, IssuedKnowledgeIDs: input.IssuedKnowledgeIDs})
+	// Team-run scoping (docs/agent-teams.md §8): knowledge whose proposal or
+	// confirmation originated under the team root is collected from the same
+	// event stream the projection just consumed — no extra store round-trip.
+	var teamRunKnowledgeIDs []string
+	if input.TeamRunRoot != "" {
+		root := input.TeamRunRoot
+		seenTeamRun := make(map[string]bool)
+		for _, event := range events {
+			if event.Type != "knowledge.proposed" && event.Type != "knowledge.confirmed" {
+				continue
+			}
+			if run := event.Context.Run; run == root || strings.HasPrefix(run, root+"/") {
+				if id, _ := event.Data["knowledge_id"].(string); id != "" && !seenTeamRun[id] {
+					seenTeamRun[id] = true
+					teamRunKnowledgeIDs = append(teamRunKnowledgeIDs, id)
+				}
+			}
+		}
+	}
+	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit, ActiveSkills: input.ActiveSkills, IssuedKnowledgeIDs: input.IssuedKnowledgeIDs, TeamRunKnowledgeIDs: teamRunKnowledgeIDs})
 	activationID := newUUID()
 	context := observation.Context{Project: input.Project, Run: input.Run, Task: input.Task, Actor: input.Actor}
 	activationEvent := observation.Event{
 		Schema: observation.Schema, EventID: activationID, OccurredAt: s.now().UTC(),
 		Source:  observation.Source{ID: "temporality-activation", Integration: "temporality", Version: "1"},
 		Context: context, Type: "hint.query",
-		Data: map[string]any{"activation_id": activationID, "candidate_count": len(hints), "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion, "has_text_query": queryText != "", "active_skill_count": len(input.ActiveSkills), "issued_knowledge_count": len(input.IssuedKnowledgeIDs)},
+		Data: map[string]any{"activation_id": activationID, "candidate_count": len(hints), "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion, "has_text_query": queryText != "", "active_skill_count": len(input.ActiveSkills), "issued_knowledge_count": len(input.IssuedKnowledgeIDs), "team_root": input.TeamRunRoot, "team_run_knowledge_count": len(teamRunKnowledgeIDs)},
 	}
 	if err = appendObservationNow(r, s.store, s.now, activationEvent); err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not record hint activation"))

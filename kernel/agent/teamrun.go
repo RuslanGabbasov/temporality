@@ -293,6 +293,22 @@ func teamSlotPrompt(manifest workspace.TeamManifest, goal string, slot workspace
 	return b.String()
 }
 
+// teamContextPrompt appends the shared team context to a slot prompt: the
+// scratch directory every slot of this team can use for intermediate files
+// and the contract files of upstream slots (the text rides in the prompt,
+// files persist for humans and later stages — docs/agent-teams.md §8).
+func teamContextPrompt(rootRunID string, task PlanTask) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n\nTeam scratch directory (workspace-relative, shared by every slot of this team): team/%s/ — use it for shared intermediate files.", rootRunID)
+	if len(task.DependsOn) > 0 {
+		b.WriteString("\nUpstream slot contracts are also persisted as files:")
+		for _, dep := range task.DependsOn {
+			fmt.Fprintf(&b, "\n- team/%s/contracts/%s.md", rootRunID, dep)
+		}
+	}
+	return b.String()
+}
+
 // teamRosterPrompt composes the lead agent's prompt for lead_workers teams:
 // the lead decomposes the goal itself with plan/delegate, and the bound slots
 // are its fixed roster (docs/agent-teams.md §6).
@@ -453,7 +469,7 @@ func runTeamLead(ctx workflow.Context, activityCtx workflow.Context, state *even
 	slots := team.Manifest.Slots
 	lead := slots[0]
 	binding := team.Bindings[lead.ID]
-	prompt := teamRosterPrompt(*team, lead)
+	prompt := teamRosterPrompt(*team, lead) + fmt.Sprintf("\n\nTeam scratch directory (workspace-relative, shared with your delegates): team/%s/ — use it for shared intermediate files.", input.RunID)
 	childRunID := input.RunID + "/lead/01-" + lead.ID
 	resolveCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 30 * time.Second, ScheduleToCloseTimeout: 40 * time.Second, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 10 * time.Second, MaximumAttempts: 3}})
 	var childInput RunInput
@@ -474,6 +490,7 @@ func runTeamLead(ctx workflow.Context, activityCtx workflow.Context, state *even
 		return fail("lead run failed to start: "+boundedFailureDetail(startErr), lead.ID, childRunID)
 	}
 	childInput.ParentRunID = input.RunID
+	childInput.TeamRootRunID = input.TeamRootRunID
 	var child RunResult
 	childErr := future.Get(ctx, &child)
 	if childErr != nil {

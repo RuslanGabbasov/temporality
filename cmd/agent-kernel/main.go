@@ -371,6 +371,7 @@ func main() {
 	temporalWorker.RegisterActivityWithOptions(activities.GenerateTitle, activity.RegisterOptions{Name: agent.ActivityGenerateTitle})
 	temporalWorker.RegisterActivityWithOptions(activities.ExtractKnowledge, activity.RegisterOptions{Name: agent.ActivityExtractKnowledge})
 	temporalWorker.RegisterActivityWithOptions(activities.SummarizeChildRun, activity.RegisterOptions{Name: agent.ActivitySummarizeChildRun})
+	temporalWorker.RegisterActivityWithOptions(activities.WriteTeamContract, activity.RegisterOptions{Name: agent.ActivityWriteTeamContract})
 	temporalWorker.RegisterActivityWithOptions(activities.NotifyChannel, activity.RegisterOptions{Name: agent.ActivityNotifyChannel})
 	temporalWorker.RegisterActivityWithOptions(activities.CloseHumanRequest, activity.RegisterOptions{Name: agent.ActivityCloseHumanRequest})
 	registerExampleWorkflow(temporalWorker)
@@ -5347,6 +5348,31 @@ func main() {
 		_ = ws.CreateRun(r.Context(), wsRun)
 		writeJSON(w, 202, map[string]string{"trigger_id": matched.ID, "run_id": input.RunID, "workflow_id": run.GetID()})
 	})
+
+	// Team scratch sweeper (docs/agent-teams.md §8): slot contracts and shared
+	// intermediate files outlive a team run for inspection for a TTL, then go.
+	// The paths are deterministic (team/<run>/ under the project workspace), so
+	// a periodic sweep is enough — no per-run cleanup bookkeeping.
+	go func() {
+		ttl := 7 * 24 * time.Hour
+		if raw := strings.TrimSpace(os.Getenv("TEMPORALITY_TEAM_SCRATCH_TTL")); raw != "" {
+			if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+				ttl = parsed
+			} else {
+				slog.Warn("TEMPORALITY_TEAM_SCRATCH_TTL is not a valid duration, using 168h", "value", raw)
+			}
+		}
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			removed, err := activities.SweepTeamScratch(time.Now(), ttl)
+			if err != nil {
+				slog.Warn("sweep team scratch", "error", err)
+			} else if removed > 0 {
+				slog.Info("swept team scratch directories", "removed", removed)
+			}
+		}
+	}()
 
 	// Schedule trigger loop: polls all enabled schedule triggers every minute.
 	go func() {

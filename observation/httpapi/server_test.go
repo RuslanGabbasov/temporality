@@ -1377,3 +1377,50 @@ func TestKnowledgeManualChallenge(t *testing.T) {
 		t.Fatalf("challenge after invalidate status = %d, want 409", res.StatusCode)
 	}
 }
+
+func TestObservationHintsScopedToTeamRunTree(t *testing.T) {
+	// Team-run scoping (docs/agent-teams.md §8): a slot asking for hints with
+	// its team root sees knowledge produced by any run of that tree, even for
+	// an unrelated task; a plain run outside the team does not.
+	handler := newTestServer(t)
+	teamEvent := proposedEvent("lighthouse", "evt-team-1", "K-team", "the legacy deploy script hangs on cached credentials")
+	teamEvent.Context.Run = "team-run-1/plan/01-coder"
+	otherEvent := proposedEvent("lighthouse", "evt-other", "K-other", "the release notes live in docs/notes")
+	otherEvent.Context.Run = "run-unrelated"
+	res, body := doJSON(t, handler, "POST", "/v1/observations/events", map[string]any{
+		"events": []observation.Event{teamEvent, otherEvent},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
+	}
+
+	// A later slot of the same team asks about an unrelated task: the
+	// mid-run learning is still admitted.
+	res, body = doJSON(t, handler, "POST", "/v1/observations/hints", map[string]any{
+		"project": "lighthouse", "query": "rename the marketing landing page headline",
+		"actor": map[string]any{"id": "qa", "type": "agent"}, "team_root": "team-run-1",
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("hints status = %d, body = %v", res.StatusCode, body)
+	}
+	hints := body["hints"].([]any)
+	if len(hints) != 1 {
+		t.Fatalf("team-scoped hints = %d, want exactly the team-run learning", len(hints))
+	}
+	hint := hints[0].(map[string]any)
+	if hint["knowledge_id"] != "K-team" {
+		t.Fatalf("knowledge_id = %v, want K-team", hint["knowledge_id"])
+	}
+
+	// The same query without the team root yields an honest zero.
+	res, body = doJSON(t, handler, "POST", "/v1/observations/hints", map[string]any{
+		"project": "lighthouse", "query": "rename the marketing landing page headline",
+		"actor": map[string]any{"id": "qa", "type": "agent"},
+	})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("hints status = %d", res.StatusCode)
+	}
+	if hints := body["hints"].([]any); len(hints) != 0 {
+		t.Fatalf("unrelated run must not see team-scoped knowledge, got %v", hints)
+	}
+}
