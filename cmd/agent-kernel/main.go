@@ -3473,6 +3473,14 @@ func main() {
 		// a JSON string holding the document. Unwrap before storing: every
 		// consumer unmarshals the config into a struct.
 		req.Config = unwrapJSONString(req.Config)
+		// Event triggers carry a constructor the listener evaluates (eventtriggers.go):
+		// a malformed one must fail at save, not silently never-match.
+		if req.Type == "event" {
+			if err := validateEventTriggerConfig(req.Config); err != nil {
+				writeError(w, 422, err)
+				return
+			}
+		}
 		if req.ID == "" {
 			req.ID = slugify(req.Name) + "-" + time.Now().UTC().Format("20060102-150405")
 		}
@@ -3620,6 +3628,14 @@ func main() {
 			}
 		}
 		existing.Config = preserveWebhookTokenHash(existing.Config, storedWebhookTokenHash, existing.Type)
+		// Same constructor validation as create: a type flip to event (or a bad
+		// config edit) fails here, not silently in the listener.
+		if existing.Type == "event" {
+			if err := validateEventTriggerConfig(existing.Config); err != nil {
+				writeError(w, 422, err)
+				return
+			}
+		}
 		// Re-authorize the merged trigger (§21): agent/identity may have changed.
 		if err := authorizeTriggerUse(r.Context(), ws, r, &existing); err != nil {
 			writeError(w, 403, err)
@@ -5283,6 +5299,14 @@ func main() {
 			}
 		}
 	}()
+
+	// Event triggers (docs/triggers-and-escalations.md §1 type=event): tail the
+	// kernel's own journal and fire runs on matching events — hooks around the
+	// agent cycle (unapproved artifacts, sandbox incidents, mass export,
+	// security events). No event triggers configured → the journal is not
+	// tailed at all.
+	eventListener := newEventTriggerListener(ws, activities, costPrices, temporalClient, taskQueue, events, activities.SourceID, observationURL, journalToken, log)
+	go eventListener.run(ctx)
 
 	// Execution identities (docs/org-structure.md §20): the security context
 	// for automated runs. Storage and admin CRUD only for now — trigger wiring

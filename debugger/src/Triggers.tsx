@@ -8,6 +8,7 @@ import {
   Toggle,
   InlineNotification,
   Tag,
+  DismissibleTag,
   Tile,
   Grid,
   Column,
@@ -49,6 +50,24 @@ const deliveryTime = (iso: string) => {
     : d.toLocaleString()
 }
 
+// Journal event types the kernel actually emits (cmd/agent-kernel). The
+// datalist is suggestions only — the input stays free-form so types added
+// later still work without a UI change.
+const EVENT_TYPE_SUGGESTIONS = [
+  'artifact.review.requested',
+  'artifact.read',
+  'artifact.review.approved',
+  'artifact.review.rejected',
+  'run.completed',
+  'tool.failed',
+  'tool.completed',
+  'secret.issued',
+  'mcp.call.failed',
+  'knowledge.proposed',
+  'trigger.accepted',
+  'trigger.rejected',
+]
+
 export default function Triggers({ project }: { project: string }) {
   const t = useT()
   const { confirmDialog, dialog: confirmDialogNode } = useConfirm()
@@ -66,6 +85,10 @@ export default function Triggers({ project }: { project: string }) {
   const [editing, setEditing] = useState<Trigger | null>(null)
   const [form, setForm] = useState<Partial<Trigger> & { config: any }>({ type: 'schedule', name: '', enabled: true, config: {} })
   const [filter, setFilter] = useState('')
+  // Draft row for data.<field> filter entries (event triggers): committed to
+  // form.config.filter only on "Add", so a half-typed pair never reaches the API.
+  const [eventDataField, setEventDataField] = useState('')
+  const [eventDataValue, setEventDataValue] = useState('')
   // Per-trigger webhook delivery token (shown once, hash lives server-side):
   // generatedToken is displayed in a dedicated modal exactly like user tokens.
   const [generatedToken, setGeneratedToken] = useState<string | null>(null)
@@ -154,6 +177,25 @@ export default function Triggers({ project }: { project: string }) {
     setEditing(trigger)
     setForm({ ...trigger, config: typeof trigger.config === 'string' ? JSON.parse(trigger.config) : trigger.config })
     setShowForm(true)
+  }
+
+  // Event filter keys are the server-validated vocabulary (workspace.EventConfig,
+  // unknown keys are a 422): actor_id / actor_type / project / data.<field>.
+  // An empty value removes the key — a stored "" would never match an event.
+  const setEventFilter = (key: string, value: string) => {
+    const filter: Record<string, string> = { ...(form.config?.filter ?? {}) }
+    if (value.trim() === '') delete filter[key]
+    else filter[key] = value
+    setForm({ ...form, config: { ...form.config, filter } })
+  }
+
+  const addEventDataFilter = () => {
+    const field = eventDataField.trim().replace(/^data\./, '')
+    const value = eventDataValue.trim()
+    if (!field || !value) return
+    setEventFilter(`data.${field}`, value)
+    setEventDataField('')
+    setEventDataValue('')
   }
 
   const save = async () => {
@@ -446,7 +488,37 @@ export default function Triggers({ project }: { project: string }) {
             {/* Event config */}
             {form.type === 'event' && (
               <>
-                <TextInput id="trigger-event-type" labelText={t('triggers.event_type') ?? 'Event type'} value={form.config?.event_type ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, event_type: e.target.value } })} placeholder="tool.failed" />
+                <TextInput id="trigger-event-type" labelText={t('triggers.event_type') ?? 'Event type'} list="trigger-event-type-options" value={form.config?.event_type ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, config: { ...form.config, event_type: e.target.value } })} placeholder="tool.failed" helperText={t('triggers.event_type_hint') ?? 'Journal event type to watch — pick a suggestion or type any type the system emits.'} />
+                <datalist id="trigger-event-type-options">
+                  {EVENT_TYPE_SUGGESTIONS.map((type) => <option key={type} value={type} />)}
+                </datalist>
+                {/* Event filter: every entry must hold; empty filter = match all
+                    events of the type. Only the validated keys are offered —
+                    the server 422s unknown ones at save time. */}
+                <div style={{ border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 600 }}>{t('triggers.event_filter') ?? 'Filter (all entries must match)'}</div>
+                  <TextInput id="trigger-event-filter-actor" labelText={t('triggers.event_filter_actor') ?? 'Actor ID'} value={form.config?.filter?.actor_id ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEventFilter('actor_id', e.target.value)} placeholder="kernel-internal" />
+                  <TextInput id="trigger-event-filter-project" labelText={t('triggers.event_filter_project') ?? 'Event project'} value={form.config?.filter?.project ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEventFilter('project', e.target.value)} placeholder="omni" />
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                      <TextInput id="trigger-event-filter-data-field" labelText={t('triggers.event_filter_data_field') ?? 'Data field'} value={eventDataField} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEventDataField(e.target.value)} placeholder="status" />
+                    </div>
+                    <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+                      <TextInput id="trigger-event-filter-data-value" labelText={t('triggers.event_filter_data_value') ?? 'Value'} value={eventDataValue} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEventDataValue(e.target.value)} placeholder="draft" />
+                    </div>
+                    <Button kind="secondary" disabled={!eventDataField.trim() || !eventDataValue.trim()} onClick={addEventDataFilter}>{t('triggers.event_filter_data_add') ?? 'Add'}</Button>
+                  </div>
+                  {Object.entries(form.config?.filter ?? {}).filter(([key]) => key.startsWith('data.')).length > 0 && (
+                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                      {Object.entries(form.config?.filter ?? {}).filter(([key]) => key.startsWith('data.')).map(([key, value]) => (
+                        <DismissibleTag key={key} type="gray" size="sm" text={`${key}=${String(value)}`} title={t('action.delete') ?? 'Delete'} onClose={() => setEventFilter(key, '')} />
+                      ))}
+                    </div>
+                  )}
+                  <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: 0 }}>
+                    {t('triggers.event_filter_hint') ?? 'Fires on events observed after the trigger is activated; every filter entry must match; events produced by runs started from triggers never re-fire triggers.'}
+                  </p>
+                </div>
                 <TextArea id="trigger-prompt" labelText={t('triggers.prompt') ?? 'Prompt'} value={form.config?.prompt ?? ''} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, config: { ...form.config, prompt: e.target.value } })} rows={4} placeholder="A tool failed. Investigate the issue and propose a fix." />
               </>
             )}

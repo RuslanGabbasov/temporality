@@ -805,6 +805,19 @@ func (a *Activities) handleCreateTrigger(ctx context.Context, request ToolReques
 	}
 	if eventType, ok := request.Arguments["event_type"].(string); ok && eventType != "" {
 		config["event_type"] = eventType
+		// Event filters (workspace.EventConfig): actor_id / actor_type /
+		// project / data.<field> — the server validates the vocabulary.
+		if filters, ok := request.Arguments["filter"].(map[string]any); ok && len(filters) > 0 {
+			clean := make(map[string]string, len(filters))
+			for key, value := range filters {
+				if s, ok := value.(string); ok && s != "" {
+					clean[key] = s
+				}
+			}
+			if len(clean) > 0 {
+				config["filter"] = clean
+			}
+		}
 	}
 	trigger := map[string]any{
 		"project_id": request.Project,
