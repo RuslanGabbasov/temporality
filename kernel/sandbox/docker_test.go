@@ -421,3 +421,15 @@ func flagValue(args []string, flag string) string {
 	}
 	return ""
 }
+
+// The sandbox command ceiling must stay below the run_tool activity timeout
+// (kernel/agent.ToolActivityTimeout, default 16m — sandbox cannot import it,
+// cycle) minus a minute of teardown head room: an activity deadline below the
+// command cap kills long builds with a StartToClose timeout while the
+// container is still running.
+func TestMaxTimeoutStaysBelowActivityBudget(t *testing.T) {
+	const activityBudget = 16 * 60 // keep in sync with kernel/agent.ToolActivityTimeout
+	if maxTimeout() > activityBudget-60 {
+		t.Fatalf("sandbox max timeout %ds exceeds the run_tool activity budget (%ds minus teardown head room)", maxTimeout(), activityBudget)
+	}
+}

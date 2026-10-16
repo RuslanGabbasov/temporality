@@ -213,7 +213,7 @@ func (a *Activities) ToolDefs() []llm.ToolDef {
 var runCommandTool = llm.ToolDef{
 	Name:        "run_command",
 	Description: "Run a command in an isolated sandbox container. The working directory is /workspace — persistent storage shared by all agents and runs of this project: files saved there survive across sessions and it may already contain files from earlier work, so treat them as shared and do not remove what you did not create. /tmp and /scratch are ephemeral and disappear between calls. Toolchain caches (GOCACHE, GOMODCACHE) point at the persistent per-project /cache volume, so builds keep their cache across runs. Network access depends on agent configuration. Provide argv as an array.",
-	Parameters:  map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer"}}, "required": []string{"command"}},
+	Parameters:  map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer", "description": "Wall-clock cap for this command, up to 900 (15 min, the hard ceiling). Default 60. Long builds and e2e suites need an explicit value"}}, "required": []string{"command"}},
 }
 
 // BuiltinToolDefs returns kernel tools plus the sandbox surface (run_command

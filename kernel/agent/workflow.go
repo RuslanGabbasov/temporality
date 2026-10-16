@@ -1414,7 +1414,10 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				messages = append(messages, llm.Message{Role: "tool", ToolCallID: call.ID, Content: original.result.Content})
 				continue
 			}
-			toolCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 4 * time.Minute, ScheduleToCloseTimeout: 5 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
+			// Must outlive the sandbox command ceiling (10 min) — see
+			// ToolActivityTimeout. MaximumAttempts stays 1: tools carry side
+			// effects, a retry could duplicate them.
+			toolCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: ToolActivityTimeout, ScheduleToCloseTimeout: ToolActivityTimeout + time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
 			isMCP := strings.HasPrefix(call.Name, "mcp__")
 			recentlyApproved := false // set true after request_approval succeeds
 			approvalRequired := call.Name == "request_approval" || contains(input.ApprovalTools, call.Name) ||

@@ -31,8 +31,26 @@ const (
 	maxTotalArgs   = 128 << 10
 	maxOutputBytes = 64 << 10
 	defaultTimeout = 60
-	maxTimeout     = 600
 )
+
+// maxTimeoutSeconds caps one sandbox command. 15 minutes: e2e suites and
+// builds legitimately run long (the model passes timeout_sec per call).
+// Overridable per deployment; the run_tool activity timeout must stay above
+// it (see kernel/agent.ToolActivityTimeout).
+var maxTimeoutSeconds = func() int {
+	const fallback = 900
+	raw := strings.TrimSpace(os.Getenv("KERNEL_TOOL_MAX_SECONDS"))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < defaultTimeout {
+		return fallback
+	}
+	return value
+}()
+
+func maxTimeout() int { return maxTimeoutSeconds }
 
 type Request struct {
 	Workspace      string
@@ -260,8 +278,8 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	if timeout > maxTimeout {
-		timeout = maxTimeout
+	if timeout > maxTimeout() {
+		timeout = maxTimeout()
 	}
 	ctx, cancel := context.WithTimeout(parent, time.Duration(timeout)*time.Second)
 	defer cancel()
