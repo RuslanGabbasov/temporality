@@ -8,8 +8,8 @@
       if (value !== undefined) el.innerHTML = value;
     });
     // Documentation links follow the site language: RU tree at /docs/, EN mirror at /docs/en/.
-    document.querySelectorAll('a[data-docs-link]').forEach((el) => {
-      el.href = lang === 'en' ? el.dataset.docsLink.replace(/\/$/, '/en/') : el.dataset.docsLink;
+    document.querySelectorAll('a[data-docs-link-ru]').forEach((el) => {
+      el.href = lang === 'en' ? el.dataset.docsLinkEn : el.dataset.docsLinkRu;
     });
     langToggle.textContent = lang === 'ru' ? 'EN' : 'RU';
     document.title = lang === 'ru' ? 'Temporality — Опыт, который накапливается' : 'Temporality — Experience that compounds';
