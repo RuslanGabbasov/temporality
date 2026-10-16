@@ -1157,6 +1157,26 @@ func main() {
 		return principal.VisibleUnits
 	}
 
+	// wizardModelClient serves every description→draft wizard (agent, skill,
+	// team): the env gateway when configured, otherwise the first workspace
+	// provider. Fresh installs configured purely through onboarding have no env
+	// gateway — activities.Model is nil there — and the wizards must keep
+	// working the same way runs do, through the provider registry. On failure it
+	// writes the 502 response itself and returns nil.
+	wizardModelClient := func(w http.ResponseWriter, r *http.Request) *llm.Client {
+		if activities.Model != nil {
+			return activities.Model
+		}
+		client, err := workspaceDraftModel(r.Context(), ws, func(ctx context.Context, ref string) (string, error) {
+			return resolveProviderAPIKey(ctx, ws, ref, secretMasterKey)
+		})
+		if err != nil {
+			writeError(w, 502, err)
+			return nil
+		}
+		return client
+	}
+
 	// Org structure CRUD (docs/org-structure.md §5). The tree itself is
 	// admin-only to mutate: moving nodes reshapes visibility for everyone.
 	mux.HandleFunc("GET /v1/org/units", func(w http.ResponseWriter, r *http.Request) {
@@ -2581,19 +2601,11 @@ func main() {
 		}
 		// The wizard runs on fresh installs configured purely through
 		// onboarding: a workspace provider exists, but the env gateway
-		// (activities.Model) is nil. Fall back to a workspace provider client —
-		// the same registry run routing uses — instead of failing with 502
-		// "model client is not configured".
-		modelClient := activities.Model
+		// (activities.Model) is nil. wizardModelClient falls back to a workspace
+		// provider client — the same registry run routing uses.
+		modelClient := wizardModelClient(w, r)
 		if modelClient == nil {
-			var err error
-			modelClient, err = workspaceDraftModel(r.Context(), ws, func(ctx context.Context, ref string) (string, error) {
-				return resolveProviderAPIKey(ctx, ws, ref, secretMasterKey)
-			})
-			if err != nil {
-				writeError(w, 502, err)
-				return
-			}
+			return
 		}
 		draft, err := agent.BuildAgentDraft(r.Context(), modelClient, req.Description, activities.ToolsSummary(), req.Final)
 		if err != nil {
@@ -4082,7 +4094,11 @@ func main() {
 			writeError(w, 422, errors.New("description is required"))
 			return
 		}
-		draft, err := agent.BuildSkillDraft(r.Context(), activities.Model, req.Description, activities.ToolsSummary(), req.Final)
+		modelClient := wizardModelClient(w, r)
+		if modelClient == nil {
+			return
+		}
+		draft, err := agent.BuildSkillDraft(r.Context(), modelClient, req.Description, activities.ToolsSummary(), req.Final)
 		if err != nil {
 			writeError(w, 502, err)
 			return
@@ -4368,10 +4384,16 @@ func main() {
 		// this viewer can actually see (same visibility as launch resolution).
 		rosterAgents, rErr := ws.ListAgentsVisible(r.Context(), candidateVisibleUnits(r))
 		if rErr != nil {
-			writeError(w, 500, rErr)
+			writeError(w, 500, fmt.Errorf("list roster agents: %w", rErr))
 			return
 		}
-		draft, err := agent.BuildTeamDraft(r.Context(), activities.Model, req.Description, agent.FormatTeamRoster(rosterAgents), req.Final)
+		// Same onboarding fallback as the other wizards: without an env gateway
+		// the draft model comes from the workspace provider registry.
+		modelClient := wizardModelClient(w, r)
+		if modelClient == nil {
+			return
+		}
+		draft, err := agent.BuildTeamDraft(r.Context(), modelClient, req.Description, agent.FormatTeamRoster(rosterAgents), req.Final)
 		if err != nil {
 			writeError(w, 502, err)
 			return

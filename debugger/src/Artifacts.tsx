@@ -240,25 +240,24 @@ export default function Artifacts() {
         <div style={{ maxWidth: '420px', flex: '1 1 260px' }}>
           <ListFilter value={filter} onChange={setFilter} placeholder={t('artifacts.filter_placeholder') ?? 'Filter artifacts…'} />
         </div>
-        {/* Carbon Select spreads `style` onto the inner <select> while the
-            .cds--select wrapper keeps width:100% — a bare Select in this flex
-            toolbar stretches to the whole row and the absolutely-positioned
-            chevron lands far outside the control. A wrapping div with
-            maxWidth is the boundary the wrapper respects. */}
-        <div style={{ maxWidth: '180px' }}>
-          <Select id="artifact-provider-filter" hideLabel labelText="provider" value={providerFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setProviderFilter(e.target.value)}>
-            <SelectItem value="" text={t('artifacts.filter_all_providers') ?? 'All providers'} />
-            <SelectItem value="builtin" text={providerLabel('builtin')} />
-            <SelectItem value="url" text={providerLabel('url')} />
-          </Select>
-        </div>
+        {/* Compact toolbar selects in the same style as the knowledge and
+            timeline toolbars (.toolbar-select); the Carbon Select used in
+            dialogs is too heavy here and its absolutely-positioned chevron
+            breaks loose in a flex row. */}
+        <label className="toolbar-select">{t('artifacts.filter_provider_label') ?? 'Source'}
+          <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)}>
+            <option value="">{t('artifacts.filter_all_providers') ?? 'All providers'}</option>
+            <option value="builtin">{providerLabel('builtin')}</option>
+            <option value="url">{providerLabel('url')}</option>
+          </select>
+        </label>
         {org.units.length > 0 && (
-          <div style={{ maxWidth: '220px' }}>
-            <Select id="artifact-org-filter" hideLabel labelText="org" value={orgFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setOrgFilter(e.target.value)}>
-              <SelectItem value="" text={t('artifacts.filter_all_orgs') ?? 'All units'} />
-              {org.units.map((u) => <SelectItem key={u.id} value={u.id} text={u.name} />)}
-            </Select>
-          </div>
+          <label className="toolbar-select">{t('artifacts.filter_org_label') ?? 'Unit'}
+            <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)}>
+              <option value="">{t('artifacts.filter_all_orgs') ?? 'All units'}</option>
+              {org.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          </label>
         )}
       </div>
 
