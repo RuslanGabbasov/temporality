@@ -52,18 +52,26 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 
 ## Запуск
 
-```sh
-cp .env.example .env   # настроить TEMPORALITY_MODEL_* и опционально песочницу
-docker compose up --build -d
-```
-
-Сборка локально или готовые образы из GHCR — на выбор:
+Готовые образы из GHCR — без клонирования репозитория и локальной сборки:
 
 ```sh
-# Готовые образы (без клонирования и сборки):
 curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
 curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
-TEMPORALITY_VERSION=2026.1.0 docker compose up -d
+cp .env.example .env   # настроить TEMPORALITY_MODEL_* и опционально песочницу
+TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+```
+
+`TEMPORALITY_VERSION` — версия образов (см. [релизы](https://github.com/RuslanGabbasov/temporality/releases));
+`latest` тянется по умолчанию, но для стенда фиксируйте версию явно.
+Обновление до новой версии: `TEMPORALITY_VERSION=<новая> docker compose up -d`
+(миграции применяются ядром на старте автоматически).
+
+Сборка из исходников — путь для разработки:
+
+```sh
+git clone https://github.com/RuslanGabbasov/temporality.git && cd temporality
+cp .env.example .env
+docker compose up --build -d
 ```
 
 Образы публикуются в GHCR при каждом релизном теге:

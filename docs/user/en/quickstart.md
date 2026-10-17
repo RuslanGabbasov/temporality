@@ -15,11 +15,27 @@ description: From zero to your first agent task — installation, onboarding, th
 
 ## Run it
 
+Prebuilt images from GHCR — the recommended path, nothing to clone or build:
+
 ```sh
-git clone https://github.com/RuslanGabbasov/temporality.git
-cd temporality
+mkdir temporality && cd temporality
+curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
 cp .env.example .env
 # edit .env: TEMPORALITY_MODEL_BASE_URL / _ID / _API_KEY
+TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+```
+
+`TEMPORALITY_VERSION` is the image version from the
+[releases page](https://github.com/RuslanGabbasov/temporality/releases); pin
+it explicitly, `latest` is for kicking the tires. Upgrading: set the new
+version and rerun `docker compose up -d` — the kernel migrates on start.
+
+Building from source (for developing Temporality itself):
+
+```sh
+git clone https://github.com/RuslanGabbasov/temporality.git && cd temporality
+cp .env.example .env
 docker compose up --build -d
 ```
 

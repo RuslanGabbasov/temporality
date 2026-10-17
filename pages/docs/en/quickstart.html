@@ -39,10 +39,21 @@
 <li>~4 GB of free memory for the stack (PostgreSQL, Temporal, Journal, Kernel, UI).</li>
 <li>A key from any OpenAI-compatible provider (OpenAI, OpenRouter, local Ollama, etc.).</li>
 </ul>
-<h2 id="run-it"><a class="anchor" href="#run-it" aria-label="Section link">#</a>Run it</h2><pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git
-cd temporality
+<h2 id="run-it"><a class="anchor" href="#run-it" aria-label="Section link">#</a>Run it</h2><p>Prebuilt images from GHCR — the recommended path, nothing to clone or build:</p>
+<pre><code class="language-sh">mkdir temporality &amp;&amp; cd temporality
+curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
 cp .env.example .env
 # edit .env: TEMPORALITY_MODEL_BASE_URL / _ID / _API_KEY
+TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+</code></pre>
+<p><code>TEMPORALITY_VERSION</code> is the image version from the
+<a href="https://github.com/RuslanGabbasov/temporality/releases" target="_blank" rel="noreferrer">releases page&nbsp;<span class="ext">↗</span></a>; pin
+it explicitly, <code>latest</code> is for kicking the tires. Upgrading: set the new
+version and rerun <code>docker compose up -d</code> — the kernel migrates on start.</p>
+<p>Building from source (for developing Temporality itself):</p>
+<pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git &amp;&amp; cd temporality
+cp .env.example .env
 docker compose up --build -d
 </code></pre>
 <p>This starts PostgreSQL, the Journal (<code>:8080</code>), the UI (<code>:3000</code>), Temporal (UI <code>:8233</code>),

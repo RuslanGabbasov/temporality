@@ -34,6 +34,17 @@
 <div class="docs-eyebrow">Administration</div>
 <h1>Administration</h1>
 <p class="docs-lead">Users and RBAC, the org structure, providers, secrets, sandboxes and quality settings.</p>
+<h2 id="upgrading"><a class="anchor" href="#upgrading" aria-label="Section link">#</a>Upgrading</h2><p>The stack runs prebuilt images from GHCR. Upgrading is pinning a new version
+and recreating the containers:</p>
+<pre><code class="language-sh">TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+</code></pre>
+<p>Database migrations apply automatically when the kernel starts. Data lives in
+compose named volumes and survives container recreation. Rolling back is the
+same move to the previous version (down-migrations do not exist for every
+schema; take a <code>postgres</code> dump before rolling back a major step).</p>
+<p>Building from source (<code>docker compose up --build</code>) is the development path:
+it overwrites the local images and silently turns <code>TEMPORALITY_VERSION</code> into
+<code>latest</code> — do not do this on a real deployment.</p>
 <h2 id="users-and-rbac"><a class="anchor" href="#users-and-rbac" aria-label="Section link">#</a>Users and RBAC</h2><p>The <strong>Users</strong> page (<code>/users</code>): creation, roles, bearer tokens, notification
 channels. Roles are ordered: <code>reader &lt; writer &lt; operator &lt; admin</code>.</p>
 <table>

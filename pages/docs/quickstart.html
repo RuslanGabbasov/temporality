@@ -39,10 +39,22 @@
 <li>~4 ГБ свободной памяти для стека (PostgreSQL, Temporal, Journal, Kernel, UI).</li>
 <li>Ключ любого OpenAI-совместимого провайдера (OpenAI, OpenRouter, локальный Ollama и т.д.).</li>
 </ul>
-<h2 id="запуск"><a class="anchor" href="#запуск" aria-label="Section link">#</a>Запуск</h2><pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git
-cd temporality
+<h2 id="запуск"><a class="anchor" href="#запуск" aria-label="Section link">#</a>Запуск</h2><p>Готовые образы из GHCR — рекомендуемый путь, ничего клонировать и собирать
+не нужно:</p>
+<pre><code class="language-sh">mkdir temporality &amp;&amp; cd temporality
+curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
 cp .env.example .env
 # отредактируйте .env: TEMPORALITY_MODEL_BASE_URL / _ID / _API_KEY
+TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+</code></pre>
+<p><code>TEMPORALITY_VERSION</code> — версия образов из
+<a href="https://github.com/RuslanGabbasov/temporality/releases" target="_blank" rel="noreferrer">релизов&nbsp;<span class="ext">↗</span></a>; фиксируйте
+её явно, <code>latest</code> — только для пробы. Обновление: подставьте новую версию и
+повторите <code>docker compose up -d</code> — миграции применяются ядром на старте.</p>
+<p>Сборка из исходников (для разработки самого Temporality):</p>
+<pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git &amp;&amp; cd temporality
+cp .env.example .env
 docker compose up --build -d
 </code></pre>
 <p>Поднимаются: PostgreSQL, Journal (<code>:8080</code>), UI (<code>:3000</code>), Temporal (UI <code>:8233</code>),

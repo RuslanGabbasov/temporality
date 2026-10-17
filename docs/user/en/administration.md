@@ -7,6 +7,24 @@ description: Users and RBAC, the org structure, providers, secrets, sandboxes an
 
 # Administration
 
+## Upgrading
+
+The stack runs prebuilt images from GHCR. Upgrading is pinning a new version
+and recreating the containers:
+
+```sh
+TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+```
+
+Database migrations apply automatically when the kernel starts. Data lives in
+compose named volumes and survives container recreation. Rolling back is the
+same move to the previous version (down-migrations do not exist for every
+schema; take a `postgres` dump before rolling back a major step).
+
+Building from source (`docker compose up --build`) is the development path:
+it overwrites the local images and silently turns `TEMPORALITY_VERSION` into
+`latest` — do not do this on a real deployment.
+
 ## Users and RBAC
 
 The **Users** page (`/users`): creation, roles, bearer tokens, notification

@@ -15,11 +15,28 @@ description: От нуля до первой задачи агента — ус�
 
 ## Запуск
 
+Готовые образы из GHCR — рекомендуемый путь, ничего клонировать и собирать
+не нужно:
+
 ```sh
-git clone https://github.com/RuslanGabbasov/temporality.git
-cd temporality
+mkdir temporality && cd temporality
+curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
 cp .env.example .env
 # отредактируйте .env: TEMPORALITY_MODEL_BASE_URL / _ID / _API_KEY
+TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+```
+
+`TEMPORALITY_VERSION` — версия образов из
+[релизов](https://github.com/RuslanGabbasov/temporality/releases); фиксируйте
+её явно, `latest` — только для пробы. Обновление: подставьте новую версию и
+повторите `docker compose up -d` — миграции применяются ядром на старте.
+
+Сборка из исходников (для разработки самого Temporality):
+
+```sh
+git clone https://github.com/RuslanGabbasov/temporality.git && cd temporality
+cp .env.example .env
 docker compose up --build -d
 ```
 

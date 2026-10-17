@@ -34,6 +34,17 @@
 <div class="docs-eyebrow">Администрирование</div>
 <h1>Администрирование</h1>
 <p class="docs-lead">Пользователи и RBAC, оргструктура, провайдеры, секреты, песочницы и настройки качества.</p>
+<h2 id="обновление"><a class="anchor" href="#обновление" aria-label="Section link">#</a>Обновление</h2><p>Стек живёт готовыми образами из GHCR. Обновление — подставить новую версию и
+пересоздать контейнеры:</p>
+<pre><code class="language-sh">TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+</code></pre>
+<p>Миграции БД применяются ядром автоматически на старте. Данные живут в
+именованных томах compose и переживают пересоздание контейнеров. Откат —
+к предыдущей версии тем же способом (даунгрейд-миграции есть не для всех
+схем; перед откатом крупного шага сделайте дамп <code>postgres</code>).</p>
+<p>Сборка из исходников (<code>docker compose up --build</code>) — путь разработки: она
+перезаписывает локальные образы и по умолчанию превращает <code>TEMPORALITY_VERSION</code>
+в <code>latest</code> — на стенде так делать не стоит.</p>
 <h2 id="пользователи-и-rbac"><a class="anchor" href="#пользователи-и-rbac" aria-label="Section link">#</a>Пользователи и RBAC</h2><p>Страница <strong>Пользователи</strong> (<code>/users</code>): создание, роли, bearer-токены, каналы
 уведомлений. Роли упорядочены: <code>reader &lt; writer &lt; operator &lt; admin</code>.</p>
 <table>

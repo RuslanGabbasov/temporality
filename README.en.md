@@ -52,8 +52,26 @@ not a partition (`docs/activity-scoping.md`).
 
 ## Getting started
 
+Prebuilt images from GHCR — no repository clone, no local build:
+
 ```sh
+curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
 cp .env.example .env   # configure TEMPORALITY_MODEL_* and optionally the sandbox
+TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+```
+
+`TEMPORALITY_VERSION` is the image version (see
+[releases](https://github.com/RuslanGabbasov/temporality/releases)); `latest`
+is the default, but pin an explicit version on any real deployment.
+Upgrading: `TEMPORALITY_VERSION=<new> docker compose up -d` — the kernel runs
+its migrations on start automatically.
+
+Building from source is the development path:
+
+```sh
+git clone https://github.com/RuslanGabbasov/temporality.git && cd temporality
+cp .env.example .env
 docker compose up --build -d
 ```
 

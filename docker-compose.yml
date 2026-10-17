@@ -1,3 +1,9 @@
+# Temporality stack. The primary deployment path is the prebuilt GHCR images:
+#   TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+# (see the releases page; the kernel applies its migrations on start).
+# The build: blocks are the development path — `docker compose up --build`
+# compiles the local sources and overrides the pulled images. See
+# docs/user/quickstart.md.
 services:
   postgres:
     image: pgvector/pgvector:pg17
