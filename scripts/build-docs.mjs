@@ -11,8 +11,8 @@
 // Usage: node scripts/build-docs.mjs   (from the repository root)
 
 import { marked } from 'marked'
-import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
-import { execSync } from 'node:child_process'
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join, basename } from 'node:path'
 
 const ROOT = new URL('..', import.meta.url).pathname
@@ -25,7 +25,7 @@ const LANGS = [
     srcDir: join(ROOT, 'docs', 'user'),
     outDir: join(ROOT, 'pages', 'docs'),
     rootPrefix: '..', // landing and assets, relative to outDir
-    cssHref: 'docs.css',
+    cssHref: '__CSS__',
     other: 'en', // the mirrored tree (slug-to-slug)
     toggleLabel: 'EN',
     editBase: 'docs/user',
@@ -46,7 +46,7 @@ const LANGS = [
     srcDir: join(ROOT, 'docs', 'user', 'en'),
     outDir: join(ROOT, 'pages', 'docs', 'en'),
     rootPrefix: '../..',
-    cssHref: '../docs.css',
+    cssHref: '../__CSS__',
     other: 'ru',
     toggleLabel: 'RU',
     editBase: 'docs/user/en',
@@ -154,13 +154,6 @@ function buildLang(lang) {
   const head = (title, description) => {
     // Cache-buster: a stale cached docs.css once made the primary button
     // invisible (amber on amber) — the version forces fresh styles.
-    // Deterministic: a timestamp or HEAD hash here would dirty the committed
-    // output on every rebuild/commit and fail the CI "generated docs are
-    // committed" check (the artifact cannot contain its own commit hash).
-    // The version follows the SOURCES: the last commit that touched docs/user.
-    // Same sources → same version, on any machine; artifact-only commits do
-    // not move it.
-    const v = process.env.DOCS_VERSION || execSync('git log -1 --format=%h -- docs/user').toString().trim()
     return `<!doctype html>
 <html lang="${strings.htmlLang}">
 <head>
@@ -170,7 +163,7 @@ function buildLang(lang) {
 <link rel="icon" href="${rootPrefix}/assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="${rootPrefix}/styles.css?v=${v}"><link rel="stylesheet" href="${lang.cssHref}?v=${v}">
+<link rel="stylesheet" href="${rootPrefix}/styles.css"><link rel="stylesheet" href="${lang.cssHref}">
 </head>
 <body class="docs-page">`
   }
@@ -235,11 +228,23 @@ ${cards}
   console.log(`✓ ${lang.code}/index.html (${pages.length} pages)`)
 }
 
-// The shared stylesheet lives with the primary language tree.
+// The shared stylesheet lives with the primary language tree. Its name
+// carries a content hash: changing styles invalidates every visitor's cache
+// without touching the HTML sources, and the build stays deterministic.
 const cssSource = join(ROOT, 'docs', 'user', 'docs.css')
+const cssBody = readFileSync(cssSource)
+const cssName = 'docs.' + createHash('sha256').update(cssBody).digest('hex').slice(0, 8) + '.css'
+const outDir = join(ROOT, 'pages', 'docs')
+mkdirSync(outDir, { recursive: true })
+// Remove stylesheets of previous builds so the directory holds exactly one.
+for (const file of readdirSync(outDir)) {
+  if (/^docs\.[0-9a-f]{8}\.css$/.test(file) && file !== cssName) rmSyncSafe(join(outDir, file))
+}
+writeFileSync(join(outDir, cssName), cssBody)
 for (const lang of LANGS) {
+  lang.cssHref = lang.cssHref.replace('__CSS__', cssName)
   buildLang(lang)
 }
-mkdirSync(join(ROOT, 'pages', 'docs'), { recursive: true })
-writeFileSync(join(ROOT, 'pages', 'docs', 'docs.css'), readFileSync(cssSource))
-console.log('✓ docs.css')
+console.log('✓ ' + cssName)
+
+
