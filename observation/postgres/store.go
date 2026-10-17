@@ -9,6 +9,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -249,4 +250,102 @@ func decodeEvidence(sourceID, eventID string, evidence []byte) []observation.Evi
 		return nil
 	}
 	return parsed
+}
+
+// KnowledgeEmbedding is one stored semantic vector of a knowledge item.
+type KnowledgeEmbedding struct {
+	KnowledgeID string
+	Model       string
+	Dim         int
+	Vector      []float32
+}
+
+// UpsertKnowledgeEmbeddings replaces vectors in one batch. All vectors in a
+// batch must share the model and dimension (validated by the caller).
+func (s *Store) UpsertKnowledgeEmbeddings(ctx context.Context, model string, items map[string][]float32) error {
+	batch := &pgx.Batch{}
+	for id, vector := range items {
+		encoded, err := json.Marshal(vector)
+		if err != nil {
+			return fmt.Errorf("encode embedding for %q: %w", id, err)
+		}
+		batch.Queue(`INSERT INTO observation_knowledge_embedding (knowledge_id, model, dim, embedding, updated_at)
+			VALUES ($1, $2, $3, $4::jsonb, clock_timestamp())
+			ON CONFLICT (knowledge_id, model) DO UPDATE SET dim = EXCLUDED.dim, embedding = EXCLUDED.embedding, updated_at = clock_timestamp()`,
+			id, model, len(vector), string(encoded))
+	}
+	if batch.Len() == 0 {
+		return nil
+	}
+	br := s.pool.SendBatch(ctx, batch)
+	defer br.Close()
+	for range items {
+		if _, err := br.Exec(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListKnowledgeEmbeddings returns every vector stored for the model, keyed by
+// knowledge id. Volumes are per-project bounded; the hint matcher consumes
+// them in-process.
+func (s *Store) ListKnowledgeEmbeddings(ctx context.Context, model string) (map[string][]float32, error) {
+	rows, err := s.pool.Query(ctx, `SELECT knowledge_id, dim, embedding FROM observation_knowledge_embedding WHERE model = $1`, model)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]float32{}
+	for rows.Next() {
+		var id string
+		var dim int
+		var raw []byte
+		if err := rows.Scan(&id, &dim, &raw); err != nil {
+			return nil, err
+		}
+		vector := make([]float32, 0, dim)
+		if err := json.Unmarshal(raw, &vector); err != nil {
+			continue // corrupt row: skip rather than break matching
+		}
+		out[id] = vector
+	}
+	return out, rows.Err()
+}
+
+// KnowledgeEmbeddingGap is the observation.KnowledgeEmbeddingGap row: id
+// plus proposition text.
+// ListKnowledgeEmbeddingGaps returns knowledge items without a vector for the
+// model, oldest first, capped. The proposition text rides along so the caller
+// (the kernel, which owns the provider keys) can embed it directly.
+func (s *Store) ListKnowledgeEmbeddingGaps(ctx context.Context, model string, limit int) ([]observation.KnowledgeEmbeddingGap, error) {
+	if limit <= 0 {
+		limit = 256
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT ON (e.data->>'knowledge_id')
+			e.data->>'knowledge_id' AS knowledge_id,
+			e.data->>'proposition'  AS text
+		FROM observation_events e
+		WHERE e.type IN ('knowledge.proposed', 'knowledge.corrected')
+		  AND COALESCE(e.data->>'knowledge_id', '') <> ''
+		  AND COALESCE(e.data->>'proposition', '') <> ''
+		  AND NOT EXISTS (
+			SELECT 1 FROM observation_knowledge_embedding emb
+			WHERE emb.knowledge_id = e.data->>'knowledge_id' AND emb.model = $1)
+		ORDER BY e.data->>'knowledge_id', e.occurred_at DESC
+		LIMIT $2`, model, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	gaps := []observation.KnowledgeEmbeddingGap{}
+	for rows.Next() {
+		var gap observation.KnowledgeEmbeddingGap
+		if err := rows.Scan(&gap.KnowledgeID, &gap.Text); err != nil {
+			return nil, err
+		}
+		gaps = append(gaps, gap)
+	}
+	return gaps, rows.Err()
 }

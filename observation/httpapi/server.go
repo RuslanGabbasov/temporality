@@ -162,6 +162,8 @@ func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate, opt
 	mux.HandleFunc("POST /v1/observations/knowledge/promote", s.promoteObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/knowledge/explore", s.exploreObservationKnowledge)
 	mux.HandleFunc("POST /v1/observations/hints", s.activateObservationHints)
+	mux.HandleFunc("PUT /v1/observations/knowledge/embeddings", s.putKnowledgeEmbeddings)
+	mux.HandleFunc("GET /v1/observations/knowledge/embeddings/missing", s.getKnowledgeEmbeddingGaps)
 	return logRequests(log, s.gate.Authenticate(mux))
 }
 
@@ -1372,6 +1374,13 @@ type observationHintRequest struct {
 	ActiveSkills []observation.HintSkill `json:"active_skills,omitempty"`
 	// IssuedKnowledgeIDs suppresses knowledge already offered in this run.
 	IssuedKnowledgeIDs []string `json:"issued_knowledge_ids,omitempty"`
+	// Embedding is the semantic vector of the query text, computed by the
+	// kernel with the supervisor embeddings model. Optional: without it the
+	// matcher runs purely lexical.
+	Embedding []float32 `json:"embedding,omitempty"`
+	// EmbeddingModel names the model that produced the query embedding; the
+	// stored knowledge vectors stamped with the same model are the match set.
+	EmbeddingModel string `json:"embedding_model,omitempty"`
 	// TeamRunRoot names the team program root run (docs/agent-teams.md §8):
 	// knowledge proposed or confirmed by any run under that root (the root
 	// itself or ids prefixed "<root>/") is additionally admitted to the hints
@@ -1454,14 +1463,33 @@ func (s *Server) activateObservationHints(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
-	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit, ActiveSkills: input.ActiveSkills, IssuedKnowledgeIDs: input.IssuedKnowledgeIDs, TeamRunKnowledgeIDs: teamRunKnowledgeIDs})
+	// Semantic tier inputs: the query embedding rides the request; knowledge
+	// vectors come from the store when it supports them (postgres journal).
+	// Any failure degrades to the lexical matcher.
+	var knowledgeEmbeddings map[string][]float32
+	embeddingUsed := false
+	if len(input.Embedding) > 0 && input.EmbeddingModel != "" {
+		if len(input.Embedding) <= 4096 {
+			if store, ok := s.store.(interface {
+				ListKnowledgeEmbeddings(context.Context, string) (map[string][]float32, error)
+			}); ok {
+				if vectors, err := store.ListKnowledgeEmbeddings(r.Context(), input.EmbeddingModel); err != nil {
+					s.log.Warn("load knowledge embeddings; semantic tier skipped", "error", err)
+				} else if len(vectors) > 0 {
+					knowledgeEmbeddings = vectors
+					embeddingUsed = true
+				}
+			}
+		}
+	}
+	hints := observation.FindHints(knowledge, observation.HintQuery{Text: queryText, Entities: input.Entities, Topics: input.Topics, Limit: input.Limit, ActiveSkills: input.ActiveSkills, IssuedKnowledgeIDs: input.IssuedKnowledgeIDs, TeamRunKnowledgeIDs: teamRunKnowledgeIDs, Embedding: input.Embedding, KnowledgeEmbeddings: knowledgeEmbeddings})
 	activationID := newUUID()
 	context := observation.Context{Project: input.Project, Run: input.Run, Task: input.Task, Actor: input.Actor}
 	activationEvent := observation.Event{
 		Schema: observation.Schema, EventID: activationID, OccurredAt: s.now().UTC(),
 		Source:  observation.Source{ID: "temporality-activation", Integration: "temporality", Version: "1"},
 		Context: context, Type: "hint.query",
-		Data: map[string]any{"activation_id": activationID, "candidate_count": len(hints), "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion, "has_text_query": queryText != "", "active_skill_count": len(input.ActiveSkills), "issued_knowledge_count": len(input.IssuedKnowledgeIDs), "team_root": input.TeamRunRoot, "team_run_knowledge_count": len(teamRunKnowledgeIDs)},
+		Data: map[string]any{"activation_id": activationID, "candidate_count": len(hints), "matcher": observation.HintsAlgorithmVersion, "algorithm_version": observation.HintsAlgorithmVersion, "has_text_query": queryText != "", "active_skill_count": len(input.ActiveSkills), "issued_knowledge_count": len(input.IssuedKnowledgeIDs), "team_root": input.TeamRunRoot, "team_run_knowledge_count": len(teamRunKnowledgeIDs), "semantic_tier": embeddingUsed},
 	}
 	if err = appendObservationNow(r, s.store, s.now, activationEvent); err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not record hint activation"))

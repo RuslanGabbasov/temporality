@@ -1,6 +1,8 @@
 package observation
 
 import (
+	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"unicode"
@@ -11,6 +13,12 @@ type HintQuery struct {
 	Entities []string
 	Topics   []string
 	Limit    int
+	// Embedding is the semantic vector of the query text (computed by the
+	// kernel with the supervisor embeddings model). Nil = no semantic tier.
+	Embedding []float32
+	// KnowledgeEmbeddings maps knowledge id → its stored vector; ids without a
+	// vector are invisible to the semantic tier.
+	KnowledgeEmbeddings map[string][]float32
 	// ActiveSkills carries the digests of skills already attached to the agent
 	// (plan-priming-relevance.md §7): a candidate whose content is mostly
 	// covered by them is demoted for novelty (B5), never excluded — it may
@@ -80,6 +88,33 @@ const (
 	hintSkillDupContainment = 0.75
 )
 
+// Semantic tier (docs/supervisor-model.md §6): candidates below every lexical
+// tier, admitted only above a conservative cosine floor and capped per query
+// so fuzzy wording cannot flood the budget.
+const (
+	hintSemanticTier     = 4
+	hintSemanticMinScore = 0.35
+	hintSemanticMaxAdmit = 3
+)
+
+// cosineSimilarity of two equal-length vectors; ok=false when lengths differ
+// or either vector is (numerically) zero.
+func cosineSimilarity(a, b []float32) (float32, bool) {
+	if len(a) == 0 || len(a) != len(b) {
+		return 0, false
+	}
+	var dot, normA, normB float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+		normA += float64(a[i]) * float64(a[i])
+		normB += float64(b[i]) * float64(b[i])
+	}
+	if normA == 0 || normB == 0 {
+		return 0, false
+	}
+	return float32(dot / (math.Sqrt(normA) * math.Sqrt(normB))), true
+}
+
 // FindHints uses explainable exact entity/topic and lexical matching. It does
 // not estimate truth or confidence and returns lifecycle/provenance alongside
 // each candidate so the caller can present memory separately from tool output.
@@ -104,7 +139,7 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 	}, 0)
 	for _, item := range knowledge {
 		itemsByID[item.ID] = item
-		if issued[item.ID] {
+		if issued[strings.ToLower(item.ID)] {
 			continue
 		}
 		matched, tier := matchKnowledge(item, queryEntities, queryTopics, queryTokens, queryPhrase)
@@ -129,6 +164,50 @@ func FindHints(knowledge []Knowledge, query HintQuery) []Hint {
 		}
 		direct[item.ID] = candidate
 		candidates = append(candidates, candidate)
+	}
+	// Semantic tier (docs/supervisor-model.md §6): recall for knowledge the
+	// lexical tiers miss. Requires a query embedding and per-knowledge vectors;
+	// candidates rank below every lexical tier and are capped so a fuzzy query
+	// cannot flood the budget. Already-matched items are skipped — semantics
+	// only adds what lexical matching missed.
+	if len(query.Embedding) > 0 && len(query.KnowledgeEmbeddings) > 0 {
+		type semanticHit struct {
+			item  Knowledge
+			score float32
+		}
+		hits := make([]semanticHit, 0)
+		for _, item := range knowledge {
+			if issued[strings.ToLower(item.ID)] {
+				continue
+			}
+			if item.State == "invalidated" || item.State == "superseded" || item.State == "corrected" {
+				continue
+			}
+			if _, already := direct[item.ID]; already {
+				continue
+			}
+			vector, ok := query.KnowledgeEmbeddings[item.ID]
+			if !ok {
+				continue
+			}
+			score, ok := cosineSimilarity(query.Embedding, vector)
+			if !ok || score < hintSemanticMinScore {
+				continue
+			}
+			hits = append(hits, semanticHit{item: item, score: score})
+		}
+		sort.Slice(hits, func(i, j int) bool { return hits[i].score > hits[j].score })
+		for i, hit := range hits {
+			if i >= hintSemanticMaxAdmit {
+				break
+			}
+			matched := []string{fmt.Sprintf("semantic:%.2f", hit.score)}
+			candidate, ok := makeHintCandidate(hit.item, matched, hintSemanticTier, skillTokens)
+			if !ok {
+				continue
+			}
+			candidates = append(candidates, candidate)
+		}
 	}
 	// Team-run knowledge (docs/agent-teams.md §8): admitted without a lexical
 	// match so later slots inherit what earlier slots confirmed mid-run. They

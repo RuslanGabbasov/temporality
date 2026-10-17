@@ -367,3 +367,12 @@ func healthPercentile(sorted []int64, p int) int64 {
 	}
 	return sorted[rank-1]
 }
+
+// KnowledgeEmbeddingGap is a knowledge item still missing a semantic vector
+// for the embeddings model: id plus the proposition text to embed (docs/
+// supervisor-model.md §6). Lives here so both the journal store and the HTTP
+// layer speak one shape.
+type KnowledgeEmbeddingGap struct {
+	KnowledgeID string `json:"knowledge_id"`
+	Text        string `json:"text"`
+}

@@ -46,3 +46,18 @@ DROP TRIGGER IF EXISTS observation_events_append_only ON observation_events;
 CREATE TRIGGER observation_events_append_only
 BEFORE UPDATE OR DELETE ON observation_events
 FOR EACH ROW EXECUTE FUNCTION reject_observation_event_mutation();
+
+-- Semantic knowledge layer (docs/supervisor-model.md §6): one vector per
+-- knowledge item per embeddings model. Vectors are stored as JSON float
+-- arrays — dimension-agnostic, cosine is computed in-process during hint
+-- matching (per-project volumes are bounded; a pgvector column + index is the
+-- scale-up path once needed). knowledge_id is global across sources: one
+-- kernel owns the knowledge stream in practice.
+CREATE TABLE IF NOT EXISTS observation_knowledge_embedding (
+    knowledge_id TEXT NOT NULL,
+    model        TEXT NOT NULL,
+    dim          INT  NOT NULL,
+    embedding    JSONB NOT NULL,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (knowledge_id, model)
+);

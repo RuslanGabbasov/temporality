@@ -6587,6 +6587,9 @@ func main() {
 	// Supervisor settings (docs/supervisor-model.md): judge/vision/embedding
 	// models and the human-attention coefficients.
 	RegisterSupervisorRoutes(mux, gate, ws)
+	// Semantic knowledge layer backfill (docs/supervisor-model.md §6): embed
+	// knowledge missing a vector, on the supervisor embeddings model.
+	startEmbeddingBackfillLoop(ctx, log, activities, observationURL, journalToken)
 	// Scheduled quality runs (docs/agent-quality-loop.md §8.1): the cadence is
 	// an operator setting the loop re-reads every minute, so UI changes apply
 	// without a restart. Anchored on the newest scheduled run row.

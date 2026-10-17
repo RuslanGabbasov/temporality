@@ -1,6 +1,7 @@
 package observation
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -253,5 +254,71 @@ func TestFindHintsTeamRunKnowledgeAdmittedWithoutLexicalMatch(t *testing.T) {
 	hints = FindHints(hintKnowledge(t, both), HintQuery{Text: "authenticate to gatekeeper", Entities: []string{"gatekeeper"}, TeamRunKnowledgeIDs: []string{"k-team"}, Limit: 8})
 	if len(hints) != 2 || hints[0].KnowledgeID != "k-entity" {
 		t.Fatalf("entity match must outrank team-run admission, got %+v", hints)
+	}
+}
+
+// The semantic tier admits knowledge the lexical tiers miss: no shared
+// tokens/topics/entities, but a close vector. Caps, skip-issued, and lexical
+// precedence are all enforced.
+func TestFindHintsSemanticTier(t *testing.T) {
+	base := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	item := func(id, proposition string) Knowledge {
+		return Knowledge{ID: id, Proposition: proposition, State: "confirmed", Topics: []string{"непересекающееся"}, Project: "demo", CreatedAt: base, UpdatedAt: base}
+	}
+	knowledge := []Knowledge{
+		item("K-lex", "миграции базы данных запускаются через make migrate"),
+		item("K-sem", "playwright пишет e2e тесты интерфейса"),
+		item("K-issued", "ретраи провайдера настраиваются таймаутами"),
+	}
+	query := HintQuery{
+		Text:  "как настроить автотесты пользовательского интерфейса",
+		Limit: 8,
+		// Query vector closest to K-sem; K-issued must stay suppressed.
+		Embedding: []float32{1, 0, 0},
+		KnowledgeEmbeddings: map[string][]float32{
+			"K-sem":    {0.95, 0.1, 0},
+			"K-lex":    {0, 1, 0},
+			"K-issued": {0.99, 0, 0},
+		},
+		IssuedKnowledgeIDs: []string{"K-issued"},
+	}
+	hints := FindHints(knowledge, query)
+	foundSemantic := false
+	for _, hint := range hints {
+		for _, mark := range hint.MatchedBy {
+			if strings.HasPrefix(mark, "semantic:") {
+				if hint.KnowledgeID == "K-sem" {
+					foundSemantic = true
+				} else {
+					t.Errorf("unexpected semantic hit: %s (%v)", hint.KnowledgeID, hint.MatchedBy)
+				}
+			}
+		}
+	}
+	if !foundSemantic {
+		t.Fatalf("K-sem must be admitted by the semantic tier, hints = %+v", hints)
+	}
+	// Lexical match still outranks: with both present, the lexical one ranks first.
+	queryBoth := query
+	queryBoth.KnowledgeEmbeddings = map[string][]float32{"K-sem": {0.95, 0.1, 0}}
+	queryBoth.IssuedKnowledgeIDs = nil
+	queryBoth.Text = "как устроены миграции базы данных и автотесты интерфейса"
+	hints = FindHints(knowledge, queryBoth)
+	if len(hints) < 2 {
+		t.Fatalf("expected at least two hints, got %+v", hints)
+	}
+	for _, hint := range hints {
+		if hint.KnowledgeID != "K-lex" {
+			continue
+		}
+		if hints[0].KnowledgeID != "K-lex" {
+			t.Errorf("lexical match must outrank semantic, order = %+v", hints)
+		}
+	}
+	// Below the cosine floor nothing semantic is admitted.
+	weak := query
+	weak.KnowledgeEmbeddings = map[string][]float32{"K-sem": {0, 1, 0}} // orthogonal
+	if hints := FindHints(knowledge, weak); len(hints) != 0 {
+		t.Errorf("orthogonal vectors must not admit semantic hints: %+v", hints)
 	}
 }

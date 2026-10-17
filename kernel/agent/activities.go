@@ -161,8 +161,9 @@ const providerCacheTTL = 60 * time.Second
 const supervisorCacheTTL = 60 * time.Second
 
 type supervisorSettingsCache struct {
-	visionModel string
-	fetchedAt   time.Time
+	visionModel    string
+	embeddingModel string
+	fetchedAt      time.Time
 }
 
 func NewActivities(events EventOutbox) (*Activities, error) {
@@ -415,25 +416,35 @@ func (a *Activities) hasImages(request ModelRequest) bool {
 // visionModelFor returns the supervisor panel's vision model, cached for
 // supervisorCacheTTL. Failures degrade to "no override".
 func (a *Activities) visionModelFor(ctx context.Context) string {
+	vision, _ := a.supervisorModelsFor(ctx)
+	return vision
+}
+
+// supervisorModelsFor returns the panel's vision and embeddings models with a
+// shared TTL cache: an operator edit applies within a minute, failures
+// degrade to empty strings.
+func (a *Activities) supervisorModelsFor(ctx context.Context) (vision string, embedding string) {
 	a.supervisorMu.Lock()
 	defer a.supervisorMu.Unlock()
 	if time.Since(a.supervisorCache.fetchedAt) < supervisorCacheTTL {
-		return a.supervisorCache.visionModel
+		return a.supervisorCache.visionModel, a.supervisorCache.embeddingModel
 	}
-	model := ""
+	vision, embedding = "", ""
 	if a.WorkspaceURL != "" {
 		endpoint := fmt.Sprintf("%s/v1/workspace/supervisor", a.WorkspaceURL)
 		if body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil); err == nil && status == 200 {
 			var view struct {
-				VisionModel string `json:"vision_model"`
+				VisionModel    string `json:"vision_model"`
+				EmbeddingModel string `json:"embedding_model"`
 			}
 			if json.Unmarshal([]byte(body), &view) == nil {
-				model = strings.TrimSpace(view.VisionModel)
+				vision = strings.TrimSpace(view.VisionModel)
+				embedding = strings.TrimSpace(view.EmbeddingModel)
 			}
 		}
 	}
-	a.supervisorCache = supervisorSettingsCache{visionModel: model, fetchedAt: time.Now()}
-	return model
+	a.supervisorCache = supervisorSettingsCache{visionModel: vision, embeddingModel: embedding, fetchedAt: time.Now()}
+	return vision, embedding
 }
 
 func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.Completion, error) {
@@ -1853,6 +1864,17 @@ func faultAfterEffect(runID, toolName, operationID string) bool {
 
 func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([]Hint, error) {
 	payload := map[string]any{"project": request.Project, "run": request.RunID, "task": request.TaskID, "actor": map[string]string{"id": request.ActorID, "type": "agent"}, "query": request.Query, "limit": 8}
+	// Semantic tier (docs/supervisor-model.md §6): embed the slot text with
+	// the supervisor embeddings model. A failure degrades to the lexical
+	// matcher — hints must never fail because semantics are misconfigured.
+	if request.Query != "" {
+		if vectors, err := a.EmbedTexts(ctx, request.Project, []string{request.Query}); err == nil && len(vectors) == 1 {
+			if model, _ := a.supervisorModelsFor(ctx); model != "" {
+				payload["embedding"] = vectors[0]
+				payload["embedding_model"] = model
+			}
+		}
+	}
 	if request.TeamRoot != "" {
 		payload["team_root"] = request.TeamRoot
 	}
