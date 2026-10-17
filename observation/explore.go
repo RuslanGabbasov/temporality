@@ -442,24 +442,30 @@ func sortExploreCards(cards []ExploreKnowledgeCard) {
 func (e exploreEngine) orient(result *ExploreResult, query ExploreQuery) {
 	limit := result.Limits.MaxItems
 	type areaAggregate struct {
-		name   string
-		kind   string
-		items  []Knowledge
-		tokens map[string]bool
+		name    string
+		kind    string
+		items   []Knowledge
+		itemIDs map[string]bool
+		tokens  map[string]bool
 	}
 	// One name = one area regardless of whether the value was tagged as a
 	// topic or an entity: two same-named tiles read as duplicates to the user
-	// (the kind stays for the fallback label, topics win).
+	// (the kind stays for the fallback label, topics win). An item is counted
+	// once per area even when both its topic and entity share the name.
 	areas := make(map[string]*areaAggregate)
 	addArea := func(name, kind string, item Knowledge) {
 		key := name
 		area, ok := areas[key]
 		if !ok {
-			area = &areaAggregate{name: name, kind: kind, tokens: make(map[string]bool)}
+			area = &areaAggregate{name: name, kind: kind, tokens: make(map[string]bool), itemIDs: make(map[string]bool)}
 			areas[key] = area
 		} else if area.kind != kind && kind == "topic" {
 			area.kind = "topic"
 		}
+		if area.itemIDs[item.ID] {
+			return
+		}
+		area.itemIDs[item.ID] = true
 		area.items = append(area.items, item)
 		for token := range knowledgeFeatureTokens(name) {
 			area.tokens[token] = true

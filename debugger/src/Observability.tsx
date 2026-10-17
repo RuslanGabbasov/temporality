@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { authHeaders } from './api'
-import { observationApi, type KnowledgeItem } from './observationApi'
+import { observationApi, type ExploreArea, type KnowledgeItem } from './observationApi'
+import AreaMap from './explorer/AreaMap'
 import {
   Button,
   InlineNotification,
@@ -79,17 +80,34 @@ export default function Observability({ project }: { project: string }) {
   const knownAtUTC = utcValue(useDebounced(knownAt, 500))
   const compareUTC = utcValue(useDebounced(compareAsOf, 500))
 
-  const clusters = useMemo(() => {
-    const groups = new Map<string, { dimension: 'topic' | 'entity'; items: KnowledgeItem[] }>()
-    for (const item of knowledge) {
-      const fromTopic = (item.topics?.length ?? 0) > 0
-      const name = (fromTopic ? item.topics?.[0] : item.entities?.[0]) || item.topics?.[0] || item.entities?.[0] || (t('knowledge.no_topic') ?? 'No topic')
-      const group = groups.get(name)
-      if (group) group.items.push(item)
-      else groups.set(name, { dimension: fromTopic ? 'topic' : 'entity', items: [item] })
+  // The knowledge area map: topics and entities merged by name (same as the
+  // explorer's orient), top-N by size. Click opens Knowledge with the sticky
+  // area filter applied.
+  const areaTiles = useMemo((): ExploreArea[] => {
+    const map = new Map<string, { kind: 'topic' | 'entity'; ids: Set<string>; states: Record<string, number>; contradictions: number }>()
+    const touch = (raw: string, kind: 'topic' | 'entity', item: KnowledgeItem) => {
+      const name = raw.trim().toLowerCase()
+      if (!name) return
+      let area = map.get(name)
+      if (!area) {
+        area = { kind, ids: new Set(), states: {}, contradictions: 0 }
+        map.set(name, area)
+      }
+      if (kind === 'topic') area.kind = 'topic'
+      if (area.ids.has(item.id)) return
+      area.ids.add(item.id)
+      area.states[item.state] = (area.states[item.state] ?? 0) + 1
+      if (item.state === 'challenged' || item.at_risk) area.contradictions += 1
     }
-    return [...groups.entries()].sort((a, b) => b[1].items.length - a[1].items.length)
-  }, [knowledge, t])
+    for (const item of knowledge) {
+      for (const topic of item.topics ?? []) touch(topic, 'topic', item)
+      for (const entity of item.entities ?? []) touch(entity, 'entity', item)
+    }
+    return [...map.entries()]
+      .map(([name, area]) => ({ name, kind: area.kind, knowledge_count: area.ids.size, states: area.states, contradictions: area.contradictions }))
+      .sort((a, b) => b.knowledge_count - a.knowledge_count || a.name.localeCompare(b.name))
+      .slice(0, 24)
+  }, [knowledge])
 
   // Health summary
   const health = useMemo(() => {
@@ -285,29 +303,25 @@ export default function Observability({ project }: { project: string }) {
             />
           )}
 
-          {/* Cluster summary */}
-          {clusters.length > 0 && (
+          {/* Knowledge area map — the same treemap as the Knowledge page;
+              a tile click opens Knowledge with the area filter applied. */}
+          {areaTiles.length > 0 && (
             <Tile style={{ marginBottom: '1rem' }}>
-              <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{t('knowledge.by_scope') ?? 'Knowledge by scope'}</Heading>
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                {clusters.map(([name, group]) => {
-                  const alive = group.items.filter((k) => k.state !== 'invalidated' && k.state !== 'superseded' && !k.at_risk).length
-                  const params = new URLSearchParams({ project })
-                  params.set(group.dimension, name)
-                  return (
-                    <div
-                      key={name}
-                      role="button" tabIndex={0}
-                      onClick={() => { window.location.href = `${window.location.origin}/knowledge?${params.toString()}` }}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location.href = `${window.location.origin}/knowledge?${params.toString()}` } }}
-                      title={t('knowledge.cluster_open_hint') ?? `Open knowledge filtered by this ${group.dimension}`}
-                      style={{ padding: '0.5rem 0.75rem', background: 'var(--tm-ink)', borderRadius: '6px', border: '1px solid var(--tm-border)', minWidth: '120px', cursor: 'pointer' }}
-                    >
-                      <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.25rem' }}>{name}</div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{group.items.length} items · {alive} alive</div>
-                    </div>
-                  )
-                })}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                <Heading style={{ fontSize: '0.875rem' }}>{t('explorer.map_title') ?? 'Area map'}</Heading>
+                <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{t('knowledge.area_map_hint') ?? 'Размер — количество знаний, цвет — состояние; клик открывает знания с фильтром по области'}</span>
+              </div>
+              <div style={{ maxWidth: 680, margin: '0 auto' }}>
+                <AreaMap
+                  areas={areaTiles}
+                  canvasWidth={560}
+                  canvasHeight={300}
+                  onSelect={(area) => {
+                    const params = new URLSearchParams({ project })
+                    params.set('area', area.name)
+                    window.location.href = `${window.location.origin}/knowledge?${params.toString()}`
+                  }}
+                />
               </div>
             </Tile>
           )}

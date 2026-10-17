@@ -141,18 +141,22 @@ function fitLabel(text: string, rectWidth: number, fontSize: number): string {
   return text.length > max ? `${text.slice(0, Math.max(2, max - 1))}…` : text
 }
 
-export default function AreaMap({ areas, selectedKey, onSelect }: {
+export default function AreaMap({ areas, selectedKey, onSelect, canvasWidth = 320, canvasHeight = 440 }: {
   areas: ExploreArea[]
   selectedKey?: string
   onSelect: (area: ExploreArea) => void
+  /** Canvas size in viewBox units — landscape for wide columns, the default
+   *  portrait fits the explorer's narrow left column. */
+  canvasWidth?: number
+  canvasHeight?: number
 }) {
   const t = useT()
   const [hover, setHover] = useState<string | null>(null)
   // Fixed canvas: stretching the SVG with the card only made the same tiles
   // taller; more clusters come from the orient query limit instead.
-  const width = 320
-  const height = 440
-  const positioned = useMemo(() => layoutAreas(areas, width, height), [areas])
+  const positioned = useMemo(
+    () => layoutAreas(areas, canvasWidth, canvasHeight),
+    [areas, canvasWidth, canvasHeight])
 
   if (positioned.length === 0) {
     return <div style={{ padding: '1rem 0', color: 'var(--tm-muted)', fontSize: '0.8rem' }}>{t('explorer.map_empty') ?? 'No areas recorded yet.'}</div>
@@ -160,7 +164,7 @@ export default function AreaMap({ areas, selectedKey, onSelect }: {
 
   return (
     <div>
-      <svg role="group" aria-label={t('explorer.map_title') ?? 'Knowledge area map'} width="100%" viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
+      <svg role="group" aria-label={t('explorer.map_title') ?? 'Knowledge area map'} width="100%" viewBox={`0 0 ${canvasWidth} ${canvasHeight}`} style={{ display: 'block' }}>
         {positioned.map(({ area, x, y, w, h }) => {
           const key = areaKey(area)
           const active = key === selectedKey

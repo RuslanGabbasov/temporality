@@ -420,3 +420,29 @@ func TestExploreUnknownOperationFailsSoft(t *testing.T) {
 func hasContextDifferences(conflict ExploreConflict) bool {
 	return len(conflict.ContextDifferences) > 0
 }
+
+// An area merges topic and entity occurrences of one name; an item carrying
+// the same value in both must be counted once, not twice.
+func TestExploreOrientMergedAreaCountsItemOnce(t *testing.T) {
+	fixture := []Knowledge{
+		{
+			ID: "K-dual", Proposition: "e2e прогоняется через playwright", State: "confirmed",
+			Topics: []string{"playwright"}, Entities: []string{"playwright"},
+			Project: "demo", CreatedAt: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), UpdatedAt: time.Now(),
+		},
+	}
+	result := ExploreKnowledge(fixture, ExploreQuery{Operation: ExploreOrient})
+	if len(result.Areas) != 1 {
+		t.Fatalf("expected one merged area, got %d: %+v", len(result.Areas), result.Areas)
+	}
+	area := result.Areas[0]
+	if area.KnowledgeCount != 1 {
+		t.Errorf("knowledge_count = %d, want 1 (item counted once)", area.KnowledgeCount)
+	}
+	if area.States["confirmed"] != 1 {
+		t.Errorf("states = %v, want confirmed:1", area.States)
+	}
+	if area.Kind != "topic" {
+		t.Errorf("merged kind = %q, want topic", area.Kind)
+	}
+}
