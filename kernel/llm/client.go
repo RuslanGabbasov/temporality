@@ -610,15 +610,7 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	}
 	idle := c.cfg.StreamIdleTimeout
 	noProgress := c.cfg.StreamNoProgressTimeout
-	firstToken := c.cfg.StreamFirstTokenTimeout
-	if firstToken > 0 {
-		// Prefill scales with prompt size: a legitimately processing provider
-		// can sit silent for minutes on an uncached ~250k-token context before
-		// the first token. Scale the budget with the payload (~1MB ≈ 250k
-		// tokens ≈ +60s) so the watchdog stays tight for typical contexts yet
-		// does not execute a lawful big-prompt prefill.
-		firstToken += time.Duration(float64(len(payload)) / 1_000_000 * float64(60*time.Second))
-	}
+	firstToken := c.firstTokenBudget(payload)
 	var lastTraffic atomic.Int64  // last parseable data line (any payload)
 	var lastProgress atomic.Int64 // last chunk that carried generated tokens
 	var anyProgress atomic.Bool   // first generated token seen at all
@@ -853,6 +845,54 @@ func (e *watchdogError) Unwrap() error { return e.cause }
 func StreamTimedOut(err error) bool {
 	var watchdogErr *watchdogError
 	return errors.As(err, &watchdogErr)
+}
+
+// firstTokenPrefillBonus scales the first-token watchdog with the prompt
+// size that actually costs prefill time. Two corrections over raw byte
+// counting: base64 image payloads are discounted to near zero (a screenshot
+// contributes megabytes of bytes but a bounded number of vision tokens —
+// without this, browser agents with screenshots bought dead providers
+// 20-30 minute first-token budgets), and the bonus is capped so no payload
+// shape can push the watchdog past ~12 minutes total.
+func firstTokenPrefillBonus(payload []byte) time.Duration {
+	bonus := time.Duration(float64(textPayloadBytes(payload)) / 1_000_000 * float64(60*time.Second))
+	if bonus > 10*time.Minute {
+		bonus = 10 * time.Minute
+	}
+	return bonus
+}
+
+// textPayloadBytes counts the JSON payload bytes excluding base64 data-URI
+// bodies ("…;base64,<blob>"): everything up to the closing quote of each
+// data URI counts, the blob itself does not.
+func textPayloadBytes(payload []byte) int {
+	const marker = ";base64,"
+	total := 0
+	for {
+		idx := bytes.Index(payload, []byte(marker))
+		if idx < 0 {
+			total += len(payload)
+			return total
+		}
+		total += idx + len(marker)
+		payload = payload[idx+len(marker):]
+		end := bytes.IndexByte(payload, '"')
+		if end < 0 {
+			// Unterminated data URI: count the rest — better a longer watchdog
+			// than an undercount on malformed input.
+			return total + len(payload)
+		}
+		payload = payload[end:]
+	}
+}
+
+// firstTokenBudget is the watchdog's total patience for the first generated
+// token on this payload (0 = disabled by explicit negative config).
+func (c *Client) firstTokenBudget(payload []byte) time.Duration {
+	if c.cfg.StreamFirstTokenTimeout <= 0 {
+		return 0
+	}
+	return c.cfg.StreamFirstTokenTimeout + firstTokenPrefillBonus(payload)
 }
 
 func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {

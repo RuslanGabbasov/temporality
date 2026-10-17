@@ -1146,7 +1146,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// (no side effects, prompt prefix cached via PromptCacheKey), so Temporal
 		// retries the whole activity: a fresh attempt after wake recovers the
 		// run instead of killing it. ScheduleToClose bounds the total patience.
-		modelOpts := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
+		// ScheduleToStartTimeout surfaces queue starvation honestly: without it a
+		// call whose worker died (restart, deploy) sits silent for up to the whole
+		// ScheduleToClose (65m) while the UI shows «ждём первый токен» — the
+		// attempt fails after the timeout and the retry ladder takes over.
+		modelOpts := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToStartTimeout: 5 * time.Minute, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
 		if err := executeModelWithNudge(ctx, activityCtx, state, modelOpts, modelReq, turn, &completion); err != nil {
 			failureDetail := boundedFailureDetail(err)
 			if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": turn, "model": input.Model, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
