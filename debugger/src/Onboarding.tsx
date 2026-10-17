@@ -381,7 +381,10 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   <p className="onboarding-hint">{status.sandbox.image}</p>
                 </>
               )}
-              {!status?.sandbox.configured && (
+              {status?.sandbox.pinned_by_env && (
+                <p className="onboarding-hint">{t('onboarding.sandbox_pinned_hint')}</p>
+              )}
+              {!status?.sandbox.configured && !status?.sandbox.pinned_by_env && (
                 <p className="onboarding-hint">{t('onboarding.sandbox_hint')}</p>
               )}
               {error && <p className="onboarding-error">{error}</p>}
@@ -390,6 +393,12 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                   // Ready (built just now or pinned in a previous run): the way
                   // forward is finishing the wizard, not building again.
                   <Button onClick={() => setStep('done')}>{t('action.finish')}</Button>
+                ) : status?.sandbox.pinned_by_env ? (
+                  // Pinned via KERNEL_SANDBOX_IMAGE: the build endpoint refuses
+                  // to override the operator's digest on purpose. Pull it with
+                  // sandbox/build.sh or unpin the variable — the wizard only
+                  // offers the skip that actually works.
+                  <Button onClick={() => setStep('done')}>{t('action.skip')}</Button>
                 ) : (
                   <>
                     <Button kind="secondary" onClick={skipStep}>{t('action.skip')}</Button>

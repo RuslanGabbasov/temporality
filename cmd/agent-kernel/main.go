@@ -1648,6 +1648,11 @@ func main() {
 				sandboxStatus["available"] = sandbox.ImageAvailable(r.Context(), env("KERNEL_DOCKER_BINARY", "docker"), image)
 			}
 		}
+		// A digest pinned via KERNEL_SANDBOX_IMAGE is an operator decision the
+		// build endpoint refuses to override — the wizard needs to know that
+		// up front, so the sandbox step renders "skip" instead of a button
+		// that can only ever answer 409.
+		sandboxStatus["pinned_by_env"] = strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_IMAGE")) != ""
 		writeJSON(w, 200, map[string]any{
 			"needs_setup":           !hasUserProjects(projects),
 			"auth_enabled":          gate.Enabled(),

@@ -81,6 +81,14 @@ through the required steps and hides navigation until they are done:</p>
 <li><strong>Agent</strong> — from a template or from a plain-language description.</li>
 <li><strong>Sandbox build</strong> — the image the agent&#39;s commands will run in (requires Docker daemon access).</li>
 </ol>
+<p>Two cases where the wizard behaves differently:</p>
+<ul>
+<li><code>KERNEL_AUTH_TOKENS</code> is set — authentication was enabled by your own env:
+the wizard does not start anonymously. Sign in with one of those tokens
+(API-token mode) or comment the variable out for the anonymous flow;</li>
+<li><code>KERNEL_SANDBOX_IMAGE</code> is set — the sandbox image is pinned by your env:
+the build step offers Skip (rebuild via <code>sandbox/build.sh</code>).</li>
+</ul>
 <h2 id="your-first-task"><a class="anchor" href="#your-first-task" aria-label="Section link">#</a>Your first task</h2><p>Open <strong>Workspace</strong> — the agent chat — and write a task. The agent responds with
 streaming output; along the way it may:</p>
 <ul>

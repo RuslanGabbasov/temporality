@@ -190,6 +190,9 @@ export default function Layout({ children, activePage }: LayoutProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [identity, setIdentity] = useState<Whoami | null>(null)
+  // whoami answered 401: the gate is on (KERNEL_AUTH_TOKENS or an existing
+  // user) — the login screen applies, with a hint for fresh installs.
+  const [authRequired, setAuthRequired] = useState(false)
   const [sso, setSso] = useState<AuthMethods | null>(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showConfigMenu, setShowConfigMenu] = useState(false)
@@ -378,7 +381,13 @@ export default function Layout({ children, activePage }: LayoutProps) {
       // callback (docs/auth-federation.md §5) — either way the login screen
       // has nothing to offer.
       setLoggedIn(true)
-    }).catch(() => {})
+    }).catch((e: unknown) => {
+      // A 401 means the gate is ON (env tokens or an existing user) and the
+      // caller holds no valid token: show the login screen — not the splash,
+      // which would otherwise hang forever — with a hint naming the env knob
+      // that turned authentication on for a fresh install.
+      if (e instanceof Error && e.message.startsWith('401')) setAuthRequired(true)
+    })
   }, [])
 
   useEffect(() => {
@@ -986,7 +995,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
       )}
 
       {!loggedIn ? (
-        identity === null && !authToken() ? (
+        identity === null && !authRequired ? (
           // Booting on a possibly-tokenless install: whoami decides whether the
           // login screen or the anonymous admin onboarding applies.
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 3rem)' }}>
@@ -998,6 +1007,11 @@ export default function Layout({ children, activePage }: LayoutProps) {
             <img src="/temporality.svg" alt="Temporality" style={{ height: '48px', marginBottom: '1rem' }} />
             <h1 style={{ fontSize: '1.25rem', fontWeight: 500, marginBottom: '0.5rem', color: 'var(--tm-text)' }}>Temporality</h1>
             <p style={{ color: 'var(--tm-text-2)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>{t('login.description') ?? 'Sign in to the Temporality workspace.'}</p>
+            {authRequired && (
+              <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', marginBottom: '1rem', lineHeight: 1.5 }}>
+                {t('login.auth_required_hint') ?? 'Authentication is enabled on this installation (KERNEL_AUTH_TOKENS or an existing user). Sign in with a workspace user, an API token, or one of the KERNEL_AUTH_TOKENS entries from your .env.'}
+              </p>
+            )}
             {sso?.sso.enabled && (
               <>
                 <Button

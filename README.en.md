@@ -78,6 +78,10 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 The base `docker-compose.yml` never builds: it pulls exactly the pinned
 version and fails loudly when that version is missing.
 
+Images are published to GHCR on every release tag (linux/amd64 + linux/arm64):
+`ghcr.io/ruslangabbasov/temporality/{agent-kernel,journal,debugger}:<version>`.
+The running kernel version is visible in `GET :8090/healthz`.
+
 This starts PostgreSQL, the Journal (`:8080`), the debugger (`:3000`), the
 Temporal dev server (UI on `:8233`), the Agent Kernel (`:8090`), SearXNG
 (`127.0.0.1:8889`, the meta-search behind the agents' `web_search` tool;

@@ -77,7 +77,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 Основной `docker-compose.yml` никогда не собирает образы: он тянет из реестра
 ровно закреплённую версию и падает с явной ошибкой, если её нет.
 
-Образы публикуются в GHCR при каждом релизном теге:
+Образы публикуются в GHCR при каждом релизном теге (linux/amd64 + linux/arm64):
 `ghcr.io/ruslangabbasov/temporality/{agent-kernel,journal,debugger}:<версия>`.
 Версия запущенного ядра видна в `GET :8090/healthz`.
 

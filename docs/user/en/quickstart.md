@@ -71,6 +71,14 @@ through the required steps and hides navigation until they are done:
 4. **Agent** — from a template or from a plain-language description.
 5. **Sandbox build** — the image the agent's commands will run in (requires Docker daemon access).
 
+Two cases where the wizard behaves differently:
+
+- `KERNEL_AUTH_TOKENS` is set — authentication was enabled by your own env:
+  the wizard does not start anonymously. Sign in with one of those tokens
+  (API-token mode) or comment the variable out for the anonymous flow;
+- `KERNEL_SANDBOX_IMAGE` is set — the sandbox image is pinned by your env:
+  the build step offers Skip (rebuild via `sandbox/build.sh`).
+
 ## Your first task
 
 Open **Workspace** — the agent chat — and write a task. The agent responds with

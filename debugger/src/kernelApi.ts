@@ -141,6 +141,9 @@ export interface SetupStatus {
     configured: boolean
     image: string
     available: boolean
+    /** KERNEL_SANDBOX_IMAGE pinned by the operator's env: the build step
+     *  refuses to override it, so the wizard offers skip instead. */
+    pinned_by_env?: boolean
   }
 }
 

@@ -16,8 +16,21 @@ The **Dashboard** (`/dashboard`) is a health summary over a chosen time window
 - providers and models: calls, p50/p95, retries, tokens, cost;
 - projects grouped by org unit;
 - the **quality loop**: gates, blocks, the judge and its agreement;
-- **sagas and tasks**: budget, tokens, time, human approvals;
+- **sagas and tasks**: budget, tokens, time, human approvals (HAB/HWT —
+  hover a metric for the explanation);
+- **human factors**: attention (HAB), idle wait (HWT), flow efficiency —
+  on the same row as storage and server;
 - the **sandboxes** widget: live containers, integral load (CPU/memory/network), hover — who and which run, click — jump to the trace.
+
+### The Supervisor tab
+
+The supervisor model's monitoring surface (`docs/supervisor-model.md`):
+failed-run diagnoses collapsed into same-root failure clusters, health
+anomaly explanations, and the wave-B/C cases — knowledge contradiction
+triage and hygiene, evolution proposals, skill candidates, user friction,
+intake audit. Filter by case and project; **Mark resolved** closes a
+verdict (journaled, nothing applied). HAB coefficients and models are
+configured in Agents → Quality settings.
 
 ## The run trace
 
@@ -25,7 +38,10 @@ Every run expands into an event feed: model calls (tokens, latency, stream),
 tool calls with arguments and results, approval decisions, knowledge events.
 Uncertain operations are flagged and resolved through reconcile. A long model
 call shows signs of life (tokens/sec, first-token wait) and can be nudged or
-cancelled.
+cancelled. A stuck run is stopped with the compact **■ Stop** action in the
+list (click twice to confirm): a forced workflow terminate that journals the
+terminal event — it lands even when a graceful cancel cannot reach the stuck
+workflow.
 
 ## The experience timeline
 
