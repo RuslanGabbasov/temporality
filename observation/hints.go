@@ -115,6 +115,10 @@ func cosineSimilarity(a, b []float32) (float32, bool) {
 	return float32(dot / (math.Sqrt(normA) * math.Sqrt(normB))), true
 }
 
+// CosineSimilarity is the exported form of cosineSimilarity for consumers
+// outside the package (the supervisor's conflict-prediction neighbor lookup).
+func CosineSimilarity(a, b []float32) (float32, bool) { return cosineSimilarity(a, b) }
+
 // FindHints uses explainable exact entity/topic and lexical matching. It does
 // not estimate truth or confidence and returns lifecycle/provenance alongside
 // each candidate so the caller can present memory separately from tool output.

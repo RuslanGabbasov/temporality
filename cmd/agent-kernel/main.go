@@ -6632,7 +6632,7 @@ func main() {
 	startEmbeddingBackfillLoop(ctx, log, activities, observationURL, journalToken)
 	// Supervisor triage (docs/supervisor-model.md §3 wave A1): diagnose
 	// failed runs with the supervisor model, journal supervisor.verdict.
-	startSupervisorTriageLoop(ctx, log, activities, observationURL, journalToken, func(ctx context.Context) (*llm.Client, error) {
+	startSupervisorTriageLoop(ctx, log, activities, ws, observationURL, journalToken, func(ctx context.Context) (*llm.Client, error) {
 		return judgeModelClient(ctx, ws, secretMasterKey)
 	})
 	// Scheduled quality runs (docs/agent-quality-loop.md §8.1): the cadence is
@@ -6651,10 +6651,16 @@ func main() {
 	bootstrapIntake(ctx, log, ws)
 	intakeEnabled := intakeEnabledFromEnv()
 	intakeRatePerHour := intakeRatePerHourFromEnv()
+	type modelClientFn func(ctx context.Context) (*llm.Client, error)
 	intake := &intakeRunner{
 		log: log, ws: ws, temporal: temporalClient, taskQueue: taskQueue,
 		sourceID: activities.SourceID, activities: activities,
 		costPrices: costPrices,
+		// Wave C3 (docs/supervisor-model.md §3): validate the chosen amendment
+		// target with the supervisor model before the amendment run starts.
+		supervisorModel: func(ctx context.Context) (*llm.Client, error) {
+			return judgeModelClient(ctx, ws, secretMasterKey)
+		},
 	}
 	intakeEmitter := intakeEventEnqueuer(events.Enqueue, activities.SourceID)
 	// Internal intake endpoints (docs/inbound-messages.md §7): the intake

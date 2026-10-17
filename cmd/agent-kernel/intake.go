@@ -16,6 +16,7 @@ import (
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/kernel/agent"
 	"github.com/temporality-project/temporality/kernel/cost"
+	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/kernel/quota"
 	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/workspace"
@@ -174,6 +175,9 @@ type intakeRunner struct {
 	sourceID   string
 	activities *agent.Activities
 	costPrices cost.Config
+	// Wave C3: the supervisor model factory for amendment-target validation;
+	// nil disables the check.
+	supervisorModel func(ctx context.Context) (*llm.Client, error)
 }
 
 // start resolves the intake agent, applies its config and starts the AgentRun
@@ -678,6 +682,20 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			}
 			body.ProjectID = prevRun.ProjectID
 			body.Title = task.Title
+			// Wave C3 (docs/supervisor-model.md §3): the supervisor model
+			// cross-checks the chosen target against the amendment text before
+			// anything starts — a wrong amend_run_id costs a whole wrong run.
+			// Best-effort: a supervisor outage never blocks a legitimate
+			// amendment, and a mismatch is a 422 the intake agent relays to the
+			// sender with the recommendation.
+			if r.supervisorModel != nil && supervisorCasesEnabled() {
+				if client, sErr := r.supervisorModel(req.Context()); sErr == nil && client != nil {
+					if verdict, vErr := agent.ValidateAmendmentTarget(req.Context(), client, body.Prompt, amendRunID, task.Title, prevRun.Answer); vErr == nil && !verdict.Matches {
+						writeError(w, 422, fmt.Errorf("amendment target check: %s %s", verdict.Explanation, verdict.Recommendation))
+						return
+					}
+				}
+			}
 			if amendAgentID == "" {
 				// The agent that produced the earlier result continues the task —
 				// same context, same sandbox, no surprise switch.

@@ -85,6 +85,86 @@ func runEmbeddingBackfill(ctx context.Context, log *slog.Logger, activities *age
 		return
 	}
 	log.Info("knowledge embeddings backfilled", "count", len(items), "model", model)
+	// Wave C5 (docs/supervisor-model.md §3): a fresh vector landing close to
+	// an existing one predicts a knowledge conflict — flag it before the
+	// contradiction ever reaches a run.
+	predictKnowledgeConflicts(ctx, log, activities, observationURL, journalToken, model, items)
+}
+
+// conflictScoreBand brackets "close but not the same": below it the items are
+// unrelated, at or above it they are near-duplicates the dedup already
+// handles.
+const (
+	conflictScoreMin = 0.85
+	conflictScoreMax = 0.97
+)
+
+// predictKnowledgeConflicts journals a supervisor.verdict (case
+// knowledge_conflict) for every freshly embedded item whose nearest stored
+// neighbor sits in the conflict band. Capped per pass; the verdict stays a
+// proposal — nothing is invalidated automatically.
+func predictKnowledgeConflicts(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL, journalToken, model string, items map[string][]float32) {
+	checked := 0
+	for id := range items {
+		if checked >= 4 {
+			return
+		}
+		checked++
+		neighbors, err := fetchKnowledgeNeighbors(ctx, observationURL, journalToken, model, id, conflictScoreMin)
+		if err != nil {
+			log.Warn("conflict prediction: neighbors", "knowledge", id, "error", err.Error())
+			continue
+		}
+		for _, neighbor := range neighbors {
+			if neighbor.Score < conflictScoreMin || neighbor.Score > conflictScoreMax {
+				continue
+			}
+			subject := id + "~" + neighbor.ID
+			summary := fmt.Sprintf("Новое знание %s семантически близко (косинус %.2f) к существующему %s — формулировки могут расходиться, а смысл конфликтовать.", id, neighbor.Score, neighbor.ID)
+			if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseKnowledgeConflict, subject, "", summary, "Сверьте две формулировки: одна может устареть или scopes расходятся.", map[string]any{
+				"knowledge_id": id, "neighbor_id": neighbor.ID, "score": neighbor.Score, "model": model,
+			}); err != nil {
+				log.Warn("conflict prediction: publish", "error", err.Error())
+			}
+			break // one conflict verdict per fresh item per pass
+		}
+	}
+}
+
+type knowledgeNeighbor struct {
+	ID    string  `json:"id"`
+	Score float32 `json:"score"`
+}
+
+// fetchKnowledgeNeighbors asks the journal for the nearest stored vectors.
+func fetchKnowledgeNeighbors(ctx context.Context, observationURL, journalToken, model, id string, minScore float32) ([]knowledgeNeighbor, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		strings.TrimSuffix(observationURL, "/")+"/v1/observations/knowledge/embeddings/neighbors?model="+url.QueryEscape(model)+"&id="+url.QueryEscape(id)+"&min_score="+fmt.Sprint(minScore), nil)
+	if err != nil {
+		return nil, err
+	}
+	if journalToken != "" {
+		request.Header.Set("Authorization", "Bearer "+journalToken)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("neighbors %s", journalErrorSnippet(response.StatusCode, string(body)))
+	}
+	var page struct {
+		Neighbors []knowledgeNeighbor `json:"neighbors"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return nil, err
+	}
+	return page.Neighbors, nil
 }
 
 func fetchEmbeddingGaps(ctx context.Context, observationURL, journalToken, model string) ([]observation.KnowledgeEmbeddingGap, error) {

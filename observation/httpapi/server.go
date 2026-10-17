@@ -164,6 +164,7 @@ func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate, opt
 	mux.HandleFunc("POST /v1/observations/hints", s.activateObservationHints)
 	mux.HandleFunc("PUT /v1/observations/knowledge/embeddings", s.putKnowledgeEmbeddings)
 	mux.HandleFunc("GET /v1/observations/knowledge/embeddings/missing", s.getKnowledgeEmbeddingGaps)
+	mux.HandleFunc("GET /v1/observations/knowledge/embeddings/neighbors", s.getKnowledgeEmbeddingNeighbors)
 	return logRequests(log, s.gate.Authenticate(mux))
 }
 

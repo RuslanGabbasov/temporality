@@ -113,3 +113,72 @@ func (s *Server) getKnowledgeEmbeddingGaps(w http.ResponseWriter, r *http.Reques
 }
 
 var _ = observation.KnowledgeEmbeddingGap{}
+
+// neighborStore is the vector-listing capability behind the neighbors lookup.
+type neighborStore interface {
+	ListKnowledgeEmbeddings(ctx context.Context, model string) (map[string][]float32, error)
+}
+
+// getKnowledgeEmbeddingNeighbors returns the nearest stored vectors for one
+// knowledge item (wave C5 conflict prediction, docs/supervisor-model.md
+// §3): id + cosine, nearest first, above a floor so quiet payloads stay
+// small. Volumes are per-project bounded, so a linear scan in-process is
+// fine; a real ANN index is an optimization for a much larger corpus.
+func (s *Server) getKnowledgeEmbeddingNeighbors(w http.ResponseWriter, r *http.Request) {
+	if !s.gate.Allow(w, r, controlplane.RoleWriter) {
+		return
+	}
+	model := strings.TrimSpace(r.URL.Query().Get("model"))
+	id := strings.TrimSpace(r.URL.Query().Get("id"))
+	if model == "" || id == "" {
+		writeError(w, 422, errors.New("model and id are required"))
+		return
+	}
+	minScore := 0.35
+	if raw := r.URL.Query().Get("min_score"); raw != "" {
+		if _, err := fmt.Sscanf(raw, "%f", &minScore); err != nil || minScore < 0 || minScore > 1 {
+			writeError(w, 400, errors.New("min_score must be between 0 and 1"))
+			return
+		}
+	}
+	store, ok := s.store.(neighborStore)
+	if !ok {
+		writeError(w, 501, errors.New("this journal store does not support knowledge embeddings"))
+		return
+	}
+	vectors, err := store.ListKnowledgeEmbeddings(r.Context(), model)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	query, ok := vectors[id]
+	if !ok {
+		writeJSON(w, 200, map[string]any{"neighbors": []any{}, "model": model, "id": id})
+		return
+	}
+	type neighbor struct {
+		ID    string  `json:"id"`
+		Score float32 `json:"score"`
+	}
+	neighbors := []neighbor{}
+	for otherID, vector := range vectors {
+		if otherID == id {
+			continue
+		}
+		score, ok := observation.CosineSimilarity(query, vector)
+		if !ok || float64(score) < minScore {
+			continue
+		}
+		neighbors = append(neighbors, neighbor{ID: otherID, Score: score})
+	}
+	// Nearest first; cap at 10 so a dense cluster still answers cheaply.
+	for i := 1; i < len(neighbors); i++ {
+		for j := i; j > 0 && neighbors[j].Score > neighbors[j-1].Score; j-- {
+			neighbors[j], neighbors[j-1] = neighbors[j-1], neighbors[j]
+		}
+	}
+	if len(neighbors) > 10 {
+		neighbors = neighbors[:10]
+	}
+	writeJSON(w, 200, map[string]any{"neighbors": neighbors, "model": model, "id": id})
+}

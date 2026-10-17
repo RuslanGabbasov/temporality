@@ -29,7 +29,7 @@ const supervisorTriageIntervalDefault = 2 * time.Minute
 // Bounded per pass so a burst of failures cannot burn the model budget.
 const supervisorTriagePassCap = 2
 
-func startSupervisorTriageLoop(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL, journalToken string, modelClient func(ctx context.Context) (*llm.Client, error)) {
+func startSupervisorTriageLoop(ctx context.Context, log *slog.Logger, activities *agent.Activities, ws supervisorCaseStore, observationURL, journalToken string, modelClient func(ctx context.Context) (*llm.Client, error)) {
 	interval := supervisorTriageIntervalDefault
 	if raw := strings.TrimSpace(os.Getenv("KERNEL_SUPERVISOR_TRIAGE_INTERVAL")); raw != "" {
 		if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
@@ -51,6 +51,9 @@ func startSupervisorTriageLoop(ctx context.Context, log *slog.Logger, activities
 			// Anomaly detection (wave A3) rides the same cadence; its own
 			// metric dedup keeps a persisting anomaly from re-journaling.
 			runSupervisorInsightPass(ctx, log, activities, observationURL, journalToken, modelClient)
+			// Waves B/C: knowledge triage/hygiene, friction, intake audit,
+			// skill mining, narratives — one pass, per-subject dedup.
+			runSupervisorCasesPass(ctx, log, activities, ws, observationURL, journalToken, modelClient)
 			select {
 			case <-ctx.Done():
 				return

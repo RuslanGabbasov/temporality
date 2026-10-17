@@ -20,6 +20,8 @@ interface ClusterRow {
   key: string
   cause: string
   pattern: string
+  caseID: string
+  subject: string
   summary: string
   recommendation: string
   project: string
@@ -46,6 +48,8 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
       key: key || `solo:${event.event_id}`,
       cause,
       pattern: String(event.data?.pattern ?? ''),
+      caseID: String(event.data?.case ?? ''),
+      subject: String(event.data?.subject ?? ''),
       summary: String(event.data?.summary ?? ''),
       recommendation: String(event.data?.recommendation ?? ''),
       project: event.context?.project ?? '',
@@ -171,6 +175,7 @@ export default function Supervisor() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
                         <Tag type={causeTag(row.cause)} size="sm">{row.cause}</Tag>
                         {row.pattern && <span style={{ fontSize: '0.74rem', color: 'var(--tm-text-2)' }}>{row.pattern}</span>}
+                        {row.caseID && <Tag type="purple" size="sm">{t(`supervisor.case_${row.caseID}`) ?? row.caseID}</Tag>}
                         {row.project && <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{row.project}</span>}
                         {row.count > 1 && <Tag type="cool-gray" size="sm">×{row.count}</Tag>}
                         <span style={{ marginLeft: 'auto', fontSize: '0.68rem', color: 'var(--tm-text-3)', flexShrink: 0 }}>{new Date(row.lastAt).toLocaleString()}</span>
