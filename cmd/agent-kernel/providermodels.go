@@ -116,7 +116,8 @@ func (s *ProviderModelSync) RegisterRoutes(mux *http.ServeMux, gate *controlplan
 			s.writeSyncError(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"models": models, "count": len(models)})
+		chatModels, embeddingModels := splitEmbeddingModels(models)
+		writeJSON(w, 200, map[string]any{"models": chatModels, "embedding_models": embeddingModels, "count": len(chatModels), "embedding_count": len(embeddingModels)})
 	})
 }
 
@@ -159,17 +160,59 @@ func (s *ProviderModelSync) Refresh(ctx context.Context, providerID string) ([]s
 		return nil, err
 	}
 	modelsChanged := !slices.Equal(current.Models, models)
-	labelChanged := current.Labels[providerModelsSourceLabel] != providerModelsDiscovered
-	if !modelsChanged && !labelChanged {
-		return models, nil
+	// Embedding models are catalog entries with an embedding marker in the id
+	// (z-ai/embedding-3, text-embedding-3-small, bge-m3…): they route to
+	// /v1/embeddings, not /chat/completions, so they live in a separate list.
+	// Operator-curated embedding entries survive the refresh: discovered ones
+	// merge in, manual ones win on id conflicts.
+	chatModels, embeddingModels := splitEmbeddingModels(models)
+	if len(current.EmbeddingModels) > 0 {
+		merged := make([]string, 0, len(current.EmbeddingModels)+len(embeddingModels))
+		seen := make(map[string]bool, len(current.EmbeddingModels)+len(embeddingModels))
+		for _, id := range current.EmbeddingModels {
+			if !seen[id] {
+				merged = append(merged, id)
+				seen[id] = true
+			}
+		}
+		for _, id := range embeddingModels {
+			if !seen[id] {
+				merged = append(merged, id)
+				seen[id] = true
+			}
+		}
+		embeddingModels = merged
 	}
-	current.Models = models
+	embeddingChanged := !slices.Equal(current.EmbeddingModels, embeddingModels)
+	labelChanged := current.Labels[providerModelsSourceLabel] != providerModelsDiscovered
+	if !modelsChanged && !embeddingChanged && !labelChanged {
+		return chatModels, nil
+	}
+	current.Models = chatModels
+	current.EmbeddingModels = embeddingModels
 	current.Labels = markProviderModelsSource(current.Labels, providerModelsDiscovered)
 	if err := s.store.UpdateProvider(ctx, current); err != nil {
 		return nil, err
 	}
-	s.log.Info("provider models refreshed", "provider", providerID, "count", len(models))
-	return models, nil
+	s.log.Info("provider models refreshed", "provider", providerID, "count", len(chatModels), "embeddings", len(embeddingModels))
+	return chatModels, nil
+}
+
+// splitEmbeddingModels separates embedding models from chat models by the
+// conventional markers in their ids. False positives are harmless: an
+// embedding id in the chat list just never gets picked for a chat completion.
+func splitEmbeddingModels(all []string) (chat, embeddings []string) {
+	chat = make([]string, 0, len(all))
+	embeddings = make([]string, 0)
+	for _, id := range all {
+		lower := strings.ToLower(id)
+		if strings.Contains(lower, "embed") {
+			embeddings = append(embeddings, id)
+		} else {
+			chat = append(chat, id)
+		}
+	}
+	return chat, embeddings
 }
 
 // Probe resolves the credential and fetches the catalog without persisting.

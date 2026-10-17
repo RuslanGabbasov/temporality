@@ -60,7 +60,7 @@ export default function Providers() {
 
   const startCreate = () => {
     setEditing(null)
-    setForm({ name: '', base_url: '', api_key_ref: '', models: [] })
+    setForm({ name: '', base_url: '', api_key_ref: '', models: [], embedding_models: [] })
     setFetchNote('')
     loadSecretOptions()
     setShowForm(true)
@@ -117,7 +117,7 @@ export default function Providers() {
     setFetching(true); setFetchNote('')
     try {
       const data = await workspaceApi.probeProviderModels({ base_url: form.base_url.trim(), api_key_ref: form.api_key_ref ?? '' })
-      setForm((f) => ({ ...f, models: data.models ?? [] }))
+      setForm((f) => ({ ...f, models: data.models ?? [], embedding_models: data.embedding_models ?? [] }))
       setFetchNote(t('providers.fetched_n', { count: String(data.count ?? 0) }) ?? `${data.count ?? 0}`)
     } catch (f) {
       setFetchNote(`${t('providers.fetch_failed') ?? 'Failed'}: ${message(f)}`)
@@ -177,6 +177,12 @@ export default function Providers() {
                       )}
                     </div>
                   ) : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.5rem' }}>{t('providers.no_models') ?? 'No models listed'}</p>}
+                  {(p.embedding_models?.length ?? 0) > 0 && (
+                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                      <Tag type="cyan" size="sm">{t('providers.embedding_tag') ?? 'embeddings'}:</Tag>
+                      {p.embedding_models!.map((m) => <Tag key={m} type="cyan" size="sm">{m}</Tag>)}
+                    </div>
+                  )}
                 </div>
                 <Stack orientation="horizontal" gap={1}>
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Renew} iconDescription={t('providers.sync_now') ?? 'Sync catalog now'}
@@ -209,6 +215,8 @@ export default function Providers() {
               <div>
                 <TextInput id="prov-models" labelText={t('providers.models_label') ?? 'Models (comma-separated)'} value={form.models?.join(', ') ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, models: e.target.value.split(',').map((m) => m.trim()).filter(Boolean) })} placeholder="z-ai-turbo, z-ai-pro"
                   helperText={t('providers.models_helper') ?? 'Leave empty to auto-discover from the provider'} />
+                <TextInput id="prov-embedding-models" labelText={t('providers.embedding_models_label') ?? 'Embedding models (comma-separated)'} value={form.embedding_models?.join(', ') ?? ''} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, embedding_models: e.target.value.split(',').map((m) => m.trim()).filter(Boolean) })} placeholder="z-ai/embedding-3, text-embedding-3-small"
+                  helperText={t('providers.embedding_models_helper') ?? 'Used by the semantic knowledge layer. Auto-split from the catalog when it lists them.'} />
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '-0.5rem' }}>
                   <Button size="sm" kind="secondary" renderIcon={Renew} disabled={fetching || !form.base_url?.trim()} onClick={() => void discoverModels()}>
                     {fetching ? (t('providers.fetching_models') ?? 'Discovering…') : (t('providers.fetch_models') ?? 'Discover models')}

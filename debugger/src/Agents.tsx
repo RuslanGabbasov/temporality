@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import {
   Button,
   TextInput,
@@ -135,6 +135,9 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [visionDraft, setVisionDraft] = useState('')
   const [embeddingDraft, setEmbeddingDraft] = useState('')
   const [habDraft, setHabDraft] = useState({ approval: 45, answerBase: 20, readingWpm: 180 })
+  // Embedding options: providers' separate embedding catalogs only — chat
+  // models neither speak /v1/embeddings nor belong in this picker.
+  const embeddingOptions = useMemo(() => providers.flatMap((p) => (p.embedding_models ?? []).map((m) => ({ value: m, text: `${m} · ${p.name}` }))), [providers])
   const [qualityBusy, setQualityBusy] = useState(false)
   const [qualityError, setQualityError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -1854,12 +1857,30 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>{t('quality.vision_model_hint') ?? ''}</p>
           </div>
           <div style={{ marginTop: '1rem' }}>
-            <Select id="supervisor-embedding-model" labelText={t('quality.embedding_model') ?? 'Embeddings model'} value={embeddingDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEmbeddingDraft(e.target.value)}>
-              <SelectItem value="" text={t('quality.model_off') ?? '— main model —'} />
-              {providers.flatMap((p) => (p.models ?? []).map((m) => (
-                <SelectItem key={`e/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
-              )))}
-            </Select>
+            {/* Embedding models come from the providers' separate embedding
+                catalogs; when none is listed (the provider does not expose
+                them via /models), fall back to free-text input — the id is
+                still validated against the registry on save. */}
+            {embeddingOptions.length > 0 ? (
+              <Select id="supervisor-embedding-model" labelText={t('quality.embedding_model') ?? 'Embeddings model'} value={embeddingOptions.some((o) => o.value === embeddingDraft) || embeddingDraft === '' ? embeddingDraft : '__custom__'} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEmbeddingDraft(e.target.value === '__custom__' ? embeddingDraft : e.target.value)}>
+                <SelectItem value="" text={t('quality.model_off') ?? '— main model —'} />
+                {embeddingOptions.map((o) => (
+                  <SelectItem key={`e/${o.value}`} value={o.value} text={o.text} />
+                ))}
+                {embeddingDraft && !embeddingOptions.some((o) => o.value === embeddingDraft) && (
+                  <SelectItem value="__custom__" text={embeddingDraft} />
+                )}
+              </Select>
+            ) : (
+              <TextInput
+                id="supervisor-embedding-model-custom"
+                labelText={t('quality.embedding_model') ?? 'Embeddings model'}
+                value={embeddingDraft}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmbeddingDraft(e.target.value)}
+                placeholder="z-ai/embedding-3"
+                helperText={t('quality.embedding_manual_hint') ?? 'No embedding models discovered — type the model id exactly as the provider expects it.'}
+              />
+            )}
             <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>{t('quality.embedding_model_hint') ?? ''}</p>
           </div>
           <div style={{ marginTop: '1rem' }}>

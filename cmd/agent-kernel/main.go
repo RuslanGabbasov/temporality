@@ -3501,7 +3501,7 @@ func main() {
 		if req.ID == "" {
 			req.ID = "prov-" + shortID()
 		}
-		provider := &workspace.Provider{ID: req.ID, Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels, OrgUnitID: req.OrgUnitID}
+		provider := &workspace.Provider{ID: req.ID, Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, EmbeddingModels: req.EmbeddingModels, Labels: req.Labels, OrgUnitID: req.OrgUnitID}
 		// An operator who typed a model list curated it: tag the row so the
 		// background loop never overwrites it. An empty list means "discover
 		// from the provider" — sync starts right after the row lands.
@@ -3545,7 +3545,7 @@ func main() {
 			writeError(w, 400, err)
 			return
 		}
-		provider := workspace.Provider{ID: r.PathValue("providerID"), Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, Labels: req.Labels}
+		provider := workspace.Provider{ID: r.PathValue("providerID"), Name: req.Name, BaseURL: req.BaseURL, APIKeyRef: req.APIKeyRef, Models: req.Models, EmbeddingModels: req.EmbeddingModels, Labels: req.Labels}
 		// Editing config must not silently re-scope a provider: bindings change
 		// only through the admin binding endpoint.
 		if prev, err := ws.GetProvider(r.Context(), provider.ID); err == nil {
@@ -3620,7 +3620,7 @@ func main() {
 			return
 		}
 		for _, p := range providers {
-			for _, m := range p.Models {
+			for _, m := range append(append([]string{}, p.Models...), p.EmbeddingModels...) {
 				if m == model {
 					apiKey, kErr := resolveProviderAPIKey(r.Context(), ws, p.APIKeyRef, secretMasterKey)
 					if kErr != nil {
