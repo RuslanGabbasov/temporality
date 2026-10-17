@@ -1,9 +1,14 @@
-FROM golang:1.27-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 ARG KERNEL_BUILD_TAGS=""
 # BuildVersion: stamped by the release workflow (calendar version); "dev" in
 # local builds. Lands in the binaries via -ldflags and shows up in the start
 # log and /healthz.
 ARG BUILD_VERSION="dev"
+# Multi-arch releases (linux/amd64 + linux/arm64): the build stage always runs
+# on the builder's native platform and cross-compiles for the target — full
+# QEMU emulation of a Go build would take 10x longer for the same output.
+ARG TARGETARCH
+ENV GOARCH=$TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 # Cache mounts (BuildKit) keep downloaded modules and compiled package
