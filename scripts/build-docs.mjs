@@ -154,11 +154,13 @@ function buildLang(lang) {
   const head = (title, description) => {
     // Cache-buster: a stale cached docs.css once made the primary button
     // invisible (amber on amber) — the version forces fresh styles.
-    // Deterministic: a timestamp here would dirty the committed output on
-    // every rebuild and fail the CI "docs are committed" check. The version
-    // comes from the current git commit (or DOCS_VERSION), so a rebuild of
-    // the same sources is byte-stable across machines.
-    const v = process.env.DOCS_VERSION || execSync('git rev-parse --short HEAD').toString().trim()
+    // Deterministic: a timestamp or HEAD hash here would dirty the committed
+    // output on every rebuild/commit and fail the CI "generated docs are
+    // committed" check (the artifact cannot contain its own commit hash).
+    // The version follows the SOURCES: the last commit that touched docs/user.
+    // Same sources → same version, on any machine; artifact-only commits do
+    // not move it.
+    const v = process.env.DOCS_VERSION || execSync('git log -1 --format=%h -- docs/user').toString().trim()
     return `<!doctype html>
 <html lang="${strings.htmlLang}">
 <head>
