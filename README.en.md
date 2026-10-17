@@ -67,13 +67,16 @@ is the default, but pin an explicit version on any real deployment.
 Upgrading: `TEMPORALITY_VERSION=<new> docker compose up -d` — the kernel runs
 its migrations on start automatically.
 
-Building from source is the development path:
+Building from source is the development path (repository + dev overlay):
 
 ```sh
 git clone https://github.com/RuslanGabbasov/temporality.git && cd temporality
 cp .env.example .env
-docker compose up --build -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 ```
+
+The base `docker-compose.yml` never builds: it pulls exactly the pinned
+version and fails loudly when that version is missing.
 
 This starts PostgreSQL, the Journal (`:8080`), the debugger (`:3000`), the
 Temporal dev server (UI on `:8233`), the Agent Kernel (`:8090`), SearXNG

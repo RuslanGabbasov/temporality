@@ -54,7 +54,7 @@ version and rerun <code>docker compose up -d</code> — the kernel migrates on s
 <p>Building from source (for developing Temporality itself):</p>
 <pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git &amp;&amp; cd temporality
 cp .env.example .env
-docker compose up --build -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 </code></pre>
 <p>This starts PostgreSQL, the Journal (<code>:8080</code>), the UI (<code>:3000</code>), Temporal (UI <code>:8233</code>),
 the Agent Kernel (<code>:8090</code>), SearXNG (<code>127.0.0.1:8889</code>, meta-search for the agent)

@@ -55,7 +55,7 @@ TEMPORALITY_VERSION=2026.2.0 docker compose up -d
 <p>Сборка из исходников (для разработки самого Temporality):</p>
 <pre><code class="language-sh">git clone https://github.com/RuslanGabbasov/temporality.git &amp;&amp; cd temporality
 cp .env.example .env
-docker compose up --build -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 </code></pre>
 <p>Поднимаются: PostgreSQL, Journal (<code>:8080</code>), UI (<code>:3000</code>), Temporal (UI <code>:8233</code>),
 Agent Kernel (<code>:8090</code>), SearXNG (<code>127.0.0.1:8889</code>, метапоиск для агента) и

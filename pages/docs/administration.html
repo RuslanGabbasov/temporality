@@ -42,9 +42,10 @@
 именованных томах compose и переживают пересоздание контейнеров. Откат —
 к предыдущей версии тем же способом (даунгрейд-миграции есть не для всех
 схем; перед откатом крупного шага сделайте дамп <code>postgres</code>).</p>
-<p>Сборка из исходников (<code>docker compose up --build</code>) — путь разработки: она
-перезаписывает локальные образы и по умолчанию превращает <code>TEMPORALITY_VERSION</code>
-в <code>latest</code> — на стенде так делать не стоит.</p>
+<p>Сборка из исходников (<code>docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build</code>) — путь разработки: она перезаписывает
+локальные образы и по умолчанию превращает <code>TEMPORALITY_VERSION</code> в <code>latest</code> —
+на стенде так делать не стоит. Основной compose-файл не умеет собирать вовсе:
+деплой — только pull закреплённой версии.</p>
 <h2 id="пользователи-и-rbac"><a class="anchor" href="#пользователи-и-rbac" aria-label="Section link">#</a>Пользователи и RBAC</h2><p>Страница <strong>Пользователи</strong> (<code>/users</code>): создание, роли, bearer-токены, каналы
 уведомлений. Роли упорядочены: <code>reader &lt; writer &lt; operator &lt; admin</code>.</p>
 <table>

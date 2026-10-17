@@ -37,7 +37,7 @@ TEMPORALITY_VERSION=2026.2.0 docker compose up -d
 ```sh
 git clone https://github.com/RuslanGabbasov/temporality.git && cd temporality
 cp .env.example .env
-docker compose up --build -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 ```
 
 Поднимаются: PostgreSQL, Journal (`:8080`), UI (`:3000`), Temporal (UI `:8233`),

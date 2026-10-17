@@ -66,13 +66,16 @@ TEMPORALITY_VERSION=2026.2.0 docker compose up -d
 Обновление до новой версии: `TEMPORALITY_VERSION=<новая> docker compose up -d`
 (миграции применяются ядром на старте автоматически).
 
-Сборка из исходников — путь для разработки:
+Сборка из исходников — путь для разработки (репозиторий + dev-overlay):
 
 ```sh
 git clone https://github.com/RuslanGabbasov/temporality.git && cd temporality
 cp .env.example .env
-docker compose up --build -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 ```
+
+Основной `docker-compose.yml` никогда не собирает образы: он тянет из реестра
+ровно закреплённую версию и падает с явной ошибкой, если её нет.
 
 Образы публикуются в GHCR при каждом релизном теге:
 `ghcr.io/ruslangabbasov/temporality/{agent-kernel,journal,debugger}:<версия>`.

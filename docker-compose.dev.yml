@@ -1,0 +1,27 @@
+# Development overlay: local source builds for the three service images.
+# Deployment never needs this file — the base docker-compose.yml pulls the
+# prebuilt GHCR images. Usage (from a repository checkout):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
+#
+# The overlay only adds the build sections; everything else (env, ports,
+# healthchecks) comes from the base file. A plain `docker compose up` on a
+# repository checkout stays pull-only by design: it can never silently
+# downgrade a pinned TEMPORALITY_VERSION to a locally compiled image.
+services:
+  journal:
+    build:
+      context: .
+      target: journal
+
+  debugger:
+    build:
+      context: debugger
+
+  agent-kernel:
+    build:
+      context: .
+      target: agent-kernel
+      args:
+        # The Lead/Coder/Reviewer/QA example routes are opt-in via build tag.
+        KERNEL_BUILD_TAGS: agent_examples

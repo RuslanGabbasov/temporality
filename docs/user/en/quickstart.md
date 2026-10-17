@@ -36,7 +36,7 @@ Building from source (for developing Temporality itself):
 ```sh
 git clone https://github.com/RuslanGabbasov/temporality.git && cd temporality
 cp .env.example .env
-docker compose up --build -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 ```
 
 This starts PostgreSQL, the Journal (`:8080`), the UI (`:3000`), Temporal (UI `:8233`),

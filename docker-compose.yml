@@ -1,9 +1,9 @@
 # Temporality stack. The primary deployment path is the prebuilt GHCR images:
-#   TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+#   TEMPORALITY_VERSION=2026.2.3 docker compose up -d
 # (see the releases page; the kernel applies its migrations on start).
-# The build: blocks are the development path — `docker compose up --build`
-# compiles the local sources and overrides the pulled images. See
-# docs/user/quickstart.md.
+# This file never builds: compose pulls exactly the pinned version and fails
+# loudly if it is missing. Local source builds live in docker-compose.dev.yml
+# (see docs/user/quickstart.md).
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -25,12 +25,8 @@ services:
       - temporality-postgres:/var/lib/postgresql/data
 
   journal:
-    # Pull the prebuilt image from GHCR (TEMPORALITY_VERSION pins it) or build
-    # locally with `docker compose up --build` — both work.
+    # Prebuilt image from GHCR; TEMPORALITY_VERSION pins it.
     image: ghcr.io/ruslangabbasov/temporality/journal:${TEMPORALITY_VERSION:-latest}
-    build:
-      context: .
-      target: journal
     environment:
       DATABASE_URL: postgres://temporality:temporality@postgres:5432/temporality?sslmode=disable
       HTTP_ADDR: :8080
@@ -52,8 +48,6 @@ services:
 
   debugger:
     image: ghcr.io/ruslangabbasov/temporality/debugger:${TEMPORALITY_VERSION:-latest}
-    build:
-      context: debugger
     ports:
       - "3000:80"
     extra_hosts:
@@ -108,12 +102,6 @@ services:
 
   agent-kernel:
     image: ghcr.io/ruslangabbasov/temporality/agent-kernel:${TEMPORALITY_VERSION:-latest}
-    build:
-      context: .
-      target: agent-kernel
-      args:
-        # The Lead/Coder/Reviewer/QA example routes are opt-in via build tag.
-        KERNEL_BUILD_TAGS: agent_examples
     # The container starts as root only so docker-entrypoint.sh can pick up
     # the Docker socket's group at runtime (root:docker on Linux, root:root on
     # Docker Desktop/OrbStack) and drop to the unprivileged user below with
