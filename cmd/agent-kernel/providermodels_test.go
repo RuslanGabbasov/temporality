@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -254,66 +253,4 @@ func TestProviderModelRefreshIntervalDefaultAndOverrides(t *testing.T) {
 	require.Equal(t, 24*time.Hour, providerModelsRefreshInterval(slog.New(slog.NewTextHandler(io.Discard, nil))))
 }
 
-func TestSplitEmbeddingModels(t *testing.T) {
-	chat, embeddings := splitEmbeddingModels([]string{
-		"z-ai-turbo", "z-ai/embedding-3", "text-embedding-3-small", "glm-4.7",
-	})
-	wantChat := []string{"z-ai-turbo", "glm-4.7"}
-	wantEmbed := []string{"z-ai/embedding-3", "text-embedding-3-small"}
-	if !slices.Equal(chat, wantChat) {
-		t.Errorf("chat = %v, want %v", chat, wantChat)
-	}
-	if !slices.Equal(embeddings, wantEmbed) {
-		t.Errorf("embeddings = %v, want %v", embeddings, wantEmbed)
-	}
-}
 
-func TestRefreshProviderMergesManualEmbeddingModels(t *testing.T) {
-	store := &embeddingCaptureStore{
-		Provider: workspace.Provider{
-			ID: "p1", Name: "z.ai", BaseURL: "https://api.z.ai/v1",
-			// The operator curated the embedding list manually (the catalog
-			// does not list embedding models for this provider).
-			EmbeddingModels: []string{"z-ai/embedding-3"},
-		},
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
-			{"id": "glm-4.7"}, {"id": "z-ai/embedding-3"},
-		}})
-	}))
-	defer server.Close()
-	store.Provider.BaseURL = server.URL
-
-	sync := NewProviderModelSync(store, func(context.Context, string) (string, error) { return "key", nil }, slog.Default())
-	chatModels, err := sync.Refresh(context.Background(), "p1")
-	if err != nil {
-		t.Fatalf("refresh: %v", err)
-	}
-	if !slices.Equal(chatModels, []string{"glm-4.7"}) {
-		t.Errorf("chat models = %v", chatModels)
-	}
-	// The manual embedding entry survives the refresh (merge, not replace).
-	if !slices.Equal(store.Provider.EmbeddingModels, []string{"z-ai/embedding-3"}) {
-		t.Errorf("embedding models = %v", store.Provider.EmbeddingModels)
-	}
-}
-
-// embeddingCaptureStore records UpdateProvider writes for assertions.
-type embeddingCaptureStore struct {
-	Provider workspace.Provider
-	saved    bool
-}
-
-func (s *embeddingCaptureStore) ListProviders(context.Context) ([]workspace.Provider, error) {
-	return []workspace.Provider{s.Provider}, nil
-}
-func (s *embeddingCaptureStore) GetProvider(context.Context, string) (workspace.Provider, error) {
-	return s.Provider, nil
-}
-func (s *embeddingCaptureStore) UpdateProvider(_ context.Context, p workspace.Provider) error {
-	saved := p
-	s.Provider = saved
-	return nil
-}

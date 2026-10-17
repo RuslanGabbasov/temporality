@@ -35,10 +35,9 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 			return
 		}
 		var req struct {
-			JudgeModel     string `json:"judge_model"`
-			VisionModel    string `json:"vision_model"`
-			EmbeddingModel string `json:"embedding_model"`
-			HAB            struct {
+			JudgeModel  string `json:"judge_model"`
+			VisionModel string `json:"vision_model"`
+			HAB         struct {
 				ApprovalSeconds   *int `json:"approval_seconds,omitempty"`
 				AnswerBaseSeconds *int `json:"answer_base_seconds,omitempty"`
 				ReadingWPM        *int `json:"reading_wpm,omitempty"`
@@ -51,9 +50,8 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 		// Every non-empty model must be served by a configured provider: a
 		// typo'd model would otherwise fail silently at first use.
 		for name, model := range map[string]string{
-			"judge_model":     req.JudgeModel,
-			"vision_model":    req.VisionModel,
-			"embedding_model": req.EmbeddingModel,
+			"judge_model":  req.JudgeModel,
+			"vision_model": req.VisionModel,
 		} {
 			if strings.TrimSpace(model) == "" {
 				continue
@@ -82,10 +80,9 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 			current.HAB.ReadingWPM = *req.HAB.ReadingWPM
 		}
 		next := workspace.SupervisorSettings{
-			JudgeModel:     req.JudgeModel,
-			VisionModel:    req.VisionModel,
-			EmbeddingModel: req.EmbeddingModel,
-			HAB:            current.HAB,
+			JudgeModel:  req.JudgeModel,
+			VisionModel: req.VisionModel,
+			HAB:         current.HAB,
 		}
 		if err := ws.SaveSupervisorSettings(r.Context(), next); err != nil {
 			writeError(w, 500, err)

@@ -416,35 +416,25 @@ func (a *Activities) hasImages(request ModelRequest) bool {
 // visionModelFor returns the supervisor panel's vision model, cached for
 // supervisorCacheTTL. Failures degrade to "no override".
 func (a *Activities) visionModelFor(ctx context.Context) string {
-	vision, _ := a.supervisorModelsFor(ctx)
-	return vision
-}
-
-// supervisorModelsFor returns the panel's vision and embeddings models with a
-// shared TTL cache: an operator edit applies within a minute, failures
-// degrade to empty strings.
-func (a *Activities) supervisorModelsFor(ctx context.Context) (vision string, embedding string) {
 	a.supervisorMu.Lock()
 	defer a.supervisorMu.Unlock()
 	if time.Since(a.supervisorCache.fetchedAt) < supervisorCacheTTL {
-		return a.supervisorCache.visionModel, a.supervisorCache.embeddingModel
+		return a.supervisorCache.visionModel
 	}
-	vision, embedding = "", ""
+	vision := ""
 	if a.WorkspaceURL != "" {
 		endpoint := fmt.Sprintf("%s/v1/workspace/supervisor", a.WorkspaceURL)
 		if body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil); err == nil && status == 200 {
 			var view struct {
-				VisionModel    string `json:"vision_model"`
-				EmbeddingModel string `json:"embedding_model"`
+				VisionModel string `json:"vision_model"`
 			}
 			if json.Unmarshal([]byte(body), &view) == nil {
 				vision = strings.TrimSpace(view.VisionModel)
-				embedding = strings.TrimSpace(view.EmbeddingModel)
 			}
 		}
 	}
-	a.supervisorCache = supervisorSettingsCache{visionModel: vision, embeddingModel: embedding, fetchedAt: time.Now()}
-	return vision, embedding
+	a.supervisorCache = supervisorSettingsCache{visionModel: vision, fetchedAt: time.Now()}
+	return vision
 }
 
 func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.Completion, error) {
@@ -1868,11 +1858,10 @@ func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([
 	// the supervisor embeddings model. A failure degrades to the lexical
 	// matcher — hints must never fail because semantics are misconfigured.
 	if request.Query != "" {
-		if vectors, err := a.EmbedTexts(ctx, request.Project, []string{request.Query}); err == nil && len(vectors) == 1 {
-			if model, _ := a.supervisorModelsFor(ctx); model != "" {
-				payload["embedding"] = vectors[0]
-				payload["embedding_model"] = model
-			}
+		if vectors, err := a.EmbedTexts(ctx, request.Project, EmbedQuery, []string{request.Query}); err == nil && len(vectors) == 1 {
+			embedCfg := embeddingsConfig()
+			payload["embedding"] = vectors[0]
+			payload["embedding_model"] = embedCfg.model
 		}
 	}
 	if request.TeamRoot != "" {

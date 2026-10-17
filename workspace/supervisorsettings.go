@@ -18,10 +18,6 @@ const (
 	// the run's main model is not multimodal. Empty = images go to the main
 	// model as before.
 	SettingSupervisorVisionModel = "supervisor.vision.model"
-	// SettingSupervisorEmbeddingModel: reserved for the semantic knowledge
-	// matcher. Nothing consumes it yet; the setting exists so the operator can
-	// pin the model before the consumer ships.
-	SettingSupervisorEmbeddingModel = "supervisor.embedding.model"
 	// Human attention estimation coefficients (docs/supervisor-model.md §5):
 	// Human Attention Spend is an ESTIMATE of the time a human spends reading
 	// conclusions and writing answers — not the wall-clock wait.
@@ -88,19 +84,14 @@ func (s *Store) SupervisorSettings(ctx context.Context) (SupervisorSettings, err
 	if err != nil && err != ErrNotFound {
 		return SupervisorSettings{}, err
 	}
-	embedding, err := s.GetSetting(ctx, SettingSupervisorEmbeddingModel)
-	if err != nil && err != ErrNotFound {
-		return SupervisorSettings{}, err
-	}
 	hab, err := s.HumanFactors(ctx)
 	if err != nil {
 		return SupervisorSettings{}, err
 	}
 	return SupervisorSettings{
-		JudgeModel:     judge,
-		VisionModel:    vision,
-		EmbeddingModel: embedding,
-		HAB:            hab,
+		JudgeModel:  judge,
+		VisionModel: vision,
+		HAB:         hab,
 	}, nil
 }
 
@@ -118,9 +109,6 @@ func (s *Store) SaveSupervisorSettings(ctx context.Context, settings SupervisorS
 		return err
 	}
 	if err := write(SettingSupervisorVisionModel, strings.TrimSpace(settings.VisionModel)); err != nil {
-		return err
-	}
-	if err := write(SettingSupervisorEmbeddingModel, strings.TrimSpace(settings.EmbeddingModel)); err != nil {
 		return err
 	}
 	hab := settings.HAB

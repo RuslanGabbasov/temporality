@@ -66,7 +66,7 @@ func runEmbeddingBackfill(ctx context.Context, log *slog.Logger, activities *age
 		ids = append(ids, gap.KnowledgeID)
 		texts = append(texts, gap.Text)
 	}
-	vectors, err := activities.EmbedTexts(ctx, "", texts)
+	vectors, err := activities.EmbedTexts(ctx, "", agent.EmbedPassage, texts)
 	if err != nil {
 		log.Warn("embedding backfill: embed", "error", err.Error())
 		return

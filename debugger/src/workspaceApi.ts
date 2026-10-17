@@ -767,9 +767,6 @@ export interface Provider {
   base_url: string
   api_key_ref: string
   models: string[]
-  /** Embedding models (z-ai/embedding-3…): a separate catalog from chat
-   *  models; the supervisor embeddings panel picks from here. */
-  embedding_models?: string[]
   labels: Record<string, string>
   org_unit_id?: string
   created_at: string
@@ -1134,7 +1131,7 @@ export const workspaceApi = {
   refreshProviderModels: (id: string) =>
     request<{ models: string[]; count: number }>(`/v1/workspace/providers/${id}/refresh-models`, { method: 'POST' }),
   probeProviderModels: (data: { base_url: string; api_key_ref?: string }) =>
-    request<{ models: string[]; count: number; embedding_models?: string[]; embedding_count?: number }>('/v1/workspace/providers/probe-models', { method: 'POST', body: JSON.stringify(data) }),
+    request<{ models: string[]; count: number }>('/v1/workspace/providers/probe-models', { method: 'POST', body: JSON.stringify(data) }),
 
   // Triggers. listTriggers without a project hits the global listing
   // (docs/activity-scoping.md §5) — server-side constrained to the visible

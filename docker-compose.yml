@@ -100,6 +100,26 @@ services:
       - browser
     restart: unless-stopped
 
+  # Local embedding model for the semantic knowledge layer (docs/supervisor-
+  # model.md §6): rembed serves an OpenAI-compatible /v1/embeddings for
+  # intfloat/multilingual-e5-small (384-dim, 100+ languages) — pure-Go, CPU,
+  # weight-only int8. Model weights download from the HF Hub on first start
+  # into the named volume. The kernel adds the e5 "query: "/"passage: "
+  # prefixes itself (rembed embeds exactly the text it is given).
+  embeddings:
+    build:
+      context: deploy/embeddings
+    image: ghcr.io/ruslangabbasov/temporality/embeddings:${TEMPORALITY_VERSION:-latest}
+    volumes:
+      - embeddings_models:/cache/rembed
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8099/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 20
+      start_period: 5m
+    restart: unless-stopped
+
   agent-kernel:
     image: ghcr.io/ruslangabbasov/temporality/agent-kernel:${TEMPORALITY_VERSION:-latest}
     build:
@@ -196,6 +216,11 @@ services:
       # Web research tools: SearXNG backs web_search (empty disables the tool
       # while web_fetch keeps working); AllowPrivate lets web_fetch reach
       # internal hosts (docs servers) — off by default, SSRF guard stays strict.
+      # Local embeddings for the semantic knowledge layer (docs/supervisor-model.md
+      # §6): the always-up `embeddings` service (rembed + multilingual-e5-small).
+      KERNEL_EMBEDDINGS_BASE_URL: http://embeddings:8099/v1
+      KERNEL_EMBEDDINGS_MODEL: intfloat/multilingual-e5-small
+      KERNEL_EMBEDDINGS_API_KEY: ${KERNEL_EMBEDDINGS_API_KEY:-}
       KERNEL_SEARXNG_URL: ${KERNEL_SEARXNG_URL:-http://searxng:8080}
       KERNEL_WEB_FETCH_ALLOW_PRIVATE: ${KERNEL_WEB_FETCH_ALLOW_PRIVATE:-}
       # Process-global web_search budget: search engines ban the server IP,
@@ -241,6 +266,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  embeddings_models:
   temporality-postgres:
 
 networks:

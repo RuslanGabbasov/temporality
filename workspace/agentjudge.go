@@ -123,7 +123,7 @@ func (s *Store) ProviderOfModel(ctx context.Context, model string) (string, bool
 		return "", false, err
 	}
 	for _, p := range providers {
-		for _, candidate := range append(append([]string{}, p.Models...), p.EmbeddingModels...) {
+		for _, candidate := range p.Models {
 			if strings.TrimSpace(candidate) == model {
 				return p.ID, true, nil
 			}

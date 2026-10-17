@@ -13,10 +13,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
-	"github.com/temporality-project/temporality/kernel/llm"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/log"
 )
@@ -29,22 +29,46 @@ const (
 	embedTimeout = 30 * time.Second
 )
 
-// EmbedTexts computes embeddings for the texts with the supervisor embeddings
-// model, routed through the project's provider registry. Returns one vector
-// per input, in order.
-func (a *Activities) EmbedTexts(ctx context.Context, project string, texts []string) ([][]float32, error) {
+// EmbedKind selects the e5 input prefix. The e5 family was trained with
+// "query: " on queries and "passage: " on documents; rembed embeds exactly
+// the text it is given, so the kernel adds the prefixes itself — skipping
+// them silently degrades retrieval quality (rembed README, e5 caveat).
+type EmbedKind string
+
+const (
+	EmbedQuery   EmbedKind = "query"
+	EmbedPassage EmbedKind = "passage"
+)
+
+func (k EmbedKind) prefix() string {
+	switch k {
+	case EmbedQuery:
+		return "query: "
+	case EmbedPassage:
+		return "passage: "
+	}
+	return ""
+}
+
+// EmbedTexts computes embeddings for the texts with the LOCAL embeddings
+// model (rembed serving multilingual-e5-small, always up with the stack). The
+// endpoint is fixed by env (KERNEL_EMBEDDINGS_BASE_URL / _MODEL / _API_KEY) —
+// embeddings are infrastructure, not a provider choice, so no keys or routing
+// apply. kind selects the e5 input prefix ("query" for hint slots, "passage"
+// for stored knowledge; empty for prefix-agnostic models).
+func (a *Activities) EmbedTexts(ctx context.Context, project string, kind EmbedKind, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
-	model, _ := a.supervisorModelsFor(ctx)
-	if model == "" {
-		return nil, fmt.Errorf("embeddings model is not configured — pick one in Agents → Модель-супервайзер")
-	}
-	// Provider routing shares the chat path: resolve base URL + key for the
-	// model (workspace registry first, env fallback).
-	config, err := a.embeddingsConfig(ctx, project, model)
-	if err != nil {
-		return nil, err
+	config := embeddingsConfig()
+	prefix := kind.prefix()
+	if prefix != "" {
+		texts = append([]string(nil), texts...)
+		for i := range texts {
+			if !strings.HasPrefix(texts[i], prefix) {
+				texts[i] = prefix + texts[i]
+			}
+		}
 	}
 	vectors := make([][]float32, 0, len(texts))
 	for start := 0; start < len(texts); start += embedMaxBatch {
@@ -52,7 +76,7 @@ func (a *Activities) EmbedTexts(ctx context.Context, project string, texts []str
 		if end > len(texts) {
 			end = len(texts)
 		}
-		batch, err := a.embedBatch(ctx, config, model, texts[start:end])
+		batch, err := a.embedBatch(ctx, config, texts[start:end])
 		if err != nil {
 			return nil, err
 		}
@@ -64,10 +88,10 @@ func (a *Activities) EmbedTexts(ctx context.Context, project string, texts []str
 	return vectors, nil
 }
 
-func (a *Activities) embedBatch(ctx context.Context, config embedConfig, model string, texts []string) ([][]float32, error) {
+func (a *Activities) embedBatch(ctx context.Context, config embedConfig, texts []string) ([][]float32, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, embedTimeout)
 	defer cancel()
-	payload, err := json.Marshal(map[string]any{"model": model, "input": texts})
+	payload, err := json.Marshal(map[string]any{"model": config.model, "input": texts})
 	if err != nil {
 		return nil, err
 	}
@@ -110,27 +134,28 @@ func (a *Activities) embedBatch(ctx context.Context, config embedConfig, model s
 	return vectors, nil
 }
 
-// embedConfig is the resolved endpoint for one embeddings model.
+// embedConfig is the resolved local embeddings endpoint.
 type embedConfig struct {
 	baseURL string
+	model   string
 	apiKey  string
 }
 
-// embeddingsConfig resolves base URL and key for the model: the workspace
-// provider registry first (same routing as chat), env fallback otherwise.
-func (a *Activities) embeddingsConfig(ctx context.Context, project, model string) (embedConfig, error) {
-	if a.WorkspaceURL != "" {
-		if config, ok, err := a.modelConfigFor(ctx, project, model); err != nil {
-			return embedConfig{}, err
-		} else if ok {
-			return embedConfig{baseURL: config.BaseURL, apiKey: config.APIKey}, nil
-		}
+// embeddingsConfig reads the local embeddings endpoint from env, with the
+// compose defaults baked in (service `embeddings`, model `qwen3-embedding`).
+func embeddingsConfig() embedConfig {
+	return embedConfig{
+		baseURL: envWithDefault("KERNEL_EMBEDDINGS_BASE_URL", "http://embeddings:11434/v1"),
+		model:   envWithDefault("KERNEL_EMBEDDINGS_MODEL", "qwen3-embedding"),
+		apiKey:  os.Getenv("KERNEL_EMBEDDINGS_API_KEY"),
 	}
-	fallback, err := llm.OptionalConfigFromEnv()
-	if err != nil {
-		return embedConfig{}, err
+}
+
+func envWithDefault(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
 	}
-	return embedConfig{baseURL: fallback.BaseURL, apiKey: fallback.APIKey}, nil
+	return fallback
 }
 
 // publishKnowledgeEmbeddings pushes computed vectors to the journal. The
@@ -170,10 +195,9 @@ func (a *Activities) embedLogger(ctx context.Context) log.Logger {
 	return nil
 }
 
-// SupervisorEmbeddingModel returns the panel's embeddings model ("" = off).
-// Exported for the kernel's background backfill loop, which runs outside the
-// activities package.
+// SupervisorEmbeddingModel returns the local embeddings model name — the
+// same one EmbedTexts targets. Used by the backfill loop for the model stamp
+// and by the journal gaps query.
 func (a *Activities) SupervisorEmbeddingModel(ctx context.Context) string {
-	_, embedding := a.supervisorModelsFor(ctx)
-	return embedding
+	return embeddingsConfig().model
 }
