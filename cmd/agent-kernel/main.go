@@ -46,8 +46,13 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
+// BuildVersion is injected at link time by the release pipeline
+// (-ldflags "-X main.buildVersion=v2026.1.0"); "dev" when built by hand.
+var buildVersion = "dev"
+
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	log.Info("temporality-agent-kernel starting", "version", buildVersion)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := controlplane.LoadFileSecrets("DATABASE_URL", "TEMPORALITY_MODEL_API_KEY", "TEMPORALITY_API_TOKEN", "KERNEL_AUTH_TOKENS", "KERNEL_SECRET_MASTER_KEY"); err != nil {
@@ -514,7 +519,9 @@ func main() {
 		}
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]bool{"ok": true}) })
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, 200, map[string]any{"ok": true, "version": buildVersion})
+	})
 	mux.HandleFunc("GET /v1/agent/whoami", func(w http.ResponseWriter, r *http.Request) {
 		// Identity for UI clients: the token's subject, role and project scope.
 		// Any authenticated role may see its own identity.

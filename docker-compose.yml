@@ -19,6 +19,9 @@ services:
       - temporality-postgres:/var/lib/postgresql/data
 
   journal:
+    # Pull the prebuilt image from GHCR (TEMPORALITY_VERSION pins it) or build
+    # locally with `docker compose up --build` — both work.
+    image: ghcr.io/ruslangabbasov/temporality/journal:${TEMPORALITY_VERSION:-latest}
     build:
       context: .
       target: journal
@@ -42,6 +45,7 @@ services:
     restart: unless-stopped
 
   debugger:
+    image: ghcr.io/ruslangabbasov/temporality/debugger:${TEMPORALITY_VERSION:-latest}
     build:
       context: debugger
     ports:
@@ -97,6 +101,7 @@ services:
     restart: unless-stopped
 
   agent-kernel:
+    image: ghcr.io/ruslangabbasov/temporality/agent-kernel:${TEMPORALITY_VERSION:-latest}
     build:
       context: .
       target: agent-kernel

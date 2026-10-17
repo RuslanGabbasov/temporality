@@ -57,6 +57,19 @@ cp .env.example .env   # настроить TEMPORALITY_MODEL_* и опцион�
 docker compose up --build -d
 ```
 
+Сборка локально или готовые образы из GHCR — на выбор:
+
+```sh
+# Готовые образы (без клонирования и сборки):
+curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
+curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
+TEMPORALITY_VERSION=2026.1.0 docker compose up -d
+```
+
+Образы публикуются в GHCR при каждом релизном теге:
+`ghcr.io/ruslangabbasov/temporality/{agent-kernel,journal,debugger}:<версия>`.
+Версия запущенного ядра видна в `GET :8090/healthz`.
+
 Поднимаются: PostgreSQL, Journal (`:8080`), debugger (`:3000`), dev-сервер
 Temporal (UI на `:8233`), Agent Kernel (`:8090`), SearXNG (`127.0.0.1:8889`,
 метапоиск для тула агентов `web_search`; отключается пустым
