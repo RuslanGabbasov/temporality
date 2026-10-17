@@ -148,7 +148,6 @@ export const en: Record<string, string> = {
     'supervisor.case_amendment_target': 'Amendment target',
     'supervisor.case_skill_candidate': 'Skill candidate',
     'supervisor.case_knowledge_conflict': 'Knowledge conflict',
-    'supervisor.hab_title': 'Human attention coefficients',
     'supervisor.semantic_title': 'Semantic layer',
     'supervisor.semantic_ready': 'ready',
     'supervisor.semantic_degraded': 'degraded',

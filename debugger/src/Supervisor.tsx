@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Button, Tag, TextInput, Select, SelectItem } from '@carbon/react'
+import { Button, Tag, Select, SelectItem } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { observationApi, type ObservationEvent } from './observationApi'
 import { workspaceApi } from './workspaceApi'
@@ -105,10 +105,8 @@ export function SupervisorPanels() {
   const [showResolved, setShowResolved] = useState(false)
   const [acknowledged, setAcknowledged] = useState<Set<string>>(new Set())
   const [busyAck, setBusyAck] = useState('')
-  // HAB coefficients + semantic-layer health (§5, §6.5) live on this page so
-  // the administrator tunes what the queue measures without leaving it.
-  const [hab, setHab] = useState<{ approval: number; answerBase: number; readingWpm: number } | null>(null)
-  const [habBusy, setHabBusy] = useState(false)
+  // Semantic-layer health (§6.5): read-only monitoring. Configuration lives
+  // in Agents → quality settings.
   const [embeddings, setEmbeddings] = useState<{ model: string; ready: boolean; error?: string } | null>(null)
   const [tiers, setTiers] = useState<{ tier: string; helpful: number; harmful: number; helpful_rate_pct: number }[] | null>(null)
 
@@ -131,9 +129,6 @@ export function SupervisorPanels() {
         if (id) ackSet.add(id)
       }
       setAcknowledged(ackSet)
-      if (settings?.hab) {
-        setHab({ approval: settings.hab.approval_seconds, answerBase: settings.hab.answer_base_seconds, readingWpm: settings.hab.reading_wpm })
-      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setEmbeddings((settings as any)?.embeddings ?? null)
       setTiers(effect?.tiers ?? [])
@@ -158,20 +153,6 @@ export function SupervisorPanels() {
     }
   }
 
-  const saveHab = async () => {
-    if (!hab) return
-    setHabBusy(true)
-    try {
-      await workspaceApi.updateSupervisorSettings({
-        hab: { approval_seconds: hab.approval, answer_base_seconds: hab.answerBase, reading_wpm: hab.readingWpm },
-      })
-    } catch (failure) {
-      setError(message(failure))
-    } finally {
-      setHabBusy(false)
-    }
-  }
-
   const clusters = clusterVerdicts(verdicts)
   const projectOptions = [...new Set(clusters.map((row) => row.project).filter(Boolean))]
   const caseOptions = [...new Set(clusters.map((row) => row.caseID).filter(Boolean))]
@@ -189,25 +170,12 @@ export function SupervisorPanels() {
 
       {loading ? <PageLoading /> : (
         <>
-          {/* Operator tuning lives beside the measurements (§5, §6.5): HAB
-              coefficients shape the queue's human-factor numbers; the
-              semantic-layer health explains silent hint degradation. */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
-            <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem' }}>
-              <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>{t('supervisor.hab_title') ?? 'Human attention coefficients'}</div>
-              {hab && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.5rem', alignItems: 'end' }}>
-                  <TextInput id="sup-hab-approval" labelText={t('quality.hab_approval') ?? 'Approval, sec'} size="sm" value={String(hab.approval)} onChange={(e) => setHab({ ...hab, approval: Number(e.target.value) || 0 })} />
-                  <TextInput id="sup-hab-answer" labelText={t('quality.hab_answer') ?? 'Answer base, sec'} size="sm" value={String(hab.answerBase)} onChange={(e) => setHab({ ...hab, answerBase: Number(e.target.value) || 0 })} />
-                  <TextInput id="sup-hab-wpm" labelText={t('quality.hab_wpm') ?? 'Reading, wpm'} size="sm" value={String(hab.readingWpm)} onChange={(e) => setHab({ ...hab, readingWpm: Number(e.target.value) || 0 })} />
-                </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                <Button size="sm" kind="secondary" disabled={habBusy || !hab} onClick={() => void saveHab()}>{habBusy ? '…' : t('action.save') ?? 'Save'}</Button>
-              </div>
-            </div>
-            <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem' }}>
-              <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>{t('supervisor.semantic_title') ?? 'Semantic layer'}</div>
+          {/* Monitoring only (§6.5): semantic-layer health and hint-tier
+              effectiveness. Configuration (models, HAB coefficients) lives in
+              Agents → quality settings — a monitoring tab must not be a
+              second editing surface for the same values. */}
+          <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem', marginBottom: '1.25rem' }}>
+            <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>{t('supervisor.semantic_title') ?? 'Semantic layer'}</div>
               {embeddings && (
                 <div style={{ marginBottom: '0.4rem' }}>
                   <Tag type={embeddings.ready ? 'green' : 'red'} size="sm">{embeddings.ready ? t('supervisor.semantic_ready') ?? 'ready' : t('supervisor.semantic_degraded') ?? 'degraded'}</Tag>{' '}
@@ -234,7 +202,6 @@ export function SupervisorPanels() {
               ) : (
                 <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', margin: 0 }}>{t('supervisor.tiers_empty') ?? 'No hint outcomes in the window yet.'}</p>
               )}
-            </div>
           </div>
 
           {/* Wave A3: health anomaly explanations, newest first. */}

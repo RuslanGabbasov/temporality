@@ -148,7 +148,6 @@ export const ru: Record<string, string> = {
     'supervisor.case_amendment_target': 'Цель поправки',
     'supervisor.case_skill_candidate': 'Кандидат в навыки',
     'supervisor.case_knowledge_conflict': 'Конфликт знаний',
-    'supervisor.hab_title': 'Коэффициенты человеческого внимания',
     'supervisor.semantic_title': 'Семантический слой',
     'supervisor.semantic_ready': 'готов',
     'supervisor.semantic_degraded': 'деградировал',
