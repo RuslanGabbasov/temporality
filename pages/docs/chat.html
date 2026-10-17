@@ -7,7 +7,7 @@
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../styles.css?v=2026-10-16T18:12"><link rel="stylesheet" href="docs.css?v=2026-10-16T18:12">
+<link rel="stylesheet" href="../styles.css?v=29869555"><link rel="stylesheet" href="docs.css?v=29869555">
 </head>
 <body class="docs-page">
 <header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/chat.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/chat.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
@@ -51,9 +51,7 @@
 зависит от политики агента) агент обязан получить ваше решение. Вопрос
 появляется карточкой в чате и в разделе <strong>Запуски → вопросы</strong>. Если агент
 настроен на каналы уведомлений, вопрос придёт и туда (см. <a href="inbound.html">Входящие и каналы</a>).</p>
-<p>Ответ всегда даётся в интерфейсе; внешние каналы — только доставка.
-Неответственное подтверждение можно отменить — ран продолжится другим путём
-или корректно завершится.</p>
+<p>Вопрос из канала можно ответить прямо там: реплай в двустороннем канале (Matrix, Mattermost, Slack) маршрутизируется в ждущий ран как ответ; для командных вопросов побеждает первый ответ. Решения по подтверждениям операций (approve/reject) принимаются в интерфейсе. Ожидающее подтверждение можно отменить — ран продолжится другим путём или корректно завершится.</p>
 <h2 id="делегирование-и-планы"><a class="anchor" href="#делегирование-и-планы" aria-label="Section link">#</a>Делегирование и планы</h2><p>Для крупных задач агент умеет декомпозировать работу:</p>
 <ul>
 <li><strong><code>delegate</code></strong> — субзадача другому агенту со своим промптом и бюджетом шагов.</li>

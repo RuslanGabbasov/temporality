@@ -11,7 +11,7 @@
 // Usage: node scripts/build-docs.mjs   (from the repository root)
 
 import { marked } from 'marked'
-import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, execSync } from 'node:fs'
 import { join, basename } from 'node:path'
 
 const ROOT = new URL('..', import.meta.url).pathname
@@ -153,7 +153,11 @@ function buildLang(lang) {
   const head = (title, description) => {
     // Cache-buster: a stale cached docs.css once made the primary button
     // invisible (amber on amber) — the version forces fresh styles.
-    const v = process.env.DOCS_VERSION || new Date().toISOString().slice(0, 16)
+    // Deterministic: a timestamp here would dirty the committed output on
+    // every rebuild and fail the CI "docs are committed" check. The version
+    // comes from the current git commit (or DOCS_VERSION), so a rebuild of
+    // the same sources is byte-stable across machines.
+    const v = process.env.DOCS_VERSION || execSync('git rev-parse --short HEAD').toString().trim()
     return `<!doctype html>
 <html lang="${strings.htmlLang}">
 <head>

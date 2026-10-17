@@ -7,7 +7,7 @@
 <link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../../styles.css?v=2026-10-16T18:12"><link rel="stylesheet" href="../docs.css?v=2026-10-16T18:12">
+<link rel="stylesheet" href="../../styles.css?v=29869555"><link rel="stylesheet" href="../docs.css?v=29869555">
 </head>
 <body class="docs-page">
 <header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../chat.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/chat.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
@@ -52,9 +52,11 @@ depending on the agent&#39;s policy) the agent must get your decision. The
 question appears as a card in the chat and under <strong>Runs → questions</strong>. If the
 agent has notification channels configured, the question goes there too (see
 <a href="inbound.html">Inbound and channels</a>).</p>
-<p>Answers always happen in the app; external channels are delivery only.
-You can cancel a pending approval — the run continues another way or ends
-gracefully.</p>
+<p>A channel question can be answered right in the chat: a reply in a two-way
+channel (Matrix, Mattermost, Slack) is routed to the waiting run; for team
+questions the first reply wins. Operation approve/reject decisions happen in
+the UI. You can cancel a pending approval — the run continues another way or
+ends gracefully.</p>
 <h2 id="delegation-and-plans"><a class="anchor" href="#delegation-and-plans" aria-label="Section link">#</a>Delegation and plans</h2><p>For larger tasks the agent can decompose the work:</p>
 <ul>
 <li><strong><code>delegate</code></strong> — a subtask to another agent with its own prompt and turn budget.</li>
