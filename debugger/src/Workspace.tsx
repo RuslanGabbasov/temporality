@@ -88,7 +88,13 @@ function loadConversations(): Conversation[] {
       taskId: c.taskId ?? '',
       agentId: c.agentId ?? '',
       createdAt: new Date(c.createdAt),
-      messages: c.messages.map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) })),
+      messages: c.messages.map((m: any) => ({
+        ...m,
+        timestamp: new Date(m.timestamp),
+        // Mid-run addenda ride the same JSON round-trip: their Date comes
+        // back as an ISO string and must be revived before rendering.
+        addenda: (m.addenda ?? []).map((a: any) => ({ ...a, at: new Date(a.at) })),
+      })),
     }))
   } catch { return [] }
 }
@@ -1050,7 +1056,7 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                           <div key={addendumIndex} style={{ borderLeft: '2px solid var(--tm-border-strong)', paddingLeft: '0.6rem' }}>
                             <div style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                               <span>⤳</span>
-                              <span>{t('chat.addendum_at', { time: addendum.at.toLocaleTimeString() }) ?? `Amended at ${addendum.at.toLocaleTimeString()}`}</span>
+                              <span>{t('chat.addendum_at', { time: new Date(addendum.at).toLocaleTimeString() }) ?? `Amended at ${new Date(addendum.at).toLocaleTimeString()}`}</span>
                             </div>
                             {addendum.text && <div style={{ fontSize: '0.82rem', whiteSpace: 'pre-wrap' }}>{addendum.text}</div>}
                             {addendum.attachments && addendum.attachments.length > 0 && (
