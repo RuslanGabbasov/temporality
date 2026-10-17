@@ -1,10 +1,11 @@
 package agent
 
-// Semantic knowledge layer client (docs/supervisor-model.md §6): the kernel
-// owns the provider keys, so it computes knowledge embeddings with the
-// supervisor embeddings model (OpenAI-compatible POST /v1/embeddings, model
-// routed through the same provider registry as chat calls) and pushes them to
-// the journal, where hint matching consumes them as an extra recall tier.
+// Semantic knowledge layer (docs/supervisor-model.md §6): the embedding
+// inference runs IN-PROCESS via the pure-Go rembed engine (no cgo, no ONNX
+// Runtime, no separate service). The model — intfloat/multilingual-e5-small
+// by default — is lazily loaded from the Hugging Face Hub into a persistent
+// cache on kernel boot and served from RAM; vectors are published to the
+// journal where hint matching consumes them as an extra recall tier.
 
 import (
 	"bytes"
@@ -15,24 +16,35 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/rostamlabs/rembed"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/log"
 )
 
 const (
-	// embedMaxBatch caps one /v1/embeddings call; larger sets are split.
-	embedMaxBatch = 64
-	// embedTimeout bounds one provider call; embeddings are small and fast,
-	// but a wedged gateway must not hang the hints path.
-	embedTimeout = 30 * time.Second
+	// EmbeddingModelDefault is the supervisor-pinned multilingual model:
+	// 384 dims, 100+ languages, small enough for CPU-only inference.
+	EmbeddingModelDefault = "intfloat/multilingual-e5-small"
+	// embedCacheDirDefault keeps downloaded weights across restarts; the
+	// kernel image provisions this path and compose persists it as a volume.
+	embedCacheDirDefault = "/var/cache/rembed"
+	// embedWorkersDefault caps inference CPU so encoding cannot starve the
+	// Temporal worker goroutines sharing the process.
+	embedWorkersDefault = 2
+	// embedWaitTimeout bounds how long a hint-slot embed waits for the
+	// background preload. Past it the call degrades to the lexical matcher —
+	// the backfill loop retries publication later.
+	embedWaitTimeout = 10 * time.Second
 )
 
 // EmbedKind selects the e5 input prefix. The e5 family was trained with
 // "query: " on queries and "passage: " on documents; rembed embeds exactly
 // the text it is given, so the kernel adds the prefixes itself — skipping
-// them silently degrades retrieval quality (rembed README, e5 caveat).
+// them silently degrades retrieval quality (rembed README, e5 caveat). The
+// prefixes apply when the model id names an e5 model.
 type EmbedKind string
 
 const (
@@ -40,8 +52,13 @@ const (
 	EmbedPassage EmbedKind = "passage"
 )
 
-func (k EmbedKind) prefix() string {
-	switch k {
+// embedPrefix returns the e5 input prefix for the model and kind, "" when the
+// model is not e5 (a non-e5 model must not get e5 prefixes).
+func embedPrefix(model string, kind EmbedKind) string {
+	if !strings.Contains(strings.ToLower(model), "e5") {
+		return ""
+	}
+	switch kind {
 	case EmbedQuery:
 		return "query: "
 	case EmbedPassage:
@@ -50,19 +67,133 @@ func (k EmbedKind) prefix() string {
 	return ""
 }
 
-// EmbedTexts computes embeddings for the texts with the LOCAL embeddings
-// model (rembed serving multilingual-e5-small, always up with the stack). The
-// endpoint is fixed by env (KERNEL_EMBEDDINGS_BASE_URL / _MODEL / _API_KEY) —
-// embeddings are infrastructure, not a provider choice, so no keys or routing
-// apply. kind selects the e5 input prefix ("query" for hint slots, "passage"
-// for stored knowledge; empty for prefix-agnostic models).
+// embeddingModelID resolves the model id: env override first, the default
+// multilingual model otherwise.
+func embeddingModelID() string {
+	if value := strings.TrimSpace(os.Getenv("KERNEL_EMBEDDINGS_MODEL")); value != "" {
+		return value
+	}
+	return EmbeddingModelDefault
+}
+
+// embedCacheDir resolves where downloaded weights persist.
+func embedCacheDir() string {
+	if value := strings.TrimSpace(os.Getenv("REMBED_CACHE")); value != "" {
+		return value
+	}
+	return embedCacheDirDefault
+}
+
+// embedWorkers caps inference CPU (env override, 0 = rembed default).
+func embedWorkers() int {
+	if value := strings.TrimSpace(os.Getenv("KERNEL_EMBEDDING_WORKERS")); value != "" {
+		switch value {
+		case "1":
+			return 1
+		case "2":
+			return 2
+		case "4":
+			return 4
+		case "8":
+			return 8
+		}
+	}
+	return embedWorkersDefault
+}
+
+// embedderState guards the lazy one-time model load. A failure is retried on
+// the next EmbedTexts call — a transient Hub outage must not brick the
+// feature for the process lifetime.
+type embedderState struct {
+	mu       sync.Mutex
+	embedder *rembed.Embedder
+	ready    chan struct{} // closed on load success OR failure
+	err      error
+}
+
+var (
+	embedMu    sync.Mutex
+	embedState embedderState
+)
+
+// getEmbedder returns the loaded embedder, waiting for an in-flight load.
+// Kicks off the load when nobody has attempted it yet; a failed attempt is
+// retried by the caller re-invoking after embedWaitTimeout.
+func (a *Activities) getEmbedder(ctx context.Context) (*rembed.Embedder, error) {
+	embedMu.Lock()
+	if embedState.ready == nil {
+		// Nobody attempted yet: kick off the preload in the background and
+		// wait for it below, bounded by the caller's deadline.
+		a.startEmbeddingPreloadLocked()
+	}
+	ready := embedState.ready
+	embedMu.Unlock()
+
+	select {
+	case <-ready:
+		embedMu.Lock()
+		defer embedMu.Unlock()
+		if embedState.err != nil {
+			// Allow a retry on the next call.
+			embedMu.Lock()
+			embedState.ready = nil
+			embedMu.Unlock()
+			return nil, embedState.err
+		}
+		return embedState.embedder, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(embedWaitTimeout):
+		return nil, fmt.Errorf("embedding model is still loading — retry shortly")
+	}
+}
+
+// startEmbeddingPreloadLocked begins the model load; embedMu must be held.
+func (a *Activities) startEmbeddingPreloadLocked() {
+	embedState.ready = make(chan struct{})
+	model := embeddingModelID()
+	workers := embedWorkers()
+	cacheDir := embedCacheDir()
+	_ = os.Setenv("REMBED_CACHE", cacheDir)
+	go func() {
+		opts := []rembed.Option{rembed.WithInt8()}
+		if workers > 0 {
+			opts = append(opts, rembed.WithWorkers(workers))
+		}
+		emb, err := rembed.Load(model, opts...)
+		embedMu.Lock()
+		defer embedMu.Unlock()
+		embedState.err = err
+		if err != nil {
+			// Retryable: the next getEmbedder call re-attempts the load.
+			embedState.ready = nil
+			return
+		}
+		embedState.embedder = emb
+		close(embedState.ready)
+	}()
+}
+
+// StartEmbeddingPreload kicks off the model load in the background at kernel
+// boot so the first hint slot does not pay the Hub download.
+func (a *Activities) StartEmbeddingPreload() {
+	embedMu.Lock()
+	defer embedMu.Unlock()
+	if embedState.ready != nil {
+		return
+	}
+	a.startEmbeddingPreloadLocked()
+}
+
+// EmbedTexts computes embeddings for the texts in-process. kind selects the
+// e5 input prefix. On any failure it returns an error — callers degrade to
+// the lexical matcher.
 func (a *Activities) EmbedTexts(ctx context.Context, project string, kind EmbedKind, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
-	config := embeddingsConfig()
-	prefix := kind.prefix()
-	if prefix != "" {
+	model := embeddingModelID()
+	if prefix := embedPrefix(model, kind); prefix != "" {
 		texts = append([]string(nil), texts...)
 		for i := range texts {
 			if !strings.HasPrefix(texts[i], prefix) {
@@ -70,97 +201,29 @@ func (a *Activities) EmbedTexts(ctx context.Context, project string, kind EmbedK
 			}
 		}
 	}
-	vectors := make([][]float32, 0, len(texts))
-	for start := 0; start < len(texts); start += embedMaxBatch {
-		end := start + embedMaxBatch
-		if end > len(texts) {
-			end = len(texts)
-		}
-		batch, err := a.embedBatch(ctx, config, texts[start:end])
-		if err != nil {
-			return nil, err
-		}
-		vectors = append(vectors, batch...)
+	embedder, err := a.getEmbedder(ctx)
+	if err != nil {
+		return nil, err
+	}
+	vectors, err := embedder.Embed(ctx, texts)
+	if err != nil {
+		return nil, fmt.Errorf("embedding inference: %w", err)
 	}
 	if len(vectors) != len(texts) {
-		return nil, fmt.Errorf("embeddings provider returned %d vectors for %d inputs", len(vectors), len(texts))
+		return nil, fmt.Errorf("embedding engine returned %d vectors for %d inputs", len(vectors), len(texts))
 	}
 	return vectors, nil
 }
 
-func (a *Activities) embedBatch(ctx context.Context, config embedConfig, texts []string) ([][]float32, error) {
-	requestCtx, cancel := context.WithTimeout(ctx, embedTimeout)
-	defer cancel()
-	payload, err := json.Marshal(map[string]any{"model": config.model, "input": texts})
-	if err != nil {
-		return nil, err
-	}
-	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, strings.TrimSuffix(config.baseURL, "/")+"/embeddings", bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	if config.apiKey != "" {
-		request.Header.Set("Authorization", "Bearer "+config.apiKey)
-	}
-	response, err := a.HTTP.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("embeddings HTTP %d: %s", response.StatusCode, truncate(string(body), 200))
-	}
-	var reply struct {
-		Data []struct {
-			Index     int       `json:"index"`
-			Embedding []float32 `json:"embedding"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &reply); err != nil {
-		return nil, fmt.Errorf("decode embeddings reply: %w", err)
-	}
-	vectors := make([][]float32, 0, len(reply.Data))
-	for _, item := range reply.Data {
-		vectors = append(vectors, item.Embedding)
-	}
-	if len(vectors) != len(texts) {
-		return nil, fmt.Errorf("embeddings provider returned %d vectors for %d inputs", len(vectors), len(texts))
-	}
-	return vectors, nil
-}
-
-// embedConfig is the resolved local embeddings endpoint.
-type embedConfig struct {
-	baseURL string
-	model   string
-	apiKey  string
-}
-
-// embeddingsConfig reads the local embeddings endpoint from env, with the
-// compose defaults baked in (service `embeddings`, model `qwen3-embedding`).
-func embeddingsConfig() embedConfig {
-	return embedConfig{
-		baseURL: envWithDefault("KERNEL_EMBEDDINGS_BASE_URL", "http://embeddings:11434/v1"),
-		model:   envWithDefault("KERNEL_EMBEDDINGS_MODEL", "qwen3-embedding"),
-		apiKey:  os.Getenv("KERNEL_EMBEDDINGS_API_KEY"),
-	}
-}
-
-func envWithDefault(key, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
-	}
-	return fallback
+// SupervisorEmbeddingModel returns the configured embeddings model id — used
+// by the backfill loop for the journal model stamp and gap queries.
+func (a *Activities) SupervisorEmbeddingModel(ctx context.Context) string {
+	return embeddingModelID()
 }
 
 // publishKnowledgeEmbeddings pushes computed vectors to the journal. The
 // journal gates on writer; failures degrade to a log line — the backfill loop
-// will re-embed the same ids on a later pass.
+// re-embeds the same ids on a later pass.
 func (a *Activities) publishKnowledgeEmbeddings(ctx context.Context, model string, items map[string][]float32) error {
 	payload, err := json.Marshal(map[string]any{"model": model, "items": items})
 	if err != nil {
@@ -193,11 +256,4 @@ func (a *Activities) embedLogger(ctx context.Context) log.Logger {
 		return activity.GetLogger(ctx)
 	}
 	return nil
-}
-
-// SupervisorEmbeddingModel returns the local embeddings model name — the
-// same one EmbedTexts targets. Used by the backfill loop for the model stamp
-// and by the journal gaps query.
-func (a *Activities) SupervisorEmbeddingModel(ctx context.Context) string {
-	return embeddingsConfig().model
 }

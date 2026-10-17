@@ -17,6 +17,7 @@ description: Переменные окружения, порты, страниц
 | `TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT` | `2m` | Ожидание первого токена (адаптивно +60с/МБ промпта) |
 | `TEMPORALITY_TOOL_ACTIVITY_TIMEOUT` | `16m` | Потолок активности `run_tool` |
 | `KERNEL_TOOL_MAX_SECONDS` | `900` | Потолок одной команды песочницы |
+| `KERNEL_EMBEDDINGS_MODEL` | `intfloat/multilingual-e5-small` | Модель семантического слоя знаний (ин-процесс, rembed) |
 | `KERNEL_SANDBOX_ROOT` | `/tmp` | Корень персистентных воркспейсов |
 | `KERNEL_DOCKER_BINARY` | `docker` | Путь к docker CLI |
 | `KERNEL_SECRET_MASTER_KEY` | — | Ключ шифрования секретов (`openssl rand -hex 32`) |

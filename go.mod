@@ -1,6 +1,6 @@
 module github.com/temporality-project/temporality
 
-go 1.26.0
+go 1.26.1
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
@@ -40,6 +40,7 @@ require (
 	github.com/nexus-rpc/sdk-go v0.6.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/robfig/cron v1.2.0 // indirect
+	github.com/rostamlabs/rembed v0.3.1-0.20260826212454-19d673b357bd // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect

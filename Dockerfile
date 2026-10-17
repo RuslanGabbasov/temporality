@@ -39,6 +39,9 @@ FROM alpine:3.22 AS agent-kernel
 # and drops to the unprivileged user with that group attached — no per-host
 # GID configuration in .env.
 RUN adduser -D -u 10001 temporality && apk add --no-cache util-linux
+# In-process embedding model cache (semantic knowledge layer): the named
+# volume mounts here and inherits this ownership from the image.
+RUN mkdir -p /var/cache/rembed && chown temporality /var/cache/rembed
 WORKDIR /app
 COPY --from=build /out/temporality-agent-kernel /usr/local/bin/temporality-agent-kernel
 COPY --from=build /out/test-mcp /usr/local/bin/test-mcp

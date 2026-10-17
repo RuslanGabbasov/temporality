@@ -1859,9 +1859,8 @@ func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([
 	// matcher — hints must never fail because semantics are misconfigured.
 	if request.Query != "" {
 		if vectors, err := a.EmbedTexts(ctx, request.Project, EmbedQuery, []string{request.Query}); err == nil && len(vectors) == 1 {
-			embedCfg := embeddingsConfig()
 			payload["embedding"] = vectors[0]
-			payload["embedding_model"] = embedCfg.model
+			payload["embedding_model"] = embeddingModelID()
 		}
 	}
 	if request.TeamRoot != "" {
