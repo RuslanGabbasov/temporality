@@ -220,8 +220,10 @@ come back from the API — only a set flag and a 4-character tail.
 Channel address: for Matrix — room ID (`!room:matrix.org`), for Telegram —
 chat ID. Delivery does not block execution: a transport failure is recorded
 as a `notification.sent` event with status `failed`, and the question remains
-available in the UI. Answers always happen in the app; external channels
-only deliver the question.
+available in the UI. A question can be answered right in the chat — a reply
+in a two-way channel (Matrix, Mattermost, Slack) is routed to the waiting
+run; for team questions the first reply wins. Telegram and the generic
+webhook only deliver the question.
 
 ## Inbound messages (intake)
 

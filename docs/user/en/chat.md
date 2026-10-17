@@ -31,9 +31,11 @@ question appears as a card in the chat and under **Runs → questions**. If the
 agent has notification channels configured, the question goes there too (see
 [Inbound and channels](inbound.html)).
 
-Answers always happen in the app; external channels are delivery only.
-You can cancel a pending approval — the run continues another way or ends
-gracefully.
+A channel question can be answered right in the chat: a reply in a two-way
+channel (Matrix, Mattermost, Slack) is routed to the waiting run; for team
+questions the first reply wins. Operation approve/reject decisions happen in
+the UI. You can cancel a pending approval — the run continues another way or
+ends gracefully.
 
 ## Delegation and plans
 

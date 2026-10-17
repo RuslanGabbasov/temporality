@@ -28,3 +28,22 @@
 .viewer-close { position: absolute; top: 16px; right: 22px; display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 1px solid rgba(237,232,223,.2); border-radius: 50%; background: #142522; color: #EDE8DF; font-size: 24px; line-height: 1; cursor: pointer; }
 .viewer-close:hover { border-color: rgba(237,232,223,.45); color: #F7F5F0; }
 @media (max-width: 760px) { .real-gallery { grid-template-columns: 1fr; gap: 15px; margin-top: 25px; } .gallery-shot-wide { grid-column: auto; } .hero-shot, .hero-shot img { max-height: none; } .shot-expand { opacity: 1; transform: none; font-size: 11px; } .gallery-meta { padding: 12px 13px; } .image-viewer { padding: 58px 10px 14px; } }
+
+/* ── Compare section (05) ── */
+.compare-scroll{overflow-x:auto;border:1px solid var(--tm-border);border-radius:10px;background:#101a19}
+.compare-table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px}
+.compare-table th,.compare-table td{padding:13px 14px;border-bottom:1px solid var(--tm-border);text-align:left;vertical-align:top}
+.compare-table thead th{font:500 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--tm-text-3);background:#14241f}
+.compare-table thead th.compare-us{color:var(--tm-amber)}
+.compare-table th.compare-us,.compare-table td.compare-us{background:rgba(224,155,90,.05)}
+.compare-table td:first-child{color:var(--tm-text-2);max-width:300px}
+.compare-mark-yes{color:#8ab4a0;font-weight:700}
+.compare-mark-part{color:var(--tm-amber)}
+.compare-mark-no{color:var(--tm-text-4)}
+.compare-note{margin-top:14px;font-size:11px;color:var(--tm-text-3)}
+.why-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:34px}
+.why-card{border:1px solid var(--tm-border);border-radius:8px;padding:20px;background:#14241f}
+.why-card .why-icon{font:14px var(--mono);color:var(--tm-amber)}
+.why-card h3{font-size:14.5px;font-weight:650;letter-spacing:-.03em;margin:10px 0 8px}
+.why-card p{font-size:12px;line-height:1.75;color:var(--tm-text-2);margin:0}
+@media(max-width:980px){.why-grid{grid-template-columns:1fr}}

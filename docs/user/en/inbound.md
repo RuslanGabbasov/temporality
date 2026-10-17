@@ -29,7 +29,10 @@ the in-app question mailbox (Runs → questions). External transports:
 Channels are edited in the UI without a restart (DB values override env);
 secrets are never returned — only an "is set" marker. Delivery never blocks a
 run: a transport failure is recorded as an event and the question stays in the
-UI. Answers always happen in the app.
+UI. A channel question can be answered right in the chat: a reply in a two-way
+channel (Matrix, Mattermost, Slack) is routed to the waiting run as the
+answer; for team questions the first reply wins. Operation approval
+decisions happen in the UI.
 
 ## The intake pipeline
 
