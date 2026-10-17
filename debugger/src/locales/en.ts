@@ -1280,6 +1280,10 @@ export const en: Record<string, string> = {
 
     // Users
     'users.title': 'Users',
+    'users.all_users': 'All users',
+    'users.add_to_unit': 'Add to unit',
+    'users.clear_unit_filter': 'Show every user',
+    'users.none_in_unit': 'No users in this branch yet.',
     'users.token_for': 'Token for {{name}}',
     'users.token_hint': 'Token saved. The user can sign in with it immediately — the previous token (if any) is revoked.',
     'users.copy_close': 'Copy & Close',

@@ -1280,6 +1280,10 @@ export const ru: Record<string, string> = {
 
     // Users
     'users.title': 'Пользователи',
+    'users.all_users': 'Все пользователи',
+    'users.add_to_unit': 'Добавить в подразделение',
+    'users.clear_unit_filter': 'Показать всех пользователей',
+    'users.none_in_unit': 'В этой ветке пока нет пользователей.',
     'users.token_for': 'Токен для {{name}}',
     'users.token_hint': 'Токен сохранён. Пользователь может войти с ним сразу — прежний токен (если был) аннулирован.',
     'users.copy_close': 'Копировать и закрыть',
