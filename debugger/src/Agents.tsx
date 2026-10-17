@@ -1851,11 +1851,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>{t('quality.vision_model_hint') ?? ''}</p>
           </div>
           <div style={{ marginTop: '1rem' }}>
-            <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>
-              {t('quality.embedding_local') ?? 'Embeddings run locally (rembed + multilingual-e5-small) — no configuration needed.'}
-            </p>
-          </div>
-          <div style={{ marginTop: '1rem' }}>
             <Select id="quality-schedule" labelText={t('quality.schedule_interval') ?? 'Re-run suites every'} value={scheduleDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setScheduleDraft(e.target.value)}>
               <SelectItem value="0" text={t('quality.schedule_off') ?? '— off —'} />
               <SelectItem value="6" text={t('quality.schedule_6h') ?? '6 hours'} />

@@ -194,7 +194,6 @@ export const ru: Record<string, string> = {
     'quality.hab_approval': 'Подтверждение, сек',
     'quality.hab_answer': 'Ответ, сек (база)',
     'quality.hab_wpm': 'Чтение, слов/мин',
-    'quality.embedding_local': 'Эмбеддинги считаются локально (rembed + multilingual-e5-small) — настройка не требуется.',
     'quality.judge_off': '— выключено —',
     'quality.judge_status_on': 'Супервайзер активен (источник: {{source}})',
     'quality.judge_status_off': 'Супервайзер выключен',

@@ -194,7 +194,6 @@ export const en: Record<string, string> = {
     'quality.hab_approval': 'Approval, sec',
     'quality.hab_answer': 'Answer base, sec',
     'quality.hab_wpm': 'Reading, wpm',
-    'quality.embedding_local': 'Embeddings run locally (rembed + multilingual-e5-small) — no configuration needed.',
     'quality.judge_off': '— off —',
     'quality.judge_status_on': 'Supervisor active (source: {{source}})',
     'quality.judge_status_off': 'Supervisor is off',
