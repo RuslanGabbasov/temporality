@@ -270,7 +270,9 @@ export default function Users() {
                   </div>
                   <ChannelBadges user={u} />
                 </div>
-                <Stack orientation="horizontal" gap={1}>
+                {/* Actions live in a right-hand column: four icon buttons in a
+                    horizontal row overflew the card on narrow grids. */}
+                <Stack orientation="vertical" gap={1} style={{ flexShrink: 0 }}>
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Chat} iconDescription={t('users.edit_channels') ?? 'Communication channels'} onClick={() => setChannelsUser(u)} />
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Key} iconDescription={t('users.generate_token') ?? 'Generate Token'} onClick={() => generateToken(u)} />
                   <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'} onClick={() => startEdit(u)} />
