@@ -621,6 +621,20 @@ type StreamEvent struct {
 	Data       json.RawMessage `json:"data"`
 }
 
+// RunProjectID resolves a run's project from its journal events. Delegated
+// child runs never get a workspace_run row (only API/trigger/intake starts
+// do), so journal-derived project is the universal fallback; ErrNotFound
+// means the journal has no events for the run either.
+func (s *Store) RunProjectID(ctx context.Context, runID string) (string, error) {
+	var project string
+	err := s.pool.QueryRow(ctx,
+		`SELECT project_id FROM observation_events WHERE run_id = $1 LIMIT 1`, runID).Scan(&project)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return project, err
+}
+
 // StreamRunEvents fetches observation events for a run, optionally starting
 // after a cursor (event_id). Returns events ordered by occurred_at.
 func (s *Store) StreamRunEvents(ctx context.Context, projectID, runID, afterCursor string, limit int) ([]StreamEvent, string, error) {

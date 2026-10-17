@@ -3025,9 +3025,20 @@ func main() {
 			return
 		}
 		runID := r.PathValue("runID")
+		// Child runs carry no workspace_run row; the journal resolves their
+		// project (see /trajectory).
 		run, err := ws.GetRun(r.Context(), runID)
-		if err != nil {
-			writeError(w, 404, err)
+		if err != nil && !errors.Is(err, workspace.ErrNotFound) {
+			writeError(w, 500, err)
+			return
+		}
+		project := ""
+		if err == nil {
+			project = run.ProjectID
+		} else if resolved, perr := ws.RunProjectID(r.Context(), runID); perr == nil {
+			project = resolved
+		} else {
+			writeError(w, 404, workspace.ErrNotFound)
 			return
 		}
 		flusher, ok := w.(http.Flusher)
@@ -3048,7 +3059,7 @@ func main() {
 			// the client was away, its terminal event — then continue live from
 			// the journal tail. A full replay of a long run floods the chat with
 			// hundreds of stale updates before reaching the present.
-			events, next, tErr := ws.StreamRunEventsTail(r.Context(), run.ProjectID, runID, 50)
+			events, next, tErr := ws.StreamRunEventsTail(r.Context(), project, runID, 50)
 			if tErr == nil {
 				for _, ev := range events {
 					data, _ := json.Marshal(ev)
@@ -3072,7 +3083,7 @@ func main() {
 			if done {
 				break
 			}
-			events, nextCursor, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, runID, cursor, 50)
+			events, nextCursor, eErr := ws.StreamRunEvents(r.Context(), project, runID, cursor, 50)
 			if eErr == nil {
 				for _, ev := range events {
 					data, _ := json.Marshal(ev)
@@ -3182,17 +3193,27 @@ func main() {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		run, err := ws.GetRun(r.Context(), r.PathValue("runID"))
-		if err != nil {
-			if errors.Is(err, workspace.ErrNotFound) {
-				writeError(w, 404, err)
-				return
+		runID := r.PathValue("runID")
+		// The journal is the source of truth: delegated child runs never get a
+		// workspace_run row (only API/trigger/intake starts do), so a missing
+		// row must not block the extraction. Project resolution: the run row
+		// when present, then the ?project= param, then the run's own events.
+		project := r.URL.Query().Get("project")
+		if run, err := ws.GetRun(r.Context(), runID); err == nil {
+			project = run.ProjectID
+		} else if errors.Is(err, workspace.ErrNotFound) && project == "" {
+			if resolved, perr := ws.RunProjectID(r.Context(), runID); perr == nil {
+				project = resolved
 			}
+		} else if !errors.Is(err, workspace.ErrNotFound) && project == "" {
 			writeError(w, 500, err)
 			return
 		}
-		// Fetch all events for this run from the journal.
-		events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, "", 500)
+		if project == "" {
+			writeError(w, 404, workspace.ErrNotFound)
+			return
+		}
+		events, _, eErr := ws.StreamRunEvents(r.Context(), project, runID, "", 500)
 		if eErr != nil {
 			writeError(w, 500, eErr)
 			return
@@ -3208,7 +3229,7 @@ func main() {
 				EventID:    ev.EventID,
 				OccurredAt: occurredAt,
 				Type:       ev.Type,
-				Context:    struct{ Run, Project string }{Run: run.RunID, Project: run.ProjectID},
+				Context:    struct{ Run, Project string }{Run: runID, Project: project},
 			}
 			// Parse the data JSON.
 			if ev.Data != nil {
@@ -3220,13 +3241,6 @@ func main() {
 			evLikes = append(evLikes, el)
 		}
 		trajectory := agent.ExtractTrajectory(evLikes)
-		// Debug: log event types and turn count
-		slog.Info("trajectory extraction", "events", len(evLikes), "turns", len(trajectory.Turns), "tools", len(trajectory.Tools), "tokens", trajectory.Summary.TotalTokens)
-		for i, ev := range evLikes {
-			if i < 5 || ev.Type == "model.completed" || ev.Type == "turn.started" {
-				slog.Info("  event", "type", ev.Type, "id", ev.EventID[len(ev.EventID)-10:], "data_keys", len(ev.Data))
-			}
-		}
 		writeJSON(w, 200, trajectory)
 	})
 
@@ -3284,11 +3298,17 @@ func main() {
 			return
 		}
 		extractRun := func(runID string) (*agent.Trajectory, error) {
-			run, err := ws.GetRun(r.Context(), runID)
-			if err != nil {
-				return nil, err
+			// Same journal-first project resolution as the single-run endpoint:
+			// compared runs are often delegated children without a run row.
+			project := ""
+			if run, err := ws.GetRun(r.Context(), runID); err == nil {
+				project = run.ProjectID
+			} else if resolved, perr := ws.RunProjectID(r.Context(), runID); perr == nil {
+				project = resolved
+			} else {
+				return nil, workspace.ErrNotFound
 			}
-			events, _, eErr := ws.StreamRunEvents(r.Context(), run.ProjectID, run.RunID, "", 500)
+			events, _, eErr := ws.StreamRunEvents(r.Context(), project, runID, "", 500)
 			if eErr != nil {
 				return nil, eErr
 			}
@@ -3300,7 +3320,7 @@ func main() {
 				}
 				el := agent.EventLike{
 					EventID: ev.EventID, OccurredAt: occurredAt, Type: ev.Type,
-					Context: struct{ Run, Project string }{Run: run.RunID, Project: run.ProjectID},
+					Context: struct{ Run, Project string }{Run: runID, Project: project},
 				}
 				if ev.Data != nil {
 					_ = json.Unmarshal(ev.Data, &el.Data)

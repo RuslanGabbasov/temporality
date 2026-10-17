@@ -598,7 +598,7 @@ export default function AgentRuns({ project }: { project: string }) {
       window.history.replaceState(null, '', `/agents?${query}`)
       // Fetch trajectory extraction (deterministic patterns from event stream)
       try {
-        const tResp = await fetch(`${KERNEL_API}/v1/workspace/runs/${encodeURIComponent(run)}/trajectory`, { headers: authHeaders() })
+        const tResp = await fetch(`${KERNEL_API}/v1/workspace/runs/${encodeURIComponent(run)}/trajectory?project=${encodeURIComponent(runProject)}`, { headers: authHeaders() })
         if (tResp.ok) setTrajectory(await tResp.json())
       } catch { /* ignore */ }
       // Token/cost totals for the run (cached prompt tokens billed at half

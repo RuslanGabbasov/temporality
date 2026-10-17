@@ -173,8 +173,7 @@ func ExtractTrajectory(events []EventLike) Trajectory {
 				pending.Output = stringField(d, "output")
 				pending.CompletedID = ev.EventID
 				pending.CompletedAt = ev.OccurredAt
-				if exitCode, ok := d["exit_code"]; ok {
-					code := int(exitCode.(float64))
+				if code, ok := intFieldOk(d, "exit_code"); ok {
 					pending.ExitCode = &code
 					pending.Success = code == 0
 				} else {
@@ -340,27 +339,36 @@ func stringField(d map[string]any, key string) string {
 }
 
 func intField(d map[string]any, key string) int {
-	if v, ok := d[key]; ok {
-		switch n := v.(type) {
-		case float64:
-			return int(n)
-		case int:
-			return n
-		}
+	n, _ := intFieldOk(d, key)
+	return n
+}
+
+// intFieldOk tolerantly converts journal data numbers: JSON decoding yields
+// float64 while native producers emit int/int64; anything else is absent.
+func intFieldOk(d map[string]any, key string) (int, bool) {
+	switch n := d[key].(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	default:
+		return 0, false
 	}
-	return 0
 }
 
 func int64Field(d map[string]any, key string) int64 {
-	if v, ok := d[key]; ok {
-		switch n := v.(type) {
-		case float64:
-			return int64(n)
-		case int64:
-			return n
-		}
+	switch n := d[key].(type) {
+	case float64:
+		return int64(n)
+	case int:
+		return int64(n)
+	case int64:
+		return n
+	default:
+		return 0
 	}
-	return 0
 }
 
 func containsStr(slice []string, s string) bool {
