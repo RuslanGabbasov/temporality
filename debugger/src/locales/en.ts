@@ -381,6 +381,7 @@ export const en: Record<string, string> = {
     'chat.stream.note_accepted': '⤳ Addendum accepted · consumed in turn {{turn}}',
     'chat.stream.note_dropped': '⚠ Addendum not delivered — turn budget exhausted',
     'chat.note.sent': '⤳ Sent to the current run',
+    'chat.addendum_at': 'amended at {{time}}',
 
     // Runs
     'runs.title': 'Runs',

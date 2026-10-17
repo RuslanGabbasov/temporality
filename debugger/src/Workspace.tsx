@@ -62,6 +62,10 @@ interface ChatMessage {
   /** Tool the model is streaming arguments for right now (no answer text this
    * turn) — transient, cleared when the model moves on to text. */
   liveTool?: string
+  /** User addenda sent into a RUNNING run: they augment this original task
+   *  message (reply-style, timestamped) instead of dangling at the chat
+   *  bottom after the model's answer. */
+  addenda?: { text: string; at: Date; attachments?: UploadedFile[] }[]
 }
 
 interface Conversation {
@@ -822,23 +826,14 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
     setLoading(true)
     setError('')
 
-    const userMsg: ChatMessage = { role: 'user', content, timestamp: new Date(), attachments: sentAttachments.length ? sentAttachments : undefined }
-    // Sending implies reading the reply: always follow it from the bottom,
-    // even if the user was browsing history a moment ago.
-    stickRef.current = true
-    setAtBottom(true)
-    setUnread(0)
-    const updatedConv = { ...activeConv, messages: [...activeConv.messages, userMsg] }
-    const firstLine = content || sentAttachments[0]?.name || ''
-    if (updatedConv.messages.length === 1) {
-      updatedConv.title = firstLine.slice(0, 60) + (firstLine.length > 60 ? '…' : '')
-    }
-    setConversations((prev) => prev.map((c) => c.id === updatedConv.id ? updatedConv : c))
+    const sendAttachments = sentAttachments.length ? sentAttachments : undefined
 
     // A message sent while this conversation's run is still executing is an
     // addendum to THAT run (kernel.user_note signal lands at the nearest turn
-    // boundary), not a new parallel run over the whole history.
-    const runningMsg = updatedConv.messages.filter((m) => m.role === 'assistant' && m.status === 'running' && m.runId).pop()
+    // boundary), not a new parallel run. It renders as a timestamped
+    // reply under the ORIGINAL task message — not as a dangling message at
+    // the bottom, below the model's answer.
+    const runningMsg = activeConv.messages.filter((m) => m.role === 'assistant' && m.status === 'running' && m.runId).pop()
     if (runningMsg?.runId) {
       const noteParts: string[] = []
       if (content) noteParts.push(content)
@@ -846,7 +841,21 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
       if (sentAttachments.length) noteParts.push(sentAttachments.map((a) => `[Attached file: ${a.path}]`).join('\n'))
       try {
         await workspaceApi.appendRunNote(runningMsg.runId, noteParts.join('\n\n'), project)
-        appendStreamLine(updatedConv.id, runningMsg.runId, t('chat.note.sent') ?? 'Sent to the current run')
+        // Attach the addendum to the last user message (the task source).
+        const lastUserIdx = activeConv.messages.map((m) => m.role).lastIndexOf('user')
+        if (lastUserIdx >= 0) {
+          setConversations((prev) => prev.map((c) => {
+            if (c.id !== activeConv.id) return c
+            const messages = c.messages.map((m, idx) => idx === lastUserIdx ? {
+              ...m,
+              addenda: [...(m.addenda ?? []), { text: content, at: new Date(), attachments: sendAttachments }],
+            } : m)
+            return { ...c, messages }
+          }))
+        } else {
+          // No user message to attach to (defensive) — keep the old marker.
+          appendStreamLine(activeConv.id, runningMsg.runId, t('chat.note.sent') ?? 'Sent to the current run')
+        }
         setLoading(false)
         return
       } catch (noteErr) {
@@ -860,6 +869,19 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         // history, which already includes this message.
       }
     }
+
+    const userMsg: ChatMessage = { role: 'user', content, timestamp: new Date(), attachments: sendAttachments }
+    // Sending implies reading the reply: always follow it from the bottom,
+    // even if the user was browsing history a moment ago.
+    stickRef.current = true
+    setAtBottom(true)
+    setUnread(0)
+    const updatedConv = { ...activeConv, messages: [...activeConv.messages, userMsg] }
+    const firstLine = content || sentAttachments[0]?.name || ''
+    if (updatedConv.messages.length === 1) {
+      updatedConv.title = firstLine.slice(0, 60) + (firstLine.length > 60 ? '…' : '')
+    }
+    setConversations((prev) => prev.map((c) => c.id === updatedConv.id ? updatedConv : c))
 
     try {
       // Build full conversation history as the prompt
@@ -1007,6 +1029,29 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                             <span className="chip-name">📎 {a.name}</span>
                             <span className="chip-size">{formatSize(a.size)}</span>
                           </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {msg.role === 'user' && (msg.addenda ?? []).length > 0 && (
+                      <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                        {(msg.addenda ?? []).map((addendum, addendumIndex) => (
+                          <div key={addendumIndex} style={{ borderLeft: '2px solid var(--tm-border-strong)', paddingLeft: '0.6rem' }}>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                              <span>⤳</span>
+                              <span>{t('chat.addendum_at', { time: addendum.at.toLocaleTimeString() }) ?? `Amended at ${addendum.at.toLocaleTimeString()}`}</span>
+                            </div>
+                            {addendum.text && <div style={{ fontSize: '0.82rem', whiteSpace: 'pre-wrap' }}>{addendum.text}</div>}
+                            {addendum.attachments && addendum.attachments.length > 0 && (
+                              <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                                {addendum.attachments.map((a) => (
+                                  <span key={a.path} className="chat-attachment-chip" title={a.path}>
+                                    <span className="chip-name">📎 {a.name}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         ))}
                       </div>
                     )}
