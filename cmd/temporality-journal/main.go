@@ -19,8 +19,13 @@ import (
 	"github.com/temporality-project/temporality/workspace"
 )
 
+// BuildVersion is injected at link time by the release pipeline
+// (-ldflags "-X main.buildVersion=v2026.1.0"); "dev" when built by hand.
+var buildVersion = "dev"
+
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	log.Info("temporality-journal starting", "version", buildVersion)
 	ctx := context.Background()
 	if err := controlplane.LoadFileSecrets("DATABASE_URL", "JOURNAL_AUTH_TOKENS"); err != nil {
 		log.Error("load file secrets", "error", err)

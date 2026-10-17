@@ -1,5 +1,9 @@
 FROM golang:1.27-alpine AS build
 ARG KERNEL_BUILD_TAGS=""
+# BuildVersion: stamped by the release workflow (calendar version); "dev" in
+# local builds. Lands in the binaries via -ldflags and shows up in the start
+# log and /healthz.
+ARG BUILD_VERSION="dev"
 WORKDIR /src
 COPY go.mod go.sum ./
 # Cache mounts (BuildKit) keep downloaded modules and compiled package
@@ -17,8 +21,8 @@ COPY workspace ./workspace
 COPY examples ./examples
 RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
-    CGO_ENABLED=0 go build -o /out/temporality-journal ./cmd/temporality-journal \
- && CGO_ENABLED=0 go build -tags "$KERNEL_BUILD_TAGS" -o /out/temporality-agent-kernel ./cmd/agent-kernel \
+    CGO_ENABLED=0 go build -ldflags "-X main.buildVersion=${BUILD_VERSION}" -o /out/temporality-journal ./cmd/temporality-journal \
+ && CGO_ENABLED=0 go build -tags "$KERNEL_BUILD_TAGS" -ldflags "-X main.buildVersion=${BUILD_VERSION}" -o /out/temporality-agent-kernel ./cmd/agent-kernel \
  && CGO_ENABLED=0 go build -o /out/test-mcp ./examples/test-mcp
 
 FROM alpine:3.22 AS journal
