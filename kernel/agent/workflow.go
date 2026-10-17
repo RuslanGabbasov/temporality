@@ -334,6 +334,13 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if input.SourceID == "" {
 		input.SourceID = "temporality-agent-kernel"
 	}
+	// Replay compatibility gates (docs/failure-model.md): in-flight runs carry
+	// histories recorded by older binaries. Every behavioral change to the
+	// wait paths must be gated by GetVersion, so a replay takes the code path
+	// that matches the recorded history instead of failing the workflow task
+	// on determinism checks. Called unconditionally, in this fixed order.
+	noteSteering := workflow.GetVersion(ctx, "delegation-note-steering", workflow.DefaultVersion, 1)
+	modelSchedStart := workflow.GetVersion(ctx, "model-schedule-to-start", workflow.DefaultVersion, 1)
 	// The team root seeds the shared context handle: every child run of the
 	// program (slots, reviewers, delegates below them) inherits it so scratch
 	// paths and run-scoped hints stay addressable across the tree.
@@ -850,28 +857,33 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			// wait on the child AND the note signal together — a chat addendum
 			// wakes the lead immediately and is signalled into every still-
 			// running child's mailbox, instead of sitting queued until the
-			// whole delegation completes.
+			// whole delegation completes. Gated by version: pre-gate histories
+			// replay the plain blocking wait.
 			var child RunResult
 			var childErr error
-			childDone := false
-			noteChannel := workflow.GetSignalChannel(ctx, UserNoteSignal)
-			selector := workflow.NewSelector(ctx)
-			selector.AddFuture(p.future, func(f workflow.Future) {
-				childDone = true
-				childErr = f.Get(ctx, &child)
-			})
-			selector.AddReceive(noteChannel, func(c workflow.ReceiveChannel, more bool) {
-				if notes := pendingUserNotes(ctx); len(notes) > 0 {
-					running := runningPlanChildren(inflightPlan, p)
-					// Best-effort: a journaling failure here must not fail the
-					// child (the callback's only error channel is childErr, and
-					// the child is alive) — the note is already delivered.
-					_ = forwardUserNotesToChildren(ctx, activityCtx, state, turn, notes, running)
-					appendForwardedNotes(&messages, notes)
+			if noteSteering == 1 {
+				childDone := false
+				noteChannel := workflow.GetSignalChannel(ctx, UserNoteSignal)
+				selector := workflow.NewSelector(ctx)
+				selector.AddFuture(p.future, func(f workflow.Future) {
+					childDone = true
+					childErr = f.Get(ctx, &child)
+				})
+				selector.AddReceive(noteChannel, func(c workflow.ReceiveChannel, more bool) {
+					if notes := pendingUserNotes(ctx); len(notes) > 0 {
+						running := runningPlanChildren(inflightPlan, p)
+						// Best-effort: a journaling failure here must not fail the
+						// child (the callback's only error channel is childErr, and
+						// the child is alive) — the note is already delivered.
+						_ = forwardUserNotesToChildren(ctx, activityCtx, state, turn, notes, running)
+						appendForwardedNotes(&messages, notes)
+					}
+				})
+				for !childDone {
+					selector.Select(ctx)
 				}
-			})
-			for !childDone {
-				selector.Select(ctx)
+			} else {
+				childErr = p.future.Get(ctx, &child)
 			}
 			if childErr == nil {
 				// Subtree rollup: the child's totals (its own plus its children)
@@ -1150,7 +1162,12 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		// call whose worker died (restart, deploy) sits silent for up to the whole
 		// ScheduleToClose (65m) while the UI shows «ждём первый токен» — the
 		// attempt fails after the timeout and the retry ladder takes over.
-		modelOpts := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToStartTimeout: 5 * time.Minute, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
+		// Gated by version: the extra timeout field is part of the activity
+		// schedule command, so pre-gate histories must replay without it.
+		modelOpts := workflow.ActivityOptions{StartToCloseTimeout: ModelCallActivityTimeout, ScheduleToCloseTimeout: ModelCallActivityTimeout*3 + 5*time.Minute, RetryPolicy: &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: 30 * time.Second, MaximumAttempts: 3}}
+		if modelSchedStart == 1 {
+			modelOpts.ScheduleToStartTimeout = 5 * time.Minute
+		}
 		if err := executeModelWithNudge(ctx, activityCtx, state, modelOpts, modelReq, turn, &completion); err != nil {
 			failureDetail := boundedFailureDetail(err)
 			if eventErr := emit(activityCtx, state, "model.failed", map[string]any{"turn": turn, "model": input.Model, "error_type": "activity_failed", "error": failureDetail}); eventErr != nil {
@@ -1256,30 +1273,36 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			// Mid-delegation steering (docs/agent-delegation.md §steering):
 			// same as the plan loop — a chat addendum during the wait is
 			// signalled straight into the running children's note mailboxes.
+			// Gated by version: pre-gate histories replay the plain blocking
+			// wait, which is what their events were recorded against.
 			var childErr error
-			childDone := false
-			noteChannel := workflow.GetSignalChannel(ctx, UserNoteSignal)
-			selector := workflow.NewSelector(ctx)
-			selector.AddFuture(p.future, func(f workflow.Future) {
-				childDone = true
-				childErr = f.Get(ctx, &child)
-			})
-			selector.AddReceive(noteChannel, func(c workflow.ReceiveChannel, _ bool) {
-				if notes := pendingUserNotes(ctx); len(notes) > 0 {
-					// p is still in inflight here (the width gate awaits it before
-					// removing it), so inflight alone covers every running child.
-					running := make([]string, 0, len(inflight))
-					for _, d := range inflight {
-						running = append(running, d.childRunID)
+			if noteSteering == 1 {
+				childDone := false
+				noteChannel := workflow.GetSignalChannel(ctx, UserNoteSignal)
+				selector := workflow.NewSelector(ctx)
+				selector.AddFuture(p.future, func(f workflow.Future) {
+					childDone = true
+					childErr = f.Get(ctx, &child)
+				})
+				selector.AddReceive(noteChannel, func(c workflow.ReceiveChannel, _ bool) {
+					if notes := pendingUserNotes(ctx); len(notes) > 0 {
+						// p is still in inflight here (the width gate awaits it before
+						// removing it), so inflight alone covers every running child.
+						running := make([]string, 0, len(inflight))
+						for _, d := range inflight {
+							running = append(running, d.childRunID)
+						}
+						// Best-effort journaling: the child is alive, a lead-side
+						// journaling failure must not turn into childErr.
+						_ = forwardUserNotesToChildren(ctx, activityCtx, state, turn, notes, running)
+						appendForwardedNotes(&messages, notes)
 					}
-					// Best-effort journaling: the child is alive, a lead-side
-					// journaling failure must not turn into childErr.
-					_ = forwardUserNotesToChildren(ctx, activityCtx, state, turn, notes, running)
-					appendForwardedNotes(&messages, notes)
+				})
+				for !childDone {
+					selector.Select(ctx)
 				}
-			})
-			for !childDone {
-				selector.Select(ctx)
+			} else {
+				childErr = p.future.Get(ctx, &child)
 			}
 			if childErr == nil {
 				subtree.tokens += child.TotalTokens
