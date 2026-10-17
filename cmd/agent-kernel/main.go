@@ -6591,6 +6591,11 @@ func main() {
 	// in-process embedding model, then backfill knowledge missing a vector.
 	activities.StartEmbeddingPreload()
 	startEmbeddingBackfillLoop(ctx, log, activities, observationURL, journalToken)
+	// Supervisor triage (docs/supervisor-model.md §3 wave A1): diagnose
+	// failed runs with the supervisor model, journal supervisor.verdict.
+	startSupervisorTriageLoop(ctx, log, activities, observationURL, journalToken, func(ctx context.Context) (*llm.Client, error) {
+		return judgeModelClient(ctx, ws, secretMasterKey)
+	})
 	// Scheduled quality runs (docs/agent-quality-loop.md §8.1): the cadence is
 	// an operator setting the loop re-reads every minute, so UI changes apply
 	// without a restart. Anchored on the newest scheduled run row.

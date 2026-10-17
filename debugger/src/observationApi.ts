@@ -199,6 +199,9 @@ export interface HealthStats {
   totals: { model_calls: number; model_failures: number; in_flight: number; nudged: number }
   runs: { started: number; completed: number; failed: number; cancelled: number; running_now: number }
   approvals: { requested: number; granted: number; rejected: number; timed_out: number; auto_granted: number; pending: number; wait_ms_avg: number }
+  /** Human factors (docs/supervisor-model.md §5): HAB — estimated attention,
+   *  HWT — wall-clock wait for a human, flow efficiency = HAB/(HAB+HWT). */
+  human?: { approval_decisions: number; ask_human_answered: number; hab_seconds: number; hwt_seconds: number; flow_efficiency: number }
 }
 
 // ── Explore engine contracts (observation/explore.go) ─────────────────────────

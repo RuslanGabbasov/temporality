@@ -18,6 +18,7 @@ description: Переменные окружения, порты, страниц
 | `TEMPORALITY_TOOL_ACTIVITY_TIMEOUT` | `16m` | Потолок активности `run_tool` |
 | `KERNEL_TOOL_MAX_SECONDS` | `900` | Потолок одной команды песочницы |
 | `KERNEL_EMBEDDINGS_MODEL` | `intfloat/multilingual-e5-small` | Модель семантического слоя знаний (ин-процесс, rembed) |
+| `KERNEL_SUPERVISOR_TRIAGE_INTERVAL` | `2m` | Периодичность триажа упавших ранов (`0` — выключить) |
 | `KERNEL_SANDBOX_ROOT` | `/tmp` | Корень персистентных воркспейсов |
 | `KERNEL_DOCKER_BINARY` | `docker` | Путь к docker CLI |
 | `KERNEL_SECRET_MASTER_KEY` | — | Ключ шифрования секретов (`openssl rand -hex 32`) |
