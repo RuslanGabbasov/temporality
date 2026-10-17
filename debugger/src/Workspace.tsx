@@ -1033,6 +1033,15 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                       </div>
                     )}
 
+                    {msg.content && msg.role === 'assistant' ? (
+                      <Markdown content={linkifyWorkspacePaths(msg.content, project)} onFile={(path) => void onFileLink(path)} />
+                    ) : msg.content ? (
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                    ) : null}
+
+                    {/* Mid-run addenda trail the original message (reply-style):
+                        the first line is the text, everything amended later
+                        stacks below with its timestamp. */}
                     {msg.role === 'user' && (msg.addenda ?? []).length > 0 && (
                       <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                         {(msg.addenda ?? []).map((addendum, addendumIndex) => (
@@ -1055,12 +1064,6 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
                         ))}
                       </div>
                     )}
-
-                    {msg.content && msg.role === 'assistant' ? (
-                      <Markdown content={linkifyWorkspacePaths(msg.content, project)} onFile={(path) => void onFileLink(path)} />
-                    ) : msg.content ? (
-                      <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
-                    ) : null}
 
                     {msg.role === 'assistant' && msg.status === 'running' && msg.liveTool && (
                       <div style={{ color: 'var(--tm-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: msg.content ? '0.35rem' : 0 }}>
