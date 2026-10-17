@@ -137,6 +137,27 @@ func (f *fakeSandboxProfileStore) SetCustomProfileImage(_ context.Context, id, i
 	return nil
 }
 
+func (f *fakeSandboxProfileStore) SetExternalProfileImage(_ context.Context, id, image string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	current, ok := f.profiles[id]
+	if !ok {
+		return workspace.ErrNotFound
+	}
+	if current.Builtin {
+		return errors.New("not custom")
+	}
+	if current.Base != "" {
+		return errors.New("recipe-based profile must be built, not pulled")
+	}
+	if !workspace.IsDigestPinnedImage(image) {
+		return errors.New("not digest pinned")
+	}
+	current.Image = image
+	f.profiles[id] = current
+	return nil
+}
+
 func (f *fakeSandboxProfileStore) DeleteSandboxProfile(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -173,6 +194,19 @@ func (b fakeProfileBuilders) Build(context.Context, sandbox.ProfileDefinition) (
 		return "", b.buildErr
 	}
 	return "temporality-sandbox-test@sha256:" + strings.Repeat("cd", 32), nil
+}
+
+func (b fakeProfileBuilders) Pull(_ context.Context, reference string) (string, error) {
+	if b.buildErr != nil {
+		return "", b.buildErr
+	}
+	// The pinned form mirrors a real pull: whatever the input, the answer is
+	// a digest-pinned reference.
+	repo := reference
+	if idx := strings.IndexAny(repo, ":@"); idx > 0 {
+		repo = repo[:idx]
+	}
+	return repo + "@sha256:" + strings.Repeat("ef", 32), nil
 }
 
 type captureProfileOutbox struct {
@@ -437,4 +471,55 @@ func TestRebuildKeepsResourceOverrides(t *testing.T) {
 	require.Equal(t, "3g", built.Memory)
 	require.Contains(t, built.CacheEnv, "EXTRA_CACHE=/cache/extra")
 	require.NotEmpty(t, built.Image)
+}
+
+func TestPreviewRecipe(t *testing.T) {
+	store := newFakeSandboxProfileStore(builtinProfileFixture())
+	server := newSandboxProfileServer(t, store, &captureProfileOutbox{}, fakeProfileBuilders{})
+	defer server.Close()
+
+	status, body := profileRequest(t, server, http.MethodPost, "writertoken", "/v1/workspace/sandbox-profiles/preview",
+		`{"base":"python","packages":["gcc","linux-headers"]}`)
+	require.Equal(t, 200, status, body)
+	var payload struct {
+		Dockerfile string `json:"dockerfile"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &payload))
+	require.Contains(t, payload.Dockerfile, "FROM python:3.12-alpine")
+	require.Contains(t, payload.Dockerfile, "apk add --no-cache gcc linux-headers")
+
+	// Unknown base and shell-bearing packages are rejected before any Docker.
+	status, _ = profileRequest(t, server, http.MethodPost, "writertoken", "/v1/workspace/sandbox-profiles/preview",
+		`{"base":"invented","packages":[]}`)
+	require.Equal(t, 422, status)
+	status, _ = profileRequest(t, server, http.MethodPost, "writertoken", "/v1/workspace/sandbox-profiles/preview",
+		`{"base":"python","packages":["gcc; rm -rf /"]}`)
+	require.Equal(t, 422, status)
+}
+
+func TestPullExternalImagePinsDigest(t *testing.T) {
+	external := workspace.SandboxProfile{ID: "ext-tool", Name: "External"}
+	recipe := workspace.SandboxProfile{ID: "recipe-tool", Name: "Recipe", Base: "python", Packages: []string{"gcc"}}
+	store := newFakeSandboxProfileStore(builtinProfileFixture(), external, recipe)
+	outbox := &captureProfileOutbox{}
+	server := newSandboxProfileServer(t, store, outbox, fakeProfileBuilders{})
+	defer server.Close()
+
+	// A recipe-based profile refuses the pull.
+	status, _ := profileRequest(t, server, http.MethodPost, "writertoken", "/v1/workspace/sandbox-profiles/recipe-tool/pull",
+		`{"reference":"repo/tool:latest"}`)
+	require.Equal(t, 409, status)
+
+	status, body := profileRequest(t, server, http.MethodPost, "writertoken", "/v1/workspace/sandbox-profiles/ext-tool/pull",
+		`{"reference":"registry.local/tool:1.4"}`)
+	require.Equal(t, 200, status, body)
+	var pinned struct {
+		Image string `json:"image"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &pinned))
+	require.Contains(t, pinned.Image, "registry.local/tool@sha256:")
+
+	built := outbox.byType("sandbox.profile.built")
+	require.Len(t, built, 1)
+	require.Equal(t, true, built[0].Data["pulled"])
 }

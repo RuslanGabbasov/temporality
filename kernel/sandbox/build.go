@@ -242,6 +242,48 @@ func ImageAvailable(ctx context.Context, binary, ref string) bool {
 	return inspect.Run() == nil
 }
 
+// PullImage pulls an external image reference, resolves it to the local
+// digest (repo@sha256:…) and verifies it runs exactly the way the kernel
+// will (--pull=never). A mutable tag reference is accepted on pull — the
+// point is to pin whatever the tag resolves to today — but the returned
+// reference is always digest-pinned, so runs stay reproducible until the
+// next explicit pull.
+func PullImage(ctx context.Context, binary, reference string) (string, error) {
+	reference = strings.TrimSpace(reference)
+	if reference == "" {
+		return "", fmt.Errorf("image reference is required")
+	}
+	if err := PreflightSocket(ctx, binary); err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, buildTimeout)
+	defer cancel()
+	pull := exec.CommandContext(ctx, binary, "pull", reference)
+	var output limitedBuffer
+	pull.Stdout, pull.Stderr = &output, &output
+	if err := pull.Run(); err != nil {
+		ctxErr := ctx.Err()
+		if ctxErr != nil {
+			return "", fmt.Errorf("image pull timed out after %s: %w", buildTimeout, ctxErr)
+		}
+		return "", fmt.Errorf("image pull: %w: %s", err, output.String())
+	}
+	// A tag reference needs the local tag→digest resolution; a digest-pinned
+	// input is already its own answer but still gets verified below.
+	ref := reference
+	if !strings.Contains(ref, "@sha256:") {
+		pinned, err := pinnedRef(ctx, binary, ref)
+		if err != nil {
+			return "", err
+		}
+		ref = pinned
+	}
+	if err := verifyPinned(ctx, binary, ref); err != nil {
+		return "", err
+	}
+	return ref, nil
+}
+
 // pinnedRef resolves a tag to its digest-pinned reference. The repository
 // name is derived from the tag (temporality-sandbox-node:latest →
 // temporality-sandbox-node), so profile builds pin under their own repo.

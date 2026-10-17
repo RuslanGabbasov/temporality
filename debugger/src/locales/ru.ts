@@ -1319,6 +1319,16 @@ export const ru: Record<string, string> = {
     'sandbox.field_packages': 'Доп. пакеты (через запятую)',
     'sandbox.recipe_hint': 'Профиль собирается поверх базового рецепта: платформа соберёт образ сама (кнопка «Собрать»), менять нужно только пакеты и лимиты.',
     'sandbox.base_tag': 'база: {{base}}',
+    'sandbox.recipe_preview': 'Предпросмотр Dockerfile',
+    'sandbox.pull': 'Скачать',
+    'sandbox.pull_title': 'Скачать внешний образ',
+    'sandbox.pull_hint': 'Референс скачается сейчас и закрепится по digest; раны воспроизводимы до следующего явного обновления.',
+    'sandbox.pull_reference': 'Референс образа',
+    'sandbox.pulled': 'скачан',
+    'sandbox.pulled_notice': 'Профиль «{{name}}» обновлён из реестра.',
+    'sandbox.history': 'История',
+    'sandbox.history_heading': 'История сборок',
+    'sandbox.history_empty': 'Сборок в журнале пока нет.',
 
     // Providers
     'providers.title': 'Провайдеры моделей',

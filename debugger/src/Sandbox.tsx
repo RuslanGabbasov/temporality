@@ -12,8 +12,9 @@ import {
   Heading,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, TrashCan, Renew, Edit } from '@carbon/icons-react'
+import { Add, TrashCan, Renew, Edit, Download } from '@carbon/icons-react'
 import { workspaceApi, type SandboxProfile } from './workspaceApi'
+import { observationApi } from './observationApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
@@ -58,6 +59,13 @@ export default function Sandbox({ project }: { project?: string }) {
   const [wizardBusy, setWizardBusy] = useState(false)
   const [wizardError, setWizardError] = useState('')
   const [draftRationale, setDraftRationale] = useState('')
+  // Layer-builder preview (§5.1 phase 2): the composed Dockerfile for the
+  // current base+packages, refreshed as the operator edits.
+  const [recipePreview, setRecipePreview] = useState('')
+  // Build history (§5.1 phase 2): journal events per opened profile.
+  const [historyFor, setHistoryFor] = useState('')
+  const [history, setHistory] = useState<{ at: string; image: string; pulled?: boolean }[]>([])
+  const [pullRef, setPullRef] = useState<{ id: string; reference: string } | null>(null)
 
   const visible = profiles.filter((p) => matchesFilter(filter, p.name, p.id, p.description, ...(p.toolchains ?? [])))
 
@@ -81,6 +89,47 @@ export default function Sandbox({ project }: { project?: string }) {
     } catch (f) { setError(message(f)) }
     finally { setBuilding('') }
   }
+
+  // Pull an external image and pin the resolved digest into the profile.
+  const pull = async (p: SandboxProfile, reference: string) => {
+    setBuilding(p.id); setError(''); setNotice('')
+    try {
+      const updated = await workspaceApi.pullSandboxProfile(p.id, reference)
+      setProfiles((prev) => prev.map((x) => (x.id === p.id ? { ...x, image: updated.image, available: false } : x)))
+      setNotice(t('sandbox.pulled_notice', { name: p.name }))
+    } catch (f) { setError(message(f)) }
+    finally { setBuilding('') }
+  }
+
+  // Build history: the journal keeps every sandbox.profile.built for the
+  // profile; the newest ones render in the tile.
+  const openHistory = async (p: SandboxProfile) => {
+    if (historyFor === p.id) { setHistoryFor(''); return }
+    setHistoryFor(p.id); setHistory([])
+    try {
+      const page = await observationApi.events(undefined, undefined, undefined, undefined, { type: 'sandbox.profile.built', limit: 100 })
+      const rows = (page.events ?? [])
+        .filter((e) => String(e.data?.profile ?? '') === p.id)
+        .slice(0, 8)
+        .map((e) => ({ at: e.occurred_at, image: String(e.data?.image ?? ''), pulled: Boolean(e.data?.pulled) }))
+      setHistory(rows)
+    } catch { /* history is best-effort */ }
+  }
+
+  // Compose the Dockerfile preview whenever the recipe inputs change.
+  useEffect(() => {
+    if (showForm && !editing?.builtin && form.base) {
+      const packages = form.packages.split(',').map((s) => s.trim()).filter(Boolean)
+      const timer = setTimeout(() => {
+        workspaceApi.previewSandboxRecipe(form.base, packages)
+          .then((r) => setRecipePreview(r.dockerfile))
+          .catch(() => setRecipePreview(''))
+      }, 300)
+      return () => clearTimeout(timer)
+    }
+    setRecipePreview('')
+    return undefined
+  }, [showForm, editing, form.base, form.packages])
 
   const remove = async (p: SandboxProfile) => {
     const ok = await confirmDialog({
@@ -214,8 +263,21 @@ export default function Sandbox({ project }: { project?: string }) {
                     </Button>
                   )}
                   {!p.builtin && !p.base && (
+                    <Button
+                      size="sm"
+                      kind="secondary"
+                      renderIcon={Download}
+                      disabled={building === p.id}
+                      iconDescription={t('sandbox.pull_hint') ?? 'Pull a reference and pin its digest'}
+                      onClick={() => setPullRef({ id: p.id, reference: '' })}
+                    >
+                      {building === p.id ? t('sandbox.building') : t('sandbox.pull') ?? 'Pull'}
+                    </Button>
+                  )}
+                  {!p.builtin && !p.base && (
                     <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} onClick={() => void remove(p)}>{t('action.delete')}</Button>
                   )}
+                  <Button size="sm" kind="ghost" onClick={() => void openHistory(p)}>{t('sandbox.history') ?? 'History'}</Button>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.5rem', flexWrap: 'wrap', alignItems: 'center', opacity: p.image ? 1 : 0.55 }}>
@@ -231,6 +293,22 @@ export default function Sandbox({ project }: { project?: string }) {
                 {p.scratch_size && <Tag type="gray" size="sm">scratch {p.scratch_size}</Tag>}
               </div>
               {p.image && <p style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', marginTop: '0.35rem', wordBreak: 'break-all' }}>{p.image}</p>}
+              {historyFor === p.id && (
+                <div style={{ marginTop: '0.4rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.4rem', fontSize: '0.72rem' }}>
+                  <div style={{ color: 'var(--tm-text-3)', marginBottom: '0.2rem' }}>{t('sandbox.history_heading') ?? 'Build history'}</div>
+                  {history.length === 0 ? (
+                    <p style={{ color: 'var(--tm-text-3)', margin: 0 }}>{t('sandbox.history_empty') ?? 'No builds journaled yet.'}</p>
+                  ) : (
+                    history.map((h, hi) => (
+                      <div key={hi} style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                        <span style={{ color: 'var(--tm-text-3)', flexShrink: 0 }}>{new Date(h.at).toLocaleString()}</span>
+                        {h.pulled && <Tag type="cool-gray" size="sm">{t('sandbox.pulled') ?? 'pulled'}</Tag>}
+                        <span style={{ fontFamily: 'var(--tm-font-mono)', fontSize: '0.66rem', wordBreak: 'break-all' }}>{h.image}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </Tile>
           ))}
           {visible.length === 0 && (
@@ -267,6 +345,12 @@ export default function Sandbox({ project }: { project?: string }) {
             {!editing?.builtin && form.base && (
               <TextInput id="sp-packages" labelText={t('sandbox.field_packages')} value={form.packages} onChange={(e) => setForm({ ...form, packages: e.target.value })} placeholder="gcc, musl-dev" />
             )}
+            {!editing?.builtin && form.base && recipePreview && (
+              <div>
+                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', marginBottom: '0.25rem' }}>{t('sandbox.recipe_preview') ?? 'Dockerfile preview'}</div>
+                <pre style={{ background: 'var(--tm-surface-2)', borderRadius: '4px', padding: '0.5rem', fontSize: '0.7rem', overflowX: 'auto', margin: 0, whiteSpace: 'pre-wrap' }}>{recipePreview}</pre>
+              </div>
+            )}
             {!editing?.builtin && !form.base && (
               <TextInput id="sp-image" labelText={t('sandbox.field_image')} value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} placeholder="registry.local/toolbox@sha256:…" />
             )}
@@ -284,6 +368,34 @@ export default function Sandbox({ project }: { project?: string }) {
               <Button onClick={() => void saveCustom()} disabled={!form.id.trim() || !form.name.trim() || (!editing && !form.base && !form.image.trim())}>{editing ? t('action.save') : t('action.create')}</Button>
             </div>
           </Stack>
+        </AppModal>
+      )}
+
+      {/* Pull dialog (§5.1 phase 2): resolve an external reference to a
+          digest and pin it into the profile. */}
+      {pullRef && (
+        <AppModal onClose={() => setPullRef(null)} panelStyle={{ width: '520px' }}>
+          <Heading>{t('sandbox.pull_title') ?? 'Pull external image'}</Heading>
+          <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>{t('sandbox.pull_hint') ?? 'The reference is pulled now and pinned by digest; runs stay reproducible until the next explicit pull.'}</p>
+          <TextInput
+            id="sp-pull-ref"
+            labelText={t('sandbox.pull_reference') ?? 'Image reference'}
+            value={pullRef.reference}
+            onChange={(e) => setPullRef({ ...pullRef, reference: e.target.value })}
+            placeholder="registry.local/toolbox:1.4"
+            autoFocus
+          />
+          <div className="form-actions">
+            <Button kind="secondary" onClick={() => setPullRef(null)}>{t('action.cancel')}</Button>
+            <Button
+              disabled={!pullRef.reference.trim() || building === pullRef.id}
+              onClick={() => {
+                const target = profiles.find((p) => p.id === pullRef.id)
+                setPullRef(null)
+                if (target) void pull(target, pullRef.reference.trim())
+              }}
+            >{building ? t('sandbox.building') : t('sandbox.pull') ?? 'Pull'}</Button>
+          </div>
         </AppModal>
       )}
 

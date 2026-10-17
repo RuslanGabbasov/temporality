@@ -30,6 +30,7 @@ type sandboxProfileStore interface {
 	UpdateSandboxProfile(ctx context.Context, p workspace.SandboxProfile) error
 	SetSandboxProfileImage(ctx context.Context, id, image string) error
 	SetCustomProfileImage(ctx context.Context, id, image string) error
+	SetExternalProfileImage(ctx context.Context, id, image string) error
 	DeleteSandboxProfile(ctx context.Context, id string) error
 	RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error
 }
@@ -45,6 +46,7 @@ type sandboxProfileOutbox interface {
 type sandboxProfileBuilders interface {
 	ImageAvailable(ctx context.Context, ref string) bool
 	Build(ctx context.Context, def sandbox.ProfileDefinition) (string, error)
+	Pull(ctx context.Context, reference string) (string, error)
 }
 
 type dockerProfileBuilder struct {
@@ -57,6 +59,10 @@ func (b dockerProfileBuilder) ImageAvailable(ctx context.Context, ref string) bo
 
 func (b dockerProfileBuilder) Build(ctx context.Context, def sandbox.ProfileDefinition) (string, error) {
 	return sandbox.BuildDefinition(ctx, b.binary, def)
+}
+
+func (b dockerProfileBuilder) Pull(ctx context.Context, reference string) (string, error) {
+	return sandbox.PullImage(ctx, b.binary, reference)
 }
 
 func sandboxDockerBinary() string {
@@ -183,6 +189,70 @@ func RegisterSandboxProfileRoutes(mux *http.ServeMux, gate *controlplane.Gate, w
 		_ = ws.RecordAccessAudit(r.Context(), actor, workspace.AuditSandboxProfileDeleted, "sandbox_profile", id, nil)
 		emitSandboxProfileEvent(r.Context(), events, "sandbox.profile.deleted", id, map[string]any{"profile": id, "by": actor})
 		writeJSON(w, 200, map[string]any{"deleted": id})
+	})
+
+	mux.HandleFunc("POST /v1/workspace/sandbox-profiles/preview", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req struct {
+			Base     string   `json:"base"`
+			Packages []string `json:"packages"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		// The composed recipe without touching Docker: the layer-builder UI
+		// shows the operator exactly what a build would produce (docs/
+		// sandbox-profiles.md §5.1) before any image exists.
+		def, err := sandbox.CustomDefinition("preview", req.Base, req.Packages)
+		if err != nil {
+			writeError(w, 422, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"dockerfile": def.Dockerfile})
+	})
+
+	mux.HandleFunc("POST /v1/workspace/sandbox-profiles/{id}/pull", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		id := r.PathValue("id")
+		var req struct {
+			Reference string `json:"reference"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		profile, err := ws.GetSandboxProfile(r.Context(), id)
+		if err != nil {
+			writeSandboxProfileError(w, err)
+			return
+		}
+		if profile.Builtin || profile.Base != "" {
+			writeError(w, 409, fmt.Errorf("profile %q composes on a recipe; use build, not pull", id))
+			return
+		}
+		ref, err := builders.Pull(r.Context(), req.Reference)
+		if err != nil {
+			writeError(w, 502, err)
+			return
+		}
+		if err := ws.SetExternalProfileImage(r.Context(), id, ref); err != nil {
+			writeSandboxProfileError(w, err)
+			return
+		}
+		actor := requestSubject(r)
+		_ = ws.RecordAccessAudit(r.Context(), actor, workspace.AuditSandboxProfileBuilt, "sandbox_profile", id, map[string]any{"image": ref, "pulled": true})
+		emitSandboxProfileEvent(r.Context(), events, "sandbox.profile.built", id, map[string]any{"profile": id, "image": ref, "by": actor, "pulled": true})
+		updated, gErr := ws.GetSandboxProfile(r.Context(), id)
+		if gErr != nil {
+			writeError(w, 500, gErr)
+			return
+		}
+		writeJSON(w, 200, updated)
 	})
 
 	mux.HandleFunc("POST /v1/workspace/sandbox-profiles/{id}/build", func(w http.ResponseWriter, r *http.Request) {

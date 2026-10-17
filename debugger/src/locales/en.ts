@@ -1319,6 +1319,16 @@ export const en: Record<string, string> = {
     'sandbox.field_packages': 'Extra packages (comma-separated)',
     'sandbox.recipe_hint': 'The profile composes on a base recipe: the platform builds the image for you (the Build button) — you only choose packages and limits.',
     'sandbox.base_tag': 'base: {{base}}',
+    'sandbox.recipe_preview': 'Dockerfile preview',
+    'sandbox.pull': 'Pull',
+    'sandbox.pull_title': 'Pull external image',
+    'sandbox.pull_hint': 'The reference is pulled now and pinned by digest; runs stay reproducible until the next explicit pull.',
+    'sandbox.pull_reference': 'Image reference',
+    'sandbox.pulled': 'pulled',
+    'sandbox.pulled_notice': 'Profile “{{name}}” updated from the registry.',
+    'sandbox.history': 'History',
+    'sandbox.history_heading': 'Build history',
+    'sandbox.history_empty': 'No builds journaled yet.',
 
     // Providers
     'providers.title': 'Model Providers',

@@ -379,6 +379,36 @@ func (s *Store) SetSandboxProfileImage(ctx context.Context, id, image string) er
 	return nil
 }
 
+// SetExternalProfileImage pins a pulled external image into a custom
+// profile without a base recipe (docs/sandbox-profiles.md §5.1 phase 2):
+// docker pull resolved the reference to a local digest, the row carries it
+// like a hand-typed one — but audited and journaled.
+func (s *Store) SetExternalProfileImage(ctx context.Context, id, image string) error {
+	existing, err := s.GetSandboxProfile(ctx, id)
+	if err != nil {
+		return err
+	}
+	if existing.Builtin {
+		return fmt.Errorf("%w: %s is a builtin profile", ErrProfileBuiltin, id)
+	}
+	if existing.Base != "" {
+		return fmt.Errorf("profile %s composes on a base recipe; build it instead of pulling", id)
+	}
+	if !IsDigestPinnedImage(image) {
+		return fmt.Errorf("image %q must be pinned by a sha256 digest", image)
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_sandbox_profile SET image=$2, updated_at=now() WHERE id=$1 AND builtin = FALSE`,
+		id, image)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SetCustomProfileImage pins a freshly built digest into a recipe-based
 // custom profile. Unlike the builtin variant it touches no metadata — a
 // custom row owns its name/description/toolchains.

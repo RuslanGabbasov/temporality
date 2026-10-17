@@ -1113,6 +1113,13 @@ export const workspaceApi = {
   // description -> sandbox profile draft from the supervisor-scope model.
   sandboxBuilder: (description: string) =>
     request<SandboxDraft>('/v1/workspace/sandbox-profiles/builder', { method: 'POST', body: JSON.stringify({ description }) }),
+  // Layer-builder preview (docs/sandbox-profiles.md §5.1 phase 2): the exact
+  // Dockerfile a build would run, composed without touching Docker.
+  previewSandboxRecipe: (base: string, packages: string[]) =>
+    request<{ dockerfile: string }>('/v1/workspace/sandbox-profiles/preview', { method: 'POST', body: JSON.stringify({ base, packages }) }),
+  // Pull an external image reference and pin its digest into the profile.
+  pullSandboxProfile: (id: string, reference: string) =>
+    request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${encodeURIComponent(id)}/pull`, { method: 'POST', body: JSON.stringify({ reference }) }),
   buildSandboxProfile: (id: string) =>
     request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${id}/build`, { method: 'POST' }),
   createSandboxProfile: (data: Partial<SandboxProfile> & { id: string; name: string }) =>
