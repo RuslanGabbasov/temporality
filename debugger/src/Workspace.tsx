@@ -128,8 +128,10 @@ export function formatStreamEvent(type: string, outer: any, t: Translate, locale
       return t('chat.stream.completed', { turns: pluralT(t, locale, 'chat.stream.turns_n', Number(d.turns ?? 0)) })
     case 'run.user_note':
       // Confirmation that a mid-run chat message was drained into the model's
-      // conversation (turn = the turn that will consume it).
-      return t('chat.stream.note_accepted', { turn: String(d.turn ?? '') })
+      // conversation (turn = the turn that will consume it). When the lead was
+      // blocked on a delegation, the note was also steered into the running
+      // children's mailboxes.
+      return t('chat.stream.note_accepted', { turn: String(d.turn ?? '') }) + (d.forwarded ? t('chat.stream.note_forwarded') : '')
     case 'run.note_dropped':
       return t('chat.stream.note_dropped', { turn: String(d.turn ?? '') })
     case 'run.failed':

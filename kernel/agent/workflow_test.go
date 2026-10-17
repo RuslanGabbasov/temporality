@@ -1313,6 +1313,113 @@ func TestAgentRunDelegationWidthLimit(t *testing.T) {
 	require.Less(t, completedIdx[0], completedIdx[1])
 }
 
+// A chat addendum arriving while the lead is blocked on a delegation must be
+// steered into the running child immediately (docs/agent-delegation.md
+// §steering): the lead journals run.user_note with forwarded_to and the
+// child's model meets the note at its own nearest turn — not after the whole
+// delegation lands.
+func TestAgentRunDelegationNoteSteering(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+
+	// The child runs two tool turns (turns 1-2) and parks inside its turn-3
+	// model call until the test releases it — the lead is blocked in
+	// awaitDelegation the whole time. The note must reach the child's mailbox
+	// while it is parked and be drained at the turn-3 request.
+	releaseChild := make(chan struct{})
+	childCalls := 0
+	var childThirdTurnMessages []llm.Message
+	noteSeenByChild := false
+	childToolTurns := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if len(request.Messages) == 0 {
+			t.Fatalf("unexpected model request: %#v", request)
+		}
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			childCalls++
+			if childCalls <= 2 {
+				childToolTurns++
+				return llm.Completion{ToolCalls: []llm.ToolCall{{ID: fmt.Sprintf("child-tool-%d", childCalls), Name: "run_command", Args: map[string]any{"command": "sleep 1"}}}}, nil
+			}
+			<-releaseChild
+			childThirdTurnMessages = request.Messages
+			for _, message := range request.Messages {
+				if message.Role == "user" && strings.Contains(message.Content, "also check the tests") {
+					noteSeenByChild = true
+				}
+			}
+			return llm.Completion{Content: "child done"}, nil
+		}
+		parentCalls := 0
+		_ = parentCalls
+		// The lead: delegate, then finish after the child's answer arrives.
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "child done") {
+				return llm.Completion{Content: "parent done"}, nil
+			}
+		}
+		return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "delegate-1", Name: "delegate", Args: map[string]any{"agent_id": "worker", "prompt": "do the work", "max_turns": 4}}}}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: request.MaxTurns}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ToolRequest) (ToolResult, error) {
+		return ToolResult{Content: "ok"}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(UserNoteSignal, UserNote{Text: "also check the tests", ActorID: "user-1"})
+	}, time.Second)
+	env.RegisterDelayedCallback(func() {
+		close(releaseChild)
+	}, 2*time.Second)
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-steer", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "delegate the work", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var lead RunResult
+	require.NoError(t, env.GetWorkflowResult(&lead))
+	require.Equal(t, "completed", lead.Status)
+	require.Equal(t, 2, childToolTurns, "the child must run its two tool turns before parking")
+
+	// The lead journals the note with the forwarding evidence; the child
+	// journals its own run.user_note when it drains the note at turn 3.
+	forwarded := -1
+	drainedByChild := false
+	for i, event := range recorded {
+		if event.Type != "run.user_note" {
+			continue
+		}
+		if event.Context.Run == "run-steer" {
+			forwarded = i
+			require.Equal(t, "user-1", event.Data["actor_id"])
+			require.Equal(t, true, event.Data["forwarded"])
+			targets, ok := event.Data["forwarded_to"].([]any)
+			require.True(t, ok, "forwarded_to must list the running children")
+			require.Len(t, targets, 1)
+			require.Contains(t, targets[0], "run-steer/delegate")
+		} else {
+			drainedByChild = true
+		}
+	}
+	require.NotEqual(t, -1, forwarded, "the lead must journal the mid-delegation note")
+	require.True(t, drainedByChild, "the child must journal the drained note at its nearest turn")
+
+	// The child's third-turn request carries the note as a user message.
+	require.True(t, noteSeenByChild, "the steered note must reach the child's model at its nearest turn")
+	require.NotEmpty(t, childThirdTurnMessages)
+}
+
 func TestAgentRunDelegationWithApproval(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

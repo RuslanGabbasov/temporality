@@ -460,7 +460,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// skips only its transitive dependents while independent branches finish.
 	// Prior plan answers from the same run are available to task prompts as
 	// {{task-id.answer}} placeholders (re-plan support).
-	executePlan := func(call llm.ToolCall, operationID, argumentsHash string, startTool func() error) (string, *planExecution, error) {
+	executePlan := func(call llm.ToolCall, operationID, argumentsHash string, startTool func() error, turn int) (string, *planExecution, error) {
 		if err := startTool(); err != nil {
 			return "", nil, err
 		}
@@ -846,8 +846,33 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			p := inflightPlan[0]
 			inflightPlan = inflightPlan[1:]
+			// Mid-delegation steering (docs/agent-delegation.md §steering):
+			// wait on the child AND the note signal together — a chat addendum
+			// wakes the lead immediately and is signalled into every still-
+			// running child's mailbox, instead of sitting queued until the
+			// whole delegation completes.
 			var child RunResult
-			childErr := p.future.Get(ctx, &child)
+			var childErr error
+			childDone := false
+			noteChannel := workflow.GetSignalChannel(ctx, UserNoteSignal)
+			selector := workflow.NewSelector(ctx)
+			selector.AddFuture(p.future, func(f workflow.Future) {
+				childDone = true
+				childErr = f.Get(ctx, &child)
+			})
+			selector.AddReceive(noteChannel, func(c workflow.ReceiveChannel, more bool) {
+				if notes := pendingUserNotes(ctx); len(notes) > 0 {
+					running := runningPlanChildren(inflightPlan, p)
+					// Best-effort: a journaling failure here must not fail the
+					// child (the callback's only error channel is childErr, and
+					// the child is alive) — the note is already delivered.
+					_ = forwardUserNotesToChildren(ctx, activityCtx, state, turn, notes, running)
+					appendForwardedNotes(&messages, notes)
+				}
+			})
+			for !childDone {
+				selector.Select(ctx)
+			}
 			if childErr == nil {
 				// Subtree rollup: the child's totals (its own plus its children)
 				// flow into this run's honest spend.
@@ -1224,7 +1249,34 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		var inflight []*pendingDelegation
 		awaitDelegation := func(p *pendingDelegation) error {
 			var child RunResult
-			childErr := p.future.Get(ctx, &child)
+			// Mid-delegation steering (docs/agent-delegation.md §steering):
+			// same as the plan loop — a chat addendum during the wait is
+			// signalled straight into the running children's note mailboxes.
+			var childErr error
+			childDone := false
+			noteChannel := workflow.GetSignalChannel(ctx, UserNoteSignal)
+			selector := workflow.NewSelector(ctx)
+			selector.AddFuture(p.future, func(f workflow.Future) {
+				childDone = true
+				childErr = f.Get(ctx, &child)
+			})
+			selector.AddReceive(noteChannel, func(c workflow.ReceiveChannel, _ bool) {
+				if notes := pendingUserNotes(ctx); len(notes) > 0 {
+					// p is still in inflight here (the width gate awaits it before
+					// removing it), so inflight alone covers every running child.
+					running := make([]string, 0, len(inflight))
+					for _, d := range inflight {
+						running = append(running, d.childRunID)
+					}
+					// Best-effort journaling: the child is alive, a lead-side
+					// journaling failure must not turn into childErr.
+					_ = forwardUserNotesToChildren(ctx, activityCtx, state, turn, notes, running)
+					appendForwardedNotes(&messages, notes)
+				}
+			})
+			for !childDone {
+				selector.Select(ctx)
+			}
 			if childErr == nil {
 				subtree.tokens += child.TotalTokens
 				subtree.costUSD += child.CostUSD
@@ -1707,7 +1759,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					} else if call.Name == "plan" {
 						// Approved plan: execute the DAG directly for the same reason as
 						// delegate — the tool activity does not know "plan".
-						content, _, planErr := executePlan(call, operationID, argumentsHash, startTool)
+						content, _, planErr := executePlan(call, operationID, argumentsHash, startTool, turn)
 						if planErr != nil {
 							return result, planErr
 						}
@@ -1794,7 +1846,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			} else if call.Name == "plan" {
 				// A plan runs its whole DAG inside this call (docs/agent-delegation.md,
 				// plans); the summary text is the tool outcome.
-				content, _, planErr := executePlan(call, operationID, argumentsHash, startTool)
+				content, _, planErr := executePlan(call, operationID, argumentsHash, startTool, turn)
 				if planErr != nil {
 					return result, planErr
 				}
@@ -2591,6 +2643,73 @@ func pendingUserNotes(ctx workflow.Context) []UserNote {
 		}
 	}
 	return notes
+}
+
+// runningPlanChildren lists the plan's still-running children: the awaited
+// one plus everything else in flight (a note is relevant to all of them —
+// the user does not address children by id).
+func runningPlanChildren(inflight []*planPendingTask, awaited *planPendingTask) []string {
+	ids := make([]string, 0, len(inflight)+1)
+	if awaited != nil {
+		ids = append(ids, awaited.childRunID)
+	}
+	for _, task := range inflight {
+		ids = append(ids, task.childRunID)
+	}
+	return ids
+}
+
+// forwardUserNotesToChildren implements mid-delegation steering: while the
+// lead is blocked waiting on child workflows, a chat addendum must reach the
+// working children at their own nearest turn — not after the whole
+// delegation lands. Each still-running child gets the note signalled into
+// its own kernel.user_note mailbox (the same drain it applies to its human
+// notes); the lead journals run.user_note with forwarded_to so its model
+// sees at the next turn what was asked meanwhile. Notes whose children all
+// finished already stay lead-only — the delegation is done, the note is an
+// ordinary addendum to the lead's conversation.
+func forwardUserNotesToChildren(ctx workflow.Context, activityCtx workflow.Context, state *eventState, turn int, notes []UserNote, childRunIDs []string) error {
+	if len(notes) == 0 {
+		return nil
+	}
+	for i := range notes {
+		var forwarded, failed []string
+		for _, childRunID := range childRunIDs {
+			future := workflow.SignalExternalWorkflow(ctx, WorkflowID(state.run.SourceID, state.run.Project, childRunID), "", UserNoteSignal, notes[i])
+			if err := future.Get(ctx, nil); err != nil {
+				// Unregistered/closed child: it finished between the drain and
+				// the signal — not a delivery failure of the note itself, the
+				// lead still records it below.
+				failed = append(failed, childRunID)
+			} else {
+				forwarded = append(forwarded, childRunID)
+			}
+		}
+		truncated := strings.TrimSpace(notes[i].Text)
+		if len(truncated) > 4096 {
+			truncated = truncated[:4096]
+		}
+		data := map[string]any{"turn": turn, "actor_id": notes[i].ActorID, "text": truncated, "forwarded": true}
+		if len(forwarded) > 0 {
+			data["forwarded_to"] = forwarded
+		}
+		if len(failed) > 0 {
+			data["forward_failed"] = failed
+		}
+		if err := emit(activityCtx, state, "run.user_note", data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// appendForwardedNotes appends already-forwarded notes to the lead's
+// conversation so its model meets them at the next built turn (append-only
+// history keeps the prompt-cache prefix stable).
+func appendForwardedNotes(messages *[]llm.Message, notes []UserNote) {
+	for _, note := range notes {
+		*messages = append(*messages, userNoteMessage(note))
+	}
 }
 
 func userNoteMessage(note UserNote) llm.Message {

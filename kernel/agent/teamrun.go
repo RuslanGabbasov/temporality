@@ -358,7 +358,7 @@ func teamRosterPrompt(team TeamRunInput, lead workspace.TeamSlot) string {
 // unchanged. lead_workers runs one lead child that decomposes the goal itself.
 // run.started was already emitted by AgentRun; this path emits the team.*
 // lifecycle around the program and settles the run honestly.
-func runTeamProgram(ctx workflow.Context, activityCtx workflow.Context, state *eventState, input RunInput, executePlan func(llm.ToolCall, string, string, func() error) (string, *planExecution, error), subtree *subtreeTotals) (RunResult, error) {
+func runTeamProgram(ctx workflow.Context, activityCtx workflow.Context, state *eventState, input RunInput, executePlan func(llm.ToolCall, string, string, func() error, int) (string, *planExecution, error), subtree *subtreeTotals) (RunResult, error) {
 	team := input.Team
 	result := RunResult{RunID: input.RunID, Status: "running"}
 	// One frame covers the whole mechanical program; child runs attach below it.
@@ -432,7 +432,7 @@ func runTeamProgram(ctx workflow.Context, activityCtx workflow.Context, state *e
 	startTool := func() error {
 		return emit(activityCtx, state, "tool.started", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "team", "tool_call_id": call.ID, "arguments": compactJSON(call.Args, 500)})
 	}
-	content, execution, err := executePlan(call, operationID, argumentsHash, startTool)
+	content, execution, err := executePlan(call, operationID, argumentsHash, startTool, 0)
 	if err != nil {
 		if ctx.Err() != nil {
 			return result, err // the deferred run.cancelled emit covers cancellation

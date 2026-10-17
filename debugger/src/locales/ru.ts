@@ -404,6 +404,7 @@ export const ru: Record<string, string> = {
     'chat.stream.approval_rejected': '✗ Отклонено',
     'chat.stream.auto_approved': '✓ Автоподтверждено: {{tool}}',
     'chat.stream.note_accepted': '⤳ Дополнение принято · будет учтено в ходе {{turn}}',
+    'chat.stream.note_forwarded': ' · переслано в выполняющиеся делегации',
     'chat.stream.note_dropped': '⚠ Дополнение не доставлено — бюджет хода исчерпан',
     'chat.note.sent': '⤳ Отправлено в текущий запуск',
     'chat.addendum_at': 'дополнено в {{time}}',
