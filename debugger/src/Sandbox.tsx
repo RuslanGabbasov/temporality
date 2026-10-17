@@ -12,7 +12,7 @@ import {
   Heading,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Add, TrashCan, Renew, Edit, Download } from '@carbon/icons-react'
+import { Add, TrashCan, Renew, Edit, Download, MagicWand } from '@carbon/icons-react'
 import { workspaceApi, type SandboxProfile } from './workspaceApi'
 import { observationApi } from './observationApi'
 import { useT } from './i18n'
@@ -236,7 +236,7 @@ export default function Sandbox({ project }: { project?: string }) {
           <Heading>{t('sandbox.title')}</Heading>
           <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', marginTop: '0.25rem' }}>{t('sandbox.subtitle')}</p>
         </div>
-        <Button size="sm" kind="secondary" onClick={() => { setWizardText(''); setWizardError(''); setWizardOpen(true) }}>{t('sandbox.wizard_button') ?? 'From description'}</Button>
+        <Button size="sm" kind="secondary" renderIcon={MagicWand} onClick={() => { setWizardText(''); setWizardError(''); setWizardOpen(true) }}>{t('sandbox.wizard_button') ?? 'From description'}</Button>
         <Button size="sm" onClick={() => setShowForm(true)} renderIcon={Add}>{t('sandbox.add_custom')}</Button>
       </div>
       <div style={{ position: 'sticky', top: '3rem', background: 'var(--tm-bg)', zIndex: 1, paddingBottom: '0.5rem', marginBottom: '0.5rem', maxWidth: '420px' }}>

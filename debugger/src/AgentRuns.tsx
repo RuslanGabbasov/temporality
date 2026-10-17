@@ -349,6 +349,8 @@ export default function AgentRuns({ project }: { project: string }) {
   const [result, setResult] = useState<Record<string, unknown> | null>(null)
   const [reason, setReason] = useState('Reviewed in Agent Runs UI')
   const [busy, setBusy] = useState(false)
+  // Force-stop guard: the first click asks, the second terminates.
+  const [confirmStop, setConfirmStop] = useState('')
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('')
   // Runs with an open human question (human_request entity, §28) — marks the
@@ -493,6 +495,20 @@ export default function AgentRuns({ project }: { project: string }) {
   // caller may see (docs/activity-scoping.md §7). The journal scopes an
   // unfiltered query server-side, so the same code path serves both.
   const scope = project.trim() || undefined
+  // Force stop (docs/agent-delegation.md §runs ops): a two-click guard — the
+  // first click asks, the second terminates the workflow and journals the
+  // terminal event. Terminate lands even when the workflow is stuck failing
+  // its determinism check, which a graceful cancel cannot reach.
+  const stopRun = async (row: RunRow) => {
+    setBusy(true)
+    try {
+      await workspaceApi.terminateRun(row.id, row.project ?? project ?? '')
+    } catch { /* the silent refresh picks the terminal state up either way */ }
+    setConfirmStop('')
+    await loadRuns(true, true)
+    setBusy(false)
+  }
+
   const loadRuns = useCallback(async (autoSelect = false, silent = false) => {
     if (!autoSelect && !silent) setBusy(true)
     if (!silent) setError('')
@@ -855,6 +871,22 @@ export default function AgentRuns({ project }: { project: string }) {
                     {row.status === 'completed' && <Tag type="green" size="sm">{t('chat.delegation.completed')}</Tag>}
                     {row.status === 'failed' && <Tag type="red" size="sm">{t('chat.delegation.failed')}</Tag>}
                     {row.status === 'running' && <Tag type="blue" size="sm">{t('chat.delegation.running')}</Tag>}
+                    {row.status === 'running' && (
+                      confirmStop === row.id ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); void stopRun(row) }}
+                          disabled={busy}
+                          title={t('runs.stop_confirm') ?? 'Click again to force-stop'}
+                          style={{ background: 'var(--tm-danger)', border: 'none', color: '#fff', cursor: busy ? 'wait' : 'pointer', fontSize: '0.62rem', padding: '0.05rem 0.3rem', borderRadius: '3px', lineHeight: 1.4 }}
+                        >{t('runs.stop_confirm') ?? 'Sure?'}</button>
+                      ) : (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setConfirmStop(row.id) }}
+                          title={t('runs.stop_hint') ?? 'Force-stop the workflow; use when a run is stuck'}
+                          style={{ background: 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.62rem', padding: '0.05rem 0.3rem', borderRadius: '3px', lineHeight: 1.4 }}
+                        >■ {t('runs.stop') ?? 'Stop'}</button>
+                      )
+                    )}
                     {row.status === 'cancelled' && <Tag type="warm-gray" size="sm">{t('status.cancelled')}</Tag>}
                     {questionRuns.has(row.id) && <Tag type="warm-gray" size="sm" title={t('runs.asks_human') ?? 'This run is waiting for a human answer'}>❓ {t('runs.asks_human') ?? 'asks you'}</Tag>}
                     {opRunIds.ids.has(row.id) && (

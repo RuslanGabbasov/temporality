@@ -1060,6 +1060,44 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]string{"run_id": r.PathValue("runID"), "status": "cancel_requested"})
 	})
+	// Force stop (POST /terminate): TerminateWorkflow kills the workflow even
+	// when a cancel cannot land — the prime case being a workflow task stuck
+	// failing its determinism check, which processes no further signals. The
+	// workflow's own deferred run.cancelled never fires on terminate, so the
+	// endpoint journals the terminal event itself; the UI flips the run to
+	// «остановлен» immediately instead of waiting on a zombie.
+	mux.HandleFunc("POST /v1/agent/runs/{runID}/terminate", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if project == "" {
+			writeError(w, 400, errors.New("project query parameter is required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleWriter, project) {
+			return
+		}
+		runID := r.PathValue("runID")
+		sourceID := querySourceID(r, activities.SourceID)
+		workflowID := workflowIDFor(sourceID, project, runID)
+		if err := temporalClient.TerminateWorkflow(r.Context(), workflowID, "", "terminated by operator"); err != nil {
+			writeError(w, 409, err)
+			return
+		}
+		actor := requestUserID(r)
+		event := observation.Event{
+			Schema:     observation.Schema,
+			EventID:    fmt.Sprintf("run-terminate/%s/%d", runID, time.Now().UnixNano()),
+			OccurredAt: time.Now().UTC(),
+			Source:     observation.Source{ID: sourceID, Integration: "temporality-agent-kernel", Version: "1"},
+			Context:    observation.Context{Project: project, Run: runID, Actor: observation.Actor{ID: actor, Type: "human"}},
+			Type:       "run.cancelled",
+			Data:       map[string]any{"reason": "terminated", "actor_id": actor},
+		}
+		if err := events.Enqueue(r.Context(), event); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]string{"run_id": runID, "status": "terminated"})
+	})
 	mux.HandleFunc("POST /v1/agent/runs/{runID}/nudge", func(w http.ResponseWriter, r *http.Request) {
 		var nudge agent.Nudge
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&nudge); err != nil && !errors.Is(err, io.EOF) {
