@@ -530,6 +530,8 @@ export const en: Record<string, string> = {
     'runs.turns_heading': 'Turns',
     'runs.patterns_heading': 'Repeating patterns',
     'runs.knowledge_heading': 'Knowledge',
+    'runs.knowledge_dossier': 'dossier',
+    'knowledge.evidence_open': 'Open the source run',
     'runs.show_details': 'show details',
     'runs.hide_details': 'hide details',
     'runs.reasoning': 'Reasoning',

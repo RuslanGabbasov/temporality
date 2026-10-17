@@ -1320,6 +1320,14 @@ export default function AgentRuns({ project }: { project: string }) {
                                   onDone={() => setKnowledgeRevision((r) => r + 1)}
                                 />
                               )}
+                              {k.knowledge_id && (
+                                <a
+                                  href={`/knowledge?project=${encodeURIComponent(selectedProject)}&dossier=${encodeURIComponent(String(k.knowledge_id))}`}
+                                  onClick={(e) => { e.preventDefault(); window.history.pushState(null, '', `/knowledge?project=${encodeURIComponent(selectedProject)}&dossier=${encodeURIComponent(String(k.knowledge_id))}`); window.dispatchEvent(new PopStateEvent('popstate')) }}
+                                  title={t('runs.knowledge_dossier') ?? 'Open the knowledge dossier'}
+                                  style={{ fontSize: '0.72rem', color: 'var(--tm-teal)', marginLeft: '0.4rem' }}
+                                >{t('runs.knowledge_dossier') ?? 'dossier'} →</a>
+                              )}
                             </div>
                           )
                         })}

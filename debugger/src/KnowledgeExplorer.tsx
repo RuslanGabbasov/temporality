@@ -13,6 +13,7 @@ import LifecycleBar from './explorer/LifecycleBar'
 import AgentResearch from './explorer/AgentResearch'
 import HintsPreview from './explorer/HintsPreview'
 import SessionsPanel from './explorer/SessionsPanel'
+import EvidenceLink from './explorer/EvidenceLink'
 import { applySessionPayload, type SessionSnapshot } from './explorer/sessions'
 import Dossier from './Dossier'
 import { stateLabel, kindLabel, scopeLabel } from './explorer/shared'
@@ -535,7 +536,9 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
                     </div>
                     {(item.evidence ?? []).length > 0 && (
                       <div style={{ fontFamily: 'var(--tm-font-mono)', fontSize: '0.68rem', color: 'var(--tm-muted)', marginBottom: '0.6rem', wordBreak: 'break-all' }}>
-                        {(item.evidence ?? []).slice(0, 6).map((e) => e.ref).join('  ')}
+                        {(item.evidence ?? []).slice(0, 6).map((e) => (
+                          <EvidenceLink key={e.ref} refID={e.ref} project={project} />
+                        ))}
                       </div>
                     )}
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.5rem' }}>

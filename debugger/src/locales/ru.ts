@@ -530,6 +530,8 @@ export const ru: Record<string, string> = {
     'runs.turns_heading': 'Ходы',
     'runs.patterns_heading': 'Повторяющиеся паттерны',
     'runs.knowledge_heading': 'Знания',
+    'runs.knowledge_dossier': 'досье',
+    'knowledge.evidence_open': 'Открыть ран-источник',
     'runs.show_details': 'показать детали',
     'runs.hide_details': 'скрыть детали',
     'runs.reasoning': 'Размышления',
