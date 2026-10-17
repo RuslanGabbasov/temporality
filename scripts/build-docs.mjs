@@ -11,7 +11,8 @@
 // Usage: node scripts/build-docs.mjs   (from the repository root)
 
 import { marked } from 'marked'
-import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, execSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { join, basename } from 'node:path'
 
 const ROOT = new URL('..', import.meta.url).pathname
