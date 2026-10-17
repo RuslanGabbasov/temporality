@@ -198,6 +198,21 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
     setSelectedAreaKey((current) => (current === key ? '' : key))
   }, [])
 
+  // A deep link from the dashboard carries `area` without a dimension. Once
+  // facets arrive, convert it into the matching topic/entity filter so the
+  // value visibly sits in the filter panel instead of a parallel chip.
+  const areaConverted = useRef(false)
+  useEffect(() => {
+    if (!selectedAreaKey || areaConverted.current || !facets) return
+    const bare = selectedAreaKey.replace(/^(topic|entity):/, '').toLowerCase()
+    const inTopics = Object.keys(facets.topics ?? {}).some((t) => t.toLowerCase() === bare)
+    const inEntities = Object.keys(facets.entities ?? {}).some((e) => e.toLowerCase() === bare)
+    areaConverted.current = true
+    if (inTopics) setFilters((f) => ({ ...f, topic: bare }))
+    else if (inEntities) setFilters((f) => ({ ...f, entity: bare }))
+    setSelectedAreaKey('')
+  }, [facets, selectedAreaKey])
+
   const setFilter = useCallback((dimension: keyof Filters, value: string) => {
     setFilters((current) => ({ ...current, [dimension]: value || '' }))
   }, [])
@@ -287,7 +302,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   // listing filters, so it reliably separates an empty knowledge base from an
   // over-filtered one.
   const hasAnyData = areas.length > 0 || list.length > 0
-  const activeFilterCount = Object.values(filters).filter(Boolean).length
+  const activeFilterCount = Object.values(filters).filter(Boolean).length + (selectedAreaKey ? 1 : 0)
 
   if (!project.trim()) return <ProjectRequired what={t('explorer.title') ?? 'Knowledge explorer'} />
 
@@ -454,7 +469,7 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
               <button
                 style={{ ...chip(true), marginLeft: 'auto' }}
                 title={t('explorer.relax_filters') ?? 'Clear filters'}
-                onClick={() => setFilters({ ...EMPTY_FILTERS })}
+                onClick={() => { setFilters({ ...EMPTY_FILTERS }); setSelectedAreaKey('') }}
               >✕ {activeFilterCount}</button>
             )}
           </div>
@@ -462,13 +477,6 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.5rem' }}>
             <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{t('explorer.results') ?? 'Results'}</div>
             <div style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{list.length} / {total}</div>
-            {selectedAreaKey && (
-              <button
-                style={{ ...chip(true), marginLeft: 'auto' }}
-                title={t('explorer.area_filter_hint') ?? 'Sticky area filter from the map — click to clear'}
-                onClick={() => setSelectedAreaKey('')}
-              >🗺 {selectedAreaKey.replace(/^(topic|entity):/, '')} ✕</button>
-            )}
           </div>
 
           {!hasAnyData && (
