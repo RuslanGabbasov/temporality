@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/temporality-project/temporality/controlplane"
+	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/observation/httpapi"
 	"github.com/temporality-project/temporality/observation/postgres"
 	"github.com/temporality-project/temporality/workspace"
@@ -140,6 +141,13 @@ func main() {
 					aliases[value] = httpapi.AreaAlias{Canonical: alias.Canonical, Hidden: alias.Hidden}
 				}
 				return aliases, nil
+			}),
+			httpapi.WithHumanFactors(func(ctx context.Context) (observation.HumanFactors, error) {
+				hab, err := ws.HumanFactors(ctx)
+				if err != nil {
+					return observation.HumanFactors{}, err
+				}
+				return observation.HumanFactors{ApprovalSeconds: hab.ApprovalSeconds, AnswerBaseSeconds: hab.AnswerBaseSeconds, ReadingWPM: hab.ReadingWPM}, nil
 			}),
 		)
 	}

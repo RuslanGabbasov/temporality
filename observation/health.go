@@ -13,6 +13,7 @@ var HealthEventTypes = []string{
 	"model.started", "model.completed", "model.failed", "model.attempt", "model.nudged",
 	"run.started", "run.completed", "run.failed", "run.cancelled",
 	"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted",
+	"human.answered",
 }
 
 // HealthModelStats aggregates one model's calls over the health window. Model
@@ -62,6 +63,43 @@ type HealthApprovals struct {
 	WaitMSAvg   int64 `json:"wait_ms_avg"`
 }
 
+// HumanFactors carries the human-attention estimate coefficients (kanban
+// "touch time" per interaction type). Defaults live in the workspace
+// settings; the dashboard renders the derived metrics.
+type HumanFactors struct {
+	// Seconds of attention one approval/reconcile decision takes (reading the
+	// operation summary and deciding).
+	ApprovalSeconds int `json:"approval_seconds"`
+	// Base seconds of attention one ask_human answer takes before the typed
+	// part (orientation on the question and context).
+	AnswerBaseSeconds int `json:"answer_base_seconds"`
+	// Reading speed for generated conclusions, words per minute. Output
+	// tokens convert to words at ~0.75 words/token.
+	ReadingWPM int `json:"reading_wpm"`
+}
+
+// DefaultHumanFactors mirrors workspace.DefaultHab* — duplicated here because
+// observation sits below workspace in the import graph.
+var DefaultHumanFactors = HumanFactors{ApprovalSeconds: 45, AnswerBaseSeconds: 20, ReadingWPM: 180}
+
+// HealthHuman is the human-factor rollup of the window (docs/supervisor-model.md §5):
+//
+//	HAB — Human Attention Spend: ESTIMATED attention time (reading final and
+//	  intermediate conclusions, deciding approvals, writing answers). Kanban
+//	  "touch time".
+//	HWT — Human Wait Time: wall-clock time work sat BLOCKED waiting for a
+//	  human to become available (approval raised → resolved). Kanban "queue
+//	  wait". Not attention — a latency metric.
+//	FlowEfficiency = HAB / (HAB + HWT) — the kanban flow-efficiency view of
+//	  how much of the human-bound timeline is real attention versus idle queue.
+type HealthHuman struct {
+	ApprovalDecisions int   `json:"approval_decisions"`
+	AskHumanAnswered  int   `json:"ask_human_answered"`
+	HABSeconds        int64 `json:"hab_seconds"`
+	HWTSeconds        int64 `json:"hwt_seconds"`
+	FlowEfficiency    int   `json:"flow_efficiency"` // percent, 0-100
+}
+
 // HealthStats is the system-dashboard health summary of one window
 // (docs/system-dashboard.md §3.1).
 type HealthStats struct {
@@ -71,6 +109,7 @@ type HealthStats struct {
 	Totals      HealthTotals       `json:"totals"`
 	Runs        HealthRuns         `json:"runs"`
 	Approvals   HealthApprovals    `json:"approvals"`
+	Human       HealthHuman        `json:"human"`
 }
 
 // healthModelAccumulator gathers one model's window state before percentile
@@ -85,8 +124,18 @@ type healthModelAccumulator struct {
 // counter, so the memory and postgres paths share one semantics. Events may
 // arrive in any order — a copy is sorted by (OccurredAt, EventID) so "latest"
 // (provider attribution, terminal races) is well defined. Events older than
-// since are ignored, matching the stores' window queries.
-func ComputeHealthStats(events []Event, since, now time.Time) HealthStats {
+// since are ignored, matching the stores' window queries. Human factors carry
+// the human-attention estimate coefficients (docs/supervisor-model.md §5).
+func ComputeHealthStats(events []Event, since, now time.Time, human HumanFactors) HealthStats {
+	if human.ApprovalSeconds <= 0 {
+		human.ApprovalSeconds = DefaultHumanFactors.ApprovalSeconds
+	}
+	if human.AnswerBaseSeconds <= 0 {
+		human.AnswerBaseSeconds = DefaultHumanFactors.AnswerBaseSeconds
+	}
+	if human.ReadingWPM <= 0 {
+		human.ReadingWPM = DefaultHumanFactors.ReadingWPM
+	}
 	stats := HealthStats{Since: since, GeneratedAt: now, Models: []HealthModelStats{}}
 	ordered := make([]Event, len(events))
 	copy(ordered, events)
@@ -201,6 +250,16 @@ func ComputeHealthStats(events []Event, since, now time.Time) HealthStats {
 			}
 		case "approval.auto_granted":
 			stats.Approvals.AutoGranted++
+		case "human.answered":
+			// ask_human rides the approval machinery, so the wait clock is the
+			// pending-approval one; the answer adds the human's WRITING attention
+			// (orientation base + typing the response).
+			stats.Human.AskHumanAnswered++
+			stats.Human.HABSeconds += int64(human.AnswerBaseSeconds)
+			if response, _ := event.Data["response"].(string); response != "" {
+				// ~5 characters per word at the configured reading/writing speed.
+				stats.Human.HABSeconds += int64(len([]rune(response)) / 5 * 60 / human.ReadingWPM)
+			}
 		}
 	}
 
@@ -223,6 +282,21 @@ func ComputeHealthStats(events []Event, since, now time.Time) HealthStats {
 	stats.Approvals.Pending = len(pendingApprovals)
 	if resolvedApprovals > 0 {
 		stats.Approvals.WaitMSAvg = totalWaitMS / int64(resolvedApprovals)
+	}
+	// Human factors: attention (HAB) covers the decisions actually made plus
+	// the reading volume of generated conclusions (every model turn is
+	// reviewable in the UI, so output tokens proxy the read words); wait (HWT)
+	// covers the wall-clock queue time of resolved approvals and questions.
+	stats.Human.ApprovalDecisions = resolvedApprovals
+	stats.Human.HABSeconds += int64(resolvedApprovals) * int64(human.ApprovalSeconds)
+	for _, agg := range models {
+		// words ≈ tokens × 0.75; seconds = words / WPM × 60.
+		stats.Human.HABSeconds += agg.stats.TotalTokens * 3 / 4 * 60 / int64(human.ReadingWPM)
+	}
+	stats.Human.HWTSeconds = totalWaitMS / 1000
+	total := stats.Human.HABSeconds + stats.Human.HWTSeconds
+	if total > 0 {
+		stats.Human.FlowEfficiency = int(stats.Human.HABSeconds * 100 / total)
 	}
 	sort.SliceStable(stats.Models, func(i, j int) bool {
 		if stats.Models[i].Calls != stats.Models[j].Calls {

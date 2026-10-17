@@ -91,6 +91,9 @@ const (
 	// AuditKnowledgeAreasNormalized records a judge-driven area normalization
 	// sweep (docs/human-knowledge-explorer.md §4.2).
 	AuditKnowledgeAreasNormalized = "knowledge.areas.normalized"
+	// AuditSettingChanged records an installation-wide settings change
+	// (supervisor models, human-attention coefficients).
+	AuditSettingChanged = "settings.changed"
 )
 
 // ErrAuditWriteFailed reports a failed access-audit INSERT on a path where

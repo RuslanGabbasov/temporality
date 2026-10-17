@@ -112,6 +112,10 @@ type Activities struct {
 	// rarely — a short TTL keeps the hot path free of workspace round trips.
 	providerCacheMu sync.Mutex
 	providerCache   map[string]providerCacheEntry
+	// supervisorMu + supervisor cache the panel settings (vision model) for
+	// the vision routing decision; TTL keeps operator edits near-real-time.
+	supervisorMu    sync.Mutex
+	supervisorCache supervisorSettingsCache
 	// artifactCacheMu + artifactCache memoize url-provider bodies fetched by
 	// artifact_read (docs/artifact-registry.md §10, phase 2): egress lives at
 	// the kernel — the sandbox never dials out — and the TTL keeps repeated
@@ -150,6 +154,16 @@ type providerCacheEntry struct {
 // the per-turn hot path cheap, short enough that a provider edit applies to
 // running agents within a minute.
 const providerCacheTTL = 60 * time.Second
+
+// supervisorCacheTTL bounds how stale the supervisor panel values (vision
+// model, HAB coefficients) may be in the kernel's hot path: an operator edit
+// applies within a minute.
+const supervisorCacheTTL = 60 * time.Second
+
+type supervisorSettingsCache struct {
+	visionModel string
+	fetchedAt   time.Time
+}
 
 func NewActivities(events EventOutbox) (*Activities, error) {
 	// Boot tolerates a missing default model (clean install configuring
@@ -387,6 +401,41 @@ func (a *Activities) RecordEvent(ctx context.Context, event observation.Event) e
 	return a.Events.Enqueue(ctx, event)
 }
 
+// hasImages reports whether any message carries image blocks: the trigger
+// condition for the supervisor's vision-model routing.
+func (a *Activities) hasImages(request ModelRequest) bool {
+	for _, message := range request.Messages {
+		if len(message.Images) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// visionModelFor returns the supervisor panel's vision model, cached for
+// supervisorCacheTTL. Failures degrade to "no override".
+func (a *Activities) visionModelFor(ctx context.Context) string {
+	a.supervisorMu.Lock()
+	defer a.supervisorMu.Unlock()
+	if time.Since(a.supervisorCache.fetchedAt) < supervisorCacheTTL {
+		return a.supervisorCache.visionModel
+	}
+	model := ""
+	if a.WorkspaceURL != "" {
+		endpoint := fmt.Sprintf("%s/v1/workspace/supervisor", a.WorkspaceURL)
+		if body, status, err := a.workspaceDo(ctx, http.MethodGet, endpoint, nil); err == nil && status == 200 {
+			var view struct {
+				VisionModel string `json:"vision_model"`
+			}
+			if json.Unmarshal([]byte(body), &view) == nil {
+				model = strings.TrimSpace(view.VisionModel)
+			}
+		}
+	}
+	a.supervisorCache = supervisorSettingsCache{visionModel: model, fetchedAt: time.Now()}
+	return model
+}
+
 func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.Completion, error) {
 	// A retried attempt is the frozen-host recovery path (see the workflow
 	// comment on call_model options): after a sleeping machine burns the
@@ -434,6 +483,15 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		}
 	}
 	client := a.Model
+	// Vision fallback (docs/supervisor-model.md §4): when a call carries images
+	// and the supervisor panel pins a vision model, route the call there — the
+	// main model may be text-only. Routing reuse means the vision model just
+	// needs to be declared by a provider.
+	if a.hasImages(request) {
+		if vision := a.visionModelFor(ctx); vision != "" && vision != request.Model {
+			request.Model = vision
+		}
+	}
 	if request.Model != "" && (a.Model == nil || request.Model != a.Model.Model()) {
 		// The existing client config is immutable; constructing a provider client
 		// per run keeps model selection out of deterministic Workflow code.

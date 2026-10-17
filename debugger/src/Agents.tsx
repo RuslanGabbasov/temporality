@@ -44,6 +44,7 @@ import {
   type Run,
   type JudgeConfig,
   type QualitySchedule,
+  type SupervisorSettings,
 } from './workspaceApi'
 import { applyGateErrorView, detectRegressions, latestEvalByVersion, passRate, runsByVersion as aggregateRunsByVersion } from './agentEvolution'
 import { useT } from './i18n'
@@ -128,6 +129,12 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [judgeDraft, setJudgeDraft] = useState('')
   const [schedule, setSchedule] = useState<QualitySchedule | null>(null)
   const [scheduleDraft, setScheduleDraft] = useState('')
+  // Supervisor panel drafts: vision/embedding model overrides and the
+  // human-attention estimate coefficients (docs/supervisor-model.md).
+  const [supervisor, setSupervisor] = useState<SupervisorSettings | null>(null)
+  const [visionDraft, setVisionDraft] = useState('')
+  const [embeddingDraft, setEmbeddingDraft] = useState('')
+  const [habDraft, setHabDraft] = useState({ approval: 45, answerBase: 20, readingWpm: 180 })
   const [qualityBusy, setQualityBusy] = useState(false)
   const [qualityError, setQualityError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -227,20 +234,31 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // not break the page, and the panel just shows its own error.
   const loadQualitySettings = useCallback(async () => {
     try {
-      const [judge, sched] = await Promise.all([
+      const [judge, sched, sup] = await Promise.all([
         workspaceApi.getJudgeConfig(),
         workspaceApi.getQualitySchedule(),
+        workspaceApi.getSupervisorSettings().catch(() => null),
       ])
       setJudgeConfig(judge)
       setJudgeDraft(judge.configured ? judge.model : '')
       setSchedule(sched)
       setScheduleDraft(sched.enabled ? String(sched.interval_hours) : '0')
+      if (sup) {
+        setSupervisor(sup)
+        setVisionDraft(sup.vision_model ?? '')
+        setEmbeddingDraft(sup.embedding_model ?? '')
+        setHabDraft({
+          approval: sup.hab.approval_seconds,
+          answerBase: sup.hab.answer_base_seconds,
+          readingWpm: sup.hab.reading_wpm,
+        })
+      }
     } catch { /* panel shows its own empty state */ }
   }, [])
   useEffect(() => { void loadQualitySettings() }, [loadQualitySettings])
 
-  // One Save for both knobs: judge model and re-run cadence change together
-  // in practice, and two identical buttons on two fields read as a bug.
+  // One Save for the whole supervisor panel: judge/vision/embedding models,
+  // re-run cadence and the HAB coefficients change together in practice.
   const saveQualitySettings = async () => {
     setQualityBusy(true); setQualityError('')
     try {
@@ -248,8 +266,19 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         workspaceApi.updateJudgeConfig(judgeDraft.trim()),
         workspaceApi.updateQualitySchedule(Number(scheduleDraft) || 0),
       ])
+      const sup = await workspaceApi.updateSupervisorSettings({
+        judge_model: judgeDraft.trim(),
+        vision_model: visionDraft.trim(),
+        embedding_model: embeddingDraft.trim(),
+        hab: {
+          approval_seconds: Number(habDraft.approval) || 45,
+          answer_base_seconds: Number(habDraft.answerBase) || 20,
+          reading_wpm: Number(habDraft.readingWpm) || 180,
+        },
+      })
       setJudgeConfig(judge)
       setSchedule(sched)
+      setSupervisor(sup)
       setQualityOpen(false)
     } catch (e) { setQualityError(message(e)) }
     finally { setQualityBusy(false) }
@@ -1486,21 +1515,25 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                   </div>
                   {provenance.capabilities && <ProvBadge kind={provenance.capabilities} />}
                 </div>
-                {CAP_KEYS.map((key) => (
+                {/* Two columns: seven toggles in one stack read as an endless
+                    list; a 2-col grid halves the height and groups cleanly. */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.25rem 1.5rem' }}>
+                  {CAP_KEYS.map((key) => (
+                    <Toggle
+                      key={key}
+                      id={`agent-cap-${key}`}
+                      labelText={capLabel(key)}
+                      toggled={form.definition?.capabilities?.[key] !== false}
+                      onToggle={(checked: boolean) => { touch('capabilities'); setCap(key, checked ? undefined : false) }}
+                    />
+                  ))}
                   <Toggle
-                    key={key}
-                    id={`agent-cap-${key}`}
-                    labelText={capLabel(key)}
-                    toggled={form.definition?.capabilities?.[key] !== false}
-                    onToggle={(checked: boolean) => { touch('capabilities'); setCap(key, checked ? undefined : false) }}
+                    id="agent-cap-delegation"
+                    labelText={t('agents.cap.delegation') ?? 'Delegate to other agents'}
+                    toggled={form.definition?.capabilities?.delegation === true}
+                    onToggle={(checked: boolean) => { touch('capabilities'); setCap('delegation', checked ? true : undefined) }}
                   />
-                ))}
-                <Toggle
-                  id="agent-cap-delegation"
-                  labelText={t('agents.cap.delegation') ?? 'Delegate to other agents'}
-                  toggled={form.definition?.capabilities?.delegation === true}
-                  onToggle={(checked: boolean) => { touch('capabilities'); setCap('delegation', checked ? true : undefined) }}
-                />
+                </div>
               </Stack>
             )}
             {formTab === 'rules' && (
@@ -1789,11 +1822,12 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         </AppModal>
       )}
 
-      {/* Installation-level quality settings (judge model + re-run schedule):
-          one modal, one Save. The button lives in the page header — an
-          operator surface, not part of the everyday agent browsing flow. */}
+      {/* Installation-level supervisor settings (judge + vision + embedding
+          models, re-run schedule, HAB coefficients): one modal, one Save.
+          The button lives in the page header — an operator surface, not part
+          of the everyday agent browsing flow. */}
       {qualityOpen && (
-        <AppModal onClose={() => setQualityOpen(false)} panelStyle={{ width: '520px' }}>
+        <AppModal onClose={() => setQualityOpen(false)} panelStyle={{ width: '560px', maxHeight: '85vh', overflowY: 'auto' }}>
           <Heading>{t('quality.settings_title') ?? 'Quality settings'}</Heading>
           <p style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', margin: '0.25rem 0 1rem' }}>{t('quality.settings_hint') ?? ''}</p>
           {qualityError && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={qualityError} onClose={() => setQualityError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
@@ -1811,6 +1845,24 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             </p>
           )}
           <div style={{ marginTop: '1rem' }}>
+            <Select id="supervisor-vision-model" labelText={t('quality.vision_model') ?? 'Vision model (image fallback)'} value={visionDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setVisionDraft(e.target.value)}>
+              <SelectItem value="" text={t('quality.model_off') ?? '— main model —'} />
+              {providers.flatMap((p) => (p.models ?? []).map((m) => (
+                <SelectItem key={`v/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
+              )))}
+            </Select>
+            <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>{t('quality.vision_model_hint') ?? ''}</p>
+          </div>
+          <div style={{ marginTop: '1rem' }}>
+            <Select id="supervisor-embedding-model" labelText={t('quality.embedding_model') ?? 'Embeddings model'} value={embeddingDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEmbeddingDraft(e.target.value)}>
+              <SelectItem value="" text={t('quality.model_off') ?? '— main model —'} />
+              {providers.flatMap((p) => (p.models ?? []).map((m) => (
+                <SelectItem key={`e/${p.id}/${m}`} value={m} text={`${m} · ${p.name}`} />
+              )))}
+            </Select>
+            <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: '0.25rem 0 0' }}>{t('quality.embedding_model_hint') ?? ''}</p>
+          </div>
+          <div style={{ marginTop: '1rem' }}>
             <Select id="quality-schedule" labelText={t('quality.schedule_interval') ?? 'Re-run suites every'} value={scheduleDraft} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setScheduleDraft(e.target.value)}>
               <SelectItem value="0" text={t('quality.schedule_off') ?? '— off —'} />
               <SelectItem value="6" text={t('quality.schedule_6h') ?? '6 hours'} />
@@ -1823,6 +1875,15 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                 {t('quality.next_run') ?? 'next run'}: {new Date(schedule.next_run_at).toLocaleString()}
               </p>
             )}
+          </div>
+          <div style={{ marginTop: '1.25rem' }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>{t('quality.hab_title') ?? 'Human Attention Budget (estimates)'}</div>
+            <p style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', margin: '0 0 0.5rem' }}>{t('quality.hab_hint') ?? ''}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.6rem' }}>
+              <TextInput id="hab-approval" labelText={t('quality.hab_approval') ?? 'Approval, sec'} value={String(habDraft.approval)} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHabDraft({ ...habDraft, approval: Number(e.target.value) })} />
+              <TextInput id="hab-answer" labelText={t('quality.hab_answer') ?? 'Answer base, sec'} value={String(habDraft.answerBase)} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHabDraft({ ...habDraft, answerBase: Number(e.target.value) })} />
+              <TextInput id="hab-wpm" labelText={t('quality.hab_wpm') ?? 'Reading, wpm'} value={String(habDraft.readingWpm)} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHabDraft({ ...habDraft, readingWpm: Number(e.target.value) })} />
+            </div>
           </div>
           <div className="form-actions">
             <Button kind="secondary" disabled={qualityBusy} onClick={() => setQualityOpen(false)}>{t('action.cancel') ?? 'Cancel'}</Button>

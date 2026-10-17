@@ -40,6 +40,8 @@ type Server struct {
 	// topicAliases resolves the project's judge-normalized area map. Optional:
 	// without it areas render with their raw topic/entity values.
 	topicAliases func(ctx context.Context, project string) (map[string]AreaAlias, error)
+	// humanFactors resolves the HAB estimate coefficients. Optional.
+	humanFactors func(ctx context.Context) (observation.HumanFactors, error)
 }
 
 // Option customizes the journal server.
@@ -72,6 +74,27 @@ type AreaAlias struct {
 // dependency.
 func WithTopicAliases(fn func(ctx context.Context, project string) (map[string]AreaAlias, error)) Option {
 	return func(s *Server) { s.topicAliases = fn }
+}
+
+// WithHumanFactors wires the human-attention estimate coefficients for the
+// health stats (docs/supervisor-model.md §5). Nil or an error degrades to the
+// built-in defaults.
+func WithHumanFactors(fn func(ctx context.Context) (observation.HumanFactors, error)) Option {
+	return func(s *Server) { s.humanFactors = fn }
+}
+
+// humanFactorsFor resolves the coefficients with the documented fallback:
+// a missing hook or a failed read never breaks the dashboard.
+func (s *Server) humanFactorsFor(ctx context.Context) observation.HumanFactors {
+	if s.humanFactors == nil {
+		return observation.DefaultHumanFactors
+	}
+	factors, err := s.humanFactors(ctx)
+	if err != nil {
+		s.log.Warn("load human factors; using defaults", "error", err)
+		return observation.DefaultHumanFactors
+	}
+	return factors
 }
 
 // applyAreaAliases rewrites the topic/entity lists through the alias map:
@@ -342,7 +365,7 @@ func (s *Server) observationHealthStats(w http.ResponseWriter, r *http.Request) 
 		if len(visible) == 0 {
 			// Nothing visible: zeroed counters with the window fields, not an
 			// error — the dashboard renders an empty but well-formed state.
-			writeJSON(w, http.StatusOK, observation.ComputeHealthStats(nil, since, now))
+			writeJSON(w, http.StatusOK, observation.ComputeHealthStats(nil, since, now, s.humanFactorsFor(r.Context())))
 			return
 		}
 		projects = visible
@@ -353,7 +376,7 @@ func (s *Server) observationHealthStats(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("could not compute health stats: %w", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, observation.ComputeHealthStats(events, since, now))
+	writeJSON(w, http.StatusOK, observation.ComputeHealthStats(events, since, now, s.humanFactorsFor(r.Context())))
 }
 
 func (s *Server) getObservationEvent(w http.ResponseWriter, r *http.Request) {

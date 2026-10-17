@@ -196,6 +196,20 @@ export interface JudgeConfig {
   source?: string
 }
 
+/** Supervisor panel (docs/supervisor-model.md): models working for the
+ *  administrator plus the human-attention estimate coefficients. Empty model
+ *  = feature off; HAB values are seconds / words-per-minute. */
+export interface SupervisorSettings {
+  judge_model: string
+  vision_model: string
+  embedding_model: string
+  hab: {
+    approval_seconds: number
+    answer_base_seconds: number
+    reading_wpm: number
+  }
+}
+
 // Result of the judge-driven knowledge-area normalization sweep: how many
 // raw values were merged into canonical ones and how many were hidden.
 export interface AreaNormalizationResult {
@@ -1031,6 +1045,12 @@ export const workspaceApi = {
     request<QualitySchedule>('/v1/workspace/quality-schedule'),
   updateQualitySchedule: (intervalHours: number) =>
     request<QualitySchedule>('/v1/workspace/quality-schedule', { method: 'PUT', body: JSON.stringify({ interval_hours: intervalHours }) }),
+  // Supervisor panel (docs/supervisor-model.md): the models that work for the
+  // administrator plus the human-attention estimate coefficients.
+  getSupervisorSettings: () =>
+    request<SupervisorSettings>('/v1/workspace/supervisor'),
+  updateSupervisorSettings: (settings: Partial<SupervisorSettings>) =>
+    request<SupervisorSettings>('/v1/workspace/supervisor', { method: 'PUT', body: JSON.stringify(settings) }),
   // Judge-driven knowledge-area normalization: merge duplicate/raw topic and
   // entity values into canonical areas, hide garbage (file names etc.).
   normalizeKnowledgeAreas: (project: string) =>

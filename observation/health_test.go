@@ -87,7 +87,7 @@ func TestComputeHealthStatsInFlight(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			stats := ComputeHealthStats(testCase.events, base.Add(-time.Minute), base.Add(time.Minute))
+			stats := ComputeHealthStats(testCase.events, base.Add(-time.Minute), base.Add(time.Minute), DefaultHumanFactors)
 			var model *HealthModelStats
 			for i := range stats.Models {
 				if stats.Models[i].Model == testCase.wantModel {
@@ -133,7 +133,7 @@ func TestComputeHealthStatsPercentiles(t *testing.T) {
 				}
 				events = append(events, healthTestEvent("e"+strconv.Itoa(i), "model.completed", "r1", base.Add(time.Duration(i)*time.Second), data))
 			}
-			stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour))
+			stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour), DefaultHumanFactors)
 			if len(stats.Models) != 1 || stats.Models[0].Model != "gpt-5.2" {
 				t.Fatalf("models = %v, want exactly gpt-5.2", stats.Models)
 			}
@@ -169,7 +169,7 @@ func TestComputeHealthStatsApprovals(t *testing.T) {
 	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
 		events[i], events[j] = events[j], events[i]
 	}
-	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour))
+	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour), DefaultHumanFactors)
 	want := HealthApprovals{Requested: 5, Granted: 1, Rejected: 1, TimedOut: 0, AutoGranted: 1, Pending: 2, WaitMSAvg: 45000}
 	if stats.Approvals != want {
 		t.Fatalf("approvals = %+v, want %+v", stats.Approvals, want)
@@ -194,7 +194,7 @@ func TestComputeHealthStatsRunningNow(t *testing.T) {
 	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
 		events[i], events[j] = events[j], events[i]
 	}
-	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour))
+	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour), DefaultHumanFactors)
 	want := HealthRuns{Started: 5, Completed: 2, Failed: 1, Cancelled: 1, RunningNow: 1}
 	if stats.Runs != want {
 		t.Fatalf("runs = %+v, want %+v", stats.Runs, want)
@@ -214,7 +214,7 @@ func TestComputeHealthStatsProviderAttribution(t *testing.T) {
 	for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
 		events[i], events[j] = events[j], events[i]
 	}
-	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour))
+	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour), DefaultHumanFactors)
 	if len(stats.Models) != 1 || stats.Models[0].Provider != "anthropic" {
 		t.Fatalf("models = %+v, want one gpt-5.2 with provider anthropic", stats.Models)
 	}
@@ -230,7 +230,7 @@ func TestComputeHealthStatsTokenTolerance(t *testing.T) {
 		healthTestEvent("e3", "model.completed", "r1", base.Add(2*time.Second), map[string]any{"turn": 3, "model": "gpt-5.2", "total_tokens": int64(50)}),
 		healthTestEvent("e4", "model.completed", "r1", base.Add(3*time.Second), map[string]any{"turn": 4, "model": "gpt-5.2", "total_tokens": "700"}),
 	}
-	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour))
+	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour), DefaultHumanFactors)
 	if len(stats.Models) != 1 {
 		t.Fatalf("models = %+v, want exactly one", stats.Models)
 	}
@@ -252,7 +252,7 @@ func TestComputeHealthStatsModelOrdering(t *testing.T) {
 		healthTestEvent("e4", "model.started", "r1", base.Add(3*time.Second), map[string]any{"turn": 4, "model": "gamma"}),
 		healthTestEvent("e5", "model.started", "r1", base.Add(4*time.Second), map[string]any{"turn": 5, "model": "zeta"}),
 	}
-	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour))
+	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour), DefaultHumanFactors)
 	if len(stats.Models) != 4 {
 		t.Fatalf("models = %+v, want four", stats.Models)
 	}
@@ -267,7 +267,7 @@ func TestComputeHealthStatsModelOrdering(t *testing.T) {
 func TestComputeHealthStatsEmptyWindow(t *testing.T) {
 	since := time.Date(2026, 10, 16, 11, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
-	stats := ComputeHealthStats(nil, since, now)
+	stats := ComputeHealthStats(nil, since, now, DefaultHumanFactors)
 	if !stats.Since.Equal(since) || !stats.GeneratedAt.Equal(now) {
 		t.Fatalf("window fields = %v/%v, want %v/%v", stats.Since, stats.GeneratedAt, since, now)
 	}
@@ -290,7 +290,7 @@ func TestComputeHealthStatsProviderFallback(t *testing.T) {
 			"turn": 1, "provider": "api.z.ai", "latency_ms": 1500, "total_tokens": 5000,
 		}),
 	}
-	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Minute))
+	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Minute), DefaultHumanFactors)
 	var legacy *HealthModelStats
 	for i := range stats.Models {
 		if stats.Models[i].Model == "api.z.ai" {
@@ -305,5 +305,44 @@ func TestComputeHealthStatsProviderFallback(t *testing.T) {
 	}
 	if legacy.Completed != 1 || legacy.TotalTokens != 5000 || legacy.P50LatencyMS != 1500 {
 		t.Fatalf("provider row = %+v, want 1 completed / 5000 tokens / 1500ms", legacy)
+	}
+}
+
+// HAB/HWT (docs/supervisor-model.md §5): attention estimates from resolved
+// approvals, ask_human answers and generated volume; wait time from the
+// approval queue; flow efficiency ties them together.
+func TestComputeHealthStatsHumanFactors(t *testing.T) {
+	base := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	approval := func(id string, at time.Time, eventType string) Event {
+		return Event{EventID: id + "/" + eventType, OccurredAt: at, Type: eventType,
+			Context: Context{Run: "r-1"}, Data: map[string]any{"operation_id": id, "arguments_hash": "h"}}
+	}
+	events := []Event{
+		approval("op-1", base, "approval.requested"),
+		approval("op-1", base.Add(10*time.Minute), "approval.granted"), // 10 min queue wait
+		{EventID: "answer/1", OccurredAt: base.Add(time.Minute), Type: "human.answered",
+			Context: Context{Run: "r-1"}, Data: map[string]any{"response": "делай так"}},
+		// 900 output tokens of generated conclusions: 900*3/4 = 675 words.
+		{EventID: "mc/1", OccurredAt: base, Type: "model.completed",
+			Context: Context{Run: "r-1"}, Data: map[string]any{"model": "m", "total_tokens": 900}},
+	}
+	factors := HumanFactors{ApprovalSeconds: 45, AnswerBaseSeconds: 20, ReadingWPM: 180}
+	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour), factors)
+
+	// HAB: approval 45s + answer base 20s + typing 7 runes/5 → 1 word → 0s +
+	// reading 675 words / 180 wpm → 225s = 290s.
+	if stats.Human.HABSeconds != 290 {
+		t.Errorf("HAB = %d, want 290", stats.Human.HABSeconds)
+	}
+	// HWT: one resolved approval waited 10 minutes.
+	if stats.Human.HWTSeconds != 600 {
+		t.Errorf("HWT = %d, want 600", stats.Human.HWTSeconds)
+	}
+	// Flow efficiency = 290 / (290 + 600) ≈ 32%.
+	if stats.Human.FlowEfficiency != 32 {
+		t.Errorf("flow efficiency = %d, want 32", stats.Human.FlowEfficiency)
+	}
+	if stats.Human.ApprovalDecisions != 1 || stats.Human.AskHumanAnswered != 1 {
+		t.Errorf("decisions/answers = %d/%d, want 1/1", stats.Human.ApprovalDecisions, stats.Human.AskHumanAnswered)
 	}
 }
