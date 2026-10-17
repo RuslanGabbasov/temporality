@@ -95,6 +95,16 @@ func main() {
 			log.Info("loaded workspace user tokens", "count", len(principals))
 		}
 		refreshUserTokens()
+		// Kernel→journal auth: the kernel's auto-provisioned service principal
+		// is excluded from the DB token set above (it must not switch the gate
+		// on for fresh installs), so it is recognized as the loopback internal
+		// credential instead — kernel requests carry it as TEMPORALITY_API_TOKEN
+		// and pass the gate even after the first user enables authentication.
+		if serviceToken, sErr := ws.EnsureKernelServiceToken(ctx); sErr == nil && serviceToken != "" {
+			gate.SetInternalToken(serviceToken)
+		} else if sErr != nil {
+			log.Warn("resolve kernel service token for loopback auth", "error", sErr)
+		}
 		go func() {
 			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()

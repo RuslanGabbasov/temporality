@@ -122,6 +122,15 @@ func (s *Store) LoadTokenPrincipals(ctx context.Context, log *slog.Logger) (map[
 		if u.Token == "" || !u.Active {
 			continue
 		}
+		// The kernel's auto-provisioned service principal is an internal
+		// credential (kernel→journal, loopback), not a gate subject: counting
+		// it here would switch authentication on for every fresh install —
+		// where the whole design assumes anonymous admin access until the
+		// first user is created through onboarding (docs/onboarding). It is
+		// also unreachable from outside: the value never leaves the kernel.
+		if u.ID == KernelServiceUserID || u.Name == KernelServiceUserName {
+			continue
+		}
 		role, err := controlplane.ParseRole(u.Role)
 		if err != nil {
 			log.Error("skip workspace user token: unknown role", "user", u.Name, "role", u.Role)

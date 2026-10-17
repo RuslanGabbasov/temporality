@@ -19,6 +19,11 @@ import (
 // hints/listings across every project.
 const KernelServiceUserName = "temporality-kernel"
 
+// KernelServiceUserID is the fixed id of the auto-provisioned service
+// principal; LoadTokenPrincipals excludes it from the auth gate (it is an
+// internal credential, not a UI subject).
+const KernelServiceUserID = "usr-temporality-kernel"
+
 // EnsureKernelServiceToken returns the service principal's bearer token,
 // creating the row (and minting a token) on first use. The token is stable
 // across restarts; deactivating the user is a deliberate admin action and
@@ -33,7 +38,7 @@ func (s *Store) EnsureKernelServiceToken(ctx context.Context) (string, error) {
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		token = newServiceToken()
-		user := &User{ID: "usr-temporality-kernel", Name: KernelServiceUserName, Role: "writer", Token: token, Active: true}
+		user := &User{ID: KernelServiceUserID, Name: KernelServiceUserName, Role: "writer", Token: token, Active: true}
 		if err := s.CreateUser(ctx, user); err != nil {
 			return "", fmt.Errorf("create kernel service user: %w", err)
 		}
