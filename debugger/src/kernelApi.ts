@@ -224,6 +224,7 @@ export interface TaskCost {
   total_tokens: number
   total_cost_usd: number
   approvals: ApprovalStats
+  human?: HumanStats
   runs: TaskRunBreakdown[]
   agents: TaskAgentRollup[]
 }
@@ -243,6 +244,17 @@ export interface ApprovalStats {
   pending?: number
   wait_ms: number
   max_wait_ms?: number
+}
+
+// Persistent human-factor rollup of a scope (docs/supervisor-model.md §5):
+// HAB — estimated attention (decisions, answers, reading conclusions);
+// HWT — wall-clock wait on humans; flow efficiency — the attention share.
+export interface HumanStats {
+  decisions: number
+  answers: number
+  hab_seconds: number
+  hwt_seconds: number
+  flow_efficiency: number
 }
 
 // One explicitly registered saga (docs/sagas.md): a long-running effort
@@ -271,6 +283,7 @@ export interface SagaRollup {
   total_tokens: number
   total_cost_usd: number
   approvals: ApprovalStats
+  human?: HumanStats
 }
 
 // One task inside a project: totals across every run it spans (follow-ups +
@@ -294,6 +307,7 @@ export interface TaskRollup {
   total_tokens: number
   total_cost_usd: number
   approvals: ApprovalStats
+  human?: HumanStats
 }
 
 // Project rollup: totals across every task plus a row per saga and per task

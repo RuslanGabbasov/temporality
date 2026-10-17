@@ -182,6 +182,42 @@ func TestAggregateTaskApprovals(t *testing.T) {
 	}
 }
 
+func TestAggregateTaskHumanFactors(t *testing.T) {
+	cfg, _ := ParsePrices("m:1.00:2.00")
+	api := NewCostAPI(cfg, "", "")
+	api.SetHumanFactors(HumanFactors{ApprovalSeconds: 45, AnswerBaseSeconds: 20, ReadingWPM: 180})
+	base := time.Date(2026, 10, 11, 10, 0, 0, 0, time.UTC)
+	mk := func(typ, run, task string, at time.Time, data map[string]any) observation.Event {
+		return observation.Event{Type: typ, OccurredAt: at, Context: observation.Context{Run: run, Task: task}, Data: data}
+	}
+	events := []observation.Event{
+		mk("run.started", "r1", "t1", base, map[string]any{"agent_id": "lead"}),
+		mk("model.completed", "r1", "t1", base.Add(time.Minute), map[string]any{"model": "m", "completion_tokens": 240}),
+		mk("approval.requested", "r1", "t1", base.Add(2*time.Minute), map[string]any{"operation_id": "op-1", "arguments_hash": "h1"}),
+		mk("approval.granted", "r1", "t1", base.Add(5*time.Minute), map[string]any{"operation_id": "op-1", "arguments_hash": "h1"}),
+		mk("human.answered", "r1", "t1", base.Add(8*time.Minute), map[string]any{"response": "сделай вот так"}),
+	}
+
+	got := api.aggregateTask("p", "t1", events)
+	h := got.Human
+	if h.Decisions != 1 || h.Answers != 1 {
+		t.Fatalf("unexpected decisions/answers: %+v", h)
+	}
+	// HAB: one 45s decision + 20s answer base + 14 runes/5 ≈ 0 min typing
+	// + 240 tokens ≈ 180 words ≈ 60s of reading = 125s.
+	if h.HABSeconds != 125 {
+		t.Fatalf("expected 125s HAB, got %d", h.HABSeconds)
+	}
+	// HWT mirrors the 3-minute approval wait.
+	if h.HWTSeconds != 180 {
+		t.Fatalf("expected 180s HWT, got %d", h.HWTSeconds)
+	}
+	// 125/(125+180) = 40%.
+	if h.FlowEfficiency != 40 {
+		t.Fatalf("expected 40%% flow efficiency, got %d", h.FlowEfficiency)
+	}
+}
+
 func TestAggregateProjectBudget(t *testing.T) {
 	cfg, _ := ParsePrices("m:1.00:2.00")
 	api := NewCostAPI(cfg, "", "")

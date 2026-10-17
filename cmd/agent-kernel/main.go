@@ -366,6 +366,16 @@ func main() {
 		os.Exit(1)
 	}
 	costAPI := cost.NewCostAPI(costPrices, observationURL, os.Getenv("TEMPORALITY_API_TOKEN"))
+	// Human-attention coefficients (docs/supervisor-model.md §5) feed the
+	// persistent HAB/HWT rollups; read once at boot — settings changes apply
+	// after a restart.
+	if factors, err := ws.HumanFactors(ctx); err == nil {
+		costAPI.SetHumanFactors(cost.HumanFactors{
+			ApprovalSeconds:   factors.ApprovalSeconds,
+			AnswerBaseSeconds: factors.AnswerBaseSeconds,
+			ReadingWPM:        factors.ReadingWPM,
+		})
+	}
 	activities, err := agent.NewActivities(events)
 	if err != nil {
 		log.Error("configure activities", "error", err)

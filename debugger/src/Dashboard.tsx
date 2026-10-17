@@ -361,41 +361,18 @@ export default function Dashboard({ project, setProject }: Props) {
             </div>
           )}
 
-          {/* Supervisor problem queue (docs/supervisor-model.md §3 A1): the
-              newest triage verdicts for failed runs. Cause class is raw (the
-              taxonomy is closed); the summary is the model's plain language. */}
+          {/* Supervisor summary (docs/supervisor-model.md §3): the full
+              problem queue — clusters, insights, run lists — lives on the
+              dedicated /supervisor page; here a compact count with a link. */}
           {verdicts.length > 0 && (
             <div style={{ marginBottom: '1rem' }}>
-              <PanelHeader title={t('dashboard.problems_title') ?? 'Problems (supervisor triage)'} hint={t('dashboard.problems_hint') ?? undefined} />
-              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
-                {verdicts.map((event) => {
-                  const run = String(event.data?.run_id ?? '')
-                  const project = event.context?.project ?? ''
-                  const cause = String(event.data?.cause_class ?? 'unknown')
-                  const summary = String(event.data?.summary ?? '')
-                  const recommendation = String(event.data?.recommendation ?? '')
-                  return (
-                    <div key={event.event_id} style={{ padding: '0.55rem 0.75rem', borderTop: '1px solid var(--tm-border)', fontSize: '0.78rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
-                        <Tag type={cause === 'harness_bug' || cause === 'model_error' ? 'red' : cause === 'agent_prompt' || cause === 'user_error' ? 'warm-gray' : 'blue'} size="sm">{cause}</Tag>
-                        {project && <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{project}</span>}
-                        <a
-                          href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(run)}`}
-                          onClick={(e) => { e.preventDefault(); navigate(`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(run)}`) }}
-                          style={{ fontSize: '0.72rem', color: 'var(--tm-teal)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                          title={run}
-                        >{run}</a>
-                        <span style={{ marginLeft: 'auto', fontSize: '0.68rem', color: 'var(--tm-text-3)', flexShrink: 0 }}>{new Date(event.occurred_at).toLocaleString()}</span>
-                      </div>
-                      <div style={{ marginTop: '0.25rem', lineHeight: 1.5 }}>{summary}</div>
-                      {recommendation && (
-                        <div style={{ marginTop: '0.2rem', fontSize: '0.72rem', color: 'var(--tm-text-2)' }}>
-                          <span style={{ color: 'var(--tm-amber)' }}>→</span> {recommendation}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <span style={{ color: 'var(--tm-text-2)' }}>{t('dashboard.problems_compact', { count: String(verdicts.length) })}</span>
+                <a
+                  href="/supervisor"
+                  onClick={(e) => { e.preventDefault(); navigate('/supervisor') }}
+                  style={{ color: 'var(--tm-teal)', fontSize: '0.76rem' }}
+                >{t('dashboard.problems_open')} →</a>
               </div>
             </div>
           )}

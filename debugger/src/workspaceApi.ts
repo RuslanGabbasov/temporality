@@ -629,6 +629,7 @@ export interface TeamRunCost {
   total_tokens: number
   total_cost_usd: number
   approvals?: { requested: number; granted: number; rejected: number; timed_out: number; auto_granted: number; pending: number; wait_ms: number; max_wait_ms: number }
+  human?: { decisions: number; answers: number; hab_seconds: number; hwt_seconds: number; flow_efficiency: number }
   runs: Array<{
     run_id: string
     parent_run_id?: string

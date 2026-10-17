@@ -48,6 +48,9 @@ const NAV_ITEMS = [
   // The system dashboard (docs/system-dashboard.md): health, quality, sagas
   // and knowledge observability in one operational surface.
   { path: '/dashboard', label: 'nav.dashboard' },
+  // Supervisor problem queue (docs/supervisor-model.md §3): the model's
+  // verdicts, failure clusters and health insights for the administrator.
+  { path: '/supervisor', label: 'nav.supervisor' },
   { path: '/agents', label: 'nav.runs' },
   { path: '/inbound', label: 'nav.inbound' },
   // Knowledge explorer is the main research surface (docs/human-knowledge-

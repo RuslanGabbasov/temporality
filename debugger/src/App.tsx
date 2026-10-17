@@ -3,6 +3,7 @@ import Layout, { type AppState } from './Layout'
 import { I18nProvider } from './i18n'
 import { ThemePrefProvider } from './theme'
 import Dashboard from './Dashboard'
+import Supervisor from './Supervisor'
 import KnowledgeExplorer from './KnowledgeExplorer'
 import AgentRuns from './AgentRuns'
 import ExperienceTimeline from './ExperienceTimeline'
@@ -24,6 +25,7 @@ import InboundMessages from './InboundMessages'
 
 const Routes = {
   dashboard: /^\/dashboard(\/|$)/,
+  supervisor: /^\/supervisor(\/|$)/,
   experience: /^\/experience(\/|$)/,
   agents: /^\/agents(\/|$)/,
   teams: /^\/teams(\/|$)/,
@@ -44,10 +46,11 @@ const Routes = {
   inbound: /^\/inbound(\/|$)/,
 } as const
 
-type Page = 'dashboard' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
+type Page = 'dashboard' | 'supervisor' | 'experience' | 'agents' | 'teams' | 'knowledge' | 'workspace' | 'agent-config' | 'skills' | 'artifacts' | 'mcp' | 'secrets' | 'sandbox' | 'storage' | 'providers' | 'users' | 'triggers' | 'org' | 'channels' | 'inbound'
 
 function pageFor(pathname: string): Page {
   if (Routes.dashboard.test(pathname)) return 'dashboard'
+  if (Routes.supervisor.test(pathname)) return 'supervisor'
   if (Routes.agents.test(pathname)) return 'agents'
   if (Routes.teams.test(pathname)) return 'teams'
   if (Routes.knowledge.test(pathname)) return 'knowledge'
@@ -87,6 +90,8 @@ export default function App() {
         switch (page) {
           case 'dashboard':
             return <Dashboard project={project} setProject={setProject} />
+          case 'supervisor':
+            return <Supervisor />
           case 'agents':
             return <AgentRuns project={project} />
           case 'teams':

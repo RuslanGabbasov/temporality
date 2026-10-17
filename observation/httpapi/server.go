@@ -360,6 +360,22 @@ func (s *Server) observationHealthStats(w http.ResponseWriter, r *http.Request) 
 		}
 		since = parsed
 	}
+	// until bounds the window's end (supervisor insights compare the current
+	// hour against the previous one); events after it are dropped server-side
+	// so the stores' window queries stay unchanged.
+	until := now
+	if value := r.URL.Query().Get("until"); value != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, errors.New("until must be RFC3339"))
+			return
+		}
+		if parsed.Before(since) {
+			writeError(w, http.StatusBadRequest, errors.New("until must not precede since"))
+			return
+		}
+		until = parsed
+	}
 	var projects []string
 	if project := r.URL.Query().Get("project"); project != "" {
 		projects = []string{project}
@@ -378,7 +394,16 @@ func (s *Server) observationHealthStats(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("could not compute health stats: %w", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, observation.ComputeHealthStats(events, since, now, s.humanFactorsFor(r.Context())))
+	if !until.Equal(now) {
+		kept := events[:0]
+		for _, event := range events {
+			if !event.OccurredAt.After(until) {
+				kept = append(kept, event)
+			}
+		}
+		events = kept
+	}
+	writeJSON(w, http.StatusOK, observation.ComputeHealthStats(events, since, until, s.humanFactorsFor(r.Context())))
 }
 
 func (s *Server) getObservationEvent(w http.ResponseWriter, r *http.Request) {

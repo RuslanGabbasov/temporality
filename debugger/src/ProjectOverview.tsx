@@ -208,7 +208,7 @@ export default function ProjectOverview({ project }: Props) {
                       <span>{formatDuration(saga.active_ms)}</span>
                       <span>{saga.total_tokens.toLocaleString()}</span>
                       <span>{saga.total_cost_usd > 0 ? `$${saga.total_cost_usd.toFixed(2)}` : '—'}</span>
-                      <span title={approvalHint(t, saga.approvals)} style={{ whiteSpace: 'nowrap' }}>
+                      <span title={approvalHint(t, saga.approvals, saga.human)} style={{ whiteSpace: 'nowrap' }}>
                         {saga.approvals.requested > 0
                           ? <>✓{saga.approvals.granted} ✗{saga.approvals.rejected}{saga.approvals.timed_out > 0 ? ` ⏱${saga.approvals.timed_out}` : ''}{(saga.approvals.pending ?? 0) > 0 ? ` …${saga.approvals.pending}` : ''} · {formatDuration(saga.approvals.wait_ms)}</>
                           : '—'}
@@ -262,7 +262,7 @@ export default function ProjectOverview({ project }: Props) {
                   <span>{formatDuration(task.active_ms)}</span>
                   <span>{task.total_tokens.toLocaleString()}</span>
                   <span>{task.total_cost_usd > 0 ? `$${task.total_cost_usd.toFixed(2)}` : '—'}</span>
-                  <span title={approvalHint(t, task.approvals)} style={{ whiteSpace: 'nowrap' }}>
+                  <span title={approvalHint(t, task.approvals, task.human)} style={{ whiteSpace: 'nowrap' }}>
                     {task.approvals.requested > 0
                       ? <>✓{task.approvals.granted} ✗{task.approvals.rejected}{task.approvals.timed_out > 0 ? ` ⏱${task.approvals.timed_out}` : ''}{(task.approvals.pending ?? 0) > 0 ? ` …${task.approvals.pending}` : ''} · {formatDuration(task.approvals.wait_ms)}</>
                       : '—'}

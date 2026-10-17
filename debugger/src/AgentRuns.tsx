@@ -1364,6 +1364,11 @@ export default function AgentRuns({ project }: { project: string }) {
                           👤 <strong>{taskCostData.approvals.granted + taskCostData.approvals.rejected}/{taskCostData.approvals.requested}</strong> {t('runs.approvals_col') ?? 'approvals'} · {formatDuration(taskCostData.approvals.wait_ms)}
                         </span>
                       )}
+                      {taskCostData.human && taskCostData.human.hab_seconds > 0 && (
+                        <span title={t('runs.human_hint') ?? undefined} style={{ cursor: 'help' }}>
+                          🧠 <strong>{formatDuration(taskCostData.human.hab_seconds * 1000)}</strong> {t('runs.hab') ?? 'attention'} · {formatDuration(taskCostData.human.hwt_seconds * 1000)} {t('runs.hwt') ?? 'wait'}
+                        </span>
+                      )}
                     </div>
                     {taskCostData.agents.length > 0 && (
                       <div>

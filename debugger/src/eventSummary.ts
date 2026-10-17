@@ -56,15 +56,23 @@ export function formatDuration(ms: number): string {
 }
 
 /** Human-approval budget tooltip: the full breakdown behind a compact cell.
- * Structural on purpose — works for ApprovalStats from any rollup shape. */
-export function approvalHint(t: TranslateFn, ap: { requested: number; granted: number; rejected: number; timed_out: number; pending?: number; wait_ms: number }): string {
-	return t('runs.approvals_hint', {
+ * Structural on purpose — works for ApprovalStats from any rollup shape.
+ * human (persistent HAB/HWT, docs/supervisor-model.md §5) appends the
+ * attention/wait line when the rollup carries it. */
+export function approvalHint(t: TranslateFn, ap: { requested: number; granted: number; rejected: number; timed_out: number; pending?: number; wait_ms: number }, human?: { decisions: number; answers: number; hab_seconds: number; hwt_seconds: number; flow_efficiency: number }): string {
+	const base = t('runs.approvals_hint', {
 		requested: String(ap.requested),
 		granted: String(ap.granted),
 		rejected: String(ap.rejected),
 		timed_out: String(ap.timed_out),
 		pending: String(ap.pending ?? 0),
 		wait: formatDuration(ap.wait_ms),
+	})
+	if (!human || (human.hab_seconds <= 0 && human.hwt_seconds <= 0)) return base
+	return base + '\n' + t('runs.human_hint', {
+		hab: formatDuration(human.hab_seconds * 1000),
+		hwt: formatDuration(human.hwt_seconds * 1000),
+		flow: String(human.flow_efficiency),
 	})
 }
 

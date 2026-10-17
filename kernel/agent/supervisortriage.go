@@ -32,10 +32,18 @@ const (
 
 // SupervisorTriage is the model's structured diagnosis of one failed run.
 type SupervisorTriage struct {
-	CauseClass     SupervisorCauseClass
+	CauseClass SupervisorCauseClass
+	// Pattern is the model's short stable label for the failure kind (e.g.
+	// "cpu range", "tmpfs limit", "provider 429") — the human-facing cluster
+	// title when several runs share one root cause (wave A2).
+	Pattern        string
 	Summary        string
 	Recommendation string
 	Evidence       []string
+	// ClusterKey is the deterministic grouping key (wave A2): cause class
+	// plus the normalized error text. The model never invents it — clusters
+	// must not depend on the model's phrasing stability.
+	ClusterKey string
 }
 
 // SupervisorTraceRef is the failed-run digest the caller assembles from
@@ -60,7 +68,7 @@ Cause classes (pick exactly one):
 - external_dependency — an outside system (git remote, API endpoint, package registry) failed
 
 Respond with one JSON object:
-{"cause_class": "<class>", "summary": "<1-3 sentences, what happened and why>", "recommendation": "<one concrete next step for the administrator>", "evidence": ["<event id or fact>", "..."]}
+{"cause_class": "<class>", "pattern": "<2-4 word stable label for this failure kind, e.g. 'cpu range', 'tmpfs limit', 'provider 429'>", "summary": "<1-3 sentences, what happened and why>", "recommendation": "<one concrete next step for the administrator>", "evidence": ["<event id or fact>", "..."]}
 
 Failed run:
 `)
@@ -75,6 +83,7 @@ Rules: ground every claim in the lines above; do not invent events. If the lines
 
 type supervisorTriageReply struct {
 	CauseClass     string   `json:"cause_class"`
+	Pattern        string   `json:"pattern"`
 	Summary        string   `json:"summary"`
 	Recommendation string   `json:"recommendation"`
 	Evidence       []string `json:"evidence"`
@@ -87,6 +96,7 @@ func parseSupervisorTriageReply(content string) (SupervisorTriage, error) {
 	}
 	var reply struct {
 		CauseClass     string   `json:"cause_class"`
+		Pattern        string   `json:"pattern"`
 		Summary        string   `json:"summary"`
 		Recommendation string   `json:"recommendation"`
 		Evidence       []string `json:"evidence"`
@@ -106,6 +116,10 @@ func parseSupervisorTriageReply(content string) (SupervisorTriage, error) {
 		// failing the whole verdict — the summary still carries the nuance.
 		class = CauseHarnessBug
 	}
+	pattern := strings.TrimSpace(reply.Pattern)
+	if len(pattern) > 64 {
+		pattern = pattern[:64]
+	}
 	evidence := make([]string, 0, len(reply.Evidence))
 	for _, ref := range reply.Evidence {
 		if ref = strings.TrimSpace(ref); ref != "" {
@@ -114,10 +128,42 @@ func parseSupervisorTriageReply(content string) (SupervisorTriage, error) {
 	}
 	return SupervisorTriage{
 		CauseClass:     class,
+		Pattern:        pattern,
 		Summary:        summary,
 		Recommendation: strings.TrimSpace(reply.Recommendation),
 		Evidence:       evidence,
 	}, nil
+}
+
+// SupervisorClusterKey derives the deterministic failure-group key (wave A2):
+// cause class + error type + the normalized error text. Normalization —
+// lowercase, digits → #, path/quote payloads → ~, whitespace collapsed —
+// keeps "range of CPUs is from 0.01 to 1.00" and "range of CPUs is from 0.05
+// to 2.00" in one cluster while leaving different failure kinds apart. Runs
+// sharing a key collapse into one problem-queue ticket.
+func SupervisorClusterKey(trace SupervisorTraceRef) string {
+	s := strings.ToLower(strings.TrimSpace(trace.Error))
+	if len(s) > 400 {
+		s = s[:400]
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+			b.WriteByte('#')
+		case r == '/' || r == '"' || r == '\'' || r == '`':
+			b.WriteByte('~')
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+			b.WriteByte(' ')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	norm := b.String()
+	if len(norm) > 120 {
+		norm = norm[:120]
+	}
+	return trace.ErrorType + "|" + norm
 }
 
 // TriageFailedRun asks the supervisor model to diagnose one failed run from a
@@ -145,7 +191,9 @@ func TriageFailedRunFromPrompt(ctx context.Context, model *llm.Client, prompt st
 
 // PublishSupervisorVerdict journals the triage verdict as a supervisor.verdict
 // event bound to the failed run (project + run context), so the dashboard's
-// problem queue and run traces can surface it. Best-effort by the caller.
+// problem queue and run traces can surface it. clusterKey groups same-root
+// failures into one ticket (wave A2); empty key = unclustered legacy row.
+// Best-effort by the caller.
 func (a *Activities) PublishSupervisorVerdict(ctx context.Context, model string, v SupervisorTriage, project, runID string) error {
 	if a.Events == nil {
 		return nil
@@ -156,6 +204,12 @@ func (a *Activities) PublishSupervisorVerdict(ctx context.Context, model string,
 		"summary":        v.Summary,
 		"recommendation": v.Recommendation,
 		"model":          model,
+	}
+	if v.Pattern != "" {
+		data["pattern"] = v.Pattern
+	}
+	if v.ClusterKey != "" {
+		data["cluster_key"] = v.ClusterKey
 	}
 	if len(v.Evidence) > 0 {
 		data["evidence"] = v.Evidence

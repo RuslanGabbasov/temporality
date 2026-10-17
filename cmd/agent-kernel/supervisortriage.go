@@ -48,6 +48,9 @@ func startSupervisorTriageLoop(ctx context.Context, log *slog.Logger, activities
 				return
 			}
 			runSupervisorTriagePass(ctx, log, activities, observationURL, journalToken, modelClient)
+			// Anomaly detection (wave A3) rides the same cadence; its own
+			// metric dedup keeps a persisting anomaly from re-journaling.
+			runSupervisorInsightPass(ctx, log, activities, observationURL, journalToken, modelClient)
 			select {
 			case <-ctx.Done():
 				return
@@ -113,12 +116,13 @@ func runSupervisorTriagePass(ctx context.Context, log *slog.Logger, activities *
 			log.Warn("supervisor triage: model call failed", "run", runID, "error", err.Error())
 			continue
 		}
+		verdict.ClusterKey = agent.SupervisorClusterKey(trace)
 		if err := activities.PublishSupervisorVerdict(ctx, string(verdict.CauseClass), verdict, project, runID); err != nil {
 			log.Warn("supervisor triage: publish", "run", runID, "error", err.Error())
 			continue
 		}
 		triaged++
-		log.Info("supervisor verdict recorded", "run", runID, "cause_class", string(verdict.CauseClass), "summary", verdict.Summary)
+		log.Info("supervisor verdict recorded", "run", runID, "cause_class", string(verdict.CauseClass), "pattern", verdict.Pattern, "summary", verdict.Summary)
 	}
 }
 

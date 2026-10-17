@@ -150,6 +150,34 @@ type ApprovalStats struct {
 	MaxWaitMS   int64 `json:"max_wait_ms,omitempty"` // slowest single decision
 }
 
+// HumanFactors carries the human-attention estimate coefficients (kanban
+// "touch time"): seconds per approval decision, base seconds per ask_human
+// answer, and the reading speed for generated conclusions. Mirrors the
+// workspace supervisor settings; set at boot.
+type HumanFactors struct {
+	ApprovalSeconds   int `json:"approval_seconds"`
+	AnswerBaseSeconds int `json:"answer_base_seconds"`
+	ReadingWPM        int `json:"reading_wpm"`
+}
+
+// DefaultHumanFactors mirrors workspace.DefaultHab* (duplicated because cost
+// sits below workspace in the import graph).
+var DefaultHumanFactors = HumanFactors{ApprovalSeconds: 45, AnswerBaseSeconds: 20, ReadingWPM: 180}
+
+// HumanStats is the persistent human-factor rollup of a scope (docs/
+// supervisor-model.md §5): HAB — the estimated attention spend (decisions,
+// answers, reading generated conclusions); HWT — the wall-clock time the
+// scope sat blocked waiting for a human; FlowEfficiency — the kanban share
+// of the human-bound timeline that was real attention. HWT mirrors
+// approvals.wait_ms in seconds.
+type HumanStats struct {
+	Decisions      int   `json:"decisions"`
+	Answers        int   `json:"answers"`
+	HABSeconds     int64 `json:"hab_seconds"`
+	HWTSeconds     int64 `json:"hwt_seconds"`
+	FlowEfficiency int   `json:"flow_efficiency"` // percent, 0-100
+}
+
 // TaskCost is the aggregated time/token budget of a whole task: every run it
 // spans (conversation follow-ups and the full delegation tree) with the sum
 // of what was spent.
@@ -168,6 +196,7 @@ type TaskCost struct {
 	TotalTokens           int                `json:"total_tokens"`
 	TotalCostUSD          float64            `json:"total_cost_usd"`
 	Approvals             ApprovalStats      `json:"approvals"`
+	Human                 HumanStats         `json:"human"`
 	Runs                  []TaskRunBreakdown `json:"runs"`
 	Agents                []TaskAgentRollup  `json:"agents"`
 }
@@ -199,6 +228,7 @@ type SagaRollup struct {
 	TotalTokens           int           `json:"total_tokens"`
 	TotalCostUSD          float64       `json:"total_cost_usd"`
 	Approvals             ApprovalStats `json:"approvals"`
+	Human                 HumanStats    `json:"human"`
 }
 
 // TaskRollup is one task inside a project: everything spent on it across
@@ -224,6 +254,7 @@ type TaskRollup struct {
 	TotalTokens           int           `json:"total_tokens"`
 	TotalCostUSD          float64       `json:"total_cost_usd"`
 	Approvals             ApprovalStats `json:"approvals"`
+	Human                 HumanStats    `json:"human"`
 }
 
 // ProjectBudget is the project-level rollup: totals across every task plus a
@@ -245,6 +276,7 @@ type ProjectBudget struct {
 	TotalTokens           int           `json:"total_tokens"`
 	TotalCostUSD          float64       `json:"total_cost_usd"`
 	Approvals             ApprovalStats `json:"approvals"`
+	Human                 HumanStats    `json:"human"`
 	Sagas                 []SagaRollup  `json:"sagas"`
 	Tasks                 []TaskRollup  `json:"tasks"`
 }
@@ -279,6 +311,7 @@ type CostAPI struct {
 	journalURL string
 	token      string
 	now        func() time.Time
+	factors    HumanFactors
 }
 
 // NewCostAPI creates a cost API handler.
@@ -289,6 +322,22 @@ func NewCostAPI(config Config, journalURL string, token string) *CostAPI {
 		journalURL: journalURL,
 		token:      token,
 		now:        time.Now,
+		factors:    DefaultHumanFactors,
+	}
+}
+
+// SetHumanFactors installs the attention-estimate coefficients; zero or
+// negative values fall back to the defaults. Set once at boot — changing the
+// settings applies after a restart.
+func (a *CostAPI) SetHumanFactors(f HumanFactors) {
+	if f.ApprovalSeconds > 0 {
+		a.factors.ApprovalSeconds = f.ApprovalSeconds
+	}
+	if f.AnswerBaseSeconds > 0 {
+		a.factors.AnswerBaseSeconds = f.AnswerBaseSeconds
+	}
+	if f.ReadingWPM > 0 {
+		a.factors.ReadingWPM = f.ReadingWPM
 	}
 }
 
@@ -349,7 +398,7 @@ func (a *CostAPI) TaskCostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	events, err := a.queryEventsFiltered(r, project, "", taskID,
 		"run.started", "run.completed", "run.failed", "run.cancelled", "model.completed",
-		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted")
+		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted", "human.answered")
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -368,7 +417,7 @@ func (a *CostAPI) ProjectBudgetHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	events, err := a.queryEventsFiltered(r, project, "", "",
 		"run.started", "run.completed", "run.failed", "run.cancelled", "model.completed",
-		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted",
+		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted", "human.answered",
 		"saga.registered", "saga.attached", "saga.detached", "saga.renamed", "saga.merged")
 	if err != nil {
 		writeError(w, 500, err.Error())
@@ -399,6 +448,7 @@ type TeamRunCost struct {
 	TotalTokens           int                `json:"total_tokens"`
 	TotalCostUSD          float64            `json:"total_cost_usd"`
 	Approvals             ApprovalStats      `json:"approvals"`
+	Human                 HumanStats         `json:"human"`
 	Runs                  []TaskRunBreakdown `json:"runs"`
 }
 
@@ -414,7 +464,7 @@ func (a *CostAPI) TeamRunCostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	events, err := a.queryEventsFiltered(r, project, "", "",
 		"run.started", "run.completed", "run.failed", "run.cancelled", "model.completed",
-		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted",
+		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "approval.auto_granted", "human.answered",
 		"team.started", "team.completed", "team.failed")
 	if err != nil {
 		writeError(w, 500, err.Error())
@@ -474,6 +524,7 @@ func (a *CostAPI) aggregateTeamRunCost(project, runID string, events []observati
 	out.TotalTokens = totals.totalTokens
 	out.TotalCostUSD = totals.costUSD
 	out.Approvals = saga.approvals.stats()
+	out.Human = totals.human
 	out.Runs = totals.runs
 	return out
 }
@@ -747,11 +798,13 @@ type taskRunAgg struct {
 
 // approvalAccumulator tracks the human-approval budget of a saga. Requests
 // are matched to resolutions by run + operation_id + arguments_hash — the
-// same identity the kernel uses to dedup repeat approvals.
+// same identity the kernel uses to dedup repeat approvals. ask_human answers
+// ride the same machinery (human.answered) and add their own attention.
 type approvalAccumulator struct {
 	requested, granted, rejected, timedOut, autoGranted int
 	pending                                             map[string]time.Time
 	waitMS, maxWaitMS                                   int64
+	answers, answerRunes                                int
 }
 
 func approvalKey(runID string, data map[string]any) string {
@@ -777,6 +830,11 @@ func (acc *approvalAccumulator) ingest(runID string, ev observation.Event) {
 		acc.resolve(runID, ev, &acc.timedOut)
 	case "approval.auto_granted":
 		acc.autoGranted++
+	case "human.answered":
+		acc.answers++
+		if response, _ := ev.Data["response"].(string); response != "" {
+			acc.answerRunes += len([]rune(response))
+		}
 	}
 }
 
@@ -807,6 +865,24 @@ func (acc *approvalAccumulator) stats() ApprovalStats {
 		WaitMS:      acc.waitMS,
 		MaxWaitMS:   acc.maxWaitMS,
 	}
+}
+
+// humanStats derives the persistent HAB/HWT rollup of a scope from the
+// approval accumulator plus the scope's completion tokens (every generated
+// conclusion is reviewable, so output tokens proxy the read words — the
+// same estimate the dashboard health window applies).
+func (a *CostAPI) humanStats(acc *approvalAccumulator, completionTokens int) HumanStats {
+	decisions := acc.granted + acc.rejected + acc.timedOut
+	hab := int64(decisions) * int64(a.factors.ApprovalSeconds)
+	hab += int64(acc.answers) * int64(a.factors.AnswerBaseSeconds)
+	hab += int64(acc.answerRunes / 5 * 60 / a.factors.ReadingWPM)
+	hab += int64(completionTokens) * 3 / 4 * 60 / int64(a.factors.ReadingWPM)
+	hwt := acc.waitMS / 1000
+	out := HumanStats{Decisions: decisions, Answers: acc.answers, HABSeconds: hab, HWTSeconds: hwt}
+	if total := hab + hwt; total > 0 {
+		out.FlowEfficiency = int(hab * 100 / total)
+	}
+	return out
 }
 
 // sagaAccumulator ingests lifecycle, model and approval events of one task
@@ -893,6 +969,7 @@ type sagaTotals struct {
 	costUSD                       float64
 	agents                        map[string]*TaskAgentRollup
 	runs                          []TaskRunBreakdown
+	human                         HumanStats
 }
 
 func (a *CostAPI) finalizeSaga(s *sagaAccumulator, now time.Time) sagaTotals {
@@ -944,6 +1021,7 @@ func (a *CostAPI) finalizeSaga(s *sagaAccumulator, now time.Time) sagaTotals {
 	// growing to now; once everything ended it is the last end - first start.
 	out.elapsedMS = spanElapsedMS(out.firstStartedAt, out.lastEndedAt, out.running, now)
 	sort.Slice(out.runs, func(i, j int) bool { return out.runs[i].StartedAt.Before(out.runs[j].StartedAt) })
+	out.human = a.humanStats(&s.approvals, out.completionTokens)
 	return out
 }
 
@@ -980,6 +1058,7 @@ func (a *CostAPI) aggregateTask(project, taskID string, events []observation.Eve
 		TotalCompletionTokens: totals.completionTokens, TotalTokens: totals.totalTokens,
 		TotalCostUSD: totals.costUSD,
 		Approvals:    saga.approvals.stats(),
+		Human:        totals.human,
 		Runs:         totals.runs,
 	}
 	tasks.Agents = make([]TaskAgentRollup, 0, len(totals.agents))
@@ -1203,6 +1282,7 @@ func (a *CostAPI) aggregateProjectBudget(project string, events []observation.Ev
 			TotalCompletionTokens: totals.completionTokens, TotalTokens: totals.totalTokens,
 			TotalCostUSD: totals.costUSD,
 			Approvals:    acc.approvals.stats(),
+			Human:        totals.human,
 		}
 		budget.TaskCount++
 		budget.RunCount += rollup.RunCount
@@ -1229,6 +1309,10 @@ func (a *CostAPI) aggregateProjectBudget(project string, events []observation.Ev
 		if rollup.Approvals.MaxWaitMS > budget.Approvals.MaxWaitMS {
 			budget.Approvals.MaxWaitMS = rollup.Approvals.MaxWaitMS
 		}
+		budget.Human.Decisions += rollup.Human.Decisions
+		budget.Human.Answers += rollup.Human.Answers
+		budget.Human.HABSeconds += rollup.Human.HABSeconds
+		budget.Human.HWTSeconds += rollup.Human.HWTSeconds
 		budget.Tasks = append(budget.Tasks, rollup)
 	}
 	// Registered sagas appear even without spend (registered-only rows); bound
@@ -1282,6 +1366,7 @@ func (a *CostAPI) aggregateProjectBudget(project string, events []observation.Ev
 			rollup.TotalTokens = totals.totalTokens
 			rollup.TotalCostUSD = totals.costUSD
 			rollup.Approvals = acc.approvals.stats()
+			rollup.Human = totals.human
 			if rollup.Title == "" {
 				// Registration carried no title: name the saga after its earliest
 				// task's root run before falling back to the bare id.
@@ -1333,6 +1418,9 @@ func (a *CostAPI) aggregateProjectBudget(project string, events []observation.Ev
 		}
 		return a_.TaskID < b_.TaskID
 	})
+	if total := budget.Human.HABSeconds + budget.Human.HWTSeconds; total > 0 {
+		budget.Human.FlowEfficiency = int(budget.Human.HABSeconds * 100 / total)
+	}
 	return budget
 }
 

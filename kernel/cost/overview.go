@@ -206,7 +206,7 @@ func (a *CostAPI) ProjectsOverview(ctx context.Context, window time.Duration, vi
 		return ProjectsOverview{}, err
 	}
 	approvals, err := a.queryEventsFilteredSince(ctx, "", "", "", &approvalSince,
-		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out")
+		"approval.requested", "approval.granted", "approval.rejected", "approval.timed_out", "human.answered")
 	if err != nil {
 		return ProjectsOverview{}, err
 	}
