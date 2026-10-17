@@ -252,5 +252,3 @@ func TestProviderModelRefreshIntervalDefaultAndOverrides(t *testing.T) {
 	t.Setenv("KERNEL_PROVIDER_MODELS_REFRESH", "nope")
 	require.Equal(t, 24*time.Hour, providerModelsRefreshInterval(slog.New(slog.NewTextHandler(io.Discard, nil))))
 }
-
-

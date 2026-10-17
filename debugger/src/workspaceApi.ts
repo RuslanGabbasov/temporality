@@ -136,11 +136,31 @@ export interface Agent {
 
 // Sandbox profile registry row (docs/sandbox-profiles.md §3.1) plus the local
 // availability flag: the digest-pinned image exists in the docker store.
+/** Sandbox wizard draft (docs/sandbox-profiles.md): the supervisor model's
+ *  proposal, landed in the regular profile form for editing. */
+export interface SandboxDraft {
+  id: string
+  name: string
+  description: string
+  base: string
+  packages?: string[]
+  toolchains?: string[]
+  memory?: string
+  cpus?: string
+  scratch_size?: string
+  tmp_size?: string
+  rationale?: string
+}
+
 export interface SandboxProfile {
   id: string
   name: string
   description?: string
   image?: string
+  /** Build recipe: the known base the custom profile composes on; the built
+   *  digest lands in image. Empty for external-image and builtin rows. */
+  base?: string
+  packages?: string[]
   toolchains?: string[]
   memory?: string
   cpus?: string
@@ -202,7 +222,6 @@ export interface JudgeConfig {
 export interface SupervisorSettings {
   judge_model: string
   vision_model: string
-  embedding_model: string
   hab: {
     approval_seconds: number
     answer_base_seconds: number
@@ -1076,6 +1095,10 @@ export const workspaceApi = {
   // Sandbox profiles (docs/sandbox-profiles.md §6)
   listSandboxProfiles: () =>
     request<{ profiles: SandboxProfile[] }>('/v1/workspace/sandbox-profiles'),
+  // Sandbox wizard (docs/sandbox-profiles.md): plain-language task
+  // description -> sandbox profile draft from the supervisor-scope model.
+  sandboxBuilder: (description: string) =>
+    request<SandboxDraft>('/v1/workspace/sandbox-profiles/builder', { method: 'POST', body: JSON.stringify({ description }) }),
   buildSandboxProfile: (id: string) =>
     request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${id}/build`, { method: 'POST' }),
   createSandboxProfile: (data: Partial<SandboxProfile> & { id: string; name: string }) =>

@@ -36,3 +36,72 @@ func TestSocketErrorPassthrough(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestCustomDefinition(t *testing.T) {
+	def, err := CustomDefinition("qa-tools", "python", []string{"gcc", "linux-headers"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if def.Tag != "temporality-sandbox-qa-tools:latest" {
+		t.Errorf("unexpected tag %q", def.Tag)
+	}
+	// The composed recipe keeps the base's CLI layer and appends the extra
+	// apk line for an alpine base.
+	for _, want := range []string{"FROM python:3.12-alpine", "apk add --no-cache git", "apk add --no-cache gcc linux-headers"} {
+		if !strings.Contains(def.Dockerfile, want) {
+			t.Errorf("dockerfile missing %q:\n%s", want, def.Dockerfile)
+		}
+	}
+
+	// Debian base (browser-e2e) installs extras with apt.
+	def, err = CustomDefinition("db-tests", "browser-e2e", []string{"postgresql-client"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(def.Dockerfile, "apt-get install -y --no-install-recommends postgresql-client") {
+		t.Errorf("dockerfile missing apt line:\n%s", def.Dockerfile)
+	}
+
+	// The embedded minimal base is a valid base too.
+	if _, err = CustomDefinition("shell-only", "base", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No packages: the recipe equals the base recipe with a fresh tag.
+	plain, err := CustomDefinition("plain", "node", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	baseDef, _ := BaseDefinition("node")
+	if plain.Dockerfile != baseDef.Dockerfile {
+		t.Errorf("package-free recipe must equal the base recipe")
+	}
+}
+
+func TestCustomDefinitionRejects(t *testing.T) {
+	if _, err := CustomDefinition("Bad_ID", "python", nil); err == nil {
+		t.Error("expected error for invalid profile id")
+	}
+	if _, err := CustomDefinition("ok-id", "invented-base", nil); err == nil {
+		t.Error("expected error for unknown base")
+	}
+	// Shell metacharacters never reach the RUN line.
+	for _, bad := range []string{"gcc; rm -rf /", "$(id)", "a b", "x`id`"} {
+		if _, err := CustomDefinition("ok-id", "python", []string{bad}); err == nil {
+			t.Errorf("expected error for package %q", bad)
+		}
+	}
+	sixtyFive := make([]string, 65)
+	for i := range sixtyFive {
+		sixtyFive[i] = "pkg"
+	}
+	if _, err := CustomDefinition("ok-id", "python", sixtyFive); err == nil {
+		t.Error("expected error for too many packages")
+	}
+	if !ValidPackageName("libicu-dev") || !ValidPackageName("python3-dev") || !ValidPackageName("postgresql-client") {
+		t.Error("valid package names rejected")
+	}
+	if ValidPackageName("GCC") || ValidPackageName("") || ValidPackageName("a/b") {
+		t.Error("invalid package name accepted")
+	}
+}

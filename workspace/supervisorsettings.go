@@ -36,11 +36,12 @@ const (
 )
 
 // SupervisorSettings is the full editable surface of the supervisor panel.
+// Embeddings have no model setting: inference is local (rembed in-process),
+// the model id travels via KERNEL_EMBEDDINGS_MODEL for operators.
 type SupervisorSettings struct {
-	JudgeModel     string       `json:"judge_model"`
-	VisionModel    string       `json:"vision_model"`
-	EmbeddingModel string       `json:"embedding_model"`
-	HAB            HumanFactors `json:"hab"`
+	JudgeModel  string       `json:"judge_model"`
+	VisionModel string       `json:"vision_model"`
+	HAB         HumanFactors `json:"hab"`
 }
 
 // HumanFactors carries the human-attention estimate coefficients (HAB) and is

@@ -315,6 +315,12 @@ func main() {
 		log.Error("migrate workspace v70 (sandbox profiles)", "error", err)
 		os.Exit(1)
 	}
+	// 000071 adds custom profile build recipes: a custom row either references
+	// an external image or composes on a known base (base + extra packages).
+	if err = ws.Migrate(ctx, "migrations/000071_sandbox_profile_recipes.up.sql"); err != nil {
+		log.Error("migrate workspace v71 (sandbox profile recipes)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -2601,6 +2607,9 @@ func main() {
 	RegisterStorageRoutes(mux, gate, func(r *http.Request) (map[string][]string, error) {
 		return overviewVisibleProjects(r, ws)
 	}, storageRoot, sandboxDockerBinary(), storageSnapshots, ws)
+	// Sandbox profile wizard (docs/sandbox-profiles.md): plain-language task
+	// description → profile draft via the supervisor-scope wizard client.
+	RegisterSandboxBuilderRoutes(mux, gate, wizardModelClient)
 	// agentskills.io import: folder or archive → parsed SKILL.md draft for the
 	// skill editor. Pure parse, no persistence — saving follows the normal flow.
 	RegisterSkillImportRoutes(mux, gate)

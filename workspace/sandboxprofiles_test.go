@@ -67,6 +67,15 @@ func TestValidateSandboxProfile(t *testing.T) {
 		"cache no value":  func(p *SandboxProfile) { p.CacheEnv = []string{"NPM_CONFIG_CACHE"} },
 		"cache outside":   func(p *SandboxProfile) { p.CacheEnv = []string{"X=/tmp/cache"} },
 		"cache bare root": func(p *SandboxProfile) { p.CacheEnv = []string{"X=/cache/"} },
+		"image with base": func(p *SandboxProfile) {
+			p.Image = ""
+			p.Base = "python"
+			p.Image = "repo@sha256:" + strings.Repeat("ab", 32)
+		},
+		"unknown base":     func(p *SandboxProfile) { p.Base = "invented" },
+		"packages no base": func(p *SandboxProfile) { p.Packages = []string{"gcc"} },
+		"bad package":      func(p *SandboxProfile) { p.Base = "python"; p.Packages = []string{"gcc; rm"} },
+		"builtin base":     func(p *SandboxProfile) { p.Base = "python"; p.Builtin = true },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -75,6 +84,10 @@ func TestValidateSandboxProfile(t *testing.T) {
 			require.Error(t, ValidateSandboxProfile(p))
 		})
 	}
+
+	// Recipe-based custom profile: no image yet, base from the known set.
+	recipe := SandboxProfile{ID: "qa-tools", Name: "QA tools", Base: "python", Packages: []string{"gcc", "linux-headers"}}
+	require.NoError(t, ValidateSandboxProfile(recipe))
 }
 
 func TestIsDigestPinnedImage(t *testing.T) {

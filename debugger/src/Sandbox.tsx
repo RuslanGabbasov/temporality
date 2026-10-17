@@ -4,6 +4,8 @@ import {
   TextInput,
   TextArea,
   InlineNotification,
+  Select,
+  SelectItem,
   Tag,
   Tile,
   Stack,
@@ -24,6 +26,8 @@ type ProfileForm = {
   name: string
   description: string
   image: string
+  base: string
+  packages: string
   toolchains: string
   memory: string
   cpus: string
@@ -32,7 +36,7 @@ type ProfileForm = {
   cache_env: string
 }
 
-const emptyForm: ProfileForm = { id: '', name: '', description: '', image: '', toolchains: '', memory: '', cpus: '', scratch_size: '', tmp_size: '', cache_env: '' }
+const emptyForm: ProfileForm = { id: '', name: '', description: '', image: '', base: '', packages: '', toolchains: '', memory: '', cpus: '', scratch_size: '', tmp_size: '', cache_env: '' }
 
 // Sandbox profile registry (docs/sandbox-profiles.md §8): the catalog of
 // execution environments, builtin recipes with a Build action and custom
@@ -49,6 +53,11 @@ export default function Sandbox({ project }: { project?: string }) {
   const [filter, setFilter] = useState('')
   const [building, setBuilding] = useState('')
   const [editing, setEditing] = useState<SandboxProfile | null>(null)
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [wizardText, setWizardText] = useState('')
+  const [wizardBusy, setWizardBusy] = useState(false)
+  const [wizardError, setWizardError] = useState('')
+  const [draftRationale, setDraftRationale] = useState('')
 
   const visible = profiles.filter((p) => matchesFilter(filter, p.name, p.id, p.description, ...(p.toolchains ?? [])))
 
@@ -95,6 +104,8 @@ export default function Sandbox({ project }: { project?: string }) {
       name: p.name,
       description: p.description ?? '',
       image: p.image ?? '',
+      base: p.base ?? '',
+      packages: (p.packages ?? []).join(', '),
       toolchains: (p.toolchains ?? []).join(', '),
       memory: p.memory ?? '',
       cpus: p.cpus ?? '',
@@ -111,7 +122,9 @@ export default function Sandbox({ project }: { project?: string }) {
       id: editing ? editing.id : form.id.trim(),
       name: form.name.trim(),
       description: form.description,
-      image: form.image.trim(),
+      image: form.base ? '' : form.image.trim(),
+      base: form.base,
+      packages: form.base ? form.packages.split(',').map((s) => s.trim()).filter(Boolean) : [],
       toolchains: form.toolchains.split(',').map((s) => s.trim()).filter(Boolean),
       memory: form.memory.trim(),
       cpus: form.cpus.trim(),
@@ -128,8 +141,38 @@ export default function Sandbox({ project }: { project?: string }) {
       }
       setShowForm(false)
       setForm(emptyForm)
+      setDraftRationale('')
       await load()
     } catch (f) { setError(message(f)) }
+  }
+
+  // The wizard turns a plain-language task description into a profile draft
+  // via the supervisor-scope builder endpoint; the draft lands in the regular
+  // form for review and editing.
+  const runWizard = async () => {
+    setWizardBusy(true); setWizardError('')
+    try {
+      const draft = await workspaceApi.sandboxBuilder(wizardText)
+      setForm({
+        id: draft.id,
+        name: draft.name,
+        description: draft.description ?? '',
+        image: '',
+        base: draft.base ?? '',
+        packages: (draft.packages ?? []).join(', '),
+        toolchains: (draft.toolchains ?? []).join(', '),
+        memory: draft.memory ?? '',
+        cpus: draft.cpus ?? '',
+        scratch_size: draft.scratch_size ?? '',
+        tmp_size: draft.tmp_size ?? '',
+        cache_env: '',
+      })
+      setDraftRationale(draft.rationale ?? '')
+      setEditing(null)
+      setWizardOpen(false)
+      setShowForm(true)
+    } catch (f) { setWizardError(message(f)) }
+    finally { setWizardBusy(false) }
   }
 
   return (
@@ -144,6 +187,7 @@ export default function Sandbox({ project }: { project?: string }) {
           <Heading>{t('sandbox.title')}</Heading>
           <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', marginTop: '0.25rem' }}>{t('sandbox.subtitle')}</p>
         </div>
+        <Button size="sm" kind="secondary" onClick={() => { setWizardText(''); setWizardError(''); setWizardOpen(true) }}>{t('sandbox.wizard_button') ?? 'From description'}</Button>
         <Button size="sm" onClick={() => setShowForm(true)} renderIcon={Add}>{t('sandbox.add_custom')}</Button>
       </div>
       <div style={{ position: 'sticky', top: '3rem', background: 'var(--tm-bg)', zIndex: 1, paddingBottom: '0.5rem', marginBottom: '0.5rem', maxWidth: '420px' }}>
@@ -164,18 +208,20 @@ export default function Sandbox({ project }: { project?: string }) {
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0 }}>
                   <Button size="sm" kind="ghost" renderIcon={Edit} onClick={() => startEdit(p)}>{t('sandbox.edit')}</Button>
-                  {p.builtin && (
+                  {(p.builtin || p.base) && (
                     <Button size="sm" kind="secondary" renderIcon={Renew} disabled={building === p.id} onClick={() => void build(p)}>
                       {building === p.id ? t('sandbox.building') : p.image ? t('sandbox.rebuild') : t('sandbox.build')}
                     </Button>
                   )}
-                  {!p.builtin && (
+                  {!p.builtin && !p.base && (
                     <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} onClick={() => void remove(p)}>{t('action.delete')}</Button>
                   )}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.5rem', flexWrap: 'wrap', alignItems: 'center', opacity: p.image ? 1 : 0.55 }}>
                 {(p.toolchains ?? []).map((tc) => <Tag key={tc} type="blue" size="sm">{tc}</Tag>)}
+                {p.base && <Tag type="purple" size="sm">{t('sandbox.base_tag', { base: p.base })}</Tag>}
+                {(p.packages ?? []).map((pkg) => <Tag key={pkg} type="cool-gray" size="sm">{pkg}</Tag>)}
                 {p.image
                   ? (p.available
                       ? <Tag type="green" size="sm">{t('sandbox.built')}</Tag>
@@ -196,14 +242,34 @@ export default function Sandbox({ project }: { project?: string }) {
       )}
 
       {showForm && (
-        <AppModal onClose={() => { setShowForm(false); setEditing(null) }} panelStyle={{ width: '640px' }}>
+        <AppModal onClose={() => { setShowForm(false); setEditing(null); setDraftRationale('') }} panelStyle={{ width: '640px' }}>
           <Heading>{editing ? t('sandbox.edit_heading') : t('sandbox.custom_heading')}</Heading>
           <Stack gap={3}>
+            {draftRationale && <InlineNotification kind="info" lowContrast title={t('sandbox.wizard_rationale')} subtitle={draftRationale} onCloseButtonClick={() => setDraftRationale('')} />}
             {error && <InlineNotification kind="error" lowContrast title={t('action.error')} subtitle={error} />}
             <TextInput id="sp-id" labelText={t('sandbox.field_id')} value={form.id} disabled={!!editing} onChange={(e) => setForm({ ...form, id: e.target.value })} placeholder="rust" />
             <TextInput id="sp-name" labelText={t('sandbox.field_name')} value={form.name} disabled={!!editing?.builtin} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Rust toolchain" />
             <TextArea id="sp-desc" labelText={t('sandbox.field_description')} rows={2} value={form.description} disabled={!!editing?.builtin} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-            <TextInput id="sp-image" labelText={t('sandbox.field_image')} value={form.image} disabled={!!editing?.builtin} onChange={(e) => setForm({ ...form, image: e.target.value })} placeholder="registry.local/toolbox@sha256:…" />
+            {!editing?.builtin && (
+              <Select
+                id="sp-base"
+                labelText={t('sandbox.field_base')}
+                value={form.base}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, base: e.target.value })}
+              >
+                <SelectItem value="" text={t('sandbox.base_external')} />
+                <SelectItem value="base" text={t('sandbox.base_minimal')} />
+                <SelectItem value="node" text={t('sandbox.base_node')} />
+                <SelectItem value="python" text={t('sandbox.base_python')} />
+                <SelectItem value="browser-e2e" text={t('sandbox.base_browser')} />
+              </Select>
+            )}
+            {!editing?.builtin && form.base && (
+              <TextInput id="sp-packages" labelText={t('sandbox.field_packages')} value={form.packages} onChange={(e) => setForm({ ...form, packages: e.target.value })} placeholder="gcc, musl-dev" />
+            )}
+            {!editing?.builtin && !form.base && (
+              <TextInput id="sp-image" labelText={t('sandbox.field_image')} value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} placeholder="registry.local/toolbox@sha256:…" />
+            )}
             <TextInput id="sp-toolchains" labelText={t('sandbox.field_toolchains')} value={form.toolchains} disabled={!!editing?.builtin} onChange={(e) => setForm({ ...form, toolchains: e.target.value })} placeholder="rust, wasm" />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.5rem' }}>
               <TextInput id="sp-memory" labelText={t('sandbox.field_memory')} value={form.memory} onChange={(e) => setForm({ ...form, memory: e.target.value })} placeholder="2g" />
@@ -212,12 +278,43 @@ export default function Sandbox({ project }: { project?: string }) {
               <TextInput id="sp-tmp" labelText={t('sandbox.field_tmp')} value={form.tmp_size} onChange={(e) => setForm({ ...form, tmp_size: e.target.value })} placeholder="512m" />
             </div>
             <TextArea id="sp-cache" labelText={t('sandbox.field_cache')} rows={2} value={form.cache_env} onChange={(e) => setForm({ ...form, cache_env: e.target.value })} placeholder={'CARGO_HOME=/cache/cargo'} />
-            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>{editing?.builtin ? t('sandbox.edit_hint') : t('sandbox.custom_hint')}</p>
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>{editing?.builtin ? t('sandbox.edit_hint') : form.base ? t('sandbox.recipe_hint') : t('sandbox.custom_hint')}</p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-              <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel')}</Button>
-              <Button onClick={() => void saveCustom()} disabled={!form.id.trim() || !form.name.trim()}>{editing ? t('action.save') : t('action.create')}</Button>
+              <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null); setDraftRationale('') }}>{t('action.cancel')}</Button>
+              <Button onClick={() => void saveCustom()} disabled={!form.id.trim() || !form.name.trim() || (!editing && !form.base && !form.image.trim())}>{editing ? t('action.save') : t('action.create')}</Button>
             </div>
           </Stack>
+        </AppModal>
+      )}
+
+      {/* Wizard: describe the agent's tasks, the supervisor proposes the profile */}
+      {wizardOpen && (
+        <AppModal onClose={() => setWizardOpen(false)} panelStyle={{ width: '560px' }}>
+          <Heading>{t('sandbox.wizard_title')}</Heading>
+          {wizardBusy ? (
+            <p style={{ color: 'var(--tm-text-2)', fontSize: '0.85rem', margin: '1rem 0' }}>{t('sandbox.wizard_generating')}</p>
+          ) : (
+            <>
+              <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
+                {t('sandbox.wizard_hint')}
+              </p>
+              <TextArea
+                id="sandbox-wizard-description"
+                hideLabel
+                labelText=""
+                rows={5}
+                value={wizardText}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setWizardText(e.target.value)}
+                placeholder={t('sandbox.wizard_placeholder')}
+                autoFocus
+              />
+              {wizardError && <InlineNotification kind="error" lowContrast title={t('action.error')} subtitle={wizardError} hideCloseButton style={{ marginTop: '0.5rem' }} />}
+              <div className="form-actions">
+                <Button kind="secondary" onClick={() => setWizardOpen(false)}>{t('action.cancel')}</Button>
+                <Button onClick={() => void runWizard()} disabled={!wizardText.trim()}>{t('sandbox.wizard_generate')}</Button>
+              </div>
+            </>
+          )}
         </AppModal>
       )}
     </div>

@@ -172,8 +172,6 @@ func (s *ProviderModelSync) Refresh(ctx context.Context, providerID string) ([]s
 	return models, nil
 }
 
-
-
 // Probe resolves the credential and fetches the catalog without persisting.
 func (s *ProviderModelSync) Probe(ctx context.Context, baseURL, apiKeyRef string) ([]string, error) {
 	return s.discover(ctx, baseURL, apiKeyRef)

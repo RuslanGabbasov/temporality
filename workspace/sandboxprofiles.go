@@ -26,7 +26,14 @@ type SandboxProfile struct {
 	// Image is the digest-pinned reference (repo@sha256:…). Empty means the
 	// profile is not built yet — run_command under it fails with an explicit
 	// error instead of silently substituting another image (§4.3).
-	Image      string   `json:"image,omitempty"`
+	Image string `json:"image,omitempty"`
+	// Base names the known build recipe the profile composes on ("base",
+	// "node", "python", "browser-e2e"); Packages are the extra OS packages
+	// layered on top. A recipe-based custom profile has Image empty until its
+	// build pins the digest; an external-image profile carries Image and no
+	// Base. Builtins own their catalog recipes and never set Base.
+	Base       string   `json:"base,omitempty"`
+	Packages   []string `json:"packages,omitempty"`
 	Toolchains []string `json:"toolchains,omitempty"`
 	// Resource overrides; empty = the runner's installation defaults.
 	Memory      string `json:"memory,omitempty"`
@@ -49,7 +56,15 @@ var ErrProfileBuiltin = errors.New("sandbox profile is builtin")
 // profile: removing it would strand their runs on a missing image.
 var ErrProfileInUse = errors.New("sandbox profile is assigned to agents")
 
+// sandboxProfileIDPattern is the profile id shape; kernel/sandbox keeps a
+// mirror (it travels into build tags).
 var sandboxProfileIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
+
+// ValidSandboxBases is the closed set of base recipes a custom profile may
+// compose on: the three builtin profiles plus the embedded minimal alpine.
+// kernel/sandbox.BaseDefinition is the build-side authority; a cmd-level test
+// keeps the two catalogs from drifting apart.
+var ValidSandboxBases = []string{"base", "node", "python", "browser-e2e"}
 
 // BuiltinSandboxProfiles is the in-code catalog (§5). Images stay empty until
 // an administrator builds them through POST …/{id}/build, which pins the
@@ -140,8 +155,43 @@ func ValidateSandboxProfile(p SandboxProfile) error {
 			return fmt.Errorf("cache_env %q must point inside /cache/ (e.g. /cache/npm)", entry)
 		}
 	}
+	// Recipe-based vs external-image custom profiles are mutually exclusive:
+	// a recipe's image is produced by the build, never typed by hand.
+	if p.Base != "" {
+		if p.Image != "" {
+			return fmt.Errorf("profile with a base recipe must not set an image directly; build it instead")
+		}
+		if p.Builtin {
+			return fmt.Errorf("builtin profiles cannot use a base recipe")
+		}
+		var known bool
+		for _, b := range ValidSandboxBases {
+			if p.Base == b {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return fmt.Errorf("unknown sandbox base %q (known: %s)", p.Base, strings.Join(ValidSandboxBases, ", "))
+		}
+		for _, name := range p.Packages {
+			if !ValidSandboxPackageName(name) {
+				return fmt.Errorf("package name %q is not a valid apk/apt package", name)
+			}
+		}
+	} else if len(p.Packages) > 0 {
+		return fmt.Errorf("packages require a base recipe")
+	}
 	return nil
 }
+
+// validSandboxPackageName allows only characters that appear in apk/apt
+// package names; kernel/sandbox's build-side validation is the stricter
+// authority, this mirrors it so bad names fail at save time.
+var validSandboxPackageName = regexp.MustCompile(`^[a-z0-9][a-z0-9.+_-]*$`)
+
+// ValidSandboxPackageName reports whether name is a safe OS package name.
+func ValidSandboxPackageName(name string) bool { return validSandboxPackageName.MatchString(name) }
 
 // IsDigestPinnedImage reports whether ref is repo@sha256:<64 hex>. It mirrors
 // kernel/sandbox's validateImage so both sides reject mutable tags without
@@ -173,11 +223,11 @@ func isValidResourceValue(field, value string) bool {
 	return digits != "" && strings.Trim(digits, "0123456789") == ""
 }
 
-const sandboxProfileColumns = `id, name, description, image, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, builtin, created_at, updated_at`
+const sandboxProfileColumns = `id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, builtin, created_at, updated_at`
 
 func scanSandboxProfile(row interface{ Scan(dest ...any) error }) (SandboxProfile, error) {
 	var p SandboxProfile
-	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.Image, &p.Toolchains,
+	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.Image, &p.Base, &p.Packages, &p.Toolchains,
 		&p.Memory, &p.CPUs, &p.ScratchSize, &p.TmpSize, &p.CacheEnv, &p.Builtin, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return p, ErrNotFound
@@ -194,8 +244,8 @@ func (s *Store) SeedSandboxProfiles(ctx context.Context) error {
 	for _, p := range BuiltinSandboxProfiles() {
 		now := time.Now().UTC()
 		_, err := s.pool.Exec(ctx,
-			`INSERT INTO workspace_sandbox_profile (id, name, description, image, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, builtin, created_at, updated_at)
-			 VALUES ($1,$2,$3,'',$4,$5,$6,$7,$8,$9,TRUE,$10,$10)
+			`INSERT INTO workspace_sandbox_profile (id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, builtin, created_at, updated_at)
+			 VALUES ($1,$2,$3,'','','{}',$4,$5,$6,$7,$8,$9,TRUE,$10,$10)
 			 ON CONFLICT (id) DO NOTHING`,
 			p.ID, p.Name, p.Description, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, now)
 		if err != nil {
@@ -244,9 +294,9 @@ func (s *Store) CreateSandboxProfile(ctx context.Context, p *SandboxProfile) err
 	p.CreatedAt = now
 	p.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_sandbox_profile (id, name, description, image, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, builtin, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,FALSE,$11,$11)`,
-		p.ID, p.Name, p.Description, p.Image, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, now)
+		`INSERT INTO workspace_sandbox_profile (id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, builtin, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,FALSE,$13,$13)`,
+		p.ID, p.Name, p.Description, p.Image, p.Base, p.Packages, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, now)
 	return err
 }
 
@@ -264,18 +314,25 @@ func (s *Store) UpdateSandboxProfile(ctx context.Context, p SandboxProfile) erro
 		p.Description = existing.Description
 		p.Toolchains = existing.Toolchains
 		p.Image = existing.Image
+		p.Base = ""
+		p.Packages = nil
 		p.Builtin = true
 	} else {
 		p.Builtin = false
+		// Editing the recipe invalidates the pinned image: the digest on the
+		// row would silently not match what the recipe now produces.
+		if p.Base != "" && (existing.Base != p.Base || !equalStrings(existing.Packages, p.Packages)) {
+			p.Image = ""
+		}
 	}
 	if err := ValidateSandboxProfile(p); err != nil {
 		return err
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_sandbox_profile
-		 SET name=$2, description=$3, image=$4, toolchains=$5, memory=$6, cpus=$7, scratch_size=$8, tmp_size=$9, cache_env=$10, updated_at=$11
+		 SET name=$2, description=$3, image=$4, base=$5, packages=$6, toolchains=$7, memory=$8, cpus=$9, scratch_size=$10, tmp_size=$11, cache_env=$12, updated_at=$13
 		 WHERE id=$1`,
-		p.ID, p.Name, p.Description, p.Image, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, time.Now().UTC())
+		p.ID, p.Name, p.Description, p.Image, p.Base, p.Packages, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -320,6 +377,48 @@ func (s *Store) SetSandboxProfileImage(ctx context.Context, id, image string) er
 		return errors.New("sandbox profile row did not update")
 	}
 	return nil
+}
+
+// SetCustomProfileImage pins a freshly built digest into a recipe-based
+// custom profile. Unlike the builtin variant it touches no metadata — a
+// custom row owns its name/description/toolchains.
+func (s *Store) SetCustomProfileImage(ctx context.Context, id, image string) error {
+	existing, err := s.GetSandboxProfile(ctx, id)
+	if err != nil {
+		return err
+	}
+	if existing.Builtin {
+		return fmt.Errorf("%w: %s is a builtin profile", ErrProfileBuiltin, id)
+	}
+	if existing.Base == "" {
+		return fmt.Errorf("profile %s has no base recipe; set its image reference directly", id)
+	}
+	if !IsDigestPinnedImage(image) {
+		return fmt.Errorf("image %q must be pinned by a sha256 digest", image)
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_sandbox_profile SET image=$2, updated_at=now() WHERE id=$1 AND builtin = FALSE`,
+		id, image)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// equalStrings compares two string slices order-sensitively.
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // DeleteSandboxProfile removes a custom profile. Refusing when agents still

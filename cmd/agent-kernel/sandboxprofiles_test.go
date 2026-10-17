@@ -116,6 +116,27 @@ func (f *fakeSandboxProfileStore) SetSandboxProfileImage(_ context.Context, id, 
 	return nil
 }
 
+func (f *fakeSandboxProfileStore) SetCustomProfileImage(_ context.Context, id, image string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	current, ok := f.profiles[id]
+	if !ok {
+		return workspace.ErrNotFound
+	}
+	if current.Builtin {
+		return errors.New("not custom")
+	}
+	if current.Base == "" {
+		return errors.New("no base recipe")
+	}
+	if !workspace.IsDigestPinnedImage(image) {
+		return errors.New("not digest pinned")
+	}
+	current.Image = image
+	f.profiles[id] = current
+	return nil
+}
+
 func (f *fakeSandboxProfileStore) DeleteSandboxProfile(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -283,7 +304,64 @@ func TestBuildBuiltinPinsImageAndAudits(t *testing.T) {
 	require.Equal(t, workspace.AuditSandboxProfileBuilt, store.audits[0].action)
 }
 
-// Reader cannot build; a custom profile has no recipe to build.
+// Building a recipe-based custom profile composes the definition, pins the
+// digest into the row and journals the event.
+func TestBuildCustomRecipePinsImage(t *testing.T) {
+	custom := workspace.SandboxProfile{ID: "qa-tools", Name: "QA tools", Base: "python", Packages: []string{"gcc", "linux-headers"}}
+	store := newFakeSandboxProfileStore(builtinProfileFixture(), custom)
+	outbox := &captureProfileOutbox{}
+	server := newSandboxProfileServer(t, store, outbox, fakeProfileBuilders{})
+	defer server.Close()
+
+	status, body := profileRequest(t, server, http.MethodPost, "writertoken", "/v1/workspace/sandbox-profiles/qa-tools/build", "")
+	require.Equal(t, 200, status, body)
+	require.Contains(t, body, "temporality-sandbox-test@sha256:")
+
+	built := outbox.byType("sandbox.profile.built")
+	require.Len(t, built, 1)
+	require.Equal(t, "qa-tools", built[0].Data["profile"])
+
+	pinned, err := store.GetSandboxProfile(context.Background(), "qa-tools")
+	require.NoError(t, err)
+	require.Equal(t, "temporality-sandbox-test@sha256:"+strings.Repeat("cd", 32), pinned.Image)
+	require.Equal(t, "python", pinned.Base)
+}
+
+// Recipe creation and update through the API: valid recipes save, malformed
+// ones are rejected, recipe changes invalidate the pinned image.
+func TestCustomRecipeLifecycle(t *testing.T) {
+	store := newFakeSandboxProfileStore(builtinProfileFixture())
+	server := newSandboxProfileServer(t, store, &captureProfileOutbox{}, fakeProfileBuilders{})
+	defer server.Close()
+
+	status, body := profileRequest(t, server, http.MethodPost, "writertoken", "/v1/workspace/sandbox-profiles",
+		`{"id":"qa-tools","name":"QA tools","base":"python","packages":["gcc"]}`)
+	require.Equal(t, 201, status, body)
+
+	// Building then editing the recipe drops the stale digest.
+	status, _ = profileRequest(t, server, http.MethodPost, "writertoken", "/v1/workspace/sandbox-profiles/qa-tools/build", "")
+	require.Equal(t, 200, status)
+	status, _ = profileRequest(t, server, http.MethodPut, "writertoken", "/v1/workspace/sandbox-profiles/qa-tools",
+		`{"id":"qa-tools","name":"QA tools","base":"python","packages":["gcc","linux-headers"]}`)
+	require.Equal(t, 200, status)
+	updated, err := store.GetSandboxProfile(context.Background(), "qa-tools")
+	require.NoError(t, err)
+	require.Empty(t, updated.Image, "recipe change must invalidate the pinned image")
+
+	// Base and image are mutually exclusive; unknown base and shell-bearing
+	// package names are rejected.
+	status, _ = profileRequest(t, server, http.MethodPost, "writertoken", "/v1/workspace/sandbox-profiles",
+		`{"id":"both","name":"Both","base":"node","image":"repo@sha256:`+strings.Repeat("ab", 32)+`"}`)
+	require.Equal(t, 400, status)
+	status, _ = profileRequest(t, server, http.MethodPost, "writertoken", "/v1/workspace/sandbox-profiles",
+		`{"id":"invented","name":"Invented","base":"invented-base"}`)
+	require.Equal(t, 400, status)
+	status, _ = profileRequest(t, server, http.MethodPost, "writertoken", "/v1/workspace/sandbox-profiles",
+		`{"id":"shelly","name":"Shelly","base":"python","packages":["gcc; rm -rf /"]}`)
+	require.Equal(t, 400, status)
+}
+
+// Reader cannot build; a custom profile without a recipe has nothing to build.
 func TestBuildGuards(t *testing.T) {
 	custom := workspace.SandboxProfile{ID: "my-toolchain", Name: "Mine", Image: "repo@sha256:" + strings.Repeat("ab", 32)}
 	store := newFakeSandboxProfileStore(builtinProfileFixture(), custom)

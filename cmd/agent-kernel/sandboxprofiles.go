@@ -29,6 +29,7 @@ type sandboxProfileStore interface {
 	CreateSandboxProfile(ctx context.Context, p *workspace.SandboxProfile) error
 	UpdateSandboxProfile(ctx context.Context, p workspace.SandboxProfile) error
 	SetSandboxProfileImage(ctx context.Context, id, image string) error
+	SetCustomProfileImage(ctx context.Context, id, image string) error
 	DeleteSandboxProfile(ctx context.Context, id string) error
 	RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error
 }
@@ -189,25 +190,45 @@ func RegisterSandboxProfileRoutes(mux *http.ServeMux, gate *controlplane.Gate, w
 			return
 		}
 		id := r.PathValue("id")
+		custom := false
 		def, ok := sandbox.ProfileDefinitions()[id]
 		if !ok {
-			// Custom profiles reference an external image; there is nothing to
-			// build locally.
-			writeError(w, 409, fmt.Errorf("profile %q has no builtin build recipe; set its image reference directly", id))
-			return
+			// Not a builtin recipe: a custom profile may compose on a known
+			// base; anything else references an external image and has nothing
+			// to build locally.
+			profile, err := ws.GetSandboxProfile(r.Context(), id)
+			if err != nil {
+				writeSandboxProfileError(w, err)
+				return
+			}
+			if profile.Base == "" {
+				writeError(w, 409, fmt.Errorf("profile %q has no build recipe; set its image reference directly", id))
+				return
+			}
+			def, err = sandbox.CustomDefinition(profile.ID, profile.Base, profile.Packages)
+			if err != nil {
+				writeError(w, 422, err)
+				return
+			}
+			custom = true
 		}
 		ref, err := builders.Build(r.Context(), def)
 		if err != nil {
 			writeError(w, 500, err)
 			return
 		}
-		if err := ws.SetSandboxProfileImage(r.Context(), id, ref); err != nil {
+		if custom {
+			err = ws.SetCustomProfileImage(r.Context(), id, ref)
+		} else {
+			err = ws.SetSandboxProfileImage(r.Context(), id, ref)
+		}
+		if err != nil {
 			writeSandboxProfileError(w, err)
 			return
 		}
 		actor := requestSubject(r)
-		_ = ws.RecordAccessAudit(r.Context(), actor, workspace.AuditSandboxProfileBuilt, "sandbox_profile", id, map[string]any{"image": ref})
-		emitSandboxProfileEvent(r.Context(), events, "sandbox.profile.built", id, map[string]any{"profile": id, "image": ref, "by": actor})
+		_ = ws.RecordAccessAudit(r.Context(), actor, workspace.AuditSandboxProfileBuilt, "sandbox_profile", id, map[string]any{"image": ref, "recipe": !custom})
+		emitSandboxProfileEvent(r.Context(), events, "sandbox.profile.built", id, map[string]any{"profile": id, "image": ref, "by": actor, "recipe": !custom})
 		updated, err := ws.GetSandboxProfile(r.Context(), id)
 		if err != nil {
 			writeError(w, 500, err)

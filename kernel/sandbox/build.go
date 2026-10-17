@@ -6,9 +6,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// sandboxProfileIDPattern mirrors workspace's profile id shape: lowercase
+// latin/digits/dash, 2-32 chars — the same pattern travels into local build
+// tags, which must be valid docker references.
+var sandboxProfileIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
 
 // EmbeddedDockerfile mirrors sandbox/Dockerfile (kernel/sandbox/embedded_test.go
 // fails when the two drift). The kernel image does not carry the sandbox/
@@ -85,6 +91,73 @@ RUN apt-get update && apt-get install -y --no-install-recommends git openssh-cli
 // buildTimeout bounds the whole docker build: pulling golang:1.27-alpine on a
 // slow link is the slow part; the apk layer is small.
 const buildTimeout = 15 * time.Minute
+
+// BaseDefinition returns the build recipe of a known base: the three builtin
+// profiles plus "base" — the embedded minimal alpine recipe. Custom profiles
+// compose on one of these; they never invent a base image.
+func BaseDefinition(base string) (ProfileDefinition, bool) {
+	if base == "base" {
+		return ProfileDefinition{Profile: "base", Tag: BuildImageTag, Dockerfile: EmbeddedDockerfile}, true
+	}
+	def, ok := ProfileDefinitions()[base]
+	return def, ok
+}
+
+// validPackageName allows only characters that appear in apk/apt package
+// names (lowercase latin, digits, dot, plus, dash, underscore). Names are
+// interpolated into the recipe's RUN line, so the allowlist doubles as shell
+// injection protection.
+var validPackageName = regexp.MustCompile(`^[a-z0-9][a-z0-9.+_-]*$`)
+
+// ValidPackageName reports whether name is a safe OS package name.
+func ValidPackageName(name string) bool { return validPackageName.MatchString(name) }
+
+// maxRecipePackages bounds one recipe's extra package list; a sane Dockerfile
+// layer never needs more.
+const maxRecipePackages = 64
+
+// CustomDefinition composes the build recipe for a custom profile: the base
+// recipe plus one extra package-install layer using the base distro's package
+// manager. profileID names the local tag so rebuilds overwrite in place.
+func CustomDefinition(profileID, base string, packages []string) (ProfileDefinition, error) {
+	if !sandboxProfileIDPattern.MatchString(profileID) {
+		return ProfileDefinition{}, fmt.Errorf("profile id %q does not match %s", profileID, sandboxProfileIDPattern.String())
+	}
+	baseDef, ok := BaseDefinition(base)
+	if !ok {
+		return ProfileDefinition{}, fmt.Errorf("unknown sandbox base %q", base)
+	}
+	if len(packages) > maxRecipePackages {
+		return ProfileDefinition{}, fmt.Errorf("too many packages: %d > %d", len(packages), maxRecipePackages)
+	}
+	for _, name := range packages {
+		if len(name) > 64 || !ValidPackageName(name) {
+			return ProfileDefinition{}, fmt.Errorf("package name %q is not a valid apk/apt package", name)
+		}
+	}
+	dockerfile := baseDef.Dockerfile
+	if len(packages) > 0 {
+		dockerfile += "\n# Extra packages requested by the custom profile.\n" + packageInstallLine(base, packages)
+	}
+	return ProfileDefinition{
+		Profile:    profileID,
+		Tag:        "temporality-sandbox-" + profileID + ":latest",
+		Dockerfile: dockerfile,
+	}, nil
+}
+
+// packageInstallLine renders the RUN layer for extra packages. The package
+// manager follows the base image's distro: apk for alpine bases, apt for the
+// debian browser-e2e image (mirroring the shared CLI layer above).
+func packageInstallLine(base string, packages []string) string {
+	list := strings.Join(packages, " ")
+	switch base {
+	case "browser-e2e":
+		return "RUN apt-get update && apt-get install -y --no-install-recommends " + list + " && rm -rf /var/lib/apt/lists/*"
+	default: // alpine bases: base, node, python
+		return "RUN apk add --no-cache " + list
+	}
+}
 
 // PreflightSocket proves the daemon socket is usable by the current kernel
 // user before a build or run is attempted, and turns the two deployment-level

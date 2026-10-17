@@ -129,8 +129,8 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const [judgeDraft, setJudgeDraft] = useState('')
   const [schedule, setSchedule] = useState<QualitySchedule | null>(null)
   const [scheduleDraft, setScheduleDraft] = useState('')
-  // Supervisor panel drafts: vision/embedding model overrides and the
-  // human-attention estimate coefficients (docs/supervisor-model.md).
+  // Supervisor panel drafts: vision model override and the human-attention
+  // estimate coefficients (docs/supervisor-model.md).
   const [supervisor, setSupervisor] = useState<SupervisorSettings | null>(null)
   const [visionDraft, setVisionDraft] = useState('')
   const [habDraft, setHabDraft] = useState({ approval: 45, answerBase: 20, readingWpm: 180 })
@@ -255,7 +255,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   }, [])
   useEffect(() => { void loadQualitySettings() }, [loadQualitySettings])
 
-  // One Save for the whole supervisor panel: judge/vision/embedding models,
+  // One Save for the whole supervisor panel: judge/vision models,
   // re-run cadence and the HAB coefficients change together in practice.
   const saveQualitySettings = async () => {
     setQualityBusy(true); setQualityError('')
@@ -1819,8 +1819,8 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         </AppModal>
       )}
 
-      {/* Installation-level supervisor settings (judge + vision + embedding
-          models, re-run schedule, HAB coefficients): one modal, one Save.
+      {/* Installation-level supervisor settings (judge + vision models,
+          re-run schedule, HAB coefficients): one modal, one Save.
           The button lives in the page header — an operator surface, not part
           of the everyday agent browsing flow. */}
       {qualityOpen && (

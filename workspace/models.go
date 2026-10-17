@@ -495,16 +495,12 @@ type EventConfig struct {
 
 // Provider is an OpenAI-compatible model endpoint (e.g. z.ai, xiaomi).
 type Provider struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	BaseURL   string   `json:"base_url"`
-	APIKeyRef string   `json:"api_key_ref,omitempty"` // env var name or secret ref
-	Models    []string `json:"models,omitempty"`      // model IDs discovered or listed
-	// EmbeddingModels are the provider's embedding models (e.g.
-	// z-ai/embedding-3): a separate catalog — chat /models listings may not
-	// include them, and the supervisor embeddings panel picks from here.
-	EmbeddingModels []string          `json:"embedding_models,omitempty"`
-	Labels          map[string]string `json:"labels,omitempty"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	BaseURL   string            `json:"base_url"`
+	APIKeyRef string            `json:"api_key_ref,omitempty"` // env var name or secret ref
+	Models    []string          `json:"models,omitempty"`      // model IDs discovered or listed
+	Labels    map[string]string `json:"labels,omitempty"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
 	OrgUnitID string    `json:"org_unit_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -719,16 +715,13 @@ type StartRunRequest struct {
 
 // CreateProviderRequest is the payload for creating a model provider.
 type CreateProviderRequest struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	BaseURL   string   `json:"base_url"`
-	APIKeyRef string   `json:"api_key_ref,omitempty"`
-	Models    []string `json:"models,omitempty"`
-	// EmbeddingModels is the provider's embedding catalog (a separate
-	// namespace from chat models — see Provider.EmbeddingModels).
-	EmbeddingModels []string          `json:"embedding_models,omitempty"`
-	Labels          map[string]string `json:"labels,omitempty"`
-	OrgUnitID       string            `json:"org_unit_id,omitempty"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	BaseURL   string            `json:"base_url"`
+	APIKeyRef string            `json:"api_key_ref,omitempty"`
+	Models    []string          `json:"models,omitempty"`
+	Labels    map[string]string `json:"labels,omitempty"`
+	OrgUnitID string            `json:"org_unit_id,omitempty"`
 }
 
 // CreateUserRequest is the payload for creating a user.
