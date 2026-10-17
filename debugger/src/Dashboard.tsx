@@ -16,6 +16,7 @@ import {
 } from './kernelApi'
 import ProjectOverview from './ProjectOverview'
 import Observability from './Observability'
+import { SupervisorPanels } from './Supervisor'
 import { useI18n, pluralT } from './i18n'
 import { formatDuration } from './eventSummary'
 import { sandboxLoad, maxSandboxNet, sandboxDiameter, sandboxColor, topSandboxes, sandboxShortName } from './sandboxWidgets'
@@ -25,7 +26,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed'
 }
 
-type Tab = 'overview' | 'quality' | 'sagas' | 'knowledge'
+type Tab = 'overview' | 'quality' | 'sagas' | 'knowledge' | 'supervisor'
 const TAB_KEYS: Tab[] = ['overview', 'quality', 'sagas', 'knowledge']
 
 // The journal stats window and the kernel overview window share one selector.
@@ -116,9 +117,6 @@ export default function Dashboard({ project, setProject }: Props) {
   // Run id → title from run.started events: the sandbox digest shows the human
   // name of the run, not the opaque id. Best-effort — failures leave ids.
   const [runTitles, setRunTitles] = useState<Map<string, string>>(new Map())
-  // Supervisor triage verdicts (docs/supervisor-model.md §3 A1): the problem
-  // queue for the administrator.
-  const [verdicts, setVerdicts] = useState<ObservationEvent[]>([])
   const [quality, setQuality] = useState<QualitySummary | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -134,18 +132,16 @@ export default function Dashboard({ project, setProject }: Props) {
     setError('')
     const since = new Date(Date.now() - window_.ms).toISOString()
     try {
-      const [stats, projects, ops, storageSnap, syshealthSnap, startedPage, verdictPage] = await Promise.all([
+      const [stats, projects, ops, storageSnap, syshealthSnap, startedPage] = await Promise.all([
         observationApi.healthStats(undefined, since),
         projectsOverview(window_.go),
         operations().catch(() => null),
         storageOverview().catch(() => null),
         systemHealth().catch(() => null),
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.started', limit: 200 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
-        observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict', limit: 20 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
       ])
       setHealth(stats)
       setOverview(projects)
-      setVerdicts(verdictPage.events ?? [])
       setOpsCount(ops ? ops.count : null)
       setStorage(storageSnap)
       setSyshealth(syshealthSnap)
@@ -228,6 +224,9 @@ export default function Dashboard({ project, setProject }: Props) {
     { key: 'quality', label: t('dashboard.tab_quality') ?? 'Quality' },
     { key: 'sagas', label: t('dashboard.tab_sagas') ?? 'Sagas' },
     { key: 'knowledge', label: t('dashboard.tab_knowledge') ?? 'Knowledge' },
+    // The supervisor surface (docs/supervisor-model.md §7): the administrator's
+    // problem queue lives inside the dashboard, not as a separate page.
+    { key: 'supervisor', label: t('dashboard.tab_supervisor') ?? 'Supervisor' },
   ]
 
   return (
@@ -317,68 +316,10 @@ export default function Dashboard({ project, setProject }: Props) {
             )}
           </div>
 
-          {/* Human factors (docs/supervisor-model.md §5): estimated attention
-              (HAB) versus idle wait for a human (HWT) over the window. The
-              backend derives both from journal events; coefficients live in
-              the supervisor panel. */}
-          {health?.human && (
-            <div style={{ marginBottom: '1rem' }}>
-              <PanelHeader title={t('dashboard.human_title') ?? 'Human factors'} hint={t('dashboard.human_hint') ?? undefined} />
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1rem', alignItems: 'start' }}>
-                <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.5rem', textAlign: 'center' }}>
-                    <div>
-                      <div style={{ fontSize: '1.3rem', fontWeight: 650 }}>{formatDuration(health.human.hab_seconds * 1000)}</div>
-                      <div style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('dashboard.human_hab') ?? 'attention (HAB)'}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '1.3rem', fontWeight: 650 }}>{formatDuration(health.human.hwt_seconds * 1000)}</div>
-                      <div style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('dashboard.human_hwt') ?? 'wait (HWT)'}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '1.3rem', fontWeight: 650, color: health.human.flow_efficiency < 30 ? 'var(--tm-danger)' : health.human.flow_efficiency < 50 ? 'var(--tm-amber)' : 'var(--tm-success)' }}>{health.human.flow_efficiency}%</div>
-                      <div style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('dashboard.human_flow') ?? 'flow efficiency'}</div>
-                    </div>
-                  </div>
-                  <div style={{ marginTop: '0.5rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
-                    {t('dashboard.human_counts', {
-                      decisions: String(health.human.approval_decisions),
-                      answers: String(health.human.ask_human_answered),
-                    }) ?? `${health.human.approval_decisions} decisions · ${health.human.ask_human_answered} answers`}
-                  </div>
-                </div>
-                <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem' }}>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', marginBottom: '0.35rem' }}>{t('dashboard.human_reading_title') ?? 'How to read this'}</div>
-                  <p style={{ margin: '0 0 0.4rem', lineHeight: 1.6 }}>{t('dashboard.human_read_hab') ?? ''}</p>
-                  <p style={{ margin: 0, lineHeight: 1.6 }}>
-                    {t('dashboard.human_read_hwt') ?? ''}
-                    {health.human.hwt_seconds > health.human.hab_seconds * 2 && health.human.hwt_seconds > 300 && (
-                      <strong style={{ color: 'var(--tm-danger)' }}> {t('dashboard.human_read_hwt_flag') ?? 'Wait time dominates — questions are stalling on people.'}</strong>
-                    )}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Supervisor problems live in the dashboard's Supervisor tab. */}
 
-          {/* Supervisor summary (docs/supervisor-model.md §3): the full
-              problem queue — clusters, insights, run lists — lives on the
-              dedicated /supervisor page; here a compact count with a link. */}
-          {verdicts.length > 0 && (
-            <div style={{ marginBottom: '1rem' }}>
-              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                <span style={{ color: 'var(--tm-text-2)' }}>{t('dashboard.problems_compact', { count: String(verdicts.length) })}</span>
-                <a
-                  href="/supervisor"
-                  onClick={(e) => { e.preventDefault(); navigate('/supervisor') }}
-                  style={{ color: 'var(--tm-teal)', fontSize: '0.76rem' }}
-                >{t('dashboard.problems_open')} →</a>
-              </div>
-            </div>
-          )}
-
-          {/* Storage + Server health side by side (docs/sandbox-storage.md §5.4, §7.1) */}
-          {(storage_ || syshealth) && (
+          {/* Storage + Server + Human factors side by side (docs/sandbox-storage.md §5.4, §7.1, supervisor-model.md §5) */}
+          {(storage_ || syshealth || health?.human) && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1rem', alignItems: 'start', marginBottom: '1rem' }}>
             {storage_ && (
               <section style={{ minWidth: 0 }}>
@@ -468,6 +409,36 @@ export default function Dashboard({ project, setProject }: Props) {
                   <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.server_no_docker') ?? 'docker unreachable'}</span>
                 )}
               </div>
+              </section>
+            )}
+            {health?.human && (
+              <section style={{ minWidth: 0 }}>
+                <PanelHeader title={t('dashboard.human_title') ?? 'Human factors'} hint={t('dashboard.human_hint') ?? undefined} />
+                <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.5rem', textAlign: 'center' }}>
+                    <div title={t('dashboard.human_read_hab') ?? ''}>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 650 }}>{formatDuration(health.human.hab_seconds * 1000)}</div>
+                      <div style={{ fontSize: '0.62rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('dashboard.human_hab') ?? 'attention (HAB)'}</div>
+                    </div>
+                    <div title={t('dashboard.human_read_hwt') ?? ''}>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 650 }}>{formatDuration(health.human.hwt_seconds * 1000)}</div>
+                      <div style={{ fontSize: '0.62rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('dashboard.human_hwt') ?? 'wait (HWT)'}</div>
+                    </div>
+                    <div title={t('dashboard.human_flow_hint') ?? ''}>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 650, color: health.human.flow_efficiency < 30 ? 'var(--tm-danger)' : health.human.flow_efficiency < 50 ? 'var(--tm-amber)' : 'var(--tm-success)' }}>{health.human.flow_efficiency}%</div>
+                      <div style={{ fontSize: '0.62rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('dashboard.human_flow') ?? 'flow efficiency'}</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: '0.4rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
+                    {t('dashboard.human_counts', {
+                      decisions: String(health.human.approval_decisions),
+                      answers: String(health.human.ask_human_answered),
+                    }) ?? `${health.human.approval_decisions} decisions · ${health.human.ask_human_answered} answers`}
+                    {health.human.hwt_seconds > health.human.hab_seconds * 2 && health.human.hwt_seconds > 300 && (
+                      <strong style={{ color: 'var(--tm-danger)' }}> · {t('dashboard.human_read_hwt_flag') ?? 'Wait time dominates'}</strong>
+                    )}
+                  </div>
+                </div>
               </section>
             )}
           </div>
@@ -576,6 +547,8 @@ export default function Dashboard({ project, setProject }: Props) {
       {tab === 'sagas' && <ProjectOverview project={project} />}
 
       {tab === 'knowledge' && <Observability project={project} />}
+
+      {tab === 'supervisor' && <SupervisorPanels />}
     </div>
   )
 }

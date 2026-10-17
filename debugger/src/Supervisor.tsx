@@ -87,7 +87,10 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
   return [...clustered, ...loose.sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1))]
 }
 
-export default function Supervisor() {
+// SupervisorPanels is the whole supervisor surface without the page chrome —
+// the /supervisor page and the dashboard's supervisor tab render the same
+// panels (docs/supervisor-model.md §7).
+export function SupervisorPanels() {
   const t = useT()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -181,11 +184,7 @@ export default function Supervisor() {
   })
 
   return (
-    <div style={{ padding: '1rem', maxWidth: '60rem', margin: '0 auto' }}>
-      <div style={{ marginBottom: '0.75rem' }}>
-        <h2 style={{ margin: 0 }}>{t('supervisor.title')}</h2>
-        <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0' }}>{t('supervisor.subtitle')}</p>
-      </div>
+    <>
       {error && <p style={{ color: 'var(--tm-danger)', fontSize: '0.8rem' }}>{error}</p>}
 
       {loading ? <PageLoading /> : (
@@ -364,6 +363,19 @@ export default function Supervisor() {
           </section>
         </>
       )}
+    </>
+  )
+}
+
+export default function Supervisor() {
+  const t = useT()
+  return (
+    <div style={{ padding: '1rem', maxWidth: '60rem', margin: '0 auto' }}>
+      <div style={{ marginBottom: '0.75rem' }}>
+        <h2 style={{ margin: 0 }}>{t('supervisor.title')}</h2>
+        <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0' }}>{t('supervisor.subtitle')}</p>
+      </div>
+      <SupervisorPanels />
     </div>
   )
 }

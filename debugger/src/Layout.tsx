@@ -46,11 +46,9 @@ interface LayoutProps {
 const NAV_ITEMS = [
   { path: '/workspace', label: 'nav.workspace' },
   // The system dashboard (docs/system-dashboard.md): health, quality, sagas
-  // and knowledge observability in one operational surface.
+  // and knowledge observability in one operational surface. The supervisor
+  // problem queue is a dashboard tab, not a separate nav destination.
   { path: '/dashboard', label: 'nav.dashboard' },
-  // Supervisor problem queue (docs/supervisor-model.md §3): the model's
-  // verdicts, failure clusters and health insights for the administrator.
-  { path: '/supervisor', label: 'nav.supervisor' },
   { path: '/agents', label: 'nav.runs' },
   { path: '/inbound', label: 'nav.inbound' },
   // Knowledge explorer is the main research surface (docs/human-knowledge-

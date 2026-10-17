@@ -117,6 +117,8 @@ export const en: Record<string, string> = {
     'dashboard.human_hab': 'attention (HAB)',
     'dashboard.human_hwt': 'wait (HWT)',
     'dashboard.human_flow': 'flow efficiency',
+    'dashboard.human_flow_hint': 'HAB / (HAB + HWT): the share of the human-bound timeline that was real attention, not idle wait. Below 30% — work keeps stalling on people.',
+    'dashboard.tab_supervisor': 'Supervisor',
     'dashboard.human_counts': 'decisions: {{decisions}} · answers: {{answers}}',
     'dashboard.human_reading_title': 'How to read this',
     'dashboard.human_read_hab': 'HAB is the estimated time people spent reading conclusions, deciding and answering. That is attention already spent.',

@@ -117,6 +117,8 @@ export const ru: Record<string, string> = {
     'dashboard.human_hab': 'внимание (HAB)',
     'dashboard.human_hwt': 'ожидание (HWT)',
     'dashboard.human_flow': 'эффективность потока',
+    'dashboard.human_flow_hint': 'HAB / (HAB + HWT): доля человеческой шкалы времени, ушедшая на реальное внимание, а не на простой. Ниже 30% — работа застревает на людях.',
+    'dashboard.tab_supervisor': 'Супервайзер',
     'dashboard.human_counts': 'решений: {{decisions}} · ответов: {{answers}}',
     'dashboard.human_reading_title': 'Как читать',
     'dashboard.human_read_hab': 'HAB — оценка времени, которое люди потратили на чтение выводов, решения и ответы. Это уже потраченное внимание.',
