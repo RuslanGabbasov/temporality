@@ -112,7 +112,7 @@ export const ru: Record<string, string> = {
     'dashboard.override_warn': 'Доля обходов гейта превышает 5%',
     'dashboard.judge_degraded': 'с деградацией судьи',
     'dashboard.judge_degraded_hint': 'Прогоны оценок, у которых калибровка судьи ниже порога согласия',
-    'dashboard.human_title': 'Человеческий фактор',
+    'dashboard.human_title': 'Наблюдение',
     'dashboard.human_hint': 'Внимание людей и простой в ожидании людей за окно',
     'dashboard.human_hab': 'внимание (HAB)',
     'dashboard.human_hwt': 'ожидание (HWT)',
