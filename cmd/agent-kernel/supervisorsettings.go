@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/temporality-project/temporality/controlplane"
+	"github.com/temporality-project/temporality/kernel/agent"
+	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/workspace"
 )
 
@@ -16,8 +19,9 @@ import (
 // estimate coefficients. Reader-gated reads; operator-gated writes with
 // provider-registry validation of every model name.
 
-// RegisterSupervisorRoutes mounts GET/PUT /v1/workspace/supervisor.
-func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *workspace.Store) {
+// RegisterSupervisorRoutes mounts GET/PUT /v1/workspace/supervisor and the
+// verdict-acknowledgement endpoint.
+func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *workspace.Store, activities *agent.Activities) {
 	mux.HandleFunc("GET /v1/workspace/supervisor", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -27,7 +31,14 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 			writeError(w, 500, err)
 			return
 		}
-		writeJSON(w, 200, settings)
+		// Semantic-layer health rides along (docs/supervisor-model.md §6.5):
+		// the operator sees degradation without digging kernel logs.
+		writeJSON(w, 200, map[string]any{
+			"judge_model":  settings.JudgeModel,
+			"vision_model": settings.VisionModel,
+			"hab":          settings.HAB,
+			"embeddings":   activities.EmbeddingsStatus(),
+		})
 	})
 
 	mux.HandleFunc("PUT /v1/workspace/supervisor", func(w http.ResponseWriter, r *http.Request) {
@@ -97,5 +108,46 @@ func RegisterSupervisorRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *w
 			"judge_model": saved.JudgeModel, "vision_model": saved.VisionModel,
 		})
 		writeJSON(w, 200, saved)
+	})
+
+	// Acknowledging a verdict closes it in the problem queue without touching
+	// anything the verdict proposes: the human decided — applied elsewhere,
+	// dismissed, or noted. The acknowledgement is journaled, so the queue can
+	// hide closed rows while keeping the audit trail.
+	mux.HandleFunc("POST /v1/workspace/supervisor/verdicts/acknowledge", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleOperator) {
+			return
+		}
+		var req struct {
+			EventID string `json:"event_id"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		eventID := strings.TrimSpace(req.EventID)
+		if eventID == "" {
+			writeError(w, 422, fmt.Errorf("event_id is required"))
+			return
+		}
+		item := observation.Event{
+			Schema:     observation.Schema,
+			EventID:    fmt.Sprintf("supervisor-ack/%s/%d", eventID, time.Now().UnixNano()),
+			OccurredAt: time.Now().UTC(),
+			Source:     observation.Source{ID: activities.SourceID, Integration: "temporality-agent-kernel", Version: "1"},
+			Context:    observation.Context{Actor: observation.Actor{ID: requestUserID(r), Type: "human"}},
+			Type:       "supervisor.verdict.acknowledged",
+			Data:       map[string]any{"verdict_event_id": eventID},
+		}
+		if err := item.Validate(); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if err := activities.Events.Enqueue(r.Context(), item); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditSettingChanged, "supervisor_verdict", eventID, map[string]any{"acknowledged": true})
+		writeJSON(w, 200, map[string]any{"acknowledged": eventID})
 	})
 }

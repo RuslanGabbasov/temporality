@@ -2987,9 +2987,21 @@ func runKnowledgeExtraction(ctx workflow.Context, activityCtx workflow.Context, 
 	}
 	// Judged outcomes close the usefulness loop (plan-priming-relevance.md
 	// §11): used ≠ helpful, so the extractor's verdict is a separate event the
-	// projection aggregates into the knowledge's B4 ranking factor.
+	// projection aggregates into the knowledge's B4 ranking factor. matched_by
+	// travels along (joined from the offered hints) so the tier effectiveness
+	// report (docs/supervisor-model.md §6.6) can split helpful/harmful rates
+	// by matcher tier — semantic versus lexical.
+	feedbackByKnowledge := map[string]string{}
+	for _, hint := range extraction.HintFeedback {
+		if len(hint.MatchedBy) > 0 && hint.MatchedBy[0] != "" {
+			feedbackByKnowledge[hint.KnowledgeID] = hint.MatchedBy[0]
+		}
+	}
 	for _, outcome := range extraction.HintOutcomes {
 		data := map[string]any{"hint_id": outcome.HintID, "knowledge_id": outcome.KnowledgeID, "outcome": outcome.Outcome, "matcher": "extraction-judgment.v1"}
+		if tier, ok := feedbackByKnowledge[outcome.KnowledgeID]; ok {
+			data["matched_by"] = tier
+		}
 		if err := emit(activityCtx, state, "hint.outcome", data); err != nil {
 			return
 		}

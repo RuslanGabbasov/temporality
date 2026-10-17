@@ -174,6 +174,37 @@ func (a *Activities) startEmbeddingPreloadLocked() {
 	}()
 }
 
+// EmbeddingsStatus is the operator-facing health of the in-process semantic
+// layer (docs/supervisor-model.md §6.5): when the model is not ready, hints
+// silently degrade to the lexical tiers — this makes the degradation
+// visible instead of discovered.
+type EmbeddingsStatus struct {
+	Model string `json:"model"`
+	Ready bool   `json:"ready"`
+	Error string `json:"error,omitempty"`
+}
+
+// EmbeddingsStatus reports the current semantic-layer state.
+func (a *Activities) EmbeddingsStatus() EmbeddingsStatus {
+	embedMu.Lock()
+	defer embedMu.Unlock()
+	status := EmbeddingsStatus{Model: embeddingModelID()}
+	if embedState.ready != nil {
+		select {
+		case <-embedState.ready:
+			status.Ready = embedState.err == nil
+			if embedState.err != nil {
+				status.Error = embedState.err.Error()
+			}
+		default:
+			status.Error = "model is loading"
+		}
+	} else {
+		status.Error = "load not attempted"
+	}
+	return status
+}
+
 // StartEmbeddingPreload kicks off the model load in the background at kernel
 // boot so the first hint slot does not pay the Hub download.
 func (a *Activities) StartEmbeddingPreload() {

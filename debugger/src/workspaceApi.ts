@@ -1071,6 +1071,19 @@ export const workspaceApi = {
     request<SupervisorSettings>('/v1/workspace/supervisor'),
   updateSupervisorSettings: (settings: Partial<SupervisorSettings>) =>
     request<SupervisorSettings>('/v1/workspace/supervisor', { method: 'PUT', body: JSON.stringify(settings) }),
+  // Close a verdict in the problem queue (journaled, audited; nothing the
+  // verdict proposes is applied or reverted).
+  acknowledgeSupervisorVerdict: (eventID: string) =>
+    request<{ acknowledged: string }>('/v1/workspace/supervisor/verdicts/acknowledge', { method: 'POST', body: JSON.stringify({ event_id: eventID }) }),
+  // Hint tier effectiveness (docs/supervisor-model.md §6.6): helpful/harmful
+  // rates per matcher tier — the semantic-vs-lexical A/B evidence.
+  hintEffectiveness: (project?: string) => {
+    const query = new URLSearchParams()
+    if (project) query.set('project', project)
+    const qs = query.toString()
+    return request<{ tiers: { tier: string; helpful: number; harmful: number; helpful_rate_pct: number }[]; since: string }>(
+      `/v1/observations/hints/effectiveness${qs ? `?${qs}` : ''}`)
+  },
   // Judge-driven knowledge-area normalization: merge duplicate/raw topic and
   // entity values into canonical areas, hide garbage (file names etc.).
   normalizeKnowledgeAreas: (project: string) =>
