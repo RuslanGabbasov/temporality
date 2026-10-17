@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Button, Tag, Select, SelectItem } from '@carbon/react'
+import { Button, Tag } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { observationApi, type ObservationEvent } from './observationApi'
 import { workspaceApi } from './workspaceApi'
@@ -247,15 +247,21 @@ export function SupervisorPanels() {
           <section>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.4rem' }}>
               <h3 style={{ fontSize: '0.85rem', margin: 0 }}>{t('supervisor.problems_title')}</h3>
-              <Select id="sup-case-filter" size="sm" hideLabel value={caseFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCaseFilter(e.target.value)} style={{ width: 'auto', minWidth: '12rem' }}>
-                <SelectItem value="" text={t('supervisor.filter_all_cases') ?? 'All cases'} />
-                {caseOptions.map((caseID) => <SelectItem key={caseID} value={caseID} text={t(`supervisor.case_${caseID}`) ?? caseID} />)}
-              </Select>
+              <label className="toolbar-select">
+                {t('supervisor.filter_case') ?? 'Case'}
+                <select value={caseFilter} onChange={(e) => setCaseFilter(e.target.value)}>
+                  <option value="">{t('supervisor.filter_all_cases') ?? 'All cases'}</option>
+                  {caseOptions.map((caseID) => <option key={caseID} value={caseID}>{t(`supervisor.case_${caseID}`) ?? caseID}</option>)}
+                </select>
+              </label>
               {projectOptions.length > 0 && (
-                <Select id="sup-project-filter" size="sm" hideLabel value={projectFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setProjectFilter(e.target.value)} style={{ width: 'auto', minWidth: '10rem' }}>
-                  <SelectItem value="" text={t('supervisor.filter_all_projects') ?? 'All projects'} />
-                  {projectOptions.map((p) => <SelectItem key={p} value={p} text={p} />)}
-                </Select>
+                <label className="toolbar-select">
+                  {t('supervisor.filter_project') ?? 'Project'}
+                  <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+                    <option value="">{t('supervisor.filter_all_projects') ?? 'All projects'}</option>
+                    {projectOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </label>
               )}
               <label style={{ fontSize: '0.74rem', color: 'var(--tm-text-3)', display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer' }}>
                 <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />

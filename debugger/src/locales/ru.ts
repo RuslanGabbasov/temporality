@@ -160,6 +160,8 @@ export const ru: Record<string, string> = {
     'supervisor.tier_other': 'другое',
     'supervisor.tiers_empty': 'Исходов подсказок за окно пока нет.',
     'supervisor.filter_all_cases': 'Все кейсы',
+    'supervisor.filter_case': 'Кейс',
+    'supervisor.filter_project': 'Проект',
     'supervisor.filter_all_projects': 'Все проекты',
     'supervisor.show_resolved': 'Показать разобранные',
     'supervisor.resolved': 'разобрано',

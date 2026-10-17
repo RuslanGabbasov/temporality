@@ -160,6 +160,8 @@ export const en: Record<string, string> = {
     'supervisor.tier_other': 'other',
     'supervisor.tiers_empty': 'No hint outcomes in the window yet.',
     'supervisor.filter_all_cases': 'All cases',
+    'supervisor.filter_case': 'Case',
+    'supervisor.filter_project': 'Project',
     'supervisor.filter_all_projects': 'All projects',
     'supervisor.show_resolved': 'Show resolved',
     'supervisor.resolved': 'resolved',
