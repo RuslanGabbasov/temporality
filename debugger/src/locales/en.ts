@@ -1626,6 +1626,11 @@ export const en: Record<string, string> = {
     // Knowledge explorer (docs/human-knowledge-explorer.md, stage 2)
     'explorer.title': 'Knowledge explorer',
     'explorer.search_placeholder': 'Question or keywords',
+    'explorer.search_semantic_placeholder': 'Describe the meaning — we will find similar knowledge…',
+    'explorer.semantic_toggle': 'Semantic',
+    'explorer.semantic_toggle_hint': 'Search by meaning through embeddings — finds knowledge without the exact words',
+    'explorer.semantic_searching': 'Searching by meaning…',
+    'explorer.semantic_empty': 'Nothing found by meaning. Try rephrasing.',
     'explorer.areas': 'Areas',
     'explorer.areas_filter': 'Filter areas…',
     'explorer.sort_size': 'By size',

@@ -1626,6 +1626,11 @@ export const ru: Record<string, string> = {
     // Knowledge explorer (docs/human-knowledge-explorer.md, stage 2)
     'explorer.title': 'Исследование знаний',
     'explorer.search_placeholder': 'Вопрос или ключевые слова',
+    'explorer.search_semantic_placeholder': 'Опишите смысл — найдём похожие знания…',
+    'explorer.semantic_toggle': 'Семантика',
+    'explorer.semantic_toggle_hint': 'Поиск по смыслу через эмбеддинги — находит знания, где нужных слов нет',
+    'explorer.semantic_searching': 'Ищем по смыслу…',
+    'explorer.semantic_empty': 'По смыслу ничего не найдено. Попробуйте сформулировать иначе.',
     'explorer.areas': 'Области',
     'explorer.areas_filter': 'Фильтр областей…',
     'explorer.sort_size': 'По размеру',

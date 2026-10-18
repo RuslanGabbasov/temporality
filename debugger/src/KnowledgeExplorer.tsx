@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { authHeaders } from './api'
 import { Button, TextInput, InlineNotification, Tag } from '@carbon/react'
 import {
   observationApi,
@@ -77,6 +78,13 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   const [cursor, setCursor] = useState('')
   const [listLoading, setListLoading] = useState(false)
   const [listError, setListError] = useState('')
+  // Semantic search mode (docs/supervisor-model.md §6.6): the query goes to
+  // the hint matcher's semantic tier instead of the lexical listing — finds
+  // by meaning, not by word overlap.
+  const [semanticMode, setSemanticMode] = useState(false)
+  const [semanticResults, setSemanticResults] = useState<{ id: string; proposition: string; state: string; matched_by: string[] }[]>([])
+  const [semanticLoading, setSemanticLoading] = useState(false)
+  const [semanticError, setSemanticError] = useState('')
 
   const [expandedID, setExpandedID] = useState('')
 
@@ -191,6 +199,29 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
   }
 
   useEffect(() => { void loadList(false) }, [project, debouncedQuestion, filters, revision, selectedAreaKey])
+
+    // Semantic search: same debounce, different engine — the kernel embeds the
+    // query and matches the journal's fused lexical+semantic tiers.
+    useEffect(() => {
+      if (!semanticMode || !project.trim()) { setSemanticResults([]); setSemanticError(''); setSemanticLoading(false); return }
+      if (!debouncedQuestion.trim()) { setSemanticResults([]); setSemanticLoading(false); return }
+      const seq = ++exploreSeq.current
+      setSemanticLoading(true); setSemanticError('')
+      ;(async () => {
+        try {
+          const resp = await fetch(`/kernel-api/v1/workspace/knowledge/search?project=${encodeURIComponent(project.trim())}&q=${encodeURIComponent(debouncedQuestion.trim())}`, { headers: { ...authHeaders() } })
+          if (seq !== exploreSeq.current) return
+          if (!resp.ok) { setSemanticError(`HTTP ${resp.status}`); setSemanticResults([]); return }
+          const page = await resp.json()
+          if (seq !== exploreSeq.current) return
+          setSemanticResults(page.results ?? [])
+        } catch (e) {
+          if (seq === exploreSeq.current) setSemanticError(e instanceof Error ? e.message : 'Request failed')
+        } finally {
+          if (seq === exploreSeq.current) setSemanticLoading(false)
+        }
+      })()
+    }, [project, debouncedQuestion, semanticMode, revision])
 
   /** The selected area is a sticky list filter (topic OR entity match), not a
    *  one-shot search: click toggles it, the map keeps the tile highlighted. */
@@ -356,13 +387,21 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
             id="explorer-search"
             size="sm"
             value={searchInput}
-            placeholder={t('explorer.search_placeholder') ?? 'Question or keywords…'}
+            placeholder={semanticMode ? (t('explorer.search_semantic_placeholder') ?? 'Опишите смысл — найдём по сходству…') : (t('explorer.search_placeholder') ?? 'Question or keywords…')}
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submitQuestion() }}
             labelText=""
             hideLabel
             style={{ flex: 1 }}
           />
+          {/* Semantic mode: search by meaning through the embedding tier
+              (docs/supervisor-model.md §6.6). Off = the lexical listing. */}
+          <Button
+            size="sm"
+            kind={semanticMode ? 'primary' : 'secondary'}
+            onClick={() => setSemanticMode((v) => !v)}
+            title={t('explorer.semantic_toggle_hint') ?? 'Search by meaning (semantic tier)'}
+          >{t('explorer.semantic_toggle') ?? 'Семантика'}</Button>
           <Button size="sm" onClick={submitQuestion}>{t('knowledge.search') ?? 'Search'}</Button>
           <button onClick={() => setRevision((r) => r + 1)} disabled={listLoading} title={t('explorer.refresh_hint') ?? 'Refresh'} style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', padding: '0.25rem', lineHeight: 1, borderRadius: '4px', flexShrink: 0 }}>↻</button>
           <button
@@ -497,7 +536,40 @@ export default function KnowledgeExplorer({ project }: { project: string }) {
             </div>
           )}
 
-          {list.map((item) => {
+          {semanticMode && (semanticLoading ? (
+            <div style={{ border: '1px dashed var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '1rem', fontSize: '0.8rem', color: 'var(--tm-muted)' }}>
+              {t('explorer.semantic_searching') ?? 'Ищем по смыслу…'}
+            </div>
+          ) : semanticError ? (
+            <InlineNotification kind="error" title="Error" subtitle={semanticError} onClose={() => setSemanticError('')} lowContrast style={{ marginBottom: '0.75rem' }} />
+          ) : semanticResults.length === 0 ? (
+            <div style={{ border: '1px dashed var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '1rem', fontSize: '0.8rem', color: 'var(--tm-muted)' }}>
+              {t('explorer.semantic_empty') ?? 'По смыслу ничего не найдено. Попробуйте сформулировать иначе.'}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {semanticResults.map((result) => (
+                <div key={result.id} style={{ border: '1px solid var(--tm-border)', borderRadius: 'var(--tm-radius-md)', padding: '0.6rem 0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                    <Tag type={STATE_TAG[result.state] ?? 'gray'} size="sm">{stateLabel(result.state, t)}</Tag>
+                    <div
+                      role="button" tabIndex={0}
+                      onClick={() => openDossier(result.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') openDossier(result.id) }}
+                      style={{ flex: 1, fontSize: '0.82rem', lineHeight: 1.45, cursor: 'pointer' }}
+                    >{result.proposition || result.id}</div>
+                  </div>
+                  {(result.matched_by ?? []).length > 0 && (
+                    <div style={{ marginTop: '0.25rem', fontSize: '0.66rem', color: 'var(--tm-muted)' }}>
+                      {(result.matched_by ?? []).slice(0, 4).join(' · ')}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {!semanticMode && list.map((item) => {
             const annotation = annotations.get(item.id)
             const expanded = expandedID === item.id
             return (

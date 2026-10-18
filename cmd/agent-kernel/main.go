@@ -6704,6 +6704,9 @@ func main() {
 	RegisterJudgeRoutes(mux, gate, ws, activities, events, visibleUnits, log)
 	// Judge-driven knowledge-area normalization (docs/human-knowledge-explorer.md §4.2).
 	RegisterKnowledgeAreaRoutes(mux, gate, ws, secretMasterKey, observationURL, log)
+	// Semantic knowledge search (docs/supervisor-model.md §6.6): lexical +
+	// semantic tiers through the journal's hint matcher, exposed as search.
+	RegisterKnowledgeSearchRoutes(mux, gate, activities)
 	// Supervisor settings (docs/supervisor-model.md): judge/vision/embedding
 	// models and the human-attention coefficients.
 	RegisterSupervisorRoutes(mux, gate, ws, activities)
