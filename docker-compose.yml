@@ -220,7 +220,9 @@ services:
       # container and on the host. The default /srv/temporality/sandbox is a
       # persistent host directory (create it before first start; the kernel
       # chowns what it needs) — /tmp was volatile and wiped project
-      # workspaces on every host reboot.
+      # workspaces on every host reboot. Kubernetes deployments replace this
+      # bind-mount with a Job-based runner + PVC (docs/sandbox-profiles.md
+      # §13, roadmap).
       - /var/run/docker.sock:/var/run/docker.sock
       # In-process embedding model cache (semantic knowledge layer): weights
       # download once and persist across container restarts.
