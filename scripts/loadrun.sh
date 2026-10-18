@@ -12,21 +12,27 @@
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile loadtest up -d
 #
 # Usage:
-#   scripts/loadrun.sh [runs] [ramp-seconds] [report-path] [--hitl]
+#   scripts/loadrun.sh [runs] [ramp-seconds] [report-path] [--hitl] [--heavy]
 #
-#   --hitl  mock answers ask_human after the tool turns; the driver plays the
-#           human with -human-delay 30s — the queue-wait (HWT) profile.
+#   --hitl   mock answers ask_human after the tool turns; the driver plays the
+#            human with -human-delay 30s — the queue-wait (HWT) profile.
+#   --heavy  heavier workload: 12s sandbox commands (concurrent containers),
+#            1.5s token gaps (long streams), ask_human pause in the middle —
+#            the profile that stresses sandboxes, journal write volume and
+#            the token bus at once.
 set -eu
 
 RUNS="50"
 RAMP="60"
 REPORT=""
 HITL="0"
+HEAVY="0"
 SET_RUNS=""
 SET_RAMP=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --hitl) HITL="1" ;;
+    --heavy) HEAVY="1" ;;
     *) if [ -z "${SET_RUNS:-}" ]; then RUNS="$1"; SET_RUNS=1
        elif [ -z "${SET_RAMP:-}" ]; then RAMP="$1"; SET_RAMP=1
        elif [ -z "${REPORT:-}" ]; then REPORT="$1"
@@ -51,7 +57,7 @@ trap cleanup EXIT INT TERM
 
 echo "== 1/4 build tools (requires Go) =="
 go build -o /tmp/loadgen-runner ./examples/loadgen
-if [ "$HITL" = "1" ]; then
+if [ "$HITL" = "1" ] || [ "$HEAVY" = "1" ]; then
   go build -o /tmp/mockllm-bin ./examples/mockllm
 fi
 
@@ -76,23 +82,29 @@ case "$mock_health" in
   *)    echo "   WARNING: mock provider not reachable at $MOCK_URL — check the loadtest profile / process"; exit 1 ;;
 esac
 
-echo "== 3/4 resource sampler =="
+echo "== 3/4 resource sampler (1s: containers, cpu, mem) =="
 (
   while :; do
-    echo "=== $(date +%H:%M:%S)"
+    echo "=== $(date +%H:%M:%S) containers=$(docker ps -q | wc -l)"
     docker stats --no-stream --format '{{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}}' \
       | grep -E 'agent-kernel|journal|postgres|mockllm|debugger' || true
-    sleep 2
+    sleep 1
   done
 ) > /tmp/loadgen-resources.log &
 SAMPLER_PID=$!
 
-echo "== 4/4 load: $RUNS runs, ramp ${RAMP}s, hitl=$HITL =="
+echo "== 4/4 load: $RUNS runs, ramp ${RAMP}s, hitl=$HITL heavy=$HEAVY =="
 hitl_flags=""
+mock_flags="-first-token 200ms -token-gap 15ms -tokens 120"
 if [ "$HITL" = "1" ]; then
-  /tmp/mockllm-bin -addr :18099 -first-token 200ms -token-gap 15ms -tokens 120 -ask-human-after-tools 2 &
-  MOCK_PID=$!
   hitl_flags="-hitl -human-delay 30s"
+fi
+if [ "$HEAVY" = "1" ]; then
+  # Heavy profile: 10s sandbox commands (long-lived concurrent containers),
+  # 1.5s token gaps (long streams), and an ask_human pause mid-run —
+  # sandboxes + journal volume + token bus stressed together.
+  mock_flags="-first-token 1s -token-gap 1500ms -tokens 300 -tool-command 'sleep 10 && echo heavy'"
+  hitl_flags="-hitl -human-delay 45s"
 fi
 /tmp/loadgen-runner \
   -kernel "$KERNEL_URL" \
@@ -102,14 +114,14 @@ fi
   -agent "${AGENT:-loadgen-agent}" \
   -model "${MODEL:-loadgen-model}" \
   -runs "$RUNS" -ramp "${RAMP}s" \
-  -timeout "${RUN_TIMEOUT:-10m}" \
+  -timeout "${RUN_TIMEOUT:-20m}" \
   $hitl_flags \
   -report "$REPORT" \
   2>&1 | tee /tmp/loadgen-runner.log
 
 echo
 
-echo "== resource summary (peaks per service) =="
+echo "== resource summary (peaks per service + concurrent sandboxes) =="
 grep -oE '[a-z0-9-]+ cpu=[0-9.]+%' /tmp/loadgen-resources.log \
   | awk '{split($0,a," cpu="); if (a[2]+0 > pcpu[a[1]]) pcpu[a[1]]=a[2]+0}
          END {for (s in pcpu) printf "  %-14s peak cpu %.2f%%\n", s, pcpu[s]}' | sort
@@ -118,5 +130,8 @@ grep -oE '[a-z0-9-]+ .*mem=[0-9.]+[GM]iB' /tmp/loadgen-resources.log \
   | awk -F'\t' '{name=$1; sub(/ cpu=.*$/, "", name); mb=$2+0; if ($3=="G") mb*=1024;
           if (mb > pmem[name]) pmem[name]=mb}
          END {for (s in pmem) printf "  %-14s peak mem %.0f MiB\n", s, pmem[s]}' | sort
+# Peak concurrent sandboxes: the container count line from the sampler.
+grep -oE 'containers=[0-9]+' /tmp/loadgen-resources.log \
+  | awk -F= '{if ($2+0 > m) m=$2+0} END {print "  peak concurrent containers:", m}'
 echo "full sampler log: /tmp/loadgen-resources.log"
 echo "report: $REPORT"

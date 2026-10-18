@@ -102,6 +102,8 @@ func main() {
 	a.ensureSetup()
 
 	started := time.Now()
+	var answeredTotal atomic.Int64
+	var inFlight atomic.Int64
 	var (
 		mu       sync.Mutex
 		results  []runResult
@@ -119,6 +121,8 @@ func main() {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+			defer inFlight.Add(-1)
+			inFlight.Add(1)
 			time.Sleep(step * time.Duration(idx))
 
 			// A task per run: the run's conversation transcript lives on the
@@ -174,10 +178,13 @@ func main() {
 				if *askHuman {
 					if asked, ok := a.findOpenQuestion(startedRun.RunID, answered); ok {
 						time.Sleep(*humanDelay)
-						if a.answerQuestion(startedRun.RunID, *project, asked) == nil {
+						if aErr := a.answerQuestion(startedRun.RunID, *project, asked); aErr == nil {
 							hits++
 							hwtMS += time.Since(asked.raisedAt).Milliseconds()
 							answered[asked.operationID] = true
+							answeredTotal.Add(1)
+						} else {
+							fmt.Fprintf(os.Stderr, "loadgen: answer failed: %v\n", aErr)
 						}
 					}
 				}
@@ -208,7 +215,27 @@ func main() {
 			mu.Unlock()
 		}(i)
 	}
+	// Live progress (heavy profiles run for minutes): in-flight counter with
+	// a periodic line, so the operator sees the funnel while it runs.
+	stopProgress := make(chan struct{})
+	progressDone := make(chan struct{})
+	go func() {
+		defer close(progressDone)
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopProgress:
+				return
+			case <-ticker.C:
+				fmt.Printf("[%s] running: %d · answered HITL: %d\n",
+					time.Since(started).Round(time.Second), inFlight.Load(), answeredTotal.Load())
+			}
+		}
+	}()
 	wg.Wait()
+	close(stopProgress)
+	<-progressDone
 	elapsed := time.Since(started)
 
 	durations, startLat, done, statuses, hits, hwt := collect(results)

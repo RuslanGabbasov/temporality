@@ -36,4 +36,12 @@ services:
     profiles: [loadtest]
     ports:
       - "8081:8081"
+    # Heavy-profile knobs (docs/resilience-and-scale.md §НТ): the default is
+    # the light profile; scripts/loadrun.sh --heavy documents the heavy env.
+    environment:
+      MOCKLLM_FIRST_TOKEN: ${MOCKLLM_FIRST_TOKEN:-200ms}
+      MOCKLLM_TOKEN_GAP: ${MOCKLLM_TOKEN_GAP:-15ms}
+      MOCKLLM_TOKENS: ${MOCKLLM_TOKENS:-120}
+      MOCKLLM_TOOL_COMMAND: ${MOCKLLM_TOOL_COMMAND:-echo loadgen step}
+      MOCKLLM_ASK_AFTER_TOOLS: ${MOCKLLM_ASK_AFTER_TOOLS:-0}
     restart: unless-stopped

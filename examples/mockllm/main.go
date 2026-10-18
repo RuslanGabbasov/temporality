@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -27,15 +29,16 @@ import (
 
 var (
 	addr       = flag.String("addr", ":8081", "listen address")
-	firstToken = flag.Duration("first-token", 200*time.Millisecond, "delay before the first streamed token")
-	tokenGap   = flag.Duration("token-gap", 15*time.Millisecond, "delay between streamed tokens")
-	tokenCount = flag.Int("tokens", 120, "streamed content tokens per answer")
+	firstToken = flag.Duration("first-token", 200*time.Millisecond, "delay before the first streamed token (env MOCKLLM_FIRST_TOKEN)")
+	tokenGap   = flag.Duration("token-gap", 15*time.Millisecond, "delay between streamed tokens (env MOCKLLM_TOKEN_GAP)")
+	tokenCount = flag.Int("tokens", 120, "streamed content tokens per answer (env MOCKLLM_TOKENS)")
 	charsToken = flag.Int("chars-per-token", 4, "characters per token delta")
 	failEvery  = flag.Int("fail-every", 0, "fail every Nth request with 429 (0 = never)")
 	// HITL profile (docs/resilience-and-scale.md §НТ): after N tool results
-	// the mock answers ask_human instead of a tool call — the run parks on the
-	// approval signal until the driver answers it.
-	askAfterTools = flag.Int("ask-human-after-tools", 0, "answer ask_human once the request carries this many tool results (0 = off)")
+	// the mock answers ask_human instead of a tool call — the run parks on
+	// the approval signal until the driver answers it.
+	askAfterTools = flag.Int("ask-human-after-tools", 0, "answer ask_human once the request carries this many tool results (env MOCKLLM_ASK_AFTER_TOOLS, 0 = off)")
+	toolCommand   = flag.String("tool-command", "echo loadgen step", "command the scripted tool calls execute (env MOCKLLM_TOOL_COMMAND; heavier profiles: 'sleep 10 && echo heavy')")
 	histBucket    = flag.Duration("hist-bucket", 100*time.Millisecond, "first-token histogram bucket width")
 )
 
@@ -55,6 +58,31 @@ var firstTokenHist [32]atomic.Int64
 
 func main() {
 	flag.Parse()
+	// Env overrides win over flags: the compose loadtest profile passes the
+	// heavy-profile knobs this way (MOCKLLM_* in docker-compose.dev.yml).
+	if v := strings.TrimSpace(os.Getenv("MOCKLLM_FIRST_TOKEN")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			*firstToken = d
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("MOCKLLM_TOKEN_GAP")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			*tokenGap = d
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("MOCKLLM_TOKENS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			*tokenCount = n
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("MOCKLLM_TOOL_COMMAND")); v != "" {
+		*toolCommand = v
+	}
+	if v := strings.TrimSpace(os.Getenv("MOCKLLM_ASK_AFTER_TOOLS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			*askAfterTools = n
+		}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/chat/completions", handleChat)
 	mux.HandleFunc("GET /metrics", handleMetrics)
@@ -124,10 +152,10 @@ func scripted(tools, askAfter int) (toolName, args, content string) {
 	switch {
 	case tools == 0:
 		toolCalls.Add(1)
-		return "run_command", `{"command":"echo loadgen step 1"}`, ""
+		return "run_command", fmt.Sprintf(`{"command":"%s 1"}`, *toolCommand), ""
 	case tools == 1:
 		toolCalls.Add(1)
-		return "run_command", `{"command":"echo loadgen step 2"}`, ""
+		return "run_command", fmt.Sprintf(`{"command":"%s 2"}`, *toolCommand), ""
 	default:
 		finalAnswers.Add(1)
 		return "", "", "Load run complete: the scripted coding loop finished successfully."
