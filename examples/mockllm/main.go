@@ -32,7 +32,11 @@ var (
 	tokenCount = flag.Int("tokens", 120, "streamed content tokens per answer")
 	charsToken = flag.Int("chars-per-token", 4, "characters per token delta")
 	failEvery  = flag.Int("fail-every", 0, "fail every Nth request with 429 (0 = never)")
-	histBucket = flag.Duration("hist-bucket", 100*time.Millisecond, "first-token histogram bucket width")
+	// HITL profile (docs/resilience-and-scale.md §НТ): after N tool results
+	// the mock answers ask_human instead of a tool call — the run parks on the
+	// approval signal until the driver answers it.
+	askAfterTools = flag.Int("ask-human-after-tools", 0, "answer ask_human once the request carries this many tool results (0 = off)")
+	histBucket    = flag.Duration("hist-bucket", 100*time.Millisecond, "first-token histogram bucket width")
 )
 
 // Counters exposed at /metrics.
@@ -109,10 +113,14 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 }
 
 // scripted: two tool-call turns (the loadgen scenario "3 model calls,
-// 2 tools"), then the final answer. Tool calls arrive as one complete
-// function call — the kernel's stream parser accumulates deltas, and a
-// single full delta is the simplest valid OpenAI-shaped form.
-func scripted(tools int) (toolName, args, content string) {
+// 2 tools"), then the final answer. With the HITL profile on, the first
+// turn after the tool results becomes an ask_human call — the run parks on
+// the approval signal until the driver answers.
+func scripted(tools, askAfter int) (toolName, args, content string) {
+	if askAfter > 0 && tools == askAfter {
+		toolCalls.Add(1)
+		return "ask_human", fmt.Sprintf(`{"question":"Load-test decision %d: approve the next step?","options":["yes","no"]}`, tools), ""
+	}
 	switch {
 	case tools == 0:
 		toolCalls.Add(1)
@@ -127,7 +135,7 @@ func scripted(tools int) (toolName, args, content string) {
 }
 
 func streamResponse(w http.ResponseWriter, tools int, start time.Time) {
-	name, args, content := scripted(tools)
+	name, args, content := scripted(tools, *askAfterTools)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	flusher, ok := w.(http.Flusher)
@@ -190,7 +198,7 @@ func streamResponse(w http.ResponseWriter, tools int, start time.Time) {
 }
 
 func blockResponse(w http.ResponseWriter, tools int, start time.Time) {
-	name, args, content := scripted(tools)
+	name, args, content := scripted(tools, *askAfterTools)
 	time.Sleep(*firstToken)
 	bucketFirstToken(time.Since(start))
 	msg := map[string]any{"role": "assistant"}

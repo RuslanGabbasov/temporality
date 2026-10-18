@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -38,7 +39,14 @@ var (
 	ramp      = flag.Duration("ramp", 60*time.Second, "spread the starts over this duration")
 	pollEvery = flag.Duration("poll", 1*time.Second, "run-status poll interval")
 	perRunTO  = flag.Duration("timeout", 15*time.Minute, "give up on a run after this long")
-	report    = flag.String("report", "", "write a markdown report to this path (in addition to stdout)")
+	// HITL profile: when the mock answers ask_human (see -ask-human-after-tools),
+	// the driver plays the human — waits humanDelay after the question event,
+	// then signals the approval with a response. Delay is what makes the HWT
+	// numbers in the report realistic (queue wait, not reflex).
+	askHuman   = flag.Bool("hitl", false, "answer ask_human pauses (use with mockllm -ask-human-after-tools)")
+	humanDelay = flag.Duration("human-delay", 5*time.Second, "simulated human think time before answering")
+	report     = flag.String("report", "", "write a markdown report to this path (in addition to stdout)")
+	journal    = flag.String("journal", "http://localhost:8080", "journal API base URL (human.requested lookup)")
 )
 
 type api struct {
@@ -79,6 +87,8 @@ type runResult struct {
 	totalMS  int64 // start → terminal
 	status   string
 	terminal string
+	hits     int   // answered HITL pauses
+	hwtMS    int64 // summed question→answer wait
 }
 
 func main() {
@@ -142,10 +152,24 @@ func main() {
 
 			// Poll to terminal; the status endpoint enriches with the live
 			// Temporal status, so a run that died silently still settles.
+			// With the HITL profile on, human.requested events found in the
+			// run's journal are answered after the simulated think time.
 			deadline := time.Now().Add(*perRunTO)
+			answered := map[string]bool{}
+			hits, hwtMS := 0, int64(0)
 			for time.Now().Before(deadline) {
 				time.Sleep(*pollEvery)
-				code, body, err := a.call(http.MethodGet, "/v1/workspace/runs/"+startedRun.RunID, nil)
+				if *askHuman {
+					if asked, ok := a.findOpenQuestion(startedRun.RunID, answered); ok {
+						time.Sleep(*humanDelay)
+						if a.answerQuestion(startedRun.RunID, *project, asked) == nil {
+							hits++
+							hwtMS += time.Since(asked.raisedAt).Milliseconds()
+							answered[asked.operationID] = true
+						}
+					}
+				}
+				code, body, err := a.call(http.MethodGet, "/v1/workspace/runs/"+startedRun.RunID+"?project="+url.QueryEscape(*project), nil)
 				if code != 200 || err != nil {
 					continue // transient (restart window, journal lag)
 				}
@@ -161,27 +185,35 @@ func main() {
 					results = append(results, runResult{
 						id: task.ID, startMS: startMS,
 						totalMS: time.Since(tStart).Milliseconds(), status: run.Status,
+						hits: hits, hwtMS: hwtMS,
 					})
 					mu.Unlock()
 					return
 				}
 			}
 			mu.Lock()
-			results = append(results, runResult{id: task.ID, startMS: startMS, totalMS: time.Since(tStart).Milliseconds(), status: "timeout"})
+			results = append(results, runResult{id: task.ID, startMS: startMS, totalMS: time.Since(tStart).Milliseconds(), status: "timeout", hits: hits, hwtMS: hwtMS})
 			mu.Unlock()
 		}(i)
 	}
 	wg.Wait()
 	elapsed := time.Since(started)
 
-	durations, startLat, done, statuses := collect(results)
+	durations, startLat, done, statuses, hits, hwt := collect(results)
 	fmt.Printf("\n=== Load report (%d runs, ramp %s) ===\n", *runs, ramp)
 	fmt.Printf("wall clock: %s · start failures: %d · terminal: %d/%d\n", elapsed.Round(time.Second), failures.Load(), done, *runs)
 	printTable("run duration (start → terminal)", durations)
 	printTable("start-API latency", startLat)
+	if hits > 0 {
+		avg := int64(0)
+		if hits > 0 && hwt > 0 {
+			avg = hwt / int64(hits)
+		}
+		fmt.Printf("%-32s %d пауз · средняя пауза %d ms\n", "HITL (human-in-the-loop)", hits, avg)
+	}
 	printStatuses(statuses)
 	if *report != "" {
-		writeReport(*report, *runs, *ramp, elapsed, failures.Load(), durations, startLat, statuses, done)
+		writeReport(*report, *runs, *ramp, elapsed, failures.Load(), durations, startLat, statuses, done, hits, hwt)
 		fmt.Printf("report written to %s\n", *report)
 	}
 	if failures.Load() > 0 || done < *runs {
@@ -189,13 +221,15 @@ func main() {
 	}
 }
 
-func collect(results []runResult) (durations, startLat []int64, done int, statuses map[string]int) {
+func collect(results []runResult) (durations, startLat []int64, done int, statuses map[string]int, hits int, hwt int64) {
 	statuses = map[string]int{}
 	for _, r := range results {
 		startLat = append(startLat, r.startMS)
 		if r.totalMS > 0 {
 			durations = append(durations, r.totalMS)
 		}
+		hits += r.hits
+		hwt += r.hwtMS
 		statuses[r.status]++
 		switch r.status {
 		case "completed", "failed", "cancelled":
@@ -230,7 +264,7 @@ func printStatuses(statuses map[string]int) {
 	fmt.Printf("statuses: %s\n", strings.Join(parts, " "))
 }
 
-func writeReport(path string, runs int, ramp time.Duration, elapsed time.Duration, failures int64, durations, startLat []int64, statuses map[string]int, done int) {
+func writeReport(path string, runs int, ramp time.Duration, elapsed time.Duration, failures int64, durations, startLat []int64, statuses map[string]int, done int, hits int, hwtMS int64) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Нагрузочный прогон\n\n- ранов: %d, ramp: %s, wall clock: %s\n- сбоев старта: %d, завершившихся: %d/%d\n\n| Метрика | p50 | p95 | p99 | max |\n|---|---|---|---|---|\n", runs, ramp, elapsed.Round(time.Second), failures, done, runs)
 	row := func(title string, s []int64) {
@@ -243,6 +277,9 @@ func writeReport(path string, runs int, ramp time.Duration, elapsed time.Duratio
 	}
 	row("Длительность рана", durations)
 	row("Латентность старта (API)", startLat)
+	if hits > 0 {
+		fmt.Fprintf(&b, "\nHITL: отвечено пауз %d, средняя пауза (HWT): %d ms\n", hits, hwtMS/int64(hits))
+	}
 	keys := make([]string, 0, len(statuses))
 	for k := range statuses {
 		keys = append(keys, k)
@@ -256,6 +293,77 @@ func writeReport(path string, runs int, ramp time.Duration, elapsed time.Duratio
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "write report: %v\n", err)
 	}
+}
+
+// openQuestion is one unanswered ask_human of a run, as seen in the journal.
+type openQuestion struct {
+	operationID   string
+	argumentsHash string
+	raisedAt      time.Time
+}
+
+// findOpenQuestion returns the run's newest human.requested event that the
+// driver has not answered yet. Answers ride the approval signal with the
+// operation id + arguments hash from that event.
+func (a api) findOpenQuestion(runID string, answered map[string]bool) (openQuestion, bool) {
+	req, err := http.NewRequest(http.MethodGet,
+		strings.TrimRight(*journal, "/")+"/v1/observations/events?run="+url.QueryEscape(runID)+"&type=human.requested&limit=20", nil)
+	if err != nil {
+		return openQuestion{}, false
+	}
+	if a.token != "" {
+		req.Header.Set("Authorization", "Bearer "+a.token)
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return openQuestion{}, false
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || err != nil {
+		return openQuestion{}, false
+	}
+	var page struct {
+		Events []struct {
+			OccurredAt time.Time      `json:"occurred_at"`
+			Data       map[string]any `json:"data"`
+		} `json:"events"`
+	}
+	if json.Unmarshal(body, &page) != nil {
+		return openQuestion{}, false
+	}
+	for _, e := range page.Events {
+		op, _ := e.Data["operation_id"].(string)
+		hash, _ := e.Data["arguments_hash"].(string)
+		if op == "" || answered[op] {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "loadgen: HITL question found (run %s, op %s)\n", runID, op[:min2(len(op), 40)])
+		return openQuestion{operationID: op, argumentsHash: hash, raisedAt: e.OccurredAt}, true
+	}
+	return openQuestion{}, false
+}
+
+func min2(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// answerQuestion signals the approval with a response — the same move the
+// UI's question card makes (docs/triggers-and-escalations.md §5-13).
+func (a api) answerQuestion(runID, project string, q openQuestion) error {
+	code, body, _ := a.call(http.MethodPost,
+		"/v1/agent/runs/"+url.PathEscape(runID)+"/approval?project="+url.QueryEscape(project),
+		map[string]any{
+			"operation_id": q.operationID, "arguments_hash": q.argumentsHash,
+			"approved": true, "response": "loadgen: approved", "actor_id": "loadgen-human",
+		})
+	if code != 200 {
+		return fmt.Errorf("approval %d: %s", code, truncate(body))
+	}
+	return nil
 }
 
 // ensureSetup creates the project and the load agent when missing. Both are
