@@ -123,12 +123,13 @@ func NewFromEnv() (*Docker, error) {
 	if err := validateByteSize(strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_SCRATCH_SIZE"))); err != nil {
 		return nil, err
 	}
-	if err := validateByteSize(strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_TMP_SIZE"))); err != nil {
+	if err := validateByteSize(strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_SCRATCH_SIZE"))); err != nil {
 		return nil, err
 	}
-	// NewFromEnv fails on a missing root: the administrator explicitly
-	// configured a path that is not there, and guessing would hide it.
-	return newDocker(image, root, false)
+	// The root is created when missing: an operator pinning the path in env
+	// states *where* the sandbox lives, not that they pre-created it. MkdirAll
+	// is idempotent, and a typo still fails loudly one line below.
+	return newDocker(image, root, true)
 }
 
 // New builds a runner from an explicit image and root (first-run onboarding

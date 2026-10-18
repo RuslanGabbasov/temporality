@@ -72,6 +72,8 @@ type FileEntry struct {
 
 // ListDir lists one directory inside an area, directories first, both groups
 // alphabetical — the shape a Finder-style tree expects for lazy loading.
+// A missing area directory is a normal state, not an error: a project's
+// workspace materializes at its first run, so the listing answers empty.
 func ListDir(root, project, area, rel string) ([]FileEntry, error) {
 	dir, err := ResolveAreaPath(root, project, area, rel)
 	if err != nil {
@@ -79,6 +81,9 @@ func ListDir(root, project, area, rel string) ([]FileEntry, error) {
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return []FileEntry{}, nil
+		}
 		return nil, err
 	}
 	result := make([]FileEntry, 0, len(entries))

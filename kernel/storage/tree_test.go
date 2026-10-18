@@ -72,7 +72,10 @@ func TestProjectTreeInvalidProjectIDs(t *testing.T) {
 	}
 }
 
-func TestProjectTreeMissingRootIsError(t *testing.T) {
-	_, err := ProjectTreeSnapshot(context.Background(), filepath.Join(t.TempDir(), "nope"), "alpha", TreeOptions{})
-	require.Error(t, err)
+func TestProjectTreeMissingRootIsEmptyState(t *testing.T) {
+	// A missing sandbox root (fresh install before the first sandbox build)
+	// is a normal empty state, not an error: the page renders an empty tree.
+	tree, err := ProjectTreeSnapshot(context.Background(), filepath.Join(t.TempDir(), "nope"), "alpha", TreeOptions{})
+	require.NoError(t, err)
+	require.Equal(t, "alpha", tree.Project)
 }

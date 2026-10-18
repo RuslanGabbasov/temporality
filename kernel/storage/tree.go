@@ -74,8 +74,11 @@ func ProjectTreeSnapshot(ctx context.Context, root, project string, opts TreeOpt
 	if err != nil {
 		return nil, err
 	}
+	// A missing base (fresh install before the first sandbox build) or a
+	// missing project workspace (before its first run) is a normal empty
+	// state — the page renders an empty tree, not a filesystem error.
 	if _, err := os.Stat(base); err != nil {
-		return nil, err
+		return &ProjectTree{Project: project}, nil
 	}
 	tree := &ProjectTree{Project: project}
 	builder := &treeBuilder{
