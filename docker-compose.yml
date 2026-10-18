@@ -168,8 +168,13 @@ services:
       KERNEL_MCP_TEST_ROOT: ${KERNEL_MCP_TEST_ROOT:-}
       # Fault injection for reconciliation drills: the named operation's effect
       # really executes, then the worker dies before the terminal event lands.
+      # really executes, then the worker dies before the terminal event lands.
       KERNEL_FAULT_AFTER_EFFECT: ${KERNEL_FAULT_AFTER_EFFECT:-}
-      KERNEL_SANDBOX_ROOT: ${TEMPORALITY_SANDBOX_ROOT:-/tmp}
+      # Sandbox root MUST live on a persistent host path: it holds every
+      # project's /workspace (agent files, chat artifacts). The old /tmp
+      # default was wiped by host reboots (systemd-tmpfiles) and took the
+      # workspaces with it.
+      KERNEL_SANDBOX_ROOT: ${TEMPORALITY_SANDBOX_ROOT:-/srv/temporality/sandbox}
       KERNEL_SANDBOX_IMAGE: ${KERNEL_SANDBOX_IMAGE:-${TEMPORALITY_SANDBOX_IMAGE:-}}
       # Outbound notification channels (docs/triggers-and-escalations.md §7,
       # docs/channels.md §6): transports the kernel uses to deliver ask_human
@@ -212,17 +217,19 @@ services:
       # The optional run_command sandbox shells out to the host Docker daemon;
       # sandbox workspaces bind-mount themselves into sibling containers, so
       # the sandbox root must exist at the same absolute path inside this
-      # container and on the host. The /tmp default needs no setup (world-
-      # writable, survives the kernel's non-root user) but is volatile across
-      # host reboots — set TEMPORALITY_SANDBOX_ROOT in .env to a persistent
-      # directory you created and own.
+      # container and on the host. The default /srv/temporality/sandbox is a
+      # persistent host directory (create it before first start; the kernel
+      # chowns what it needs) — /tmp was volatile and wiped project
+      # workspaces on every host reboot.
       - /var/run/docker.sock:/var/run/docker.sock
       # In-process embedding model cache (semantic knowledge layer): weights
       # download once and persist across container restarts.
       - rembed_cache:/var/cache/rembed
       # Sandbox workspace must be accessible to MCP servers running as
-      # child processes of the kernel.
-      - ${TEMPORALITY_SANDBOX_ROOT:-/tmp}:${TEMPORALITY_SANDBOX_ROOT:-/tmp}
+      # child processes of the kernel. The host directory must exist before
+      # start (mkdir -p /srv/temporality/sandbox) — compose does not create
+      # host bind-mount sources.
+      - ${TEMPORALITY_SANDBOX_ROOT:-/srv/temporality/sandbox}:${TEMPORALITY_SANDBOX_ROOT:-/srv/temporality/sandbox}
     networks:
       - default
       - browser
