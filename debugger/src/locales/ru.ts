@@ -151,6 +151,8 @@ export const ru: Record<string, string> = {
     'supervisor.action_invalidate_new': 'Инвалидировать новое',
     'supervisor.action_invalidate_old': 'Инвалидировать существующее',
     'supervisor.action_keep_both': 'Оставить оба',
+    'supervisor.action_create_skill': 'Создать навык',
+    'supervisor.action_show_runs': 'Показать раны',
     'supervisor.action_invalidated_reason': 'Инвалидировано из очереди супервайзера: семантический конфликт (косинус {{score}})',
     'supervisor.semantic_title': 'Семантический слой',
     'supervisor.semantic_ready': 'готов',

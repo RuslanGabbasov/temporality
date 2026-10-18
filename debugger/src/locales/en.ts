@@ -151,6 +151,8 @@ export const en: Record<string, string> = {
     'supervisor.action_invalidate_new': 'Invalidate new',
     'supervisor.action_invalidate_old': 'Invalidate existing',
     'supervisor.action_keep_both': 'Keep both',
+    'supervisor.action_create_skill': 'Create skill',
+    'supervisor.action_show_runs': 'Show these runs',
     'supervisor.action_invalidated_reason': 'Invalidated from the supervisor queue: semantic conflict (cosine {{score}})',
     'supervisor.semantic_title': 'Semantic layer',
     'supervisor.semantic_ready': 'ready',

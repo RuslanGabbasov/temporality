@@ -32,6 +32,8 @@ interface ClusterRow {
   lastAt: string
   // knowledge_conflict case payload: the pair to compare and act on.
   conflict?: { newID: string; newProp: string; newProject: string; oldID: string; oldProp: string; oldProject: string; score: number }
+  // C4 skill draft (name/description/steps from the verdict).
+  skill?: { name: string; description: string; steps: string[] }
 }
 
 // causeTag picks the tag color for a cause class.
@@ -73,6 +75,13 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
         score: Number(event.data.score ?? 0),
       }
     }
+    if (event.data?.case === 'skill_candidate' && event.data?.skill_name) {
+      row.skill = {
+        name: String(event.data.skill_name),
+        description: String(event.data.description ?? ''),
+        steps: Array.isArray(event.data.steps) ? event.data.steps.map(String) : [],
+      }
+    }
     if (!key) {
       // Legacy verdicts without a cluster key stay standalone rows.
       loose.push(row)
@@ -94,6 +103,7 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
       existing.pattern = row.pattern || existing.pattern
       existing.project = row.project || existing.project
       if (row.conflict) existing.conflict = row.conflict
+      if (row.skill) existing.skill = row.skill
     }
   }
   const clustered = [...byKey.values()]
@@ -119,6 +129,7 @@ export function SupervisorPanels() {
   const [showResolved, setShowResolved] = useState(false)
   const [acknowledged, setAcknowledged] = useState<Set<string>>(new Set())
   const [busyAck, setBusyAck] = useState('')
+  const [busyCase, setBusyCase] = useState('')
   // Semantic-layer health (§6.5): read-only monitoring. Configuration lives
   // in Agents → quality settings.
   const [embeddings, setEmbeddings] = useState<{ model: string; ready: boolean; error?: string } | null>(null)
@@ -170,7 +181,32 @@ export function SupervisorPanels() {
   // One-click resolutions for a knowledge_conflict verdict: invalidate the
   // losing knowledge through the knowledge API, then acknowledge the verdict
   // (it leaves the queue). The keep-both path only acknowledges.
-  const [busyCase, setBusyCase] = useState('')
+  // One-click resolutions per case family (docs/supervisor-model.md §3):
+  // C4 skill candidates open the Skills form pre-filled from the verdict's
+  // draft; C1 friction rows jump to the runs list. No dead-end buttons: an
+  // action either navigates somewhere useful or is not shown.
+  const openSkillFromCase = (row: ClusterRow) => {
+    const skill = row.skill
+    if (!skill) return
+    const md = [
+      '---', `name: ${skill.name}`, 'description: >-',
+      ...skill.description.split('\n').map((l) => '  ' + l),
+      '---', '',
+      `# ${skill.name}`, '',
+      skill.description, '',
+      '## Steps', ...skill.steps.map((s, i) => `${i + 1}. ${s}`), '',
+      `Evidence: supervisor case ${row.key} (${row.count} runs)`,
+    ].join('\n')
+    try {
+      sessionStorage.setItem('skill_prefill', JSON.stringify({
+        name: skill.name, description: skill.description, markdown: md,
+      }))
+    } catch { /* storage full or private mode: the form opens unfilled */ }
+    navigate('/skills')
+  }
+  const openFrictionRuns = (row: ClusterRow) => {
+    navigate(row.project ? `/agents?project=${encodeURIComponent(row.project)}` : '/agents')
+  }
   const resolveConflict = async (row: ClusterRow, kind: 'invalidate_new' | 'invalidate_old' | 'keep_both') => {
     const conflict = row.conflict!
     setBusyCase(row.key)
@@ -388,6 +424,16 @@ export function SupervisorPanels() {
                             onClick={() => { for (const id of row.eventIDs) { void acknowledge(id) } setBusyAck('') }}
                           >
                             {t('supervisor.acknowledge') ?? 'Mark resolved'}
+                          </Button>
+                        )}
+                        {row.caseID === 'skill_candidate' && row.skill && (
+                          <Button size="sm" kind="primary" onClick={() => openSkillFromCase(row)}>
+                            {t('supervisor.action_create_skill') ?? 'Create skill'}
+                          </Button>
+                        )}
+                        {row.caseID === 'user_friction' && (
+                          <Button size="sm" kind="ghost" onClick={() => openFrictionRuns(row)}>
+                            {t('supervisor.action_show_runs') ?? 'Show these runs'}
                           </Button>
                         )}
                         {row.runs.length > 0 && (

@@ -155,6 +155,26 @@ export default function Skills() {
   }, [])
 
   useEffect(() => { void load() }, [load])
+  // Prefill handoff from the supervisor queue (docs/supervisor-model.md C4):
+  // a skill-candidate verdict leaves its draft here, and the form opens
+  // pre-filled — 'create' becomes a review-and-save instead of retyping.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('skill_prefill')
+      if (!raw) return
+      sessionStorage.removeItem('skill_prefill')
+      const draft = JSON.parse(raw) as { name?: string; description?: string; markdown?: string }
+      if (!draft.name) return
+      setForm((f) => ({
+        ...f,
+        id: draft.name ?? '',
+        name: draft.name ?? '',
+        description: draft.description ?? '',
+        markdown: draft.markdown ?? f.markdown,
+      }))
+      setShowForm(true)
+    } catch { /* malformed handoff — ignore */ }
+  }, [])
 
   const visibleSkills = skills.filter((s) => matchesFilter(filter, s.name, s.id, s.description))
 
