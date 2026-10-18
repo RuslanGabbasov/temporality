@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/temporality-project/temporality/controlplane"
@@ -28,7 +29,7 @@ import (
 // silently falling back to some other model.
 
 // RegisterKnowledgeAreaRoutes mounts the area normalization endpoint.
-func RegisterKnowledgeAreaRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *workspace.Store, masterKey []byte, observationURL, apiToken string, log interface{ Warn(string, ...any) }) {
+func RegisterKnowledgeAreaRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *workspace.Store, masterKey []byte, observationURL string, log interface{ Warn(string, ...any) }) {
 	mux.HandleFunc("POST /v1/workspace/knowledge-areas/normalize", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleWriter) {
 			return
@@ -56,7 +57,9 @@ func RegisterKnowledgeAreaRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws
 		// knowledge projection (topics and entities share one namespace — the
 		// area aggregation merges them by name anyway).
 		valueSeen := map[string]int{}
-		if err := collectKnowledgeAreaValues(ctx, observationURL, apiToken, project, valueSeen); err != nil {
+		// Journal bearer read at request time: TEMPORALITY_API_TOKEN may be
+		// re-resolved long after boot (journal boot-order race recovery).
+		if err := collectKnowledgeAreaValues(ctx, observationURL, os.Getenv("TEMPORALITY_API_TOKEN"), project, valueSeen); err != nil {
 			writeError(w, 502, err)
 			return
 		}

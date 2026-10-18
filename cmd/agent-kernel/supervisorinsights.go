@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -29,7 +30,9 @@ const supervisorInsightDedupWindow = 6 * time.Hour
 
 // runSupervisorInsightPass executes one detection pass. Model errors never
 // fail the pass — the template wording is the floor.
-func runSupervisorInsightPass(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL, journalToken string, modelClient func(ctx context.Context) (*llm.Client, error)) {
+func runSupervisorInsightPass(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL string, modelClient func(ctx context.Context) (*llm.Client, error)) {
+	// Token read per pass: boot-order races must self-heal (see triage pass).
+	journalToken := os.Getenv("TEMPORALITY_API_TOKEN")
 	now := time.Now().UTC()
 	current, err := fetchHealthStats(ctx, observationURL, journalToken, now.Add(-time.Hour), now)
 	if err != nil {

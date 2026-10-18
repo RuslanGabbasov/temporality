@@ -402,6 +402,16 @@ func (a *Activities) RecordEvent(ctx context.Context, event observation.Event) e
 	return a.Events.Enqueue(ctx, event)
 }
 
+// apiToken resolves the journal bearer at call time: TEMPORALITY_API_TOKEN
+// is preferred (the background re-resolver updates it after a boot-order
+// race — journal down at kernel start), falling back to the captured field.
+func (a *Activities) apiToken() string {
+	if t := strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")); t != "" {
+		return t
+	}
+	return a.APIToken
+}
+
 // hasImages reports whether any message carries image blocks: the trigger
 // condition for the supervisor's vision-model routing.
 func (a *Activities) hasImages(request ModelRequest) bool {
@@ -1126,7 +1136,7 @@ func (a *Activities) workspaceDo(ctx context.Context, method, url string, body a
 	}
 	token := a.WorkspaceToken
 	if token == "" {
-		token = a.APIToken
+		token = a.apiToken()
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := a.HTTP.Do(req)
@@ -1340,8 +1350,8 @@ func (a *Activities) handleKnowledgeLookupTool(ctx context.Context, request Tool
 	if err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
 	}
-	if a.APIToken != "" {
-		httpRequest.Header.Set("Authorization", "Bearer "+a.APIToken)
+	if token := a.apiToken(); token != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := a.HTTP.Do(httpRequest)
 	if err != nil {
@@ -1398,8 +1408,8 @@ func (a *Activities) handleKnowledgeExploreTool(ctx context.Context, request Too
 		return ToolResult{Content: "error: " + err.Error()}, nil
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	if a.APIToken != "" {
-		httpRequest.Header.Set("Authorization", "Bearer "+a.APIToken)
+	if token := a.apiToken(); token != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := a.HTTP.Do(httpRequest)
 	if err != nil {
@@ -1884,8 +1894,8 @@ func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([
 		return nil, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	if a.APIToken != "" {
-		httpRequest.Header.Set("Authorization", "Bearer "+a.APIToken)
+	if token := a.apiToken(); token != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := a.HTTP.Do(httpRequest)
 	if err != nil {
@@ -2050,8 +2060,8 @@ func (a *Activities) KnowledgeLookup(ctx context.Context, request KnowledgeLooku
 	if err != nil {
 		return KnowledgeLookupResult{}, err
 	}
-	if a.APIToken != "" {
-		httpRequest.Header.Set("Authorization", "Bearer "+a.APIToken)
+	if token := a.apiToken(); token != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := a.HTTP.Do(httpRequest)
 	if err != nil {

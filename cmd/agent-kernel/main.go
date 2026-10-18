@@ -355,6 +355,35 @@ func main() {
 			log.Info("kernel journal auth: journal unreachable at boot; if it requires a token, restart the kernel once it is up")
 		}
 	}
+	// Journal auth re-resolver (docs/resilience-and-scale.md §4): a boot-order
+	// race (the journal comes up after the kernel) used to leave the kernel
+	// without a working token until a manual restart — runs published nothing
+	// and every journal consumer 401'd. All journal consumers read the env
+	// lazily now, so a periodic re-resolution self-heals them: runs become
+	// visible and the supervisor/embedding passes recover without a restart.
+	go func() {
+		lastSource := journalTokenSource
+		lastToken := os.Getenv("TEMPORALITY_API_TOKEN")
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Minute):
+			}
+			token, source, err := resolveJournalToken(ctx, &http.Client{Timeout: 5 * time.Second}, observationURL, strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), func() (string, error) {
+				return ws.EnsureKernelServiceToken(ctx)
+			})
+			if err != nil {
+				continue
+			}
+			if token == lastToken && source == lastSource {
+				continue // nothing changed
+			}
+			os.Setenv("TEMPORALITY_API_TOKEN", token)
+			log.Info("kernel journal auth re-resolved", "source", source, "was", lastSource)
+			lastToken, lastSource = token, source
+		}
+	}()
 	events, err := outbox.Open(ctx, databaseURL, observationURL)
 	if err != nil {
 		log.Error("open kernel outbox", "error", err)
@@ -2645,7 +2674,7 @@ func main() {
 	// Manual saga management (docs/sagas.md §8): rename, merge and task
 	// re-binding from the UI. Event-sourced like the agent tools — the routes
 	// only validate against the journal and emit through the same outbox.
-	RegisterSagaRoutes(mux, gate, events, observationURL, journalToken)
+	RegisterSagaRoutes(mux, gate, events, observationURL)
 	// Research sessions (docs/human-knowledge-explorer.md §11): saved
 	// knowledge-explorer investigations — list/read for everyone with read
 	// access, create/update/delete for writers.
@@ -5831,7 +5860,7 @@ func main() {
 	// agent cycle (unapproved artifacts, sandbox incidents, mass export,
 	// security events). No event triggers configured → the journal is not
 	// tailed at all.
-	eventListener := newEventTriggerListener(ws, activities, costPrices, temporalClient, taskQueue, events, activities.SourceID, observationURL, journalToken, log)
+	eventListener := newEventTriggerListener(ws, activities, costPrices, temporalClient, taskQueue, events, activities.SourceID, observationURL, log)
 	go eventListener.run(ctx)
 
 	// Execution identities (docs/org-structure.md §20): the security context
@@ -6665,17 +6694,17 @@ func main() {
 	// LLM-judge configuration and calibration (specs/quality-loop.md §6).
 	RegisterJudgeRoutes(mux, gate, ws, activities, events, visibleUnits, log)
 	// Judge-driven knowledge-area normalization (docs/human-knowledge-explorer.md §4.2).
-	RegisterKnowledgeAreaRoutes(mux, gate, ws, secretMasterKey, observationURL, journalToken, log)
+	RegisterKnowledgeAreaRoutes(mux, gate, ws, secretMasterKey, observationURL, log)
 	// Supervisor settings (docs/supervisor-model.md): judge/vision/embedding
 	// models and the human-attention coefficients.
 	RegisterSupervisorRoutes(mux, gate, ws, activities)
 	// Semantic knowledge layer (docs/supervisor-model.md §6): preload the
 	// in-process embedding model, then backfill knowledge missing a vector.
 	activities.StartEmbeddingPreload()
-	startEmbeddingBackfillLoop(ctx, log, activities, observationURL, journalToken)
+	startEmbeddingBackfillLoop(ctx, log, activities, observationURL)
 	// Supervisor triage (docs/supervisor-model.md §3 wave A1): diagnose
 	// failed runs with the supervisor model, journal supervisor.verdict.
-	startSupervisorTriageLoop(ctx, log, activities, ws, observationURL, journalToken, func(ctx context.Context) (*llm.Client, error) {
+	startSupervisorTriageLoop(ctx, log, activities, ws, observationURL, func(ctx context.Context) (*llm.Client, error) {
 		return judgeModelClient(ctx, ws, secretMasterKey)
 	})
 	// Scheduled quality runs (docs/agent-quality-loop.md §8.1): the cadence is

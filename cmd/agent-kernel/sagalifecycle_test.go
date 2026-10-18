@@ -72,7 +72,7 @@ func newSagaLifecycleServer(t *testing.T, outbox *captureArtifactOutbox, journal
 	gate, err := controlplane.NewGate("readertoken:reader:reader:*\nwritertoken:writer:writer:*\nadmintoken:admin:admin:*")
 	require.NoError(t, err)
 	mux := http.NewServeMux()
-	RegisterSagaRoutes(mux, gate, outbox, journal.url, "")
+	RegisterSagaRoutes(mux, gate, outbox, journal.url)
 	return httptest.NewServer(gate.Authenticate(mux))
 }
 

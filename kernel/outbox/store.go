@@ -19,7 +19,6 @@ import (
 type Store struct {
 	pool   *pgxpool.Pool
 	url    string
-	token  string
 	client *http.Client
 }
 
@@ -33,8 +32,10 @@ func Open(ctx context.Context, databaseURL, temporalityURL string) (*Store, erro
 		return nil, err
 	}
 	// The journal may require bearer auth (JOURNAL_AUTH_TOKENS); the kernel
-	// publisher authenticates with TEMPORALITY_API_TOKEN.
-	return &Store{pool: pool, url: temporalityURL, token: strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")), client: &http.Client{Timeout: 5 * time.Second}}, nil
+	// publisher authenticates with TEMPORALITY_API_TOKEN. The token is read
+	// per delivery, not captured: the background re-resolver may fill it long
+	// after boot (journal boot-order race recovery).
+	return &Store{pool: pool, url: temporalityURL, client: &http.Client{Timeout: 5 * time.Second}}, nil
 }
 
 func (s *Store) Close() { s.pool.Close() }
@@ -91,8 +92,8 @@ func (s *Store) PublishOne(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	if s.token != "" {
-		request.Header.Set("Authorization", "Bearer "+s.token)
+	if token := strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := s.client.Do(request)
 	if err != nil {

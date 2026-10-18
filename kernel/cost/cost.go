@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	neturl "net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -1495,8 +1496,10 @@ func (a *CostAPI) queryOneType(ctx context.Context, project, runID, taskID, even
 		if err != nil {
 			return err
 		}
-		if a.token != "" {
-			req.Header.Set("Authorization", "Bearer "+a.token)
+		// The journal bearer is read per request: the background re-resolver
+		// updates TEMPORALITY_API_TOKEN after boot-order races.
+		if token := os.Getenv("TEMPORALITY_API_TOKEN"); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
 		}
 		resp, err := a.http.Do(req)
 		if err != nil {

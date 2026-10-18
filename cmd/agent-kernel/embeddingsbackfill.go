@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,7 +25,7 @@ import (
 
 const embeddingBackfillInterval = 5 * time.Minute
 
-func startEmbeddingBackfillLoop(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL, journalToken string) {
+func startEmbeddingBackfillLoop(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL string) {
 	go func() {
 		// First pass shortly after boot so a freshly configured model fills
 		// the backlog without waiting a full interval.
@@ -33,7 +34,7 @@ func startEmbeddingBackfillLoop(ctx context.Context, log *slog.Logger, activitie
 			return
 		case <-time.After(30 * time.Second):
 		}
-		runEmbeddingBackfill(ctx, log, activities, observationURL, journalToken)
+		runEmbeddingBackfill(ctx, log, activities, observationURL)
 		ticker := time.NewTicker(embeddingBackfillInterval)
 		defer ticker.Stop()
 		for {
@@ -41,13 +42,16 @@ func startEmbeddingBackfillLoop(ctx context.Context, log *slog.Logger, activitie
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				runEmbeddingBackfill(ctx, log, activities, observationURL, journalToken)
+				runEmbeddingBackfill(ctx, log, activities, observationURL)
 			}
 		}
 	}()
 }
 
-func runEmbeddingBackfill(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL, journalToken string) {
+func runEmbeddingBackfill(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL string) {
+	// Token read per pass: a boot-order race (journal down at kernel start)
+	// self-heals here instead of requiring a kernel restart.
+	journalToken := os.Getenv("TEMPORALITY_API_TOKEN")
 	model := activities.SupervisorEmbeddingModel(ctx)
 	if model == "" {
 		return // supervisor embeddings off — nothing to do

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -138,19 +139,21 @@ type eventTriggerListener struct {
 	sourceID   string
 
 	journalURL string
-	apiToken   string
-	client     *http.Client
-	log        *slog.Logger
+	// apiToken is installed by run() as a lazy env reader: the token may be
+	// re-resolved long after construction (boot-order race recovery).
+	apiToken func() string
+	client   *http.Client
+	log      *slog.Logger
 }
 
 // newEventTriggerListener wires the production collaborators: the store for
 // triggers/tasks/runs, the journal listing for the tail, the real fire path.
-func newEventTriggerListener(ws *workspace.Store, activities *agent.Activities, prices cost.Config, temporal client.Client, taskQueue string, events eventTriggerOutbox, sourceID, journalURL, apiToken string, log *slog.Logger) *eventTriggerListener {
+func newEventTriggerListener(ws *workspace.Store, activities *agent.Activities, prices cost.Config, temporal client.Client, taskQueue string, events eventTriggerOutbox, sourceID, journalURL string, log *slog.Logger) *eventTriggerListener {
 	l := &eventTriggerListener{
 		ws: ws, activities: activities, prices: prices, temporal: temporal,
 		taskQueue: taskQueue, events: events, sourceID: sourceID,
-		journalURL: journalURL, apiToken: apiToken,
-		client: &http.Client{Timeout: 20 * time.Second}, log: log,
+		journalURL: journalURL,
+		client:     &http.Client{Timeout: 20 * time.Second}, log: log,
 	}
 	l.listTriggers = l.listStoreTriggers
 	l.loadCursor = func(ctx context.Context) (string, error) {
@@ -169,6 +172,11 @@ func newEventTriggerListener(ws *workspace.Store, activities *agent.Activities, 
 }
 
 func (l *eventTriggerListener) run(ctx context.Context) {
+	// apiToken resolves the journal bearer at call time: a boot-order race
+	// (journal down at kernel start) leaves TEMPORALITY_API_TOKEN empty until
+	// the background re-resolver fills it — the listener must pick the new
+	// value up without a restart.
+	l.apiToken = func() string { return os.Getenv("TEMPORALITY_API_TOKEN") }
 	ticker := time.NewTicker(eventTriggerInterval)
 	defer ticker.Stop()
 	for {
@@ -252,8 +260,8 @@ func (l *eventTriggerListener) fetchJournalPage(ctx context.Context, cursor stri
 	if err != nil {
 		return nil, err
 	}
-	if l.apiToken != "" {
-		request.Header.Set("Authorization", "Bearer "+l.apiToken)
+	if l.apiToken() != "" {
+		request.Header.Set("Authorization", "Bearer "+l.apiToken())
 	}
 	response, err := l.client.Do(request)
 	if err != nil {

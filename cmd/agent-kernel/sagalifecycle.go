@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"net/url"
 	"strconv"
 	"strings"
@@ -143,7 +144,7 @@ type taskSagaBindRequest struct {
 
 // RegisterSagaRoutes mounts the manual saga management endpoints. Writer-only:
 // renaming, merging and re-binding change how a project's spend is accounted.
-func RegisterSagaRoutes(mux *http.ServeMux, gate *controlplane.Gate, events sagaLifecycleOutbox, journalURL, journalToken string) {
+func RegisterSagaRoutes(mux *http.ServeMux, gate *controlplane.Gate, events sagaLifecycleOutbox, journalURL string) {
 	requireProject := func(w http.ResponseWriter, r *http.Request) (string, bool) {
 		project := r.URL.Query().Get("project")
 		if project == "" {
@@ -212,7 +213,7 @@ func RegisterSagaRoutes(mux *http.ServeMux, gate *controlplane.Gate, events saga
 			return
 		}
 		sagaID := r.PathValue("sagaID")
-		known, err := sagaRegisteredIDs(r.Context(), journalURL, journalToken, project)
+		known, err := sagaRegisteredIDs(r.Context(), journalURL, os.Getenv("TEMPORALITY_API_TOKEN"), project)
 		if err != nil {
 			writeError(w, 502, fmt.Errorf("journal query failed: %w", err))
 			return
@@ -250,7 +251,7 @@ func RegisterSagaRoutes(mux *http.ServeMux, gate *controlplane.Gate, events saga
 			writeError(w, 422, errors.New("source_saga_ids is required"))
 			return
 		}
-		known, err := sagaRegisteredIDs(r.Context(), journalURL, journalToken, project)
+		known, err := sagaRegisteredIDs(r.Context(), journalURL, os.Getenv("TEMPORALITY_API_TOKEN"), project)
 		if err != nil {
 			writeError(w, 502, fmt.Errorf("journal query failed: %w", err))
 			return
@@ -299,7 +300,7 @@ func RegisterSagaRoutes(mux *http.ServeMux, gate *controlplane.Gate, events saga
 			writeJSON(w, 200, map[string]any{"task_id": taskID, "status": "detached"})
 			return
 		}
-		known, err := sagaRegisteredIDs(r.Context(), journalURL, journalToken, project)
+		known, err := sagaRegisteredIDs(r.Context(), journalURL, os.Getenv("TEMPORALITY_API_TOKEN"), project)
 		if err != nil {
 			writeError(w, 502, fmt.Errorf("journal query failed: %w", err))
 			return
