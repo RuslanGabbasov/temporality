@@ -16,11 +16,18 @@
 #
 #   --hitl   mock answers ask_human after the tool turns; the driver plays the
 #            human with -human-delay 30s — the queue-wait (HWT) profile.
-#   --heavy  heavier workload: 12s sandbox commands (concurrent containers),
+#   --heavy  heavier workload: 10s sandbox commands (concurrent containers),
 #            1.5s token gaps (long streams), ask_human pause in the middle —
 #            the profile that stresses sandboxes, journal write volume and
 #            the token bus at once.
+#
+# The mock provider is the compose service `mockllm` (profile loadtest): the
+# script recreates it with MOCKLLM_* env for the chosen profile, so a --heavy
+# run can never silently inherit the previous run's settings.
 set -eu
+
+# Compose and go build resolve paths relative to the repo root.
+cd "$(dirname "$0")/.."
 
 RUNS="50"
 RAMP="60"
@@ -48,20 +55,54 @@ TOKEN="${TOKEN:-}"
 PROJECT="${PROJECT:-loadgen}"
 
 SAMPLER_PID=""
-MOCK_PID=""
 cleanup() {
   [ -n "$SAMPLER_PID" ] && kill "$SAMPLER_PID" 2>/dev/null || true
-  [ -n "$MOCK_PID" ] && kill "$MOCK_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-echo "== 1/4 build tools (requires Go) =="
+echo "== 1/3 build tools (requires Go) =="
 go build -o /tmp/loadgen-runner ./examples/loadgen
-if [ "$HITL" = "1" ] || [ "$HEAVY" = "1" ]; then
-  go build -o /tmp/mockllm-bin ./examples/mockllm
-fi
 
-echo "== 2/4 preflight =="
+echo "== 2/3 mock profile + preflight =="
+
+# apply_mock_profile recreates the mockllm compose service with the profile
+# env (shell env wins over .env in compose interpolation). Deterministic
+# campaigns: every invocation pins all five knobs, including the light
+# default, so a plain run after a --heavy one is never polluted.
+apply_mock_profile() {
+  first="$1"; gap="$2"; tokens="$3"; command="$4"; ask="$5"
+  export MOCKLLM_FIRST_TOKEN="$first" MOCKLLM_TOKEN_GAP="$gap" MOCKLLM_TOKENS="$tokens"
+  export MOCKLLM_TOOL_COMMAND="$command" MOCKLLM_ASK_AFTER_TOOLS="$ask"
+  echo "   mock profile: first-token=$first token-gap=$gap tokens=$tokens ask-after-tools=$ask"
+  echo "   recreating the mockllm compose service…"
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile loadtest up -d --force-recreate --no-deps mockllm >/dev/null
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    health=$(curl -s -m 2 "$MOCK_URL/healthz" || true)
+    case "$health" in *ok*) return 0 ;; esac
+    sleep 1
+  done
+  echo "   ERROR: mock provider did not become healthy after recreate" >&2
+  return 1
+}
+
+if [ "$HEAVY" = "1" ]; then
+  apply_mock_profile 1s 1500ms 300 "sleep 10 && echo heavy" 2
+  hitl_flags="-hitl -human-delay 45s"
+  PROFILE="heavy"
+elif [ "$HITL" = "1" ]; then
+  apply_mock_profile 200ms 15ms 120 "echo loadgen step" 2
+  hitl_flags="-hitl -human-delay 30s"
+  PROFILE="hitl"
+else
+  apply_mock_profile 200ms 15ms 120 "echo loadgen step" 0
+  hitl_flags=""
+  PROFILE="light"
+fi
+MOCK_HEALTH=$(curl -s -m 5 "$MOCK_URL/healthz" || true)
+case "$MOCK_HEALTH" in
+  *ok*) echo "   mock provider: up ($MOCK_URL)" ;;
+  *)    echo "   WARNING: mock provider not reachable at $MOCK_URL — check the loadtest profile"; exit 1 ;;
+esac
 auth=()
 [ -n "$TOKEN" ] && auth=(-H "Authorization: Bearer $TOKEN")
 # Token check first: a gated stand fails every call with 401, and the report
@@ -84,13 +125,9 @@ if [ "$needs_sandbox" = "false" ]; then
 elif [ -n "$pinned" ]; then
   echo "   sandbox pinned by KERNEL_SANDBOX_IMAGE — skipping build (by design)"
 fi
-mock_health=$(curl -s -m 5 "$MOCK_URL/healthz" || true)
-case "$mock_health" in
-  *ok*) echo "   mock provider: up ($MOCK_URL)" ;;
-  *)    echo "   WARNING: mock provider not reachable at $MOCK_URL — check the loadtest profile / process"; exit 1 ;;
-esac
 
-echo "== 3/4 resource sampler (1s: containers, cpu, mem) =="
+# Sampler runs for the whole campaign (step 3/3 below); the mock was already
+# verified by apply_mock_profile.
 (
   while :; do
     echo "=== $(date +%H:%M:%S) containers=$(docker ps -q | wc -l)"
@@ -101,19 +138,7 @@ echo "== 3/4 resource sampler (1s: containers, cpu, mem) =="
 ) > /tmp/loadgen-resources.log &
 SAMPLER_PID=$!
 
-echo "== 4/4 load: $RUNS runs, ramp ${RAMP}s, hitl=$HITL heavy=$HEAVY =="
-hitl_flags=""
-mock_flags="-first-token 200ms -token-gap 15ms -tokens 120"
-if [ "$HITL" = "1" ]; then
-  hitl_flags="-hitl -human-delay 30s"
-fi
-if [ "$HEAVY" = "1" ]; then
-  # Heavy profile: 10s sandbox commands (long-lived concurrent containers),
-  # 1.5s token gaps (long streams), and an ask_human pause mid-run —
-  # sandboxes + journal volume + token bus stressed together.
-  mock_flags="-first-token 1s -token-gap 1500ms -tokens 300 -tool-command 'sleep 10 && echo heavy'"
-  hitl_flags="-hitl -human-delay 45s"
-fi
+echo "== 3/3 load: $RUNS runs, ramp ${RAMP}s, profile=$PROFILE =="
 /tmp/loadgen-runner \
   -kernel "$KERNEL_URL" \
   -journal "$JOURNAL_URL" \
@@ -124,6 +149,7 @@ fi
   -runs "$RUNS" -ramp "${RAMP}s" \
   -timeout "${RUN_TIMEOUT:-20m}" \
   $hitl_flags \
+  -profile "$PROFILE" \
   -report "$REPORT" \
   2>&1 | tee /tmp/loadgen-runner.log
 

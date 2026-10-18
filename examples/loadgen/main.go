@@ -46,7 +46,10 @@ var (
 	askHuman   = flag.Bool("hitl", false, "answer ask_human pauses (use with mockllm -ask-human-after-tools)")
 	humanDelay = flag.Duration("human-delay", 5*time.Second, "simulated human think time before answering")
 	report     = flag.String("report", "", "write a markdown report to this path (in addition to stdout)")
-	journal    = flag.String("journal", "http://localhost:8080", "journal API base URL (human.requested lookup)")
+	// Profile names the load profile in the report, so a saved heavy-100.md is
+	// self-describing months later (light / hitl / heavy — see loadrun.sh).
+	profile = flag.String("profile", "light", "profile label quoted in the report")
+	journal = flag.String("journal", "http://localhost:8080", "journal API base URL (human.requested lookup)")
 	// Cleanup (docs/resilience-and-scale.md §НТ): delete every task created by
 	// this run after the report. The cascade removes the runs; the journal is
 	// append-only, so the loadgen project's events stay as an archive of the
@@ -239,7 +242,7 @@ func main() {
 	elapsed := time.Since(started)
 
 	durations, startLat, done, statuses, hits, hwt := collect(results)
-	fmt.Printf("\n=== Load report (%d runs, ramp %s) ===\n", *runs, ramp)
+	fmt.Printf("\n=== Load report (%d runs, ramp %s, profile %s) ===\n", *runs, ramp, *profile)
 	fmt.Printf("wall clock: %s · start failures: %d · terminal: %d/%d\n", elapsed.Round(time.Second), failures.Load(), done, *runs)
 	printTable("run duration (start → terminal)", durations)
 	printTable("start-API latency", startLat)
@@ -252,7 +255,7 @@ func main() {
 	}
 	printStatuses(statuses)
 	if *report != "" {
-		writeReport(*report, *runs, *ramp, elapsed, failures.Load(), durations, startLat, statuses, done, hits, hwt)
+		writeReport(*report, *runs, *ramp, elapsed, failures.Load(), durations, startLat, statuses, done, hits, hwt, *profile)
 		fmt.Printf("report written to %s\n", *report)
 	}
 	if failures.Load() > 0 || done < *runs {
@@ -324,9 +327,9 @@ func printStatuses(statuses map[string]int) {
 	fmt.Printf("statuses: %s\n", strings.Join(parts, " "))
 }
 
-func writeReport(path string, runs int, ramp time.Duration, elapsed time.Duration, failures int64, durations, startLat []int64, statuses map[string]int, done int, hits int, hwtMS int64) {
+func writeReport(path string, runs int, ramp time.Duration, elapsed time.Duration, failures int64, durations, startLat []int64, statuses map[string]int, done int, hits int, hwtMS int64, profile string) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "## Нагрузочный прогон\n\n- ранов: %d, ramp: %s, wall clock: %s\n- сбоев старта: %d, завершившихся: %d/%d\n\n| Метрика | p50 | p95 | p99 | max |\n|---|---|---|---|---|\n", runs, ramp, elapsed.Round(time.Second), failures, done, runs)
+	fmt.Fprintf(&b, "## Нагрузочный прогон\n\n- профиль: %s\n- ранов: %d, ramp: %s, wall clock: %s\n- сбоев старта: %d, завершившихся: %d/%d\n\n| Метрика | p50 | p95 | p99 | max |\n|---|---|---|---|---|\n", profile, runs, ramp, elapsed.Round(time.Second), failures, done, runs)
 	row := func(title string, s []int64) {
 		if len(s) == 0 {
 			fmt.Fprintf(&b, "| %s | — | — | — | — |\n", title)
