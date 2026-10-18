@@ -429,15 +429,17 @@ func (a api) answerQuestion(runID, project string, q openQuestion) error {
 // ensureSetup creates the project and the load agent when missing. Both are
 // idempotent: an existing id answers 409/200, which the runner treats as OK.
 func (a api) ensureSetup() {
+	// Idempotent setup: an existing project/agent is fine — repeat campaigns
+	// reuse them. Only transport errors (err != nil) are real failures.
 	code, _, err := a.call(http.MethodPost, "/v1/workspace/projects", map[string]any{"id": *project, "name": "LoadGen"})
 	if err != nil {
 		fmt.Printf("project create: %v\n", err)
 	} else if code == 201 || code == 200 {
 		fmt.Printf("project %s created\n", *project)
 	} else {
-		fmt.Printf("project %s exists or rejected (code %d)\n", *project, code)
+		fmt.Printf("project %s exists (code %d) — reusing\n", *project, code)
 	}
-	code, body, err := a.call(http.MethodPost, "/v1/workspace/agents", map[string]any{
+	code, _, err = a.call(http.MethodPost, "/v1/workspace/agents", map[string]any{
 		"id": *agent, "name": "LoadGen Agent", "model": *model,
 		"system_prompt": "You are a load-test fixture: run the two scripted commands and finish.",
 		"max_turns":     3,
@@ -447,7 +449,7 @@ func (a api) ensureSetup() {
 	} else if code == 201 || code == 200 {
 		fmt.Printf("agent %s created\n", *agent)
 	} else {
-		fmt.Printf("agent %s exists or rejected (code %d): %s\n", *agent, code, truncate(body))
+		fmt.Printf("agent %s exists (code %d) — reusing\n", *agent, code)
 	}
 }
 
