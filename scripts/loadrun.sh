@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Load-test orchestration (docs/resilience-and-scale.md §НТ): preflight
 # (sandbox, provider health), the load scenario, resource sampling and a
 # markdown report — one command per profile.
@@ -22,12 +22,14 @@ RUNS="50"
 RAMP="60"
 REPORT=""
 HITL="0"
+SET_RUNS=""
+SET_RAMP=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --hitl) HITL="1" ;;
-    *) if [ -z "$SET_RUNS" ]; then RUNS="$1"; SET_RUNS=1
-       elif [ -z "$SET_RAMP" ]; then RAMP="$1"; SET_RAMP=1
-       elif [ -z "$REPORT" ]; then REPORT="$1"
+    *) if [ -z "${SET_RUNS:-}" ]; then RUNS="$1"; SET_RUNS=1
+       elif [ -z "${SET_RAMP:-}" ]; then RAMP="$1"; SET_RAMP=1
+       elif [ -z "${REPORT:-}" ]; then REPORT="$1"
        fi ;;
   esac
   shift
