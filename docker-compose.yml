@@ -250,6 +250,38 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+  # Nightly backup loop (docs/user/administration.md «Резервное копирование»):
+  # opt-in via the backup compose profile. Dumps PostgreSQL and tars the
+  # sandbox root into ./backups, keeping 14 of each. Restore with
+  # scripts/restore.sh <db-dump> <sandbox.tar.gz>.
+  backup:
+    image: pgvector/pgvector:pg17
+    profiles: [backup]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: temporality
+      PGPASSWORD: temporality
+      PGDATABASE: temporality
+    volumes:
+      - ./backups:/backups
+      - ${TEMPORALITY_SANDBOX_ROOT:-/srv/temporality/sandbox}:/sandbox:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        while :; do
+          ts=$$(date +%Y%m%d-%H%M)
+          pg_dump | gzip > "/backups/db-$$ts.sql.gz"
+          tar czf "/backups/sandbox-$$ts.tar.gz" -C /sandbox .
+          ls -1t /backups/db-*.sql.gz | tail -n +15 | xargs -r rm -f
+          ls -1t /backups/sandbox-*.tar.gz | tail -n +15 | xargs -r rm -f
+          echo "backup $$ts done"
+          sleep 86400
+        done
+    restart: unless-stopped
 
 volumes:
   rembed_cache:

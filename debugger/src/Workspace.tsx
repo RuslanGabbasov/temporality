@@ -237,6 +237,57 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
   }
 
   useEffect(() => { saveConversations(conversations) }, [conversations])
+
+  // Server-side chat sync (docs/resilience-and-scale.md §4): the durable
+  // copy lives in the workspace DB — localStorage stays as the offline
+  // cache, but a browser wipe (or a second device) restores from here.
+  // Push is debounced: conversations change on every streamed token batch.
+  const chatSyncTimer = useRef<number | null>(null)
+  useEffect(() => {
+    if (!project || conversations.length === 0) return
+    if (chatSyncTimer.current) window.clearTimeout(chatSyncTimer.current)
+    chatSyncTimer.current = window.setTimeout(() => {
+      for (const c of conversations) {
+        const transcript = c.messages.map((m) => ({
+          role: m.role, content: m.content, at: m.timestamp,
+          addenda: m.addenda ?? [], attachments: m.attachments ?? [],
+        }))
+        workspaceApi.putServerChat(c.id, {
+          project_id: project, agent_id: c.agentId ?? '',
+          title: c.title || 'Untitled', transcript,
+        }).catch(() => { /* server sync is best-effort; localStorage stays the cache */ })
+      }
+    }, 2000)
+    return () => { if (chatSyncTimer.current) window.clearTimeout(chatSyncTimer.current) }
+  }, [conversations, project])
+
+  // Restore on mount: server chats missing locally (other device, wiped
+  // browser) are appended; locally newer copies win (by message count).
+  useEffect(() => {
+    if (!project) return
+    let alive = true
+    workspaceApi.listServerChats(project).then((page) => {
+      if (!alive || !page.chats?.length) return
+      setConversations((prev) => {
+        const known = new Map(prev.map((c) => [c.id, c]))
+        const next = [...prev]
+        for (const chat of page.chats) {
+          if (known.has(chat.id)) continue // local copy wins: it may be newer
+          const messages = (chat.transcript as any[]).map((m) => ({
+            role: m.role, content: m.content ?? '', timestamp: new Date(m.at ?? chat.updated_at),
+            addenda: m.addenda ?? [], attachments: m.attachments ?? [],
+          }))
+          if (messages.length === 0) continue
+          next.push({
+            id: chat.id, title: chat.title || 'Chat', messages,
+            agentId: chat.agent_id ?? '', taskId: '', createdAt: new Date(chat.updated_at),
+          })
+        }
+        return next
+      })
+    }).catch(() => { /* server chats are a durability feature, not a dependency */ })
+    return () => { alive = false }
+  }, [project])
   useEffect(() => () => {
     streamRef.current.forEach((es) => es.close()); streamRef.current.clear()
     tokenStreamRef.current.forEach((es) => es.close()); tokenStreamRef.current.clear()

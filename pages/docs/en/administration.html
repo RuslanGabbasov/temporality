@@ -34,6 +34,43 @@
 <div class="docs-eyebrow">Administration</div>
 <h1>Administration</h1>
 <p class="docs-lead">Users and RBAC, the org structure, providers, secrets, sandboxes and quality settings.</p>
+<h1 id="administration"><a class="anchor" href="#administration" aria-label="Section link">#</a>Administration</h1><h2 id="backup-and-restore"><a class="anchor" href="#backup-and-restore" aria-label="Section link">#</a>Backup and restore</h2><p>Three stores — three stories:</p>
+<table>
+<thead>
+<tr>
+<th>Store</th>
+<th>Contents</th>
+<th>Backup</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>PostgreSQL</td>
+<td>runs, knowledge, tasks, users, chats, journal</td>
+<td><code>pg_dump</code> (scripts below)</td>
+</tr>
+<tr>
+<td>Sandbox root</td>
+<td>project /workspace files written by agents</td>
+<td>tar the directory</td>
+</tr>
+<tr>
+<td>rembed cache</td>
+<td>embedding model weights</td>
+<td>not needed — re-downloads itself</td>
+</tr>
+</tbody></table>
+<p>Chats sync to the server (the <code>workspace_chat</code> table) — clearing browser
+data no longer loses them, and they follow the user across devices.</p>
+<p><strong>Scripts</strong> (from a repository checkout):</p>
+<pre><code class="language-sh">scripts/backup.sh [target-dir]     # DB dump + sandbox tar, keeps 14 of each
+scripts/restore.sh db.sql.gz sandbox.tar.gz   # stops writers, restores, starts
+</code></pre>
+<p><strong>Built-in schedule</strong>: the <code>backup</code> compose profile — nightly DB dump and
+sandbox tar into ./backups, keeping 14 of each:</p>
+<pre><code class="language-sh">docker compose --profile backup up -d backup
+</code></pre>
+<p>For production campaigns layer restic/borg on the backups directory with
+off-site upload (S3/ssh): a local backup does not survive host loss.</p>
 <h2 id="upgrading"><a class="anchor" href="#upgrading" aria-label="Section link">#</a>Upgrading</h2><p>The stack runs prebuilt images from GHCR. Upgrading is pinning a new version
 and recreating the containers:</p>
 <pre><code class="language-sh">TEMPORALITY_VERSION=2026.2.0 docker compose up -d

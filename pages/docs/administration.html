@@ -34,6 +34,43 @@
 <div class="docs-eyebrow">Администрирование</div>
 <h1>Администрирование</h1>
 <p class="docs-lead">Пользователи и RBAC, оргструктура, провайдеры, секреты, песочницы и настройки качества.</p>
+<h2 id="резервное-копирование"><a class="anchor" href="#резервное-копирование" aria-label="Section link">#</a>Резервное копирование</h2><p>Три хранилища — три истории:</p>
+<table>
+<thead>
+<tr>
+<th>Хранилище</th>
+<th>Что там</th>
+<th>Как бэкапить</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>PostgreSQL</td>
+<td>раны, знания, задачи, пользователи, чаты, журнал</td>
+<td><code>pg_dump</code> (скрипт ниже)</td>
+</tr>
+<tr>
+<td>Корень песочниц</td>
+<td>файлы воркспейсов проектов (<code>/workspace</code> агентов)</td>
+<td>tar каталога</td>
+</tr>
+<tr>
+<td>rembed-кэш</td>
+<td>веса модели эмбеддингов</td>
+<td>не нужен — перекачивается сам</td>
+</tr>
+</tbody></table>
+<p>Чаты синхронизируются на сервер (таблица <code>workspace_chat</code>) — очистка
+данных браузера больше не теряет их, и они доступны с любого устройства.</p>
+<p><strong>Скрипты</strong> (из чекаута репозитория):</p>
+<pre><code class="language-sh">scripts/backup.sh [каталог]     # дамп БД + tar песочниц, хранит 14 последних
+scripts/restore.sh db.sql.gz sandbox.tar.gz   # останавливает писателей, восстанавливает, стартует
+</code></pre>
+<p><strong>Встроенное расписание</strong>: профиль <code>backup</code> в compose — ночной дамп БД и
+tar песочниц в <code>./backups</code>, хранит 14 последних:</p>
+<pre><code class="language-sh">docker compose --profile backup up -d backup
+</code></pre>
+<p>Для продакшн-кампаний поверх этого — restic/borg на каталог <code>backups</code>
+с выгрузкой вовне (S3/ssh): локальный бэкап не спасает от гибели хоста.</p>
 <h2 id="обновление"><a class="anchor" href="#обновление" aria-label="Section link">#</a>Обновление</h2><p>Стек живёт готовыми образами из GHCR. Обновление — подставить новую версию и
 пересоздать контейнеры:</p>
 <pre><code class="language-sh">TEMPORALITY_VERSION=2026.2.0 docker compose up -d

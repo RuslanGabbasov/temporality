@@ -321,6 +321,13 @@ func main() {
 		log.Error("migrate workspace v71 (sandbox profile recipes)", "error", err)
 		os.Exit(1)
 	}
+	// 000072 adds server-side chat persistence (docs/resilience-and-scale.md
+	// §4): UI conversations sync here so a browser wipe is no longer data
+	// loss, and chats follow the user across devices.
+	if err = ws.Migrate(ctx, "migrations/000072_workspace_chats.up.sql"); err != nil {
+		log.Error("migrate workspace v72 (workspace chats)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -2675,6 +2682,8 @@ func main() {
 	// re-binding from the UI. Event-sourced like the agent tools — the routes
 	// only validate against the journal and emit through the same outbox.
 	RegisterSagaRoutes(mux, gate, events, observationURL)
+	// Server-side chat persistence (docs/resilience-and-scale.md §4).
+	RegisterChatRoutes(mux, gate, ws)
 	// Research sessions (docs/human-knowledge-explorer.md §11): saved
 	// knowledge-explorer investigations — list/read for everyone with read
 	// access, create/update/delete for writers.

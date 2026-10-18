@@ -7,6 +7,38 @@ description: Users and RBAC, the org structure, providers, secrets, sandboxes an
 
 # Administration
 
+# Administration
+
+## Backup and restore
+
+Three stores — three stories:
+
+| Store | Contents | Backup |
+|---|---|---|
+| PostgreSQL | runs, knowledge, tasks, users, chats, journal | `pg_dump` (scripts below) |
+| Sandbox root | project /workspace files written by agents | tar the directory |
+| rembed cache | embedding model weights | not needed — re-downloads itself |
+
+Chats sync to the server (the `workspace_chat` table) — clearing browser
+data no longer loses them, and they follow the user across devices.
+
+**Scripts** (from a repository checkout):
+
+```sh
+scripts/backup.sh [target-dir]     # DB dump + sandbox tar, keeps 14 of each
+scripts/restore.sh db.sql.gz sandbox.tar.gz   # stops writers, restores, starts
+```
+
+**Built-in schedule**: the `backup` compose profile — nightly DB dump and
+sandbox tar into ./backups, keeping 14 of each:
+
+```sh
+docker compose --profile backup up -d backup
+```
+
+For production campaigns layer restic/borg on the backups directory with
+off-site upload (S3/ssh): a local backup does not survive host loss.
+
 ## Upgrading
 
 The stack runs prebuilt images from GHCR. Upgrading is pinning a new version
