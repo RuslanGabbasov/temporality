@@ -26,7 +26,7 @@ services:
 
   journal:
     # Prebuilt image from GHCR; TEMPORALITY_VERSION pins it.
-    image: ghcr.io/ruslangabbasov/temporality/journal:${TEMPORALITY_VERSION:-latest}
+    image: ghcr.io/ruslangabbasov/temporality/journal:${TEMPORALITY_VERSION:-2026.2.3}
     environment:
       DATABASE_URL: postgres://temporality:temporality@postgres:5432/temporality?sslmode=disable
       HTTP_ADDR: :8080
@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
 
   debugger:
-    image: ghcr.io/ruslangabbasov/temporality/debugger:${TEMPORALITY_VERSION:-latest}
+    image: ghcr.io/ruslangabbasov/temporality/debugger:${TEMPORALITY_VERSION:-2026.2.3}
     ports:
       - "3000:80"
     extra_hosts:
@@ -101,7 +101,7 @@ services:
     restart: unless-stopped
 
   agent-kernel:
-    image: ghcr.io/ruslangabbasov/temporality/agent-kernel:${TEMPORALITY_VERSION:-latest}
+    image: ghcr.io/ruslangabbasov/temporality/agent-kernel:${TEMPORALITY_VERSION:-2026.2.3}
     # The container starts as root only so docker-entrypoint.sh can pick up
     # the Docker socket's group at runtime (root:docker on Linux, root:root on
     # Docker Desktop/OrbStack) and drop to the unprivileged user below with

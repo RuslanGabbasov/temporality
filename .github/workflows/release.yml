@@ -54,6 +54,7 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.repo }}/agent-kernel:${{ steps.meta.outputs.version }}
             ${{ steps.meta.outputs.repo }}/agent-kernel:v${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.repo }}/agent-kernel:latest
 
       - name: Build & push journal
         uses: docker/build-push-action@v6
@@ -67,6 +68,7 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.repo }}/journal:${{ steps.meta.outputs.version }}
             ${{ steps.meta.outputs.repo }}/journal:v${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.repo }}/journal:latest
 
       - name: Build & push debugger UI
         uses: docker/build-push-action@v6
@@ -77,6 +79,7 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.repo }}/debugger:${{ steps.meta.outputs.version }}
             ${{ steps.meta.outputs.repo }}/debugger:v${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.repo }}/debugger:latest
 
   release:
     name: GitHub Release
