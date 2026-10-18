@@ -76,4 +76,6 @@ The architecture and internals are described in the repository's `docs/`:
 `architecture.md` (overview), `event-model.md`, `knowledge-model.md`,
 `agent-quality-loop.md`, `living-skills.md`, `agent-delegation.md`,
 `inbound-messages.md`, `sandbox-security-matrix.md`,
-`failure-reconciliation.md`, `runbook.md` (operations) and others.
+`failure-model.md`, `failure-reconciliation.md`, `resilience-and-scale.md`
+(fault tolerance and scale bounds: replay, workflow history, Continue-As-New),
+`runbook.md` (operations) and others.

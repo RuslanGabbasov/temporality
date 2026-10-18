@@ -1,6 +1,8 @@
 # Agent Kernel failure and delivery model
 
 Status: target policy for the first durable run vertical.
+Смежный документ: `resilience-and-scale.md` — границы ресурсов воркфлоу
+(история Temporal, replay, Continue-As-New) и отказоустойчивость деплоя.
 
 ## Invariants
 

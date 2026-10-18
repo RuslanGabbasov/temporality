@@ -22,6 +22,9 @@ The **Dashboard** (`/dashboard`) is a health summary over a chosen time window
   on the same row as storage and server;
 - the **sandboxes** widget: live containers, integral load (CPU/memory/network), hover — who and which run, click — jump to the trace.
 
+Fault tolerance and scale bounds (replay, workflow history,
+Continue-As-New, quotas) — see `docs/resilience-and-scale.md`.
+
 ### The Supervisor tab
 
 The supervisor model's monitoring surface (`docs/supervisor-model.md`):

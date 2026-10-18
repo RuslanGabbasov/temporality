@@ -77,5 +77,7 @@ description: Переменные окружения, порты, страниц
 Архитектура и внутренние механизмы описаны в `docs/` репозитория: `architecture.md`
 (общая), `event-model.md`, `knowledge-model.md`, `agent-quality-loop.md`,
 `living-skills.md`, `agent-delegation.md`, `inbound-messages.md`,
-`sandbox-security-matrix.md`, `failure-reconciliation.md`, `runbook.md`
+`sandbox-security-matrix.md`, `failure-model.md`, `failure-reconciliation.md`,
+`resilience-and-scale.md` (отказоустойчивость и границы масштаба: replay,
+история воркфлоу, Continue-As-New), `runbook.md`
 (эксплуатация) и другие.
