@@ -137,6 +137,31 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
     return () => { cancelled = true }
   }, [knowledgeID, project, revision])
 
+  // Semantically related knowledge (docs/supervisor-model.md §6.6): nearest
+  // vectors from the journal's neighbor lookup, resolved to propositions.
+  const [related, setRelated] = useState<{ id: string; proposition: string; state: string }[]>([])
+  useEffect(() => {
+    if (!knowledgeID || !project.trim()) { setRelated([]); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const resp = await fetch(`/kernel-api/v1/observations/knowledge/embeddings/neighbors?model=active&id=${encodeURIComponent(knowledgeID)}&min_score=0.5&limit=5`, { headers: { ...authHeaders() } })
+        if (!resp.ok) { if (!cancelled) setRelated([]); return }
+        const page = await resp.json()
+        const items = await observationApi.knowledge(project.trim())
+        const byID = new Map((items.knowledge ?? []).map((k) => [k.id, k]))
+        if (cancelled) return
+        setRelated(page.neighbors
+          .map((n: { id: string; score: number }) => {
+            const item = byID.get(n.id)
+            return item ? { id: n.id, proposition: item.proposition, state: item.state ?? '' } : null
+          })
+          .filter(Boolean))
+      } catch { if (!cancelled) setRelated([]) }
+    })()
+    return () => { cancelled = true }
+  }, [knowledgeID, project, revision])
+
   const conflictObjects: ExploreConflict[] | undefined = useMemo(() => {
     if (contradictions.length === 0) return undefined
     // Build proper conflict records by comparing the item with its
@@ -266,6 +291,27 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
                 <Button size="sm" kind="ghost" onClick={() => onQuestion(trace.proposition)}>{t('explorer.dossier_research') ?? 'Research from this statement'}</Button>
                 {contradictions.length > 0 && <Button size="sm" kind="ghost" onClick={() => setTab('conflicts')}>{t('explorer.dossier_compare') ?? 'Compare with counterparts'}</Button>}
               </div>
+
+              {/* Semantically related knowledge (supervisor-model §6.6): the
+                  vector neighbors of this item, resolved to propositions —
+                  "what else does the system know nearby", one click away. */}
+              {related.length > 0 && (
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.3rem' }}>{t('knowledge.related') ?? 'Semantically related'}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    {related.map((item) => (
+                      <div key={item.id} style={{ fontSize: '0.74rem', display: 'flex', gap: '0.4rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                        <a
+                          href="#"
+                          onClick={(e) => { e.preventDefault(); onOpenDossier(item.id) }}
+                          style={{ color: 'var(--tm-teal)', cursor: 'pointer' }}
+                        >{item.proposition || item.id}</a>
+                        {item.state && item.state !== 'proposed' && item.state !== 'confirmed' && <Tag size="sm" type="warm-gray">{item.state}</Tag>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <LifecycleBar project={project} knowledgeID={knowledgeID} onDone={onRefresh} onOpenDossier={onOpenDossier} />
             </div>

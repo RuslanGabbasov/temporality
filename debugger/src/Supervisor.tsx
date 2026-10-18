@@ -30,6 +30,8 @@ interface ClusterRow {
   runs: { run: string; at: string }[]
   eventIDs: string[]
   lastAt: string
+  // knowledge_conflict case payload: the pair to compare and act on.
+  conflict?: { newID: string; newProp: string; newProject: string; oldID: string; oldProp: string; oldProject: string; score: number }
 }
 
 // causeTag picks the tag color for a cause class.
@@ -60,6 +62,17 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
       eventIDs: [event.event_id],
       lastAt: event.occurred_at,
     }
+    if (event.data?.case === 'knowledge_conflict' && event.data?.knowledge_id && event.data?.neighbor_id) {
+      row.conflict = {
+        newID: String(event.data.knowledge_id),
+        newProp: String(event.data.new_proposition ?? ''),
+        newProject: String(event.data.new_project ?? event.context?.project ?? ''),
+        oldID: String(event.data.neighbor_id),
+        oldProp: String(event.data.old_proposition ?? ''),
+        oldProject: String(event.data.old_project ?? event.context?.project ?? ''),
+        score: Number(event.data.score ?? 0),
+      }
+    }
     if (!key) {
       // Legacy verdicts without a cluster key stay standalone rows.
       loose.push(row)
@@ -80,6 +93,7 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
       existing.recommendation = row.recommendation
       existing.pattern = row.pattern || existing.pattern
       existing.project = row.project || existing.project
+      if (row.conflict) existing.conflict = row.conflict
     }
   }
   const clustered = [...byKey.values()]
@@ -150,6 +164,36 @@ export function SupervisorPanels() {
       setError(message(failure))
     } finally {
       setBusyAck('')
+    }
+  }
+
+  // One-click resolutions for a knowledge_conflict verdict: invalidate the
+  // losing knowledge through the knowledge API, then acknowledge the verdict
+  // (it leaves the queue). The keep-both path only acknowledges.
+  const [busyCase, setBusyCase] = useState('')
+  const resolveConflict = async (row: ClusterRow, kind: 'invalidate_new' | 'invalidate_old' | 'keep_both') => {
+    const conflict = row.conflict!
+    setBusyCase(row.key)
+    try {
+      if (kind !== 'keep_both') {
+        const target = kind === 'invalidate_new'
+          ? { id: conflict.newID, project: conflict.newProject }
+          : { id: conflict.oldID, project: conflict.oldProject }
+        await observationApi.invalidate({
+          knowledge_id: target.id,
+          project: target.project,
+          actor: { id: 'supervisor-queue', type: 'human' },
+          reason: t('supervisor.action_invalidated_reason', { score: (conflict.score || 0).toFixed(2) }),
+        })
+      }
+      for (const eventID of row.eventIDs) {
+        try { await workspaceApi.acknowledgeSupervisorVerdict(eventID) } catch { /* queue hygiene is best-effort */ }
+      }
+      await load()
+    } catch (failure) {
+      setError(message(failure))
+    } finally {
+      setBusyCase('')
     }
   }
 
@@ -292,6 +336,49 @@ export function SupervisorPanels() {
                           <span style={{ color: 'var(--tm-amber)' }}>→</span> {row.recommendation}
                         </div>
                       )}
+                      {row.conflict && (() => {
+                      const cf = row.conflict
+                      const openDossier = (id: string, project: string) => (e: React.MouseEvent) => {
+                        e.preventDefault()
+                        navigate(`/knowledge?project=${encodeURIComponent(project)}&dossier=${encodeURIComponent(id)}`)
+                      }
+                      return (
+                      <div style={{ marginTop: '0.4rem', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.4rem 0.6rem', fontSize: '0.75rem' }}>
+                          <div style={{ display: 'grid', gap: '0.25rem' }}>
+                            <div>
+                              <Tag type="blue" size="sm">новое</Tag>{' '}
+                              <a
+                                href={`/knowledge?project=${encodeURIComponent(cf.newProject || row.project)}&dossier=${encodeURIComponent(cf.newID)}`}
+                                onClick={openDossier(cf.newID, cf.newProject || row.project)}
+                                style={{ color: 'var(--tm-teal)', fontSize: '0.72rem' }}
+                              >{cf.newID}</a>
+                              <div style={{ color: 'var(--tm-text-2)', marginTop: '0.1rem' }}>{cf.newProp || '—'}</div>
+                            </div>
+                            <div style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem' }}>против</div>
+                            <div>
+                              <Tag type="warm-gray" size="sm">существующее</Tag>{' '}
+                              <a
+                                href={`/knowledge?project=${encodeURIComponent(cf.oldProject || row.project)}&dossier=${encodeURIComponent(cf.oldID)}`}
+                                onClick={openDossier(cf.oldID, cf.oldProject || row.project)}
+                                style={{ color: 'var(--tm-teal)', fontSize: '0.72rem' }}
+                              >{cf.oldID}</a>
+                              <div style={{ color: 'var(--tm-text-2)', marginTop: '0.1rem' }}>{cf.oldProp || '—'}</div>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                            <Button size="sm" kind="danger" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'invalidate_new')}>
+                              {busyCase === row.key ? '…' : t('supervisor.action_invalidate_new') ?? 'Invalidate new'}
+                            </Button>
+                            <Button size="sm" kind="danger" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'invalidate_old')}>
+                              {busyCase === row.key ? '…' : t('supervisor.action_invalidate_old') ?? 'Invalidate existing'}
+                            </Button>
+                            <Button size="sm" kind="secondary" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'keep_both')}>
+                              {busyCase === row.key ? '…' : t('supervisor.action_keep_both') ?? 'Keep both'}
+                            </Button>
+                          </div>
+                        </div>
+                      )
+                      })()}
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.35rem', flexWrap: 'wrap' }}>
                         {!isResolved && (
                           <Button

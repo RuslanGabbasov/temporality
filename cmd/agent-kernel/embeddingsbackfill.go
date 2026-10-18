@@ -13,9 +13,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -103,11 +103,41 @@ const (
 	conflictScoreMax = 0.97
 )
 
-// predictKnowledgeConflicts journals a supervisor.verdict (case
-// knowledge_conflict) for every freshly embedded item whose nearest stored
-// neighbor sits in the conflict band. Capped per pass; the verdict stays a
-// proposal — nothing is invalidated automatically.
+// conflictMeta is the journal-side knowledge identity the conflict verdict
+// needs: which project the item lives in and its current proposition.
+type conflictMeta struct {
+	Project     string
+	Proposition string
+}
+
+// fetchKnowledgeMeta builds knowledge_id → (project, proposition) from the
+// journal's knowledge events. One pass over two event types covers every
+// item born through the normal extraction path; items outside the map
+// (manual writes) simply keep an empty proposition in the verdict.
+func fetchKnowledgeMeta(ctx context.Context, observationURL, journalToken string) map[string]conflictMeta {
+	meta := map[string]conflictMeta{}
+	for _, eventType := range []string{"knowledge.proposed", "knowledge.corrected"} {
+		events, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, eventType, 500)
+		if err != nil {
+			continue
+		}
+		for _, ev := range events {
+			id, _ := ev.Data["knowledge_id"].(string)
+			prop, _ := ev.Data["proposition"].(string)
+			if id == "" {
+				continue
+			}
+			if existing, ok := meta[id]; ok && existing.Proposition != "" {
+				continue // first (newest) wins — the listing is newest-first
+			}
+			meta[id] = conflictMeta{Project: ev.Project, Proposition: prop}
+		}
+	}
+	return meta
+}
+
 func predictKnowledgeConflicts(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL, journalToken, model string, items map[string][]float32) {
+	metaByKnowledge := fetchKnowledgeMeta(ctx, observationURL, journalToken)
 	checked := 0
 	for id := range items {
 		if checked >= 4 {
@@ -124,9 +154,18 @@ func predictKnowledgeConflicts(ctx context.Context, log *slog.Logger, activities
 				continue
 			}
 			subject := id + "~" + neighbor.ID
-			summary := fmt.Sprintf("Новое знание %s семантически близко (косинус %.2f) к существующему %s — формулировки могут расходиться, а смысл конфликтовать.", id, neighbor.Score, neighbor.ID)
-			if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseKnowledgeConflict, subject, "", summary, "Сверьте две формулировки: одна может устареть или scopes расходятся.", map[string]any{
+			newMeta := metaByKnowledge[id]
+			oldMeta := metaByKnowledge[neighbor.ID]
+			summary := fmt.Sprintf("«%s» (новое) против «%s» (существующее) — косинус %.2f: формулировки близки, смысл может конфликтовать.",
+				newMeta.Proposition, oldMeta.Proposition, neighbor.Score)
+			project := oldMeta.Project
+			if project == "" {
+				project = newMeta.Project
+			}
+			if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseKnowledgeConflict, subject, project, summary, "Сопоставьте формулировки: схлопнуть, инвалидировать устаревшее или оставить оба в разных scope.", map[string]any{
 				"knowledge_id": id, "neighbor_id": neighbor.ID, "score": neighbor.Score, "model": model,
+				"new_proposition": newMeta.Proposition, "old_proposition": oldMeta.Proposition,
+				"old_project": oldMeta.Project, "new_project": newMeta.Project,
 			}); err != nil {
 				log.Warn("conflict prediction: publish", "error", err.Error())
 			}

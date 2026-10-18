@@ -125,13 +125,15 @@ type neighborStore interface {
 // small. Volumes are per-project bounded, so a linear scan in-process is
 // fine; a real ANN index is an optimization for a much larger corpus.
 func (s *Server) getKnowledgeEmbeddingNeighbors(w http.ResponseWriter, r *http.Request) {
-	if !s.gate.Allow(w, r, controlplane.RoleWriter) {
+	if !s.gate.Allow(w, r, controlplane.RoleReader) {
 		return
 	}
 	model := strings.TrimSpace(r.URL.Query().Get("model"))
 	id := strings.TrimSpace(r.URL.Query().Get("id"))
-	if model == "" || id == "" {
-		writeError(w, 422, errors.New("model and id are required"))
+	// Empty model is legal for UI consumers (related-knowledge in the
+	// dossier): the vectors are matched across whatever model is stored.
+	if id == "" {
+		writeError(w, 422, errors.New("id is required"))
 		return
 	}
 	minScore := 0.35

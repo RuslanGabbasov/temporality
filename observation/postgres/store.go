@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -291,7 +292,15 @@ func (s *Store) UpsertKnowledgeEmbeddings(ctx context.Context, model string, ite
 // knowledge id. Volumes are per-project bounded; the hint matcher consumes
 // them in-process.
 func (s *Store) ListKnowledgeEmbeddings(ctx context.Context, model string) (map[string][]float32, error) {
-	rows, err := s.pool.Query(ctx, `SELECT knowledge_id, dim, embedding FROM observation_knowledge_embedding WHERE model = $1`, model)
+	where, args := "model = $1", []any{model}
+	if strings.TrimSpace(model) == "" {
+		// Empty model = the installation's single embedding space: accept any
+		// stored model so UI consumers (related-knowledge lookups) work without
+		// knowing the operator's embedding choice.
+		where = "model <> ''"
+		args = nil
+	}
+	rows, err := s.pool.Query(ctx, `SELECT knowledge_id, dim, embedding FROM observation_knowledge_embedding WHERE `+where, args...)
 	if err != nil {
 		return nil, err
 	}
