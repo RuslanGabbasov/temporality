@@ -47,6 +47,11 @@ var (
 	humanDelay = flag.Duration("human-delay", 5*time.Second, "simulated human think time before answering")
 	report     = flag.String("report", "", "write a markdown report to this path (in addition to stdout)")
 	journal    = flag.String("journal", "http://localhost:8080", "journal API base URL (human.requested lookup)")
+	// Cleanup (docs/resilience-and-scale.md §НТ): delete every task created by
+	// this run after the report. The cascade removes the runs; the journal is
+	// append-only, so the loadgen project's events stay as an archive of the
+	// profile — acceptable by design.
+	cleanup = flag.Bool("cleanup", true, "delete the created tasks after the report")
 )
 
 type api struct {
@@ -101,6 +106,8 @@ func main() {
 		mu       sync.Mutex
 		results  []runResult
 		failures atomic.Int64
+		tasksMu  sync.Mutex
+		tasks    []string // every task created by this run — for -cleanup
 	)
 	var wg sync.WaitGroup
 
@@ -133,6 +140,11 @@ func main() {
 				ID string `json:"id"`
 			}
 			_ = json.Unmarshal(body, &task)
+			if task.ID != "" {
+				tasksMu.Lock()
+				tasks = append(tasks, task.ID)
+				tasksMu.Unlock()
+			}
 			startMS := time.Since(tStart).Milliseconds()
 
 			code, body, _ = a.call(http.MethodPost, "/v1/workspace/tasks/"+task.ID+"/runs", map[string]any{
@@ -217,8 +229,29 @@ func main() {
 		fmt.Printf("report written to %s\n", *report)
 	}
 	if failures.Load() > 0 || done < *runs {
+		if *cleanup {
+			cleanupTasks(a, tasks)
+		}
 		os.Exit(1)
 	}
+	if *cleanup {
+		cleanupTasks(a, tasks)
+	}
+}
+
+// cleanupTasks deletes the tasks this run created; workspace_run rows go
+// with them by cascade. The journal stays append-only by design.
+func cleanupTasks(a api, tasks []string) {
+	deleted, failed := 0, 0
+	for _, id := range tasks {
+		code, _, err := a.call(http.MethodDelete, "/v1/workspace/tasks/"+url.PathEscape(id), nil)
+		if err != nil || code == 200 {
+			deleted++
+		} else {
+			failed++
+		}
+	}
+	fmt.Printf("cleanup: tasks deleted %d, failed %d\n", deleted, failed)
 }
 
 func collect(results []runResult) (durations, startLat []int64, done int, statuses map[string]int, hits int, hwt int64) {
