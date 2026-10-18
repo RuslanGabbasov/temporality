@@ -65,18 +65,30 @@ go build -o /tmp/loadgen-runner ./examples/loadgen
 
 echo "== 2/3 mock profile + preflight =="
 
-# apply_mock_profile recreates the mockllm compose service with the profile
-# env (shell env wins over .env in compose interpolation). Deterministic
-# campaigns: every invocation pins all five knobs, including the light
-# default, so a plain run after a --heavy one is never polluted.
+# apply_mock_profile recreates the mockllm service with the profile. The
+# values go into a compose override file as YAML literals — no env
+# interpolation, so neither .env precedence nor env propagation through
+# sudo can silently swap the profile (a stand once measured the light
+# profile that way). rm -sf before up: a fresh container even when the
+# stand's compose version skips --force-recreate on a stopped service.
 apply_mock_profile() {
   first="$1"; gap="$2"; tokens="$3"; command="$4"; ask="$5"
-  export MOCKLLM_FIRST_TOKEN="$first" MOCKLLM_TOKEN_GAP="$gap" MOCKLLM_TOKENS="$tokens"
-  export MOCKLLM_TOOL_COMMAND="$command" MOCKLLM_ASK_AFTER_TOOLS="$ask"
   echo "   mock profile: first-token=$first token-gap=$gap tokens=$tokens ask-after-tools=$ask"
-  echo "   recreating the mockllm compose service…"
-  docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile loadtest up -d --force-recreate --no-deps mockllm >/dev/null
-  cid=$(docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile loadtest ps -q mockllm)
+  override=/tmp/mockllm-profile.yml
+  cat > "$override" <<EOF
+services:
+  mockllm:
+    environment:
+      MOCKLLM_FIRST_TOKEN: "$first"
+      MOCKLLM_TOKEN_GAP: "$gap"
+      MOCKLLM_TOKENS: "$tokens"
+      MOCKLLM_TOOL_COMMAND: "$command"
+      MOCKLLM_ASK_AFTER_TOOLS: "$ask"
+EOF
+  compose=(docker compose -f docker-compose.yml -f docker-compose.dev.yml -f "$override" --profile loadtest)
+  "${compose[@]}" rm -sf mockllm >/dev/null
+  "${compose[@]}" up -d --no-deps mockllm >/dev/null
+  cid=$("${compose[@]}" ps -q mockllm)
   if [ -z "$cid" ]; then
     echo "   ERROR: mockllm container not found after up — is the loadtest profile defined here?" >&2
     return 1
