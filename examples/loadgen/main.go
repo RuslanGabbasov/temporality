@@ -423,7 +423,10 @@ func (a api) answerQuestion(runID, project string, q openQuestion) error {
 			"operation_id": q.operationID, "arguments_hash": q.argumentsHash,
 			"approved": true, "response": "loadgen: approved", "actor_id": "loadgen-human",
 		})
-	if code != 200 {
+	if code != 200 && code != 202 {
+		// 202 Accepted is the kernel's contract for a signalled approval —
+		// treating it as a failure made the driver re-answer every poll and
+		// zero out its HITL counters while the runs themselves proceeded.
 		return fmt.Errorf("approval %d: %s", code, truncate(body))
 	}
 	return nil
