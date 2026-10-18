@@ -64,6 +64,7 @@ echo "== 1/3 build tools (requires Go) =="
 go build -o /tmp/loadgen-runner ./examples/loadgen
 
 echo "== 2/3 mock profile + preflight =="
+echo "   $(docker compose version --short 2>/dev/null || docker compose version)"
 
 # apply_mock_profile recreates the mockllm service with the profile. The
 # values go into a compose override file as YAML literals — no env
@@ -86,7 +87,11 @@ services:
       MOCKLLM_ASK_AFTER_TOOLS: "$ask"
 EOF
   compose=(docker compose -f docker-compose.yml -f docker-compose.dev.yml -f "$override" --profile loadtest)
-  "${compose[@]}" rm -sf mockllm >/dev/null
+  # Remove by container NAME, not via compose: a stand once kept starting a
+  # stale container whose project/service labels compose did not match, so
+  # neither rm nor --force-recreate touched it. Name removal is unconditional.
+  container="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}"-mockllm-1
+  docker rm -f "$container" >/dev/null 2>&1 || true
   "${compose[@]}" up -d --no-deps mockllm >/dev/null
   cid=$("${compose[@]}" ps -q mockllm)
   if [ -z "$cid" ]; then
@@ -99,13 +104,18 @@ EOF
   env_gap=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid" | sed -n 's/^MOCKLLM_TOKEN_GAP=//p')
   if [ "$env_gap" != "$gap" ]; then
     echo "   ERROR: mockllm env MOCKLLM_TOKEN_GAP=$env_gap, expected $gap — container was not recreated with the profile" >&2
+    echo "   --- container dump (attach this to the bug report) ---" >&2
+    docker inspect --format 'created={{.Created}} image={{.Config.Image}}{{println}}{{range .Config.Labels}}{{println .}}{{end}}{{range .Config.Env}}{{println .}}{{end}}' "$cid" >&2
     return 1
   fi
   boot=$(docker logs "$cid" 2>&1 | grep -m1 'mockllm on' || true)
   echo "   mock boot: ${boot:-<no log>}"
   case "$boot" in
     *"token-gap=$gap"*) : ;;
-    *) echo "   ERROR: mock boot line does not match the requested profile (token-gap=$gap)" >&2; return 1 ;;
+    *)  echo "   ERROR: mock boot line does not match the requested profile (token-gap=$gap)" >&2
+        echo "   --- container dump (attach this to the bug report) ---" >&2
+        docker inspect --format 'created={{.Created}} image={{.Config.Image}}{{println}}{{range .Config.Labels}}{{println .}}{{end}}{{range .Config.Env}}{{println .}}{{end}}' "$cid" >&2
+        return 1 ;;
   esac
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     health=$(curl -s -m 2 "$MOCK_URL/healthz" || true)
