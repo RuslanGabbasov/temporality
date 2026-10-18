@@ -92,7 +92,11 @@ EOF
   # neither rm nor --force-recreate touched it. Name removal is unconditional.
   container="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}"-mockllm-1
   docker rm -f "$container" >/dev/null 2>&1 || true
-  "${compose[@]}" up -d --no-deps mockllm >/dev/null
+  # --build: an existing image is otherwise never rebuilt, and a stale image
+  # (built before the MOCKLLM_* env code landed) silently serves flag defaults
+  # with the correct env attached — exactly what the boot assertion catches.
+  # With warm layers the rebuild is a cache hit, seconds at most.
+  "${compose[@]}" up -d --build --no-deps mockllm >/dev/null
   cid=$("${compose[@]}" ps -q mockllm)
   if [ -z "$cid" ]; then
     echo "   ERROR: mockllm container not found after up — is the loadtest profile defined here?" >&2
