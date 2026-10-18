@@ -216,6 +216,11 @@ func main() {
 			mu.Lock()
 			results = append(results, runResult{id: task.ID, startMS: startMS, totalMS: time.Since(tStart).Milliseconds(), status: "timeout", hits: hits, hwtMS: hwtMS})
 			mu.Unlock()
+			// Give up loudly: a run the driver abandons keeps streaming in the
+			// kernel (the workflow has no idea the observer left). Without the
+			// terminate, the next campaign starts on top of the previous one's
+			// zombies — that doubled the load of the first heavy run.
+			a.terminateRun(startedRun.RunID)
 		}(i)
 	}
 	// Live progress (heavy profiles run for minutes): in-flight counter with
@@ -430,6 +435,14 @@ func (a api) answerQuestion(runID, project string, q openQuestion) error {
 		return fmt.Errorf("approval %d: %s", code, truncate(body))
 	}
 	return nil
+}
+
+// terminateRun force-stops a run the driver gave up on (POST /terminate —
+// the same move as the UI's stop button): TerminateWorkflow + the journal's
+// terminal event. Best-effort — the campaign report must not depend on it.
+func (a api) terminateRun(runID string) {
+	a.call(http.MethodPost,
+		"/v1/agent/runs/"+url.PathEscape(runID)+"/terminate?project="+url.QueryEscape(*project), nil)
 }
 
 // ensureSetup creates the project and the load agent when missing. Both are
