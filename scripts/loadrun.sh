@@ -76,6 +76,25 @@ apply_mock_profile() {
   echo "   mock profile: first-token=$first token-gap=$gap tokens=$tokens ask-after-tools=$ask"
   echo "   recreating the mockllm compose service…"
   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile loadtest up -d --force-recreate --no-deps mockllm >/dev/null
+  cid=$(docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile loadtest ps -q mockllm)
+  if [ -z "$cid" ]; then
+    echo "   ERROR: mockllm container not found after up — is the loadtest profile defined here?" >&2
+    return 1
+  fi
+  # A container that was not actually recreated silently measures the wrong
+  # profile (a whole campaign wasted): assert the env and the process boot
+  # line, not just the health endpoint.
+  env_gap=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid" | sed -n 's/^MOCKLLM_TOKEN_GAP=//p')
+  if [ "$env_gap" != "$gap" ]; then
+    echo "   ERROR: mockllm env MOCKLLM_TOKEN_GAP=$env_gap, expected $gap — container was not recreated with the profile" >&2
+    return 1
+  fi
+  boot=$(docker logs "$cid" 2>&1 | grep -m1 'mockllm on' || true)
+  echo "   mock boot: ${boot:-<no log>}"
+  case "$boot" in
+    *"token-gap=$gap"*) : ;;
+    *) echo "   ERROR: mock boot line does not match the requested profile (token-gap=$gap)" >&2; return 1 ;;
+  esac
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     health=$(curl -s -m 2 "$MOCK_URL/healthz" || true)
     case "$health" in *ok*) return 0 ;; esac
@@ -86,7 +105,10 @@ apply_mock_profile() {
 }
 
 if [ "$HEAVY" = "1" ]; then
-  apply_mock_profile 1s 1500ms 300 "sleep 10 && echo heavy" 2
+  # Durations in the Go-normalized form: the mock logs its config through
+  # time.Duration.String() (1500ms prints as 1.5s) — the boot assertion below
+  # compares strings, so the profile must be written the way Go prints it.
+  apply_mock_profile 1s 1.5s 300 "sleep 10 && echo heavy" 2
   hitl_flags="-hitl -human-delay 45s"
   PROFILE="heavy"
 elif [ "$HITL" = "1" ]; then
@@ -168,4 +190,18 @@ grep -oE '[a-z0-9-]+ .*mem=[0-9.]+[GM]iB' /tmp/loadgen-resources.log \
 grep -oE 'containers=[0-9]+' /tmp/loadgen-resources.log \
   | awk -F= '{if ($2+0 > m) m=$2+0} END {print "  peak concurrent containers:", m}'
 echo "full sampler log: /tmp/loadgen-resources.log"
+
+# Traffic proof: the mock's own counters must show the campaign. An idle
+# counter means the kernel's provider points somewhere else (a stale host
+# process, another instance) — the report above measured the wrong provider.
+metrics=$(curl -s -m 5 "$MOCK_URL/metrics" || true)
+mock_total=$(echo "$metrics" | sed -n 's/.*"total_requests":\([0-9]*\).*/\1/p')
+mock_final=$(echo "$metrics" | sed -n 's/.*"final_answers":\([0-9]*\).*/\1/p')
+mock_ask=$(echo "$metrics" | sed -n 's/.*"tool_calls_issued":\([0-9]*\).*/\1/p')
+if [ -n "$mock_total" ] && [ "$mock_total" -ge "$RUNS" ] 2>/dev/null; then
+  echo "mock provider traffic: total_requests=$mock_total tool_calls=$mock_ask final_answers=$mock_final (runs=$RUNS)"
+elif [ -n "$mock_total" ]; then
+  echo "WARNING: mock provider counters look idle (total_requests=$mock_total for $RUNS runs) — the kernel's workspace provider likely points to a different mock/base URL; the campaign did not exercise this container."
+  echo "         Check the provider base URL in the UI (Настройки → Провайдеры) or TEMPORALITY_MODEL_BASE_URL."
+fi
 echo "report: $REPORT"
