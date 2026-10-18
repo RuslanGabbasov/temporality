@@ -25,3 +25,15 @@ services:
       args:
         # The Lead/Coder/Reviewer/QA example routes are opt-in via build tag.
         KERNEL_BUILD_TAGS: agent_examples
+
+  # Load-testing mock provider (docs/resilience-and-scale.md §НТ): activated
+  # only with --profile loadtest; the kernel's TEMPORALITY_MODEL_BASE_URL
+  # points at it during a load campaign (http://mockllm:8081/v1).
+  mockllm:
+    build:
+      context: .
+      dockerfile: examples/mockllm/Dockerfile
+    profiles: [loadtest]
+    ports:
+      - "8081:8081"
+    restart: unless-stopped

@@ -1,62 +1,113 @@
 #!/bin/sh
-# Load-test orchestration (docs/resiliance-and-scale.md §НТ): mock provider +
-# resource sampler + the loadgen scenario, one command. Run from a repository
-# checkout against a running stack whose kernel points at the mock provider:
+# Load-test orchestration (docs/resilience-and-scale.md §НТ): preflight
+# (sandbox, provider health), the load scenario, resource sampling and a
+# markdown report — one command per profile.
+#
+# Prerequisites on this host: Go (builds the tools) and docker CLI (sampler).
+# The stack runs with the mock provider configured in .env:
 #
 #   TEMPORALITY_MODEL_BASE_URL=http://mockllm:8081/v1
 #   TEMPORALITY_MODEL_ID=loadgen-model
+#   # and the stack started with the loadtest profile:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile loadtest up -d
 #
-# Usage: scripts/loadrun.sh [runs] [ramp-seconds] [report-path]
+# Usage:
+#   scripts/loadrun.sh [runs] [ramp-seconds] [report-path] [--hitl]
+#
+#   --hitl  mock answers ask_human after the tool turns; the driver plays the
+#           human with -human-delay 30s — the queue-wait (HWT) profile.
 set -eu
 
-RUNS="${1:-50}"
-RAMP="${2:-60}"
-REPORT="${3:-loadreport-$(date +%Y%m%d-%H%M%S).md}"
-SAMPLER_PID=""
+RUNS="50"
+RAMP="60"
+REPORT=""
+HITL="0"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --hitl) HITL="1" ;;
+    *) if [ -z "$SET_RUNS" ]; then RUNS="$1"; SET_RUNS=1
+       elif [ -z "$SET_RAMP" ]; then RAMP="$1"; SET_RAMP=1
+       elif [ -z "$REPORT" ]; then REPORT="$1"
+       fi ;;
+  esac
+  shift
+done
+[ -n "$REPORT" ] || REPORT="loadreport-$(date +%Y%m%d-%H%M%S).md"
+KERNEL_URL="${KERNEL:-http://localhost:8090}"
+JOURNAL_URL="${JOURNAL:-http://localhost:8080}"
+MOCK_URL="${MOCK:-http://localhost:8081}"
+TOKEN="${TOKEN:-}"
+PROJECT="${PROJECT:-loadgen}"
 
+SAMPLER_PID=""
+MOCK_PID=""
 cleanup() {
-  if [ -n "$SAMPLER_PID" ]; then
-    kill "$SAMPLER_PID" 2>/dev/null || true
-  fi
+  [ -n "$SAMPLER_PID" ] && kill "$SAMPLER_PID" 2>/dev/null || true
+  [ -n "$MOCK_PID" ] && kill "$MOCK_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-echo "== building tools =="
-go build -o /tmp/loadgen-mockllm ./examples/mockllm
+echo "== 1/4 build tools (requires Go) =="
 go build -o /tmp/loadgen-runner ./examples/loadgen
+if [ "$HITL" = "1" ]; then
+  go build -o /tmp/mockllm-bin ./examples/mockllm
+fi
 
-echo "== starting mock provider on :8081 =="
-/tmp/loadgen-mockllm -addr :8081 -first-token 200ms -token-gap 15ms -tokens 120 &
-MOCK_PID=$!
-trap 'kill $MOCK_PID $SAMPLER_PID 2>/dev/null' EXIT INT TERM
-sleep 1
+echo "== 2/4 preflight =="
+auth=()
+[ -n "$TOKEN" ] && auth=(-H "Authorization: Bearer $TOKEN")
+status=$(curl -s -m 10 "${auth[@]}" "$KERNEL_URL/v1/setup/status" || echo '{}')
+needs_sandbox=$(echo "$status" | sed -n 's/.*"sandbox":{"configured":\([a-z]*\).*/\1/p')
+pinned=$(echo "$status" | grep -o '"pinned_by_env":true' || true)
+if [ "$needs_sandbox" = "false" ]; then
+  echo "   sandbox not configured — building via /v1/setup/sandbox/build (minutes)…"
+  code=$(curl -s -o /tmp/loadrun-sandbox.json -w '%{http_code}' -m 900 -X POST \
+    "${auth[@]}" -H 'Content-Type: application/json' "$KERNEL_URL/v1/setup/sandbox/build" || echo curl_err)
+  [ "$code" = "200" ] || { echo "   sandbox build failed (HTTP $code): $(cat /tmp/loadrun-sandbox.json)"; exit 1; }
+  echo "   sandbox built: $(sed -n 's/.*"image":"\([^"]*\)".*/\1/p' /tmp/loadrun-sandbox.json)"
+elif [ -n "$pinned" ]; then
+  echo "   sandbox pinned by KERNEL_SANDBOX_IMAGE — skipping build (by design)"
+fi
+mock_health=$(curl -s -m 5 "$MOCK_URL/healthz" || true)
+case "$mock_health" in
+  *ok*) echo "   mock provider: up ($MOCK_URL)" ;;
+  *)    echo "   WARNING: mock provider not reachable at $MOCK_URL — check the loadtest profile / process"; exit 1 ;;
+esac
 
-echo "== starting resource sampler (docker stats every 2s) =="
+echo "== 3/4 resource sampler =="
 (
   while :; do
     echo "=== $(date +%H:%M:%S)"
     docker stats --no-stream --format '{{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}}' \
-      | grep -E 'agent-kernel|journal|postgres|debugger' || true
+      | grep -E 'agent-kernel|journal|postgres|mockllm|debugger' || true
     sleep 2
   done
 ) > /tmp/loadgen-resources.log &
 SAMPLER_PID=$!
 
-echo "== load: $RUNS runs, ramp ${RAMP}s =="
+echo "== 4/4 load: $RUNS runs, ramp ${RAMP}s, hitl=$HITL =="
+hitl_flags=""
+if [ "$HITL" = "1" ]; then
+  /tmp/mockllm-bin -addr :18099 -first-token 200ms -token-gap 15ms -tokens 120 -ask-human-after-tools 2 &
+  MOCK_PID=$!
+  hitl_flags="-hitl -human-delay 30s"
+fi
 /tmp/loadgen-runner \
-  -kernel "${KERNEL:-http://localhost:8090}" \
-  -token "${TOKEN:-}" \
-  -project "${PROJECT:-loadgen}" \
+  -kernel "$KERNEL_URL" \
+  -journal "$JOURNAL_URL" \
+  -token "$TOKEN" \
+  -project "$PROJECT" \
   -agent "${AGENT:-loadgen-agent}" \
   -model "${MODEL:-loadgen-model}" \
   -runs "$RUNS" -ramp "${RAMP}s" \
+  -timeout "${RUN_TIMEOUT:-10m}" \
+  $hitl_flags \
   -report "$REPORT" \
   2>&1 | tee /tmp/loadgen-runner.log
 
-kill "$MOCK_PID" 2>/dev/null || true
+echo
 
-echo "== resource summary (peak cpu / peak mem per service) =="
-# cpu peaks: "name cpu=X%" lines; mem peaks: numeric MiB values per name.
+echo "== resource summary (peaks per service) =="
 grep -oE '[a-z0-9-]+ cpu=[0-9.]+%' /tmp/loadgen-resources.log \
   | awk '{split($0,a," cpu="); if (a[2]+0 > pcpu[a[1]]) pcpu[a[1]]=a[2]+0}
          END {for (s in pcpu) printf "  %-14s peak cpu %.2f%%\n", s, pcpu[s]}' | sort
