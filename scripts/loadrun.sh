@@ -64,6 +64,14 @@ fi
 echo "== 2/4 preflight =="
 auth=()
 [ -n "$TOKEN" ] && auth=(-H "Authorization: Bearer $TOKEN")
+# Token check first: a gated stand fails every call with 401, and the report
+# would be a table of failures instead of a load measurement.
+who=$(curl -s -m 10 "${auth[@]}" "$KERNEL_URL/v1/agent/whoami" || true)
+case "$who" in
+  *auth_enabled*) echo "   token accepted: $(echo "$who" | sed -n 's/.*"subject":"\([^"]*\)".*/\1/p')" ;;
+  *anonymous*)    echo "   anonymous mode (auth disabled)" ;;
+  *)              echo "   WARNING: token rejected — expect 401s (whoami: $who)" ;;
+esac
 status=$(curl -s -m 10 "${auth[@]}" "$KERNEL_URL/v1/setup/status" || echo '{}')
 needs_sandbox=$(echo "$status" | sed -n 's/.*"sandbox":{"configured":\([a-z]*\).*/\1/p')
 pinned=$(echo "$status" | grep -o '"pinned_by_env":true' || true)
