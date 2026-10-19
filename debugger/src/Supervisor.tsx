@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { Button, Tag } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { observationApi, type ObservationEvent } from './observationApi'
@@ -16,6 +16,43 @@ const navigate = (path: string) => { window.history.pushState(null, '', path); w
 const CLUSTER_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
+
+// generalizeID derives a stable knowledge id from the generalized text —
+// identical re-proposals strengthen the same node instead of duplicating it
+// (the projection's idempotent proposal semantics).
+function generalizeID(text: string) {
+  let hash = 5381
+  for (let i = 0; i < text.length; i++) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
+  return 'gen-' + (hash >>> 0).toString(36)
+}
+
+const WORD_RE = /[\p{L}\p{N}]+/gu
+function words(text: string): Set<string> {
+  const set = new Set<string>()
+  for (const match of text.toLowerCase().matchAll(WORD_RE)) set.add(match[0])
+  return set
+}
+
+/** CompareText renders a proposition with a lightweight semantic-diff
+ *  treatment: words the OTHER side does not have are highlighted, shared
+ *  words stay plain. Lexical overlap is an honest proxy — the score line
+ *  nearby quotes the actual cosine. */
+function CompareText({ text, other }: { text: string; other: string }) {
+  if (!text) return <span style={{ color: 'var(--tm-text-3)' }}>—</span>
+  if (!other) return <>{text}</>
+  const mine = words(text)
+  const theirs = words(other)
+  const parts = text.split(/(\s+)/)
+  return (
+    <>
+      {parts.map((part, i) => {
+        const clean = part.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
+        if (!clean || !mine.has(clean) || theirs.has(clean)) return <span key={i}>{part}</span>
+        return <span key={i} style={{ background: 'color-mix(in srgb, var(--tm-amber) 22%, transparent)', borderRadius: 2, padding: '0 1px' }}>{part}</span>
+      })}
+    </>
+  )
+}
 
 interface ClusterRow {
   key: string
@@ -114,7 +151,7 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
 // SupervisorPanels is the whole supervisor surface without the page chrome —
 // the /supervisor page and the dashboard's supervisor tab render the same
 // panels (docs/supervisor-model.md §7).
-export function SupervisorPanels() {
+export function SupervisorPanels({ onPendingChange, setProject }: { onPendingChange?: (pending: number) => void; setProject?: (project: string) => void } = {}) {
   const t = useT()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -130,6 +167,15 @@ export function SupervisorPanels() {
   const [acknowledged, setAcknowledged] = useState<Set<string>>(new Set())
   const [busyAck, setBusyAck] = useState('')
   const [busyCase, setBusyCase] = useState('')
+  // Bulk mode (§7): the queue fills up, one-row buttons stop scaling.
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  // Propositions behind conflict verdicts that predate new_proposition /
+  // old_proposition in the verdict payload: fetched once from the knowledge
+  // projection, keyed "project/id".
+  const [propFallback, setPropFallback] = useState<Record<string, string>>({})
+  // Inline generalization editor: which conflict row, and the draft text.
+  const [generalize, setGeneralize] = useState<{ rowKey: string; text: string } | null>(null)
   // Semantic-layer health (§6.5): read-only monitoring. Configuration lives
   // in Agents → quality settings.
   const [embeddings, setEmbeddings] = useState<{ model: string; ready: boolean; error?: string } | null>(null)
@@ -207,6 +253,83 @@ export function SupervisorPanels() {
   const openFrictionRuns = (row: ClusterRow) => {
     navigate(row.project ? `/agents?project=${encodeURIComponent(row.project)}` : '/agents')
   }
+
+  /** Generalize: replace BOTH sides with one broader statement. Creates the
+   *  generalized knowledge (knowledge.proposed through the ingest endpoint),
+   *  invalidates both originals with replacement_id — the projection turns
+   *  each invalidation into a knowledge.superseded correction — and
+   *  acknowledges the verdict. */
+  const generalizeConflict = async (row: ClusterRow) => {
+    const conflict = row.conflict!
+    if (!generalize || generalize.rowKey !== row.key) return
+    const text = generalize.text.trim()
+    if (!text) return
+    setBusyCase(row.key)
+    try {
+      const project = conflict.oldProject || row.project
+      const id = generalizeID(text)
+      await observationApi.proposeKnowledge({
+        knowledge_id: id, proposition: text, project,
+        actor: { id: 'supervisor-queue', type: 'human' },
+      })
+      for (const target of [{ id: conflict.newID, project: conflict.newProject }, { id: conflict.oldID, project: conflict.oldProject }]) {
+        if (!target.project || !target.id) continue
+        await observationApi.invalidate({
+          knowledge_id: target.id, project: target.project,
+          actor: { id: 'supervisor-queue', type: 'human' },
+          replacement_id: id,
+          reason: t('supervisor.action_generalized_reason', { id }),
+        })
+      }
+      for (const eventID of row.eventIDs) {
+        try { await workspaceApi.acknowledgeSupervisorVerdict(eventID) } catch { /* queue hygiene is best-effort */ }
+      }
+      setGeneralize(null)
+      await load()
+    } catch (failure) {
+      setError(message(failure))
+    } finally {
+      setBusyCase('')
+    }
+  }
+
+  // Resolve the proposition texts behind conflict verdicts that were published
+  // without them (older payloads): one exact-item lookup per missing side.
+  const propFallbackRef = useRef<Record<string, string>>({})
+  useEffect(() => {
+    const missing: { project: string; id: string }[] = []
+    for (const row of clusterVerdicts(verdicts)) {
+      const cf = row.conflict
+      if (!cf) continue
+      if (!cf.newProp) {
+        const key = `${cf.newProject || row.project}/${cf.newID}`
+        if (!(key in propFallbackRef.current)) missing.push({ project: cf.newProject || row.project, id: cf.newID })
+      }
+      if (!cf.oldProp) {
+        const key = `${cf.oldProject || row.project}/${cf.oldID}`
+        if (!(key in propFallbackRef.current)) missing.push({ project: cf.oldProject || row.project, id: cf.oldID })
+      }
+    }
+    if (missing.length === 0) return
+    let cancelled = false
+    void (async () => {
+      const next: Record<string, string> = {}
+      for (const { project, id } of missing.slice(0, 20)) {
+        const key = `${project}/${id}`
+        try {
+          const page = await observationApi.knowledge(project || '', undefined, undefined, { knowledge_id: id, limit: 1 })
+          next[key] = page.knowledge?.[0]?.proposition ?? ''
+        } catch {
+          next[key] = '' // not visible from this account — keep the dash
+        }
+      }
+      if (cancelled) return
+      propFallbackRef.current = { ...propFallbackRef.current, ...next }
+      setPropFallback(propFallbackRef.current)
+    })()
+    return () => { cancelled = true }
+  }, [verdicts])
+
   const resolveConflict = async (row: ClusterRow, kind: 'invalidate_new' | 'invalidate_old' | 'keep_both') => {
     const conflict = row.conflict!
     setBusyCase(row.key)
@@ -237,12 +360,80 @@ export function SupervisorPanels() {
   const projectOptions = [...new Set(clusters.map((row) => row.project).filter(Boolean))]
   const caseOptions = [...new Set(clusters.map((row) => row.caseID).filter(Boolean))]
   const resolved = (row: ClusterRow) => row.eventIDs.every((id) => acknowledged.has(id))
+  const pendingCount = clusters.filter((row) => !resolved(row)).length
+
+  // The tab badge (§7): the administrator must see the queue depth before
+  // opening the tab. The Dashboard renders the badge from this report.
+  useEffect(() => {
+    onPendingChange?.(pendingCount)
+  }, [pendingCount, onPendingChange])
+
   const visibleClusters = clusters.filter((row) => {
     if (caseFilter && row.caseID !== caseFilter) return false
     if (projectFilter && row.project !== projectFilter) return false
     if (!showResolved && resolved(row)) return false
     return true
   })
+
+  // Bulk selection works on VISIBLE rows only: a stale key from another
+  // filter would otherwise act on rows the administrator cannot see.
+  const toggleRow = (key: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }
+  const selectedRows = visibleClusters.filter((row) => selected.has(row.key) && !resolved(row))
+  const allVisibleSelected = visibleClusters.length > 0 && visibleClusters.every((row) => selected.has(row.key))
+  const toggleAll = () => {
+    setSelected(allVisibleSelected ? new Set() : new Set(visibleClusters.map((row) => row.key)))
+  }
+  /** Runs one row action after another across the selection. Conflicts are
+   *  only touched when every selected row carries the same resolution kind —
+   *  mixed selections degrade to acknowledge-only for safety. */
+  const bulkApply = async (kind: 'acknowledge' | 'invalidate_new' | 'invalidate_old') => {
+    if (selectedRows.length === 0) return
+    setBulkBusy(true)
+    setError('')
+    try {
+      for (const row of selectedRows) {
+        if (kind === 'acknowledge' || !row.conflict) {
+          for (const id of row.eventIDs) {
+            try { await workspaceApi.acknowledgeSupervisorVerdict(id) } catch { /* best-effort */ }
+          }
+          continue
+        }
+        await resolveConflictQuiet(row, kind)
+      }
+      setSelected(new Set())
+      await load()
+    } catch (failure) {
+      setError(message(failure))
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+  /** resolveConflict without its per-row load()/busy churn — the bulk loop
+   *  reloads once at the end. */
+  async function resolveConflictQuiet(row: ClusterRow, kind: 'invalidate_new' | 'invalidate_old' | 'keep_both') {
+    const conflict = row.conflict!
+    if (kind !== 'keep_both') {
+      const target = kind === 'invalidate_new'
+        ? { id: conflict.newID, project: conflict.newProject }
+        : { id: conflict.oldID, project: conflict.oldProject }
+      try {
+        await observationApi.invalidate({
+          knowledge_id: target.id, project: target.project,
+          actor: { id: 'supervisor-queue', type: 'human' },
+          reason: t('supervisor.action_invalidated_reason', { score: (conflict.score || 0).toFixed(2) }),
+        })
+      } catch { /* one failure must not sink the batch; the reload shows survivors */ }
+    }
+    for (const eventID of row.eventIDs) {
+      try { await workspaceApi.acknowledgeSupervisorVerdict(eventID) } catch { /* best-effort */ }
+    }
+  }
 
   return (
     <>
@@ -348,6 +539,35 @@ export function SupervisorPanels() {
                 {t('supervisor.show_resolved') ?? 'Show resolved'}
               </label>
             </div>
+            {visibleClusters.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.4rem', fontSize: '0.74rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', color: 'var(--tm-text-3)' }}>
+                  <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} />
+                  {t('supervisor.bulk_select_all') ?? 'Select all'}
+                </label>
+                {selectedRows.length > 0 && (
+                  <>
+                    <span style={{ color: 'var(--tm-text-2)' }}>{t('supervisor.bulk_selected_n', { count: String(selectedRows.length) })}</span>
+                    <Button size="sm" kind="ghost" disabled={bulkBusy} onClick={() => void bulkApply('acknowledge')}>
+                      {t('supervisor.bulk_acknowledge') ?? 'Mark resolved'}
+                    </Button>
+                    {selectedRows.every((row) => row.conflict) && (
+                      <>
+                        <Button size="sm" kind="danger" disabled={bulkBusy} onClick={() => void bulkApply('invalidate_new')}>
+                          {bulkBusy ? '…' : t('supervisor.action_invalidate_new') ?? 'Invalidate new'}
+                        </Button>
+                        <Button size="sm" kind="danger" disabled={bulkBusy} onClick={() => void bulkApply('invalidate_old')}>
+                          {t('supervisor.action_invalidate_old') ?? 'Invalidate existing'}
+                        </Button>
+                      </>
+                    )}
+                    <Button size="sm" kind="ghost" disabled={bulkBusy} onClick={() => setSelected(new Set())}>
+                      {t('supervisor.bulk_clear') ?? 'Clear'}
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
             {visibleClusters.length === 0 ? (
               <p style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', margin: 0 }}>{t('supervisor.problems_empty')}</p>
             ) : (
@@ -358,6 +578,14 @@ export function SupervisorPanels() {
                   return (
                     <div key={row.key} style={{ padding: '0.55rem 0.75rem', borderTop: '1px solid var(--tm-border)', fontSize: '0.78rem', opacity: isResolved ? 0.55 : 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        {!isResolved && (
+                          <input
+                            type="checkbox"
+                            checked={selected.has(row.key)}
+                            onChange={() => toggleRow(row.key)}
+                            aria-label={t('supervisor.bulk_select_row') ?? 'Select row'}
+                          />
+                        )}
                         <Tag type={causeTag(row.cause)} size="sm">{row.cause}</Tag>
                         {row.pattern && <span style={{ fontSize: '0.74rem', color: 'var(--tm-text-2)' }}>{row.pattern}</span>}
                         {row.caseID && <Tag type="purple" size="sm">{t(`supervisor.case_${row.caseID}`) ?? row.caseID}</Tag>}
@@ -374,44 +602,83 @@ export function SupervisorPanels() {
                       )}
                       {row.conflict && (() => {
                       const cf = row.conflict
+                      const newProject = cf.newProject || row.project
+                      const oldProject = cf.oldProject || row.project
+                      const newProp = cf.newProp || propFallback[`${newProject}/${cf.newID}`] || ''
+                      const oldProp = cf.oldProp || propFallback[`${oldProject}/${cf.oldID}`] || ''
                       const openDossier = (id: string, project: string) => (e: React.MouseEvent) => {
                         e.preventDefault()
+                        // The knowledge page takes its project from the app
+                        // context, not the URL — switch context first or the
+                        // dossier opens against the wrong project and 404s.
+                        setProject?.(project)
                         navigate(`/knowledge?project=${encodeURIComponent(project)}&dossier=${encodeURIComponent(id)}`)
                       }
+                      const dossierLink = (id: string, project: string) => (
+                        <a
+                          href={`/knowledge?project=${encodeURIComponent(project)}&dossier=${encodeURIComponent(id)}`}
+                          onClick={openDossier(id, project)}
+                          style={{ color: 'var(--tm-teal)', fontSize: '0.68rem' }}
+                          title={id}
+                        >{id}</a>
+                      )
                       return (
                       <div style={{ marginTop: '0.4rem', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.4rem 0.6rem', fontSize: '0.75rem' }}>
-                          <div style={{ display: 'grid', gap: '0.25rem' }}>
-                            <div>
-                              <Tag type="blue" size="sm">новое</Tag>{' '}
-                              <a
-                                href={`/knowledge?project=${encodeURIComponent(cf.newProject || row.project)}&dossier=${encodeURIComponent(cf.newID)}`}
-                                onClick={openDossier(cf.newID, cf.newProject || row.project)}
-                                style={{ color: 'var(--tm-teal)', fontSize: '0.72rem' }}
-                              >{cf.newID}</a>
-                              <div style={{ color: 'var(--tm-text-2)', marginTop: '0.1rem' }}>{cf.newProp || '—'}</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                            <div style={{ borderLeft: '2px solid var(--tm-teal)', paddingLeft: '0.45rem' }}>
+                              <div><Tag type="blue" size="sm">{t('supervisor.compare_new') ?? 'new'}</Tag>{' '}{dossierLink(cf.newID, newProject)}</div>
+                              <div style={{ marginTop: '0.2rem', lineHeight: 1.45 }}><CompareText text={newProp} other={oldProp} /></div>
                             </div>
-                            <div style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem' }}>против</div>
-                            <div>
-                              <Tag type="warm-gray" size="sm">существующее</Tag>{' '}
-                              <a
-                                href={`/knowledge?project=${encodeURIComponent(cf.oldProject || row.project)}&dossier=${encodeURIComponent(cf.oldID)}`}
-                                onClick={openDossier(cf.oldID, cf.oldProject || row.project)}
-                                style={{ color: 'var(--tm-teal)', fontSize: '0.72rem' }}
-                              >{cf.oldID}</a>
-                              <div style={{ color: 'var(--tm-text-2)', marginTop: '0.1rem' }}>{cf.oldProp || '—'}</div>
+                            <div style={{ borderLeft: '2px solid var(--tm-border)', paddingLeft: '0.45rem' }}>
+                              <div><Tag type="warm-gray" size="sm">{t('supervisor.compare_old') ?? 'existing'}</Tag>{' '}{dossierLink(cf.oldID, oldProject)}</div>
+                              <div style={{ marginTop: '0.2rem', lineHeight: 1.45 }}><CompareText text={oldProp} other={newProp} /></div>
                             </div>
                           </div>
-                          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
-                            <Button size="sm" kind="danger" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'invalidate_new')}>
-                              {busyCase === row.key ? '…' : t('supervisor.action_invalidate_new') ?? 'Invalidate new'}
-                            </Button>
-                            <Button size="sm" kind="danger" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'invalidate_old')}>
-                              {busyCase === row.key ? '…' : t('supervisor.action_invalidate_old') ?? 'Invalidate existing'}
-                            </Button>
-                            <Button size="sm" kind="secondary" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'keep_both')}>
-                              {busyCase === row.key ? '…' : t('supervisor.action_keep_both') ?? 'Keep both'}
-                            </Button>
-                          </div>
+                          {(newProp || oldProp) && (
+                            <div style={{ marginTop: '0.3rem', fontSize: '0.66rem', color: 'var(--tm-text-3)' }}>
+                              {t('supervisor.compare_hint') ?? 'Highlighted — words absent on the other side'}
+                              {cf.score > 0 && ` · ${t('supervisor.compare_score', { score: cf.score.toFixed(2) })}`}
+                            </div>
+                          )}
+                          {generalize?.rowKey === row.key ? (
+                            <div style={{ marginTop: '0.35rem', display: 'grid', gap: '0.3rem' }}>
+                              <textarea
+                                value={generalize.text}
+                                onChange={(e) => setGeneralize({ rowKey: row.key, text: e.target.value })}
+                                rows={3}
+                                placeholder={t('supervisor.generalize_placeholder') ?? 'One generalized statement covering both…'}
+                                style={{ width: '100%', fontSize: '0.75rem', padding: '0.35rem 0.45rem', border: '1px solid var(--tm-border)', borderRadius: '4px', background: 'var(--tm-bg-1, transparent)', color: 'var(--tm-text)', resize: 'vertical' }}
+                              />
+                              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                <Button size="sm" kind="primary" disabled={busyCase === row.key || !generalize.text.trim()} onClick={() => void generalizeConflict(row)}>
+                                  {busyCase === row.key ? '…' : t('supervisor.generalize_confirm') ?? 'Replace both'}
+                                </Button>
+                                <Button size="sm" kind="ghost" disabled={busyCase === row.key} onClick={() => setGeneralize(null)}>
+                                  {t('common.cancel') ?? 'Cancel'}
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                              <Button size="sm" kind="danger" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'invalidate_new')}>
+                                {busyCase === row.key ? '…' : t('supervisor.action_invalidate_new') ?? 'Invalidate new'}
+                              </Button>
+                              <Button size="sm" kind="danger" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'invalidate_old')}>
+                                {busyCase === row.key ? '…' : t('supervisor.action_invalidate_old') ?? 'Invalidate existing'}
+                              </Button>
+                              <Button size="sm" kind="secondary" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'keep_both')}>
+                                {busyCase === row.key ? '…' : t('supervisor.action_keep_both') ?? 'Keep both'}
+                              </Button>
+                              <Button
+                                size="sm"
+                                kind="primary"
+                                disabled={busyCase === row.key}
+                                onClick={() => setGeneralize({ rowKey: row.key, text: newProp.length >= oldProp.length ? newProp : oldProp })}
+                              >
+                                {t('supervisor.action_generalize') ?? 'Generalize…'}
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       )
                       })()}
@@ -452,7 +719,7 @@ export function SupervisorPanels() {
                                 <div key={run + at} style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline' }}>
                                   <a
                                     href={`/agents?project=${encodeURIComponent(row.project)}&run=${encodeURIComponent(run)}`}
-                                    onClick={(e) => { e.preventDefault(); navigate(`/agents?project=${encodeURIComponent(row.project)}&run=${encodeURIComponent(run)}`) }}
+                                    onClick={(e) => { e.preventDefault(); if (row.project) setProject?.(row.project); navigate(`/agents?project=${encodeURIComponent(row.project)}&run=${encodeURIComponent(run)}`) }}
                                     style={{ fontSize: '0.72rem', color: 'var(--tm-teal)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                                     title={run}
                                   >{run}</a>
@@ -473,7 +740,7 @@ export function SupervisorPanels() {
   )
 }
 
-export default function Supervisor() {
+export default function Supervisor({ setProject }: { setProject?: (project: string) => void }) {
   const t = useT()
   return (
     <div style={{ padding: '1rem', maxWidth: '60rem', margin: '0 auto' }}>
@@ -481,7 +748,7 @@ export default function Supervisor() {
         <h2 style={{ margin: 0 }}>{t('supervisor.title')}</h2>
         <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0' }}>{t('supervisor.subtitle')}</p>
       </div>
-      <SupervisorPanels />
+      <SupervisorPanels setProject={setProject} />
     </div>
   )
 }

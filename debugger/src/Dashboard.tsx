@@ -121,6 +121,9 @@ export default function Dashboard({ project, setProject }: Props) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
+  // Supervisor tab badge: unresolved problem-queue depth. The panel reports it
+  // while mounted; this light fetch seeds it before the first tab open.
+  const [supervisorPending, setSupervisorPending] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const window_ = WINDOWS[windowIdx] ?? WINDOWS[1]
@@ -159,6 +162,25 @@ export default function Dashboard({ project, setProject }: Props) {
       setBusy(false)
     }
   }, [window_.go, window_.ms])
+
+  // Seed the supervisor badge once: unresolved = verdicts minus acknowledgements
+  // (same accounting the queue panel renders). Cheap enough for a tab strip.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const [verdictPage, ackPage] = await Promise.all([
+          observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict', limit: 300 }),
+          observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict.acknowledged', limit: 300 }),
+        ])
+        if (cancelled) return
+        const ack = new Set((ackPage.events ?? []).map((e) => String(e.data?.verdict_event_id ?? '')))
+        const pending = (verdictPage.events ?? []).filter((e) => !ack.has(e.event_id)).length
+        setSupervisorPending(pending)
+      } catch { /* badge is best-effort */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const loadQuality = useCallback(async () => {
     setBusy(true)
@@ -270,9 +292,19 @@ export default function Dashboard({ project, setProject }: Props) {
             style={{
               padding: '0.45rem 0.8rem', background: 'none', border: 'none', borderBottom: `2px solid ${tab === item.key ? 'var(--tm-teal)' : 'transparent'}`,
               color: tab === item.key ? 'var(--tm-text)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.82rem', fontWeight: tab === item.key ? 600 : 400,
+              display: 'flex', alignItems: 'center', gap: '0.35rem',
             }}
           >
             {item.label}
+            {item.key === 'supervisor' && supervisorPending > 0 && (
+              <span
+                title={t('supervisor.badge_hint') ?? undefined}
+                style={{
+                  background: 'var(--tm-danger)', color: '#fff', borderRadius: '999px', fontSize: '0.64rem',
+                  minWidth: '1.1rem', padding: '0.05rem 0.3rem', textAlign: 'center', fontWeight: 600, lineHeight: 1.3,
+                }}
+              >{supervisorPending > 99 ? '99+' : supervisorPending}</span>
+            )}
           </button>
         ))}
       </div>
@@ -548,7 +580,7 @@ export default function Dashboard({ project, setProject }: Props) {
 
       {tab === 'knowledge' && <Observability project={project} />}
 
-      {tab === 'supervisor' && <SupervisorPanels />}
+      {tab === 'supervisor' && <SupervisorPanels onPendingChange={setSupervisorPending} />}
     </div>
   )
 }

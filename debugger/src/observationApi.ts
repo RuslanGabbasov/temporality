@@ -132,6 +132,23 @@ export const observationApi = {
     }),
   invalidate: (body: { knowledge_id: string; project: string; actor: ObservationActor; reason: string; /** Successor knowledge: turns the invalidation into a correction (knowledge.superseded). */ replacement_id?: string; evidence?: ObservationEvidence[] }) =>
     post<ObservationEvent>('/v1/observations/knowledge/invalidate', body),
+  /** Manual knowledge creation (the supervisor's generalize action): the
+   *  projection builds knowledge from knowledge.proposed events, so appending
+   *  one through the regular ingest endpoint creates the item — the same
+   *  path run extraction uses. Idempotent per knowledge_id: an identical
+   *  re-proposal strengthens the existing node (observation/knowledge.go). */
+  proposeKnowledge: (body: { knowledge_id: string; proposition: string; topics?: string[]; entities?: string[]; project: string; actor: ObservationActor }) =>
+    post<{ accepted: number; repeated: number }>('/v1/observations/events', {
+      events: [{
+        schema: 'temporality.event/1',
+        event_id: `manual/${body.knowledge_id}/${Date.now()}`,
+        occurred_at: new Date().toISOString(),
+        source: { id: 'supervisor-queue', integration: 'temporality-debugger', version: '1' },
+        context: { project: body.project, actor: body.actor },
+        type: 'knowledge.proposed',
+        data: { knowledge_id: body.knowledge_id, proposition: body.proposition, topics: body.topics ?? [], entities: body.entities ?? [] },
+      }],
+    }),
   challenge: (body: { knowledge_id: string; project: string; actor: ObservationActor; reason: string; evidence?: ObservationEvidence[] }) =>
     post<ObservationEvent>('/v1/observations/knowledge/challenge', body),
   promote: (body: { knowledge_id: string; project: string; actor: ObservationActor; scope_kind: 'org_unit' | 'organization'; scope_id?: string; reason: string; evidence?: ObservationEvidence[] }) =>

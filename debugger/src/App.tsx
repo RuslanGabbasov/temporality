@@ -91,7 +91,7 @@ export default function App() {
           case 'dashboard':
             return <Dashboard project={project} setProject={setProject} />
           case 'supervisor':
-            return <Supervisor />
+            return <Supervisor setProject={setProject} />
           case 'agents':
             return <AgentRuns project={project} />
           case 'teams':

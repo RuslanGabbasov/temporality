@@ -3009,3 +3009,11 @@ button.header-nav-link {
   height: 20px !important;
   stroke-width: 2 !important;
 }
+
+// Carbon reserves icon space on the right of every productive button
+// (3× padding + 16px ≈ 63px) — buttons without an icon render a dead hole on
+// their right edge (the supervisor queue's action buttons did). Collapse the
+// reserve back to a normal padding when there is no icon to place.
+.cds--btn:not(.cds--btn--icon-only):not(:has(.cds--btn__icon)) {
+  padding-inline-end: calc(0.75rem - 1px);
+}
