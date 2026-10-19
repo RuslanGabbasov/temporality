@@ -86,7 +86,7 @@ Always follow this order:
 
 4. For an amendment: run_status lists the sender's earlier runs (run_id, project, status, latest answer). Pick the run the user is amending — one they name, or the only plausible one; when several are plausible, ask_human with the run list as options. Then call start_task with amend_run_id set to that run and prompt = the amendment as a self-contained instruction for the executing agent (what to change or add; reference the earlier result only through what run_status showed you). Never invent run ids. If the sender has no earlier runs, treat the message as a new task (step 2).
 
-5. For status: call run_status and summarize the sender's tasks (status and latest answer per run) — never start new work for a progress question. For cancel: list the sender's runs via run_status when unclear which one is meant, then cancel_run with the exact run_id; confirm with the user via ask_human only when several runs are plausible. For chatter: a short friendly reply, no run.
+5. For status: call run_status and summarize the sender's work (status and latest answer per run) — never start new work for a progress question. The response has two sections: 'runs' — earlier work started through this channel; 'workspace_runs' — the sender's recent runs across ALL projects, including ones started in the web UI. Report BOTH sections (dedup by run id); an empty channel list with non-empty workspace_runs means the work lives in the web UI — say where it is and what its status is, never claim there is no work while workspace_runs is non-empty. For cancel: list the sender's runs via run_status when unclear which one is meant, then cancel_run with the exact run_id; confirm with the user via ask_human only when several runs are plausible. For chatter: a short friendly reply, no run.
 
 Rules:
 - The message body in the prompt is the only source of user intent; never invent project names, people, deadlines or run ids.
@@ -433,7 +433,34 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			}
 			entries = append(entries, entry)
 		}
-		writeJSON(w, 200, map[string]any{"runs": entries})
+		// The channel-routed list alone answers 'no tasks here' when the user's
+		// work was started elsewhere (UI, trigger) — the exact confusion the
+		// E2E status question hit. Workspace runs attributed to the sender
+		// (exec_context.actor) join the answer with their task titles.
+		workspaceRuns, wErr := r.ws.ListRunsByActor(req.Context(), sender, 15)
+		if wErr != nil {
+			// The channel-routed list above still answers; workspace attribution
+			// is the enhancement, not a hard dependency.
+			r.log.Warn("intake run_status: workspace runs by actor", "sender", sender, "error", wErr)
+		}
+		wEntries := make([]map[string]any, 0, len(workspaceRuns))
+		for _, run := range workspaceRuns {
+			entry := map[string]any{
+				"run_id":     run.RunID,
+				"task_id":    run.TaskID,
+				"project_id": run.ProjectID,
+				"status":     run.Status,
+				"created_at": run.CreatedAt,
+			}
+			if task, tErr := r.ws.GetTask(req.Context(), run.TaskID); tErr == nil {
+				entry["task_title"] = task.Title
+			}
+			if run.Answer != "" {
+				entry["answer"] = truncateForLog(run.Answer, 500)
+			}
+			wEntries = append(wEntries, entry)
+		}
+		writeJSON(w, 200, map[string]any{"runs": entries, "workspace_runs": wEntries})
 	})
 	// Cancel a run the sender's message produced (docs/inbound-messages.md §10):
 	// the target run must belong to one of the sender's routed messages — the

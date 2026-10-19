@@ -561,6 +561,39 @@ func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
 	return result, rows.Err()
 }
 
+// ListRunsByActor returns the most recent runs the given user started —
+// across every project. The actor is matched in exec_context ('actor' and
+// 'authorized_by.user_id'), which is stamped at start time by every entry
+// point (API, trigger, intake). Powers the intake agent's run_status: a
+// status question must see UI-started work too, not only channel-routed runs.
+func (s *Store) ListRunsByActor(ctx context.Context, actorID string, limit int) ([]Run, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
+		 FROM workspace_run
+		 WHERE exec_context->>'actor' = $1 OR exec_context->'authorized_by'->>'user_id' = $1
+		 ORDER BY created_at DESC LIMIT $2`, actorID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Run
+	for rows.Next() {
+		var r Run
+		var agentID *string
+		var execContext []byte
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &execContext, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		r.AgentID = derefPtr(agentID)
+		r.ExecContext = decodeExecContext(execContext)
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
 // ListRunsByProject returns all completed runs for a project.
 func (s *Store) ListRunsByProject(ctx context.Context, projectID string) ([]Run, error) {
 	rows, err := s.pool.Query(ctx,
