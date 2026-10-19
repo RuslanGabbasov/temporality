@@ -59,19 +59,36 @@ const NAV_ITEMS = [
   { path: '/experience', label: 'nav.timeline' },
 ]
 
-// Configuration surfaces — grouped under the Settings dropdown.
-const CONFIG_ITEMS = [
-  { path: '/agent-config', label: 'nav.agents' },
-  { path: '/teams', label: 'nav.teams' },
-  { path: '/triggers', label: 'nav.triggers' },
-  { path: '/skills', label: 'nav.skills' },
-  { path: '/mcp', label: 'nav.mcp' },
-  { path: '/secrets', label: 'nav.secrets' },
-  { path: '/sandbox', label: 'nav.sandbox' },
-  { path: '/providers', label: 'nav.providers' },
-  { path: '/users', label: 'nav.users' },
-  { path: '/org', label: 'nav.org', adminOnly: true },
-  { path: '/channels', label: 'nav.channels', adminOnly: true },
+// Configuration surfaces — grouped under the Settings dropdown. Groups are
+// labels, not submenus: the whole list stays visible, headers just make it
+// scannable (11 flat items stopped being one glance).
+const CONFIG_GROUPS: { title: string; items: { path: string; label: string; adminOnly?: boolean }[] }[] = [
+  {
+    title: 'nav.group_agents',
+    items: [
+      { path: '/agent-config', label: 'nav.agents' },
+      { path: '/teams', label: 'nav.teams' },
+      { path: '/skills', label: 'nav.skills' },
+      { path: '/triggers', label: 'nav.triggers' },
+    ],
+  },
+  {
+    title: 'nav.group_infra',
+    items: [
+      { path: '/providers', label: 'nav.providers' },
+      { path: '/mcp', label: 'nav.mcp' },
+      { path: '/sandbox', label: 'nav.sandbox' },
+      { path: '/secrets', label: 'nav.secrets' },
+      { path: '/channels', label: 'nav.channels', adminOnly: true },
+    ],
+  },
+  {
+    title: 'nav.group_org',
+    items: [
+      { path: '/users', label: 'nav.users' },
+      { path: '/org', label: 'nav.org', adminOnly: true },
+    ],
+  },
 ]
 
 interface Project {
@@ -572,7 +589,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
           ))}
           <div className="header-config-dropdown" ref={configMenuRef}>
             <button
-              className={`header-nav-link ${CONFIG_ITEMS.some((i) => activePage === i.path.slice(1)) ? 'active' : ''}`}
+              className={`header-nav-link ${CONFIG_GROUPS.some((g) => g.items.some((i) => activePage === i.path.slice(1))) ? 'active' : ''}`}
               onClick={() => setShowConfigMenu(!showConfigMenu)}
             >
               {t('nav.settings') ?? 'Settings'}
@@ -580,16 +597,25 @@ export default function Layout({ children, activePage }: LayoutProps) {
             </button>
             {showConfigMenu && (
               <div className="header-config-menu">
-                {CONFIG_ITEMS.filter((i) => !i.adminOnly || identity?.role === 'admin').map(({ path, label }) => (
-                  <a
-                    key={path}
-                    href={path}
-                    className={`header-config-link ${activePage === path.slice(1) ? 'active' : ''}`}
-                    onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path); setShowConfigMenu(false) }}
-                  >
-                    {t(label)}
-                  </a>
-                ))}
+                {CONFIG_GROUPS.map(({ title, items }) => {
+                  const visible = items.filter((i) => !i.adminOnly || identity?.role === 'admin')
+                  if (visible.length === 0) return null
+                  return (
+                    <div key={title} className="header-config-group">
+                      <div className="header-config-group-title">{t(title)}</div>
+                      {visible.map(({ path, label }) => (
+                        <a
+                          key={path}
+                          href={path}
+                          className={`header-config-link ${activePage === path.slice(1) ? 'active' : ''}`}
+                          onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path); setShowConfigMenu(false) }}
+                        >
+                          {t(label)}
+                        </a>
+                      ))}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -779,16 +805,25 @@ export default function Layout({ children, activePage }: LayoutProps) {
               </a>
             ))}
             <div className="header-mobile-divider" />
-            {CONFIG_ITEMS.filter((i) => !i.adminOnly || identity?.role === 'admin').map(({ path, label }) => (
-              <a
-                key={path}
-                href={path}
-                className={`header-mobile-link ${activePage === path.slice(1) ? 'active' : ''}`}
-                onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path); setMobileNavOpen(false) }}
-              >
-                {t(label)}
-              </a>
-            ))}
+            {CONFIG_GROUPS.map(({ title, items }) => {
+              const visible = items.filter((i) => !i.adminOnly || identity?.role === 'admin')
+              if (visible.length === 0) return null
+              return (
+                <div key={title}>
+                  <div className="header-config-group-title">{t(title)}</div>
+                  {visible.map(({ path, label }) => (
+                    <a
+                      key={path}
+                      href={path}
+                      className={`header-mobile-link ${activePage === path.slice(1) ? 'active' : ''}`}
+                      onClick={(e: React.MouseEvent) => { e.preventDefault(); navigate(path); setMobileNavOpen(false) }}
+                    >
+                      {t(label)}
+                    </a>
+                  ))}
+                </div>
+              )
+            })}
           </div>
         )}
       </Header>

@@ -748,6 +748,19 @@ button.header-nav-link {
 .header-config-link:hover { color: var(--tm-text); background: rgba(255, 255, 255, 0.05); }
 .header-config-link.active { color: var(--tm-amber); }
 
+/* Logical groups inside the settings dropdown: a small uppercase label, then
+   its links; groups after the first get a hairline separator. */
+.header-config-group { display: flex; flex-direction: column; padding-top: 0.25rem; }
+.header-config-group + .header-config-group { border-top: 1px solid var(--tm-border); margin-top: 0.35rem; padding-top: 0.45rem; }
+.header-config-group-title {
+  padding: 0.15rem 0.6rem 0.25rem;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--tm-text-4, var(--tm-text-3));
+  user-select: none;
+}
+
 .header-mobile-divider {
   height: 1px;
   margin: 0.4rem 1rem;
