@@ -198,6 +198,7 @@ echo "== 3/3 load: $RUNS runs, ramp ${RAMP}s, profile=$PROFILE =="
   -timeout "${RUN_TIMEOUT:-20m}" \
   $hitl_flags \
   -profile "$PROFILE" \
+  -mock "$MOCK_URL" \
   -report "$REPORT" \
   2>&1 | tee /tmp/loadgen-runner.log
 

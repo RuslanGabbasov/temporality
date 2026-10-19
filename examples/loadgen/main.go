@@ -50,6 +50,10 @@ var (
 	// self-describing months later (light / hitl / heavy — see loadrun.sh).
 	profile = flag.String("profile", "light", "profile label quoted in the report")
 	journal = flag.String("journal", "http://localhost:8080", "journal API base URL (human.requested lookup)")
+	// The mock provider's own counters, quoted in the report as traffic proof:
+	// total_requests ≈ runs×4 and final_answers = runs mean the kernel actually
+	// exercised the provider end-to-end (idle counters = wrong base URL).
+	mockURL = flag.String("mock", "", "mock provider base URL — fetch /metrics into the report when set")
 	// Cleanup (docs/resilience-and-scale.md §НТ): delete every task created by
 	// this run after the report. The cascade removes the runs; the journal is
 	// append-only, so the loadgen project's events stay as an archive of the
@@ -176,9 +180,14 @@ func main() {
 			deadline := time.Now().Add(*perRunTO)
 			answered := map[string]bool{}
 			hits, hwtMS := 0, int64(0)
+			// The HITL scan pages the journal per run per tick — at 100 runs that
+			// was ~100 journal queries/s for events that appear once per run.
+			// Scan every 5th tick; the simulated human delay (30–45s) dwarfs it.
+			tick := 0
 			for time.Now().Before(deadline) {
 				time.Sleep(*pollEvery)
-				if *askHuman {
+				tick++
+				if *askHuman && tick%5 == 0 {
 					if asked, ok := a.findOpenQuestion(startedRun.RunID, answered); ok {
 						time.Sleep(*humanDelay)
 						if aErr := a.answerQuestion(startedRun.RunID, *project, asked); aErr == nil {
@@ -259,8 +268,17 @@ func main() {
 		fmt.Printf("%-32s %d пауз · средняя пауза %d ms\n", "HITL (human-in-the-loop)", hits, avg)
 	}
 	printStatuses(statuses)
+	// Mock traffic proof — into stdout and the report: the campaign's numbers
+	// mean nothing if the kernel was not actually talking to this provider.
+	mockLine := ""
+	if *mockURL != "" {
+		mockLine = fetchMockMetrics(*mockURL, *runs)
+		if mockLine != "" {
+			fmt.Println(mockLine)
+		}
+	}
 	if *report != "" {
-		writeReport(*report, *runs, *ramp, elapsed, failures.Load(), durations, startLat, statuses, done, hits, hwt, *profile)
+		writeReport(*report, *runs, *ramp, elapsed, failures.Load(), durations, startLat, statuses, done, hits, hwt, *profile, mockLine)
 		fmt.Printf("report written to %s\n", *report)
 	}
 	if failures.Load() > 0 || done < *runs {
@@ -332,7 +350,35 @@ func printStatuses(statuses map[string]int) {
 	fmt.Printf("statuses: %s\n", strings.Join(parts, " "))
 }
 
-func writeReport(path string, runs int, ramp time.Duration, elapsed time.Duration, failures int64, durations, startLat []int64, statuses map[string]int, done int, hits int, hwtMS int64, profile string) {
+// fetchMockMetrics reads the mock provider's counters and formats the traffic
+// line for the report. Empty on any failure — the report must not depend on
+// the mock being a mockllm.
+func fetchMockMetrics(base string, runs int) string {
+	resp, err := http.Get(strings.TrimRight(base, "/") + "/metrics")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return ""
+	}
+	var m struct {
+		TotalRequests  int64 `json:"total_requests"`
+		StreamRequests int64 `json:"stream_requests"`
+		ToolCalls      int64 `json:"tool_calls_issued"`
+		FinalAnswers   int64 `json:"final_answers"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&m) != nil {
+		return ""
+	}
+	line := fmt.Sprintf("мок-провайдер: запросов=%d (стримов=%d, tool_calls=%d, финальных ответов=%d) на %d ранов", m.TotalRequests, m.StreamRequests, m.ToolCalls, m.FinalAnswers, runs)
+	if m.TotalRequests < int64(runs) {
+		line += " — СЧЁТЧИКИ ПУСТЫ: провайдер не обслуживал эту кампанию, отчёт измерял не тот endpoint"
+	}
+	return line
+}
+
+func writeReport(path string, runs int, ramp time.Duration, elapsed time.Duration, failures int64, durations, startLat []int64, statuses map[string]int, done int, hits int, hwtMS int64, profile, mockLine string) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Нагрузочный прогон\n\n- профиль: %s\n- ранов: %d, ramp: %s, wall clock: %s\n- сбоев старта: %d, завершившихся: %d/%d\n\n| Метрика | p50 | p95 | p99 | max |\n|---|---|---|---|---|\n", profile, runs, ramp, elapsed.Round(time.Second), failures, done, runs)
 	row := func(title string, s []int64) {
@@ -358,6 +404,9 @@ func writeReport(path string, runs int, ramp time.Duration, elapsed time.Duratio
 		fmt.Fprintf(&b, "%s=%d ", k, statuses[k])
 	}
 	b.WriteString("\n")
+	if mockLine != "" {
+		fmt.Fprintf(&b, "\n%s\n", mockLine)
+	}
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "write report: %v\n", err)
 	}
