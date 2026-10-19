@@ -1296,10 +1296,11 @@ func (a *Activities) handleSkillSearch(ctx context.Context, request ToolRequest)
 	}
 	var page struct {
 		Skills []struct {
-			ID       string `json:"id"`
-			Name     string `json:"name"`
-			Version  string `json:"version"`
-			Manifest struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Version     string `json:"version"`
+			Manifest    struct {
 				Capabilities []string `json:"capabilities"`
 				Tools        []string `json:"tools"`
 			} `json:"manifest"`
@@ -1310,6 +1311,8 @@ func (a *Activities) handleSkillSearch(ctx context.Context, request ToolRequest)
 	}
 	// Match per keyword instead of one literal substring: a multi-word query
 	// like "code review quality gate" must still surface relevant skills.
+	// The description carries the human wording — the most likely place a
+	// natural-language query actually matches.
 	keywords := strings.Fields(strings.ToLower(query))
 	type scoredMatch struct {
 		item  map[string]any
@@ -1317,7 +1320,7 @@ func (a *Activities) handleSkillSearch(ctx context.Context, request ToolRequest)
 	}
 	var scored []scoredMatch
 	for _, s := range page.Skills {
-		haystack := strings.ToLower(s.ID + " " + s.Name + " " + strings.Join(s.Manifest.Capabilities, " ") + " " + strings.Join(s.Manifest.Tools, " "))
+		haystack := strings.ToLower(s.ID + " " + s.Name + " " + s.Description + " " + strings.Join(s.Manifest.Capabilities, " ") + " " + strings.Join(s.Manifest.Tools, " "))
 		score := 0
 		for _, kw := range keywords {
 			if strings.Contains(haystack, kw) {
@@ -1333,6 +1336,17 @@ func (a *Activities) handleSkillSearch(ctx context.Context, request ToolRequest)
 	var matches []map[string]any
 	for _, m := range scored {
 		matches = append(matches, m.item)
+	}
+	if len(matches) == 0 {
+		// Zero keyword matches must not read as 'no skills exist': return the
+		// registry's id+name index so the agent sees what IS available and can
+		// re-query with better terms.
+		index := make([]map[string]any, 0, len(page.Skills))
+		for _, s := range page.Skills {
+			index = append(index, map[string]any{"id": s.ID, "name": s.Name})
+		}
+		encoded, _ := json.Marshal(map[string]any{"skills": matches, "count": 0, "note": "no keyword matches; the registry itself is listed in 'all_skills'", "all_skills": index})
+		return ToolResult{Content: string(encoded)}, nil
 	}
 	encoded, _ := json.Marshal(map[string]any{"skills": matches, "count": len(matches)})
 	return ToolResult{Content: string(encoded)}, nil
