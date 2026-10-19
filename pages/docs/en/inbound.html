@@ -123,8 +123,10 @@ toggle and constrained by org policies, a per-sender limit
 (<code>KERNEL_INTAKE_MAX_PER_HOUR</code>) and body retention (<code>KERNEL_INTAKE_RETENTION_DAYS</code>).
 The audit trail &quot;message → intake run → task run&quot; is kept without message bodies.</p>
 <h2 id="what-the-user-sees"><a class="anchor" href="#what-the-user-sees" aria-label="Section link">#</a>What the user sees</h2><p>The <strong>Inbound</strong> section lists messages with statuses (received → classified →
-clarifying → routed) and outcomes. In the channel the bot replies: where the
-task landed, what clarification it needs, status on request.</p>
+clarifying → routed → <strong>answered in chat</strong>) and outcomes. The intake agent&#39;s
+verdict is delivered back to the same chat the message came from: where the
+task landed, what clarification it needs, a status on request, or a polite
+close with no work created.</p>
 
 
   <nav class="docs-pager">

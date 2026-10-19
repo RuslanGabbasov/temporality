@@ -55,5 +55,7 @@ The audit trail "message → intake run → task run" is kept without message bo
 ## What the user sees
 
 The **Inbound** section lists messages with statuses (received → classified →
-clarifying → routed) and outcomes. In the channel the bot replies: where the
-task landed, what clarification it needs, status on request.
+clarifying → routed → **answered in chat**) and outcomes. The intake agent's
+verdict is delivered back to the same chat the message came from: where the
+task landed, what clarification it needs, a status on request, or a polite
+close with no work created.

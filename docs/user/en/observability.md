@@ -25,15 +25,30 @@ The **Dashboard** (`/dashboard`) is a health summary over a chosen time window
 Fault tolerance and scale bounds (replay, workflow history,
 Continue-As-New, quotas) — see `docs/resilience-and-scale.md`.
 
-### The Supervisor tab
+### The Supervisor tab and the /supervisor page
 
 The supervisor model's monitoring surface (`docs/supervisor-model.md`):
 failed-run diagnoses collapsed into same-root failure clusters, health
 anomaly explanations, and the wave-B/C cases — knowledge contradiction
 triage and hygiene, evolution proposals, skill candidates, user friction,
-intake audit. Filter by case and project; **Mark resolved** closes a
-verdict (journaled, nothing applied). HAB coefficients and models are
-configured in Agents → Quality settings.
+intake audit.
+
+The queue works like this:
+
+- the **tab badge** shows how many items need attention;
+- **knowledge conflicts** expand into a side-by-side comparison of the two
+  formulations (differences highlighted, cosine quoted); actions live on
+  each side: **Invalidate** retires that knowledge; **Skip** closes the
+  item unchanged; **Generalize…** replaces both with one broader statement
+  (editable before it applies);
+- **bulk actions**: row checkboxes, select-all, then 'Skip selected' or
+  (when every selected row is a conflict) bulk invalidations;
+- filter by case and project; resolved rows toggle;
+- HAB coefficients and models are configured in Agents → Quality settings.
+
+The run trace (Trajectory tab) shows the session's human factors next to
+cost: ⏳ human wait (HWT, measured), 👁 human attention (HAB, estimate),
+✋ human decisions.
 
 ## The run trace
 
