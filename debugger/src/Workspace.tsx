@@ -273,6 +273,9 @@ export default function Workspace({ project, defaultAgentId, defaultModel }: { p
         const next = [...prev]
         for (const chat of page.chats) {
           if (known.has(chat.id)) continue // local copy wins: it may be newer
+          // Older kernels marshaled Chat without json tags ("Transcript") —
+          // such rows carry no readable transcript; skip instead of crashing.
+          if (!Array.isArray(chat.transcript)) continue
           const messages = (chat.transcript as any[]).map((m) => ({
             role: m.role, content: m.content ?? '', timestamp: new Date(m.at ?? chat.updated_at),
             addenda: m.addenda ?? [], attachments: m.attachments ?? [],

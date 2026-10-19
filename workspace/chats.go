@@ -22,12 +22,12 @@ const TranscriptSizeLimit = 1 << 20
 // Chat is one stored conversation. Transcript is the UI's messages array,
 // kept as pre-marshaled JSON.
 type Chat struct {
-	ID         string
-	ProjectID  string
-	AgentID    string
-	Title      string
-	Transcript json.RawMessage
-	UpdatedAt  time.Time
+	ID         string          `json:"id"`
+	ProjectID  string          `json:"project_id"`
+	AgentID    string          `json:"agent_id"`
+	Title      string          `json:"title"`
+	Transcript json.RawMessage `json:"transcript"`
+	UpdatedAt  time.Time       `json:"updated_at"`
 }
 
 // ValidateChat enforces the storage contract before any write.
