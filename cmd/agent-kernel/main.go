@@ -440,6 +440,11 @@ func main() {
 	// agent-granted secrets over the loopback workspace API with a TTL cache;
 	// the master key stays in this process and never reaches activities.
 	secretMasterKey := loadSecretMasterKey(ctx, log, ws)
+	// Background quality work (skill builder) falls back to the supervisor
+	// judge model when no project/run default model is configured.
+	activities.JudgeModel = func(ctx context.Context) (*llm.Client, error) {
+		return judgeModelClient(ctx, ws, secretMasterKey)
+	}
 	activities.Secrets = &agent.SecretBroker{
 		HTTP: &http.Client{Timeout: 10 * time.Second},
 		TTL:  secretCacheTTL(),

@@ -405,9 +405,17 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	// hints would never be consumed (docs/agent-teams.md §9).
 	if input.Team == nil && !input.SkipKnowledge {
 		hintsCtx := workflow.WithActivityOptions(activityCtx, workflow.ActivityOptions{StartToCloseTimeout: 20 * time.Second, ScheduleToCloseTimeout: 20 * time.Second, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
-		if err := workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints); err != nil {
+		hintsErr := workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints)
+		if hintsErr != nil {
+			// The common miss is the boot-order race (kernel up, journal still
+			// projecting) — one short retry closes most of it without delaying
+			// a healthy start. A second failure is journaled with the cause.
+			workflow.Sleep(ctx, 3*time.Second)
+			hintsErr = workflow.ExecuteActivity(hintsCtx, ActivityKnowledgeHints, HintRequest{Project: input.Project, RunID: input.RunID, TaskID: input.TaskID, ActorID: input.ActorID, Query: input.Prompt, Skills: input.Skills, TeamRoot: input.TeamRootRunID}).Get(ctx, &priorHints)
+		}
+		if hintsErr != nil {
 			// Retrieval is best-effort, but the miss is still part of the trajectory.
-			if eventErr := emit(activityCtx, state, "memory.read.failed", map[string]any{"error_type": "activation_unavailable"}); eventErr != nil {
+			if eventErr := emit(activityCtx, state, "memory.read.failed", map[string]any{"error_type": "activation_unavailable", "detail": boundedFailureDetail(hintsErr)}); eventErr != nil {
 				return result, eventErr
 			}
 			priorHints = nil

@@ -49,7 +49,11 @@ func sandboxConfigured(r SandboxRunner) bool {
 type Activities struct {
 	Events EventOutbox
 	Model  *llm.Client
-	HTTP   *http.Client
+	// JudgeModel resolves the installation's supervisor/judge model — the
+	// fallback for background quality work (skill builder, area normalization)
+	// when the run/project carries no default model.
+	JudgeModel func(ctx context.Context) (*llm.Client, error)
+	HTTP       *http.Client
 	// TemporalityURL is the journal base URL (observations, hints, events).
 	TemporalityURL string
 	// WorkspaceURL is the base URL of the kernel's own workspace API
@@ -1514,6 +1518,27 @@ func (a *Activities) handleSkillValidate(ctx context.Context, skillID string) (T
 	return ToolResult{Content: compactJSON(response, 4000)}, nil
 }
 
+// skillBuilderModel resolves the model for the skill builder: the run's
+// project default when configured, else the supervisor/judge model — the
+// installation's dedicated quality-work model (an agent asking to memorize a
+// skill should not depend on the project default being set).
+func (a *Activities) skillBuilderModel(ctx context.Context, project string) (*llm.Client, error) {
+	if a.Model != nil {
+		return a.Model, nil
+	}
+	if a.JudgeModel != nil {
+		if client, err := a.JudgeModel(ctx); err == nil && client != nil {
+			return client, nil
+		}
+	}
+	if project != "" && a.WorkspaceURL != "" {
+		if config, ok, err := a.modelConfigFor(ctx, project, ""); err == nil && ok {
+			return llm.New(config), nil
+		}
+	}
+	return nil, errors.New("no model available for the skill builder: set the project default model, or pick a judge model in Agents → Quality settings")
+}
+
 // handleSkillPropose turns a natural-language capability description into a
 // structured skill draft (via the skill builder) and saves it as a proposal:
 // a draft version for human review, never the live revision. Per
@@ -1525,7 +1550,11 @@ func (a *Activities) handleSkillPropose(ctx context.Context, request ToolRequest
 	if strings.TrimSpace(description) == "" {
 		return ToolResult{Content: "error: description is required"}, nil
 	}
-	draft, err := BuildSkillDraft(ctx, a.Model, description, a.ToolsSummary(), false)
+	model, modelErr := a.skillBuilderModel(ctx, request.Project)
+	if modelErr != nil {
+		return ToolResult{Content: "error: " + modelErr.Error()}, nil
+	}
+	draft, err := BuildSkillDraft(ctx, model, description, a.ToolsSummary(), false)
 	if err != nil {
 		return ToolResult{Content: "error: skill builder failed: " + err.Error()}, nil
 	}
