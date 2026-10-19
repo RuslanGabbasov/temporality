@@ -765,7 +765,7 @@ func (s *Store) PendingRunRefresh(ctx context.Context, limit int) ([]Run, error)
 		limit = 100
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status,
+		`SELECT id, COALESCE(task_id, '') AS task_id, project_id, agent_id, agent_version, exec_context, run_id, status,
 		        model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run
 		 WHERE status NOT IN ('completed','succeeded','failed','turn_limit','time_limit',

@@ -328,6 +328,13 @@ func main() {
 		log.Error("migrate workspace v72 (workspace chats)", "error", err)
 		os.Exit(1)
 	}
+	// 000073 lets runs exist without a task: intake runs (docs/inbound-messages.md)
+	// hit the NOT NULL on task_id, the insert failed silently and their answers
+	// were undeliverable (the channel watcher reads this row).
+	if err = ws.Migrate(ctx, "migrations/000073_run_task_id_nullable.up.sql"); err != nil {
+		log.Error("migrate workspace v73 (run task_id nullable)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier

@@ -478,10 +478,17 @@ func (s *Store) CreateRun(ctx context.Context, r *Run) error {
 	r.CreatedAt = now
 	r.UpdatedAt = now
 	execContext, _ := json.Marshal(execContextOrEmpty(r.ExecContext))
+	// Task-less runs (intake, docs/inbound-messages.md) carry no task id: it
+	// must travel as SQL NULL — the FK constrains only non-NULL values, so an
+	// empty string would violate it.
+	var taskID any
+	if r.TaskID != "" {
+		taskID = r.TaskID
+	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO workspace_run (id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-		r.ID, r.TaskID, r.ProjectID, nullString(r.AgentID), r.AgentVersion, execContext, r.RunID, r.Status, r.Model, r.Answer, r.Turns, r.Error, r.CreatedAt, r.UpdatedAt)
+		r.ID, taskID, r.ProjectID, nullString(r.AgentID), r.AgentVersion, execContext, r.RunID, r.Status, r.Model, r.Answer, r.Turns, r.Error, r.CreatedAt, r.UpdatedAt)
 	return err
 }
 
@@ -511,7 +518,7 @@ func (s *Store) GetRun(ctx context.Context, id string) (Run, error) {
 	var agentID *string
 	var execContext []byte
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
+		`SELECT id, COALESCE(task_id, '') AS task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run WHERE id = $1`, id).
 		Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &execContext, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -540,7 +547,7 @@ func (s *Store) UpdateRunStatus(ctx context.Context, id, status, answer string, 
 
 func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
+		`SELECT id, COALESCE(task_id, '') AS task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run WHERE task_id = $1 ORDER BY created_at DESC`, taskID)
 	if err != nil {
 		return nil, err
@@ -571,7 +578,7 @@ func (s *Store) ListRunsByActor(ctx context.Context, actorID string, limit int) 
 		limit = 10
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
+		`SELECT id, COALESCE(task_id, '') AS task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run
 		 WHERE exec_context->>'actor' = $1 OR exec_context->'authorized_by'->>'user_id' = $1
 		 ORDER BY created_at DESC LIMIT $2`, actorID, limit)
@@ -597,7 +604,7 @@ func (s *Store) ListRunsByActor(ctx context.Context, actorID string, limit int) 
 // ListRunsByProject returns all completed runs for a project.
 func (s *Store) ListRunsByProject(ctx context.Context, projectID string) ([]Run, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
+		`SELECT id, COALESCE(task_id, '') AS task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run WHERE project_id = $1 AND status = 'completed' ORDER BY created_at`, projectID)
 	if err != nil {
 		return nil, err
@@ -625,7 +632,7 @@ func (s *Store) ListRunsByAgent(ctx context.Context, agentID string, limit int) 
 		limit = 200
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
+		`SELECT id, COALESCE(task_id, '') AS task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
 		 FROM workspace_run WHERE agent_id = $1 ORDER BY created_at DESC LIMIT $2`, agentID, limit)
 	if err != nil {
 		return nil, err

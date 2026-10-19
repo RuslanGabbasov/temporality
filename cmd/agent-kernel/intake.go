@@ -232,7 +232,10 @@ func (r *intakeRunner) start(ctx context.Context, message agent.InboundMessage, 
 	if _, err := r.temporal.ExecuteWorkflow(ctx, options, "AgentRun", input); err != nil {
 		return "", err
 	}
-	_ = r.ws.CreateRun(ctx, &workspace.Run{
+	// The row is what the channel answer watcher and the workspace run API
+	// read — a failed insert means the run's answer is undeliverable, so it is
+	// logged loudly instead of disappearing into the workflow only.
+	if cErr := r.ws.CreateRun(ctx, &workspace.Run{
 		ID: runID, ProjectID: IntakeProjectID, AgentID: agentID,
 		AgentVersion: input.AgentVersion, RunID: runID, Status: "started", Model: input.Model,
 		ExecContext: map[string]any{
@@ -241,7 +244,9 @@ func (r *intakeRunner) start(ctx context.Context, message agent.InboundMessage, 
 			"sender":  senderUser.ID,
 			"channel": message.Channel,
 		},
-	})
+	}); cErr != nil {
+		r.log.Warn("intake run row", "run", runID, "error", cErr)
+	}
 	return runID, nil
 }
 
@@ -853,11 +858,13 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			// and each amendment points at the run it amends.
 			execContext["amends_run"] = amendRunID
 		}
-		_ = r.ws.CreateRun(req.Context(), &workspace.Run{
+		if cErr := r.ws.CreateRun(req.Context(), &workspace.Run{
 			ID: runID, TaskID: taskID, ProjectID: body.ProjectID,
 			AgentID: agentID, AgentVersion: input.AgentVersion, RunID: runID, Status: "started", Model: input.Model,
 			ExecContext: execContext,
-		})
+		}); cErr != nil {
+			r.log.Warn("intake target run row", "run", runID, "error", cErr)
+		}
 		_ = r.ws.UpdateInboundMessage(req.Context(), row.ID, workspace.InboundMessageUpdate{
 			ProjectID: body.ProjectID, TargetRunID: runID, Status: workspace.InboundStatusRouted,
 		})
