@@ -173,7 +173,11 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   // Propositions behind conflict verdicts that predate new_proposition /
   // old_proposition in the verdict payload: fetched once from the knowledge
   // projection, keyed "project/id".
-  const [propFallback, setPropFallback] = useState<Record<string, string>>({})
+  // Propositions behind conflict verdicts that predate new_proposition /
+  // old_proposition in the verdict payload: fetched once from the knowledge
+  // projection, keyed "project/id" (and "/id" for project-less verdicts);
+  // project records where the item was found.
+  const [propFallback, setPropFallback] = useState<Record<string, { text: string; project?: string }>>({})
   // Inline generalization editor: which conflict row, and the draft text.
   const [generalize, setGeneralize] = useState<{ rowKey: string; text: string } | null>(null)
   // Semantic-layer health (§6.5): read-only monitoring. Configuration lives
@@ -296,57 +300,63 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   // Resolve the proposition texts behind conflict verdicts that were published
   // without them (older payloads, or verdicts whose kernel-side meta scan
   // missed the item): one exact-item lookup per missing side. The listing
-  // requires a project — when the verdict does not name one, walk the
-  // account's visible projects.
-  const propFallbackRef = useRef<Record<string, string>>({})
+  // requires a project — when the verdict does not name one (or the item is
+  // not there), walk the account's visible projects. Results are stored under
+  // "project/id" AND the project-less "/id" key the render reads when the
+  // verdict names no project; project carries where the item was FOUND, so
+  // the dossier link opens the right project.
+  const propFallbackRef = useRef<Record<string, { text: string; project?: string }>>({})
   useEffect(() => {
-    const missing: { projects: string[]; id: string }[] = []
+    const missing: { project: string; id: string }[] = []
     for (const row of clusterVerdicts(verdicts)) {
       const cf = row.conflict
       if (!cf) continue
       if (!cf.newProp) {
-        const key = `${cf.newProject || row.project}/${cf.newID}`
-        if (!(key in propFallbackRef.current)) missing.push({ projects: [cf.newProject || row.project].filter(Boolean), id: cf.newID })
+        const project = cf.newProject || row.project
+        if (!(`${project}/${cf.newID}` in propFallbackRef.current) && !(`/${cf.newID}` in propFallbackRef.current)) missing.push({ project, id: cf.newID })
       }
       if (!cf.oldProp) {
-        const key = `${cf.oldProject || row.project}/${cf.oldID}`
-        if (!(key in propFallbackRef.current)) missing.push({ projects: [cf.oldProject || row.project].filter(Boolean), id: cf.oldID })
+        const project = cf.oldProject || row.project
+        if (!(`${project}/${cf.oldID}` in propFallbackRef.current) && !(`/${cf.oldID}` in propFallbackRef.current)) missing.push({ project, id: cf.oldID })
       }
     }
     if (missing.length === 0) return
     let cancelled = false
     void (async () => {
       let candidates: string[] = []
-      const withProject = missing.filter((m) => m.projects.length > 0)
-      const withoutProject = missing.filter((m) => m.projects.length === 0)
-      if (withoutProject.length > 0) {
-        try {
-          const { projects } = await workspaceApi.listProjects()
-          candidates = projects.map((p) => p.id)
-        } catch { /* no project list — nothing to walk */ }
-      }
-      const next: Record<string, string> = {}
+      try {
+        const { projects } = await workspaceApi.listProjects()
+        candidates = projects.map((p) => p.id)
+      } catch { /* no project list — only the verdict's own project is tried */ }
+      const next: Record<string, { text: string; project?: string }> = {}
       let fetched = 0
       const lookup = async (project: string, id: string): Promise<string> => {
-        if (fetched >= 30) return ''
+        if (fetched >= 40) return ''
         fetched++
         try {
           const page = await observationApi.knowledge(project, undefined, undefined, { knowledge_id: id, limit: 1 })
           return page.knowledge?.[0]?.proposition ?? ''
         } catch {
-          return '' // not visible from this account — keep the dash
+          return '' // not visible from this account
         }
       }
-      for (const item of withProject) {
-        const key = `${item.projects[0]}/${item.id}`
-        next[key] = await lookup(item.projects[0], item.id)
-      }
-      for (const item of withoutProject) {
-        for (const project of candidates) {
-          const key = `${project}/${item.id}`
-          if (key in propFallbackRef.current || key in next) continue
-          const proposition = await lookup(project, item.id)
-          if (proposition) { next[key] = proposition; break }
+      for (const item of missing) {
+        // Verdict's project first (the common case, one lookup), then the
+        // visible projects for items born elsewhere or project-less verdicts.
+        const order = [...new Set([item.project, ...candidates].filter(Boolean))]
+        let found: { text: string; project?: string } | null = null
+        for (const project of order) {
+          const text = await lookup(project, item.id)
+          if (text) { found = { text, project }; break }
+        }
+        // Store under the found project and the project-less render key; the
+        // bare entry also stops the effect from re-fetching on every render.
+        if (found) {
+          next[`${found.project}/${item.id}`] = found
+          next[`/${item.id}`] = found
+        } else {
+          next[`${item.project}/${item.id}`] = { text: '' }
+          next[`/${item.id}`] = { text: '' }
         }
       }
       if (cancelled) return
@@ -630,8 +640,15 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                       const cf = row.conflict
                       const newProject = cf.newProject || row.project
                       const oldProject = cf.oldProject || row.project
-                      const newProp = cf.newProp || propFallback[`${newProject}/${cf.newID}`] || ''
-                      const oldProp = cf.oldProp || propFallback[`${oldProject}/${cf.oldID}`] || ''
+                      // Verdict text first, then the fallback lookup — which
+                      // also knows the project where the item was FOUND, so
+                      // links open the right dossier even cross-project.
+                      const fallbackNew = cf.newProp ? null : (propFallback[`${newProject}/${cf.newID}`] ?? propFallback[`/${cf.newID}`])
+                      const fallbackOld = cf.oldProp ? null : (propFallback[`${oldProject}/${cf.oldID}`] ?? propFallback[`/${cf.oldID}`])
+                      const newProp = cf.newProp || fallbackNew?.text || ''
+                      const oldProp = cf.oldProp || fallbackOld?.text || ''
+                      const newLinkProject = fallbackNew?.project || newProject
+                      const oldLinkProject = fallbackOld?.project || oldProject
                       const openDossier = (id: string, project: string) => (e: React.MouseEvent) => {
                         e.preventDefault()
                         // The knowledge page takes its project from the app
@@ -652,11 +669,11 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                       <div style={{ marginTop: '0.4rem', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.4rem 0.6rem', fontSize: '0.75rem' }}>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                             <div style={{ borderLeft: '2px solid var(--tm-teal)', paddingLeft: '0.45rem' }}>
-                              <div><Tag type="blue" size="sm">{t('supervisor.compare_new') ?? 'new'}</Tag>{' '}{dossierLink(cf.newID, newProject)}</div>
+                              <div><Tag type="blue" size="sm">{t('supervisor.compare_new') ?? 'new'}</Tag>{' '}{dossierLink(cf.newID, newLinkProject)}</div>
                               <div style={{ marginTop: '0.2rem', lineHeight: 1.45 }}><CompareText text={newProp} other={oldProp} /></div>
                             </div>
                             <div style={{ borderLeft: '2px solid var(--tm-border)', paddingLeft: '0.45rem' }}>
-                              <div><Tag type="warm-gray" size="sm">{t('supervisor.compare_old') ?? 'existing'}</Tag>{' '}{dossierLink(cf.oldID, oldProject)}</div>
+                              <div><Tag type="warm-gray" size="sm">{t('supervisor.compare_old') ?? 'existing'}</Tag>{' '}{dossierLink(cf.oldID, oldLinkProject)}</div>
                               <div style={{ marginTop: '0.2rem', lineHeight: 1.45 }}><CompareText text={oldProp} other={newProp} /></div>
                             </div>
                           </div>
