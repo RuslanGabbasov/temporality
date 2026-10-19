@@ -39,6 +39,10 @@ services:
       # Format: "token:subject:role:projects" entries separated by ';' or
       # newlines; projects is '*' or a comma list. Generate: openssl rand -hex 24
       JOURNAL_AUTH_TOKENS: ${JOURNAL_AUTH_TOKENS:-}
+      # Debug listener INSIDE the container (counters + pprof), off by default.
+      # Not published to the host: reach it via
+      #   docker compose exec journal wget -qO- http://localhost:6060/debug/counters
+      JOURNAL_DEBUG_ADDR: ${JOURNAL_DEBUG_ADDR:-}
     ports:
       - "8080:8080"
     depends_on:
