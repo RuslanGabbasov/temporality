@@ -1892,12 +1892,20 @@ func faultAfterEffect(runID, toolName, operationID string) bool {
 }
 
 func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([]Hint, error) {
-	payload := map[string]any{"project": request.Project, "run": request.RunID, "task": request.TaskID, "actor": map[string]string{"id": request.ActorID, "type": "agent"}, "query": request.Query, "limit": 8}
+	// The journal caps query at 4096 runes; long prompts (a pasted document,
+	// a big task brief) are truncated — the head of the task carries the
+	// matching signal, and an unhandled 422 would silently strip the whole
+	// run of hints.
+	query := request.Query
+	if len([]rune(query)) > 4000 {
+		query = string([]rune(query)[:4000])
+	}
+	payload := map[string]any{"project": request.Project, "run": request.RunID, "task": request.TaskID, "actor": map[string]string{"id": request.ActorID, "type": "agent"}, "query": query, "limit": 8}
 	// Semantic tier (docs/supervisor-model.md §6): embed the slot text with
 	// the supervisor embeddings model. A failure degrades to the lexical
 	// matcher — hints must never fail because semantics are misconfigured.
-	if request.Query != "" {
-		if vectors, err := a.EmbedTexts(ctx, request.Project, EmbedQuery, []string{request.Query}); err == nil && len(vectors) == 1 {
+	if query != "" {
+		if vectors, err := a.EmbedTexts(ctx, request.Project, EmbedQuery, []string{query}); err == nil && len(vectors) == 1 {
 			payload["embedding"] = vectors[0]
 			payload["embedding_model"] = embeddingModelID()
 		}
