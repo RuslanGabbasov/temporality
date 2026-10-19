@@ -31,10 +31,19 @@ type endpointCounters struct {
 	mu      sync.Mutex
 	started time.Time
 	byRoute map[string]*routeCounter
+	// unmatchedPaths tallies the paths behind the "unmatched" row — a flood
+	// of misses is a finding (the heavy-100 melt was ~27 req/s of them), but
+	// the row alone hides WHO is knocking. Capped: a scanner must not grow
+	// this map forever.
+	unmatchedPaths map[string]int64
 }
 
+// maxTrackedUnmatched bounds the path map; past it new paths land nowhere
+// (the counter row still counts them) until the process restarts.
+const maxTrackedUnmatched = 1024
+
 func newEndpointCounters() *endpointCounters {
-	return &endpointCounters{started: time.Now(), byRoute: map[string]*routeCounter{}}
+	return &endpointCounters{started: time.Now(), byRoute: map[string]*routeCounter{}, unmatchedPaths: map[string]int64{}}
 }
 
 // statusRecorder captures the response code the handler wrote. Header-only
@@ -61,6 +70,16 @@ func (c *endpointCounters) middleware(next http.Handler) http.Handler {
 		}
 		c.mu.Lock()
 		defer c.mu.Unlock()
+		if route == "unmatched" {
+			// Query string dropped: it carries cursors and filters, not identity.
+			path := r.URL.Path
+			if len(path) > 120 {
+				path = path[:120] + "…"
+			}
+			if _, tracked := c.unmatchedPaths[path]; tracked || len(c.unmatchedPaths) < maxTrackedUnmatched {
+				c.unmatchedPaths[path]++
+			}
+		}
 		counter := c.byRoute[route]
 		if counter == nil {
 			counter = &routeCounter{}
@@ -114,7 +133,19 @@ func (c *endpointCounters) snapshot() map[string]any {
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].TotalS > rows[j].TotalS })
-	return map[string]any{"uptime_s": time.Since(c.started).Seconds(), "routes": rows}
+	type pathMatch struct {
+		Path     string `json:"path"`
+		Requests int64  `json:"requests"`
+	}
+	top := make([]pathMatch, 0, len(c.unmatchedPaths))
+	for path, requests := range c.unmatchedPaths {
+		top = append(top, pathMatch{Path: path, Requests: requests})
+	}
+	sort.Slice(top, func(i, j int) bool { return top[i].Requests > top[j].Requests })
+	if len(top) > 10 {
+		top = top[:10]
+	}
+	return map[string]any{"uptime_s": time.Since(c.started).Seconds(), "routes": rows, "unmatched_top": top}
 }
 
 // writeCounters renders the snapshot for the debug listener.
