@@ -3233,11 +3233,47 @@ func main() {
 			"workflow_id": run.GetID(), "temporal_run_id": run.GetRunID(), "status": "started",
 		})
 	})
+	// resolveRunState merges the stored run row with its live Temporal state:
+	// the AgentRun workflow does not write its result back, so the row alone
+	// stays "started" forever — the terminal status and the answer exist only
+	// in the workflow result until this enrichment lazily persists them. The
+	// API route and the channel answer watcher share it; project "" takes the
+	// row's own project.
+	resolveRunState := func(ctx context.Context, project, runID string) (workspace.Run, error) {
+		run, err := ws.GetRun(ctx, runID)
+		if err != nil {
+			return workspace.Run{}, err
+		}
+		if project == "" {
+			project = run.ProjectID
+		}
+		workflowID := workflowIDFor(activities.SourceID, project, run.RunID)
+		response, tErr := temporalClient.DescribeWorkflowExecution(ctx, workflowID, "")
+		if tErr != nil || response.WorkflowExecutionInfo == nil {
+			return run, nil
+		}
+		run.Status = workflowStatusName(response.WorkflowExecutionInfo.Status)
+		if response.WorkflowExecutionInfo.Status != enums.WORKFLOW_EXECUTION_STATUS_COMPLETED {
+			return run, nil
+		}
+		var result agent.RunResult
+		if gErr := temporalClient.GetWorkflow(ctx, workflowID, "").Get(ctx, &result); gErr != nil {
+			return run, nil
+		}
+		run.Answer = result.Answer
+		run.Turns = result.Turns
+		run.Status = result.Status
+		if run.Status == "" {
+			run.Status = "completed"
+		}
+		_ = ws.UpdateRunStatus(ctx, run.ID, run.Status, run.Answer, run.Turns, "")
+		return run, nil
+	}
 	mux.HandleFunc("GET /v1/workspace/runs/{runID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
 		}
-		run, err := ws.GetRun(r.Context(), r.PathValue("runID"))
+		run, err := resolveRunState(r.Context(), "", r.PathValue("runID"))
 		if err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)
@@ -3245,20 +3281,6 @@ func main() {
 			}
 			writeError(w, 500, err)
 			return
-		}
-		// Enrich with live Temporal status
-		response, tErr := temporalClient.DescribeWorkflowExecution(r.Context(), workflowIDFor(activities.SourceID, run.ProjectID, run.RunID), "")
-		if tErr == nil && response.WorkflowExecutionInfo != nil {
-			run.Status = workflowStatusName(response.WorkflowExecutionInfo.Status)
-			if response.WorkflowExecutionInfo.Status == enums.WORKFLOW_EXECUTION_STATUS_COMPLETED {
-				var result agent.RunResult
-				if gErr := temporalClient.GetWorkflow(r.Context(), workflowIDFor(activities.SourceID, run.ProjectID, run.RunID), "").Get(r.Context(), &result); gErr == nil {
-					run.Answer = result.Answer
-					run.Turns = result.Turns
-					run.Status = result.Status
-					_ = ws.UpdateRunStatus(r.Context(), run.ID, run.Status, run.Answer, run.Turns, "")
-				}
-			}
 		}
 		writeJSON(w, 200, run)
 	})
@@ -6958,6 +6980,7 @@ func main() {
 					httpClient: activities.HTTP,
 					settings:   activities.ChannelSettings,
 					store:      ws,
+					resolveRun: resolveRunState,
 					sourceID:   activities.SourceID,
 					log:        log,
 					signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
@@ -6993,6 +7016,7 @@ func main() {
 			httpClient: activities.HTTP,
 			settings:   activities.ChannelSettings,
 			store:      ws,
+			resolveRun: resolveRunState,
 			sourceID:   activities.SourceID,
 			log:        log,
 			signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {

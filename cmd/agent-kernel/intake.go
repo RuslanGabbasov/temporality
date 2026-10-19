@@ -861,6 +861,10 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 		_ = r.ws.UpdateInboundMessage(req.Context(), row.ID, workspace.InboundMessageUpdate{
 			ProjectID: body.ProjectID, TargetRunID: runID, Status: workspace.InboundStatusRouted,
 		})
+		// The watcher derives the target workflow id from the row's project —
+		// pin the resolved one on the in-memory copy: the update above lands
+		// only in the database.
+		row.ProjectID = body.ProjectID
 		// The target run's answer must reach the same chat the message came
 		// from: the loop's watcher follows it to terminal state and delivers
 		// the answer through the channel driver.

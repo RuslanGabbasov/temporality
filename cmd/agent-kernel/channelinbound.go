@@ -35,6 +35,11 @@ type channelInboundLoop struct {
 	httpClient *http.Client
 	settings   func(context.Context) (agent.ChannelSettings, error)
 	store      channelInboundStore
+	// resolveRun returns the run's live state: the stored row alone stays
+	// "started" forever (the AgentRun workflow does not write its result
+	// back), so the answer watcher needs the Temporal resolver to ever see a
+	// terminal status and the answer. nil (tests) falls back to the raw row.
+	resolveRun func(ctx context.Context, project, runID string) (workspace.Run, error)
 	sourceID   string
 	log        *slog.Logger
 	// signal routes one approval into a waiting workflow; production wraps
@@ -478,11 +483,21 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 	watchCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 	defer cancel()
 	const pollEvery = 5 * time.Second
-	settings, sErr := l.settings(watchCtx)
+	// The workflow id carries the project: intake verdicts run in the system
+	// project, routed target runs in the resolved one — the intake runner pins
+	// it on the row before starting this watcher.
+	project := row.ProjectID
+	if project == "" {
+		project = IntakeProjectID
+	}
+	stored, sErr := l.settings(watchCtx)
 	if sErr != nil {
 		l.log.Warn("run answer watch", "channel", l.driver.Type(), "error", sErr)
 		return
 	}
+	// Same precedence as the delivery loop (cycle): database overlay over env —
+	// an env-configured channel must deliver without a database settings row.
+	settings := stored.OverlayEnv()
 	address := row.Room
 	if address == "" {
 		address = row.SenderRaw
@@ -493,17 +508,16 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 		SendTyping(ctx context.Context, client *http.Client, settings map[string]string, address string, typing bool) error
 	})
 	for {
-		run, err := l.store.GetRun(watchCtx, runID)
+		run, err := l.currentRun(watchCtx, project, runID)
 		if err != nil {
 			l.log.Warn("run answer watch", "run", runID, "error", err)
 			return
 		}
-		switch run.Status {
-		case "completed", "failed", "cancelled":
-			if run.Answer == "" {
-				l.log.Warn("run finished without an answer", "run", runID, "status", run.Status)
-				return
-			}
+		if !liveRunStatus(run.Status) && run.Answer == "" {
+			l.log.Warn("run finished without an answer", "run", runID, "status", run.Status)
+			return
+		}
+		if !liveRunStatus(run.Status) {
 			deliverCtx, cancel := context.WithTimeout(watchCtx, 20*time.Second)
 			dErr := l.driver.SendText(deliverCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: run.Answer})
 			cancel()
@@ -530,6 +544,27 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 			return
 		case <-time.After(pollEvery):
 		}
+	}
+}
+
+// currentRun resolves the run's live state; the raw row is the fallback when
+// no Temporal resolver is wired (tests, degraded setups).
+func (l *channelInboundLoop) currentRun(ctx context.Context, project, runID string) (workspace.Run, error) {
+	if l.resolveRun != nil {
+		return l.resolveRun(ctx, project, runID)
+	}
+	return l.store.GetRun(ctx, runID)
+}
+
+// liveRunStatus reports statuses that still leave the run room to produce an
+// answer. Result statuses are open-ended (completed, failed, cancelled,
+// turn_limit, timeout…): anything unknown with an answer stays deliverable.
+func liveRunStatus(status string) bool {
+	switch status {
+	case "", "started", "running":
+		return true
+	default:
+		return false
 	}
 }
 

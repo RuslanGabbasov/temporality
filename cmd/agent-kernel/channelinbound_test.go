@@ -761,6 +761,97 @@ func TestChannelInboundIntakeDeduplicatesRedelivery(t *testing.T) {
 	}
 }
 
+// TestChannelWatcherDeliversResolvedAnswer: the stored run row stays
+// "started" forever — the AgentRun workflow does not write its result back —
+// so the watcher must trust the Temporal resolver. The answer is delivered
+// and the row is marked answered even though the raw row never reached a
+// terminal status (the production bug: every intake verdict silently expired
+// in the 30-minute give-up loop).
+func TestChannelWatcherDeliversResolvedAnswer(t *testing.T) {
+	var sent []string
+	server := matrixIntakeHomeServer(t, "!r1:hs", nil, &sent)
+	store := &fakeInboundStore{
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+	}
+	loop := newInboundLoop(t, server, store, &recordedSignal{})
+	loop.resolveRun = func(_ context.Context, project, runID string) (workspace.Run, error) {
+		if project != "intake" {
+			t.Errorf("resolver project = %q, want intake", project)
+		}
+		if runID != "intake-m9" {
+			t.Errorf("resolver run = %q", runID)
+		}
+		return workspace.Run{ID: runID, Status: "completed", Answer: "Ответ из базы знаний"}, nil
+	}
+	row := &workspace.InboundMessage{
+		ID: workspace.InboundMessageID("matrix", "$m9"), Channel: "matrix", MessageID: "$m9",
+		SenderRaw: "@human:hs", Room: "!r1:hs", SenderUserID: "u1",
+		Status: workspace.InboundStatusClassified, IntakeRunID: "intake-m9",
+	}
+	loop.watchRunAnswer(context.Background(), row, "intake-m9", true)
+	if len(sent) != 1 || !strings.HasPrefix(sent[0], "Ответ из базы знаний") {
+		t.Fatalf("answer not delivered: %v", sent)
+	}
+	if latest, _ := store.lastUpdate(row.ID); latest.Status != workspace.InboundStatusAnswered {
+		t.Fatalf("row not marked answered: %+v", latest)
+	}
+}
+
+// TestChannelWatcherTargetRunResolvesByRowProject: the routed target run
+// lives in the resolved project — the watcher passes row.ProjectID to the
+// resolver (the workflow id needs it) and keeps the row's routed status (the
+// answered mark stays for intake verdicts).
+func TestChannelWatcherTargetRunResolvesByRowProject(t *testing.T) {
+	var sent []string
+	server := matrixIntakeHomeServer(t, "!r1:hs", nil, &sent)
+	store := &fakeInboundStore{
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+	}
+	loop := newInboundLoop(t, server, store, &recordedSignal{})
+	loop.resolveRun = func(_ context.Context, project, runID string) (workspace.Run, error) {
+		if project != "omni" {
+			t.Errorf("resolver project = %q, want omni", project)
+		}
+		if runID != "target-1" {
+			t.Errorf("resolver run = %q", runID)
+		}
+		// A non-completed result status with an answer is still terminal for
+		// delivery (turn_limit, timeout…).
+		return workspace.Run{ID: runID, Status: "turn_limit", Answer: "Целевой ответ"}, nil
+	}
+	row := workspace.InboundMessage{
+		ID: workspace.InboundMessageID("matrix", "$m10"), Channel: "matrix", MessageID: "$m10",
+		SenderRaw: "@human:hs", Room: "!r1:hs", SenderUserID: "u1",
+		Status: workspace.InboundStatusRouted, ProjectID: "omni", TargetRunID: "target-1",
+	}
+	loop.WatchTargetRun(row, "target-1")
+	waitFor(t, 2*time.Second, func() bool { return len(sent) == 1 })
+	if len(sent) != 1 || !strings.HasPrefix(sent[0], "Целевой ответ") {
+		t.Fatalf("target answer not delivered: %v", sent)
+	}
+	if latest, _ := store.lastUpdate(row.ID); latest.Status == workspace.InboundStatusAnswered {
+		t.Fatal("routed row must keep its status")
+	}
+}
+
+// waitFor polls the condition with a deadline; used for the watcher goroutine.
+func waitFor(t *testing.T, within time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // TestChannelInboundIntakeRateLimitsFloodingSender: the per-sender cap
 // (docs/inbound-messages.md §12 phase 4) rejects the message that crosses the
 // hourly limit — with the audit trail and a room notice — instead of spawning
