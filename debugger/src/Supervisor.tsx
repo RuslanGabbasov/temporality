@@ -112,6 +112,21 @@ function clusterVerdicts(events: ObservationEvent[]): ClusterRow[] {
         score: Number(event.data.score ?? 0),
       }
     }
+    // B1 knowledge_contradiction: a challenged item vs its contradictor — the
+    // same compare-and-act surface as C5. Layout contract: 'new' is the
+    // contradicting observation (contradicted_by), 'existing' is the
+    // challenged subject.
+    if (event.data?.case === 'knowledge_contradiction' && event.data?.subject && event.data?.contradicted_by) {
+      row.conflict = {
+        newID: String(event.data.contradicted_by),
+        newProp: '',
+        newProject: String(event.context?.project ?? ''),
+        oldID: String(event.data.subject),
+        oldProp: '',
+        oldProject: String(event.context?.project ?? ''),
+        score: 0,
+      }
+    }
     if (event.data?.case === 'skill_candidate' && event.data?.skill_name) {
       row.skill = {
         name: String(event.data.skill_name),

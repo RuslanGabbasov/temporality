@@ -233,7 +233,9 @@ func triageKnowledgeCases(ctx context.Context, log *slog.Logger, activities *age
 				log.Warn("supervisor cases: hygiene", "knowledge", knowledgeID, "error", err.Error())
 				continue
 			}
-			summary := fmt.Sprintf("%s: %s", verdict.Action, verdict.Explanation)
+			// The action vocabulary is machine-facing (data.action); gluing it to
+			// the summary leaked raw tokens like "supersede_old" into the queue.
+			summary := verdict.Explanation
 			if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseKnowledgeHygiene, knowledgeID, challenge.Project, summary, verdict.Recommendation, map[string]any{
 				"action": verdict.Action, "rule": rule,
 			}); err != nil {
@@ -253,7 +255,8 @@ func triageKnowledgeCases(ctx context.Context, log *slog.Logger, activities *age
 				log.Warn("supervisor cases: contradiction", "knowledge", knowledgeID, "error", err.Error())
 				continue
 			}
-			summary := fmt.Sprintf("%s: %s", verdict.Action, verdict.Explanation)
+			// Same leak fix as hygiene above: action lives in data.action.
+			summary := verdict.Explanation
 			if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseKnowledgeContradiction, knowledgeID, challenge.Project, summary, verdict.Recommendation, map[string]any{
 				"action": verdict.Action, "contradicted_by": contradictedBy,
 			}); err != nil {

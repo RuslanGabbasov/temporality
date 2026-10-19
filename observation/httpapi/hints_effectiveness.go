@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"sort"
@@ -102,6 +103,26 @@ func aggregateTierOutcomes(used, outcomes []observation.Event) []TierOutcome {
 }
 
 // getHintEffectiveness serves GET /v1/observations/hints/effectiveness.
+// pageAll follows listing cursors up to maxPages (the store caps a page at
+// 500) so a 30-day window is not silently truncated to its oldest page.
+func (s *Server) pageAll(filter observation.Filter, maxPages int) ([]observation.Event, error) {
+	var all []observation.Event
+	cursor := ""
+	for page := 0; page < maxPages; page++ {
+		pageData, err := s.store.ListObservationPage(context.Background(), filter, cursor)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, pageData.Events...)
+		if pageData.NextCursor == "" {
+			break
+		}
+		cursor = pageData.NextCursor
+	}
+	return all, nil
+}
+
+// getHintEffectiveness serves GET /v1/observations/hints/effectiveness.
 func (s *Server) getHintEffectiveness(w http.ResponseWriter, r *http.Request) {
 	// Same query surface as the global events listing: the gate resolves the
 	// principal and constrains the report to the visible projects.
@@ -118,9 +139,9 @@ func (s *Server) getHintEffectiveness(w http.ResponseWriter, r *http.Request) {
 		}
 		since = parsed
 	}
-	limit := 2000
+	limit := 500 // the store caps listing pages at 500 (NormalizeLimit)
 	if raw := r.URL.Query().Get("limit"); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 10000 {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 500 {
 			limit = parsed
 		}
 	}
@@ -137,19 +158,19 @@ func (s *Server) getHintEffectiveness(w http.ResponseWriter, r *http.Request) {
 	}
 	usedFilter := base
 	usedFilter.Type = "hint.used"
-	usedPage, err := s.store.ListObservationPage(r.Context(), usedFilter, "")
+	usedEvents, err := s.pageAll(usedFilter, 5)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	outcomeFilter := base
 	outcomeFilter.Type = "hint.outcome"
-	outcomePage, err := s.store.ListObservationPage(r.Context(), outcomeFilter, "")
+	outcomeEvents, err := s.pageAll(outcomeFilter, 5)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	tiers := aggregateTierOutcomes(usedPage.Events, outcomePage.Events)
+	tiers := aggregateTierOutcomes(usedEvents, outcomeEvents)
 	if tiers == nil {
 		tiers = []TierOutcome{}
 	}
