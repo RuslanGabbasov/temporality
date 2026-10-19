@@ -1020,7 +1020,16 @@ func (s *Server) runState(w http.ResponseWriter, r *http.Request) {
 			status = "in_progress"
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"project": project, "run": runID, "at": at, "status": status, "events": entries, "count": len(entries)})
+	// Per-run human factors (docs/supervisor-model.md §7): what this session
+	// cost its humans — measured wait (HWT) and estimated attention (HAB).
+	human := observation.DefaultHumanFactors
+	if s.humanFactors != nil {
+		if configured, err := s.humanFactors(r.Context()); err == nil {
+			human = configured
+		}
+	}
+	factors := observation.ComputeRunHumanFactors(allEvents, human)
+	writeJSON(w, http.StatusOK, map[string]any{"project": project, "run": runID, "at": at, "status": status, "events": entries, "count": len(entries), "human": factors})
 }
 
 type RunSummary struct {

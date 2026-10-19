@@ -8,6 +8,7 @@ import RunDisputes from './RunDisputes'
 import Markdown from './Markdown'
 import { useT, useI18n, pluralT } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString, formatDuration, approvalHint } from './eventSummary'
+import { humanFactorsOf, type RunHumanFactors } from './humanFactors'
 import { useRunTokenMetrics } from './tokenStream'
 import { subscribeRunJournal } from './journalStream'
 import {
@@ -343,6 +344,7 @@ export default function AgentRuns({ project }: { project: string }) {
   const [agents, setAgents] = useState<Agent[]>([])
   const [timeline, setTimeline] = useState<ObservationEvent[]>([])
   const [trajectory, setTrajectory] = useState<any>(null)
+  const [humanFactors, setHumanFactors] = useState<RunHumanFactors | null>(null)
   const [runCostData, setRunCostData] = useState<RunCost | null>(null)
   // Task budget spans every run of the task (follow-ups + delegation tree).
   const [taskCostData, setTaskCostData] = useState<TaskCost | null>(null)
@@ -598,6 +600,9 @@ export default function AgentRuns({ project }: { project: string }) {
         const extra = prev.filter((e) => !seen.has(`${e.source.id}:${e.event_id}`))
         return [...allEvents, ...extra].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
       })
+      // Human factors (§7): what this session cost its humans — from the same
+      // events the trace already loaded, no second journal scan.
+      setHumanFactors(humanFactorsOf(allEvents))
       const resultPath = teamRun ? `/v1/agent/examples/lead-coder-reviewer-qa/runs/${encodeURIComponent(run)}` : `/v1/agent/runs/${encodeURIComponent(run)}`
       const sourceQuery = new URLSearchParams({ project: runProject, source_id: root?.source.id ?? '' })
       let response = await fetch(`${KERNEL_API}${resultPath}?${sourceQuery}`, { headers: authHeaders() })
@@ -1288,6 +1293,15 @@ export default function AgentRuns({ project }: { project: string }) {
                       )}
                       {runCostData && (runCostData.total_cached_tokens ?? 0) > 0 && (
                         <span>↻ <strong>{(runCostData.total_cached_tokens ?? 0).toLocaleString()}</strong> {t('runs.cached') ?? 'cached'}</span>
+                      )}
+                      {humanFactors && humanFactors.hwtSeconds > 0 && (
+                        <span title={t('runs.hwt_hint') ?? 'Wall-clock time the run spent waiting for a human (HWT)'}>⏳ <strong>{formatDuration(humanFactors.hwtSeconds * 1000)}</strong> {t('runs.hwt') ?? 'human wait'}</span>
+                      )}
+                      {humanFactors && humanFactors.habSeconds > 0 && (
+                        <span title={t('runs.hab_hint') ?? 'Estimated human attention: decisions, answers and reading (HAB, estimate)'}>👁 <strong>{formatDuration(humanFactors.habSeconds * 1000)}</strong> {t('runs.hab') ?? 'human attention'}</span>
+                      )}
+                      {humanFactors && humanFactors.approvalDecisions + humanFactors.askHumanAnswered > 0 && (
+                        <span>✋ <strong>{humanFactors.approvalDecisions + humanFactors.askHumanAnswered}</strong> {t('runs.decisions') ?? 'human decisions'}</span>
                       )}
                     </div>
                     {trajectory && (<>
