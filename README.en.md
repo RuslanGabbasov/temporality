@@ -58,7 +58,7 @@ Prebuilt images from GHCR — no repository clone, no local build:
 curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
 curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
 cp .env.example .env   # configure TEMPORALITY_MODEL_* and optionally the sandbox
-TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+TEMPORALITY_VERSION=2026.2.11 docker compose up -d
 ```
 
 `TEMPORALITY_VERSION` is the image version (see
@@ -98,6 +98,28 @@ Stop the stack while keeping data:
 ```sh
 make stack-stop
 ```
+
+## Performance (measured)
+
+The heavy load-test profile: every run makes four model turns, executes two
+sandboxed commands (~10 s), pauses for an `ask_human` answer from a simulated
+human (~46 s), then streams its final answer continuously for ~9.4 minutes.
+The provider is a deterministic mock (`examples/mockllm`); methodology,
+instrumentation and scripts ship with the repository.
+
+| Metric | 25 runs | 50 runs | 100 runs |
+|---|---|---|---|
+| Completed | 25/25 | 50/50 | **100/100** |
+| Run duration p50 | 614.9 s | 614.9 s | **615.0 s** |
+| Start-API p95 | 9 ms | 6 ms | 6 ms |
+| HITL pauses answered | 25 | 50 | 100 |
+| Peak CPU: journal / postgres / kernel | 1.5 / 0.9 / 1.0 cores | 2.2 / 0.8 / 1.0 | 3.2 / 1.1 / 1.2 |
+
+The headline: **run duration is a constant across the whole ladder** —
+quadrupling concurrency cost the agents not a single millisecond; journal
+growth is sublinear; the summed peak is ~5 cores out of 6 on the test VM
+(Xeon E5-2665, 6 cores, 32 GB). Full methodology, counter snapshots and the
+iteration history: [`docs/resilience-and-scale.md`](docs/resilience-and-scale.md).
 
 ## Model configuration
 
