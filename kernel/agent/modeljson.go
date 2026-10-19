@@ -50,17 +50,24 @@ func completeParsed[T any](ctx context.Context, model *llm.Client, messages []ll
 			return zero, fmt.Errorf("model call failed: %w", err)
 		}
 	}
-	parsed, parseErr := parse(completion.Content)
+	// Reasoning-first models under json_object mode sometimes put the whole
+	// answer into reasoning_content and leave content empty — the parse then
+	// chokes on an empty string. The reasoning text is the model's own answer
+	// draft: use it.
+	content := completion.Content
+	if strings.TrimSpace(content) == "" && strings.TrimSpace(completion.Reasoning) != "" {
+		content = completion.Reasoning
+	}
+	parsed, parseErr := parse(content)
 	if parseErr == nil {
 		return parsed, nil
 	}
-	// Repair pass on the same output: raw newlines in strings and trailing
-	// commas are the dominant failure of small models against nested schemas.
-	if repaired, changed := repairJSONLoose(completion.Content); changed {
+	if repaired, changed := repairJSONLoose(content); changed {
 		if parsed, err := parse(repaired); err == nil {
 			return parsed, nil
 		}
 	}
+	// Corrective retry with the same reasoning fallback.
 	retry := append(append(make([]llm.Message, 0, len(messages)+2), messages...),
 		llm.Message{Role: "assistant", Content: completion.Content},
 		llm.Message{Role: "user", Content: jsonRepairInstruction},
@@ -69,11 +76,15 @@ func completeParsed[T any](ctx context.Context, model *llm.Client, messages []ll
 	if err != nil {
 		return zero, fmt.Errorf("model call failed: %w", err)
 	}
-	parsed, parseErr = parse(completion.Content)
+	content = completion.Content
+	if strings.TrimSpace(content) == "" && strings.TrimSpace(completion.Reasoning) != "" {
+		content = completion.Reasoning
+	}
+	parsed, parseErr = parse(content)
 	if parseErr == nil {
 		return parsed, nil
 	}
-	if repaired, changed := repairJSONLoose(completion.Content); changed {
+	if repaired, changed := repairJSONLoose(content); changed {
 		if parsed, err := parse(repaired); err == nil {
 			return parsed, nil
 		}

@@ -934,7 +934,7 @@ func (c *Client) once(ctx context.Context, payload []byte) (Completion, error) {
 	// transient error sends it down the retry ladder with backoff instead of
 	// surfacing an empty string to the model-facing caller.
 	if strings.TrimSpace(completion.Content) == "" && len(completion.ToolCalls) == 0 && strings.TrimSpace(completion.Reasoning) == "" {
-		return Completion{}, &transportError{err: errors.New("provider returned an empty completion (no content, tool calls or reasoning)")}
+		return Completion{}, &transportError{err: fmt.Errorf("provider returned an empty completion (no content, tool calls or reasoning); body: %s", truncate(string(body), 400))}
 	}
 	for _, call := range choice.Message.ToolCalls {
 		args := map[string]any{}
