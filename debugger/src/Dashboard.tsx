@@ -7,6 +7,8 @@ import {
   operations,
   storageOverview,
   systemHealth,
+  readiness,
+  type ReadinessCheck,
   type ProjectsOverview,
   type QualitySummary,
   type QualitySummaryAgent,
@@ -124,6 +126,7 @@ export default function Dashboard({ project, setProject }: Props) {
   // Supervisor tab badge: unresolved problem-queue depth. The panel reports it
   // while mounted; this light fetch seeds it before the first tab open.
   const [supervisorPending, setSupervisorPending] = useState(0)
+  const [toolReadiness, setToolReadiness] = useState<ReadinessCheck[] | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const window_ = WINDOWS[windowIdx] ?? WINDOWS[1]
@@ -135,19 +138,21 @@ export default function Dashboard({ project, setProject }: Props) {
     setError('')
     const since = new Date(Date.now() - window_.ms).toISOString()
     try {
-      const [stats, projects, ops, storageSnap, syshealthSnap, startedPage] = await Promise.all([
+      const [stats, projects, ops, storageSnap, syshealthSnap, startedPage, ready] = await Promise.all([
         observationApi.healthStats(undefined, since),
         projectsOverview(window_.go),
         operations().catch(() => null),
         storageOverview().catch(() => null),
         systemHealth().catch(() => null),
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'run.started', limit: 200 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
+        readiness().catch(() => null),
       ])
       setHealth(stats)
       setOverview(projects)
       setOpsCount(ops ? ops.count : null)
       setStorage(storageSnap)
       setSyshealth(syshealthSnap)
+      setToolReadiness(ready?.checks ?? null)
       const titles = new Map<string, string>()
       for (const event of startedPage.events) {
         const run = event.context?.run ?? ''
@@ -348,7 +353,25 @@ export default function Dashboard({ project, setProject }: Props) {
             )}
           </div>
 
-          {/* Supervisor problems live in the dashboard's Supervisor tab. */}
+          {/* Tool readiness (docs/onboarding-readiness): unset configuration
+              that silently degrades tools, surfaced before anyone wonders why
+              a tool 'does not work'. Only not-configured entries render. */}
+          {toolReadiness && toolReadiness.some((check) => !check.configured) && (
+            <div style={{ border: '1px solid var(--tm-amber)', borderRadius: '6px', padding: '0.6rem 0.75rem', marginBottom: '1rem', fontSize: '0.78rem' }}>
+              <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>⚠ {t('dashboard.readiness_title') ?? 'Not everything is configured'}</div>
+              <div style={{ display: 'grid', gap: '0.3rem' }}>
+                {toolReadiness.filter((check) => !check.configured).map((check) => (
+                  <div key={check.key}>
+                    <strong>{check.key}</strong>
+                    <span style={{ color: 'var(--tm-text-3)' }}> — {t('dashboard.readiness_used_by') ?? 'affects'}: {(check.used_by ?? []).join(', ')}</span>
+                    {check.fix && <div style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem' }}>→ {check.fix}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Supervisor problems live in the dashboard's Supervisor t
 
           {/* Storage + Server + Human factors side by side (docs/sandbox-storage.md §5.4, §7.1, supervisor-model.md §5) */}
           {(storage_ || syshealth || health?.human) && (

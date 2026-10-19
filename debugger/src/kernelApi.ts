@@ -546,3 +546,18 @@ export interface SystemHealth {
 export function systemHealth(): Promise<SystemHealth> {
   return request('/v1/system/health')
 }
+
+// Tool readiness (docs/onboarding-readiness): every background feature that
+// silently degrades when a piece of configuration is missing — which tools
+// stop working, and what to toggle. The dashboard renders this as a checklist.
+export interface ReadinessCheck {
+  key: string
+  configured: boolean
+  used_by?: string[]
+  fix?: string
+  detail?: string
+}
+
+export function readiness(): Promise<{ checks: ReadinessCheck[] }> {
+  return request('/v1/setup/readiness')
+}

@@ -199,6 +199,8 @@ export const en: Record<string, string> = {
     'supervisor.acknowledge': 'Skip',
     'dashboard.problems_empty': 'No problems.',
     'dashboard.no_quality': 'No quality loop data',
+    'dashboard.readiness_title': 'Not everything is configured — some features will be limited:',
+    'dashboard.readiness_used_by': 'affects',
     'dashboard.agents': 'Agents',
     'dashboard.agents_hint': 'Latest evaluation and open evolution proposals',
     'dashboard.col_agent': 'Agent',

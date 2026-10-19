@@ -159,6 +159,13 @@ func channelDriverByType(channelType string) ChannelDriver {
 	return nil
 }
 
+// ChannelDriverByTypePublic is the server-package face of the registry:
+// readiness checks probe whether a transport is configured without reaching
+// into driver internals.
+func ChannelDriverByTypePublic(channelType string) ChannelDriver {
+	return channelDriverByType(channelType)
+}
+
 // ChannelDrivers exposes the ordered registry — the admin settings API walks
 // it to render the per-channel schema, the same list delivery dispatches
 // through.

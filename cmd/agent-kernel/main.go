@@ -1803,6 +1803,46 @@ func main() {
 			"model_configured":      len(providers) > 0 || strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_API_KEY")) != "",
 		})
 	})
+
+	// Tool readiness (docs/onboarding-readiness): every background feature
+	// that silently degrades when a piece of configuration is missing — which
+	// tools stop working, and what to toggle. The dashboard renders this as a
+	// checklist; tool errors name the same keys.
+	mux.HandleFunc("GET /v1/setup/readiness", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		judgeCfg, jErr := ws.JudgeConfig(r.Context())
+		judgeOK := jErr == nil && judgeCfg.Configured
+		defaultModel := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL")) != "" && strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID")) != ""
+		matrixOK := false
+		if driver := agent.ChannelDriverByTypePublic("matrix"); driver != nil {
+			if matrixSettings, mErr := activities.ChannelSettings(r.Context()); mErr == nil {
+				matrixOK = driver.IsConfigured(matrixSettings.Channels["matrix"])
+			}
+		}
+		// Sandbox readiness mirrors the onboarding wizard's setup/status probe.
+		sandboxOK := false
+		if swappable := activities.SandboxSwappable(); swappable != nil && swappable.Image() != "" {
+			sandboxOK = sandbox.ImageAvailable(r.Context(), env("KERNEL_DOCKER_BINARY", "docker"), swappable.Image())
+		}
+		embedStatus := activities.EmbeddingsStatus()
+		checks := []map[string]any{
+			{"key": "default_model", "configured": defaultModel, "used_by": []string{"remember", "remember_many", "knowledge extraction (fallback)"},
+				"fix": "Set TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID in .env"},
+			{"key": "judge_model", "configured": judgeOK, "used_by": []string{"skill_propose (fallback)", "knowledge contradiction triage (B1)", "knowledge hygiene (B4)", "area normalization"},
+				"fix": "Agents → Quality settings → pick a judge model"},
+			{"key": "embeddings", "configured": embedStatus.Ready, "used_by": []string{"semantic hints", "knowledge conflict prediction (C5)", "semantic knowledge search"},
+				"fix": "Wait for the model to load (first boot downloads it); check KERNEL_EMBEDDINGS_MODEL", "detail": embedStatus.Error},
+			{"key": "sandbox_image", "configured": sandboxOK, "used_by": []string{"run_command", "write_file", "read_file", "web_fetch (page rendering)"},
+				"fix": "Run the sandbox build in onboarding, or set KERNEL_SANDBOX_IMAGE"},
+			{"key": "channel_matrix", "configured": matrixOK, "used_by": []string{"intake from Matrix", "ask_human and send_file delivery to Matrix users"},
+				"fix": "Channels → Matrix: homeserver + bot access token"},
+			{"key": "journal_auth", "configured": strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")) != "" || !gate.Enabled(), "used_by": []string{"operations panel", "knowledge extraction", "saga tools"},
+				"fix": "Fresh installs auto-provision the service principal; set TEMPORALITY_API_TOKEN only for a custom journal", "detail": "the kernel re-resolves the token every minute"},
+		}
+		writeJSON(w, 200, map[string]any{"checks": checks})
+	})
 	mux.HandleFunc("POST /v1/setup/sandbox/build", func(w http.ResponseWriter, r *http.Request) {
 		// Building a sandbox image changes what model-authored commands may
 		// execute — an operator-level decision even on a fresh install.
