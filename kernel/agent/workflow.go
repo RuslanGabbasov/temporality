@@ -2697,6 +2697,13 @@ func executeModelWithNudge(ctx workflow.Context, activityCtx workflow.Context, s
 // addendum to the original request rather than a new task.
 const userNotePrefix = "User follow-up for this task (sent while the run was in progress — treat it as an addendum to the original request, not a new task):\n\n"
 
+// forwardNotePrefix frames a note FORWARDED INTO A CHILD of a delegation: the
+// note addresses the whole delegation, not this child's subtask specifically.
+// Without the frame children burn turns answering 'this is not my job' (the
+// reviewer in the rebaze case) or, worse, re-scope their own subtask to match
+// an addendum meant for the lead.
+const forwardNotePrefix = "A user follow-up for the WHOLE delegation was received while your subtask was running. It is forwarded for visibility — it may not concern your subtask at all. Read it, assess whether it changes YOUR part of the work: if yes, adapt at your nearest turn; if no, continue as planned and do not reply to the follow-up itself:\n\n"
+
 // pendingUserNotes drains user notes (chat messages signalled via
 // kernel.user_note while the run was in progress) from the signal channel
 // without touching the conversation. Empty texts are skipped.
@@ -2741,8 +2748,12 @@ func forwardUserNotesToChildren(ctx workflow.Context, activityCtx workflow.Conte
 	}
 	for i := range notes {
 		var forwarded, failed []string
+		// The forward carries its own framing: children must assess relevance
+		// to their own subtask instead of answering 'not my job'.
+		forwardedNote := notes[i]
+		forwardedNote.Text = forwardNotePrefix + strings.TrimSpace(notes[i].Text)
 		for _, childRunID := range childRunIDs {
-			future := workflow.SignalExternalWorkflow(ctx, WorkflowID(state.run.SourceID, state.run.Project, childRunID), "", UserNoteSignal, notes[i])
+			future := workflow.SignalExternalWorkflow(ctx, WorkflowID(state.run.SourceID, state.run.Project, childRunID), "", UserNoteSignal, forwardedNote)
 			if err := future.Get(ctx, nil); err != nil {
 				// Unregistered/closed child: it finished between the drain and
 				// the signal — not a delivery failure of the note itself, the
