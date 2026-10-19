@@ -862,7 +862,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
 
       {/* Project edit/create modal */}
       {(!!editProject || showNewProject) && (
-        <AppModal onClose={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectDesc(''); setProjectMembers([]); setMemberDraft([]); setNewMemberUser('') }} panelStyle={{ width: '460px' }}>
+        <AppModal onClose={() => { setEditProject(null); setShowNewProject(false); setNewProjectName(''); setNewProjectDesc(''); setProjectMembers([]); setMemberDraft([]); setNewMemberUser('') }} panelStyle={{ width: '560px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto' }}>
             <Heading style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>{editProject ? (t('action.edit') ?? 'Edit') + ' ' + (t('nav.projects') ?? 'project') : (t('new.project') ?? 'New project')}</Heading>
             {!editProject && (
               <TextInput
@@ -961,13 +961,13 @@ export default function Layout({ children, activePage }: LayoutProps) {
                     {memberDraft.map((m) => {
                       const user = allUsers.find((u) => u.id === m.user_id)
                       return (
-                        <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{ flex: 1, fontSize: '0.875rem' }}>{user ? user.name : m.user_id}</span>
+                        <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                          <span style={{ flex: 1, minWidth: 0, fontSize: '0.875rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user ? user.name : m.user_id}</span>
                           <select
                             aria-label={t('projects.member_role') ?? 'Role'}
                             value={m.role}
                             onChange={(e) => setMemberDraft(memberDraft.map((x) => x.user_id === m.user_id ? { ...x, role: e.target.value } : x))}
-                            style={{ background: 'var(--tm-bg)', color: 'var(--tm-text)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                            style={{ background: 'var(--tm-bg)', color: 'var(--tm-text)', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.25rem 0.5rem', fontSize: '0.8rem', flexShrink: 0, maxWidth: '9rem' }}
                           >
                             <option value="viewer">{t('projects.role_viewer') ?? 'Viewer'}</option>
                             <option value="writer">{t('projects.role_writer') ?? 'Writer'}</option>
