@@ -882,13 +882,13 @@ export default function AgentRuns({ project }: { project: string }) {
                           onClick={(e) => { e.stopPropagation(); void stopRun(row) }}
                           disabled={busy}
                           title={t('runs.stop_confirm') ?? 'Click again to force-stop'}
-                          style={{ background: 'var(--tm-danger)', border: 'none', color: '#fff', cursor: busy ? 'wait' : 'pointer', fontSize: '0.62rem', padding: '0.05rem 0.3rem', borderRadius: '3px', lineHeight: 1.4 }}
+                          style={{ marginLeft: 'auto', flexShrink: 0, background: 'var(--tm-danger)', border: 'none', color: '#fff', cursor: busy ? 'wait' : 'pointer', fontSize: '0.62rem', padding: '0.05rem 0.3rem', borderRadius: '3px', lineHeight: 1.4 }}
                         >✓?</button>
                       ) : (
                         <button
                           onClick={(e) => { e.stopPropagation(); setConfirmStop(row.id) }}
                           title={`${t('runs.stop') ?? 'Stop'} — ${t('runs.stop_hint') ?? 'Force-stop the workflow; use when a run is stuck'}`}
-                          style={{ background: 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.62rem', padding: '0.05rem 0.3rem', borderRadius: '3px', lineHeight: 1.4 }}
+                          style={{ marginLeft: 'auto', flexShrink: 0, background: 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.62rem', padding: '0.05rem 0.3rem', borderRadius: '3px', lineHeight: 1.4 }}
                         >■</button>
                       )
                     )}
