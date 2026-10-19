@@ -147,6 +147,21 @@ func (s *fakeInboundStore) GetRun(_ context.Context, id string) (workspace.Run, 
 	return workspace.Run{}, workspace.ErrNotFound
 }
 
+// ListRoutedInboundMessages backs the follow-up-as-note lookup: newest first
+// among the sender's rows that produced runs.
+func (s *fakeInboundStore) ListRoutedInboundMessages(_ context.Context, senderUserID string, limit int) ([]workspace.InboundMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var routed []workspace.InboundMessage
+	for i := len(s.inbound) - 1; i >= 0 && len(routed) < limit; i-- {
+		row := s.inbound[i]
+		if row.SenderUserID == senderUserID && row.TargetRunID != "" && row.Status == workspace.InboundStatusRouted {
+			routed = append(routed, row)
+		}
+	}
+	return routed, nil
+}
+
 func (s *fakeInboundStore) CountInboundMessagesSince(_ context.Context, sender string, since time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -878,6 +893,117 @@ func TestChannelWatcherTargetRunResolvesByRowProject(t *testing.T) {
 	}
 	if latest, _ := store.lastUpdate(row.ID); latest.Status == workspace.InboundStatusAnswered {
 		t.Fatal("routed row must keep its status")
+	}
+}
+
+// TestChannelInboundFollowUpSteersRunningRun: a message written while the
+// sender's routed run is still live becomes a user note in that run — not a
+// competing intake classification. The chat hears a confirmation, the row is
+// attached to the target run, and no new intake run starts.
+func TestChannelInboundFollowUpSteersRunningRun(t *testing.T) {
+	var sent []string
+	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
+		matrixTextEvent("$m14", "!r1:hs", "@human:hs", "и ещё проверь кэш"),
+	}, &sent)
+	store := &fakeInboundStore{
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+		inbound: []workspace.InboundMessage{{
+			ID: workspace.InboundMessageID("matrix", "$old"), Channel: "matrix", MessageID: "$old",
+			SenderUserID: "u1", Room: "!r1:hs", Status: workspace.InboundStatusRouted,
+			ProjectID: "omni", TargetRunID: "target-9",
+		}},
+	}
+	intake := &recordedIntake{runID: "intake-m14"}
+	notes := make(chan agent.UserNote, 4)
+	var notedWorkflow string
+	loop := newInboundLoop(t, server, store, &recordedSignal{})
+	loop.intake = intake.record
+	loop.intakeEnabled = true
+	loop.resolveRun = func(_ context.Context, project, runID string) (workspace.Run, error) {
+		if project != "omni" || runID != "target-9" {
+			t.Errorf("resolve %s/%s", project, runID)
+		}
+		return workspace.Run{ID: runID, Status: "running"}, nil
+	}
+	loop.note = func(_ context.Context, workflowID string, note agent.UserNote) error {
+		notedWorkflow = workflowID
+		notes <- note
+		return nil
+	}
+
+	if _, err := loop.cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case note := <-notes:
+		if note.Text != "и ещё проверь кэш" || note.ActorID != "u1" {
+			t.Fatalf("unexpected note: %+v", note)
+		}
+	default:
+		t.Fatal("user note not signaled")
+	}
+	if notedWorkflow != agent.WorkflowID("src", "omni", "target-9") {
+		t.Fatalf("note routed to the wrong workflow: %q", notedWorkflow)
+	}
+	if intake.count() != 0 {
+		t.Fatalf("a live run must not spawn a classification run, got %d", intake.count())
+	}
+	if len(sent) != 1 || !strings.Contains(sent[0], "Added to the running task") {
+		t.Fatalf("confirmation not delivered: %v", sent)
+	}
+	// The message row is attached to the target run (the audit trail).
+	row, ok := store.inboundRow("$m14")
+	if !ok {
+		t.Fatal("message not recorded")
+	}
+	latest, found := store.lastUpdate(row.ID)
+	if !found || latest.TargetRunID != "target-9" || latest.ProjectID != "omni" || latest.Status != workspace.InboundStatusRouted {
+		t.Fatalf("note row not attached: %+v found=%v", latest, found)
+	}
+}
+
+// TestChannelInboundFollowUpFallsBackToClassification: with no live routed
+// run the same message goes through the intake pipeline as before — a dead
+// run (or a failed note signal) must not eat the message.
+func TestChannelInboundFollowUpFallsBackToClassification(t *testing.T) {
+	var sent []string
+	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
+		matrixTextEvent("$m15", "!r1:hs", "@human:hs", "новая задача: смета"),
+	}, &sent)
+	store := &fakeInboundStore{
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+		inbound: []workspace.InboundMessage{{
+			ID: workspace.InboundMessageID("matrix", "$old"), Channel: "matrix", MessageID: "$old",
+			SenderUserID: "u1", Room: "!r1:hs", Status: workspace.InboundStatusRouted,
+			ProjectID: "omni", TargetRunID: "target-done",
+		}},
+	}
+	intake := &recordedIntake{runID: "intake-m15"}
+	loop := newInboundLoop(t, server, store, &recordedSignal{})
+	loop.intake = intake.record
+	loop.intakeEnabled = true
+	loop.resolveRun = func(context.Context, string, string) (workspace.Run, error) {
+		return workspace.Run{ID: "target-done", Status: "completed"}, nil
+	}
+	loop.note = func(context.Context, string, agent.UserNote) error {
+		t.Fatal("a finished run must not be noted")
+		return nil
+	}
+
+	if _, err := loop.cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if intake.count() != 1 {
+		t.Fatalf("message must fall back to classification, got %d intake runs", intake.count())
+	}
+	if len(sent) != 0 {
+		t.Fatalf("no confirmation expected: %v", sent)
 	}
 }
 

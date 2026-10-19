@@ -59,6 +59,10 @@ type channelInboundLoop struct {
 	// emit journals one intake.* event (docs/inbound-messages.md §11); nil
 	// drops events (tests).
 	emit func(ctx context.Context, eventType string, message agent.InboundMessage, senderUserID string, data map[string]any)
+	// note routes a user note into a live run's workflow (the UI's
+	// "дополнение" mechanism); nil disables the follow-up-while-running path
+	// (tests).
+	note func(ctx context.Context, workflowID string, note agent.UserNote) error
 	// events receives hitl.verdict.recorded emissions when a channel reply
 	// answers a human request (specs/quality-loop.md §9); nil disables them
 	// (tests run without an outbox).
@@ -89,6 +93,7 @@ type channelInboundStore interface {
 	SaveChannelCursor(ctx context.Context, channel string, cursor workspace.ChannelCursor) error
 	InsertInboundMessage(ctx context.Context, m *workspace.InboundMessage) (bool, error)
 	UpdateInboundMessage(ctx context.Context, id string, u workspace.InboundMessageUpdate) error
+	ListRoutedInboundMessages(ctx context.Context, senderUserID string, limit int) ([]workspace.InboundMessage, error)
 	GetRun(ctx context.Context, id string) (workspace.Run, error)
 	CountInboundMessagesSince(ctx context.Context, senderUserID string, since time.Time) (int, error)
 }
@@ -478,6 +483,13 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 		l.log.Info("intake recorded without processing (pipeline disabled)", "channel", l.driver.Type(), "message", message.ID)
 		return
 	}
+	// A follow-up written while the sender's routed run is still live is a
+	// user note, not a new task: the workflow drains it at the nearest turn
+	// boundary and steers the working agent (the same mechanism the UI uses).
+	// Only a message with no live run of one's own goes to classification.
+	if l.deliverUserNote(ctx, channelSettings, message, senderUserID) {
+		return
+	}
 	runID, err := l.intake(ctx, message, senderUserID)
 	if err != nil {
 		// The row stays received — visible in the Входящие list as stuck; the
@@ -707,6 +719,50 @@ func liveRunStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+// deliverUserNote steers a still-running routed run of this sender with the
+// fresh chat message (docs/inbound-messages.md: the dialog continues while
+// the work is in flight). Returns true when the message was consumed as a
+// note — the intake pipeline must not start a competing classification run.
+// The target run must be the sender's own (routed rows carry the ownership),
+// live per the Temporal resolver, and the row keeps its routed status: the
+// watcher already follows it and will deliver the final answer.
+func (l *channelInboundLoop) deliverUserNote(ctx context.Context, channelSettings map[string]string, message agent.InboundMessage, senderUserID string) bool {
+	if l.note == nil || l.resolveRun == nil || strings.TrimSpace(message.Text) == "" {
+		return false
+	}
+	routed, err := l.store.ListRoutedInboundMessages(ctx, senderUserID, 20)
+	if err != nil {
+		l.log.Warn("intake follow-up lookup", "channel", l.driver.Type(), "error", err)
+		return false
+	}
+	for _, row := range routed {
+		if row.TargetRunID == "" || row.ProjectID == "" {
+			continue
+		}
+		run, err := l.resolveRun(ctx, row.ProjectID, row.TargetRunID)
+		if err != nil || !liveRunStatus(run.Status) {
+			continue // finished or gone — the next routed row may still be live
+		}
+		workflowID := agent.WorkflowID(l.sourceID, row.ProjectID, row.TargetRunID)
+		note := agent.UserNote{Text: message.Text, ActorID: senderUserID}
+		if nErr := l.note(ctx, workflowID, note); nErr != nil {
+			// A terminal run (finished between the lookup and the signal) falls
+			// back to classification; anything else is a real delivery failure.
+			l.log.Warn("intake follow-up note", "channel", l.driver.Type(), "run", row.TargetRunID, "error", nErr)
+			return false
+		}
+		_ = l.store.UpdateInboundMessage(ctx, workspace.InboundMessageID(message.Channel, message.ID), workspace.InboundMessageUpdate{
+			SenderUserID: senderUserID, TargetRunID: row.TargetRunID, ProjectID: row.ProjectID,
+			Status: workspace.InboundStatusRouted,
+		})
+		l.sendRoomNotice(ctx, channelSettings, message.ChatID,
+			"Added to the running task — the agent takes it into account at the next step.")
+		l.log.Info("intake follow-up delivered", "channel", l.driver.Type(), "message", message.ID, "run", row.TargetRunID, "sender", senderUserID)
+		return true
+	}
+	return false
 }
 
 // sendRoomNotice delivers a channel-neutral service notice to a chat.

@@ -7019,6 +7019,9 @@ func main() {
 					signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
 						return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
 					},
+					note: func(ctx context.Context, workflowID string, note agent.UserNote) error {
+						return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.UserNoteSignal, note)
+					},
 					intake: func(ctx context.Context, message agent.InboundMessage, senderUserID string) (string, error) {
 						user, err := senderUser(ctx, ws, senderUserID)
 						if err != nil {
@@ -7055,6 +7058,9 @@ func main() {
 			log:        log,
 			signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
 				return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
+			},
+			note: func(ctx context.Context, workflowID string, note agent.UserNote) error {
+				return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.UserNoteSignal, note)
 			},
 			intake: func(ctx context.Context, message agent.InboundMessage, senderUserID string) (string, error) {
 				user, err := senderUser(ctx, ws, senderUserID)
