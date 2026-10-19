@@ -359,7 +359,7 @@ func main() {
 		log.Info("kernel journal auth: TEMPORALITY_API_TOKEN is empty or rejected; using the auto-provisioned service principal", "user", workspace.KernelServiceUserName)
 	case journalTokenEnvStale:
 		if journalToken == "" {
-			log.Info("kernel journal auth: journal unreachable at boot; if it requires a token, restart the kernel once it is up")
+			log.Info("kernel journal auth: journal unreachable at boot; the re-resolver self-heals within a minute once it is up")
 		}
 	}
 	// Journal auth re-resolver (docs/resilience-and-scale.md §4): a boot-order
