@@ -1815,18 +1815,42 @@ func main() {
 		judgeCfg, jErr := ws.JudgeConfig(r.Context())
 		judgeOK := jErr == nil && judgeCfg.Configured
 		defaultModel := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL")) != "" && strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID")) != ""
+		// Channels are a user choice, not a requirement: an install may have
+		// none, or add one later. The check stays informational — it only
+		// flags anything when NO channel is configured, and marks itself
+		// optional so the dashboard does not paint it as a misconfiguration.
 		matrixOK := false
-		if driver := agent.ChannelDriverByTypePublic("matrix"); driver != nil {
-			if matrixSettings, mErr := activities.ChannelSettings(r.Context()); mErr == nil {
-				matrixOK = driver.IsConfigured(matrixSettings.Channels["matrix"])
+		anyChannelConfigured := false
+		for _, channelType := range []string{"matrix", "telegram", "slack"} {
+			if driver := agent.ChannelDriverByTypePublic(channelType); driver != nil {
+				if channelSettings, cErr := activities.ChannelSettings(r.Context()); cErr == nil {
+					if driver.IsConfigured(channelSettings.Channels[channelType]) {
+						if channelType == "matrix" {
+							matrixOK = true
+						}
+						anyChannelConfigured = true
+					}
+				}
 			}
 		}
+		embedStatus := activities.EmbeddingsStatus()
 		// Sandbox readiness mirrors the onboarding wizard's setup/status probe.
 		sandboxOK := false
 		if swappable := activities.SandboxSwappable(); swappable != nil && swappable.Image() != "" {
 			sandboxOK = sandbox.ImageAvailable(r.Context(), env("KERNEL_DOCKER_BINARY", "docker"), swappable.Image())
 		}
-		embedStatus := activities.EmbeddingsStatus()
+		// Channels: optional by nature. Always 'configured'; the detail line
+		// appears only when nothing is set, phrased as availability, not error.
+		channelsConfigured := matrixOK || anyChannelConfigured
+		channelsEntry := map[string]any{
+			"key":        "channels",
+			"configured": true,
+			"optional":   true,
+			"used_by":    []string{"intake from messengers", "ask_human and send_file delivery to messengers"},
+		}
+		if !channelsConfigured {
+			channelsEntry["detail"] = "no chat transport configured — agents reach you only in the web inbox; add one under Channels when needed"
+		}
 		checks := []map[string]any{
 			{"key": "default_model", "configured": defaultModel, "used_by": []string{"remember", "remember_many", "knowledge extraction (fallback)"},
 				"fix": "Set TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID in .env"},
@@ -1836,10 +1860,9 @@ func main() {
 				"fix": "Wait for the model to load (first boot downloads it); check KERNEL_EMBEDDINGS_MODEL", "detail": embedStatus.Error},
 			{"key": "sandbox_image", "configured": sandboxOK, "used_by": []string{"run_command", "write_file", "read_file", "web_fetch (page rendering)"},
 				"fix": "Run the sandbox build in onboarding, or set KERNEL_SANDBOX_IMAGE"},
-			{"key": "channel_matrix", "configured": matrixOK, "used_by": []string{"intake from Matrix", "ask_human and send_file delivery to Matrix users"},
-				"fix": "Channels → Matrix: homeserver + bot access token"},
 			{"key": "journal_auth", "configured": strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")) != "" || !gate.Enabled(), "used_by": []string{"operations panel", "knowledge extraction", "saga tools"},
 				"fix": "Fresh installs auto-provision the service principal; set TEMPORALITY_API_TOKEN only for a custom journal", "detail": "the kernel re-resolves the token every minute"},
+			channelsEntry,
 		}
 		writeJSON(w, 200, map[string]any{"checks": checks})
 	})
