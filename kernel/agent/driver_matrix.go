@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,7 +14,41 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/renderer/html"
 )
+
+// ReadMarker is the optional driver extension for marking an inbound message
+// as read (matrix m.read receipts): the sender sees the dialog's read mark
+// the moment the message enters the pipeline, not when the answer lands.
+type ReadMarker interface {
+	// MarkRead posts a read receipt for eventID in the room at address, as
+	// the transport's own account. Best-effort by contract: callers log
+	// failures and move on.
+	MarkRead(ctx context.Context, client *http.Client, settings map[string]string, address, eventID string) error
+}
+
+// matrixMarkdown renders agent answers for Matrix formatted_body: GFM
+// extensions for tables and task lists, hard wraps to keep chat-style single
+// newlines visible. Raw HTML stays escaped (no Unsafe): model output must not
+// inject markup into the room.
+var matrixMarkdown = goldmark.New(
+	goldmark.WithExtensions(extension.GFM),
+	goldmark.WithRendererOptions(html.WithHardWraps()),
+)
+
+// matrixFormattedHTML converts markdown to the HTML fragment for
+// formatted_body; an empty result (nothing to convert) keeps the message
+// plain — the unformatted body always ships as the fallback.
+func matrixFormattedHTML(markdown string) string {
+	var buf bytes.Buffer
+	if err := matrixMarkdown.Convert([]byte(markdown), &buf); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(buf.String())
+}
 
 // DMResolver is the optional driver extension for transports that can locate
 // a user's direct conversation from their own identity: the matrix bot finds
@@ -74,17 +109,25 @@ func (matrixDriver) SendText(ctx context.Context, client *http.Client, settings 
 	if homeserver == "" || accessToken == "" || roomID == "" {
 		return errors.New("matrix transport is not configured")
 	}
-	txnID := "temporality-" + transactionFingerprint(roomID, msg.Body)
-	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)
 	// The transport is two-way (matrixinbound.go): replying in the room routes
 	// the answer back into the paused run, so say so next to the question.
-	payload := map[string]any{"msgtype": "m.text", "body": msg.Body + "\n\nReply in this room to answer."}
-	body, status, err := postJSON(ctx, client, http.MethodPut, endpoint, payload, map[string]string{"Authorization": "Bearer " + accessToken})
+	body := msg.Body + "\n\nReply in this room to answer."
+	txnID := "temporality-" + transactionFingerprint(roomID, body)
+	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)
+	payload := map[string]any{"msgtype": "m.text", "body": body}
+	// Agent answers are markdown; render them for HTML-capable clients
+	// (Element) via the custom format. The plain body stays the fallback for
+	// clients that ignore formatted_body.
+	if html := matrixFormattedHTML(body); html != "" {
+		payload["format"] = "org.matrix.custom.html"
+		payload["formatted_body"] = html
+	}
+	body2, status, err := postJSON(ctx, client, http.MethodPut, endpoint, payload, map[string]string{"Authorization": "Bearer " + accessToken})
 	if err != nil {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("matrix returned %d: %s", status, truncate(body, 200))
+		return fmt.Errorf("matrix returned %d: %s", status, truncate(body2, 200))
 	}
 	return nil
 }
@@ -337,6 +380,26 @@ func (matrixDriver) SendTyping(ctx context.Context, client *http.Client, setting
 	}
 	if status != http.StatusOK {
 		return fmt.Errorf("matrix typing returned %d: %s", status, truncate(body, 200))
+	}
+	return nil
+}
+
+// MarkRead (ReadMarker) posts an m.read receipt for the event as the bot
+// account: the sender's message shows as read the moment Temporality takes
+// it into processing.
+func (matrixDriver) MarkRead(ctx context.Context, client *http.Client, settings map[string]string, address, eventID string) error {
+	homeserver := strings.TrimRight(setting(settings, "homeserver"), "/")
+	accessToken := TrimBearerPrefix(setting(settings, "access_token"))
+	if homeserver == "" || accessToken == "" || address == "" || eventID == "" {
+		return errors.New("matrix transport is not configured")
+	}
+	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/receipt/m.read/%s", homeserver, url.PathEscape(address), url.PathEscape(eventID))
+	body, status, err := postJSON(ctx, client, http.MethodPost, endpoint, map[string]any{}, map[string]string{"Authorization": "Bearer " + accessToken})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("matrix read receipt returned %d: %s", status, truncate(body, 200))
 	}
 	return nil
 }

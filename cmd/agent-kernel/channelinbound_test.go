@@ -560,10 +560,15 @@ func matrixTextEvent(eventID, room, sender, body string) map[string]any {
 
 // matrixIntakeHomeServer fakes whoami + a sync that replays the same room
 // events on every poll (the redelivery model) and records notices sent through
-// the room message route.
-func matrixIntakeHomeServer(t *testing.T, room string, events []any, sent *[]string) *httptest.Server {
+// the room message route. The optional receipts sink records m.read receipt
+// posts (the dialog's read mark).
+func matrixIntakeHomeServer(t *testing.T, room string, events []any, sent *[]string, receipts ...*[]string) *httptest.Server {
 	t.Helper()
 	batch := 0
+	var receiptSink *[]string
+	if len(receipts) > 0 {
+		receiptSink = receipts[0]
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/account/whoami"):
@@ -576,6 +581,11 @@ func matrixIntakeHomeServer(t *testing.T, room string, events []any, sent *[]str
 					room: map[string]any{"timeline": map[string]any{"events": events}},
 				}},
 			})
+		case strings.Contains(r.URL.Path, "/receipt/"):
+			if receiptSink != nil {
+				*receiptSink = append(*receiptSink, r.URL.Path)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{})
 		case strings.Contains(r.URL.Path, "/send/"):
 			var payload struct {
 				Body string `json:"body"`
@@ -721,6 +731,36 @@ func TestChannelInboundIntakeStartsRunForKnownSender(t *testing.T) {
 	}
 	if len(sent) != 0 {
 		t.Fatalf("known sender must not get a rejection notice, sent %v", sent)
+	}
+}
+
+// TestChannelInboundIntakeMarksMessageRead: a message accepted into the
+// intake pipeline posts an m.read receipt for the sender's event (the
+// dialog's read mark arrives before the answer, not with it).
+func TestChannelInboundIntakeMarksMessageRead(t *testing.T) {
+	var sent, receipts []string
+	server := matrixIntakeHomeServer(t, "!r1:hs", []any{
+		matrixTextEvent("$m12", "!r1:hs", "@human:hs", "Подготовь смету"),
+	}, &sent, &receipts)
+	store := &fakeInboundStore{
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+	}
+	loop := newInboundLoop(t, server, store, &recordedSignal{})
+	loop.intake = (&recordedIntake{runID: "intake-m12"}).record
+	loop.intakeEnabled = true
+
+	if _, err := loop.cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(receipts) != 1 || !strings.Contains(receipts[0], "/receipt/m.read/") || !strings.Contains(receipts[0], "!r1:hs") {
+		t.Fatalf("read receipt not posted: %v", receipts)
+	}
+	// The event id survives the path escape ($ is path-safe in Go).
+	if !strings.Contains(receipts[0], "$m12") {
+		t.Fatalf("receipt lost the event id: %v", receipts)
 	}
 }
 

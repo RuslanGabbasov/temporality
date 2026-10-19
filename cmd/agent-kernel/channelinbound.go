@@ -175,7 +175,7 @@ func (l *channelInboundLoop) routeMessages(ctx context.Context, messages []agent
 	answered := make(map[string]bool, len(replies))
 	for _, reply := range replies {
 		answered[reply.Message.ID] = true
-		l.routeReply(ctx, reply)
+		l.routeReply(ctx, channelSettings, reply)
 	}
 	// Everything else is an initiative message: the intake pipeline records
 	// it durably, identifies the sender (closed world) and either starts the
@@ -297,7 +297,10 @@ func (l *channelInboundLoop) openAsks(ctx context.Context) ([]agent.PendingAsk, 
 // restart's history replay) may yet deliver the answer. File replies are
 // downloaded into the project workspace first, so the resumed run — and every
 // agent in the project — can read the attachment by path.
-func (l *channelInboundLoop) routeReply(ctx context.Context, reply agent.ChannelReply) {
+func (l *channelInboundLoop) routeReply(ctx context.Context, channelSettings map[string]string, reply agent.ChannelReply) {
+	// The reply is consumed — the sender gets the read mark now, not when the
+	// resumed run eventually answers.
+	l.markRead(ctx, channelSettings, reply.Message.ChatID, reply.Message.ID)
 	// A threaded reply pins the conversation thread on the ask when it has
 	// none yet (docs/channels.md §9): the rest of the thread matches exactly,
 	// and follow-up questions of the run join it. Best-effort — a failed pin
@@ -361,6 +364,21 @@ func (l *channelInboundLoop) routeReply(ctx context.Context, reply agent.Channel
 		l.log.Warn("channel reply audit", "operation", reply.Ask.RequestID, "error", err)
 	}
 	l.log.Info("channel reply routed", "channel", l.driver.Type(), "operation", reply.Ask.RequestID, "run", reply.Ask.RunID, "sender", reply.Message.Sender, "cancelled", reply.Cancelled)
+}
+
+// markRead gives the sender the dialog's read mark (matrix m.read receipt):
+// the message was received and taken into processing. Driver-optional and
+// best-effort — a failed receipt costs nothing downstream.
+func (l *channelInboundLoop) markRead(ctx context.Context, channelSettings map[string]string, room, eventID string) {
+	marker, ok := l.driver.(agent.ReadMarker)
+	if !ok || room == "" || eventID == "" {
+		return
+	}
+	markCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := marker.MarkRead(markCtx, l.httpClient, channelSettings, room, eventID); err != nil {
+		l.log.Warn("channel read receipt", "channel", l.driver.Type(), "message", eventID, "error", err)
+	}
 }
 
 // handleIntake is the intake pipeline entry (docs/inbound-messages.md §4–5):
@@ -433,6 +451,9 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 	if l.emit != nil {
 		l.emit(ctx, "intake.received", message, senderUserID, nil)
 	}
+	// The message is accepted into processing — the sender gets the read mark
+	// now, long before the answer lands.
+	l.markRead(ctx, channelSettings, message.ChatID, message.ID)
 	// Attachments of an initiative message are saved before the intake run
 	// starts (docs/inbound-messages.md §12 phase 3): the staging paths land on
 	// the row, start_task copies them into the target project's inbox. A fetch
