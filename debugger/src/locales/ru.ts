@@ -135,6 +135,7 @@ export const ru: Record<string, string> = {
     'supervisor.subtitle': 'Модель, работающая для администратора: диагнозы упавших ранов, кластеры повторяющихся сбоев и пояснения аномалий здоровья. Каждое суждение — предложение, решения за человеком.',
     'supervisor.insights_title': 'Аномалии здоровья',
     'supervisor.insights_empty': 'Аномалий в окнах здоровья не обнаружено — тихо.',
+    'supervisor.insights_hidden_n': 'Скрыто: {{count}} — разобранные и старые записи тех же метрик',
     'supervisor.problems_title': 'Очередь проблем',
     'supervisor.problems_empty': 'Проблем нет: упавших ранов с диагнозами не найдено.',
     'supervisor.severity_warning': 'важно',

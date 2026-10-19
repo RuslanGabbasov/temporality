@@ -135,6 +135,7 @@ export const en: Record<string, string> = {
     'supervisor.subtitle': 'The model that works for the administrator: failed-run diagnoses, recurring-failure clusters and plain-language health insights. Every verdict is a proposal — a human decides.',
     'supervisor.insights_title': 'Health anomalies',
     'supervisor.insights_empty': 'No anomalies between the health windows — all quiet.',
+    'supervisor.insights_hidden_n': 'Hidden: {{count}} — resolved and superseded metric entries',
     'supervisor.problems_title': 'Problem queue',
     'supervisor.problems_empty': 'No problems: no failed runs with diagnoses found.',
     'supervisor.severity_warning': 'warning',

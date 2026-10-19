@@ -199,9 +199,14 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   // in Agents → quality settings.
   const [embeddings, setEmbeddings] = useState<{ model: string; ready: boolean; error?: string } | null>(null)
   const [tiers, setTiers] = useState<{ tier: string; helpful: number; harmful: number; helpful_rate_pct: number }[] | null>(null)
+  // Collapsible per-case queue sections: 50+ rows in one flat list stopped
+  // being readable — the header toggle folds what has been read.
+  const [collapsedCases, setCollapsedCases] = useState<Set<string>>(new Set())
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  // silent: refresh the data WITHOUT the spinner — acknowledge/skip keep the
+  // list mounted, so the scroll position survives on long queues (52+ rows).
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     setError('')
     try {
       const [verdictPage, insightPage, ackPage, settings, effect] = await Promise.all([
@@ -315,7 +320,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
         try { await workspaceApi.acknowledgeSupervisorVerdict(eventID) } catch { /* queue hygiene is best-effort */ }
       }
       setGeneralize(null)
-      await load()
+      await load(true)
     } catch (failure) {
       setError(message(failure))
     } finally {
@@ -410,7 +415,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
       for (const eventID of row.eventIDs) {
         try { await workspaceApi.acknowledgeSupervisorVerdict(eventID) } catch { /* queue hygiene is best-effort */ }
       }
-      await load()
+      await load(true)
     } catch (failure) {
       setError(message(failure))
     } finally {
@@ -436,6 +441,32 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
     if (!showResolved && resolved(row)) return false
     return true
   })
+
+  // Case-family sections: 50+ rows in one flat list stopped being readable.
+  // Groups keep queue order inside, sorted by unresolved count — the busiest
+  // family first. Collapsed state is per case family.
+  const caseGroups = (() => {
+    const byCase = new Map<string, ClusterRow[]>()
+    for (const row of visibleClusters) {
+      const key = row.caseID || 'other'
+      const list = byCase.get(key)
+      if (list) list.push(row); else byCase.set(key, [row])
+    }
+    return [...byCase.entries()]
+      .map(([caseID, rows]) => ({
+        caseID,
+        rows,
+        unresolved: rows.filter((row) => !resolved(row)).length,
+      }))
+      .sort((a, b) => b.unresolved - a.unresolved || a.caseID.localeCompare(b.caseID))
+  })()
+  const toggleCase = (caseID: string) => {
+    setCollapsedCases((prev) => {
+      const next = new Set(prev)
+      if (next.has(caseID)) next.delete(caseID); else next.add(caseID)
+      return next
+    })
+  }
 
   // Bulk selection works on VISIBLE rows only: a stale key from another
   // filter would otherwise act on rows the administrator cannot see.
@@ -469,7 +500,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
         await resolveConflictQuiet(row, kind)
       }
       setSelected(new Set())
-      await load()
+      await load(true)
     } catch (failure) {
       setError(message(failure))
     } finally {
@@ -537,43 +568,86 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
               )}
           </div>
 
-          {/* Wave A3: health anomaly explanations, newest first. */}
+          {/* Wave A3: health anomaly explanations, newest first. One row per
+              metric — the pass re-publishes the same anomaly each cycle, so
+              older entries of a metric are hidden behind the newest. A read
+              insight can be skipped like a queue item. */}
           <section style={{ marginBottom: '1.5rem' }}>
             <h3 style={{ fontSize: '0.85rem', margin: '0 0 0.4rem' }}>{t('supervisor.insights_title')}</h3>
-            {insights.length === 0 ? (
-              <p style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', margin: 0 }}>{t('supervisor.insights_empty')}</p>
-            ) : (
-              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
-                {insights.map((event) => {
-                  const severity = String(event.data?.severity ?? 'info')
-                  const title = String(event.data?.title ?? '')
-                  const explanation = String(event.data?.explanation ?? '')
-                  const recommendation = String(event.data?.recommendation ?? '')
-                  const current = String(event.data?.current ?? '')
-                  const baseline = String(event.data?.baseline ?? '')
-                  return (
-                    <div key={event.event_id} style={{ padding: '0.55rem 0.75rem', borderTop: '1px solid var(--tm-border)', fontSize: '0.8rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
-                        <Tag type={severity === 'warning' ? 'red' : 'blue'} size="sm">{severity === 'warning' ? t('supervisor.severity_warning') : t('supervisor.severity_info')}</Tag>
-                        <strong>{title}</strong>
-                        <span style={{ marginLeft: 'auto', fontSize: '0.68rem', color: 'var(--tm-text-3)', flexShrink: 0 }}>{new Date(event.occurred_at).toLocaleString()}</span>
-                      </div>
-                      <div style={{ marginTop: '0.3rem', lineHeight: 1.5 }}>{explanation}</div>
-                      {(current || baseline) && (
-                        <div style={{ marginTop: '0.2rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
-                          {current}{baseline ? ` · ${t('supervisor.vs_baseline')} ${baseline}` : ''}
+            {(() => {
+              const ackedInsights = insights.filter((event) => acknowledged.has(event.event_id))
+              const visible = insights.filter((event) => !acknowledged.has(event.event_id))
+              // Dedup by metric: only the newest insight per metric stays.
+              const latestByMetric = new Map<string, ObservationEvent>()
+              for (const event of visible) {
+                const metric = String(event.data?.metric ?? event.event_id)
+                if (!latestByMetric.has(metric)) latestByMetric.set(metric, event)
+              }
+              const rows = [...latestByMetric.values()]
+              if (insights.length === 0) {
+                return <p style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', margin: 0 }}>{t('supervisor.insights_empty')}</p>
+              }
+              return (
+                <>
+                  {(ackedInsights.length > 0 || visible.length !== insights.length) && (
+                    <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', margin: '0 0 0.35rem' }}>
+                      {t('supervisor.insights_hidden_n', { count: String(insights.length - rows.length) })}
+                    </p>
+                  )}
+                  <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
+                    {rows.map((event) => {
+                      const severity = String(event.data?.severity ?? 'info')
+                      const title = String(event.data?.title ?? '')
+                      const explanation = String(event.data?.explanation ?? '')
+                      const recommendation = String(event.data?.recommendation ?? '')
+                      const current = String(event.data?.current ?? '')
+                      const baseline = String(event.data?.baseline ?? '')
+                      const busyKey = 'insight:' + event.event_id
+                      return (
+                        <div key={event.event_id} style={{ padding: '0.55rem 0.75rem', borderTop: '1px solid var(--tm-border)', fontSize: '0.8rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                            <Tag type={severity === 'warning' ? 'red' : 'blue'} size="sm">{severity === 'warning' ? t('supervisor.severity_warning') : t('supervisor.severity_info')}</Tag>
+                            <strong>{title}</strong>
+                            <span style={{ marginLeft: 'auto', fontSize: '0.68rem', color: 'var(--tm-text-3)', flexShrink: 0 }}>{new Date(event.occurred_at).toLocaleString()}</span>
+                          </div>
+                          <div style={{ marginTop: '0.3rem', lineHeight: 1.5 }}>{explanation}</div>
+                          {(current || baseline) && (
+                            <div style={{ marginTop: '0.2rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
+                              {current}{baseline ? ` · ${t('supervisor.vs_baseline')} ${baseline}` : ''}
+                            </div>
+                          )}
+                          {recommendation && (
+                            <div style={{ marginTop: '0.2rem', fontSize: '0.72rem', color: 'var(--tm-text-2)' }}>
+                              <span style={{ color: 'var(--tm-amber)' }}>→</span> {recommendation}
+                            </div>
+                          )}
+                          <div style={{ marginTop: '0.35rem' }}>
+                            <Button
+                              size="sm"
+                              kind="ghost"
+                              disabled={busyAck === busyKey}
+                              onClick={async () => {
+                                setBusyAck(busyKey)
+                                try {
+                                  await workspaceApi.acknowledgeSupervisorVerdict(event.event_id)
+                                  await load(true)
+                                } catch (failure) {
+                                  setError(message(failure))
+                                } finally {
+                                  setBusyAck('')
+                                }
+                              }}
+                            >
+                              {busyAck === busyKey ? '…' : t('supervisor.action_skip') ?? 'Skip'}
+                            </Button>
+                          </div>
                         </div>
-                      )}
-                      {recommendation && (
-                        <div style={{ marginTop: '0.2rem', fontSize: '0.72rem', color: 'var(--tm-text-2)' }}>
-                          <span style={{ color: 'var(--tm-amber)' }}>→</span> {recommendation}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+                      )
+                    })}
+                  </div>
+                </>
+              )
+            })()}
           </section>
 
           {/* Waves A1+A2: triage verdicts collapsed into same-root clusters. */}
@@ -633,12 +707,28 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
             {visibleClusters.length === 0 ? (
               <p style={{ color: 'var(--tm-text-3)', fontSize: '0.78rem', margin: 0 }}>{t('supervisor.problems_empty')}</p>
             ) : (
-              <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
-                {visibleClusters.map((row) => {
-                  const open = expanded === row.key
-                  const isResolved = resolved(row)
+              <div style={{ display: 'grid', gap: '0.75rem' }}>
+                {caseGroups.map((group) => {
+                  const collapsed = collapsedCases.has(group.caseID)
                   return (
-                    <div key={row.key} style={{ padding: '0.55rem 0.75rem', borderTop: '1px solid var(--tm-border)', fontSize: '0.78rem', opacity: isResolved ? 0.55 : 1 }}>
+                    <div key={group.caseID}>
+                      <button
+                        type="button"
+                        onClick={() => toggleCase(group.caseID)}
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', width: '100%', background: 'none', border: 'none', padding: '0.3rem 0.15rem', cursor: 'pointer', textAlign: 'left' }}
+                      >
+                        <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem', width: '0.8rem' }}>{collapsed ? '▸' : '▾'}</span>
+                        <strong style={{ fontSize: '0.8rem' }}>{t(`supervisor.case_${group.caseID}`) ?? group.caseID}</strong>
+                        {group.unresolved > 0 && <Tag type={group.unresolved > 5 ? 'red' : 'blue'} size="sm">{group.unresolved}</Tag>}
+                        <span style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }}>/ {group.rows.length}</span>
+                      </button>
+                      {!collapsed && (
+                        <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
+                          {group.rows.map((row) => {
+                            const open = expanded === row.key
+                            const isResolved = resolved(row)
+                            return (
+                              <div key={row.key} style={{ padding: '0.55rem 0.75rem', borderTop: '1px solid var(--tm-border)', fontSize: '0.78rem', opacity: isResolved ? 0.55 : 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
                         {!isResolved && (
                           <input
@@ -811,6 +901,11 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                                   <span style={{ fontSize: '0.66rem', color: 'var(--tm-text-3)', flexShrink: 0 }}>{new Date(at).toLocaleString()}</span>
                                 </div>
                               ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
                         </div>
                       )}
                     </div>
