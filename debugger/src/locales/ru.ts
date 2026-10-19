@@ -1439,6 +1439,7 @@ export const ru: Record<string, string> = {
     'inbound.status_routed': 'Направлено',
     'inbound.status_rejected': 'Отклонено',
     'inbound.status_expired': 'Истекло',
+    'inbound.status_answered': 'Ответлено в чат',
     'inbound.class_task': 'Задача',
     'inbound.class_amendment': 'Дополнение',
     'inbound.class_status': 'Статус',

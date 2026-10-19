@@ -1439,6 +1439,7 @@ export const en: Record<string, string> = {
     'inbound.status_routed': 'Routed',
     'inbound.status_rejected': 'Rejected',
     'inbound.status_expired': 'Expired',
+    'inbound.status_answered': 'Answered in chat',
     'inbound.class_task': 'Task',
     'inbound.class_amendment': 'Amendment',
     'inbound.class_status': 'Status',

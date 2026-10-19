@@ -32,6 +32,7 @@ type fakeInboundStore struct {
 	cursor     workspace.ChannelCursor
 	inbound    []workspace.InboundMessage
 	updates    []inboundUpdateRecord
+	runs       map[string]workspace.Run
 }
 
 // inboundUpdateRecord is one observed UpdateInboundMessage call.
@@ -132,6 +133,17 @@ func (s *fakeInboundStore) UpdateInboundMessage(_ context.Context, id string, u 
 	defer s.mu.Unlock()
 	s.updates = append(s.updates, inboundUpdateRecord{id: id, update: u})
 	return nil
+}
+
+// GetRun backs the intake answer watcher: no runs configured means the watcher
+// finds nothing and gives up quietly (tests without runs are not answering).
+func (s *fakeInboundStore) GetRun(_ context.Context, id string) (workspace.Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if run, ok := s.runs[id]; ok {
+		return run, nil
+	}
+	return workspace.Run{}, workspace.ErrNotFound
 }
 
 func (s *fakeInboundStore) CountInboundMessagesSince(_ context.Context, sender string, since time.Time) (int, error) {

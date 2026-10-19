@@ -77,6 +77,7 @@ type channelInboundStore interface {
 	SaveChannelCursor(ctx context.Context, channel string, cursor workspace.ChannelCursor) error
 	InsertInboundMessage(ctx context.Context, m *workspace.InboundMessage) (bool, error)
 	UpdateInboundMessage(ctx context.Context, id string, u workspace.InboundMessageUpdate) error
+	GetRun(ctx context.Context, id string) (workspace.Run, error)
 	CountInboundMessagesSince(ctx context.Context, senderUserID string, since time.Time) (int, error)
 }
 
@@ -453,6 +454,61 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 	}
 	_ = l.store.UpdateInboundMessage(ctx, row.ID, workspace.InboundMessageUpdate{IntakeRunID: runID})
 	l.log.Info("intake run started", "channel", l.driver.Type(), "message", message.ID, "run", runID, "sender", senderUserID)
+	// The whole point of the dialog: the intake agent's verdict reaches the
+	// sender's chat. The run answer is delivered when the run settles; the
+	// watcher is best-effort (a kernel restart drops the wait — the answer
+	// stays visible in the product UI).
+	go l.watchIntakeAnswer(ctx, row, runID)
+}
+
+// watchIntakeAnswer polls the intake run to its terminal state and delivers
+// the agent's answer back to the sender's chat. ask_human pauses inside the
+// intake dialog are delivered by the notify machinery already; this closes
+// the loop on the final verdict. Bounded wait: past it the delivery is
+// dropped with a log line (the answer remains in the product UI).
+func (l *channelInboundLoop) watchIntakeAnswer(ctx context.Context, row *workspace.InboundMessage, runID string) {
+	watchCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	const pollEvery = 5 * time.Second
+	for {
+		run, err := l.store.GetRun(watchCtx, runID)
+		if err != nil {
+			l.log.Warn("intake answer watch", "run", runID, "error", err)
+			return
+		}
+		switch run.Status {
+		case "completed", "failed", "cancelled":
+			if run.Answer == "" {
+				l.log.Warn("intake run finished without an answer", "run", runID, "status", run.Status)
+				return
+			}
+			settings, sErr := l.settings(watchCtx)
+			if sErr != nil {
+				l.log.Warn("intake answer delivery", "channel", l.driver.Type(), "error", sErr)
+				return
+			}
+			address := row.Room
+			if address == "" {
+				address = row.SenderRaw
+			}
+			deliverCtx, cancel := context.WithTimeout(watchCtx, 20*time.Second)
+			dErr := l.driver.SendText(deliverCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: run.Answer})
+			cancel()
+			if dErr != nil {
+				l.log.Warn("intake answer delivery", "channel", l.driver.Type(), "chat", address, "error", dErr)
+				return
+			}
+			_ = l.store.UpdateInboundMessage(watchCtx, row.ID, workspace.InboundMessageUpdate{Status: workspace.InboundStatusAnswered})
+			l.log.Info("intake answer delivered", "channel", l.driver.Type(), "chat", address, "run", runID)
+			return
+		}
+		select {
+		case <-watchCtx.Done():
+			l.log.Warn("intake answer watch gave up", "run", runID)
+			return
+		case <-time.After(pollEvery):
+		}
+	}
 }
 
 // sendRoomNotice delivers a channel-neutral service notice to a chat.

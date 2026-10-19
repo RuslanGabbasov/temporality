@@ -592,6 +592,9 @@ const (
 	InboundStatusRouted     = "routed"
 	InboundStatusRejected   = "rejected"
 	InboundStatusExpired    = "expired"
+	// Answered closes the loop on a chatter/status intake: the agent's verdict
+	// was delivered back to the sender's chat — no work was created by design.
+	InboundStatusAnswered = "answered"
 )
 
 // Inbound message classifications (docs/inbound-messages.md §4.3).
