@@ -161,6 +161,7 @@ export const en: Record<string, string> = {
     'supervisor.compare_new': 'new',
     'supervisor.compare_old': 'existing',
     'supervisor.compare_hint': 'Highlighted — words absent on the other side',
+    'supervisor.compare_missing': 'Knowledge not found — removed or not visible to your account',
     'supervisor.compare_score': 'cosine {{score}}',
     'supervisor.bulk_select_all': 'Select all',
     'supervisor.bulk_select_row': 'Select row',

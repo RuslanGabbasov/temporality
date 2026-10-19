@@ -171,6 +171,13 @@ export const observationApi = {
     request<{ event: ObservationEvent }>(`/v1/observations/events/${encodeURIComponent(eventID)}`, undefined, { source_id: opts?.source_id, project: opts?.project }),
   healthStats: (project?: string, since?: string) =>
     request<HealthStats>('/v1/observations/stats/health', undefined, { project, since }),
+  // Hint tier effectiveness (docs/supervisor-model.md §6.6): helpful/harmful
+  // rates per matcher tier. Lives on the JOURNAL (the matcher's own
+  // telemetry), not on the kernel — the workspaceApi twin of this call 404'd
+  // forever, leaving the supervisor's tier panel silently empty.
+  hintEffectiveness: (project?: string) =>
+    request<{ tiers: { tier: string; helpful: number; harmful: number; helpful_rate_pct: number }[]; since: string }>(
+      '/v1/observations/hints/effectiveness', undefined, { project }),
 }
 
 /** All events of one run, oldest-first, following journal cursors to the end.

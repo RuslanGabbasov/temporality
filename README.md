@@ -58,7 +58,7 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
 curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
 cp .env.example .env   # настроить TEMPORALITY_MODEL_* и опционально песочницу
-TEMPORALITY_VERSION=2026.2.0 docker compose up -d
+TEMPORALITY_VERSION=2026.2.10 docker compose up -d
 ```
 
 `TEMPORALITY_VERSION` — версия образов (см. [релизы](https://github.com/RuslanGabbasov/temporality/releases));
@@ -96,6 +96,28 @@ Temporal (UI на `:8233`), Agent Kernel (`:8090`), SearXNG (`127.0.0.1:8889`,
 ```sh
 make stack-stop
 ```
+
+## Производительность (измерено)
+
+Heavy-профиль нагрузочного теста: каждый ран — 4 модельных хода, два
+выполнения команд в песочнице (~10 s), пауза `ask_human` с ответом
+симулированного человека (~46 s), финальный ответ — непрерывный стрим
+~9.4 минут. Провайдер — детерминированный мок (`examples/mockllm`);
+методология, инструментация и скрипты — в репозитории.
+
+| Метрика | 25 ранов | 50 ранов | 100 ранов |
+|---|---|---|---|
+| Завершившихся | 25/25 | 50/50 | **100/100** |
+| Длительность рана p50 | 614.9 s | 614.9 s | **615.0 s** |
+| Старт-API p95 | 9 ms | 6 ms | 6 ms |
+| HITL пауз отвечено | 25 | 50 | 100 |
+| Пик CPU: journal / postgres / kernel | 1.5 / 0.9 / 1.0 ядра | 2.2 / 0.8 / 1.0 | 3.2 / 1.1 / 1.2 |
+
+Ключевое: **длительность рана — константа** на всей лестнице — четырёхкратный
+рост параллелизма не стоил агентам ни миллисекунды; рост journal сублинейный;
+суммарный пик ~5 ядер из 6 на тестовой VM (Xeon E5-2665, 6 ядер, 32 ГБ).
+Полная методология, срезы счётчиков и история итераций —
+[`docs/resilience-and-scale.md`](docs/resilience-and-scale.md#6-измеренные-результаты-heavy-профиль-на-6-ядрах).
 
 ## Настройка модели
 

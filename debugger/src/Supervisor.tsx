@@ -194,7 +194,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.insight', limit: 50 }),
         observationApi.events(undefined, undefined, undefined, undefined, { type: 'supervisor.verdict.acknowledged', limit: 300 }),
         workspaceApi.getSupervisorSettings().catch(() => null),
-        workspaceApi.hintEffectiveness().catch(() => null),
+        observationApi.hintEffectiveness().catch(() => null),
       ])
       setVerdicts(verdictPage.events ?? [])
       setInsights(insightPage.events ?? [])
@@ -670,11 +670,23 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                             <div style={{ borderLeft: '2px solid var(--tm-teal)', paddingLeft: '0.45rem' }}>
                               <div><Tag type="blue" size="sm">{t('supervisor.compare_new') ?? 'new'}</Tag>{' '}{dossierLink(cf.newID, newLinkProject)}</div>
-                              <div style={{ marginTop: '0.2rem', lineHeight: 1.45 }}><CompareText text={newProp} other={oldProp} /></div>
+                              <div style={{ marginTop: '0.2rem', lineHeight: 1.45 }}>
+                                {newProp
+                                  ? <CompareText text={newProp} other={oldProp} />
+                                  : fallbackNew && fallbackNew.text === ''
+                                    ? <span style={{ color: 'var(--tm-text-3)', fontStyle: 'italic' }}>{t('supervisor.compare_missing') ?? 'knowledge not found (removed or not visible to your account)'}</span>
+                                    : <span style={{ color: 'var(--tm-text-3)' }}>…</span>}
+                              </div>
                             </div>
                             <div style={{ borderLeft: '2px solid var(--tm-border)', paddingLeft: '0.45rem' }}>
                               <div><Tag type="warm-gray" size="sm">{t('supervisor.compare_old') ?? 'existing'}</Tag>{' '}{dossierLink(cf.oldID, oldLinkProject)}</div>
-                              <div style={{ marginTop: '0.2rem', lineHeight: 1.45 }}><CompareText text={oldProp} other={newProp} /></div>
+                              <div style={{ marginTop: '0.2rem', lineHeight: 1.45 }}>
+                                {oldProp
+                                  ? <CompareText text={oldProp} other={newProp} />
+                                  : fallbackOld && fallbackOld.text === ''
+                                    ? <span style={{ color: 'var(--tm-text-3)', fontStyle: 'italic' }}>{t('supervisor.compare_missing') ?? 'knowledge not found (removed or not visible to your account)'}</span>
+                                    : <span style={{ color: 'var(--tm-text-3)' }}>…</span>}
+                              </div>
                             </div>
                           </div>
                           {(newProp || oldProp) && (

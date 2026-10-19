@@ -161,6 +161,7 @@ export const ru: Record<string, string> = {
     'supervisor.compare_new': 'новое',
     'supervisor.compare_old': 'существующее',
     'supervisor.compare_hint': 'Подсвечены слова, которых нет на другой стороне',
+    'supervisor.compare_missing': 'Знание не найдено — удалено или не видно вашему аккаунту',
     'supervisor.compare_score': 'косинус {{score}}',
     'supervisor.bulk_select_all': 'Выбрать все',
     'supervisor.bulk_select_row': 'Выбрать строку',

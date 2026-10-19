@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/temporality-project/temporality/controlplane"
@@ -46,6 +47,11 @@ type Server struct {
 	counters *endpointCounters
 	// handler: the middleware-wrapped mux, built by NewServer.
 	handler http.Handler
+	// knowledge projection cache (project → visible+aliased items), TTL-bound
+	// and invalidated by the knowledge-mutating handlers. Guarded by its own
+	// mutex: the projection is the journal's most expensive read path.
+	knowledgeMu    sync.Mutex
+	knowledgeCache map[string]knowledgeCacheEntry
 }
 
 // Option customizes the journal server.
@@ -145,7 +151,7 @@ func applyAreaAliases(items []observation.Knowledge, aliases map[string]AreaAlia
 // NewServer builds the journal API server with access to its non-handler
 // surfaces (the debug counters). New is the handler-only convenience form.
 func NewServer(store observation.Store, log *slog.Logger, gate *controlplane.Gate, opts ...Option) *Server {
-	s := &Server{store: store, gate: gate, log: log, now: time.Now}
+	s := &Server{store: store, gate: gate, log: log, now: time.Now, knowledgeCache: map[string]knowledgeCacheEntry{}}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -255,9 +261,13 @@ func (s *Server) appendObservations(w http.ResponseWriter, r *http.Request) {
 	}
 	result := observationIngestResult{Results: make([]observationEventResult, 0, len(input.Events))}
 	partialFailure := false
+	knowledgeProjects := map[string]bool{}
 	for _, event := range input.Events {
 		event.ReceivedAt = s.now().UTC()
 		inserted, err := s.store.AppendObservation(r.Context(), event)
+		if inserted && err == nil && strings.HasPrefix(event.Type, "knowledge.") && event.Context.Project != "" {
+			knowledgeProjects[event.Context.Project] = true
+		}
 		entry := observationEventResult{SourceID: event.Source.ID, EventID: event.EventID}
 		switch {
 		case err != nil:
@@ -280,6 +290,17 @@ func (s *Server) appendObservations(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusOK
 	if partialFailure {
 		status = http.StatusMultiStatus
+	}
+	for project := range knowledgeProjects {
+		s.invalidateKnowledge(project)
+	}
+	// Shared-scope events (proposals born shared, promotions) change what
+	// every project sees — a per-project drop would leave stale neighbors.
+	for _, event := range input.Events {
+		if strings.HasPrefix(event.Type, "knowledge.") && (event.Data["scope_kind"] == "organization" || event.Data["scope_kind"] == "org_unit" || event.Type == "knowledge.promoted") {
+			s.invalidateAllKnowledge()
+			break
+		}
 	}
 	writeJSON(w, status, result)
 }
@@ -640,6 +661,83 @@ func stringData(data map[string]any, key string) string {
 	return value
 }
 
+// knowledgeCacheTTL bounds how long a projected knowledge listing stays
+// warm. The projection walks every knowledge event of the project (plus
+// shared-scope events) per request — the supervisor's conflict panel and the
+// explorer pay it on every call. A short TTL turns the N-lookup fallback walk
+// and page flips into single projections; any knowledge-mutating call drops
+// the project's entry immediately, so staleness is bounded by TTL anyway.
+const knowledgeCacheTTL = 15 * time.Second
+
+type knowledgeCacheEntry struct {
+	items    []observation.Knowledge
+	chain    []string
+	computed time.Time
+}
+
+// cachedKnowledge returns the project's visible, alias-normalized knowledge —
+// the projection the listing (and every filter/pagination on top of it)
+// builds on. Bitemporal queries skip the cache: their inputs are the
+// timestamps themselves. The returned slice is shared between requests —
+// callers must not sort or filter it in place.
+func (s *Server) cachedKnowledge(ctx context.Context, project string, asOf, knownAt *time.Time) ([]observation.Knowledge, []string, error) {
+	if asOf != nil || knownAt != nil {
+		return s.computeKnowledge(ctx, project, asOf, knownAt)
+	}
+	s.knowledgeMu.Lock()
+	entry, ok := s.knowledgeCache[project]
+	s.knowledgeMu.Unlock()
+	if ok && time.Since(entry.computed) < knowledgeCacheTTL {
+		return entry.items, entry.chain, nil
+	}
+	items, chain, err := s.computeKnowledge(ctx, project, nil, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	s.knowledgeMu.Lock()
+	// Cap the cache: an installation with hundreds of projects must not grow
+	// it unbounded; a full map drop on overflow is fine (next reads recompute).
+	if len(s.knowledgeCache) >= 64 && !ok {
+		s.knowledgeCache = map[string]knowledgeCacheEntry{}
+	}
+	s.knowledgeCache[project] = knowledgeCacheEntry{items: items, chain: chain, computed: time.Now()}
+	s.knowledgeMu.Unlock()
+	return items, chain, nil
+}
+
+// invalidateKnowledge drops the project's cached projection. Called from the
+// knowledge-mutating handlers (ingest of knowledge.* events, invalidate,
+// challenge, promote) so a manual action is visible without waiting the TTL.
+func (s *Server) invalidateKnowledge(project string) {
+	s.knowledgeMu.Lock()
+	delete(s.knowledgeCache, project)
+	s.knowledgeMu.Unlock()
+}
+
+// invalidateAllKnowledge drops every project's projection: scope changes
+// (promotion to org_unit/organization, shared-scope proposals) change what
+// OTHER projects see, so a single-project drop would leave stale listings
+// everywhere else.
+func (s *Server) invalidateAllKnowledge() {
+	s.knowledgeMu.Lock()
+	s.knowledgeCache = map[string]knowledgeCacheEntry{}
+	s.knowledgeMu.Unlock()
+}
+
+func (s *Server) computeKnowledge(ctx context.Context, project string, asOf, knownAt *time.Time) ([]observation.Knowledge, []string, error) {
+	events, chain, err := s.visibleKnowledgeEvents(ctx, project, asOf, knownAt)
+	if err != nil {
+		return nil, nil, err
+	}
+	knowledge, err := observation.ProjectKnowledge(events)
+	if err != nil {
+		return nil, nil, err
+	}
+	knowledge = filterKnowledgeVisible(knowledge, project, chain)
+	knowledge = s.withAreaAliases(ctx, project, knowledge)
+	return knowledge, chain, nil
+}
+
 func (s *Server) listObservationKnowledge(w http.ResponseWriter, r *http.Request) {
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	if project == "" {
@@ -665,20 +763,16 @@ func (s *Server) listObservationKnowledge(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	events, chain, err := s.visibleKnowledgeEvents(r.Context(), project, asOf, knownAt)
+	knowledge, _, err := s.cachedKnowledge(r.Context(), project, asOf, knownAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, errors.New("could not load project knowledge history"))
 		return
 	}
-	knowledge, err := observation.ProjectKnowledge(events)
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err)
-		return
-	}
-	knowledge = filterKnowledgeVisible(knowledge, project, chain)
-	knowledge = s.withAreaAliases(r.Context(), project, knowledge)
 	if knowledgeID := r.URL.Query().Get("knowledge_id"); knowledgeID != "" {
-		filtered := knowledge[:0]
+		// NOT knowledge[:0]: filtering in place would corrupt the shared
+		// cached slice — an append into the zeroed head overwrites entries
+		// other readers still hold.
+		filtered := make([]observation.Knowledge, 0, len(knowledge))
 		for _, item := range knowledge {
 			if item.ID == knowledgeID {
 				filtered = append(filtered, item)
@@ -1089,6 +1183,7 @@ func (s *Server) invalidateObservationKnowledge(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, errors.New("could not record invalidation"))
 		return
 	}
+	s.invalidateKnowledge(input.Project)
 	writeJSON(w, http.StatusCreated, event)
 }
 
@@ -1177,6 +1272,7 @@ func (s *Server) challengeObservationKnowledge(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, errors.New("could not record challenge"))
 		return
 	}
+	s.invalidateKnowledge(input.Project)
 	writeJSON(w, http.StatusCreated, event)
 }
 
@@ -1289,6 +1385,7 @@ func (s *Server) promoteObservationKnowledge(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, errors.New("could not record promotion"))
 		return
 	}
+	s.invalidateAllKnowledge()
 	writeJSON(w, http.StatusCreated, event)
 }
 
