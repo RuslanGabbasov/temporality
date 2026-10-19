@@ -19,9 +19,11 @@ import (
 const jsonRepairInstruction = `Your previous reply was not the requested JSON object. Respond again with the single JSON object matching the schema — JSON only, no prose, no markdown fences.`
 
 // completeParsed runs one model call and parses the reply as JSON. It asks
-// for JSON mode up front and falls back to one corrective retry when parsing
-// still fails: small models occasionally answer conversationally despite
-// instructions (and some providers ignore response_format altogether).
+// for JSON mode up front, repairs the common small-model breakage (raw
+// control characters inside strings, trailing commas) without a second call,
+// and falls back to a corrective retry when parsing still fails: small models
+// occasionally answer conversationally despite instructions (and some
+// providers ignore response_format altogether).
 func completeParsed[T any](ctx context.Context, model *llm.Client, messages []llm.Message, parse func(string) (T, error)) (T, error) {
 	var zero T
 	completion, err := model.Complete(ctx, messages, nil, llm.JSONMode())
@@ -32,6 +34,13 @@ func completeParsed[T any](ctx context.Context, model *llm.Client, messages []ll
 	if parseErr == nil {
 		return parsed, nil
 	}
+	// Repair pass on the same output: raw newlines in strings and trailing
+	// commas are the dominant failure of small models against nested schemas.
+	if repaired, changed := repairJSONLoose(completion.Content); changed {
+		if parsed, err := parse(repaired); err == nil {
+			return parsed, nil
+		}
+	}
 	retry := append(append(make([]llm.Message, 0, len(messages)+2), messages...),
 		llm.Message{Role: "assistant", Content: completion.Content},
 		llm.Message{Role: "user", Content: jsonRepairInstruction},
@@ -40,30 +49,67 @@ func completeParsed[T any](ctx context.Context, model *llm.Client, messages []ll
 	if err != nil {
 		return zero, fmt.Errorf("model call failed: %w", err)
 	}
-	return parse(completion.Content)
+	parsed, parseErr = parse(completion.Content)
+	if parseErr == nil {
+		return parsed, nil
+	}
+	if repaired, changed := repairJSONLoose(completion.Content); changed {
+		if parsed, err := parse(repaired); err == nil {
+			return parsed, nil
+		}
+	}
+	return zero, parseErr
 }
 
 // extractJSONObject returns the most likely JSON object payload in content:
-// leading/trailing prose, markdown fences and reasoning blocks are dropped.
-// When no balanced object can be located the trimmed content is returned and
-// ok is false, so the caller's json.Unmarshal reports a meaningful error.
+// leading/trailing prose, reasoning blocks and markdown fences are dropped.
+// The string-aware balanced scan runs FIRST — a fence inside a string value
+// (markdown bodies regularly contain them) must not be mistaken for a wrapper.
+// Fence-stripping is the fallback for outputs that wrap the whole object in a
+// code block. When no balanced object can be located the trimmed content is
+// returned and ok is false, so the caller's json.Unmarshal reports a
+// meaningful error.
 func extractJSONObject(content string) (payload string, ok bool) {
 	text := strings.TrimSpace(stripReasoning(content))
+	if text == "" {
+		return "", false
+	}
+	if payload, ok := balancedObject(text); ok {
+		return payload, true
+	}
+	// Raw control characters inside string values (small-model breakage) make
+	// candidates fail json.Valid — retry the scan over the repaired text.
+	if repaired, changed := repairJSONLoose(text); changed {
+		if payload, ok := balancedObject(repaired); ok {
+			return payload, true
+		}
+	}
+	// Fenced wrapper: the model wrapped the whole object in a code block.
 	if start := strings.Index(text, "```"); start >= 0 {
 		if nl := strings.IndexByte(text[start:], '\n'); nl > 0 {
 			rest := text[start+nl+1:]
 			if end := strings.LastIndex(rest, "```"); end >= 0 {
-				text = strings.TrimSpace(rest[:end])
+				fenced := strings.TrimSpace(rest[:end])
+				if payload, ok := balancedObject(fenced); ok {
+					return payload, true
+				}
+				if repaired, changed := repairJSONLoose(fenced); changed {
+					if payload, ok := balancedObject(repaired); ok {
+						return payload, true
+					}
+				}
 			}
 		}
 	}
-	if text == "" {
-		return "", false
-	}
-	if strings.HasPrefix(text, "{") && json.Valid([]byte(text)) {
-		return text, true
-	}
-	// Scan for the first balanced, valid object wherever it sits in the text.
+	return text, false
+}
+
+// balancedObject scans for the first balanced {…} whose content passes
+// json.Valid — directly, or after the loose repair (raw newlines inside
+// strings, trailing commas). String-aware: braces inside string values do
+// not affect depth. The repaired candidate is returned so downstream
+// unmarshals see valid JSON.
+func balancedObject(text string) (string, bool) {
 	depth, start := 0, -1
 	inString, escaped := false, false
 	for i := 0; i < len(text); i++ {
@@ -76,6 +122,10 @@ func extractJSONObject(content string) (payload string, ok bool) {
 				escaped = true
 			case c == '"':
 				inString = false
+			case c < 0x20:
+				// A raw control character inside a string poisons every
+				// candidate from here on — no point continuing this scan.
+				return "", false
 			}
 			continue
 		}
@@ -95,12 +145,81 @@ func extractJSONObject(content string) (payload string, ok bool) {
 					if json.Valid([]byte(candidate)) {
 						return candidate, true
 					}
+					if repaired, changed := repairJSONLoose(candidate); changed && json.Valid([]byte(repaired)) {
+						return repaired, true
+					}
 					start = -1
 				}
 			}
 		}
 	}
-	return text, false
+	return "", false
+}
+
+// repairJSONLoose normalizes the two breakage modes of small models against
+// nested JSON schemas: raw control characters (newlines, tabs) inside string
+// values, and trailing commas before a closing brace/bracket. Valid JSON
+// passes through unchanged. Structural text outside strings is untouched.
+func repairJSONLoose(s string) (string, bool) {
+	var b strings.Builder
+	b.Grow(len(s))
+	inString, escaped := false, false
+	changed := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				b.WriteByte(c)
+				continue
+			}
+			switch c {
+			case '\\':
+				escaped = true
+				b.WriteByte(c)
+			case '"':
+				inString = false
+				b.WriteByte(c)
+			case '\n':
+				b.WriteString("\\n")
+				changed = true
+			case '\r':
+				b.WriteString("\\r")
+				changed = true
+			case '\t':
+				b.WriteString("\\t")
+				changed = true
+			default:
+				if c < 0x20 {
+					b.WriteString(fmt.Sprintf("\\u%04x", c))
+					changed = true
+				} else {
+					b.WriteByte(c)
+				}
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+			b.WriteByte(c)
+		case ',', ']', '}':
+			if c == ',' {
+				j := i + 1
+				for j < len(s) && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' || s[j] == '\r') {
+					j++
+				}
+				if j < len(s) && (s[j] == '}' || s[j] == ']') {
+					changed = true
+					continue // trailing comma: dropped
+				}
+			}
+			b.WriteByte(c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String(), changed
 }
 
 // stripReasoning removes complete <think>…</think> blocks (some providers do
