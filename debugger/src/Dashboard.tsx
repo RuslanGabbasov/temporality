@@ -426,6 +426,7 @@ export default function Dashboard({ project, setProject }: Props) {
                   <Fragment key={d.path}>
                     <span title={d.path} style={{ color: 'var(--tm-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('dashboard.server_disk') ?? 'disk'} {d.path}</span>
                     <span style={{ color: d.total_bytes > 0 && d.free_bytes / d.total_bytes < 0.1 ? 'var(--tm-danger)' : 'var(--tm-text)' }}>
+                      <span style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.storage_free') ?? 'free'} </span>
                       {fmtBytes(d.free_bytes)}
                       <span style={{ color: 'var(--tm-text-3)' }}> / {fmtBytes(d.total_bytes)}</span>
                     </span>
