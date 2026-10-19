@@ -6930,6 +6930,14 @@ func main() {
 			return judgeModelClient(ctx, ws, secretMasterKey)
 		},
 	}
+	// Target-run answers follow the message's channel: the loop's watcher
+	// follows the run and delivers the final answer to the sender's chat.
+	targetWatchers := map[string]func(row workspace.InboundMessage, runID string){}
+	intake.targetRunWatcher = func(row workspace.InboundMessage, runID string) {
+		if watcher, ok := targetWatchers[row.Channel]; ok && watcher != nil {
+			watcher(row, runID)
+		}
+	}
 	intakeEmitter := intakeEventEnqueuer(events.Enqueue, activities.SourceID)
 	// Internal intake endpoints (docs/inbound-messages.md §7): the intake
 	// agent's tools call them loopback with the kernel token; every identity
@@ -6970,6 +6978,7 @@ func main() {
 				hook: hook,
 				log:  log,
 			}
+			targetWatchers[driver.Type()] = receiver.loop.WatchTargetRun
 			mux.HandleFunc(hook.Route(), receiver.handle)
 			log.Info("channel webhook registered", "channel", driver.Type(), "route", hook.Route())
 			continue
@@ -7001,6 +7010,7 @@ func main() {
 			ratePerHour:   intakeRatePerHour,
 			events:        events,
 		}
+		targetWatchers[driver.Type()] = loop.WatchTargetRun
 		go loop.run(ctx)
 	}
 	// The gate wraps everything except the password-login route: an

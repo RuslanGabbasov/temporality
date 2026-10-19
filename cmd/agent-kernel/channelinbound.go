@@ -458,24 +458,29 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 	// sender's chat. The run answer is delivered when the run settles; the
 	// watcher is best-effort (a kernel restart drops the wait — the answer
 	// stays visible in the product UI).
-	go l.watchIntakeAnswer(ctx, row, runID)
+	go l.watchRunAnswer(ctx, row, runID, true)
 }
 
-// watchIntakeAnswer polls the intake run to its terminal state and delivers
-// the agent's answer back to the sender's chat. While the run generates, the
-// bot keeps an m.typing flag alive in the room (the homeserver expires it
-// every 30s, the 5s poll refreshes it) — the sender sees the agent is alive.
-// ask_human pauses inside the intake dialog are delivered by the notify
-// machinery already; this closes the loop on the final verdict. Bounded
-// wait: past it the delivery is dropped with a log line (the answer remains
-// in the product UI).
-func (l *channelInboundLoop) watchIntakeAnswer(ctx context.Context, row *workspace.InboundMessage, runID string) {
-	watchCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+// WatchTargetRun follows a start_task target run and delivers its final
+// answer to the message's chat — the public face of the loop's watcher for
+// the intake runner's routed-runs callback.
+func (l *channelInboundLoop) WatchTargetRun(row workspace.InboundMessage, runID string) {
+	go l.watchRunAnswer(context.Background(), &row, runID, false)
+}
+
+// watchRunAnswer polls a run to its terminal state and delivers the agent's
+// answer back to the sender's chat. Used for the intake verdict AND for
+// start_task target runs — both must reach the same chat. ask_human pauses
+// inside the dialog are delivered by the notify machinery already; this
+// closes the loop on the final verdict. Bounded wait: past it the delivery
+// is dropped with a log line (the answer remains in the product UI).
+func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.InboundMessage, runID string, markAnswered bool) {
+	watchCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 	defer cancel()
 	const pollEvery = 5 * time.Second
 	settings, sErr := l.settings(watchCtx)
 	if sErr != nil {
-		l.log.Warn("intake answer watch", "channel", l.driver.Type(), "error", sErr)
+		l.log.Warn("run answer watch", "channel", l.driver.Type(), "error", sErr)
 		return
 	}
 	address := row.Room
@@ -490,24 +495,26 @@ func (l *channelInboundLoop) watchIntakeAnswer(ctx context.Context, row *workspa
 	for {
 		run, err := l.store.GetRun(watchCtx, runID)
 		if err != nil {
-			l.log.Warn("intake answer watch", "run", runID, "error", err)
+			l.log.Warn("run answer watch", "run", runID, "error", err)
 			return
 		}
 		switch run.Status {
 		case "completed", "failed", "cancelled":
 			if run.Answer == "" {
-				l.log.Warn("intake run finished without an answer", "run", runID, "status", run.Status)
+				l.log.Warn("run finished without an answer", "run", runID, "status", run.Status)
 				return
 			}
 			deliverCtx, cancel := context.WithTimeout(watchCtx, 20*time.Second)
 			dErr := l.driver.SendText(deliverCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: run.Answer})
 			cancel()
 			if dErr != nil {
-				l.log.Warn("intake answer delivery", "channel", l.driver.Type(), "chat", address, "error", dErr)
+				l.log.Warn("run answer delivery", "channel", l.driver.Type(), "chat", address, "error", dErr)
 				return
 			}
-			_ = l.store.UpdateInboundMessage(watchCtx, row.ID, workspace.InboundMessageUpdate{Status: workspace.InboundStatusAnswered})
-			l.log.Info("intake answer delivered", "channel", l.driver.Type(), "chat", address, "run", runID)
+			if markAnswered {
+				_ = l.store.UpdateInboundMessage(watchCtx, row.ID, workspace.InboundMessageUpdate{Status: workspace.InboundStatusAnswered})
+			}
+			l.log.Info("run answer delivered", "channel", l.driver.Type(), "chat", address, "run", runID)
 			return
 		}
 		if canType {
@@ -519,7 +526,7 @@ func (l *channelInboundLoop) watchIntakeAnswer(ctx context.Context, row *workspa
 		}
 		select {
 		case <-watchCtx.Done():
-			l.log.Warn("intake answer watch gave up", "run", runID)
+			l.log.Warn("run answer watch gave up", "run", runID)
 			return
 		case <-time.After(pollEvery):
 		}

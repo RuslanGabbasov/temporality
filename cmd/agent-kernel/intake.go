@@ -187,6 +187,10 @@ type intakeRunner struct {
 	sourceID   string
 	activities *agent.Activities
 	costPrices cost.Config
+	// targetRunWatcher is invoked (goroutine) after start_task routes a
+	// channel message to a new run: it follows the target run and delivers
+	// its final answer back to the sender's chat. Set by the channel loop.
+	targetRunWatcher func(row workspace.InboundMessage, runID string)
 	// Wave C3: the supervisor model factory for amendment-target validation;
 	// nil disables the check.
 	supervisorModel func(ctx context.Context) (*llm.Client, error)
@@ -857,6 +861,12 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 		_ = r.ws.UpdateInboundMessage(req.Context(), row.ID, workspace.InboundMessageUpdate{
 			ProjectID: body.ProjectID, TargetRunID: runID, Status: workspace.InboundStatusRouted,
 		})
+		// The target run's answer must reach the same chat the message came
+		// from: the loop's watcher follows it to terminal state and delivers
+		// the answer through the channel driver.
+		if r.targetRunWatcher != nil {
+			go r.targetRunWatcher(row, runID)
+		}
 		if emit != nil {
 			// The event lands in the intake scope; the target project sees the
 			// routing through the run row and its own run events — dual visibility
