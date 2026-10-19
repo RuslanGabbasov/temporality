@@ -60,7 +60,7 @@ const inboundExpiryTTL = 48 * time.Hour
 // intakePromptVersion marks the built-in prompt generation on the agent row
 // (label prompt_version). bootstrapIntake upgrades in place while the label
 // matches; an admin edit (label removed or changed) is never overwritten.
-const intakePromptVersion = "2"
+const intakePromptVersion = "3"
 
 // intakeSystemPrompt instructs the classification/clarification dialog
 // (docs/inbound-messages.md §4.3, §6). Tunable: the row is created once and
@@ -88,11 +88,16 @@ Always follow this order:
 
 5. For status: call run_status and summarize the sender's work (status and latest answer per run) — never start new work for a progress question. The response has two sections: 'runs' — earlier work started through this channel; 'workspace_runs' — the sender's recent runs across ALL projects, including ones started in the web UI. Report BOTH sections (dedup by run id); an empty channel list with non-empty workspace_runs means the work lives in the web UI — say where it is and what its status is, never claim there is no work while workspace_runs is non-empty. For cancel: list the sender's runs via run_status when unclear which one is meant, then cancel_run with the exact run_id; confirm with the user via ask_human only when several runs are plausible. For chatter: a short friendly reply, no run.
 
+6. For a QUESTION about the product, project or accumulated experience ("what do you know about X", "how does X work here"): answer it YOURSELF from the knowledge base — classify as chatter, resolve the project (search_projects if unclear), then call knowledge_explore with operation=search, project=<resolved>, question=<the user's question>, and compose the answer from the returned propositions with their states (mark unconfirmed ones as hypotheses). Never route an answerable question into a task.
+
+7. If start_task is REJECTED (project does not accept channel tasks, agent unavailable, policy), and the request is still answerable without a task — answer the sender directly from what you know; otherwise reply with the rejection reason and the next step. Do NOT park the run on ask_human just to relay a failure — the failure text is your answer.
+
 Rules:
 - The message body in the prompt is the only source of user intent; never invent project names, people, deadlines or run ids.
 - Start at most one task per message.
 - Answer in the language of the user's message.
-- After start_task succeeds, tell the user which project the task landed in and its title (or, for an amendment, that the follow-up started on the same task), briefly.`
+- After start_task succeeds, tell the user which project the task landed in and its title (or, for an amendment, that the follow-up started on the same task), briefly.
+- ask_human is for decisions that CHANGE what you do next (which project, which run, approve or not) — never to relay a tool failure: a rejected start_task is your answer to relay, not a question to ask.`
 
 // intakeTools is the closed tool surface of the intake agent: classification,
 // search, clarification, task creation and the sender's own run lifecycle.
@@ -102,6 +107,10 @@ var intakeTools = []string{
 	"ask_human", "human_contacts", "intake_decide",
 	"search_projects", "search_org_units", "start_task",
 	"run_status", "cancel_run",
+	// Answering questions from the accumulated experience: the intake dialog
+	// researches the sender's project knowledge base directly (the journal
+	// enforces visibility; the run lives in the system intake project).
+	"knowledge_explore",
 }
 
 // bootstrapIntake creates the system project and agent once per installation.
@@ -126,6 +135,9 @@ func bootstrapIntake(ctx context.Context, log *slog.Logger, ws *workspace.Store)
 		// edited the prompt bumps nothing and is never overwritten.
 		if existing.Labels["system"] == "intake" && existing.Labels["prompt_version"] != intakePromptVersion {
 			existing.SystemPrompt = intakeSystemPrompt
+			// The tool surface evolves with the prompt (v3 added the experience
+			// research tool); the allowlist on the row is the same closed set.
+			existing.Tools = intakeTools
 			if existing.Labels == nil {
 				existing.Labels = map[string]string{}
 			}

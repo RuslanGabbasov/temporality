@@ -1398,6 +1398,16 @@ func (a *Activities) handleKnowledgeExploreTool(ctx context.Context, request Too
 	if request.Project == "" {
 		return ToolResult{Content: "error: project is required"}, nil
 	}
+	// The caller may target ANOTHER project than the run's own — but ONLY an
+	// intake dialog run may do that (the intake dialog lives in the system
+	// 'intake' project and answers questions about the sender's real
+	// projects). In ordinary runs the model naming a foreign project would
+	// widen its own visibility — the journal enforces the run's project.
+	if request.Project == IntakeProjectID {
+		if project, _ := request.Arguments["project"].(string); strings.TrimSpace(project) != "" {
+			request.Project = strings.TrimSpace(project)
+		}
+	}
 	operation, _ := request.Arguments["operation"].(string)
 	if operation == "" {
 		return ToolResult{Content: "error: operation is required (orient, search, expand, trace, compare, synthesize)"}, nil
