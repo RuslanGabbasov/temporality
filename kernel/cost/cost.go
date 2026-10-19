@@ -872,12 +872,20 @@ func (acc *approvalAccumulator) stats() ApprovalStats {
 // approval accumulator plus the scope's completion tokens (every generated
 // conclusion is reviewable, so output tokens proxy the read words — the
 // same estimate the dashboard health window applies).
-func (a *CostAPI) humanStats(acc *approvalAccumulator, completionTokens int) HumanStats {
+func (a *CostAPI) humanStats(acc *approvalAccumulator, completionTokens int, answerWords int) HumanStats {
 	decisions := acc.granted + acc.rejected + acc.timedOut
 	hab := int64(decisions) * int64(a.factors.ApprovalSeconds)
 	hab += int64(acc.answers) * int64(a.factors.AnswerBaseSeconds)
 	hab += int64(acc.answerRunes / 5 * 60 / a.factors.ReadingWPM)
-	hab += int64(completionTokens) * 3 / 4 * 60 / int64(a.factors.ReadingWPM)
+	// Reading (docs/supervisor-model.md §5): the final answer is read in full,
+	// the rest of the generated text is skimmed at 10%, prompts are not read
+	// at all. words ≈ tokens × 0.75.
+	answerTokens := int64(answerWords) * 4 / 3
+	skimWords := (int64(completionTokens) - answerTokens) * 3 / 4 * 10 / 100
+	if skimWords < 0 {
+		skimWords = 0
+	}
+	hab += (int64(answerWords) + skimWords) * 60 / int64(a.factors.ReadingWPM)
 	hwt := acc.waitMS / 1000
 	out := HumanStats{Decisions: decisions, Answers: acc.answers, HABSeconds: hab, HWTSeconds: hwt}
 	if total := hab + hwt; total > 0 {
@@ -890,11 +898,12 @@ func (a *CostAPI) humanStats(acc *approvalAccumulator, completionTokens int) Hum
 // (a saga) and finalizes into rollups. Shared by the per-task endpoint and
 // the project budget so both aggregate identically.
 type sagaAccumulator struct {
-	runs      map[string]*taskRunAgg
-	approvals approvalAccumulator
-	rootRunID string
-	title     string
-	firstRoot time.Time
+	runs        map[string]*taskRunAgg
+	approvals   approvalAccumulator
+	answerWords int // final-answer words (agent.summary), read in full by a human
+	rootRunID   string
+	title       string
+	firstRoot   time.Time
 }
 
 func newSagaAccumulator() *sagaAccumulator {
@@ -954,6 +963,10 @@ func (a *CostAPI) ingestSagaEvent(s *sagaAccumulator, ev observation.Event) {
 		b.CompletionTokens += comp
 		b.TotalTokens += prompt + comp
 		b.CostUSD += callUSD
+	case "agent.summary":
+		if answer, _ := ev.Data["answer"].(string); answer != "" {
+			s.answerWords += len(strings.Fields(answer))
+		}
 	default:
 		s.approvals.ingest(runID, ev)
 	}
@@ -1022,7 +1035,7 @@ func (a *CostAPI) finalizeSaga(s *sagaAccumulator, now time.Time) sagaTotals {
 	// growing to now; once everything ended it is the last end - first start.
 	out.elapsedMS = spanElapsedMS(out.firstStartedAt, out.lastEndedAt, out.running, now)
 	sort.Slice(out.runs, func(i, j int) bool { return out.runs[i].StartedAt.Before(out.runs[j].StartedAt) })
-	out.human = a.humanStats(&s.approvals, out.completionTokens)
+	out.human = a.humanStats(&s.approvals, out.completionTokens, s.answerWords)
 	return out
 }
 

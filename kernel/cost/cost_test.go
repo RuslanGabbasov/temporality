@@ -193,6 +193,7 @@ func TestAggregateTaskHumanFactors(t *testing.T) {
 	events := []observation.Event{
 		mk("run.started", "r1", "t1", base, map[string]any{"agent_id": "lead"}),
 		mk("model.completed", "r1", "t1", base.Add(time.Minute), map[string]any{"model": "m", "completion_tokens": 240}),
+		mk("agent.summary", "r1", "t1", base.Add(time.Minute), map[string]any{"answer": strings.Repeat("word ", 60)}), // 60 words read in full
 		mk("approval.requested", "r1", "t1", base.Add(2*time.Minute), map[string]any{"operation_id": "op-1", "arguments_hash": "h1"}),
 		mk("approval.granted", "r1", "t1", base.Add(5*time.Minute), map[string]any{"operation_id": "op-1", "arguments_hash": "h1"}),
 		mk("human.answered", "r1", "t1", base.Add(8*time.Minute), map[string]any{"response": "сделай вот так"}),
@@ -204,17 +205,19 @@ func TestAggregateTaskHumanFactors(t *testing.T) {
 		t.Fatalf("unexpected decisions/answers: %+v", h)
 	}
 	// HAB: one 45s decision + 20s answer base + 14 runes/5 ≈ 0 min typing
-	// + 240 tokens ≈ 180 words ≈ 60s of reading = 125s.
-	if h.HABSeconds != 125 {
-		t.Fatalf("expected 125s HAB, got %d", h.HABSeconds)
+	// + reading: answer 60 words + skim (240−80 tokens)*3/4*10% ≈ 12 words →
+	// 72 words ≈ 24s. Total 89s — the answer is read in full, the rest is a
+	// glance, prompts are not read at all.
+	if h.HABSeconds != 89 {
+		t.Fatalf("expected 89s HAB, got %d", h.HABSeconds)
 	}
 	// HWT mirrors the 3-minute approval wait.
 	if h.HWTSeconds != 180 {
 		t.Fatalf("expected 180s HWT, got %d", h.HWTSeconds)
 	}
-	// 125/(125+180) = 40%.
-	if h.FlowEfficiency != 40 {
-		t.Fatalf("expected 40%% flow efficiency, got %d", h.FlowEfficiency)
+	// 89/(89+180) = 33%.
+	if h.FlowEfficiency != 33 {
+		t.Fatalf("expected 33%% flow efficiency, got %d", h.FlowEfficiency)
 	}
 }
 
