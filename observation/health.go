@@ -3,6 +3,7 @@ package observation
 import (
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -155,6 +156,11 @@ func ComputeHealthStats(events []Event, since, now time.Time, human HumanFactors
 	pendingApprovals := map[string]time.Time{}
 	var totalWaitMS int64
 	resolvedApprovals := 0
+	// Human reading volume (§5): the words a human actually reads — final
+	// answers in full, intermediate conclusions as a 10% skim. Prompt tokens
+	// are context the human never sees.
+	totalCompletionTokens := int64(0)
+	answerWords := int64(0)
 
 	accumulator := func(event Event) *healthModelAccumulator {
 		model, _ := event.Data["model"].(string)
@@ -200,6 +206,11 @@ func ComputeHealthStats(events []Event, since, now time.Time, human HumanFactors
 			if tokens, ok := healthInt64(event.Data["total_tokens"]); ok {
 				agg.stats.TotalTokens += tokens
 			}
+			if tokens, ok := healthInt64(event.Data["completion_tokens"]); ok && tokens > 0 {
+				// Only GENERATED text is readable by a human; the prompt is
+				// context the human never sees.
+				totalCompletionTokens += tokens
+			}
 			if tokens, ok := healthInt64(event.Data["cached_tokens"]); ok {
 				agg.stats.CachedTokens += tokens
 			}
@@ -213,6 +224,12 @@ func ComputeHealthStats(events []Event, since, now time.Time, human HumanFactors
 		case "run.started":
 			stats.Runs.Started++
 			runningRuns[event.Context.Run] = true
+		case "agent.summary":
+			// The final answer is what the human actually reads in full; other
+			// generated text is skimmed (the 10% factor at the aggregation).
+			if answer, _ := event.Data["answer"].(string); answer != "" {
+				answerWords += int64(len(strings.Fields(answer)))
+			}
 		case "run.completed":
 			stats.Runs.Completed++
 			delete(runningRuns, event.Context.Run)
@@ -284,15 +301,17 @@ func ComputeHealthStats(events []Event, since, now time.Time, human HumanFactors
 		stats.Approvals.WaitMSAvg = totalWaitMS / int64(resolvedApprovals)
 	}
 	// Human factors: attention (HAB) covers the decisions actually made plus
-	// the reading volume of generated conclusions (every model turn is
-	// reviewable in the UI, so output tokens proxy the read words); wait (HWT)
-	// covers the wall-clock queue time of resolved approvals and questions.
+	// the reading volume a human actually sees: the final answer read in full,
+	// the rest of the generated text as a 10% skim, prompt tokens not at all
+	// (context the human never reads). words ≈ tokens × 0.75.
 	stats.Human.ApprovalDecisions = resolvedApprovals
 	stats.Human.HABSeconds += int64(resolvedApprovals) * int64(human.ApprovalSeconds)
-	for _, agg := range models {
-		// words ≈ tokens × 0.75; seconds = words / WPM × 60.
-		stats.Human.HABSeconds += agg.stats.TotalTokens * 3 / 4 * 60 / int64(human.ReadingWPM)
+	answerTokens := answerWords * 4 / 3
+	skimWords := (totalCompletionTokens - answerTokens) * 3 / 4 * 10 / 100
+	if skimWords < 0 {
+		skimWords = 0
 	}
+	stats.Human.HABSeconds += (answerWords + skimWords) * 60 / int64(human.ReadingWPM)
 	stats.Human.HWTSeconds = totalWaitMS / 1000
 	total := stats.Human.HABSeconds + stats.Human.HWTSeconds
 	if total > 0 {

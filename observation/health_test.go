@@ -2,6 +2,7 @@ package observation
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -322,25 +323,30 @@ func TestComputeHealthStatsHumanFactors(t *testing.T) {
 		approval("op-1", base.Add(10*time.Minute), "approval.granted"), // 10 min queue wait
 		{EventID: "answer/1", OccurredAt: base.Add(time.Minute), Type: "human.answered",
 			Context: Context{Run: "r-1"}, Data: map[string]any{"response": "делай так"}},
-		// 900 output tokens of generated conclusions: 900*3/4 = 675 words.
+		// 900 completion tokens of generated text (100 words of it is the final
+		// answer read in full, the rest is skimmed at 10%).
 		{EventID: "mc/1", OccurredAt: base, Type: "model.completed",
-			Context: Context{Run: "r-1"}, Data: map[string]any{"model": "m", "total_tokens": 900}},
+			Context: Context{Run: "r-1"}, Data: map[string]any{"model": "m", "total_tokens": 5000, "completion_tokens": 900}},
+		{EventID: "summary/1", OccurredAt: base, Type: "agent.summary",
+			Context: Context{Run: "r-1"}, Data: map[string]any{"answer": strings.Repeat("word ", 100)}},
 	}
 	factors := HumanFactors{ApprovalSeconds: 45, AnswerBaseSeconds: 20, ReadingWPM: 180}
 	stats := ComputeHealthStats(events, base.Add(-time.Minute), base.Add(time.Hour), factors)
 
 	// HAB: approval 45s + answer base 20s + typing 7 runes/5 → 1 word → 0s +
-	// reading 675 words / 180 wpm → 225s = 290s.
-	if stats.Human.HABSeconds != 290 {
-		t.Errorf("HAB = %d, want 290", stats.Human.HABSeconds)
+	// reading: answer 100 words + skim (900−133 tokens)*3/4*10% ≈ 57 words →
+	// 157 words / 180 wpm → 52s. Total 117s. The old formula counted all 900
+	// tokens (and even total_tokens with prompts) — hours of phantom reading.
+	if stats.Human.HABSeconds != 117 {
+		t.Errorf("HAB = %d, want 117", stats.Human.HABSeconds)
 	}
 	// HWT: one resolved approval waited 10 minutes.
 	if stats.Human.HWTSeconds != 600 {
 		t.Errorf("HWT = %d, want 600", stats.Human.HWTSeconds)
 	}
-	// Flow efficiency = 290 / (290 + 600) ≈ 32%.
-	if stats.Human.FlowEfficiency != 32 {
-		t.Errorf("flow efficiency = %d, want 32", stats.Human.FlowEfficiency)
+	// Flow efficiency = 117 / (117 + 600) ≈ 16%.
+	if stats.Human.FlowEfficiency != 16 {
+		t.Errorf("flow efficiency = %d, want 16", stats.Human.FlowEfficiency)
 	}
 	if stats.Human.ApprovalDecisions != 1 || stats.Human.AskHumanAnswered != 1 {
 		t.Errorf("decisions/answers = %d/%d, want 1/1", stats.Human.ApprovalDecisions, stats.Human.AskHumanAnswered)

@@ -2,6 +2,7 @@ package observation
 
 import (
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -48,7 +49,11 @@ func ComputeRunHumanFactors(events []Event, human HumanFactors) RunHumanFactors 
 	pending := map[string]time.Time{}
 	var waitMS int64
 	resolved := 0
-	outputTokens := int64(0)
+	// Reading volume: the final answer (agent.summary) read in full, the rest
+	// of the generated text as a 10% skim, prompts not at all — a human never
+	// reads the context, only conclusions (docs/supervisor-model.md §5).
+	completionTokens := int64(0)
+	answerWords := int64(0)
 	for _, event := range ordered {
 		switch event.Type {
 		case "approval.requested":
@@ -96,8 +101,12 @@ func ComputeRunHumanFactors(events []Event, human HumanFactors) RunHumanFactors 
 				delete(pending, healthApprovalKey(event))
 			}
 		case "model.completed":
-			if tokens, _ := event.Data["output_tokens"].(float64); tokens > 0 {
-				outputTokens += int64(tokens)
+			if tokens, _ := event.Data["completion_tokens"].(float64); tokens > 0 {
+				completionTokens += int64(tokens)
+			}
+		case "agent.summary":
+			if answer, _ := event.Data["answer"].(string); answer != "" {
+				answerWords += int64(len(strings.Fields(answer)))
 			}
 		}
 	}
@@ -105,7 +114,12 @@ func ComputeRunHumanFactors(events []Event, human HumanFactors) RunHumanFactors 
 	if resolved > 0 {
 		factors.HWTMSAvg = waitMS / int64(resolved)
 	}
-	factors.HABSeconds += outputTokens * 3 / 4 * 60 / int64(human.ReadingWPM)
+	answerTokens := answerWords * 4 / 3
+	skimWords := (completionTokens - answerTokens) * 3 / 4 * 10 / 100
+	if skimWords < 0 {
+		skimWords = 0
+	}
+	factors.HABSeconds += (answerWords + skimWords) * 60 / int64(human.ReadingWPM)
 	return factors
 }
 

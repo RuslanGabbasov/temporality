@@ -21,7 +21,10 @@ export function humanFactorsOf(events: ObservationEvent[]): RunHumanFactors {
   const ordered = [...events].sort((a, b) => a.occurred_at.localeCompare(b.occurred_at) || a.event_id.localeCompare(b.event_id))
   const pending = new Map<string, string>() // key → occurred_at
   const key = (event: ObservationEvent) => `${event.context?.run ?? ''}\x00${event.data?.operation_id ?? ''}\x00${event.data?.arguments_hash ?? ''}`
-  let outputTokens = 0
+  // Reading volume: the final answer read in full, the rest of the generated
+  // text as a 10% skim, prompts not at all — a human never reads the context.
+  let completionTokens = 0
+  let answerWords = 0
   let waitMS = 0
   for (const event of ordered) {
     switch (event.type) {
@@ -67,13 +70,20 @@ export function humanFactorsOf(events: ObservationEvent[]): RunHumanFactors {
         pending.delete(key(event))
         break
       case 'model.completed': {
-        const tokens = Number(event.data?.output_tokens ?? 0)
-        if (tokens > 0) outputTokens += tokens
+        const tokens = Number(event.data?.completion_tokens ?? 0)
+        if (tokens > 0) completionTokens += tokens
+        break
+      }
+      case 'agent.summary': {
+        const answer = String(event.data?.answer ?? '')
+        if (answer) answerWords += answer.split(/\s+/).filter(Boolean).length
         break
       }
     }
   }
   factors.hwtSeconds = Math.floor(waitMS / 1000)
-  factors.habSeconds += Math.floor(outputTokens * 3 / 4 * 60 / READING_WPM)
+  const answerTokens = answerWords * 4 / 3
+  const skimWords = Math.max(0, (completionTokens - answerTokens) * 3 / 4 * 0.1)
+  factors.habSeconds += Math.floor((answerWords + skimWords) * 60 / READING_WPM)
   return factors
 }
