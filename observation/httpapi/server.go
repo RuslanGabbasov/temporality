@@ -42,6 +42,10 @@ type Server struct {
 	topicAliases func(ctx context.Context, project string) (map[string]AreaAlias, error)
 	// humanFactors resolves the HAB estimate coefficients. Optional.
 	humanFactors func(ctx context.Context) (observation.HumanFactors, error)
+	// counters: per-route request accounting, read by the debug listener.
+	counters *endpointCounters
+	// handler: the middleware-wrapped mux, built by NewServer.
+	handler http.Handler
 }
 
 // Option customizes the journal server.
@@ -138,14 +142,15 @@ func applyAreaAliases(items []observation.Knowledge, aliases map[string]AreaAlia
 	return items
 }
 
-// New serves the journal API. A nil gate disables authentication (local
-// development); team deployments pass a gate configured from
-// JOURNAL_AUTH_TOKENS.
-func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate, opts ...Option) http.Handler {
+// NewServer builds the journal API server with access to its non-handler
+// surfaces (the debug counters). New is the handler-only convenience form.
+func NewServer(store observation.Store, log *slog.Logger, gate *controlplane.Gate, opts ...Option) *Server {
 	s := &Server{store: store, gate: gate, log: log, now: time.Now}
 	for _, opt := range opts {
 		opt(s)
 	}
+	counters := newEndpointCounters()
+	s.counters = counters
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("POST /v1/observations/events", s.appendObservations)
@@ -166,7 +171,27 @@ func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate, opt
 	mux.HandleFunc("GET /v1/observations/knowledge/embeddings/missing", s.getKnowledgeEmbeddingGaps)
 	mux.HandleFunc("GET /v1/observations/knowledge/embeddings/neighbors", s.getKnowledgeEmbeddingNeighbors)
 	mux.HandleFunc("GET /v1/observations/hints/effectiveness", s.getHintEffectiveness)
-	return logRequests(log, s.gate.Authenticate(mux))
+	s.handler = counters.middleware(logRequests(log, s.gate.Authenticate(mux)))
+	return s
+}
+
+// ServeHTTP delegates to the middleware-wrapped mux (NewServer wires it).
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
+}
+
+// New serves the journal API. A nil gate disables authentication (local
+// development); team deployments pass a gate configured from
+// JOURNAL_AUTH_TOKENS.
+func New(store observation.Store, log *slog.Logger, gate *controlplane.Gate, opts ...Option) http.Handler {
+	return NewServer(store, log, gate, opts...)
+}
+
+// DebugCounters serves the per-route request accounting for the journal's
+// debug listener (JOURNAL_DEBUG_ADDR). Public so main can wire it next to
+// net/http/pprof without exposing either on the authenticated API.
+func (s *Server) DebugCounters() http.Handler {
+	return http.HandlerFunc(s.counters.writeCounters)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

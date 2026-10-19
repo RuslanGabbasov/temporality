@@ -9,6 +9,10 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+
+	// net/http/pprof registers its handlers on http.DefaultServeMux; the
+	// debug listener below serves that mux under /debug/ — and only there.
+	_ "net/http/pprof"
 	"os"
 	"time"
 
@@ -166,9 +170,26 @@ func main() {
 			}),
 		)
 	}
+	apiServer := httpapi.NewServer(store, log, gate, opts...)
 	server := &http.Server{
-		Addr: address, Handler: httpapi.New(store, log, gate, opts...),
+		Addr: address, Handler: apiServer,
 		ReadHeaderTimeout: 5 * time.Second,
+	}
+	// Debug listener (JOURNAL_DEBUG_ADDR, e.g. ":6060", off by default):
+	// net/http/pprof plus the per-route counters — the load-attribution pair.
+	// Deliberately NOT the authenticated API: pprof must never be reachable
+	// through the public port.
+	if debugAddr := os.Getenv("JOURNAL_DEBUG_ADDR"); debugAddr != "" {
+		debugMux := http.NewServeMux()
+		debugMux.Handle("/debug/counters", apiServer.DebugCounters())
+		debugMux.Handle("/debug/", http.DefaultServeMux) // net/http/pprof handlers
+		debug := &http.Server{Addr: debugAddr, Handler: debugMux, ReadHeaderTimeout: 5 * time.Second}
+		go func() {
+			log.Info("journal debug listener", "address", debugAddr)
+			if err := debug.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Error("debug serve", "error", err)
+			}
+		}()
 	}
 	log.Info("Temporality journal started", "address", address, "schema", "temporality.event/1")
 	if err = server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

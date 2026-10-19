@@ -13,7 +13,7 @@ __pycache__/
 
 # stray local go build output
 /agent-kernel
+/temporality-journal
+/mockllm
 
 node_modules/
-temporality-journal
-mockllm
