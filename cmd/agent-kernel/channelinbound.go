@@ -462,14 +462,31 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 }
 
 // watchIntakeAnswer polls the intake run to its terminal state and delivers
-// the agent's answer back to the sender's chat. ask_human pauses inside the
-// intake dialog are delivered by the notify machinery already; this closes
-// the loop on the final verdict. Bounded wait: past it the delivery is
-// dropped with a log line (the answer remains in the product UI).
+// the agent's answer back to the sender's chat. While the run generates, the
+// bot keeps an m.typing flag alive in the room (the homeserver expires it
+// every 30s, the 5s poll refreshes it) — the sender sees the agent is alive.
+// ask_human pauses inside the intake dialog are delivered by the notify
+// machinery already; this closes the loop on the final verdict. Bounded
+// wait: past it the delivery is dropped with a log line (the answer remains
+// in the product UI).
 func (l *channelInboundLoop) watchIntakeAnswer(ctx context.Context, row *workspace.InboundMessage, runID string) {
 	watchCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 	const pollEvery = 5 * time.Second
+	settings, sErr := l.settings(watchCtx)
+	if sErr != nil {
+		l.log.Warn("intake answer watch", "channel", l.driver.Type(), "error", sErr)
+		return
+	}
+	address := row.Room
+	if address == "" {
+		address = row.SenderRaw
+	}
+	// The room may be unregistered for DM-resolved channels: typing then
+	// resolves through the driver's DM support per poll.
+	typist, canType := l.driver.(interface {
+		SendTyping(ctx context.Context, client *http.Client, settings map[string]string, address string, typing bool) error
+	})
 	for {
 		run, err := l.store.GetRun(watchCtx, runID)
 		if err != nil {
@@ -482,15 +499,6 @@ func (l *channelInboundLoop) watchIntakeAnswer(ctx context.Context, row *workspa
 				l.log.Warn("intake run finished without an answer", "run", runID, "status", run.Status)
 				return
 			}
-			settings, sErr := l.settings(watchCtx)
-			if sErr != nil {
-				l.log.Warn("intake answer delivery", "channel", l.driver.Type(), "error", sErr)
-				return
-			}
-			address := row.Room
-			if address == "" {
-				address = row.SenderRaw
-			}
 			deliverCtx, cancel := context.WithTimeout(watchCtx, 20*time.Second)
 			dErr := l.driver.SendText(deliverCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: run.Answer})
 			cancel()
@@ -501,6 +509,13 @@ func (l *channelInboundLoop) watchIntakeAnswer(ctx context.Context, row *workspa
 			_ = l.store.UpdateInboundMessage(watchCtx, row.ID, workspace.InboundMessageUpdate{Status: workspace.InboundStatusAnswered})
 			l.log.Info("intake answer delivered", "channel", l.driver.Type(), "chat", address, "run", runID)
 			return
+		}
+		if canType {
+			typingCtx, cancelTyping := context.WithTimeout(watchCtx, 10*time.Second)
+			if tErr := typist.SendTyping(typingCtx, l.httpClient, settings.Channels[l.driver.Type()], address, true); tErr != nil {
+				l.log.Warn("intake typing", "channel", l.driver.Type(), "error", tErr)
+			}
+			cancelTyping()
 		}
 		select {
 		case <-watchCtx.Done():

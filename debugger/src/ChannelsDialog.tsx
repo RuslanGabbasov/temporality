@@ -33,9 +33,9 @@ function addressHelper(spec: ChannelTypeSpec | undefined, t: (k: string) => stri
   return localized || spec.address_hint
 }
 
-function addressPlaceholder(spec: ChannelTypeSpec | undefined): string {
+function addressPlaceholder(spec: ChannelTypeSpec | undefined, t: (k: string) => string): string {
   switch (spec?.type) {
-    case 'matrix': return '!room:matrix.org'
+    case 'matrix': return t('channels.address_matrix_ph') ?? 'optional — your bot DM is used'
     case 'telegram': return '123456789'
     case 'slack': return 'https://hooks.slack.com/services/…'
     case 'webhook': return 'https://example.com/temporality'
@@ -111,13 +111,17 @@ export default function ChannelsDialog({ userId, userName, onClose }: { userId: 
     })
   }
 
-  const enabledTypes = channels.filter((c) => c.enabled && c.address.trim()).map((c) => c.type)
+  // A channel without an address is valid when the transport can resolve the
+  // conversation from the sender identity (matrix DM by mxid).
+  const addressOptional = (channelType: string) => channelType === 'matrix'
+
+  const enabledTypes = channels.filter((c) => c.enabled && (c.address.trim() || (addressOptional(c.type) && (c.sender_id ?? '').trim()))).map((c) => c.type)
 
   const save = async () => {
     setError('')
     const normalized = channels.map((c) => ({ ...c, address: c.address.trim(), sender_id: c.sender_id?.trim() ?? '' }))
-    if (normalized.some((c) => !c.address)) {
-      setError(t('channels.error_address') ?? 'Every channel needs an address.')
+    if (normalized.some((c) => !c.address && !(addressOptional(c.type) && c.sender_id))) {
+      setError(t('channels.error_address') ?? 'Every channel needs an address (matrix channels may use your mxid instead).')
       return
     }
     if (preferred !== 'web' && !enabledTypes.includes(preferred)) {
@@ -191,7 +195,7 @@ export default function ChannelsDialog({ userId, userName, onClose }: { userId: 
                 <TextInput
                   id={`channel-address-${index}`}
                   labelText={t('channels.address') ?? 'Address'}
-                  placeholder={addressPlaceholder(spec)}
+                  placeholder={addressPlaceholder(spec, t)}
                   helperText={addressHelper(spec, t)}
                   value={channel.address}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateChannel(index, { address: e.target.value })}

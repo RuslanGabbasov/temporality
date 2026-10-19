@@ -80,6 +80,9 @@ type recipientChannel struct {
 	Type    string `json:"type"`
 	Address string `json:"address"`
 	Enabled bool   `json:"enabled"`
+	// SenderID is the owner's own identity in this channel (mxid for matrix):
+	// the input for DM resolution when the address is left empty.
+	SenderID string `json:"sender_id"`
 }
 
 // NotifyChannel is the activity entry point. It never returns an error:
@@ -166,10 +169,20 @@ func (a *Activities) resolveAndDeliver(ctx context.Context, request NotifyChanne
 	settings := a.transports(ctx)
 	channel, mode := pickChannel(recipientChannels{Channels: target.Channels, Preferred: target.Preferred}, settings.Configured)
 	if mode != "web" {
+		// An empty address means the transport resolves the conversation itself
+		// (matrix: the user's DM room with the bot, from their registered mxid).
+		deliveryAddress := channel.Address
+		if strings.TrimSpace(deliveryAddress) == "" {
+			resolved, rErr := a.resolveChannelAddress(ctx, channel.Type, "", channel.SenderID)
+			if rErr != nil {
+				return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "failed", Detail: truncate(rErr.Error(), 300)}
+			}
+			deliveryAddress = resolved
+		}
 		// Follow-ups of the same run join the previous ask's conversation
 		// thread (docs/channels.md §9) — new threads only for new runs.
 		thread := a.channelThread(ctx, channel.Type, request, target.ID)
-		postedID, err := a.sendToChannel(ctx, channel.Type, channel.Address, request, settings, thread)
+		postedID, err := a.sendToChannel(ctx, channel.Type, deliveryAddress, request, settings, thread)
 		if err != nil {
 			return NotificationDelivery{Recipient: target.ID, Channel: channel.Type, Status: "failed", Detail: truncate(err.Error(), 300)}
 		}
@@ -247,10 +260,20 @@ func (a *Activities) deliverToUnit(ctx context.Context, request NotifyChannelReq
 		}
 		channel, mode := pickChannel(recipientChannels{Channels: member.Channels, Preferred: member.Preferred}, settings.Configured)
 		if mode != "web" {
+			// Same empty-address DM resolution as the direct path above.
+			deliveryAddress := channel.Address
+			if strings.TrimSpace(deliveryAddress) == "" {
+				resolved, rErr := a.resolveChannelAddress(ctx, channel.Type, "", channel.SenderID)
+				if rErr != nil {
+					targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "failed", Detail: truncate(rErr.Error(), 200)})
+					continue
+				}
+				deliveryAddress = resolved
+			}
 			// Per-member thread: every copy opens (or joins) its own
 			// conversation thread in the member's chat.
 			thread := a.channelThread(ctx, channel.Type, request, member.ID)
-			postedID, err := a.sendToChannel(ctx, channel.Type, channel.Address, request, settings, thread)
+			postedID, err := a.sendToChannel(ctx, channel.Type, deliveryAddress, request, settings, thread)
 			if err != nil {
 				targets = append(targets, DeliveryTarget{UserID: member.ID, Channel: channel.Type, Status: "failed", Detail: truncate(err.Error(), 200)})
 				continue
@@ -487,6 +510,26 @@ func pickChannel(profile recipientChannels, configured func(string) bool) (recip
 // caller's failed status. thread asks the driver to post into an existing
 // conversation thread; the return is the posted message's channel id when the
 // driver can report it (slack ts — ThreadedTextPoster), "" otherwise.
+
+// resolveChannelAddress returns the delivery address for one user channel:
+// the registered address, or — when the row leaves the address empty — the
+// transport's own DM resolution from the user's sender identity (matrix:
+// the bot's shared DM room with the user's mxid).
+func (a *Activities) resolveChannelAddress(ctx context.Context, channelType, address, senderID string) (string, error) {
+	if strings.TrimSpace(address) != "" {
+		return address, nil
+	}
+	driver := channelDriverByType(channelType)
+	if driver == nil {
+		return "", fmt.Errorf("no transport for channel %q", channelType)
+	}
+	resolver, ok := driver.(DMResolver)
+	if !ok {
+		return "", fmt.Errorf("channel %q has no address and cannot resolve direct chats", channelType)
+	}
+	return resolver.ResolveDM(ctx, a.HTTP, a.transports(ctx).Channels[channelType], senderID)
+}
+
 func (a *Activities) sendToChannel(ctx context.Context, channelType, address string, request NotifyChannelRequest, settings ChannelSettings, thread string) (postedID string, err error) {
 	driver := channelDriverByType(channelType)
 	if driver == nil {

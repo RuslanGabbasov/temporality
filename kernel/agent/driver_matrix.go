@@ -11,7 +11,21 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 )
+
+// DMResolver is the optional driver extension for transports that can locate
+// a user's direct conversation from their own identity: the matrix bot finds
+// the DM room it shares with the user's mxid, so a channel row does not have
+// to pin the room id — leaving the address empty and registering the mxid is
+// enough (docs/channels.md).
+type DMResolver interface {
+	// ResolveDM returns the room id of the user's direct conversation, or an
+	// error when none can be found. senderID is the user's own identity in
+	// this channel (mxid for matrix).
+	ResolveDM(ctx context.Context, client *http.Client, settings map[string]string, senderID string) (string, error)
+}
 
 // matrixDriver delivers through the Matrix client-server API using the
 // kernel's shared bot account: text messages with a stable txn id
@@ -32,7 +46,7 @@ func (matrixDriver) Webhook() ChannelWebhook { return nil }
 func (matrixDriver) Spec() ChannelSpec {
 	return ChannelSpec{
 		Label:             "Matrix",
-		AddressHint:       "Matrix room ID, e.g. !room:matrix.org — the kernel bot must have joined it",
+		AddressHint:       "Matrix room ID, e.g. !room:matrix.org — optional: leave empty to use your direct (DM) room with the bot; the bot must share it or be able to join it",
 		NotConfiguredHint: "Matrix homeserver + bot access token",
 		Capabilities: ChannelCapabilities{
 			Text:     true,
@@ -146,4 +160,183 @@ func (matrixDriver) SendFile(ctx context.Context, client *http.Client, settings 
 func transactionFingerprint(roomID, text string) string {
 	digest := sha256.Sum256([]byte(roomID + "\x00" + text))
 	return hex.EncodeToString(digest[:])[:16]
+}
+
+// matrixDMCache caches resolved DM rooms per (homeserver, mxid): the
+// resolution costs a joined-rooms call plus per-room member probes. Entries
+// live 10 minutes — a fresh DM created after a miss is picked up then.
+var matrixDMCache = struct {
+	sync.Mutex
+	entries map[string]dmCacheEntry
+}{entries: map[string]dmCacheEntry{}}
+
+type dmCacheEntry struct {
+	room     string
+	resolved time.Time
+}
+
+// matrixTypingCache deduplicates typing refreshes: the watcher polls every
+// 5s and each PUT restarts a 30s server-side window — a refresh more often
+// than once per 20s is waste.
+var matrixTypingCache = struct {
+	sync.Mutex
+	last map[string]time.Time
+}{last: map[string]time.Time{}}
+
+// matrixBotID fetches the bot account's own mxid (whoami) — needed to tell
+// DMs (bot + user, 2 members) from small group rooms.
+func matrixBotID(ctx context.Context, client *http.Client, homeserver, accessToken string) (string, error) {
+	endpoint := homeserver + "/_matrix/client/v3/account/whoami"
+	body, status, err := postJSON(ctx, client, http.MethodGet, endpoint, nil, map[string]string{"Authorization": "Bearer " + accessToken})
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK {
+		return "", fmt.Errorf("matrix whoami returned %d: %s", status, truncate(body, 200))
+	}
+	var who struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.Unmarshal([]byte(body), &who); err != nil {
+		return "", err
+	}
+	if who.UserID == "" {
+		return "", errors.New("matrix whoami returned no user_id")
+	}
+	return who.UserID, nil
+}
+
+// ResolveDM (DMResolver) finds the direct-message room between the bot and
+// the user's mxid: rooms the bot has joined that also have the user as a
+// member, preferring rooms with exactly two members (a true DM) and rooms
+// the bot has flagged in its own m.direct account data. The bot cannot read
+// the user's DM map, so shared-room detection is the reliable path.
+func (matrixDriver) ResolveDM(ctx context.Context, client *http.Client, settings map[string]string, senderID string) (string, error) {
+	homeserver := strings.TrimRight(setting(settings, "homeserver"), "/")
+	accessToken := TrimBearerPrefix(setting(settings, "access_token"))
+	senderID = strings.TrimSpace(senderID)
+	if homeserver == "" || accessToken == "" || senderID == "" {
+		return "", errors.New("matrix DM resolution requires homeserver, access_token and the user's mxid")
+	}
+	// A room id pasted as the sender identity is returned as is.
+	if strings.HasPrefix(senderID, "!") {
+		return senderID, nil
+	}
+	cacheKey := homeserver + "\x00" + senderID
+	matrixDMCache.Lock()
+	if entry, ok := matrixDMCache.entries[cacheKey]; ok && time.Since(entry.resolved) < 10*time.Minute {
+		room := entry.room
+		matrixDMCache.Unlock()
+		if room == "" {
+			return "", errors.New("no DM room with this user (cached)")
+		}
+		return room, nil
+	}
+	matrixDMCache.Unlock()
+
+	botID, err := matrixBotID(ctx, client, homeserver, accessToken)
+	if err != nil {
+		return "", err
+	}
+	// Rooms the bot has joined.
+	joinedBody, status, err := postJSON(ctx, client, http.MethodGet, homeserver+"/_matrix/client/v3/joined_rooms", nil, map[string]string{"Authorization": "Bearer " + accessToken})
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK {
+		return "", fmt.Errorf("matrix joined_rooms returned %d: %s", status, truncate(joinedBody, 200))
+	}
+	var joined struct {
+		Rooms []string `json:"joined_rooms"`
+	}
+	if err := json.Unmarshal([]byte(joinedBody), &joined); err != nil {
+		return "", err
+	}
+	// The bot's own m.direct flags (rooms the bot knows are DMs). The bot
+	// cannot read the user's account data — only its own.
+	directRooms := map[string]bool{}
+	if directBody, dStatus, dErr := postJSON(ctx, client, http.MethodGet, homeserver+"/_matrix/client/v3/user/"+url.PathEscape(botID)+"/account_data/m.direct", nil, map[string]string{"Authorization": "Bearer " + accessToken}); dErr == nil && dStatus == http.StatusOK {
+		var mdirect map[string][]string
+		if err := json.Unmarshal([]byte(directBody), &mdirect); err == nil {
+			for _, rooms := range mdirect[senderID] {
+				directRooms[rooms] = true
+			}
+		}
+	}
+	fallback := ""
+	for _, room := range joined.Rooms {
+		// The user must be a member of this room.
+		memberURL := homeserver + "/_matrix/client/v3/rooms/" + url.PathEscape(room) + "/state/m.room.member/" + url.PathEscape(senderID)
+		memberBody, memberStatus, memberErr := postJSON(ctx, client, http.MethodGet, memberURL, nil, map[string]string{"Authorization": "Bearer " + accessToken})
+		if memberErr != nil || memberStatus != http.StatusOK {
+			continue
+		}
+		var membership struct {
+			Membership string `json:"membership"`
+		}
+		if json.Unmarshal([]byte(memberBody), &membership) != nil || (membership.Membership != "join" && membership.Membership != "invite") {
+			continue
+		}
+		// Count joined members: a DM is exactly bot + user.
+		joinedMembersURL := homeserver + "/_matrix/client/v3/rooms/" + url.PathEscape(room) + "/joined_members"
+		joinedBody2, joinedStatus, joinedErr := postJSON(ctx, client, http.MethodGet, joinedMembersURL, nil, map[string]string{"Authorization": "Bearer " + accessToken})
+		twoMembers := false
+		if joinedErr == nil && joinedStatus == http.StatusOK {
+			var members struct {
+				Joined map[string]struct{} `json:"joined"`
+			}
+			if json.Unmarshal([]byte(joinedBody2), &members) == nil {
+				twoMembers = len(members.Joined) == 2
+			}
+		}
+		if directRooms[room] {
+			// A room the bot itself flags as a DM with this user wins outright.
+			matrixDMCache.Lock()
+			matrixDMCache.entries[cacheKey] = dmCacheEntry{room: room, resolved: time.Now()}
+			matrixDMCache.Unlock()
+			return room, nil
+		}
+		if twoMembers && fallback == "" {
+			fallback = room
+		}
+	}
+	matrixDMCache.Lock()
+	if fallback != "" {
+		matrixDMCache.entries[cacheKey] = dmCacheEntry{room: fallback, resolved: time.Now()}
+	} else {
+		matrixDMCache.entries[cacheKey] = dmCacheEntry{room: "", resolved: time.Now()}
+	}
+	matrixDMCache.Unlock()
+	if fallback == "" {
+		return "", errors.New("no shared DM room with " + senderID + " — invite the bot into a direct chat once, or register the room id in your profile")
+	}
+	return fallback, nil
+}
+
+// SendTyping sets or clears the bot's m.typing notification in a room. The
+// homeserver expires the flag after the timeout window, so a live generation
+// keeps refreshing it and a finished one just lets it lapse.
+func (matrixDriver) SendTyping(ctx context.Context, client *http.Client, settings map[string]string, address string, typing bool) error {
+	homeserver := strings.TrimRight(setting(settings, "homeserver"), "/")
+	accessToken := TrimBearerPrefix(setting(settings, "access_token"))
+	if homeserver == "" || accessToken == "" || address == "" {
+		return errors.New("matrix transport is not configured")
+	}
+	botID, err := matrixBotID(ctx, client, homeserver, accessToken)
+	if err != nil {
+		return err
+	}
+	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/typing/%s", homeserver, url.PathEscape(address), url.PathEscape(botID))
+	payload := map[string]any{"typing": typing}
+	if typing {
+		payload["timeout"] = 30000
+	}
+	body, status, err := postJSON(ctx, client, http.MethodPut, endpoint, payload, map[string]string{"Authorization": "Bearer " + accessToken})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("matrix typing returned %d: %s", status, truncate(body, 200))
+	}
+	return nil
 }
