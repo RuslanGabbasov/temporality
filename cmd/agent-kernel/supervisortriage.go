@@ -143,40 +143,61 @@ type journalTypedEvents struct {
 		Type string         `json:"type"`
 		Data map[string]any `json:"data"`
 	} `json:"events"`
+	NextCursor string `json:"next_cursor"`
 }
 
-// fetchJournalTypedEvents lists journal events of one type, newest first.
+// fetchJournalTypedEvents lists journal events of one type, ALL of them —
+// the journal pages forward from the oldest event, so a single limited page
+// returns the OLDEST slice and misses everything recent (the conflict
+// predictor then published verdicts with empty propositions once the corpus
+// passed one page). Follows cursors to the end, bounded by maxTypedEventPages.
 func fetchJournalTypedEvents(ctx context.Context, observationURL, journalToken, eventType string, limit int) ([]journalEvent, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		strings.TrimSuffix(observationURL, "/")+"/v1/observations/events?type="+url.QueryEscape(eventType)+"&limit="+fmt.Sprint(limit), nil)
-	if err != nil {
-		return nil, err
-	}
-	if journalToken != "" {
-		request.Header.Set("Authorization", "Bearer "+journalToken)
-	}
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, 16<<20))
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("journal events %s", journalErrorSnippet(response.StatusCode, string(body)))
-	}
-	var page journalTypedEvents
-	if err := json.Unmarshal(body, &page); err != nil {
-		return nil, err
-	}
-	refs := make([]journalEvent, 0, len(page.Events))
-	for _, event := range page.Events {
-		refs = append(refs, journalEvent{Project: event.Context.Project, Run: event.Context.Run, Type: event.Type, Data: event.Data})
+	var refs []journalEvent
+	cursor := ""
+	for page := 0; page < maxTypedEventPages; page++ {
+		query := "type=" + url.QueryEscape(eventType) + "&limit=" + fmt.Sprint(limit)
+		if cursor != "" {
+			query += "&cursor=" + url.QueryEscape(cursor)
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			strings.TrimSuffix(observationURL, "/")+"/v1/observations/events?"+query, nil)
+		if err != nil {
+			return nil, err
+		}
+		if journalToken != "" {
+			request.Header.Set("Authorization", "Bearer "+journalToken)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			return nil, err
+		}
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, 16<<20))
+		response.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if response.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("journal events %s", journalErrorSnippet(response.StatusCode, string(body)))
+		}
+		var pageData journalTypedEvents
+		if err := json.Unmarshal(body, &pageData); err != nil {
+			return nil, err
+		}
+		for _, event := range pageData.Events {
+			refs = append(refs, journalEvent{Project: event.Context.Project, Run: event.Context.Run, Type: event.Type, Data: event.Data})
+		}
+		if pageData.NextCursor == "" {
+			return refs, nil
+		}
+		cursor = pageData.NextCursor
 	}
 	return refs, nil
 }
+
+// maxTypedEventPages bounds the cursor walk: 500 × 20 = 10k events per type
+// — the corpus grows past that only after real adoption, and the caller
+// degrades gracefully (missing meta = verdict without propositions) anyway.
+const maxTypedEventPages = 20
 
 // buildFailedRunTrace converts one run.failed event into the trace digest.
 func buildFailedRunTrace(event journalEvent) agent.SupervisorTraceRef {

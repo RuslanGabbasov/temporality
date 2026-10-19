@@ -111,9 +111,8 @@ type conflictMeta struct {
 }
 
 // fetchKnowledgeMeta builds knowledge_id → (project, proposition) from the
-// journal's knowledge events. One pass over two event types covers every
-// item born through the normal extraction path; items outside the map
-// (manual writes) simply keep an empty proposition in the verdict.
+// journal's knowledge events. Events arrive oldest-first; a corrected item's
+// latest correction carries its current wording, so later events win.
 func fetchKnowledgeMeta(ctx context.Context, observationURL, journalToken string) map[string]conflictMeta {
 	meta := map[string]conflictMeta{}
 	for _, eventType := range []string{"knowledge.proposed", "knowledge.corrected"} {
@@ -124,12 +123,10 @@ func fetchKnowledgeMeta(ctx context.Context, observationURL, journalToken string
 		for _, ev := range events {
 			id, _ := ev.Data["knowledge_id"].(string)
 			prop, _ := ev.Data["proposition"].(string)
-			if id == "" {
+			if id == "" || prop == "" {
 				continue
 			}
-			if existing, ok := meta[id]; ok && existing.Proposition != "" {
-				continue // first (newest) wins — the listing is newest-first
-			}
+			// Later events overwrite: the newest formulation is the one to show.
 			meta[id] = conflictMeta{Project: ev.Project, Proposition: prop}
 		}
 	}

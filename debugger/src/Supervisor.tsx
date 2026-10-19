@@ -294,33 +294,59 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   }
 
   // Resolve the proposition texts behind conflict verdicts that were published
-  // without them (older payloads): one exact-item lookup per missing side.
+  // without them (older payloads, or verdicts whose kernel-side meta scan
+  // missed the item): one exact-item lookup per missing side. The listing
+  // requires a project — when the verdict does not name one, walk the
+  // account's visible projects.
   const propFallbackRef = useRef<Record<string, string>>({})
   useEffect(() => {
-    const missing: { project: string; id: string }[] = []
+    const missing: { projects: string[]; id: string }[] = []
     for (const row of clusterVerdicts(verdicts)) {
       const cf = row.conflict
       if (!cf) continue
       if (!cf.newProp) {
         const key = `${cf.newProject || row.project}/${cf.newID}`
-        if (!(key in propFallbackRef.current)) missing.push({ project: cf.newProject || row.project, id: cf.newID })
+        if (!(key in propFallbackRef.current)) missing.push({ projects: [cf.newProject || row.project].filter(Boolean), id: cf.newID })
       }
       if (!cf.oldProp) {
         const key = `${cf.oldProject || row.project}/${cf.oldID}`
-        if (!(key in propFallbackRef.current)) missing.push({ project: cf.oldProject || row.project, id: cf.oldID })
+        if (!(key in propFallbackRef.current)) missing.push({ projects: [cf.oldProject || row.project].filter(Boolean), id: cf.oldID })
       }
     }
     if (missing.length === 0) return
     let cancelled = false
     void (async () => {
-      const next: Record<string, string> = {}
-      for (const { project, id } of missing.slice(0, 20)) {
-        const key = `${project}/${id}`
+      let candidates: string[] = []
+      const withProject = missing.filter((m) => m.projects.length > 0)
+      const withoutProject = missing.filter((m) => m.projects.length === 0)
+      if (withoutProject.length > 0) {
         try {
-          const page = await observationApi.knowledge(project || '', undefined, undefined, { knowledge_id: id, limit: 1 })
-          next[key] = page.knowledge?.[0]?.proposition ?? ''
+          const { projects } = await workspaceApi.listProjects()
+          candidates = projects.map((p) => p.id)
+        } catch { /* no project list — nothing to walk */ }
+      }
+      const next: Record<string, string> = {}
+      let fetched = 0
+      const lookup = async (project: string, id: string): Promise<string> => {
+        if (fetched >= 30) return ''
+        fetched++
+        try {
+          const page = await observationApi.knowledge(project, undefined, undefined, { knowledge_id: id, limit: 1 })
+          return page.knowledge?.[0]?.proposition ?? ''
         } catch {
-          next[key] = '' // not visible from this account — keep the dash
+          return '' // not visible from this account — keep the dash
+        }
+      }
+      for (const item of withProject) {
+        const key = `${item.projects[0]}/${item.id}`
+        next[key] = await lookup(item.projects[0], item.id)
+      }
+      for (const item of withoutProject) {
+        for (const project of candidates) {
+          const key = `${project}/${item.id}`
+          if (key in propFallbackRef.current || key in next) continue
+          const proposition = await lookup(project, item.id)
+          if (proposition) { next[key] = proposition; break }
         }
       }
       if (cancelled) return
