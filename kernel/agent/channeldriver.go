@@ -124,6 +124,10 @@ type OutboundText struct {
 	// The kernel fills it from the previous ask's thread_ref so follow-up
 	// questions of one run stay in one conversation (docs/channels.md §9).
 	Thread string
+	// SuppressHint drops the two-way reply hint transports append for asks
+	// ("Reply in this room to answer."): progress updates are noise, not
+	// questions.
+	SuppressHint bool
 }
 
 // OutboundFile is one attachment pushed through a FilesOut channel.

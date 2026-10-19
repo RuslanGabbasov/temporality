@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/temporality-project/temporality/kernel/agent"
+	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/workspace"
 )
 
@@ -40,8 +42,13 @@ type channelInboundLoop struct {
 	// back), so the answer watcher needs the Temporal resolver to ever see a
 	// terminal status and the answer. nil (tests) falls back to the raw row.
 	resolveRun func(ctx context.Context, project, runID string) (workspace.Run, error)
-	sourceID   string
-	log        *slog.Logger
+	// journal returns the run's journal events, oldest first (one page per
+	// call). The watcher tails them to announce phase changes in the chat —
+	// the typing marker alone says nothing about what is happening or how
+	// long is left. nil (tests) disables progress updates.
+	journal  func(ctx context.Context, runID string) ([]observation.Event, error)
+	sourceID string
+	log      *slog.Logger
 	// signal routes one approval into a waiting workflow; production wraps
 	// temporal SignalWorkflow, tests record calls.
 	signal func(ctx context.Context, workflowID string, approval agent.Approval) error
@@ -528,6 +535,14 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 	typist, canType := l.driver.(interface {
 		SendTyping(ctx context.Context, client *http.Client, settings map[string]string, address string, typing bool) error
 	})
+	// Progress state: the watcher tails the run's journal events and announces
+	// phase changes — one short chat line per distinct step, never more often
+	// than every 10 seconds.
+	progress := runProgress{startedAt: time.Now(), lastSent: time.Now().Add(-progressEvery)}
+	if l.journal != nil {
+		l.sendProgress(watchCtx, settings, address, "On it — working on your message…", &progress)
+	}
+	typingLogged := false
 	for {
 		run, err := l.currentRun(watchCtx, project, runID)
 		if err != nil {
@@ -552,10 +567,16 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 			l.log.Info("run answer delivered", "channel", l.driver.Type(), "chat", address, "run", runID)
 			return
 		}
+		if l.journal != nil {
+			l.announceProgress(watchCtx, settings, address, runID, &progress)
+		}
 		if canType {
 			typingCtx, cancelTyping := context.WithTimeout(watchCtx, 10*time.Second)
 			if tErr := typist.SendTyping(typingCtx, l.httpClient, settings.Channels[l.driver.Type()], address, true); tErr != nil {
 				l.log.Warn("intake typing", "channel", l.driver.Type(), "error", tErr)
+			} else if !typingLogged {
+				typingLogged = true
+				l.log.Info("typing marker live", "channel", l.driver.Type(), "chat", address, "run", runID)
 			}
 			cancelTyping()
 		}
@@ -566,6 +587,105 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 		case <-time.After(pollEvery):
 		}
 	}
+}
+
+// progressEvery paces the chat progress lines: a fast tool loop must not
+// spam the dialog, so at most one line lands per interval.
+const progressEvery = 10 * time.Second
+
+// runProgress carries the watcher's announcement state across polls.
+type runProgress struct {
+	lastSeq   int       // highest journal sequence seen so far
+	lastPhase string    // phase currently announced in the chat
+	pending   string    // phase observed in the journal, not yet announced
+	startedAt time.Time // run start, for the elapsed marker
+	lastSent  time.Time // last progress delivery, for the pacing window
+}
+
+// announceProgress tails the run's journal events once per poll: the latest
+// meaningful phase that has not been announced yet (and fits the pacing
+// window) lands in the chat as a short line with the elapsed time.
+func (l *channelInboundLoop) announceProgress(ctx context.Context, settings agent.ChannelSettings, address, runID string, p *runProgress) {
+	events, err := l.journal(ctx, runID)
+	if err != nil {
+		l.log.Warn("run progress tail", "run", runID, "error", err)
+		return
+	}
+	for _, event := range events {
+		if seq := eventSeq(event.EventID); seq > p.lastSeq {
+			p.lastSeq = seq
+			if phase := runPhase(event); phase != "" {
+				p.pending = phase
+			}
+		}
+	}
+	if p.pending == "" || p.pending == p.lastPhase || time.Since(p.lastSent) < progressEvery {
+		return
+	}
+	elapsed := time.Since(p.startedAt).Truncate(time.Second)
+	l.sendProgress(ctx, settings, address, fmt.Sprintf("%s · %s", p.pending, elapsed), p)
+}
+
+// sendProgress delivers one progress line (no reply hint) and records the
+// announcement state. Best-effort: a failed line costs nothing downstream.
+func (l *channelInboundLoop) sendProgress(ctx context.Context, settings agent.ChannelSettings, address, line string, p *runProgress) {
+	sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := l.driver.SendText(sendCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: line, SuppressHint: true}); err != nil {
+		l.log.Warn("run progress line", "channel", l.driver.Type(), "chat", address, "error", err)
+		return
+	}
+	p.lastSent = time.Now()
+	p.lastPhase = p.pending
+}
+
+// runPhase maps one journal event onto a human progress line; "" marks noise
+// (model chatter, hint machinery, extraction) the chat should not hear about.
+func runPhase(event observation.Event) string {
+	switch event.Type {
+	case "tool.started":
+		tool, _ := event.Data["tool"].(string)
+		switch tool {
+		case "knowledge_explore":
+			return "🔍 Searching the project knowledge base…"
+		case "start_task":
+			if project, _ := event.Data["project"].(string); project != "" {
+				return "🚀 Starting the task in project «" + project + "»…"
+			}
+			return "🚀 Starting the task…"
+		case "run_status":
+			return "📊 Checking the running tasks…"
+		case "remember", "remember_many":
+			return "🧠 Saving to the knowledge base…"
+		case "ask_human":
+			return "" // the question itself arrives through the notify machinery
+		default:
+			if tool != "" {
+				return "⚙️ Running " + tool + "…"
+			}
+			return ""
+		}
+	case "human.requested":
+		return "" // the question itself arrives through the notify machinery
+	default:
+		return ""
+	}
+}
+
+// eventSeq extracts the journal's monotonic sequence from an event id
+// ("<source>/event/000042" → 42); unparseable ids keep the order by never
+// advancing the cursor.
+func eventSeq(eventID string) int {
+	const sep = "/event/"
+	i := strings.LastIndex(eventID, sep)
+	if i < 0 {
+		return 0
+	}
+	seq, err := strconv.Atoi(eventID[i+len(sep):])
+	if err != nil {
+		return 0
+	}
+	return seq
 }
 
 // currentRun resolves the run's live state; the raw row is the fallback when

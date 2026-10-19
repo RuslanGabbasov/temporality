@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/temporality-project/temporality/kernel/agent"
+	"github.com/temporality-project/temporality/observation"
 	"github.com/temporality-project/temporality/workspace"
 )
 
@@ -889,6 +890,71 @@ func waitFor(t *testing.T, within time.Duration, cond func() bool) {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestChannelWatcherAnnouncesRunProgress: the watcher tails the run's journal
+// events and voices phase changes in the chat — an opening line right away,
+// then one line per distinct tool phase, paced, without the reply hint. The
+// final answer stays the watcher's last word.
+func TestChannelWatcherAnnouncesRunProgress(t *testing.T) {
+	var sent []string
+	server := matrixIntakeHomeServer(t, "!r1:hs", nil, &sent)
+	store := &fakeInboundStore{
+		users: []workspace.User{{
+			ID: "u1", Name: "Human",
+			Channels: []workspace.UserChannel{{Type: "matrix", Address: "!r1:hs", SenderID: "@human:hs", Enabled: true}},
+		}},
+	}
+	loop := newInboundLoop(t, server, store, &recordedSignal{})
+	// The run stays live for the whole test: the watcher must keep polling and
+	// announcing while the workflow is still running.
+	loop.resolveRun = func(context.Context, string, string) (workspace.Run, error) {
+		return workspace.Run{ID: "intake-m13", Status: "running"}, nil
+	}
+	loop.journal = func(_ context.Context, runID string) ([]observation.Event, error) {
+		if runID != "intake-m13" {
+			t.Errorf("journal run = %q", runID)
+		}
+		return []observation.Event{
+			{EventID: "src/event/000001", Type: "turn.started"},
+			{EventID: "src/event/000002", Type: "tool.started", Data: map[string]any{"tool": "knowledge_explore"}},
+			{EventID: "src/event/000003", Type: "model.completed"},
+		}, nil
+	}
+	row := &workspace.InboundMessage{
+		ID: workspace.InboundMessageID("matrix", "$m13"), Channel: "matrix", MessageID: "$m13",
+		SenderRaw: "@human:hs", Room: "!r1:hs", SenderUserID: "u1",
+		Status: workspace.InboundStatusClassified, IntakeRunID: "intake-m13",
+	}
+	// The watcher keeps polling — run it in the background and cut it short.
+	ctx, cancel := context.WithCancel(context.Background())
+	watchDone := make(chan struct{})
+	go func() {
+		loop.watchRunAnswer(ctx, row, "intake-m13", true)
+		close(watchDone)
+	}()
+	// The opening line and the knowledge_explore phase land within seconds
+	// (poll every 5s, pacing window 10s — the opening line resets the window,
+	// so the phase line needs the second poll).
+	waitFor(t, 12*time.Second, func() bool {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		return len(sent) >= 2
+	})
+	cancel()
+	<-watchDone
+
+	if len(sent) == 0 || !strings.HasPrefix(sent[0], "On it") {
+		t.Fatalf("opening progress line missing: %v", sent)
+	}
+	if len(sent) < 2 || !strings.Contains(sent[1], "Searching the project knowledge base") {
+		t.Fatalf("phase line missing: %v", sent)
+	}
+	for _, line := range sent {
+		if strings.Contains(line, "Reply in this room to answer") {
+			t.Fatalf("progress lines must not carry the reply hint: %q", line)
+		}
 	}
 }
 

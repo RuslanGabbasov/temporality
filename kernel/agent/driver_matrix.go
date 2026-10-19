@@ -110,8 +110,12 @@ func (matrixDriver) SendText(ctx context.Context, client *http.Client, settings 
 		return errors.New("matrix transport is not configured")
 	}
 	// The transport is two-way (matrixinbound.go): replying in the room routes
-	// the answer back into the paused run, so say so next to the question.
-	body := msg.Body + "\n\nReply in this room to answer."
+	// the answer back into the paused run, so say so next to the question —
+	// unless the message is a progress update, not a question.
+	body := msg.Body
+	if !msg.SuppressHint {
+		body += "\n\nReply in this room to answer."
+	}
 	txnID := "temporality-" + transactionFingerprint(roomID, body)
 	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)
 	payload := map[string]any{"msgtype": "m.text", "body": body}

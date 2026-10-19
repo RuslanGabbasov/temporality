@@ -3276,6 +3276,31 @@ func main() {
 		_ = ws.UpdateRunStatus(ctx, run.ID, run.Status, run.Answer, run.Turns, "")
 		return run, nil
 	}
+	// runJournal fetches one page of a run's journal events, oldest first —
+	// the channel answer watcher tails them for chat progress updates.
+	runJournal := func(ctx context.Context, runID string) ([]observation.Event, error) {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			observationURL+"/v1/observations/events?run="+url.QueryEscape(runID)+"&limit=500", nil)
+		if err != nil {
+			return nil, err
+		}
+		request.Header.Set("Authorization", "Bearer "+os.Getenv("TEMPORALITY_API_TOKEN"))
+		response, err := activities.HTTP.Do(request)
+		if err != nil {
+			return nil, err
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("journal events returned HTTP %d", response.StatusCode)
+		}
+		var page struct {
+			Events []observation.Event `json:"events"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&page); err != nil {
+			return nil, err
+		}
+		return page.Events, nil
+	}
 	mux.HandleFunc("GET /v1/workspace/runs/{runID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
@@ -6988,6 +7013,7 @@ func main() {
 					settings:   activities.ChannelSettings,
 					store:      ws,
 					resolveRun: resolveRunState,
+					journal:    runJournal,
 					sourceID:   activities.SourceID,
 					log:        log,
 					signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
@@ -7024,6 +7050,7 @@ func main() {
 			settings:   activities.ChannelSettings,
 			store:      ws,
 			resolveRun: resolveRunState,
+			journal:    runJournal,
 			sourceID:   activities.SourceID,
 			log:        log,
 			signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
