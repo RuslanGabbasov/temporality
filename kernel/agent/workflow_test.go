@@ -68,6 +68,55 @@ func TestEventScopeIncludesProjectAndRun(t *testing.T) {
 	}
 }
 
+// TestAgentRunRememberManyRecordsAtomicItems: the bulk-knowledge tool records
+// one knowledge.proposed per non-empty candidate and reports the honest count.
+func TestAgentRunRememberManyRecordsAtomicItems(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		if err := event.Validate(); err != nil {
+			return err
+		}
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	modelCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		names := map[string]bool{}
+		for _, tool := range request.Tools {
+			names[tool.Name] = true
+		}
+		if !names["remember_many"] {
+			t.Fatalf("model request missing bulk tool remember_many: %#v", request.Tools)
+		}
+		modelCalls++
+		if modelCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "remember-many-1", Name: "remember_many", Args: map[string]any{"items": []any{
+				map[string]any{"proposition": "The billing domain is covered by tests A, B, C in e2e/billing/"},
+				map[string]any{"proposition": "Auth uses JWT with 15-minute expiry"},
+				map[string]any{"proposition": "   "}, // empty after trim: skipped
+			}}}}}, nil
+		}
+		return llm.Completion{Content: "memorized"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-2", Project: "repo-a", TaskID: "task-2", ActorID: "lead", Prompt: "memorize the test map", MaxTurns: 3})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	proposed := 0
+	for _, event := range recorded {
+		if event.Type == "knowledge.proposed" {
+			proposed++
+		}
+	}
+	require.Equal(t, 2, proposed, "exactly the two non-empty candidates must be proposed")
+}
+
 func TestAgentRunRecordsApprovalAndKnowledgeTrajectory(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

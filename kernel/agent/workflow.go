@@ -1856,6 +1856,46 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
 					return result, err
 				}
+			} else if call.Name == "remember_many" {
+				// Bulk knowledge import (the test-map / document learning case): the
+				// agent decomposes a document or map into atomic candidates and
+				// submits them in one call. Each candidate becomes a normal
+				// knowledge.proposed (same chain as remember) — the projection,
+				// dedup and hint matcher treat them identically. The summary tells
+				// the agent how many landed, so it can answer the user honestly.
+				if err := startTool(); err != nil {
+					return result, err
+				}
+				rawItems, _ := call.Args["items"].([]any)
+				if len(rawItems) == 0 {
+					toolResult.Content = "items is required: an array of {proposition, evidence?} — one atomic fact per item"
+				} else if len(rawItems) > 50 {
+					toolResult.Content = fmt.Sprintf("too many items (%d): submit at most 50 per call; split the batch", len(rawItems))
+				} else {
+					recorded, skipped := 0, 0
+					for _, item := range rawItems {
+						obj, _ := item.(map[string]any)
+						proposition, _ := obj["proposition"].(string)
+						proposition = strings.TrimSpace(proposition)
+						if proposition == "" {
+							skipped++
+							continue
+						}
+						args := map[string]any{}
+						if evidence, ok := obj["evidence"].([]any); ok {
+							args["evidence"] = evidence
+						}
+						knowledgeID := fmt.Sprintf("%s/knowledge/%02d", input.RunID, state.sequence+1)
+						if err := emitKnowledge(activityCtx, state, knowledgeID, proposition, operationID, args); err != nil {
+							return result, err
+						}
+						recorded++
+					}
+					toolResult.Content = fmt.Sprintf("Recorded %d knowledge items (%d skipped: empty). Proposed items surface in hints as unconfirmed until confirmed.", recorded, skipped)
+				}
+				if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": call.Name}); err != nil {
+					return result, err
+				}
 			} else if call.Name == "delegate" {
 				// Delegation runs a durable child AgentRun with the child agent's own
 				// enforced configuration (docs/agent-delegation.md). The child starts
@@ -2482,7 +2522,7 @@ var intakeDialogTools = map[string]bool{
 // mcp__ tools — still need a human decision. Read-only MCP tools are exempt
 // via isReadOnlyTool.
 var policySafeTools = map[string]bool{
-	"echo": true, "remember": true, "request_approval": true, "ask_human": true,
+	"echo": true, "remember": true, "remember_many": true, "request_approval": true, "ask_human": true,
 	"human_contacts": true, "list_triggers": true, "agents": true,
 	"skill_search": true, "skill_inspect": true, "skill_validate": true,
 	"skill_history": true, "skill_executions": true, "skill_memory": true,
@@ -3205,6 +3245,7 @@ func KernelTools() []llm.ToolDef {
 	return []llm.ToolDef{
 		{Name: "echo", Description: "Return a short text value for debugging the harness tool path", Parameters: map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}, "required": []string{"text"}}},
 		{Name: "remember", Description: "Record a high-confidence durable conclusion with optional evidence refs. Verification and build outcomes are recorded automatically; use this only for conclusions you are confident in and can ground in evidence. If the conclusion came from applying a skill, include skill_id and capability", Parameters: map[string]any{"type": "object", "properties": map[string]any{"proposition": map[string]any{"type": "string"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "skill_id": map[string]any{"type": "string", "description": "Skill this knowledge came from, e.g. deploy-service"}, "capability": map[string]any{"type": "string", "description": "Specific capability of the skill, e.g. verify"}}, "required": []string{"proposition"}}},
+		{Name: "remember_many", Description: "Record MANY atomic conclusions in one call — the way to memorize a document, a map, a spec or a domain area. Decompose the material yourself: one self-contained, verifiable fact per item (a hint surfaces one item, not a chapter). Submit batches of up to 50 items; call repeatedly for larger material and report the total to the user", Parameters: map[string]any{"type": "object", "properties": map[string]any{"items": map[string]any{"type": "array", "description": "Atomic facts, one per item", "items": map[string]any{"type": "object", "properties": map[string]any{"proposition": map[string]any{"type": "string", "description": "One self-contained fact, e.g. 'The billing domain is covered by tests A, B, C in e2e/billing/'"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "required": []string{"proposition"}}}}, "required": []string{"items"}}},
 		{Name: "request_approval", Description: "Pause this run and request a human decision before a consequential action", Parameters: map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string"}, "reason": map[string]any{"type": "string"}}, "required": []string{"action"}}},
 		{Name: "ask_human", Description: "Ask a human a question when you cannot proceed without additional context or a decision. The question must be self-contained: what task you are running, what you have established, what exactly is missing and which options exist. Prefer short structured options over open-ended questions. The run pauses until an answer arrives or the timeout expires.", Parameters: map[string]any{"type": "object", "properties": map[string]any{"question": map[string]any{"type": "string", "description": "The exact question for the human, self-contained"}, "recipient": map[string]any{"type": "string", "description": "Logical recipient: a workspace user id/name (user:ruslan), role:admin, org:<unit-id>, or project_owner. Defaults to the operator who started this run"}, "context": map[string]any{"type": "string", "description": "Brief human-facing background: what you are doing and what you already established"}, "options": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Short answer variants to choose from"}, "timeout_sec": map[string]any{"type": "integer", "description": "How long to wait for the answer"}, "timeout_policy": map[string]any{"type": "string", "enum": []string{"fallback", "fail", "retry", "escalate", "cancel"}, "description": "What happens on timeout: fallback (default) proceeds with the safest option, fail aborts the tool call, retry asks once more, escalate re-asks the project owner, cancel stops the run"}}, "required": []string{"question"}}},
 		{Name: "human_contacts", Description: "Find who to ask before ask_human: search workspace users by name, role or org unit, or resolve an escalation target with escalate_for (the nearest org level above that user with active people, falling back to installation admins). Returns contact cards with user_id, role, org unit and enabled channel types — channel addresses are never exposed, delivery is automatic", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "Optional substring matched against user name or id"}, "role": map[string]any{"type": "string", "description": "Filter by workspace role: admin, operator, writer, reader"}, "org_unit_id": map[string]any{"type": "string", "description": "Filter by org unit id (the exact unit, not its subtree)"}, "escalate_for": map[string]any{"type": "string", "description": "User id or name: resolve who to escalate to when that user cannot answer"}}}},
