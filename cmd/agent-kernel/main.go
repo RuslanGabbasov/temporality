@@ -1814,11 +1814,27 @@ func main() {
 		}
 		judgeCfg, jErr := ws.JudgeConfig(r.Context())
 		judgeOK := jErr == nil && judgeCfg.Configured
-		defaultModel := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL")) != "" && strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID")) != ""
+		defaultModelEnv := strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL")) != "" && strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID")) != ""
 		// Channels are a user choice, not a requirement: an install may have
 		// none, or add one later. The check stays informational — it only
 		// flags anything when NO channel is configured, and marks itself
 		// optional so the dashboard does not paint it as a misconfiguration.
+		// default_model: only runs started WITHOUT an explicit model depend on
+		// it. Background features (skill builder, extraction) ride the judge
+		// when the default is absent, so a configured judge downgrades this
+		// entry to informational.
+		defaultModelEntry := map[string]any{
+			"key":        "default_model",
+			"configured": defaultModelEnv || judgeOK,
+			"used_by":    []string{"runs started without an explicit model"},
+		}
+		if defaultModelEnv {
+			defaultModelEntry["detail"] = "the env default serves runs that do not name a model"
+		} else if judgeOK {
+			defaultModelEntry["detail"] = "unset — the judge model covers background features; runs pick their model from workspace providers"
+		} else {
+			defaultModelEntry["fix"] = "Set TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID in .env, or pick a judge model in Agents → Quality settings"
+		}
 		matrixOK := false
 		anyChannelConfigured := false
 		for _, channelType := range []string{"matrix", "telegram", "slack"} {
@@ -1852,8 +1868,7 @@ func main() {
 			channelsEntry["detail"] = "no chat transport configured — agents reach you only in the web inbox; add one under Channels when needed"
 		}
 		checks := []map[string]any{
-			{"key": "default_model", "configured": defaultModel, "used_by": []string{"remember", "remember_many", "knowledge extraction (fallback)"},
-				"fix": "Set TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID in .env"},
+			defaultModelEntry,
 			{"key": "judge_model", "configured": judgeOK, "used_by": []string{"skill_propose (fallback)", "knowledge contradiction triage (B1)", "knowledge hygiene (B4)", "area normalization"},
 				"fix": "Agents → Quality settings → pick a judge model"},
 			{"key": "embeddings", "configured": embedStatus.Ready, "used_by": []string{"semantic hints", "knowledge conflict prediction (C5)", "semantic knowledge search"},

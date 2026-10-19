@@ -196,6 +196,14 @@ func (a *Activities) extractionModelClient(ctx context.Context, project, model s
 	if a.Model != nil {
 		return a.Model, nil
 	}
+	// No project/run default either: the supervisor judge model is the
+	// installation's designated background-work model — extraction is exactly
+	// that, so it rides the judge instead of failing on a clean install.
+	if a.JudgeModel != nil {
+		if client, jErr := a.JudgeModel(ctx); jErr == nil && client != nil {
+			return client, nil
+		}
+	}
 	if config, err := llm.ConfigFromEnv(); err == nil {
 		if model != "" {
 			config.Model = model
