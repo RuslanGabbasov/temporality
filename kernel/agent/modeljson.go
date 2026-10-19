@@ -28,7 +28,27 @@ func completeParsed[T any](ctx context.Context, model *llm.Client, messages []ll
 	var zero T
 	completion, err := model.Complete(ctx, messages, nil, llm.JSONMode())
 	if err != nil {
-		return zero, fmt.Errorf("model call failed: %w", err)
+		// Some providers answer json_object-mode requests with an EMPTY
+		// completion (sporadically, mostly under long prompts). The retry
+		// ladder inside Complete exhausts itself on those; a plain call
+		// without response_format usually succeeds. One fallback round.
+		if strings.Contains(err.Error(), "empty completion") {
+			completion, err = model.Complete(ctx, messages, nil)
+			if err != nil {
+				return zero, fmt.Errorf("model call failed (json mode and plain): %w", err)
+			}
+			parsed, parseErr := parse(completion.Content)
+			if parseErr == nil {
+				return parsed, nil
+			}
+			if repaired, changed := repairJSONLoose(completion.Content); changed {
+				if parsed, err := parse(repaired); err == nil {
+					return parsed, nil
+				}
+			}
+		} else {
+			return zero, fmt.Errorf("model call failed: %w", err)
+		}
 	}
 	parsed, parseErr := parse(completion.Content)
 	if parseErr == nil {
