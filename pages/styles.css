@@ -47,3 +47,10 @@
 .why-card h3{font-size:14.5px;font-weight:650;letter-spacing:-.03em;margin:10px 0 8px}
 .why-card p{font-size:12px;line-height:1.75;color:var(--tm-text-2);margin:0}
 @media(max-width:980px){.why-grid{grid-template-columns:1fr}}
+/* Measured-numbers section */
+.numbers-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:34px}
+.number-card{border:1px solid var(--tm-border);border-radius:8px;padding:20px;background:#14241f}
+.number-value{font:600 30px/1.1 var(--mono);letter-spacing:-.04em;color:var(--tm-teal)}
+.number-label{margin-top:10px;font-size:11.5px;line-height:1.6;color:var(--tm-text-2)}
+@media(max-width:980px){.numbers-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.numbers-grid{grid-template-columns:1fr}.number-value{font-size:24px}}
