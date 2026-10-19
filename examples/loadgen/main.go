@@ -446,7 +446,10 @@ func (a api) terminateRun(runID string) {
 }
 
 // ensureSetup creates the project and the load agent when missing. Both are
-// idempotent: an existing id answers 409/200, which the runner treats as OK.
+// idempotent: an existing id answers 409/200, which the runner treats as OK —
+// then a PUT pins the agent shape anyway, so an agent created by an older
+// campaign (max_turns=3 made every heavy run finish on the turn-limit finale)
+// converges to what the current scenario needs.
 func (a api) ensureSetup() {
 	// Idempotent setup: an existing project/agent is fine — repeat campaigns
 	// reuse them. Only transport errors (err != nil) are real failures.
@@ -458,17 +461,26 @@ func (a api) ensureSetup() {
 	} else {
 		fmt.Printf("project %s exists (code %d) — reusing\n", *project, code)
 	}
-	code, _, err = a.call(http.MethodPost, "/v1/workspace/agents", map[string]any{
-		"id": *agent, "name": "LoadGen Agent", "model": *model,
+	agentBody := map[string]any{
+		"id": *agent, "name": "LoadGen Agent", "model": *model, "project_id": *project,
 		"system_prompt": "You are a load-test fixture: run the two scripted commands and finish.",
-		"max_turns":     3,
-	})
+		// The scripted loop is 4 model turns (2 tools + ask_human + final): the
+		// turn-limit finale would stream the answer anyway, but the run then
+		// reports status=turn_limit instead of completed.
+		"max_turns": 4,
+	}
+	code, _, err = a.call(http.MethodPost, "/v1/workspace/agents", agentBody)
 	if err != nil {
 		fmt.Printf("agent create: %v\n", err)
 	} else if code == 201 || code == 200 {
 		fmt.Printf("agent %s created\n", *agent)
 	} else {
 		fmt.Printf("agent %s exists (code %d) — reusing\n", *agent, code)
+		// PUT after reuse is the point of the exercise: converge the stored
+		// agent onto the current scenario shape.
+		if code2, _, err2 := a.call(http.MethodPut, "/v1/workspace/agents/"+url.PathEscape(*agent), agentBody); err2 != nil || code2 >= 300 {
+			fmt.Printf("agent update: HTTP %d: %v\n", code2, err2)
+		}
 	}
 }
 
