@@ -171,7 +171,7 @@ func NewServer(store observation.Store, log *slog.Logger, gate *controlplane.Gat
 	mux.HandleFunc("GET /v1/observations/knowledge/embeddings/missing", s.getKnowledgeEmbeddingGaps)
 	mux.HandleFunc("GET /v1/observations/knowledge/embeddings/neighbors", s.getKnowledgeEmbeddingNeighbors)
 	mux.HandleFunc("GET /v1/observations/hints/effectiveness", s.getHintEffectiveness)
-	s.handler = counters.middleware(logRequests(log, s.gate.Authenticate(mux)))
+	s.handler = logRequests(log, s.gate.Authenticate(counters.gateMiddleware(counters.middleware(mux))))
 	return s
 }
 

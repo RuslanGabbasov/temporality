@@ -31,9 +31,9 @@ type endpointCounters struct {
 	mu      sync.Mutex
 	started time.Time
 	byRoute map[string]*routeCounter
-	// unmatchedPaths tallies the paths behind the "unmatched" row — a flood
-	// of misses is a finding (the heavy-100 melt was ~27 req/s of them), but
-	// the row alone hides WHO is knocking. Capped: a scanner must not grow
+	// unmatchedPaths tallies the paths behind the "unmatched" row — requests
+	// that reached the mux but matched no route (method mismatches, stale
+	// clients polling removed endpoints). Capped: a scanner must not grow
 	// this map forever.
 	unmatchedPaths map[string]int64
 }
@@ -58,6 +58,11 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+// middleware accounts requests that reach the mux. It must sit INSIDE the
+// auth gate: the gate wraps requests with r.WithContext, and ServeMux sets
+// Pattern on that copy — an outer middleware reads the original, whose
+// Pattern stays empty, and every authorized call looks unmatched (the
+// v2026.2.5 counters misattributed the whole event traffic that way).
 func (c *endpointCounters) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -146,6 +151,28 @@ func (c *endpointCounters) snapshot() map[string]any {
 		top = top[:10]
 	}
 	return map[string]any{"uptime_s": time.Since(c.started).Seconds(), "routes": rows, "unmatched_top": top}
+}
+
+// gateMiddleware sits OUTSIDE the auth gate and accounts only what the gate
+// rejects (401/403) — everything else is already counted inside. A storm of
+// rejected tokens must stay visible without polluting the route rows.
+func (c *endpointCounters) gateMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		if rec.status != http.StatusUnauthorized && rec.status != http.StatusForbidden {
+			return
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		counter := c.byRoute["gate-rejected"]
+		if counter == nil {
+			counter = &routeCounter{}
+			c.byRoute["gate-rejected"] = counter
+		}
+		counter.Requests++
+		counter.Errors4x++
+	})
 }
 
 // writeCounters renders the snapshot for the debug listener.
