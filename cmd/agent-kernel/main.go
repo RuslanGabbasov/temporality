@@ -1096,6 +1096,83 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]string{"run_id": r.PathValue("runID"), "status": "cancel_requested"})
 	})
+	// Extraction kickoff for external agents (docs/external-agents.md): any
+	// framework that reported its run through the journal's event ingest can
+	// request the experience loop — knowledge extraction, projection and hint
+	// availability — without running inside the kernel harness. The kickoff
+	// verifies the run is terminal and journal-backed, then starts the same
+	// detached KnowledgeExtraction workflow native runs use; REJECT_DUPLICATE
+	// makes repeat calls idempotent (409 already extracted).
+	mux.HandleFunc("POST /v1/agent/runs/{runID}/extract", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		if project == "" {
+			writeError(w, 400, errors.New("project query parameter is required"))
+			return
+		}
+		if !gate.Allow(w, r, controlplane.RoleWriter, project) {
+			return
+		}
+		runID := r.PathValue("runID")
+		var body struct {
+			SourceID string `json:"source_id"`
+			Model    string `json:"model"`
+		}
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body)
+		sourceID := strings.TrimSpace(body.SourceID)
+		if sourceID == "" {
+			sourceID = querySourceID(r, activities.SourceID)
+		}
+		// The run must exist in the journal and be terminal: extraction replays
+		// finished work, so a live or unknown run is a caller error. The listing
+		// is scoped to the project, so a foreign project's run id answers 404.
+		terminal := map[string]bool{"run.completed": true, "run.failed": true, "run.cancelled": true}
+		lastEventID, terminalSeen := "", false
+		runEvents, err := activities.RunEvents(r.Context(), project, runID)
+		if err != nil {
+			writeError(w, 500, fmt.Errorf("journal listing failed: %w", err))
+			return
+		}
+		for _, event := range runEvents {
+			lastEventID = event.EventID
+			if terminal[event.Type] {
+				terminalSeen = true
+			}
+		}
+		if lastEventID == "" {
+			writeError(w, 404, errors.New("run not found in the journal — report its events through POST /v1/observations/events first"))
+			return
+		}
+		if !terminalSeen {
+			writeError(w, 409, errors.New("run is not terminal yet — extraction waits for run.completed, run.failed or run.cancelled"))
+			return
+		}
+		actor := "external"
+		if principal, ok := controlplane.FromContext(r.Context()); ok && principal.UserID != "" {
+			actor = principal.UserID
+		}
+		input := agent.KnowledgeExtractionInput{
+			Run: agent.RunInput{
+				RunID: runID, Project: project, SourceID: sourceID, ActorID: actor,
+				Model: strings.TrimSpace(body.Model),
+				// External runs did not run inside the harness: extraction reads
+				// the journal events, everything run-specific stays empty.
+			},
+			// A fresh deterministic chain: extraction events form their own
+			// sequence (the foreign events carry the reporter's own event ids),
+			// context.run ties them to the run's timeline.
+			Scope: agent.EventScope(sourceID, project, runID) + "-extract",
+		}
+		options := client.StartWorkflowOptions{ID: agent.ExtractionWorkflowIDPublic(sourceID, project, runID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
+		if _, err := temporalClient.ExecuteWorkflow(r.Context(), options, "KnowledgeExtraction", input); err != nil {
+			if strings.Contains(err.Error(), "already started") || strings.Contains(err.Error(), "already exists") {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": "extraction already started for this run", "run_id": runID})
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true, "run_id": runID, "project": project, "detail": "extraction started; knowledge will appear in the journal projection and in hints"})
+	})
 	// Force stop (POST /terminate): TerminateWorkflow kills the workflow even
 	// when a cancel cannot land — the prime case being a workflow task stuck
 	// failing its determinism check, which processes no further signals. The

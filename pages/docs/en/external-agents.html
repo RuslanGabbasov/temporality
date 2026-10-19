@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="How to wire any framework or pipeline into the experience loop — events, knowledge extraction, hints.">
+<title>External agents (experience layer) — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../external-agents.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/external-agents.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<div class="docs-nav-section">Integrations</div>
+<a class="docs-nav-row active" href="external-agents.html">External agents (experience layer)</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Integrations</div>
+<h1>External agents (experience layer)</h1>
+<p class="docs-lead">How to wire any framework or pipeline into the experience loop — events, knowledge extraction, hints.</p>
+<p>Temporality is not just a harness. The experience journal is available
+over HTTP, so the loop &quot;events → knowledge → hints&quot; can be enabled for an
+agent running in any framework — LangGraph, LangChain, a custom pipeline —
+without moving execution into the kernel.</p>
+<h2 id="the-three-step-contract"><a class="anchor" href="#the-three-step-contract" aria-label="Section link">#</a>The three-step contract</h2><ol>
+<li><strong>Report the run&#39;s events</strong> to the journal: <code>POST /v1/observations/events</code>
+(batches of up to 100), schema <code>temporality.event/1</code>.</li>
+<li><strong>When the run reaches a terminal event</strong> (<code>run.completed</code> / <code>run.failed</code> /
+<code>run.cancelled</code>), call extraction: <code>POST /v1/agent/runs/{run}/extract?project=…</code>
+(a kernel API; idempotent — a repeat call answers 409).</li>
+<li><strong>Ask for hints</strong> before new tasks: <code>POST /v1/observations/hints</code> with the
+task text — the project&#39;s relevant knowledge comes back with state and
+cautions.</li>
+</ol>
+<p>The minimal event set extraction understands: <code>run.started</code>,
+<code>turn.started</code>, <code>model.started</code>, <code>model.completed</code> (<code>output_tokens</code> and
+<code>content</code> are useful), <code>tool.started</code> / <code>tool.completed</code> / <code>tool.failed</code>
+(with <code>tool</code> and the result), <code>run.completed</code>. Anything unknown is
+ignored — report as much as you find useful.</p>
+<h2 id="authentication"><a class="anchor" href="#authentication" aria-label="Section link">#</a>Authentication</h2><p>The journal accepts workspace user bearer tokens (the same ones the
+kernel uses). For a service integration, create a dedicated user with the
+writer role on the target project.</p>
+<h2 id="a-ready-example"><a class="anchor" href="#a-ready-example" aria-label="Section link">#</a>A ready example</h2><p><a href="https://github.com/RuslanGabbasov/temporality/blob/main/examples/external-agent/external_agent.py" target="_blank" rel="noreferrer"><code>examples/external-agent/external_agent.py</code>&nbsp;<span class="ext">↗</span></a> —
+~100 lines of Python with no SDK: a mini agent on an OpenAI-compatible
+API that reports events, calls extraction and queries hints.</p>
+<pre><code class="language-sh">pip install requests
+export TEMPORALITY_URL=http://localhost:8080
+export TEMPORALITY_TOKEN=&lt;journal bearer&gt;
+export KERNEL_URL=http://localhost:8090
+export MODEL_BASE_URL=https://api.openai.com/v1
+export MODEL_API_KEY=sk-…
+export MODEL_NAME=gpt-4o-mini
+python3 external_agent.py my-project &quot;Set up CI for the monorepo&quot;
+</code></pre>
+<p>The first run performs the task and extracts knowledge. A second run with
+a similar task already receives hints from the accumulated experience.</p>
+<h2 id="what-an-external-agent-gets"><a class="anchor" href="#what-an-external-agent-gets" aria-label="Section link">#</a>What an external agent gets</h2><table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Endpoint</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Run event reporting</td>
+<td><code>POST /v1/observations/events</code></td>
+</tr>
+<tr>
+<td>Knowledge extraction (kickoff)</td>
+<td><code>POST /v1/agent/runs/{run}/extract</code></td>
+</tr>
+<tr>
+<td>Hints before a task</td>
+<td><code>POST /v1/observations/hints</code></td>
+</tr>
+<tr>
+<td>Knowledge listing and dossiers</td>
+<td><code>GET /v1/observations/knowledge</code></td>
+</tr>
+<tr>
+<td>Correct/challenge/promote knowledge</td>
+<td><code>POST …/knowledge/{invalidate,challenge,promote}</code></td>
+</tr>
+<tr>
+<td>Semantic neighbors of knowledge</td>
+<td><code>GET /v1/observations/knowledge/embeddings/neighbors</code></td>
+</tr>
+<tr>
+<td>Run traces and comparison</td>
+<td><code>GET /v1/observations/runs/{state,compare}</code></td>
+</tr>
+</tbody></table>
+<p>Limitation: durable execution, HITL, sandboxes and delegation are part of
+the kernel harness. If the agent needs those, move execution into the
+kernel (see Quick start); the experience survives — the event types are
+the same.</p>
+<h2 id="how-it-looks-in-the-interface"><a class="anchor" href="#how-it-looks-in-the-interface" aria-label="Section link">#</a>How it looks in the interface</h2><p>External runs appear in the same lists and timelines (project + run id
+tie the events together), extracted knowledge shows up in the knowledge
+explorer with provenance back to the originating run, and conflicts land
+in the supervisor queue.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="administration.html"><small>← Previous</small><strong>Administration</strong></a>
+    <a class="pager-next" href="reference.html"><small>Next →</small><strong>Reference</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>

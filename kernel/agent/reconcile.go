@@ -249,6 +249,14 @@ func (a *Activities) UncertainOperations(ctx context.Context, project string, li
 	return uncertain, nil
 }
 
+// RunEvents loads the complete event stream of one run from the journal —
+// the public face of fetchRunEvents, used by the server package (the
+// external-agents extraction kickoff verifies the run is terminal before
+// starting the extraction workflow).
+func (a *Activities) RunEvents(ctx context.Context, project, runID string) ([]observation.Event, error) {
+	return a.fetchRunEvents(ctx, project, runID)
+}
+
 // toolEvents pages through one event type for a project.
 // toolEvents pages through the journal's event listing for one event type.
 // since bounds the scan (empty time.Time = unbounded); the operations listing

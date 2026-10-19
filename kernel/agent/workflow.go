@@ -2965,6 +2965,15 @@ func extractionWorkflowID(sourceID, project, runID string) string {
 	return fmt.Sprintf("knowledge-extraction/%x", digest[:16])
 }
 
+// ExtractionWorkflowIDPublic exposes the deterministic extraction workflow id
+// to the server package: the external-agents kickoff starts the same workflow
+// native runs use, so REJECT_DUPLICATE keeps one extraction per run for both
+// paths (and a re-extraction under a bumped ExtractorVersion opens a new id
+// for native and external runs alike).
+func ExtractionWorkflowIDPublic(sourceID, project, runID string) string {
+	return extractionWorkflowID(sourceID, project, runID)
+}
+
 // runKnowledgeExtraction replays the finished run through the knowledge
 // extractor (docs/knowledge-extraction.md): one model call over the compact
 // trajectory produces 0..N candidates that are emitted as knowledge.proposed

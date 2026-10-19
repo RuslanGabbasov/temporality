@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Как подключить любой фреймворк или собственный пайплайн к петле опыта — события, извлечение знаний, подсказки.">
+<title>Внешние агенты (experience-слой) — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/external-agents.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/external-agents.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<div class="docs-nav-section">Интеграции</div>
+<a class="docs-nav-row active" href="external-agents.html">Внешние агенты (experience-слой)</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Интеграции</div>
+<h1>Внешние агенты (experience-слой)</h1>
+<p class="docs-lead">Как подключить любой фреймворк или собственный пайплайн к петле опыта — события, извлечение знаний, подсказки.</p>
+<p>Temporality — не только харнес. Журнал опыта доступен по HTTP, поэтому
+петлю «события → знания → подсказки» можно включить для агента, который
+работает в любом фреймворке — LangGraph, LangChain, собственный
+пайплайн — без переноса исполнения в kernel.</p>
+<h2 id="контракт-из-трёх-шагов"><a class="anchor" href="#контракт-из-трёх-шагов" aria-label="Section link">#</a>Контракт из трёх шагов</h2><ol>
+<li><strong>Репортьте события рана</strong> в журнал: <code>POST /v1/observations/events</code>
+(batch до 100 событий), схема <code>temporality.event/1</code>.</li>
+<li><strong>Дождитесь терминального события</strong> (<code>run.completed</code> / <code>run.failed</code> /
+<code>run.cancelled</code>) и вызовите извлечение: <code>POST /v1/agent/runs/{run}/extract?project=…</code>
+(это kernel-API; идемпотентно — повторный вызов вернёт 409).</li>
+<li><strong>Спрашивайте подсказки</strong> перед новыми задачами:
+<code>POST /v1/observations/hints</code> с текстом задачи — вернутся релевантные
+знания проекта с состоянием и предостережениями.</li>
+</ol>
+<p>Минимальный набор событий, который понимает извлечение: <code>run.started</code>,
+<code>turn.started</code>, <code>model.started</code>, <code>model.completed</code> (полезны
+<code>output_tokens</code>, <code>content</code>), <code>tool.started</code> / <code>tool.completed</code> /
+<code>tool.failed</code> (с <code>tool</code> и результатом), <code>run.completed</code>. Всё
+неизвестное просто игнорируется — репортьте столько, сколько считаете
+нужным.</p>
+<h2 id="аутентификация"><a class="anchor" href="#аутентификация" aria-label="Section link">#</a>Аутентификация</h2><p>Журнал принимает bearer-токены пользователей workspace (те же, что и
+kernel). Для сервисной интеграции создайте отдельного пользователя с
+ролью writer на нужный проект.</p>
+<h2 id="готовый-пример"><a class="anchor" href="#готовый-пример" aria-label="Section link">#</a>Готовый пример</h2><p><a href="https://github.com/RuslanGabbasov/temporality/blob/main/examples/external-agent/external_agent.py" target="_blank" rel="noreferrer"><code>examples/external-agent/external_agent.py</code>&nbsp;<span class="ext">↗</span></a> —
+~100 строк на Python без SDK: мини-агент на OpenAI-совместимом API,
+который репортит события, вызывает извлечение и запрашивает подсказки.</p>
+<pre><code class="language-sh">pip install requests
+export TEMPORALITY_URL=http://localhost:8080
+export TEMPORALITY_TOKEN=&lt;journal bearer&gt;
+export KERNEL_URL=http://localhost:8090
+export MODEL_BASE_URL=https://api.openai.com/v1
+export MODEL_API_KEY=sk-…
+export MODEL_NAME=gpt-4o-mini
+python3 external_agent.py my-project &quot;Настрой CI для monorepo&quot;
+</code></pre>
+<p>Первый прогон — выполняет задачу и извлекает знания. Второй прогон с
+похожей задачей — уже получает подсказки из накопленного опыта.</p>
+<h2 id="что-доступно-внешнему-агенту"><a class="anchor" href="#что-доступно-внешнему-агенту" aria-label="Section link">#</a>Что доступно внешнему агенту</h2><table>
+<thead>
+<tr>
+<th>Возможность</th>
+<th>Эндпоинт</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Репорт событий рана</td>
+<td><code>POST /v1/observations/events</code></td>
+</tr>
+<tr>
+<td>Извлечение знаний (kickoff)</td>
+<td><code>POST /v1/agent/runs/{run}/extract</code></td>
+</tr>
+<tr>
+<td>Подсказки перед задачей</td>
+<td><code>POST /v1/observations/hints</code></td>
+</tr>
+<tr>
+<td>Листинг и досье знаний</td>
+<td><code>GET /v1/observations/knowledge</code></td>
+</tr>
+<tr>
+<td>Исправить/оспорить/повысить знание</td>
+<td><code>POST …/knowledge/{invalidate,challenge,promote}</code></td>
+</tr>
+<tr>
+<td>Семантические соседи знания</td>
+<td><code>GET /v1/observations/knowledge/embeddings/neighbors</code></td>
+</tr>
+<tr>
+<td>Трейс и сравнение ранов</td>
+<td><code>GET /v1/observations/runs/{state,compare}</code></td>
+</tr>
+</tbody></table>
+<p>Ограничение: durable-исполнение, HITL, песочницы и делегирование — часть
+kernel-харнеса. Если агенту нужны они — переносите исполнение в kernel
+(см. «Быстрый старт»); опыт при этом не теряется: события тех же типов.</p>
+<h2 id="как-это-выглядит-в-интерфейсе"><a class="anchor" href="#как-это-выглядит-в-интерфейсе" aria-label="Section link">#</a>Как это выглядит в интерфейсе</h2><p>Раны внешнего агента появляются в тех же списках и таймлайне (проект +
+run id связывают события), извлечённые знания — в исследователе знаний с
+происхождением до исходного рана, конфликты — в очереди супервайзера.</p>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="administration.html"><small>← Назад</small><strong>Администрирование</strong></a>
+    <a class="pager-next" href="reference.html"><small>Далее →</small><strong>Справочник</strong></a>
+  </nav>
+</article>
+</main>
+</body>
+</html>
