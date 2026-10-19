@@ -1192,7 +1192,31 @@ func main() {
 		sourceID := querySourceID(r, activities.SourceID)
 		workflowID := workflowIDFor(sourceID, project, runID)
 		if err := temporalClient.TerminateWorkflow(r.Context(), workflowID, "", "terminated by operator"); err != nil {
-			writeError(w, 409, err)
+			// A workflow Temporal does not know is already gone — the common case
+			// being a stand whose Temporal volume was rebuilt while the journal
+			// kept older runs. Those zombies stay 'running' in lists forever and
+			// every stop press 409s. Heal instead: journal the terminal event and
+			// settle the workspace status, answer success.
+			if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "NotFound") {
+				writeError(w, 409, err)
+				return
+			}
+			actorGone := requestUserID(r)
+			goneEvent := observation.Event{
+				Schema:     observation.Schema,
+				EventID:    fmt.Sprintf("run-terminate/%s/%d", runID, time.Now().UnixNano()),
+				OccurredAt: time.Now().UTC(),
+				Source:     observation.Source{ID: sourceID, Integration: "temporality-agent-kernel", Version: "1"},
+				Context:    observation.Context{Project: project, Run: runID, Actor: observation.Actor{ID: actorGone, Type: "human"}},
+				Type:       "run.cancelled",
+				Data:       map[string]any{"reason": "terminated", "detail": "workflow not found in the orchestrator (already gone)", "actor_id": actorGone},
+			}
+			if err := events.Enqueue(r.Context(), goneEvent); err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			_ = ws.UpdateRunStatus(r.Context(), runID, "cancelled", "", 0, "")
+			writeJSON(w, 200, map[string]string{"run_id": runID, "status": "already_gone"})
 			return
 		}
 		actor := requestUserID(r)
