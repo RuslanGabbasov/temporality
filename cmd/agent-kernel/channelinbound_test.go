@@ -1046,6 +1046,14 @@ func TestChannelWatcherAnnouncesRunProgress(t *testing.T) {
 			{EventID: "src/event/000001", Type: "turn.started"},
 			{EventID: "src/event/000002", Type: "tool.started", Data: map[string]any{"tool": "knowledge_explore"}},
 			{EventID: "src/event/000003", Type: "model.completed"},
+			// Turn 2: a short interim line — voiced when turn 3 starts.
+			{EventID: "src/event/000004", Type: "turn.started"},
+			{EventID: "src/event/000005", Type: "model.text_delta", Data: map[string]any{"turn": 2, "text": "Смотрю таблицу цен в проекте"}},
+			{EventID: "src/event/000006", Type: "turn.completed"},
+			// Turn 3: a long text — the answer-in-progress, never voiced.
+			{EventID: "src/event/000007", Type: "turn.started"},
+			{EventID: "src/event/000008", Type: "model.text_delta", Data: map[string]any{"turn": 3, "text": strings.Repeat("длинный ответ ", 40)}},
+			{EventID: "src/event/000009", Type: "turn.completed"},
 		}, nil
 	}
 	row := &workspace.InboundMessage{
@@ -1060,13 +1068,12 @@ func TestChannelWatcherAnnouncesRunProgress(t *testing.T) {
 		loop.watchRunAnswer(ctx, row, "intake-m13", true)
 		close(watchDone)
 	}()
-	// The opening line and the knowledge_explore phase land within seconds
-	// (poll every 5s, pacing window 10s — the opening line resets the window,
-	// so the phase line needs the second poll).
-	waitFor(t, 12*time.Second, func() bool {
+	// The opening line, the knowledge_explore phase and the interim quote
+	// land within seconds (poll every 5s, pacing window 10s).
+	waitFor(t, 17*time.Second, func() bool {
 		store.mu.Lock()
 		defer store.mu.Unlock()
-		return len(sent) >= 2
+		return len(sent) >= 3
 	})
 	cancel()
 	<-watchDone
@@ -1074,8 +1081,15 @@ func TestChannelWatcherAnnouncesRunProgress(t *testing.T) {
 	if len(sent) == 0 || !strings.HasPrefix(sent[0], "On it") {
 		t.Fatalf("opening progress line missing: %v", sent)
 	}
-	if len(sent) < 2 || !strings.Contains(sent[1], "Searching the project knowledge base") {
+	joined := strings.Join(sent, "\n")
+	if !strings.Contains(joined, "Searching the project knowledge base") {
 		t.Fatalf("phase line missing: %v", sent)
+	}
+	if !strings.Contains(joined, "💬 «Смотрю таблицу цен в проекте»") {
+		t.Fatalf("interim model line missing: %v", sent)
+	}
+	if strings.Contains(joined, "длинный ответ") {
+		t.Fatalf("long turn text must not be voiced: %v", sent)
 	}
 	for _, line := range sent {
 		if strings.Contains(line, "Reply in this room to answer") {

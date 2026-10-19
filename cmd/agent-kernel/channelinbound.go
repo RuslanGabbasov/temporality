@@ -550,9 +550,12 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 	// Progress state: the watcher tails the run's journal events and announces
 	// phase changes — one short chat line per distinct step, never more often
 	// than every 10 seconds.
-	progress := runProgress{startedAt: time.Now(), lastSent: time.Now().Add(-progressEvery)}
+	progress := runProgress{startedAt: time.Now()}
 	if l.journal != nil {
 		l.sendProgress(watchCtx, settings, address, "On it — working on your message…", &progress)
+		// The opening line must not eat the first pacing window: the run's real
+		// first phase is due on the next poll.
+		progress.lastSent = time.Now().Add(-progressEvery)
 	}
 	typingLogged := false
 	for {
@@ -607,11 +610,13 @@ const progressEvery = 10 * time.Second
 
 // runProgress carries the watcher's announcement state across polls.
 type runProgress struct {
-	lastSeq   int       // highest journal sequence seen so far
-	lastPhase string    // phase currently announced in the chat
-	pending   string    // phase observed in the journal, not yet announced
-	startedAt time.Time // run start, for the elapsed marker
-	lastSent  time.Time // last progress delivery, for the pacing window
+	lastSeq      int       // highest journal sequence seen so far
+	lastPhase    string    // phase currently announced in the chat
+	pendingPhase string    // phase observed in the journal, not yet announced
+	pendingQuote string    // a finished short turn text, voiced at the next turn start
+	textBuf      string    // the current turn's model text, accumulating
+	startedAt    time.Time // run start, for the elapsed marker
+	lastSent     time.Time // last progress delivery, for the pacing window
 }
 
 // announceProgress tails the run's journal events once per poll: the latest
@@ -624,18 +629,59 @@ func (l *channelInboundLoop) announceProgress(ctx context.Context, settings agen
 		return
 	}
 	for _, event := range events {
-		if seq := eventSeq(event.EventID); seq > p.lastSeq {
-			p.lastSeq = seq
-			if phase := runPhase(event); phase != "" {
-				p.pending = phase
-			}
+		if seq := eventSeq(event.EventID); seq <= p.lastSeq {
+			continue
 		}
+		p.lastSeq = eventSeq(event.EventID)
+		l.foldProgressEvent(event, p)
 	}
-	if p.pending == "" || p.pending == p.lastPhase || time.Since(p.lastSent) < progressEvery {
+	if time.Since(p.lastSent) < progressEvery {
+		return // the pacing window: everything pending survives to the next poll
+	}
+	// Phases first (they happen earlier in the run), interim model lines
+	// second — one line per window.
+	var line string
+	if p.pendingPhase != "" {
+		line = fmt.Sprintf("%s · %s", p.pendingPhase, time.Since(p.startedAt).Truncate(time.Second))
+		p.lastPhase, p.pendingPhase = p.pendingPhase, ""
+	} else if p.pendingQuote != "" {
+		line, p.pendingQuote = p.pendingQuote, ""
+	}
+	if line == "" {
 		return
 	}
-	elapsed := time.Since(p.startedAt).Truncate(time.Second)
-	l.sendProgress(ctx, settings, address, fmt.Sprintf("%s · %s", p.pending, elapsed), p)
+	l.sendProgress(ctx, settings, address, line, p)
+}
+
+// interimTextLimit caps what qualifies as an "interim one-liner": longer
+// turn texts are the answer-in-progress or a real content block — voicing
+// them would duplicate the final delivery.
+const interimTextLimit = 300
+
+// foldProgressEvent advances the narration state over one journal event.
+// Turn texts accumulate until the turn completes; a short text is voiced
+// when the NEXT turn starts — the final answer's turn is followed by the run
+// completion, not another turn, so the answer never doubles as progress.
+// The pending slot holds the latest meaningful line: newer narration
+// replaces older (a displaced phase line repeats when its tool runs again).
+func (l *channelInboundLoop) foldProgressEvent(event observation.Event, p *runProgress) {
+	switch event.Type {
+	case "model.text_delta":
+		if text, _ := event.Data["text"].(string); text != "" && len(p.textBuf) < 2*interimTextLimit {
+			p.textBuf += text
+		}
+	case "turn.completed":
+		if text := strings.TrimSpace(p.textBuf); text != "" && len(text) <= interimTextLimit {
+			p.pendingQuote = "💬 «" + strings.ReplaceAll(text, "\n", " ") + "»"
+		}
+		p.textBuf = ""
+	case "turn.started":
+		p.textBuf = "" // an unfinished fragment dies with its turn
+	default:
+		if phase := runPhase(event); phase != "" && phase != p.lastPhase {
+			p.pendingPhase = phase
+		}
+	}
 }
 
 // sendProgress delivers one progress line (no reply hint) and records the
@@ -648,7 +694,6 @@ func (l *channelInboundLoop) sendProgress(ctx context.Context, settings agent.Ch
 		return
 	}
 	p.lastSent = time.Now()
-	p.lastPhase = p.pending
 }
 
 // runPhase maps one journal event onto a human progress line; "" marks noise
