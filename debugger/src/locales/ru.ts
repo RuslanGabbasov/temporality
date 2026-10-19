@@ -158,6 +158,8 @@ export const ru: Record<string, string> = {
     'supervisor.action_generalize': 'Обобщить…',
     'supervisor.generalize_placeholder': 'Одно обобщённое утверждение, покрывающее обе формулировки…',
     'supervisor.generalize_confirm': 'Заменить обе',
+    'supervisor.generalize_cancel': 'Отмена',
+    'supervisor.generalize_no_project': 'Не удалось определить проекты этих знаний — они удалены или не видны вашему аккаунту.',
     'supervisor.compare_new': 'новое',
     'supervisor.compare_old': 'существующее',
     'supervisor.compare_hint': 'Подсвечены слова, которых нет на другой стороне',

@@ -158,6 +158,8 @@ export const en: Record<string, string> = {
     'supervisor.action_generalize': 'Generalize…',
     'supervisor.generalize_placeholder': 'One generalized statement covering both formulations…',
     'supervisor.generalize_confirm': 'Replace both',
+    'supervisor.generalize_cancel': 'Cancel',
+    'supervisor.generalize_no_project': 'Could not resolve the projects of these knowledge items — they may be removed or invisible to your account.',
     'supervisor.compare_new': 'new',
     'supervisor.compare_old': 'existing',
     'supervisor.compare_hint': 'Highlighted — words absent on the other side',

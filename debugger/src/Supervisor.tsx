@@ -262,21 +262,32 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
    *  generalized knowledge (knowledge.proposed through the ingest endpoint),
    *  invalidates both originals with replacement_id — the projection turns
    *  each invalidation into a knowledge.superseded correction — and
-   *  acknowledges the verdict. */
-  const generalizeConflict = async (row: ClusterRow) => {
+   *  acknowledges the verdict. Projects come from the card's resolved state
+   *  (verdict's own, or the fallback's found-project): empty projects would
+   *  422 on every call, and the fallback already knows where the items live. */
+  const generalizeConflict = async (row: ClusterRow, newProject: string, oldProject: string) => {
     const conflict = row.conflict!
     if (!generalize || generalize.rowKey !== row.key) return
     const text = generalize.text.trim()
     if (!text) return
+    if (!newProject && !oldProject) {
+      setError(t('supervisor.generalize_no_project') ?? 'Could not resolve the projects of these knowledge items — they may be removed or invisible to your account.')
+      return
+    }
     setBusyCase(row.key)
     try {
-      const project = conflict.oldProject || row.project
       const id = generalizeID(text)
+      const anchor = oldProject || newProject
       await observationApi.proposeKnowledge({
-        knowledge_id: id, proposition: text, project,
+        knowledge_id: id, proposition: text, project: anchor,
         actor: { id: 'supervisor-queue', type: 'human' },
       })
-      for (const target of [{ id: conflict.newID, project: conflict.newProject }, { id: conflict.oldID, project: conflict.oldProject }]) {
+      for (const target of [
+        { id: conflict.newID, project: newProject },
+        { id: conflict.oldID, project: oldProject },
+      ]) {
+        // A side whose project could not be resolved is skipped: its item is
+        // likely gone — the generalized statement still replaces the pair.
         if (!target.project || !target.id) continue
         await observationApi.invalidate({
           knowledge_id: target.id, project: target.project,
@@ -705,11 +716,11 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                                 style={{ width: '100%', fontSize: '0.75rem', padding: '0.35rem 0.45rem', border: '1px solid var(--tm-border)', borderRadius: '4px', background: 'var(--tm-bg-1, transparent)', color: 'var(--tm-text)', resize: 'vertical' }}
                               />
                               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                                <Button size="sm" kind="primary" disabled={busyCase === row.key || !generalize.text.trim()} onClick={() => void generalizeConflict(row)}>
+                                <Button size="sm" kind="primary" disabled={busyCase === row.key || !generalize.text.trim()} onClick={() => void generalizeConflict(row, newLinkProject, oldLinkProject)}>
                                   {busyCase === row.key ? '…' : t('supervisor.generalize_confirm') ?? 'Replace both'}
                                 </Button>
                                 <Button size="sm" kind="ghost" disabled={busyCase === row.key} onClick={() => setGeneralize(null)}>
-                                  {t('common.cancel') ?? 'Cancel'}
+                                  {t('supervisor.generalize_cancel') ?? 'Cancel'}
                                 </Button>
                               </div>
                             </div>
