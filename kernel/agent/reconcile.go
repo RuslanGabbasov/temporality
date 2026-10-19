@@ -268,8 +268,8 @@ func (a *Activities) toolEvents(ctx context.Context, project, eventType string, 
 		if err != nil {
 			return nil, err
 		}
-		if a.APIToken != "" {
-			request.Header.Set("Authorization", "Bearer "+a.APIToken)
+		if a.apiToken() != "" {
+			request.Header.Set("Authorization", "Bearer "+a.apiToken())
 		}
 		response, err := a.HTTP.Do(request)
 		if err != nil {
@@ -481,8 +481,8 @@ func (a *Activities) RecordReconciliation(ctx context.Context, request Reconcile
 		return observation.Event{}, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	if a.APIToken != "" {
-		httpRequest.Header.Set("Authorization", "Bearer "+a.APIToken)
+	if a.apiToken() != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+a.apiToken())
 	}
 	response, err := a.HTTP.Do(httpRequest)
 	if err != nil {

@@ -66,8 +66,8 @@ func (a *Activities) fetchSagaEvents(ctx context.Context, project, taskID string
 			if err != nil {
 				return nil, err
 			}
-			if a.APIToken != "" {
-				request.Header.Set("Authorization", "Bearer "+a.APIToken)
+			if a.apiToken() != "" {
+				request.Header.Set("Authorization", "Bearer "+a.apiToken())
 			}
 			response, err := a.HTTP.Do(request)
 			if err != nil {

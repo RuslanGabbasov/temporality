@@ -265,8 +265,8 @@ func (a *Activities) publishKnowledgeEmbeddings(ctx context.Context, model strin
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	if a.APIToken != "" {
-		request.Header.Set("Authorization", "Bearer "+a.APIToken)
+	if a.apiToken() != "" {
+		request.Header.Set("Authorization", "Bearer "+a.apiToken())
 	}
 	response, err := a.HTTP.Do(request)
 	if err != nil {

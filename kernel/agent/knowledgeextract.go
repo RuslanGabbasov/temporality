@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -290,8 +291,8 @@ func (a *Activities) projectKnowledge(ctx context.Context, project string) ([]ob
 	if err != nil {
 		return nil, err
 	}
-	if a.APIToken != "" {
-		request.Header.Set("Authorization", "Bearer "+a.APIToken)
+	if a.apiToken() != "" {
+		request.Header.Set("Authorization", "Bearer "+a.apiToken())
 	}
 	response, err := a.HTTP.Do(request)
 	if err != nil {
@@ -299,6 +300,8 @@ func (a *Activities) projectKnowledge(ctx context.Context, project string) ([]ob
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 200))
+		return nil, fmt.Errorf("knowledge listing HTTP %d: %s", response.StatusCode, string(body))
 		return nil, fmt.Errorf("journal knowledge returned HTTP %d", response.StatusCode)
 	}
 	var reply struct {
@@ -323,8 +326,8 @@ func (a *Activities) fetchRunEvents(ctx context.Context, project, runID string) 
 		if err != nil {
 			return nil, err
 		}
-		if a.APIToken != "" {
-			request.Header.Set("Authorization", "Bearer "+a.APIToken)
+		if a.apiToken() != "" {
+			request.Header.Set("Authorization", "Bearer "+a.apiToken())
 		}
 		response, err := a.HTTP.Do(request)
 		if err != nil {
