@@ -19,6 +19,7 @@ import {
 import ProjectOverview from './ProjectOverview'
 import Observability from './Observability'
 import { SupervisorPanels } from './Supervisor'
+import { workspaceApi, type UserMetricsRow } from './workspaceApi'
 import { useI18n, pluralT } from './i18n'
 import { formatDuration } from './eventSummary'
 import { sandboxLoad, maxSandboxNet, sandboxDiameter, sandboxColor, topSandboxes, sandboxShortName } from './sandboxWidgets'
@@ -28,7 +29,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Request failed'
 }
 
-type Tab = 'overview' | 'quality' | 'sagas' | 'knowledge' | 'supervisor'
+type Tab = 'overview' | 'quality' | 'sagas' | 'knowledge' | 'supervisor' | 'users'
 const TAB_KEYS: Tab[] = ['overview', 'quality', 'sagas', 'knowledge']
 
 // The journal stats window and the kernel overview window share one selector.
@@ -254,6 +255,7 @@ export default function Dashboard({ project, setProject }: Props) {
     // The supervisor surface (docs/supervisor-model.md §7): the administrator's
     // problem queue lives inside the dashboard, not as a separate page.
     { key: 'supervisor', label: t('dashboard.tab_supervisor') ?? 'Supervisor' },
+    { key: 'users', label: t('dashboard.tab_users') ?? 'Users' },
   ]
 
   return (
@@ -605,6 +607,73 @@ export default function Dashboard({ project, setProject }: Props) {
       {tab === 'knowledge' && <Observability project={project} />}
 
       {tab === 'supervisor' && <SupervisorPanels onPendingChange={setSupervisorPending} />}
+
+      {tab === 'users' && <UsersTab />}
+    </div>
+  )
+}
+
+// UsersTab: the workspace's people and their live metrics — what they run,
+// what waits on them (open asks), what they already decided. The server
+// rolls the numbers up (exec_context actor + resolved_user); this renders.
+function UsersTab() {
+  const { t } = useI18n()
+  const [rows, setRows] = useState<UserMetricsRow[] | null>(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const data = await workspaceApi.userMetrics()
+      setRows(data.users ?? [])
+    } catch (failure) {
+      setError(errorMessage(failure))
+    } finally {
+      setBusy(false)
+    }
+  }, [])
+  useEffect(() => { void load() }, [load])
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem' }}>
+        <h3 style={{ margin: 0, fontSize: '0.95rem' }}>{t('dashboard.users_title') ?? 'Users'}</h3>
+        <button onClick={() => void load()} disabled={busy} title="Refresh" style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}>↻</button>
+      </div>
+      {error && <InlineNotification kind="error" title={t('common.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
+      {rows === null ? (
+        <Tile style={{ color: 'var(--tm-text-3)' }}>{t('common.loading') ?? 'Loading…'}</Tile>
+      ) : rows.length === 0 ? (
+        <Tile style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.users_empty') ?? 'No users yet'}</Tile>
+      ) : (
+        <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(10rem, 2fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(8rem, 1.2fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(7rem, 1.1fr)', gap: '0.25rem 0.6rem', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tm-text-3)', padding: '0.35rem 0.6rem', background: 'var(--tm-raised)' }}>
+            <span>{t('dashboard.users_col_user') ?? 'User'}</span>
+            <span title={t('dashboard.users_runs_hint') ?? undefined}>{t('runs.task_col_runs') ?? 'Runs'}</span>
+            <span title={t('dashboard.users_runs_hint') ?? undefined}>7d</span>
+            <span title={t('dashboard.users_asks_hint') ?? undefined}>⏳ {t('dashboard.users_open') ?? 'open'}</span>
+            <span>{t('dashboard.users_last_run') ?? 'Last run'}</span>
+            <span title={t('dashboard.users_asks_hint') ?? undefined}>{t('dashboard.users_answered') ?? 'Answered'}</span>
+            <span title={t('dashboard.users_wait_hint') ?? undefined}>⏳ {t('dashboard.users_wait') ?? 'wait'}</span>
+            <span title={t('dashboard.users_last_ask_hint') ?? undefined}>{t('dashboard.users_last_ask') ?? 'Last ask'}</span>
+          </div>
+          {rows.map((row) => (
+            <div key={row.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(10rem, 2fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(8rem, 1.2fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(7rem, 1.1fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }} title={`${row.name} · ${row.role ?? ''}${row.org_unit_id ? ' · ' + row.org_unit_id : ''}`}>
+                {row.name || row.id}
+                {!row.active && <Tag type="cool-gray" size="sm" style={{ marginLeft: '0.35rem' }}>{t('dashboard.users_inactive') ?? 'inactive'}</Tag>}
+              </span>
+              <span>{row.runs_total}</span>
+              <span>{row.runs_week}</span>
+              <span style={row.asks_open > 0 ? { color: 'var(--tm-warning)', fontWeight: 600 } : undefined}>{row.asks_open > 0 ? row.asks_open : '—'}</span>
+              <span style={{ color: 'var(--tm-text-2)' }}>{row.last_run_at ? new Date(row.last_run_at).toLocaleString() : '—'}</span>
+              <span>{row.asks_total}</span>
+              <span title={t('dashboard.users_wait_hint') ?? undefined}>{row.wait_seconds > 0 ? formatDuration(row.wait_seconds * 1000) : '—'}</span>
+              <span style={{ color: 'var(--tm-text-2)' }}>{row.last_ask_at ? new Date(row.last_ask_at).toLocaleString() : '—'}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

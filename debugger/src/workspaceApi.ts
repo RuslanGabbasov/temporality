@@ -905,6 +905,21 @@ export interface HumanRequest {
   expires_at?: string
 }
 
+export interface UserMetricsRow {
+  id: string
+  name: string
+  role?: string
+  active: boolean
+  org_unit_id?: string
+  runs_total: number
+  runs_week: number
+  last_run_at?: string
+  asks_open: number
+  asks_total: number
+  wait_seconds: number
+  last_ask_at?: string
+}
+
 export interface User {
   id: string
   name: string
@@ -1398,6 +1413,8 @@ export const workspaceApi = {
 
   // Users
   listUsers: () => request<{ users: User[] }>('/v1/workspace/users'),
+  userMetrics: () =>
+    request<{ users: UserMetricsRow[] }>('/v1/workspace/users/metrics'),
   getUser: (id: string) => request<User>(`/v1/workspace/users/${id}`),
   createUser: (data: { id?: string; name: string; email?: string; role: string; org_unit_id?: string }) =>
     request<User>('/v1/workspace/users', { method: 'POST', body: JSON.stringify(data) }),

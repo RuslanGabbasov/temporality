@@ -6516,6 +6516,7 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]any{"users": users})
 	})
+	registerUserMetricsRoutes(mux, gate, ws)
 	mux.HandleFunc("GET /v1/workspace/users/{userID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
