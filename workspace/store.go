@@ -584,6 +584,7 @@ func (s *Store) ListRunsByActor(ctx context.Context, actorID string, limit int) 
 		 FROM workspace_run
 		 WHERE exec_context->>'actor' = $1 OR exec_context->'authorized_by'->>'user_id' = $1
 		 ORDER BY created_at DESC LIMIT $2`, actorID, limit)
+	println("REPRO store: queried, err:", err != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -594,12 +595,14 @@ func (s *Store) ListRunsByActor(ctx context.Context, actorID string, limit int) 
 		var agentID *string
 		var execContext []byte
 		if err := rows.Scan(&r.ID, &r.TaskID, &r.ProjectID, &agentID, &r.AgentVersion, &execContext, &r.RunID, &r.Status, &r.Model, &r.Answer, &r.Turns, &r.Error, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			println("REPRO store: scan error:", err.Error())
 			return nil, err
 		}
 		r.AgentID = derefPtr(agentID)
 		r.ExecContext = decodeExecContext(execContext)
 		result = append(result, r)
 	}
+	println("REPRO store: scan loop done, rows.Err:", rows.Err() != nil)
 	return result, rows.Err()
 }
 

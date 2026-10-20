@@ -73,12 +73,19 @@ func registerUserMetricsRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *
 		weekAgo := time.Now().UTC().Add(-7 * 24 * time.Hour)
 		rows := make([]UserMetricsRow, 0, len(users))
 		for _, user := range users {
+			// Guarantee a non-nil stats entry: the row reads its fields
+			// directly, and a nil dereference here 502s the whole tab.
+			stats := askStats[user.ID]
+			if stats == nil {
+				stats = &userAskStats{}
+				askStats[user.ID] = stats
+			}
 			row := UserMetricsRow{
 				ID: user.ID, Name: user.Name, Role: user.Role, Active: user.Active, OrgUnitID: user.OrgUnitID,
-				AsksOpen:    askStats[user.ID].askOpen(),
-				AsksTotal:   askStats[user.ID].askTotal(),
-				WaitSeconds: askStats[user.ID].askWaitSeconds(),
-				LastAskAt:   askStats[user.ID].lastAsk,
+				AsksOpen:    stats.open,
+				AsksTotal:   stats.total,
+				WaitSeconds: stats.waitSeconds,
+				LastAskAt:   stats.lastAsk,
 			}
 			runs, err := ws.ListRunsByActor(r.Context(), user.ID, 200)
 			if err == nil {
@@ -112,32 +119,10 @@ func registerUserMetricsRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *
 }
 
 // userAskStats folds one user's human requests into the numbers the tab
-// renders. All accessors are nil-receiver-safe: a user with no asks has no
-// entry in the map at all.
+// renders; every user gets a non-nil entry before the rows are built.
 type userAskStats struct {
 	total       int
 	open        int
 	waitSeconds int64
 	lastAsk     *time.Time
-}
-
-func (s *userAskStats) askOpen() int {
-	if s == nil {
-		return 0
-	}
-	return s.open
-}
-
-func (s *userAskStats) askTotal() int {
-	if s == nil {
-		return 0
-	}
-	return s.total
-}
-
-func (s *userAskStats) askWaitSeconds() int64 {
-	if s == nil {
-		return 0
-	}
-	return s.waitSeconds
 }
