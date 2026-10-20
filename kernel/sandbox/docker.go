@@ -30,7 +30,11 @@ const (
 	maxArgBytes    = 32 << 10
 	maxTotalArgs   = 128 << 10
 	maxOutputBytes = 64 << 10
-	defaultTimeout = 60
+	// defaultTimeout covers the calls where the model did not pass
+	// timeout_sec: 60s killed legitimate builds and e2e suites mid-run («
+	// sandbox command exceeded 60 second timeout»), while the ceiling stays
+	// the real limit for anything longer.
+	defaultTimeout = 300
 )
 
 // maxTimeoutSeconds caps one sandbox command. 15 minutes: e2e suites and
