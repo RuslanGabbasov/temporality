@@ -66,8 +66,8 @@ func registerUserMetricsRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *
 			if ask.AnsweredAt != nil {
 				stats.waitSeconds += int64(ask.AnsweredAt.Sub(ask.CreatedAt).Seconds())
 			}
-			if stats.lastAskAt == nil || ask.CreatedAt.After(*stats.lastAskAt) {
-				stats.lastAskAt = &ask.CreatedAt
+			if stats.lastAsk == nil || ask.CreatedAt.After(*stats.lastAsk) {
+				stats.lastAsk = &ask.CreatedAt
 			}
 		}
 		weekAgo := time.Now().UTC().Add(-7 * 24 * time.Hour)
@@ -76,11 +76,11 @@ func registerUserMetricsRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *
 			row := UserMetricsRow{
 				ID: user.ID, Name: user.Name, Role: user.Role, Active: user.Active, OrgUnitID: user.OrgUnitID,
 				AsksOpen:    askStats[user.ID].askOpen(),
-				AsksTotal:   askStats[user.ID].total,
-				WaitSeconds: askStats[user.ID].waitSeconds,
-				LastAskAt:   askStats[user.ID].lastAskAt,
+				AsksTotal:   askStats[user.ID].askTotal(),
+				WaitSeconds: askStats[user.ID].askWaitSeconds(),
+				LastAskAt:   askStats[user.ID].lastAsk,
 			}
-			runs, err := ws.ListRunsByActor(r.Context(), user.ID, 500)
+			runs, err := ws.ListRunsByActor(r.Context(), user.ID, 200)
 			if err == nil {
 				row.RunsTotal = len(runs)
 				for _, run := range runs {
@@ -111,13 +111,14 @@ func registerUserMetricsRoutes(mux *http.ServeMux, gate *controlplane.Gate, ws *
 	})
 }
 
-// userAskStats folds one user's human requests into the three numbers the tab
-// renders; the nil-safe helpers keep the map lookups terse.
+// userAskStats folds one user's human requests into the numbers the tab
+// renders. All accessors are nil-receiver-safe: a user with no asks has no
+// entry in the map at all.
 type userAskStats struct {
 	total       int
 	open        int
 	waitSeconds int64
-	lastAskAt   *time.Time
+	lastAsk     *time.Time
 }
 
 func (s *userAskStats) askOpen() int {
@@ -125,4 +126,18 @@ func (s *userAskStats) askOpen() int {
 		return 0
 	}
 	return s.open
+}
+
+func (s *userAskStats) askTotal() int {
+	if s == nil {
+		return 0
+	}
+	return s.total
+}
+
+func (s *userAskStats) askWaitSeconds() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.waitSeconds
 }

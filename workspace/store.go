@@ -574,7 +574,9 @@ func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
 // point (API, trigger, intake). Powers the intake agent's run_status: a
 // status question must see UI-started work too, not only channel-routed runs.
 func (s *Store) ListRunsByActor(ctx context.Context, actorID string, limit int) ([]Run, error) {
-	if limit <= 0 || limit > 50 {
+	// 200: the per-user metrics rollup walks a whole history in one call; the
+	// run_status caller passes ≤ 50 and is unaffected by the higher ceiling.
+	if limit <= 0 || limit > 200 {
 		limit = 10
 	}
 	rows, err := s.pool.Query(ctx,
