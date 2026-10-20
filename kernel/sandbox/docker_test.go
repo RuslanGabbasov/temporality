@@ -238,15 +238,22 @@ func TestNetworkDefaultsToNoneAndBridgeIsExplicit(t *testing.T) {
 	if got := flagValue(base, "--network"); got != "none" {
 		t.Fatalf("default network = %q, want none", got)
 	}
-	// Request-level network overrides the runner default.
+	// Request-level bridge maps onto the DEDICATED sandbox network: compose
+	// rebuilds and host workloads share docker0, and a stack restart must not
+	// churn the bridge a running E2E session depends on.
 	bridged := runner.arguments("/w", Request{Command: []string{"ls"}, Network: "bridge"}, "n")
-	if got := flagValue(bridged, "--network"); got != "bridge" {
-		t.Fatalf("request network = %q, want bridge", got)
+	if got := flagValue(bridged, "--network"); got != SandboxNetworkName {
+		t.Fatalf("request network = %q, want %s", got, SandboxNetworkName)
 	}
 	// A runner explicitly configured with bridge keeps it when the request is silent.
 	configured := (&Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Network: "bridge", Memory: "1g", CPUs: "2", PIDs: 128}).arguments("/w", Request{Command: []string{"ls"}}, "n")
-	if got := flagValue(configured, "--network"); got != "bridge" {
-		t.Fatalf("runner network = %q, want bridge", got)
+	if got := flagValue(configured, "--network"); got != SandboxNetworkName {
+		t.Fatalf("runner network = %q, want %s", got, SandboxNetworkName)
+	}
+	// An explicit operator override passes through untouched.
+	override := (&Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Network: "temporality-e2e", Memory: "1g", CPUs: "2", PIDs: 128}).arguments("/w", Request{Command: []string{"ls"}}, "n")
+	if got := flagValue(override, "--network"); got != "temporality-e2e" {
+		t.Fatalf("override network = %q, want temporality-e2e", got)
 	}
 }
 

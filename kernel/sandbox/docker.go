@@ -305,6 +305,9 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 		return Result{}, err
 	}
 	args := d.arguments(workspace, request, name)
+	if err := d.ensureNetwork(d.effectiveNetwork(request)); err != nil {
+		return Result{}, err
+	}
 	defer func() {
 		if cleanupErr := d.removeContainer(name); cleanupErr != nil {
 			runErr = errors.Join(runErr, cleanupErr)
@@ -343,6 +346,52 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 	return result, nil
 }
 
+// SandboxNetworkName is the dedicated bridge for network-needing sandboxes:
+// isolated from compose networks and host workloads, stable across stack
+// rebuilds. KERNEL_SANDBOX_NETWORK overrides the mapping entirely.
+const SandboxNetworkName = "temporality-sandbox"
+
+// ensureNetwork idempotently materializes the dedicated sandbox network
+// before a run that needs it: an inspect hit is a no-op, a create race
+// («already exists») is a win. Only the dedicated name triggers this —
+// «none» and explicit operator overrides pass through untouched. A real
+// failure fails the run loudly: a missing network would otherwise surface
+// as a baffling per-command network error.
+func (d *Docker) ensureNetwork(network string) error {
+	if network != SandboxNetworkName {
+		return nil
+	}
+	inspect := exec.Command(d.Binary, "network", "inspect", network)
+	if err := inspect.Run(); err == nil {
+		return nil
+	}
+	create := exec.Command(d.Binary, "network", "create", network)
+	if out, err := create.CombinedOutput(); err != nil && !strings.Contains(string(out), "already exists") {
+		if len(out) > 300 {
+			out = out[:300]
+		}
+		return fmt.Errorf("create sandbox network %q: %s", network, string(out))
+	}
+	return nil
+}
+
+// effectiveNetwork resolves the run's network: the request override, the
+// runner default, then none — with bridge-needing runs mapped onto the
+// dedicated sandbox network.
+func (d *Docker) effectiveNetwork(request Request) string {
+	network := request.Network
+	if network == "" {
+		network = d.Network
+	}
+	if network == "" {
+		network = "none"
+	}
+	if network == "bridge" {
+		return SandboxNetworkName
+	}
+	return network
+}
+
 func (d *Docker) arguments(workspace string, request Request, name string) []string {
 	mode := "rw"
 	if request.ReadOnly {
@@ -359,13 +408,7 @@ func (d *Docker) arguments(workspace string, request Request, name string) []str
 	// builds, so the cap is configurable and defaults to a size that
 	// survives a link step.
 	tmpSize := firstNonEmpty(request.TmpSize, d.TmpSize, "256m")
-	network := request.Network
-	if network == "" {
-		network = d.Network
-	}
-	if network == "" {
-		network = "none"
-	}
+	network := d.effectiveNetwork(request)
 	memory := firstNonEmpty(request.Memory, d.Memory)
 	cpus := firstNonEmpty(request.CPUs, d.CPUs)
 	pids := d.PIDs
