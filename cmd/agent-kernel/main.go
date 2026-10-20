@@ -439,6 +439,22 @@ func main() {
 	if strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_BASE_URL")) == "" || strings.TrimSpace(os.Getenv("TEMPORALITY_MODEL_ID")) == "" {
 		log.Warn("no default model configured (TEMPORALITY_MODEL_BASE_URL/TEMPORALITY_MODEL_ID); runs must select a model served by a workspace provider")
 	}
+	// The sandbox root decides where every project workspace lives; say it out
+	// loud at boot so «where did my workspaces go» never needs code archaeology.
+	if swappable := activities.SandboxSwappable(); swappable != nil {
+		root := strings.TrimSpace(os.Getenv("KERNEL_SANDBOX_ROOT"))
+		if root == "" {
+			root = ".sandbox"
+		}
+		if resolved := swappable.SandboxRoot(); resolved != "" {
+			root = resolved
+		}
+		if image := swappable.Image(); image != "" {
+			log.Info("sandbox runner ready", "root", root, "image", image)
+		} else {
+			log.Warn("sandbox runner not configured: run_command stays inert until onboarding builds an image (KERNEL_SANDBOX_IMAGE)", "root", root)
+		}
+	}
 	// Ephemeral live-token streaming: the activity worker and the HTTP server
 	// share one process, so an in-memory bus connects them without a broker.
 	activities.Tokens = agent.NewTokenBus()
