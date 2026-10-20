@@ -30,7 +30,13 @@ function errorMessage(error: unknown) {
 }
 
 type Tab = 'overview' | 'quality' | 'sagas' | 'knowledge' | 'supervisor' | 'users'
+// Every valid tab: the URL param and the last-tab memory validate against this
+// full set (the TAB_KEYS strip above it is only the initial-render order).
+const ALL_TABS: Tab[] = ['overview', 'quality', 'sagas', 'knowledge', 'supervisor', 'users']
 const TAB_KEYS: Tab[] = ['overview', 'quality', 'sagas', 'knowledge']
+// The last open tab survives reloads and revisits: returning to the
+// supervisor triage mid-investigation must not land back on the overview.
+const LAST_TAB_KEY = 'dashboard.tab'
 
 // The journal stats window and the kernel overview window share one selector.
 // `go` is the Go duration the kernel endpoint understands (ParseDuration has
@@ -110,7 +116,16 @@ interface Props {
 export default function Dashboard({ project, setProject }: Props) {
   const { t, locale } = useI18n()
   const initTab = new URLSearchParams(window.location.search).get('tab') as Tab | null
-  const [tab, setTab] = useState<Tab>(TAB_KEYS.includes(initTab as Tab) ? (initTab as Tab) : 'overview')
+  const rememberedTab = window.localStorage.getItem(LAST_TAB_KEY) as Tab | null
+  const [tab, setTab] = useState<Tab>(
+    initTab && ALL_TABS.includes(initTab) ? initTab
+      : rememberedTab && ALL_TABS.includes(rememberedTab) ? rememberedTab
+        : 'overview',
+  )
+  const switchTab = useCallback((next: Tab) => {
+    setTab(next)
+    try { window.localStorage.setItem(LAST_TAB_KEY, next) } catch { /* private mode: memory-only */ }
+  }, [])
   const [windowIdx, setWindowIdx] = useState(1) // 24h by default
   const [health, setHealth] = useState<HealthStats | null>(null)
   const [overview, setOverview] = useState<ProjectsOverview | null>(null)
@@ -244,7 +259,7 @@ export default function Dashboard({ project, setProject }: Props) {
 
   const pickProject = (id: string) => {
     setProject(id)
-    setTab('sagas')
+    switchTab('sagas')
   }
 
   const tabs: { key: Tab; label: string }[] = [
@@ -295,7 +310,7 @@ export default function Dashboard({ project, setProject }: Props) {
         {tabs.map((item) => (
           <button
             key={item.key}
-            onClick={() => setTab(item.key)}
+            onClick={() => switchTab(item.key)}
             style={{
               padding: '0.45rem 0.8rem', background: 'none', border: 'none', borderBottom: `2px solid ${tab === item.key ? 'var(--tm-teal)' : 'transparent'}`,
               color: tab === item.key ? 'var(--tm-text)' : 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.82rem', fontWeight: tab === item.key ? 600 : 400,
