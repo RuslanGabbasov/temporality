@@ -65,6 +65,7 @@ func startSupervisorTriageLoop(ctx context.Context, log *slog.Logger, activities
 
 // journalEvent is one journal event reduced to what triage needs.
 type journalEvent struct {
+	EventID string
 	Project string
 	Run     string
 	Type    string
@@ -136,6 +137,7 @@ func runSupervisorTriagePass(ctx context.Context, log *slog.Logger, activities *
 // journalTypedEvents is one page of the journal listing.
 type journalTypedEvents struct {
 	Events []struct {
+		EventID string `json:"event_id"`
 		Context struct {
 			Project string `json:"project"`
 			Run     string `json:"run"`
@@ -184,7 +186,7 @@ func fetchJournalTypedEvents(ctx context.Context, observationURL, journalToken, 
 			return nil, err
 		}
 		for _, event := range pageData.Events {
-			refs = append(refs, journalEvent{Project: event.Context.Project, Run: event.Context.Run, Type: event.Type, Data: event.Data})
+			refs = append(refs, journalEvent{EventID: event.EventID, Project: event.Context.Project, Run: event.Context.Run, Type: event.Type, Data: event.Data})
 		}
 		if pageData.NextCursor == "" {
 			return refs, nil

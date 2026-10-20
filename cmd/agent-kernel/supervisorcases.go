@@ -545,9 +545,17 @@ func auditIntakeClassifications(ctx context.Context, log *slog.Logger, activitie
 		if audited >= 1 {
 			break // sampling: one classification per pass
 		}
-		subject, _ := event.Data["event_id"].(string)
+		// Stable subject: the inbound message id (present on every classified
+		// event), falling back to the journal event id. The old fallback keyed
+		// on len(done) — a number that changes every pass — so the same
+		// classification was re-audited each cycle, publishing the same verdict
+		// over and over (the «куча одинаковых вердиктов» flood).
+		subject, _ := event.Data["message_id"].(string)
 		if subject == "" {
-			subject = "intake:" + fmt.Sprint(len(done)) // stable enough fallback
+			subject = event.EventID
+		}
+		if subject == "" {
+			continue
 		}
 		classification, _ := event.Data["classification"].(string)
 		if classification != "task" && classification != "amendment" {
@@ -557,8 +565,12 @@ func auditIntakeClassifications(ctx context.Context, log *slog.Logger, activitie
 			continue
 		}
 		messageText, _ := event.Data["message"].(string)
-		if messageText == "" {
-			messageText, _ = event.Data["text"].(string)
+		if strings.TrimSpace(messageText) == "" {
+			// Older classified events predate the message payload (and truly
+			// empty bodies carry nothing to judge): auditing them produced the
+			// «message body is empty → reclassify» spam. Skip — one sample of
+			// the real text or nothing at all.
+			continue
 		}
 		// The run the router started right after this classification: same
 		// project, newest first (both listings are newest-first already).

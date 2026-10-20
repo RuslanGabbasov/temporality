@@ -625,7 +625,10 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			return
 		}
 		if emit != nil {
-			data := map[string]any{"classification": body.Classification}
+			// The message text rides along (truncated): the intake-audit case
+			// judges the classification against what the user actually wrote —
+			// without it every audit read as «empty message».
+			data := map[string]any{"classification": body.Classification, "message": truncateForLog(row.Body, 500)}
 			if body.Note != "" {
 				data["note"] = body.Note
 			}
