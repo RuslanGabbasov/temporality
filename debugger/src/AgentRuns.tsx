@@ -868,7 +868,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     {label}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.role || 'agent'} · {shortTime(row.at)}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(row.agentId && agents.find((a) => a.id === row.agentId)?.name) || row.role || 'agent'} · {shortTime(row.at)}</span>
                     {/* Project attribution in the global listing
                         (docs/activity-scoping.md §7): shows which project the
                         run worked in without narrowing the list. */}
