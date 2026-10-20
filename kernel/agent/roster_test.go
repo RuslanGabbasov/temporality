@@ -141,3 +141,31 @@ func TestResolveAgentSurfacesWorkspaceErrorDetail(t *testing.T) {
 	require.Contains(t, err.Error(), "lead-ai-agent, lead-qa")
 	require.Contains(t, err.Error(), "not available in project")
 }
+
+// TestResolveAgentFloorsDelegatedBudgets: delegating models guess budgets low
+// (observed 9–15) and children died mid-work as incomplete. A low explicit
+// budget is raised to DelegatedTurnsFloor, a generous one is honored, and no
+// budget at all keeps the agent card's value (the workflow normalizes 0 to
+// its own default).
+func TestResolveAgentFloorsDelegatedBudgets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"run_id":"child","project":"p","max_turns":50}`))
+	}))
+	t.Cleanup(server.Close)
+	activities := &Activities{HTTP: server.Client(), WorkspaceURL: server.URL, WorkspaceToken: "internal"}
+
+	// A low model guess is floored.
+	child, err := activities.ResolveAgent(context.Background(), ResolveAgentRequest{Project: "p", AgentID: "dev", RunID: "child", MaxTurns: 15})
+	require.NoError(t, err)
+	require.Equal(t, DelegatedTurnsFloor, child.MaxTurns)
+
+	// A generous guess is honored as-is.
+	child, err = activities.ResolveAgent(context.Background(), ResolveAgentRequest{Project: "p", AgentID: "dev", RunID: "child", MaxTurns: 60})
+	require.NoError(t, err)
+	require.Equal(t, 60, child.MaxTurns)
+
+	// No explicit budget keeps the card's value.
+	child, err = activities.ResolveAgent(context.Background(), ResolveAgentRequest{Project: "p", AgentID: "dev", RunID: "child"})
+	require.NoError(t, err)
+	require.Equal(t, 50, child.MaxTurns)
+}

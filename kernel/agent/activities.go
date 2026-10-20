@@ -368,7 +368,12 @@ func (a *Activities) ResolveAgent(ctx context.Context, request ResolveAgentReque
 	child.ActorID = request.ActorID
 	child.DelegationDepth = request.DelegationDepth
 	if request.MaxTurns > 0 {
-		child.MaxTurns = request.MaxTurns
+		// The delegating model guesses budgets low (observed 9–15 for real
+		// subtasks): children died mid-work, were marked incomplete, and the
+		// lead burned its own budget re-planning. The card stays the ceiling of
+		// what the child may use; the floor keeps a model guess from crippling
+		// the work below any chance to finish.
+		child.MaxTurns = max(request.MaxTurns, DelegatedTurnsFloor)
 	}
 	if err := a.PrepareRun(&child); err != nil {
 		return RunInput{}, temporal.NewNonRetryableApplicationError("prepare delegated run: "+err.Error(), "AgentResolutionFailed", nil)
