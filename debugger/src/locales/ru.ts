@@ -206,6 +206,7 @@ export const ru: Record<string, string> = {
     'supervisor.tier_unknown': 'прочее',
     'supervisor.tier_other': 'другое',
     'supervisor.tiers_empty': 'Исходов подсказок за окно пока нет.',
+    'supervisor.tiers_hint': 'Эффективность подсказок по ярусам: 👍 полезные, 👎 вредные, % — доля полезных',
     'supervisor.filter_all_cases': 'Все кейсы',
     'supervisor.filter_case': 'Кейс',
     'supervisor.filter_project': 'Проект',

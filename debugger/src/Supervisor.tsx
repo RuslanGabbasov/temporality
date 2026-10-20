@@ -547,35 +547,28 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
           {/* Monitoring only (§6.5): semantic-layer health and hint-tier
               effectiveness. Configuration (models, HAB coefficients) lives in
               Agents → quality settings — a monitoring tab must not be a
-              second editing surface for the same values. */}
-          <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.6rem 0.75rem', fontSize: '0.78rem', marginBottom: '1.25rem' }}>
-            <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>{t('supervisor.semantic_title') ?? 'Semantic layer'}</div>
-              {embeddings && (
-                <div style={{ marginBottom: '0.4rem' }}>
-                  <Tag type={embeddings.ready ? 'green' : 'red'} size="sm">{embeddings.ready ? t('supervisor.semantic_ready') ?? 'ready' : t('supervisor.semantic_degraded') ?? 'degraded'}</Tag>{' '}
-                  <span style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem' }}>{embeddings.model}{embeddings.error ? ` — ${embeddings.error}` : ''}</span>
-                </div>
-              )}
-              {tiers && tiers.length > 0 ? (
-                <div style={{ display: 'grid', gap: '0.15rem' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr repeat(3, minmax(3.5rem, auto))', gap: '0.4rem', fontSize: '0.68rem', color: 'var(--tm-text-3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    <span>{t('supervisor.tier') ?? 'tier'}</span>
-                    <span>👍</span>
-                    <span>👎</span>
-                    <span>%</span>
-                  </div>
-                  {tiers.map((row) => (
-                    <div key={row.tier} style={{ display: 'grid', gridTemplateColumns: '1fr repeat(3, minmax(3.5rem, auto))', gap: '0.4rem' }}>
-                      <span style={{ color: row.tier === 'semantic' ? 'var(--tm-teal)' : 'var(--tm-text-2)' }}>{t(`supervisor.tier_${row.tier}`) ?? row.tier}</span>
-                      <span>{row.helpful}</span>
-                      <span>{row.harmful}</span>
-                      <span>{row.helpful_rate_pct}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', margin: 0 }}>{t('supervisor.tiers_empty') ?? 'No hint outcomes in the window yet.'}</p>
-              )}
+              second editing surface for the same values. Compact: the whole
+              widget is one inline strip — status, model, tiers. */}
+          <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.4rem 0.75rem', fontSize: '0.78rem', marginBottom: '1rem', display: 'flex', gap: '0.6rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 600 }}>{t('supervisor.semantic_title') ?? 'Semantic layer'}</span>
+            {embeddings && (
+              <span style={{ display: 'inline-flex', gap: '0.35rem', alignItems: 'baseline' }} title={embeddings.error ?? undefined}>
+                <Tag type={embeddings.ready ? 'green' : 'red'} size="sm">{embeddings.ready ? t('supervisor.semantic_ready') ?? 'ready' : t('supervisor.semantic_degraded') ?? 'degraded'}</Tag>
+                <span style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem' }}>{embeddings.model}</span>
+              </span>
+            )}
+            {tiers && tiers.length > 0 ? (
+              <span style={{ display: 'inline-flex', gap: '0.75rem', flexWrap: 'wrap', color: 'var(--tm-text-2)' }} title={t('supervisor.tiers_hint') ?? undefined}>
+                {tiers.map((row) => (
+                  <span key={row.tier} style={{ whiteSpace: 'nowrap' }}>
+                    <span style={{ color: row.tier === 'semantic' ? 'var(--tm-teal)' : 'var(--tm-text-3)' }}>{t(`supervisor.tier_${row.tier}`) ?? row.tier}</span>
+                    {' '}👍{row.helpful} 👎{row.harmful} · {row.helpful_rate_pct}%
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem' }}>{t('supervisor.tiers_empty') ?? 'No hint outcomes in the window yet.'}</span>
+            )}
           </div>
 
           {/* Wave A3: health anomaly explanations, newest first. One row per

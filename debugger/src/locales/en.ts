@@ -206,6 +206,7 @@ export const en: Record<string, string> = {
     'supervisor.tier_unknown': 'unknown',
     'supervisor.tier_other': 'other',
     'supervisor.tiers_empty': 'No hint outcomes in the window yet.',
+    'supervisor.tiers_hint': 'Hint effectiveness by tier: 👍 helpful, 👎 harmful, % — helpful share',
     'supervisor.filter_all_cases': 'All cases',
     'supervisor.filter_case': 'Case',
     'supervisor.filter_project': 'Project',
