@@ -20,6 +20,17 @@ if [ "$(id -u)" = "0" ]; then
     socket_gid="$(stat -c %g /var/run/docker.sock 2>/dev/null || echo 0)"
   fi
   [ -z "$socket_gid" ] && socket_gid=0
+  # The sandbox root lives on a host bind mount; on a fresh install docker
+  # auto-creates that path root:root, and after the privilege drop the kernel
+  # (uid 10001) cannot mkdir inside it — every project start died with
+  # «create project workspace: permission denied». While still root: create
+  # the directory tree and hand it to the unprivileged user.
+  SANDBOX_ROOT="${KERNEL_SANDBOX_ROOT:-${TEMPORALITY_SANDBOX_ROOT:-/srv/temporality/sandbox}}"
+  if [ -d "$(dirname "$SANDBOX_ROOT")" ] || [ -d "$SANDBOX_ROOT" ]; then
+    mkdir -p "$SANDBOX_ROOT/projects" 2>/dev/null || true
+    chown -R "$TARGET_UID:$TARGET_GID" "$SANDBOX_ROOT" 2>/dev/null || \
+      echo "WARN: could not chown $SANDBOX_ROOT — pre-create it manually and chown to $TARGET_UID:$TARGET_GID"
+  fi
   exec setpriv --reuid="$TARGET_UID" --regid="$TARGET_GID" \
     --groups="$socket_gid" --inh-caps=-all --bounding-set=-all \
     -- /usr/local/bin/temporality-agent-kernel "$@"
