@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Heading, InlineNotification, Tag, Tile } from '@carbon/react'
+import { Button, Heading, InlineNotification, Tag, Tile } from '@carbon/react'
 import { observationApi, type HealthStats, type HealthModelStats, type ObservationEvent } from './observationApi'
 import {
   projectsOverview,
@@ -19,7 +19,7 @@ import {
 import ProjectOverview from './ProjectOverview'
 import Observability from './Observability'
 import { SupervisorPanels } from './Supervisor'
-import { workspaceApi, type UserMetricsRow } from './workspaceApi'
+import { workspaceApi, type UserMetricsRow, type UserFact } from './workspaceApi'
 import { useI18n, pluralT } from './i18n'
 import { formatDuration } from './eventSummary'
 import { sandboxLoad, maxSandboxNet, sandboxDiameter, sandboxColor, topSandboxes, sandboxShortName } from './sandboxWidgets'
@@ -636,6 +636,10 @@ function UsersTab() {
   const [rows, setRows] = useState<UserMetricsRow[] | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  // Facts drawer: one expanded user at a time; facts load on expand.
+  const [expandedUser, setExpandedUser] = useState<string | null>(null)
+  const [facts, setFacts] = useState<UserFact[] | null>(null)
+  const [draftFact, setDraftFact] = useState('')
   const load = useCallback(async () => {
     setBusy(true)
     setError('')
@@ -649,6 +653,37 @@ function UsersTab() {
     }
   }, [])
   useEffect(() => { void load() }, [load])
+  const openFacts = useCallback(async (userID: string) => {
+    if (expandedUser === userID) { setExpandedUser(null); return }
+    setExpandedUser(userID)
+    setFacts(null)
+    try {
+      const data = await workspaceApi.userFacts(userID)
+      setFacts(data.facts ?? [])
+    } catch (failure) {
+      setError(errorMessage(failure))
+    }
+  }, [expandedUser])
+  const addFact = useCallback(async (userID: string) => {
+    const fact = draftFact.trim()
+    if (!fact) return
+    try {
+      await workspaceApi.addUserFact(userID, fact)
+      setDraftFact('')
+      const data = await workspaceApi.userFacts(userID)
+      setFacts(data.facts ?? [])
+    } catch (failure) {
+      setError(errorMessage(failure))
+    }
+  }, [draftFact])
+  const removeFact = useCallback(async (userID: string, factID: number) => {
+    try {
+      await workspaceApi.deleteUserFact(userID, factID)
+      setFacts((prev) => (prev ?? []).filter((f) => f.id !== factID))
+    } catch (failure) {
+      setError(errorMessage(failure))
+    }
+  }, [])
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem' }}>
@@ -673,9 +708,14 @@ function UsersTab() {
             <span title={t('dashboard.users_last_ask_hint') ?? undefined}>{t('dashboard.users_last_ask') ?? 'Last ask'}</span>
           </div>
           {rows.map((row) => (
-            <div key={row.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(10rem, 2fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(8rem, 1.2fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(7rem, 1.1fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
+            <div key={row.id} style={{ borderTop: '1px solid var(--tm-border)' }}>
+              <div
+                onClick={() => void openFacts(row.id)}
+                title={t('dashboard.users_facts_hint') ?? undefined}
+                style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: 'minmax(10rem, 2fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(8rem, 1.2fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(7rem, 1.1fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem' }}
+              >
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }} title={`${row.name} · ${row.role ?? ''}${row.org_unit_id ? ' · ' + row.org_unit_id : ''}`}>
-                {row.name || row.id}
+                {expandedUser === row.id ? '▾ ' : '▸ '}{row.name || row.id}
                 {!row.active && <Tag type="cool-gray" size="sm" style={{ marginLeft: '0.35rem' }}>{t('dashboard.users_inactive') ?? 'inactive'}</Tag>}
               </span>
               <span>{row.runs_total}</span>
@@ -685,6 +725,40 @@ function UsersTab() {
               <span>{row.asks_total}</span>
               <span title={t('dashboard.users_wait_hint') ?? undefined}>{row.wait_seconds > 0 ? formatDuration(row.wait_seconds * 1000) : '—'}</span>
               <span style={{ color: 'var(--tm-text-2)' }}>{row.last_ask_at ? new Date(row.last_ask_at).toLocaleString() : '—'}</span>
+              </div>
+              {expandedUser === row.id && (
+                <div style={{ padding: '0.35rem 0.6rem 0.6rem 1.5rem', background: 'var(--tm-raised)' }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('dashboard.users_facts_title') ?? 'Stored preferences and facts'}</div>
+                  {facts === null ? (
+                    <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)' }}>{t('common.loading') ?? 'Loading…'}</span>
+                  ) : facts.length === 0 ? (
+                    <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)' }}>{t('dashboard.users_facts_empty') ?? 'No facts stored yet — the dialog accumulates them, or add one below'}</span>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '0.2rem', marginBottom: '0.4rem' }}>
+                      {facts.map((fact) => (
+                        <div key={fact.id} style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', fontSize: '0.8rem' }}>
+                          <span style={{ flex: 1 }}>{fact.fact}{fact.origin === 'agent' && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.68rem' }}> · {t('dashboard.users_facts_from_dialog') ?? 'from dialog'}</span>}</span>
+                          <button
+                            onClick={() => void removeFact(row.id, fact.id)}
+                            title={t('dashboard.users_facts_delete') ?? 'Delete'}
+                            style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', lineHeight: 1 }}
+                          >✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.3rem' }}>
+                    <input
+                      value={draftFact}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDraftFact(e.target.value)}
+                      onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') void addFact(row.id) }}
+                      placeholder={t('dashboard.users_facts_placeholder') ?? 'New fact or preference…'}
+                      style={{ flex: 1, maxWidth: '28rem', background: 'var(--tm-surface)', border: '1px solid var(--tm-border)', borderRadius: '4px', color: 'var(--tm-text)', padding: '0.25rem 0.5rem', fontSize: '0.78rem' }}
+                    />
+                    <Button size="sm" kind="ghost" disabled={!draftFact.trim()} onClick={() => void addFact(row.id)}>{t('dashboard.users_facts_add') ?? 'Add'}</Button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>

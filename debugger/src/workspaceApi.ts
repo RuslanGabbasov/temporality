@@ -905,6 +905,14 @@ export interface HumanRequest {
   expires_at?: string
 }
 
+export interface UserFact {
+  id: number
+  user_id: string
+  fact: string
+  origin?: string
+  created_at: string
+}
+
 export interface UserMetricsRow {
   id: string
   name: string
@@ -1415,6 +1423,12 @@ export const workspaceApi = {
   listUsers: () => request<{ users: User[] }>('/v1/workspace/users'),
   userMetrics: () =>
     request<{ users: UserMetricsRow[] }>('/v1/workspace/users/metrics'),
+  userFacts: (userId: string) =>
+    request<{ facts: UserFact[] }>(`/v1/workspace/users/${encodeURIComponent(userId)}/facts`),
+  addUserFact: (userId: string, fact: string) =>
+    request<UserFact>(`/v1/workspace/users/${encodeURIComponent(userId)}/facts`, { method: 'POST', body: JSON.stringify({ fact }) }),
+  deleteUserFact: (userId: string, factId: number) =>
+    request<{ deleted: boolean }>(`/v1/workspace/users/${encodeURIComponent(userId)}/facts/${factId}`, { method: 'DELETE' }),
   getUser: (id: string) => request<User>(`/v1/workspace/users/${id}`),
   createUser: (data: { id?: string; name: string; email?: string; role: string; org_unit_id?: string }) =>
     request<User>('/v1/workspace/users', { method: 'POST', body: JSON.stringify(data) }),

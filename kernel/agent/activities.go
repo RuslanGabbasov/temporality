@@ -855,6 +855,8 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		return a.handleDeleteTrigger(ctx, request)
 	case "skill_search":
 		return a.handleSkillSearch(ctx, request)
+	case "user_remember":
+		return a.handleUserRemember(ctx, request)
 	case "artifact_search":
 		return a.handleArtifactSearch(ctx, request)
 	case "artifact_read":

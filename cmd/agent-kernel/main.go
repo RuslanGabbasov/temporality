@@ -335,6 +335,12 @@ func main() {
 		log.Error("migrate workspace v73 (run task_id nullable)", "error", err)
 		os.Exit(1)
 	}
+	// 000074 adds explicit per-user facts («отвечай кратко», ownership notes):
+	// the accumulated half of the sender picture the dialogs open with.
+	if err = ws.Migrate(ctx, "migrations/000074_user_fact.up.sql"); err != nil {
+		log.Error("migrate workspace v74 (user facts)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
@@ -6517,6 +6523,61 @@ func main() {
 		writeJSON(w, 200, map[string]any{"users": users})
 	})
 	registerUserMetricsRoutes(mux, gate, ws)
+	// User facts (docs/inbound-messages.md §4.3): the explicit half of the
+	// per-user picture — preferences and durable facts the dialogs work with.
+	mux.HandleFunc("GET /v1/workspace/users/{userID}/facts", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		facts, err := ws.ListUserFacts(r.Context(), r.PathValue("userID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"facts": facts})
+	})
+	mux.HandleFunc("POST /v1/workspace/users/{userID}/facts", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		var req struct {
+			Fact   string `json:"fact"`
+			Origin string `json:"origin,omitempty"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if strings.TrimSpace(req.Fact) == "" {
+			writeError(w, 422, fmt.Errorf("fact is required"))
+			return
+		}
+		fact, err := ws.AddUserFact(r.Context(), r.PathValue("userID"), req.Fact, req.Origin)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, fact)
+	})
+	mux.HandleFunc("DELETE /v1/workspace/users/{userID}/facts/{factID}", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleWriter) {
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("factID"), 10, 64)
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if err := ws.DeleteUserFact(r.Context(), r.PathValue("userID"), id); err != nil {
+			if errors.Is(err, workspace.ErrNotFound) {
+				writeError(w, 404, err)
+				return
+			}
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"deleted": true})
+	})
 	mux.HandleFunc("GET /v1/workspace/users/{userID}", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
 			return
