@@ -57,6 +57,26 @@ func TestClampCPUsStaysWithinDaemonAvailability(t *testing.T) {
 	}
 }
 
+// TestPidsFromEnvKeepsDefaultOnJunk: the pids limit is operator-tunable, and
+// a typo must degrade to the safe default instead of disabling the limit.
+func TestPidsFromEnvKeepsDefaultOnJunk(t *testing.T) {
+	cases := map[string]int{
+		"":      512,
+		"1024":  1024,
+		" 256 ": 256,
+		"zero":  512,
+		"0":     512,
+		"-5":    512,
+		"12.5":  512,
+	}
+	for value, want := range cases {
+		t.Setenv("KERNEL_SANDBOX_PIDS_TEST", value)
+		if got := pidsFromEnv("KERNEL_SANDBOX_PIDS_TEST", 512); got != want {
+			t.Errorf("pidsFromEnv(%q) = %d, want %d", value, got, want)
+		}
+	}
+}
+
 func TestExecuteCapturesCommandAndAlwaysRemovesContainer(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(root, "repo")
@@ -109,10 +129,10 @@ func TestWorkspaceMustStayWithinConfiguredRoot(t *testing.T) {
 }
 
 func TestDockerArgumentsEnforceIsolation(t *testing.T) {
-	runner := &Docker{Image: "sandbox@sha256:abc", Memory: "1g", CPUs: "2", PIDs: 128, UID: 10001, GID: 10001, ScratchSize: "512m", TmpSize: "256m"}
+	runner := &Docker{Image: "sandbox@sha256:abc", Memory: "1g", CPUs: "2", PIDs: 512, UID: 10001, GID: 10001, ScratchSize: "512m", TmpSize: "256m"}
 	args := runner.arguments("/srv/work/repo", Request{Command: []string{"go", "test", "./..."}, ReadOnly: true}, "temporality-sandbox-test")
 	joined := strings.Join(args, " ")
-	for _, required := range []string{"--init", "--pull=never", "--name temporality-sandbox-test", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit 128", "--memory 1g", "--memory-swap 1g", "--cpus 2", "--ulimit nofile=1024:1024", "--user 10001:10001", "/srv/work/repo:/workspace:ro", "--tmpfs /tmp:rw,noexec,nosuid,size=256m", "--tmpfs /scratch:rw,exec,nosuid,size=512m", "--env HOME=/scratch", "--env TMPDIR=/scratch"} {
+	for _, required := range []string{"--init", "--pull=never", "--name temporality-sandbox-test", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit 512", "--memory 1g", "--memory-swap 1g", "--cpus 2", "--ulimit nofile=1024:1024", "--user 10001:10001", "/srv/work/repo:/workspace:ro", "--tmpfs /tmp:rw,noexec,nosuid,size=256m", "--tmpfs /scratch:rw,exec,nosuid,size=512m", "--env HOME=/scratch", "--env TMPDIR=/scratch"} {
 		if !strings.Contains(joined, required) {
 			t.Errorf("docker args missing %q: %s", required, joined)
 		}

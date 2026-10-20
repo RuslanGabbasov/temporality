@@ -185,6 +185,10 @@ services:
       # workspaces with it.
       KERNEL_SANDBOX_ROOT: ${TEMPORALITY_SANDBOX_ROOT:-/srv/temporality/sandbox}
       KERNEL_SANDBOX_IMAGE: ${KERNEL_SANDBOX_IMAGE:-${TEMPORALITY_SANDBOX_IMAGE:-}}
+      # Sandbox resource knobs (optional): the pids limit was a hardcoded 128,
+      # which broke real development work (go test fans out dozens of
+      # processes); 512 fits it, raise further via .env if needed.
+      KERNEL_SANDBOX_PIDS: ${KERNEL_SANDBOX_PIDS:-}
       # Outbound notification channels (docs/triggers-and-escalations.md §7,
       # docs/channels.md §6): transports the kernel uses to deliver ask_human
       # questions to users. Canonical names first (KERNEL_CHANNEL__<TYPE>__<FIELD>),

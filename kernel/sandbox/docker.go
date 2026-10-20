@@ -161,7 +161,23 @@ func newDocker(image, root string, createRoot bool) (*Docker, error) {
 	if err != nil || !info.IsDir() {
 		return nil, errors.New("KERNEL_SANDBOX_ROOT must be an existing directory")
 	}
-	return &Docker{Root: resolved, Image: image, Binary: env("KERNEL_DOCKER_BINARY", "docker"), Memory: env("KERNEL_SANDBOX_MEMORY", "1g"), CPUs: clampCPUs(env("KERNEL_SANDBOX_CPUS", "2"), runtime.NumCPU()), PIDs: 128, UID: os.Getuid(), GID: os.Getgid(), ScratchSize: env("KERNEL_SANDBOX_SCRATCH_SIZE", "512m"), TmpSize: env("KERNEL_SANDBOX_TMP_SIZE", "256m")}, nil
+	return &Docker{Root: resolved, Image: image, Binary: env("KERNEL_DOCKER_BINARY", "docker"), Memory: env("KERNEL_SANDBOX_MEMORY", "1g"), CPUs: clampCPUs(env("KERNEL_SANDBOX_CPUS", "2"), runtime.NumCPU()), PIDs: pidsFromEnv("KERNEL_SANDBOX_PIDS", 512), UID: os.Getuid(), GID: os.Getgid(), ScratchSize: env("KERNEL_SANDBOX_SCRATCH_SIZE", "512m"), TmpSize: env("KERNEL_SANDBOX_TMP_SIZE", "256m")}, nil
+}
+
+// pidsFromEnv parses the --pids-limit override; a missing, malformed or
+// non-positive value keeps the default. 512 processes fit real development
+// work (a full `go test ./...` fans out compilers and test binaries by the
+// dozen); the old hardcoded 128 killed exactly that.
+func pidsFromEnv(name string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	pids, err := strconv.Atoi(value)
+	if err != nil || pids <= 0 {
+		return fallback
+	}
+	return pids
 }
 
 // clampCPUs keeps the --cpus quota inside what the docker daemon accepts.
