@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -144,6 +145,18 @@ type Activities struct {
 	// a real, actionable change.
 	secretIssuedMu sync.Mutex
 	secretIssued   map[string]time.Time
+	// skillEmbedCache memoizes per-skill passage vectors (keyed by skill id,
+	// invalidated on version change) so skill_search's semantic tier does not
+	// re-embed the registry on every query.
+	skillEmbedMu    sync.Mutex
+	skillEmbedCache map[string]skillEmbedEntry
+}
+
+// skillEmbedEntry pairs a cached passage vector with the skill version it
+// was computed from.
+type skillEmbedEntry struct {
+	version string
+	vec     []float32
 }
 
 // providerCacheEntry is one cached model-config resolution; ok=false is the
@@ -1300,16 +1313,7 @@ func (a *Activities) handleSkillSearch(ctx context.Context, request ToolRequest)
 		return ToolResult{Content: compactJSON(body, 4000)}, nil
 	}
 	var page struct {
-		Skills []struct {
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			Version     string `json:"version"`
-			Manifest    struct {
-				Capabilities []string `json:"capabilities"`
-				Tools        []string `json:"tools"`
-			} `json:"manifest"`
-		} `json:"skills"`
+		Skills []skillIndexEntry `json:"skills"`
 	}
 	if err := json.Unmarshal([]byte(body), &page); err != nil {
 		return ToolResult{Content: "error: " + err.Error()}, nil
@@ -1319,31 +1323,29 @@ func (a *Activities) handleSkillSearch(ctx context.Context, request ToolRequest)
 	// The description carries the human wording — the most likely place a
 	// natural-language query actually matches.
 	keywords := strings.Fields(strings.ToLower(query))
-	type scoredMatch struct {
-		item  map[string]any
-		score int
-	}
-	var scored []scoredMatch
+	var scored []skillScoredMatch
+	docs := make([]string, 0, len(page.Skills))
 	for _, s := range page.Skills {
-		haystack := strings.ToLower(s.ID + " " + s.Name + " " + s.Description + " " + strings.Join(s.Manifest.Capabilities, " ") + " " + strings.Join(s.Manifest.Tools, " "))
+		docs = append(docs, s.searchText())
+		haystack := strings.ToLower(s.searchText())
 		score := 0
 		for _, kw := range keywords {
 			if strings.Contains(haystack, kw) {
 				score++
 			}
 		}
-		if score > 0 {
-			scored = append(scored, scoredMatch{item: map[string]any{"id": s.ID, "name": s.Name, "version": s.Version, "capabilities": s.Manifest.Capabilities, "tools": s.Manifest.Tools}, score: score})
-		}
+		scored = append(scored, skillScoredMatch{item: map[string]any{"id": s.ID, "name": s.Name, "version": s.Version, "capabilities": s.Manifest.Capabilities, "tools": s.Manifest.Tools}, score: score})
 	}
-	// Deterministic order: more keyword coverage first, registry order on ties.
-	sort.SliceStable(scored, func(i, j int) bool { return scored[i].score > scored[j].score })
-	var matches []map[string]any
-	for _, m := range scored {
-		matches = append(matches, m.item)
-	}
+	// Semantic tier bridges the language gap: skills are usually written in
+	// English while the model queries in the dialog's language (a Russian
+	// «проверь код ревью» matches zero English keywords). The multilingual
+	// e5 model ranks by meaning; lexical matches keep their primary status.
+	// An unavailable embedder (model still loading, inference failure)
+	// degrades to the pure lexical behavior.
+	cosines := a.skillCosines(ctx, request.Project, query, page.Skills, docs)
+	matches := rankSkillMatches(scored, cosines)
 	if len(matches) == 0 {
-		// Zero keyword matches must not read as 'no skills exist': return the
+		// Zero matches must not read as 'no skills exist': return the
 		// registry's id+name index so the agent sees what IS available and can
 		// re-query with better terms.
 		index := make([]map[string]any, 0, len(page.Skills))
@@ -1355,6 +1357,135 @@ func (a *Activities) handleSkillSearch(ctx context.Context, request ToolRequest)
 	}
 	encoded, _ := json.Marshal(map[string]any{"skills": matches, "count": len(matches)})
 	return ToolResult{Content: string(encoded)}, nil
+}
+
+// skillSemanticThreshold is the cosine above which an e5-small vector pair
+// counts as a meaningful cross-language match (relevant pairs typically sit
+// at 0.6–0.8; the bar sits low on purpose — recall over precision, the
+// lexical tier stays the precision anchor).
+const skillSemanticThreshold = 0.55
+
+// skillScoredMatch pairs one registry row's rendered entry with its two
+// search signals: keyword coverage (lexical, the precision anchor) and the
+// embedding cosine against the query (the cross-language recall tier).
+type skillScoredMatch struct {
+	item   map[string]any
+	score  int
+	cosine float32
+}
+
+// rankSkillMatches orders the registry for skill_search: lexical coverage
+// first, semantic proximity second, registry order on ties. Without any
+// lexical hit, only skills above the semantic bar surface — zero-vector
+// fallbacks (embedder unavailable) keep the pure lexical behavior. Empty
+// output sends the caller to the all_skills index.
+func rankSkillMatches(scored []skillScoredMatch, cosines []float32) []map[string]any {
+	for i := range scored {
+		if i < len(cosines) {
+			scored[i].cosine = cosines[i]
+		}
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		return scored[i].cosine > scored[j].cosine
+	})
+	matches := make([]map[string]any, 0, len(scored))
+	for _, m := range scored {
+		// A lexical hit is in; a keyword-miss needs the semantic bar. When the
+		// embedder is unavailable every cosine is zero and only lexical hits
+		// survive — the pre-semantic behavior.
+		if m.score == 0 && m.cosine < skillSemanticThreshold {
+			continue
+		}
+		matches = append(matches, m.item)
+	}
+	return matches
+}
+
+// skillIndexEntry is one registry row as skill_search sees it.
+type skillIndexEntry struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Version     string `json:"version"`
+	Manifest    struct {
+		Capabilities []string `json:"capabilities"`
+		Tools        []string `json:"tools"`
+	} `json:"manifest"`
+}
+
+// searchText is the full document behind both search tiers: the lexical
+// haystack and the embedding passage (id keeps exact-name queries working,
+// capabilities/tools carry the functional wording).
+func (s skillIndexEntry) searchText() string {
+	return s.ID + " " + s.Name + " " + s.Description + " " + strings.Join(s.Manifest.Capabilities, " ") + " " + strings.Join(s.Manifest.Tools, " ")
+}
+
+// skillCosines computes the query-to-document cosine for every skill, with a
+// per-(skill,version) passage cache: the registry is small but re-embedding
+// it on every search would still burn CPU. Any failure returns an all-zero
+// slice — the caller falls back to pure lexical ranking.
+func (a *Activities) skillCosines(ctx context.Context, project, query string, skills []skillIndexEntry, docs []string) []float32 {
+	out := make([]float32, len(skills))
+	if len(skills) == 0 || strings.TrimSpace(query) == "" {
+		return out
+	}
+	a.skillEmbedMu.Lock()
+	vectors := make([][]float32, len(skills))
+	missing := []int{}
+	for i, s := range skills {
+		if c, ok := a.skillEmbedCache[s.ID]; ok && c.version == s.Version {
+			vectors[i] = c.vec
+		} else {
+			missing = append(missing, i)
+		}
+	}
+	a.skillEmbedMu.Unlock()
+	if len(missing) > 0 {
+		texts := make([]string, len(missing))
+		for j, i := range missing {
+			texts[j] = docs[i]
+		}
+		fresh, err := a.EmbedTexts(ctx, project, EmbedPassage, texts)
+		if err != nil {
+			return out // zeros: pure lexical fallback
+		}
+		a.skillEmbedMu.Lock()
+		for j, i := range missing {
+			vectors[i] = fresh[j]
+			a.skillEmbedCache[skills[i].ID] = skillEmbedEntry{version: skills[i].Version, vec: fresh[j]}
+		}
+		a.skillEmbedMu.Unlock()
+	}
+	queryVecs, err := a.EmbedTexts(ctx, project, EmbedQuery, []string{query})
+	if err != nil || len(queryVecs) != 1 {
+		return out
+	}
+	q := queryVecs[0]
+	for i, v := range vectors {
+		if v == nil {
+			continue
+		}
+		out[i] = cosine32(q, v)
+	}
+	return out
+}
+
+// cosine32 computes the cosine of two equal-length vectors; zero-length
+// inputs yield 0.
+func cosine32(a, b []float32) float32 {
+	var dot, na, nb float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+		na += float64(a[i]) * float64(a[i])
+		nb += float64(b[i]) * float64(b[i])
+	}
+	if na == 0 || nb == 0 {
+		return 0
+	}
+	return float32(dot / (math.Sqrt(na) * math.Sqrt(nb)))
 }
 
 // handleKnowledgeLookupTool backs the agent-facing knowledge_lookup tool: a
