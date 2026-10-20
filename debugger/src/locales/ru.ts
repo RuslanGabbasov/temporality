@@ -1961,6 +1961,7 @@ export const ru: Record<string, string> = {
     'timeline.episodes': 'Эпизоды',
     'timeline.lineage': 'Родословная',
     'timeline.related_experiences': 'Связанные опыты',
+    'timeline.related_collapse': 'свернуть',
     'timeline.investigate': 'Исследовать',
     'timeline.knowledge_page': 'Страница знаний',
     'timeline.first_run_trace': 'Трассировка первого запуска',

@@ -341,7 +341,11 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       (recencyFilter === 'all' || ms(row.lastAt) >= recencyCutoff) &&
       (!hasActivations || row.points.some((pt) => ['recalled', 'injected', 'reused'].includes(pt.kind))) &&
       (!crossScopeOnly || row.scopes.secondary.length > 0) &&
-      (terminalFilter === 'all' || (terminalFilter === 'alive' ? !row.terminal : !!row.terminal))
+      (terminalFilter === 'all' || (terminalFilter === 'alive' ? !row.terminal : !!row.terminal)) &&
+      // Viewport discipline: a zoomed timeline must not drag in the whole
+      // corpus — a row earns its lane only when something actually happened
+      // to it inside the visible window. At full zoom this is a no-op.
+      row.points.some((point) => { const at = ms(point.at); return at >= active.t0 && at <= active.t1 })
     const visibleRows = model.rows.filter(visibleRow)
     const visibleRowIds = new Set(visibleRows.map((row) => row.knowledgeId))
     // Claim lanes render as before; every execution lane merges into one
@@ -1193,12 +1197,7 @@ function RowDetails({ row, lineage, forensic, onFocus, related, project }: { row
         {supersededBy.map((edge) => <li key={`in-${edge.eventId}`}>{t('timeline.superseded_by')} <code>{edge.fromId}</code>{edge.inferred ? ` · ${t('timeline.inferred')}` : ''}{edge.reason ? <small>{edge.reason}</small> : null}</li>)}
       </ul>
     </section>}
-    {related.length > 0 && <section>
-      <h4>{t('timeline.related_experiences')}</h4>
-      <ul className="related-list">
-        {related.map((item) => <li key={item.knowledgeId}><code>{shortKnowledge(item.knowledgeId)}</code><span className={`member-state ${item.state}`}>{item.state}</span><small>{item.scopes.primary}</small></li>)}
-      </ul>
-    </section>}
+    {related.length > 0 && <RelatedExperiences related={related} />}
     <section style={{ marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid #202a38' }}>
       <h4>{t('timeline.investigate')}</h4>
       <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.35rem' }}>
@@ -1208,4 +1207,37 @@ function RowDetails({ row, lineage, forensic, onFocus, related, project }: { row
       </div>
     </section>
   </div>
+}
+
+// RelatedExperiences folds the hundreds of semantically-adjacent rows into a
+// five-row preview: a wall of bare hash ids helped nobody. Expanding shows
+// everything; the most alive rows (activations on top) lead the preview.
+const RELATED_PREVIEW = 5
+function RelatedExperiences({ related }: { related: KnowledgeRow[] }) {
+  const t = useT()
+  const [expanded, setExpanded] = useState(false)
+  const ordered = useMemo(() => {
+    const alive = related.filter((item) => item.points.some((point) => ['recalled', 'injected', 'reused'].includes(point.kind)))
+    const rest = related.filter((item) => !alive.includes(item))
+    return [...alive, ...rest]
+  }, [related])
+  const shown = expanded ? ordered : ordered.slice(0, RELATED_PREVIEW)
+  return (
+    <section>
+      <h4>
+        {t('timeline.related_experiences')}
+        {ordered.length > RELATED_PREVIEW && (
+          <button
+            onClick={() => setExpanded((prev) => !prev)}
+            style={{ background: 'none', border: 'none', color: '#57d7e8', cursor: 'pointer', padding: '0 0.35rem', fontSize: '0.7rem' }}
+          >
+            {expanded ? t('timeline.related_collapse') ?? 'collapse' : `+${ordered.length - RELATED_PREVIEW}`}
+          </button>
+        )}
+      </h4>
+      <ul className="related-list">
+        {shown.map((item) => <li key={item.knowledgeId}><code>{shortKnowledge(item.knowledgeId)}</code><span className={`member-state ${item.state}`}>{item.state}</span><small>{item.scopes.primary}</small></li>)}
+      </ul>
+    </section>
+  )
 }

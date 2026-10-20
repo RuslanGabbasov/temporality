@@ -1961,6 +1961,7 @@ export const en: Record<string, string> = {
     'timeline.episodes': 'Episodes',
     'timeline.lineage': 'Lineage',
     'timeline.related_experiences': 'Related experiences',
+    'timeline.related_collapse': 'collapse',
     'timeline.investigate': 'Investigate',
     'timeline.knowledge_page': 'Knowledge page',
     'timeline.first_run_trace': 'First run trace',
