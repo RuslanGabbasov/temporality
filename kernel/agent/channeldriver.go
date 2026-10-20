@@ -128,6 +128,10 @@ type OutboundText struct {
 	// ("Reply in this room to answer."): progress updates are noise, not
 	// questions.
 	SuppressHint bool
+	// Lang picks the language of transport-appended canned text (the reply
+	// hint) — "" and unknown values fall back to English. The dialog language
+	// is detected from the user's message (agent.DetectLang).
+	Lang string
 }
 
 // OutboundFile is one attachment pushed through a FilesOut channel.

@@ -951,7 +951,7 @@ func TestChannelInboundFollowUpSteersRunningRun(t *testing.T) {
 	if intake.count() != 0 {
 		t.Fatalf("a live run must not spawn a classification run, got %d", intake.count())
 	}
-	if len(sent) != 1 || !strings.Contains(sent[0], "Added to the running task") {
+	if len(sent) != 1 || !strings.Contains(sent[0], "Добавил к текущей задаче") {
 		t.Fatalf("confirmation not delivered: %v", sent)
 	}
 	// The message row is attached to the target run (the audit trail).
@@ -1060,6 +1060,9 @@ func TestChannelWatcherAnnouncesRunProgress(t *testing.T) {
 		ID: workspace.InboundMessageID("matrix", "$m13"), Channel: "matrix", MessageID: "$m13",
 		SenderRaw: "@human:hs", Room: "!r1:hs", SenderUserID: "u1",
 		Status: workspace.InboundStatusClassified, IntakeRunID: "intake-m13",
+		// The user writes in Russian — every canned line follows the dialog
+		// language detected from the message body.
+		Body: "Что ты знаешь про Directum Omni?",
 	}
 	// The watcher keeps polling — run it in the background and cut it short.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1078,11 +1081,11 @@ func TestChannelWatcherAnnouncesRunProgress(t *testing.T) {
 	cancel()
 	<-watchDone
 
-	if len(sent) == 0 || !strings.HasPrefix(sent[0], "On it") {
+	if len(sent) == 0 || !strings.HasPrefix(sent[0], "Принято — работаю над вашим сообщением") {
 		t.Fatalf("opening progress line missing: %v", sent)
 	}
 	joined := strings.Join(sent, "\n")
-	if !strings.Contains(joined, "Searching the project knowledge base") {
+	if !strings.Contains(joined, "Ищу в базе знаний проекта") {
 		t.Fatalf("phase line missing: %v", sent)
 	}
 	if !strings.Contains(joined, "💬 «Смотрю таблицу цен в проекте»") {
@@ -1147,7 +1150,7 @@ func TestChannelInboundIntakeRateLimitsFloodingSender(t *testing.T) {
 	if len(store.audits) != 1 || store.audits[0] != workspace.AuditIntakeRejected {
 		t.Fatalf("expected one rejection audit, got %v", store.audits)
 	}
-	if len(sent) != 1 || !strings.Contains(sent[0], "rate limit") {
+	if len(sent) != 1 || !strings.Contains(sent[0], "лимит сообщений") {
 		t.Fatalf("expected one rate-limit notice, got %v", sent)
 	}
 	if intake.count() != 0 {

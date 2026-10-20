@@ -435,7 +435,7 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 		}
 		if roomRegistered && l.intakeEnabled {
 			l.sendRoomNotice(ctx, channelSettings, message.ChatID,
-				"Temporality: this room accepts answers to agent questions, but new tasks are only accepted from the registered account of the room owner. Open the app to create a task, or register this channel identity in your profile.")
+				agent.ChannelText(agent.DetectLang(message.Text), "notice_room_owner"))
 		}
 		l.log.Info("intake rejected", "channel", l.driver.Type(), "message", message.ID, "reason", reason, "sender", message.Sender)
 		return
@@ -455,7 +455,7 @@ func (l *channelInboundLoop) handleIntake(ctx context.Context, message agent.Inb
 				"reason": "rate_limited", "messages_last_hour": sent, "limit": l.ratePerHour,
 			})
 			l.sendRoomNotice(ctx, channelSettings, message.ChatID,
-				fmt.Sprintf("Temporality: rate limit reached (%d messages per hour). Please retry later; urgent tasks can be created in the app.", l.ratePerHour))
+				agent.ChannelText(agent.DetectLang(message.Text), "notice_rate_limit", l.ratePerHour))
 			l.log.Info("intake rate limited", "channel", l.driver.Type(), "message", message.ID, "sender", senderUserID, "sent", sent)
 			return
 		}
@@ -565,6 +565,9 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 			l.log.Info("typing marker live", "channel", l.driver.Type(), "chat", address, "run", runID)
 		}
 	}
+	// The dialog language comes from the user's own message; every canned
+	// line below follows it.
+	lang := agent.DetectLang(row.Body)
 	// The typing marker goes up BEFORE anything else: after the read receipt
 	// any silent window reads as «завис», and the journal/Temporal fetches
 	// below can each take a second or two.
@@ -572,9 +575,9 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 	// Progress state: the watcher tails the run's journal events and announces
 	// phase changes — one short chat line per distinct step, never more often
 	// than every 10 seconds.
-	progress := runProgress{startedAt: time.Now()}
+	progress := runProgress{startedAt: time.Now(), lang: lang}
 	if l.journal != nil {
-		l.sendProgress(watchCtx, settings, address, "On it — working on your message…", &progress)
+		l.sendProgress(watchCtx, settings, address, agent.ChannelText(lang, "on_it"), &progress)
 		// The opening line must not eat the first pacing window: the run's real
 		// first phase is due on the next poll.
 		progress.lastSent = time.Now().Add(-progressEvery)
@@ -635,6 +638,7 @@ type runProgress struct {
 	pendingPhase string    // phase observed in the journal, not yet announced
 	pendingQuote string    // a finished short turn text, voiced at the next turn start
 	textBuf      string    // the current turn's model text, accumulating
+	lang         string    // dialog language for every canned line
 	startedAt    time.Time // run start, for the elapsed marker
 	lastSent     time.Time // last progress delivery, for the pacing window
 }
@@ -698,7 +702,7 @@ func (l *channelInboundLoop) foldProgressEvent(event observation.Event, p *runPr
 	case "turn.started":
 		p.textBuf = "" // an unfinished fragment dies with its turn
 	default:
-		if phase := runPhase(event); phase != "" && phase != p.lastPhase {
+		if phase := runPhase(event, p.lang); phase != "" && phase != p.lastPhase {
 			p.pendingPhase = phase
 		}
 	}
@@ -716,29 +720,30 @@ func (l *channelInboundLoop) sendProgress(ctx context.Context, settings agent.Ch
 	p.lastSent = time.Now()
 }
 
-// runPhase maps one journal event onto a human progress line; "" marks noise
-// (model chatter, hint machinery, extraction) the chat should not hear about.
-func runPhase(event observation.Event) string {
+// runPhase maps one journal event onto a human progress line in the dialog
+// language; "" marks noise (model chatter, hint machinery, extraction) the
+// chat should not hear about.
+func runPhase(event observation.Event, lang string) string {
 	switch event.Type {
 	case "tool.started":
 		tool, _ := event.Data["tool"].(string)
 		switch tool {
 		case "knowledge_explore":
-			return "🔍 Searching the project knowledge base…"
+			return agent.ChannelText(lang, "phase_explore")
 		case "start_task":
 			if project, _ := event.Data["project"].(string); project != "" {
-				return "🚀 Starting the task in project «" + project + "»…"
+				return agent.ChannelText(lang, "phase_start_task", project)
 			}
-			return "🚀 Starting the task…"
+			return agent.ChannelText(lang, "phase_start_task_plain")
 		case "run_status":
-			return "📊 Checking the running tasks…"
+			return agent.ChannelText(lang, "phase_status")
 		case "remember", "remember_many":
-			return "🧠 Saving to the knowledge base…"
+			return agent.ChannelText(lang, "phase_remember")
 		case "ask_human":
 			return "" // the question itself arrives through the notify machinery
 		default:
 			if tool != "" {
-				return "⚙️ Running " + tool + "…"
+				return agent.ChannelText(lang, "phase_tool", tool)
 			}
 			return ""
 		}
@@ -823,7 +828,7 @@ func (l *channelInboundLoop) deliverUserNote(ctx context.Context, channelSetting
 			Status: workspace.InboundStatusRouted,
 		})
 		l.sendRoomNotice(ctx, channelSettings, message.ChatID,
-			"Added to the running task — the agent takes it into account at the next step.")
+			agent.ChannelText(agent.DetectLang(message.Text), "note_added"))
 		l.log.Info("intake follow-up delivered", "channel", l.driver.Type(), "message", message.ID, "run", row.TargetRunID, "sender", senderUserID)
 		return true
 	}

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -616,30 +615,36 @@ func outboundText(request NotifyChannelRequest, uiURL string) OutboundText {
 
 // notificationText renders the human-facing message for external transports.
 // The answer itself always happens in the product UI; external channels
-// carry the question and a link.
+// carry the question and a link. The envelope follows the question's
+// language — the model writes it in the conversation's language.
 func notificationText(request NotifyChannelRequest, uiURL string) string {
+	lang := DetectLang(request.Question)
 	var builder strings.Builder
-	builder.WriteString("Temporality: an agent is waiting for your answer\n\n")
+	builder.WriteString(ChannelText(lang, "ask_header"))
+	builder.WriteString("\n\n")
 	builder.WriteString(request.Question)
 	if request.Context != "" {
-		builder.WriteString("\n\nContext: ")
+		builder.WriteString("\n\n")
+		builder.WriteString(ChannelText(lang, "ask_context"))
+		builder.WriteString(" ")
 		builder.WriteString(request.Context)
 	}
 	if len(request.Options) > 0 {
-		builder.WriteString("\nOptions: ")
+		builder.WriteString("\n")
+		builder.WriteString(ChannelText(lang, "ask_options"))
+		builder.WriteString(" ")
 		builder.WriteString(strings.Join(request.Options, " / "))
 	}
-	builder.WriteString("\n\nProject ")
-	builder.WriteString(request.Project)
-	builder.WriteString(" · run ")
-	builder.WriteString(request.RunID)
+	builder.WriteString("\n")
+	builder.WriteString(ChannelText(lang, "ask_project_run", request.Project, request.RunID))
 	if request.TimeoutSeconds > 0 {
-		builder.WriteString(" · waiting ")
-		builder.WriteString(strconv.Itoa(request.TimeoutSeconds))
-		builder.WriteString("s")
+		builder.WriteString(" · ")
+		builder.WriteString(ChannelText(lang, "ask_waiting", request.TimeoutSeconds))
 	}
 	if trimmed := strings.TrimSpace(uiURL); trimmed != "" {
-		builder.WriteString("\nAnswer here: ")
+		builder.WriteString("\n")
+		builder.WriteString(ChannelText(lang, "ask_answer_here"))
+		builder.WriteString(" ")
 		builder.WriteString(strings.TrimRight(trimmed, "/"))
 		builder.WriteString("/agents?project=")
 		builder.WriteString(url.QueryEscape(request.Project))
