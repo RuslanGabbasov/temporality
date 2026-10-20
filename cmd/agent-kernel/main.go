@@ -370,6 +370,9 @@ func main() {
 	case journalTokenService:
 		os.Setenv("TEMPORALITY_API_TOKEN", journalToken)
 		log.Info("kernel journal auth: TEMPORALITY_API_TOKEN is empty or rejected; using the auto-provisioned service principal", "user", workspace.KernelServiceUserName)
+	case journalTokenServiceRejected:
+		os.Setenv("TEMPORALITY_API_TOKEN", journalToken)
+		log.Warn("kernel journal auth: the provisioned service principal is rejected by the journal; it should learn the token on its next reload, otherwise restart the journal", "user", workspace.KernelServiceUserName)
 	case journalTokenEnvStale:
 		if journalToken == "" {
 			log.Info("kernel journal auth: journal unreachable at boot; the re-resolver self-heals within a minute once it is up")
@@ -397,10 +400,20 @@ func main() {
 				continue
 			}
 			if token == lastToken && source == lastSource {
+				// A rejected principal must stay visible: the remedy lives on the
+				// journal side, and silence here reads exactly like a dead
+				// re-resolver.
+				if source == journalTokenServiceRejected {
+					log.Warn("kernel journal auth: the journal still rejects the service principal; restart the journal if this persists", "user", workspace.KernelServiceUserName)
+				}
 				continue // nothing changed
 			}
 			os.Setenv("TEMPORALITY_API_TOKEN", token)
-			log.Info("kernel journal auth re-resolved", "source", source, "was", lastSource)
+			if source == journalTokenServiceRejected {
+				log.Warn("kernel journal auth: service principal provisioned but rejected by the journal; expecting its token reload to accept it", "user", workspace.KernelServiceUserName)
+			} else {
+				log.Info("kernel journal auth re-resolved", "source", source, "was", lastSource)
+			}
 			lastToken, lastSource = token, source
 		}
 	}()

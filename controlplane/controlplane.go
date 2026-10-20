@@ -215,6 +215,16 @@ func (g *Gate) SetInternalToken(token string) {
 	g.internalToken = strings.TrimSpace(token)
 }
 
+// InternalToken returns the loopback self-access token installed by
+// SetInternalToken (empty when none) — callers refresh it periodically and
+// skip the write when it did not change.
+func (g *Gate) InternalToken() string {
+	if g == nil {
+		return ""
+	}
+	return g.internalToken
+}
+
 // NewGate parses the token configuration. An empty raw value yields a
 // disabled gate and no error.
 func NewGate(raw string) (*Gate, error) {

@@ -9,9 +9,13 @@ import (
 )
 
 // journalProbeServer answers the anonymous probe and (optionally) the
-// authenticated probe with fixed statuses.
+// authenticated probe with fixed statuses; authStatus 0 means «accept any
+// bearer token».
 func journalProbeServer(t *testing.T, anonStatus int, authStatus int) *httptest.Server {
 	t.Helper()
+	if authStatus == 0 {
+		authStatus = http.StatusOK
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "" {
 			w.WriteHeader(anonStatus)
@@ -72,8 +76,19 @@ func TestResolveJournalTokenEmptyEnvProvisions(t *testing.T) {
 	}
 }
 
-func TestResolveJournalTokenRejectedEnvFallsBackToService(t *testing.T) {
-	server := journalProbeServer(t, http.StatusUnauthorized, http.StatusUnauthorized)
+func TestResolveJournalTokenRejectedEnvFallsBackToAcceptedService(t *testing.T) {
+	// The env token is refused, the provisioned service principal passes.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("Authorization") {
+		case "":
+			w.WriteHeader(http.StatusUnauthorized)
+		case "Bearer minted":
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
+	t.Cleanup(server.Close)
 	token, source, err := resolveJournalToken(context.Background(), server.Client(), server.URL, "bad-env-token", func() (string, error) {
 		return "minted", nil
 	})
@@ -82,6 +97,22 @@ func TestResolveJournalTokenRejectedEnvFallsBackToService(t *testing.T) {
 	}
 	if token != "minted" || source != journalTokenService {
 		t.Fatalf("token/source = %q/%q, want minted/service", token, source)
+	}
+}
+
+func TestResolveJournalTokenRejectedServiceIsReported(t *testing.T) {
+	// A journal that refuses even the provisioned principal (boot race: it
+	// never learned the token) yields the service-rejected source instead of
+	// silently converging on a token that 401s forever.
+	server := journalProbeServer(t, http.StatusUnauthorized, http.StatusUnauthorized)
+	token, source, err := resolveJournalToken(context.Background(), server.Client(), server.URL, "bad-env-token", func() (string, error) {
+		return "minted", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "minted" || source != journalTokenServiceRejected {
+		t.Fatalf("token/source = %q/%q, want minted/service-rejected", token, source)
 	}
 }
 

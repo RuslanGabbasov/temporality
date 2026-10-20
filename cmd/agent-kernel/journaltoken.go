@@ -12,6 +12,12 @@ const (
 	journalTokenEnv       = "env"            // configured TEMPORALITY_API_TOKEN works
 	journalTokenEnvStale  = "env-unverified" // journal unreachable; keeping the env token as-is
 	journalTokenService   = "service"        // auto-provisioned workspace service principal
+	// The provisioned principal came back but the journal refuses it: on a
+	// first start the journal may boot before the workspace schema exists and
+	// never learn the token (its loopback read is retried on its reload
+	// interval). The kernel keeps using the token — it is the right
+	// credential — while this source keeps the state visible in the logs.
+	journalTokenServiceRejected = "service-rejected"
 )
 
 // resolveJournalToken decides which bearer token the kernel uses for its own
@@ -54,6 +60,12 @@ func resolveJournalToken(ctx context.Context, client *http.Client, journalURL, e
 	token, err := ensure()
 	if err != nil {
 		return "", "", err
+	}
+	// Verify the mint actually opens the gate: a journal that never learned
+	// the service token (boot race, see journalTokenServiceRejected) must not
+	// leave every kernel call 401ing in complete silence.
+	if status, perr := probeJournal(ctx, client, journalURL, token); perr == nil && status != http.StatusOK {
+		return token, journalTokenServiceRejected, nil
 	}
 	return token, journalTokenService, nil
 }

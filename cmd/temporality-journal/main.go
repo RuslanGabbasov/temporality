@@ -98,22 +98,39 @@ func main() {
 			gate.SetDBTokens(principals)
 			log.Info("loaded workspace user tokens", "count", len(principals))
 		}
-		refreshUserTokens()
 		// Kernel→journal auth: the kernel's auto-provisioned service principal
 		// is excluded from the DB token set above (it must not switch the gate
 		// on for fresh installs), so it is recognized as the loopback internal
 		// credential instead — kernel requests carry it as TEMPORALITY_API_TOKEN
 		// and pass the gate even after the first user enables authentication.
-		if serviceToken, sErr := ws.EnsureKernelServiceToken(ctx); sErr == nil && serviceToken != "" {
+		// Re-resolved on every reload, not only at boot: on a first start the
+		// kernel applies the workspace schema, so this row does not exist yet
+		// and the boot-time mint fails — a once-only read then left every
+		// kernel call 401ing until the next full restart.
+		refreshInternalToken := func() {
+			reloadCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			serviceToken, err := ws.EnsureKernelServiceToken(reloadCtx)
+			if err != nil {
+				// Expected on a very first start (schema not migrated yet); the
+				// next tick picks the row up once the kernel created it.
+				log.Warn("resolve kernel service token for loopback auth", "error", err)
+				return
+			}
+			if serviceToken == "" || serviceToken == gate.InternalToken() {
+				return
+			}
 			gate.SetInternalToken(serviceToken)
-		} else if sErr != nil {
-			log.Warn("resolve kernel service token for loopback auth", "error", sErr)
+			log.Info("kernel service token installed for loopback auth")
 		}
+		refreshUserTokens()
+		refreshInternalToken()
 		go func() {
 			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
 			for range ticker.C {
 				refreshUserTokens()
+				refreshInternalToken()
 			}
 		}()
 		opts = append(opts,
