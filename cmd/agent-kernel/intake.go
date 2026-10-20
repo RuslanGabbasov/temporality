@@ -60,7 +60,7 @@ const inboundExpiryTTL = 48 * time.Hour
 // intakePromptVersion marks the built-in prompt generation on the agent row
 // (label prompt_version). bootstrapIntake upgrades in place while the label
 // matches; an admin edit (label removed or changed) is never overwritten.
-const intakePromptVersion = "3"
+const intakePromptVersion = "4"
 
 // intakeSystemPrompt instructs the classification/clarification dialog
 // (docs/inbound-messages.md §4.3, §6). Tunable: the row is created once and
@@ -82,7 +82,7 @@ Always follow this order:
    - several matches or none: ask_human with the candidate list as options; never guess silently;
    - questions go to the sender (the default recipient) with short options; timeout_policy cancel.
 
-3. Then call start_task with a self-contained title and prompt: the executing agent sees only what you write. Translate natural instructions into explicit steps and checkpoints (e.g. "after approval from <person> pass the result to <team>"). Preserve the original wording of the request inside the prompt.
+3. Then call start_task with a self-contained title and prompt: the executing agent sees only what you write. Translate natural instructions into explicit steps and checkpoints (e.g. "after approval from <person> pass the result to <team>"). Preserve the original wording of the request inside the prompt. When the message clearly continues a long-running effort ("продолжи работу над E2E", "добавь в отчёт…"), pass the saga hint too: the saga argument takes a saga id, its title, or words from it — matched fuzzily, and with no hint the best-matching saga above the confidence bar binds automatically; the start_task result reports saga_id when bound.
 
 4. For an amendment: run_status lists the sender's earlier runs (run_id, project, status, latest answer). Pick the run the user is amending — one they name, or the only plausible one; when several are plausible, ask_human with the run list as options. Then call start_task with amend_run_id set to that run and prompt = the amendment as a self-contained instruction for the executing agent (what to change or add; reference the earlier result only through what run_status showed you). Never invent run ids. If the sender has no earlier runs, treat the message as a new task (step 2).
 
@@ -648,6 +648,7 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			Title      string `json:"title"`
 			Prompt     string `json:"prompt"`
 			AmendRunID string `json:"amend_run_id"`
+			Saga       string `json:"saga"`
 		}
 		if err := decodeJSON(w, req, &body); err != nil {
 			writeError(w, 400, err)
@@ -895,9 +896,32 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			"project": body.ProjectID, "run_id": runID, "message": row.ID,
 			"channel": row.Channel, "workflow_id": run.GetID(),
 		})
-		writeJSON(w, http.StatusAccepted, map[string]string{
+		// Try to bind the task to the saga it continues (the dialog keeps an
+		// effort alive, not just a project): the agent's explicit hint first,
+		// then an automatic title+prompt match. Best-effort — an unbound task
+		// stays attachable in the UI exactly as before.
+		sagaID, sagaNote, sagaCandidates := (func() (string, string, []map[string]any) {
+			if r.activities == nil {
+				return "", "", nil
+			}
+			ctx, cancel := context.WithTimeout(req.Context(), 20*time.Second)
+			defer cancel()
+			return r.activities.BindIntakeSaga(ctx, body.ProjectID, taskID, runID, body.Saga, strings.TrimSpace(body.Title+" "+body.Prompt))
+		})()
+		reply := map[string]string{
 			"run_id": runID, "task_id": taskID, "project": body.ProjectID, "status": "started",
-		})
+		}
+		if sagaID != "" {
+			reply["saga_id"] = sagaID
+			reply["saga_note"] = sagaNote
+		} else if len(sagaCandidates) > 0 {
+			// The hint did not resolve — name the live sagas so the dialog can
+			// tell the user what they could have meant.
+			if encoded, err := json.Marshal(sagaCandidates); err == nil {
+				reply["saga_candidates"] = string(encoded)
+			}
+		}
+		writeJSON(w, http.StatusAccepted, reply)
 	})
 }
 

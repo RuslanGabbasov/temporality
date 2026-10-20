@@ -62,7 +62,11 @@ export default function ProjectOverview({ project }: Props) {
 
   useEffect(() => { void load() }, [load])
 
-  const unbound = useMemo(() => (budget?.tasks ?? []).filter((task) => !task.saga_id), [budget])
+  const unbound = useMemo(() => (budget?.tasks ?? [])
+    .filter((task) => !task.saga_id)
+    .sort((a, b) => (b.first_started_at ?? '').localeCompare(a.first_started_at ?? '')), [budget])
+  const [showAllUnbound, setShowAllUnbound] = useState(false)
+  const unboundShown = 8
   const tasksOf = useCallback((sagaID: string) => (budget?.tasks ?? []).filter((task) => task.saga_id === sagaID), [budget])
   const liveSagas = useMemo(() => (budget?.sagas ?? []).filter((saga) => !saga.merged_into), [budget])
   const sagaTitle = useCallback((sagaID: string) => {
@@ -151,7 +155,7 @@ export default function ProjectOverview({ project }: Props) {
             <Tile style={{ color: 'var(--tm-text-3)', marginBottom: '1rem' }}>{t('project.no_sagas') ?? 'No sagas registered yet'}</Tile>
           ) : (
             <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden', marginBottom: '1rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.75rem', alignItems: 'baseline', padding: '0.4rem 0.6rem', background: 'var(--tm-raised)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.75rem', alignItems: 'baseline', padding: '0.4rem 0.6rem', background: 'var(--tm-raised)' }}>
                 <span />
                 <span />
                 <span style={{ color: 'var(--tm-text-3)' }}>{t('project.saga_col') ?? 'Saga'}</span>
@@ -162,13 +166,14 @@ export default function ProjectOverview({ project }: Props) {
                 <span style={{ color: 'var(--tm-text-3)' }}>⚒ {t('runs.task_active') ?? 'active'}</span>
                 <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.tokens') ?? 'Tokens'}</span>
                 <span style={{ color: 'var(--tm-text-3)' }}>{t('runs.cost') ?? 'Cost'}</span>
+                <span style={{ color: 'var(--tm-text-3)' }} title={t('dashboard.human_col_hint') ?? undefined}>🧠/⏳</span>
                 <span style={{ color: 'var(--tm-text-3)' }}>👤 {t('runs.approvals_col') ?? 'Approvals'}</span>
               </div>
               {budget.sagas.map((saga) => {
                 const merged = !!saga.merged_into
                 return (
                   <div key={saga.saga_id} style={{ borderTop: '1px solid var(--tm-border)', opacity: merged ? 0.55 : 1 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.6rem 1.2rem minmax(9rem, 2.2fr) minmax(4rem, 0.8fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem' }}>
                       <span style={{ display: 'flex', alignItems: 'center' }}>
                         {!merged && (
                           <input
@@ -208,6 +213,11 @@ export default function ProjectOverview({ project }: Props) {
                       <span>{formatDuration(saga.active_ms)}</span>
                       <span>{saga.total_tokens.toLocaleString()}</span>
                       <span>{saga.total_cost_usd > 0 ? `$${saga.total_cost_usd.toFixed(2)}` : '—'}</span>
+                      <span title={t('dashboard.human_col_hint') ?? undefined} style={{ whiteSpace: 'nowrap' }}>
+                        {(saga.human?.hab_seconds ?? 0) > 0 || (saga.human?.hwt_seconds ?? 0) > 0
+                          ? <>🧠 {formatDuration((saga.human?.hab_seconds ?? 0) * 1000)} · ⏳ {formatDuration((saga.human?.hwt_seconds ?? 0) * 1000)}</>
+                          : '—'}
+                      </span>
                       <span title={approvalHint(t, saga.approvals, saga.human)} style={{ whiteSpace: 'nowrap' }}>
                         {saga.approvals.requested > 0
                           ? <>✓{saga.approvals.granted} ✗{saga.approvals.rejected}{saga.approvals.timed_out > 0 ? ` ⏱${saga.approvals.timed_out}` : ''}{(saga.approvals.pending ?? 0) > 0 ? ` …${saga.approvals.pending}` : ''} · {formatDuration(saga.approvals.wait_ms)}</>
@@ -242,7 +252,9 @@ export default function ProjectOverview({ project }: Props) {
             </div>
           )}
 
-          {/* Tasks outside any saga: same accounting, no explicit effort behind them. */}
+          {/* Tasks outside any saga: same accounting, no explicit effort behind them.
+              Newest first, capped: a long-lived project accretes hundreds of
+              unbound tasks — the block should show the LIVE tail, not the landfill. */}
           <Heading style={{ fontSize: '0.95rem', marginBottom: '0.4rem' }}>
             {t('project.unbound') ?? 'Tasks without a saga'} ({unbound.length})
           </Heading>
@@ -250,8 +262,8 @@ export default function ProjectOverview({ project }: Props) {
             <Tile style={{ color: 'var(--tm-text-3)' }}>{t('project.no_unbound') ?? 'Every task belongs to a saga'}</Tile>
           ) : (
             <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
-              {unbound.map((task) => (
-                <div key={task.task_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(10rem, 2.2fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(7rem, 1.4fr) minmax(11rem, auto)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
+              {(showAllUnbound ? unbound : unbound.slice(0, unboundShown)).map((task) => (
+                <div key={task.task_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(10rem, 2.2fr) minmax(3rem, 0.7fr) minmax(3rem, 0.7fr) minmax(4rem, 1fr) minmax(4rem, 1fr) minmax(4.5rem, 1fr) minmax(3.5rem, 0.8fr) minmax(6rem, 1.2fr) minmax(7rem, 1.4fr) minmax(11rem, auto)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
                   <span title={task.root_run_id ? `${task.title || task.task_id}\n${task.root_run_id}` : task.title || task.task_id} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {task.title || task.task_id}
                     {task.running > 0 && <Tag type="cool-gray" size="sm" style={{ marginLeft: '0.35rem' }}>{pluralT(t, locale, 'runs.task_running_n', task.running)}</Tag>}
@@ -262,6 +274,11 @@ export default function ProjectOverview({ project }: Props) {
                   <span>{formatDuration(task.active_ms)}</span>
                   <span>{task.total_tokens.toLocaleString()}</span>
                   <span>{task.total_cost_usd > 0 ? `$${task.total_cost_usd.toFixed(2)}` : '—'}</span>
+                  <span title={t('dashboard.human_col_hint') ?? undefined} style={{ whiteSpace: 'nowrap' }}>
+                    {(task.human?.hab_seconds ?? 0) > 0 || (task.human?.hwt_seconds ?? 0) > 0
+                      ? <>🧠 {formatDuration((task.human?.hab_seconds ?? 0) * 1000)} · ⏳ {formatDuration((task.human?.hwt_seconds ?? 0) * 1000)}</>
+                      : '—'}
+                  </span>
                   <span title={approvalHint(t, task.approvals, task.human)} style={{ whiteSpace: 'nowrap' }}>
                     {task.approvals.requested > 0
                       ? <>✓{task.approvals.granted} ✗{task.approvals.rejected}{task.approvals.timed_out > 0 ? ` ⏱${task.approvals.timed_out}` : ''}{(task.approvals.pending ?? 0) > 0 ? ` …${task.approvals.pending}` : ''} · {formatDuration(task.approvals.wait_ms)}</>
@@ -277,6 +294,13 @@ export default function ProjectOverview({ project }: Props) {
                   </span>
                 </div>
               ))}
+              {unbound.length > unboundShown && !showAllUnbound && (
+                <div style={{ padding: '0.35rem 0.6rem', borderTop: '1px solid var(--tm-border)' }}>
+                  <Button size="sm" kind="ghost" onClick={() => setShowAllUnbound(true)}>
+                    {t('project.unbound_show_all') ?? 'Show all'} ({unbound.length - unboundShown} {t('project.unbound_more') ?? 'more'})
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </>

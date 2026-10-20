@@ -1216,6 +1216,9 @@ func (a *Activities) handleIntakeStartTask(ctx context.Context, request ToolRequ
 	if agentID, ok := request.Arguments["agent_id"].(string); ok && agentID != "" {
 		payload["agent_id"] = agentID
 	}
+	if saga, ok := request.Arguments["saga"].(string); ok && strings.TrimSpace(saga) != "" {
+		payload["saga"] = strings.TrimSpace(saga)
+	}
 	endpoint := fmt.Sprintf("%s/v1/intake/runs/%s/start-task", a.WorkspaceURL, url.PathEscape(request.RunID))
 	body, status, err := a.workspaceDo(ctx, http.MethodPost, endpoint, payload)
 	if err != nil {

@@ -111,10 +111,11 @@ func (matrixDriver) SendText(ctx context.Context, client *http.Client, settings 
 	}
 	// The transport is two-way (matrixinbound.go): replying in the room routes
 	// the answer back into the paused run, so say so next to the question —
-	// unless the message is a progress update, not a question.
+	// unless the message is a progress update, not a question. The hint
+	// follows the dialog language.
 	body := msg.Body
 	if !msg.SuppressHint {
-		body += "\n\nReply in this room to answer."
+		body += "\n\n" + ChannelText(msg.Lang, "reply_hint")
 	}
 	txnID := "temporality-" + transactionFingerprint(roomID, body)
 	endpoint := fmt.Sprintf("%s/_matrix/client/v3/rooms/%s/send/m.room.message/%s", homeserver, url.PathEscape(roomID), txnID)

@@ -428,3 +428,203 @@ func shortHash(seed string) string {
 	sum := sha256.Sum256([]byte("saga:" + seed))
 	return hex.EncodeToString(sum[:])[:6]
 }
+
+// liveSagas projects the event log into the currently-live saga list: every
+// registered saga that is not merged away, with its latest title/goal.
+func liveSagas(events []sagaEvent) []sagaEvent {
+	mergeTarget := sagaMerges(events)
+	type state struct {
+		title, goal string
+		last        time.Time
+	}
+	order := []string{}
+	states := map[string]*state{}
+	for _, ev := range events {
+		target := mergeTarget(ev.SagaID)
+		if target != ev.SagaID {
+			continue // merged away — the target carries the effort now
+		}
+		st, ok := states[ev.SagaID]
+		if !ok {
+			st = &state{}
+			states[ev.SagaID] = st
+			order = append(order, ev.SagaID)
+		}
+		if ev.OccurredAt.After(st.last) {
+			st.last = ev.OccurredAt
+		}
+		if ev.Title != "" {
+			st.title = ev.Title
+		}
+		if ev.Goal != "" {
+			st.goal = ev.Goal
+		}
+	}
+	out := make([]sagaEvent, 0, len(order))
+	for _, id := range order {
+		st := states[id]
+		out = append(out, sagaEvent{Type: "saga.registered", SagaID: id, Title: st.title, Goal: st.goal, OccurredAt: st.last})
+	}
+	return out
+}
+
+// sagaResolveConfidence marks how sure the resolver is: exact ids and titles
+// bind outright, semantic matches bind only above the auto-attach bar.
+type sagaResolveConfidence int
+
+const (
+	sagaUnresolved sagaResolveConfidence = iota
+	sagaExact                            // saga id or exact title match
+	sagaFuzzy                            // unique substring / semantic match
+)
+
+// resolveSaga matches the caller's free-text saga hint onto one live saga of
+// the project: exact id, exact title (case-insensitive), unique substring,
+// then semantic proximity via the multilingual embedder (the same bridge
+// skill_search uses — the user writes Russian, sagas are named in Russian or
+// English). Empty hint returns unresolved without touching the embedder.
+func (a *Activities) resolveSaga(ctx context.Context, project, hint string, sagas []sagaEvent) (sagaEvent, sagaResolveConfidence) {
+	hint = strings.TrimSpace(hint)
+	if hint == "" || len(sagas) == 0 {
+		return sagaEvent{}, sagaUnresolved
+	}
+	lower := strings.ToLower(hint)
+	for _, saga := range sagas {
+		if saga.SagaID == hint {
+			return saga, sagaExact
+		}
+	}
+	for _, saga := range sagas {
+		if strings.EqualFold(strings.TrimSpace(saga.Title), hint) {
+			return saga, sagaExact
+		}
+	}
+	substring := []sagaEvent{}
+	matchedWords := 0
+	for _, saga := range sagas {
+		title := strings.ToLower(strings.TrimSpace(saga.Title))
+		goal := strings.ToLower(saga.Goal)
+		hits := 0
+		for _, word := range strings.Fields(lower) {
+			if len([]rune(word)) < 4 {
+				continue // short words match everything
+			}
+			if strings.Contains(title, word) || strings.Contains(goal, word) {
+				hits++
+			}
+		}
+		if hits == 0 {
+			continue
+		}
+		if hits > matchedWords {
+			matchedWords, substring = hits, []sagaEvent{saga}
+		} else if hits == matchedWords {
+			substring = append(substring, saga) // two sagas equally close — ambiguous
+		}
+	}
+	if len(substring) == 1 {
+		return substring[0], sagaFuzzy
+	}
+	if len(substring) > 1 {
+		return sagaEvent{}, sagaUnresolved // ambiguous hint — better unbound than wrong
+	}
+	// Semantic tier: embed the hint and every saga's title+goal, take the top
+	// match above the bar. Failures degrade to unresolved (task starts
+	// unbound — the human can attach it in two clicks).
+	vectors, err := a.EmbedTexts(ctx, project, EmbedQuery, []string{hint})
+	if err != nil || len(vectors) != 1 {
+		return sagaEvent{}, sagaUnresolved
+	}
+	texts := make([]string, len(sagas))
+	for i, saga := range sagas {
+		texts[i] = strings.TrimSpace(saga.Title + " " + saga.Goal)
+	}
+	passageVectors, err := a.EmbedTexts(ctx, project, EmbedPassage, texts)
+	if err != nil || len(passageVectors) != len(sagas) {
+		return sagaEvent{}, sagaUnresolved
+	}
+	best, bestScore := -1, float32(0)
+	for i, vec := range passageVectors {
+		score := cosine32(vectors[0], vec)
+		if score > bestScore {
+			best, bestScore = i, score
+		}
+	}
+	// The margin check needs the runner-up: a hint sitting between two sagas
+	// must not bind to either.
+	runnerUp := float32(0)
+	for i, vec := range passageVectors {
+		if i == best {
+			continue
+		}
+		if score := cosine32(vectors[0], vec); score > runnerUp {
+			runnerUp = score
+		}
+	}
+	if best < 0 || bestScore < sagaAutoAttachCosine || bestScore-runnerUp < sagaAutoAttachMargin {
+		return sagaEvent{}, sagaUnresolved
+	}
+	return sagas[best], sagaFuzzy
+}
+
+// The auto-attach bar: e5-small relevant pairs sit at 0.6–0.8 cosine; the
+// bar plus a margin over the runner-up keeps a vague hint unbound instead of
+// wrongly bound (a wrong saga is worse than no saga — the human fixes the
+// latter in two clicks).
+const (
+	sagaAutoAttachCosine = 0.6
+	sagaAutoAttachMargin = 0.05
+)
+
+// BindIntakeSaga attaches a channel-started task to the project saga it
+// belongs to (docs/inbound-messages.md: the dialog continues an effort, not
+// just a project). Resolution order: the agent's explicit hint (fuzzy — id,
+// title, substring, meaning), then an automatic match of the task's own
+// title+prompt against the live sagas. A confident match emits saga.attached
+// in the TARGET project's scope and returns its id; an ambiguous or absent
+// one leaves the task unbound and returns the top candidates so the intake
+// dialog can name them.
+func (a *Activities) BindIntakeSaga(ctx context.Context, project, taskID, runID, sagaHint, taskText string) (boundID string, note string, candidates []map[string]any) {
+	events, err := a.fetchSagaEvents(ctx, project, "")
+	if err != nil {
+		return "", "saga lookup failed: " + err.Error(), nil
+	}
+	sagas := liveSagas(events)
+	if len(sagas) == 0 {
+		return "", "", nil
+	}
+	hint := strings.TrimSpace(sagaHint)
+	var resolved sagaEvent
+	confidence := sagaUnresolved
+	if hint != "" {
+		resolved, confidence = a.resolveSaga(ctx, project, hint, sagas)
+		if confidence == sagaUnresolved {
+			return "", fmt.Sprintf("saga hint %q did not match any saga; task left unbound", hint), sagaCandidates(sagas)
+		}
+	} else {
+		resolved, confidence = a.resolveSaga(ctx, project, strings.TrimSpace(taskText), sagas)
+		if confidence == sagaUnresolved {
+			return "", "", nil // nothing close enough — unbound is the honest answer
+		}
+	}
+	_ = confidence
+	attach := ToolRequest{Project: project, RunID: runID, TaskID: taskID, OperationID: runID + "/saga-attach"}
+	data := map[string]any{"saga_id": resolved.SagaID, "task_id": taskID, "origin": "intake-auto"}
+	if err := a.emitSagaEvent(ctx, attach, "saga.attached", data); err != nil {
+		return "", "saga attach failed: " + err.Error(), nil
+	}
+	return resolved.SagaID, "bound to saga «" + resolved.Title + "»", nil
+}
+
+// sagaCandidates renders the top of the live saga list for the dialog: the
+// model names them when a hint did not resolve.
+func sagaCandidates(sagas []sagaEvent) []map[string]any {
+	out := make([]map[string]any, 0, len(sagas))
+	for i, saga := range sagas {
+		if i >= 5 {
+			break
+		}
+		out = append(out, map[string]any{"saga_id": saga.SagaID, "title": saga.Title})
+	}
+	return out
+}

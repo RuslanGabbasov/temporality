@@ -261,3 +261,88 @@ func TestSagaToolsValidation(t *testing.T) {
 		}
 	}
 }
+
+// TestLiveSagasProjectsMerges: registered sagas minus the merged-away ones,
+// latest title/goal wins.
+func TestLiveSagasProjectsMerges(t *testing.T) {
+	events := []sagaEvent{
+		{Type: "saga.registered", SagaID: "saga-a", Title: "E2E tests", Goal: "flaky coverage", OccurredAt: time.Now().Add(-time.Hour)},
+		{Type: "saga.registered", SagaID: "saga-b", Title: "Old effort", OccurredAt: time.Now().Add(-2 * time.Hour)},
+		{Type: "saga.renamed", SagaID: "saga-a", Title: "E2E autotests", OccurredAt: time.Now().Add(-time.Minute)},
+		{Type: "saga.merged", SagaID: "saga-a", Sources: []string{"saga-b"}, OccurredAt: time.Now()},
+	}
+	live := liveSagas(events)
+	if len(live) != 1 || live[0].SagaID != "saga-a" {
+		t.Fatalf("live sagas: %+v", live)
+	}
+	if live[0].Title != "E2E autotests" || live[0].Goal != "flaky coverage" {
+		t.Fatalf("projection lost the rename/goal: %+v", live[0])
+	}
+}
+
+// TestResolveSagaTiers: exact id, exact title, unique substring, ambiguity —
+// in that order. The semantic tier needs the embedder, so its unresolved
+// fallback (no embedder in tests → task stays unbound) is covered too.
+func TestResolveSagaTiers(t *testing.T) {
+	activities := &Activities{}
+	sagas := []sagaEvent{
+		{SagaID: "saga-e2e-01", Title: "E2E autotests", Goal: "stabilize flaky playwright coverage"},
+		{SagaID: "saga-port-01", Title: "Portal migration", Goal: "move the portal to v2"},
+	}
+	if saga, conf := activities.resolveSaga(context.Background(), "p", "saga-e2e-01", sagas); conf != sagaExact || saga.SagaID != "saga-e2e-01" {
+		t.Fatalf("exact id: %+v %v", saga, conf)
+	}
+	if saga, conf := activities.resolveSaga(context.Background(), "p", "e2e autotests", sagas); conf != sagaExact || saga.SagaID != "saga-e2e-01" {
+		t.Fatalf("exact title: %+v %v", saga, conf)
+	}
+	if saga, conf := activities.resolveSaga(context.Background(), "p", "про e2e autotests продолжение", sagas); conf != sagaFuzzy || saga.SagaID != "saga-e2e-01" {
+		t.Fatalf("substring: %+v %v", saga, conf)
+	}
+	// Ambiguous substring: both titles contain "portal"? only one does — flip
+	// it by asking for the shared word "the": no unique substring → unresolved
+	// (the semantic tier cannot run without the embedder).
+	if _, conf := activities.resolveSaga(context.Background(), "p", "e", sagas); conf != sagaUnresolved {
+		t.Fatalf("ambiguous hint must not resolve: %v", conf)
+	}
+	if _, conf := activities.resolveSaga(context.Background(), "p", "совсем другое", sagas); conf != sagaUnresolved {
+		t.Fatalf("unrelated hint must not resolve: %v", conf)
+	}
+}
+
+// TestBindIntakeSagaAttachesAndReports: a resolving hint emits saga.attached
+// in the target scope and returns the id; a non-resolving hint leaves the
+// task unbound and names the candidates.
+func TestBindIntakeSagaAttachesAndReports(t *testing.T) {
+	journal := &sagaJournalStub{events: []observation.Event{{
+		Schema: observation.Schema, Type: "saga.registered",
+		Context: observation.Context{Project: "omni", Run: "seed", Task: "T-seed"},
+		Data:    map[string]any{"saga_id": "saga-e2e-01", "title": "E2E autotests", "goal": "stabilize flaky playwright coverage"},
+	}}}
+	server := httptest.NewServer(http.HandlerFunc(journal.handler))
+	defer server.Close()
+	outbox := &recordingOutbox{}
+	activities := sagaTestActivities(server, outbox)
+
+	bound, note, candidates := activities.BindIntakeSaga(context.Background(), "omni", "T9", "run-9", "e2e autotests", "почини flaky тесты")
+	if bound != "saga-e2e-01" || !strings.Contains(note, "bound to saga") {
+		t.Fatalf("attach failed: %q %q %v", bound, note, candidates)
+	}
+	if len(outbox.events) != 1 || outbox.events[0].Type != "saga.attached" {
+		t.Fatalf("attach event missing: %+v", outbox.events)
+	}
+	if outbox.events[0].Context.Project != "omni" || outbox.events[0].Context.Task != "T9" {
+		t.Fatalf("attach landed in the wrong scope: %+v", outbox.events[0].Context)
+	}
+
+	// A hint that matches nothing: unbound, with candidates named.
+	bound, note, candidates = activities.BindIntakeSaga(context.Background(), "omni", "T10", "run-10", "совсем другая сага", "текст")
+	if bound != "" {
+		t.Fatalf("unrelated hint must not bind: %q", bound)
+	}
+	if len(candidates) == 0 || candidates[0]["title"] != "E2E autotests" {
+		t.Fatalf("candidates missing: %v", candidates)
+	}
+	if !strings.Contains(note, "did not match") {
+		t.Fatalf("note missing: %q", note)
+	}
+}
