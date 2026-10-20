@@ -223,7 +223,17 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
         const id = String(event.data?.verdict_event_id ?? '')
         if (id) ackSet.add(id)
       }
-      setAcknowledged(ackSet)
+      // MERGE, never replace: acknowledgements ride the async outbox (the POST
+      // 200s before the journal has the event), so a fresh reload can be
+      // missing the just-clicked ids. Replacing resurrected the row and made
+      // dismiss take 2–3 clicks; an acknowledgement is irreversible, so the
+      // union of the server truth and everything clicked this session is
+      // always safe.
+      setAcknowledged((prev) => {
+        const next = new Set(prev)
+        for (const id of ackSet) next.add(id)
+        return next
+      })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setEmbeddings((settings as any)?.embeddings ?? null)
       setTiers(effect?.tiers ?? [])
@@ -858,12 +868,26 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                       )
                       })()}
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.35rem', flexWrap: 'wrap' }}>
-                        {!isResolved && (
+                        {isResolved ? null : (
                           <Button
                             size="sm"
                             kind="ghost"
                             disabled={busyAck === row.key}
-                            onClick={() => { for (const id of row.eventIDs) { void acknowledge(id) } setBusyAck('') }}
+                            onClick={async () => {
+                              setBusyAck(row.key)
+                              try {
+                                // Await every acknowledgement before the
+                                // refresh: the queue hides on the optimistic
+                                // set, and the reload must not race the
+                                // outbox delivery of these acks.
+                                for (const id of row.eventIDs) {
+                                  await acknowledge(id)
+                                }
+                                await load(true)
+                              } finally {
+                                setBusyAck('')
+                              }
+                            }}
                           >
                             {t('supervisor.action_skip') ?? 'Skip'}
                           </Button>
