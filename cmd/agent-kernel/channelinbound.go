@@ -547,6 +547,28 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 	typist, canType := l.driver.(interface {
 		SendTyping(ctx context.Context, client *http.Client, settings map[string]string, address string, typing bool) error
 	})
+	typingLogged := false
+	// setTyping best-effort sets or clears the marker with its own short
+	// deadline, so clearing works even on the cancellation paths.
+	setTyping := func(typing bool) {
+		if !canType {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if tErr := typist.SendTyping(ctx, l.httpClient, settings.Channels[l.driver.Type()], address, typing); tErr != nil {
+			l.log.Warn("intake typing", "channel", l.driver.Type(), "chat", address, "run", runID, "typing", typing, "error", tErr)
+			return
+		}
+		if typing && !typingLogged {
+			typingLogged = true
+			l.log.Info("typing marker live", "channel", l.driver.Type(), "chat", address, "run", runID)
+		}
+	}
+	// The typing marker goes up BEFORE anything else: after the read receipt
+	// any silent window reads as «завис», and the journal/Temporal fetches
+	// below can each take a second or two.
+	setTyping(true)
 	// Progress state: the watcher tails the run's journal events and announces
 	// phase changes — one short chat line per distinct step, never more often
 	// than every 10 seconds.
@@ -557,21 +579,25 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 		// first phase is due on the next poll.
 		progress.lastSent = time.Now().Add(-progressEvery)
 	}
-	typingLogged := false
 	for {
 		run, err := l.currentRun(watchCtx, project, runID)
 		if err != nil {
 			l.log.Warn("run answer watch", "run", runID, "error", err)
+			setTyping(false)
 			return
 		}
 		if !liveRunStatus(run.Status) && run.Answer == "" {
 			l.log.Warn("run finished without an answer", "run", runID, "status", run.Status)
+			setTyping(false)
 			return
 		}
 		if !liveRunStatus(run.Status) {
 			deliverCtx, cancel := context.WithTimeout(watchCtx, 20*time.Second)
 			dErr := l.driver.SendText(deliverCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: run.Answer})
 			cancel()
+			// Clear the marker before or together with the answer landing: the
+			// server expires it only after the full 30s timeout.
+			setTyping(false)
 			if dErr != nil {
 				l.log.Warn("run answer delivery", "channel", l.driver.Type(), "chat", address, "error", dErr)
 				return
@@ -582,22 +608,16 @@ func (l *channelInboundLoop) watchRunAnswer(ctx context.Context, row *workspace.
 			l.log.Info("run answer delivered", "channel", l.driver.Type(), "chat", address, "run", runID)
 			return
 		}
+		// Typing before the heavier journal/describe work: its latency must
+		// never wait on anything else.
+		setTyping(true)
 		if l.journal != nil {
 			l.announceProgress(watchCtx, settings, address, runID, &progress)
-		}
-		if canType {
-			typingCtx, cancelTyping := context.WithTimeout(watchCtx, 10*time.Second)
-			if tErr := typist.SendTyping(typingCtx, l.httpClient, settings.Channels[l.driver.Type()], address, true); tErr != nil {
-				l.log.Warn("intake typing", "channel", l.driver.Type(), "error", tErr)
-			} else if !typingLogged {
-				typingLogged = true
-				l.log.Info("typing marker live", "channel", l.driver.Type(), "chat", address, "run", runID)
-			}
-			cancelTyping()
 		}
 		select {
 		case <-watchCtx.Done():
 			l.log.Warn("run answer watch gave up", "run", runID)
+			setTyping(false)
 			return
 		case <-time.After(pollEvery):
 		}
