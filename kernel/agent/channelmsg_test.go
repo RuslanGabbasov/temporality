@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -37,8 +38,6 @@ func TestChannelTextCatalogParity(t *testing.T) {
 		require.NotEmpty(t, entry[0], "key %q misses the English line", key)
 		require.NotEmpty(t, entry[1], "key %q misses the Russian line", key)
 	}
-	require.Contains(t, ChannelText("en", "reply_hint"), "Reply in this room")
-	require.Contains(t, ChannelText("ru", "reply_hint"), "Ответьте в этом чате")
 	require.Contains(t, ChannelText("ru", "phase_start_task", "omni"), "«omni»")
 	require.Contains(t, ChannelText("en", "notice_rate_limit", 7), "7")
 	require.Equal(t, "", ChannelText("en", "no_such_key"))
@@ -74,4 +73,27 @@ func TestAskEnvelopeFollowsQuestionLanguage(t *testing.T) {
 	require.Contains(t, text, "Context: задача про миграции")
 	require.Contains(t, text, "Project omni · run run-1")
 	require.Contains(t, text, "Answer here:")
+}
+
+// TestElapsedLabel: the run-progress timer speaks the dialog's language.
+func TestElapsedLabel(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		lang string
+		want string
+	}{
+		{35 * time.Second, "en", "35s"},
+		{35 * time.Second, "ru", "35 с"},
+		{65 * time.Second, "en", "1m 05s"},
+		{65 * time.Second, "ru", "1 мин 05 с"},
+		{3700 * time.Second, "en", "1h 01m"},
+		{3700 * time.Second, "ru", "1 ч 01 мин"},
+		{0, "ru", "0 с"},
+		{-3 * time.Second, "en", "0s"},
+	}
+	for _, tc := range cases {
+		if got := ElapsedLabel(tc.d, tc.lang); got != tc.want {
+			t.Errorf("ElapsedLabel(%v, %q) = %q, want %q", tc.d, tc.lang, got, tc.want)
+		}
+	}
 }

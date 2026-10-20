@@ -666,7 +666,7 @@ func (l *channelInboundLoop) announceProgress(ctx context.Context, settings agen
 	// second — one line per window.
 	var line string
 	if p.pendingPhase != "" {
-		line = fmt.Sprintf("%s · %s", p.pendingPhase, time.Since(p.startedAt).Truncate(time.Second))
+		line = fmt.Sprintf("%s · %s", p.pendingPhase, agent.ElapsedLabel(time.Since(p.startedAt), p.lang))
 		p.lastPhase, p.pendingPhase = p.pendingPhase, ""
 	} else if p.pendingQuote != "" {
 		line, p.pendingQuote = p.pendingQuote, ""
@@ -713,7 +713,7 @@ func (l *channelInboundLoop) foldProgressEvent(event observation.Event, p *runPr
 func (l *channelInboundLoop) sendProgress(ctx context.Context, settings agent.ChannelSettings, address, line string, p *runProgress) {
 	sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	if err := l.driver.SendText(sendCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: line, SuppressHint: true}); err != nil {
+	if err := l.driver.SendText(sendCtx, l.httpClient, settings.Channels[l.driver.Type()], address, agent.OutboundText{Body: line, Lang: p.lang}); err != nil {
 		l.log.Warn("run progress line", "channel", l.driver.Type(), "chat", address, "error", err)
 		return
 	}

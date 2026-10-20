@@ -43,10 +43,10 @@ func TestMatrixSendTextRendersMarkdown(t *testing.T) {
 	// Raw HTML is omitted by default (no Unsafe) — no markup injection.
 	require.Contains(t, html, "raw HTML omitted")
 	require.NotContains(t, html, "<script>")
-	// The plain body stays the unformatted fallback, reply hint included.
+	// The plain body stays the unformatted fallback.
 	body, _ := payload["body"].(string)
 	require.Contains(t, body, "## Итог")
-	require.Contains(t, body, "Reply in this room to answer.")
+	require.NotContains(t, body, "Reply in this room to answer.")
 }
 
 // TestMatrixSendTextPlainStaysPlain: a message without markdown renders as a

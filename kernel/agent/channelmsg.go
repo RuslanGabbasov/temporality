@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Channel-facing strings are bilingual (ru/en): the dialog follows the
@@ -39,7 +40,6 @@ func DetectLang(text string) string {
 // are stable identifiers; a missing translation falls back to English.
 var channelMessages = map[string][2]string{
 	// [en, ru]
-	"reply_hint":             {"Reply in this room to answer.", "Ответьте в этом чате, чтобы продолжить."},
 	"on_it":                  {"On it — working on your message…", "Принято — работаю над вашим сообщением…"},
 	"phase_explore":          {"🔍 Searching the project knowledge base…", "🔍 Ищу в базе знаний проекта…"},
 	"phase_start_task":       {"🚀 Starting the task in project «%s»…", "🚀 Завожу задачу в проекте «%s»…"},
@@ -72,4 +72,34 @@ func ChannelText(lang, key string, args ...any) string {
 		pattern = entry[1]
 	}
 	return fmt.Sprintf(pattern, args...)
+}
+
+// ElapsedLabel renders a run's elapsed time in the dialog language: units are
+// localized («1 мин 05 с» / «1m 05s»), the zero case reads as «0 с» / «0s».
+// Hours are shown only once they matter (>= 1h).
+func ElapsedLabel(d time.Duration, lang string) string {
+	total := int64(d.Seconds())
+	if total < 0 {
+		total = 0
+	}
+	hours, rest := total/3600, total%3600
+	minutes, seconds := rest/60, rest%60
+	if lang == LangRU {
+		switch {
+		case hours > 0:
+			return fmt.Sprintf("%d ч %02d мин", hours, minutes)
+		case minutes > 0:
+			return fmt.Sprintf("%d мин %02d с", minutes, seconds)
+		default:
+			return fmt.Sprintf("%d с", seconds)
+		}
+	}
+	switch {
+	case hours > 0:
+		return fmt.Sprintf("%dh %02dm", hours, minutes)
+	case minutes > 0:
+		return fmt.Sprintf("%dm %02ds", minutes, seconds)
+	default:
+		return fmt.Sprintf("%ds", seconds)
+	}
 }

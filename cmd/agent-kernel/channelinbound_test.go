@@ -1094,11 +1094,6 @@ func TestChannelWatcherAnnouncesRunProgress(t *testing.T) {
 	if strings.Contains(joined, "длинный ответ") {
 		t.Fatalf("long turn text must not be voiced: %v", sent)
 	}
-	for _, line := range sent {
-		if strings.Contains(line, "Reply in this room to answer") {
-			t.Fatalf("progress lines must not carry the reply hint: %q", line)
-		}
-	}
 }
 
 // TestChannelInboundIntakeRateLimitsFloodingSender: the per-sender cap

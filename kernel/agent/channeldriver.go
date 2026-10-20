@@ -124,13 +124,9 @@ type OutboundText struct {
 	// The kernel fills it from the previous ask's thread_ref so follow-up
 	// questions of one run stay in one conversation (docs/channels.md §9).
 	Thread string
-	// SuppressHint drops the two-way reply hint transports append for asks
-	// ("Reply in this room to answer."): progress updates are noise, not
-	// questions.
-	SuppressHint bool
-	// Lang picks the language of transport-appended canned text (the reply
-	// hint) — "" and unknown values fall back to English. The dialog language
-	// is detected from the user's message (agent.DetectLang).
+	// Lang picks the language of transport-appended canned text — "" and
+	// unknown values fall back to English. The dialog language is detected
+	// from the user's message (agent.DetectLang).
 	Lang string
 }
 
