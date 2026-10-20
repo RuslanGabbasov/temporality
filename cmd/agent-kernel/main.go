@@ -417,13 +417,16 @@ func main() {
 	costAPI := cost.NewCostAPI(costPrices, observationURL, os.Getenv("TEMPORALITY_API_TOKEN"))
 	// Human-attention coefficients (docs/supervisor-model.md §5) feed the
 	// persistent HAB/HWT rollups; read once at boot — settings changes apply
-	// after a restart.
+	// after a restart. The same coefficients price the per-user HAB slice in
+	// the dashboard's Users tab.
+	habFactors := cost.DefaultHumanFactors
 	if factors, err := ws.HumanFactors(ctx); err == nil {
-		costAPI.SetHumanFactors(cost.HumanFactors{
+		habFactors = cost.HumanFactors{
 			ApprovalSeconds:   factors.ApprovalSeconds,
 			AnswerBaseSeconds: factors.AnswerBaseSeconds,
 			ReadingWPM:        factors.ReadingWPM,
-		})
+		}
+		costAPI.SetHumanFactors(habFactors)
 	}
 	activities, err := agent.NewActivities(events)
 	if err != nil {
@@ -6522,7 +6525,7 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]any{"users": users})
 	})
-	registerUserMetricsRoutes(mux, gate, ws)
+	registerUserMetricsRoutes(mux, gate, ws, habFactors)
 	// User facts (docs/inbound-messages.md §4.3): the explicit half of the
 	// per-user picture — preferences and durable facts the dialogs work with.
 	mux.HandleFunc("GET /v1/workspace/users/{userID}/facts", func(w http.ResponseWriter, r *http.Request) {

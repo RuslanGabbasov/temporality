@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/temporality-project/temporality/controlplane"
+	"github.com/temporality-project/temporality/kernel/cost"
 	"github.com/temporality-project/temporality/workspace"
 )
 
@@ -25,7 +26,7 @@ func TestUserMetricsHandlerDoesNotHang(t *testing.T) {
 		t.Skipf("gate: %v", err)
 	}
 	mux := http.NewServeMux()
-	registerUserMetricsRoutes(mux, gate, store)
+	registerUserMetricsRoutes(mux, gate, store, cost.DefaultHumanFactors)
 	server := httptest.NewServer(gate.Authenticate(mux))
 	defer server.Close()
 	done := make(chan int, 1)

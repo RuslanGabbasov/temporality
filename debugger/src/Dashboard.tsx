@@ -705,6 +705,8 @@ function UsersTab() {
             <span>{t('dashboard.users_last_run') ?? 'Last run'}</span>
             <span title={t('dashboard.users_asks_hint') ?? undefined}>{t('dashboard.users_answered') ?? 'Answered'}</span>
             <span title={t('dashboard.users_wait_hint') ?? undefined}>⏳ {t('dashboard.users_wait') ?? 'wait'}</span>
+            <span title={t('dashboard.users_hab_hint') ?? undefined}>🧠 {t('dashboard.users_hab') ?? 'HAB'}</span>
+            <span title={t('dashboard.users_problems_hint') ?? undefined}>⚠</span>
             <span title={t('dashboard.users_last_ask_hint') ?? undefined}>{t('dashboard.users_last_ask') ?? 'Last ask'}</span>
           </div>
           {rows.map((row) => (
@@ -712,7 +714,7 @@ function UsersTab() {
               <div
                 onClick={() => void openFacts(row.id)}
                 title={t('dashboard.users_facts_hint') ?? undefined}
-                style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: 'minmax(10rem, 2fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(8rem, 1.2fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(7rem, 1.1fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem' }}
+                style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: 'minmax(10rem, 2fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(8rem, 1.2fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(4rem, 0.5fr) minmax(7rem, 1.1fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem' }}
               >
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }} title={`${row.name} · ${row.role ?? ''}${row.org_unit_id ? ' · ' + row.org_unit_id : ''}`}>
                 {expandedUser === row.id ? '▾ ' : '▸ '}{row.name || row.id}
@@ -724,10 +726,28 @@ function UsersTab() {
               <span style={{ color: 'var(--tm-text-2)' }}>{row.last_run_at ? new Date(row.last_run_at).toLocaleString() : '—'}</span>
               <span>{row.asks_total}</span>
               <span title={t('dashboard.users_wait_hint') ?? undefined}>{row.wait_seconds > 0 ? formatDuration(row.wait_seconds * 1000) : '—'}</span>
+              <span title={t('dashboard.users_hab_hint') ?? undefined}>{row.hab_seconds > 0 ? formatDuration(row.hab_seconds * 1000) : '—'}</span>
+              <span style={(row.failed_runs > 0 || row.timed_out_asks > 0) ? { color: 'var(--tm-danger)', fontWeight: 600 } : undefined}>{(row.failed_runs + row.timed_out_asks) > 0 ? row.failed_runs + row.timed_out_asks : '—'}</span>
               <span style={{ color: 'var(--tm-text-2)' }}>{row.last_ask_at ? new Date(row.last_ask_at).toLocaleString() : '—'}</span>
               </div>
               {expandedUser === row.id && (
                 <div style={{ padding: '0.35rem 0.6rem 0.6rem 1.5rem', background: 'var(--tm-raised)' }}>
+                  {(row.last_run || row.last_ask_question) && (
+                    <div style={{ fontSize: '0.75rem', marginBottom: '0.45rem', display: 'grid', gap: '0.15rem' }}>
+                      {row.last_run && (
+                        <span>
+                          {t('dashboard.users_last_run_did') ?? 'Last'}: <strong style={{ color: 'var(--tm-text)' }}>{row.last_run.title || row.last_run.run_id}</strong>
+                          {' '}· [{row.last_run.project}] · {row.last_run.status}
+                          {row.failed_runs > 0 && <span style={{ color: 'var(--tm-danger)' }}> · ⚠ {t('dashboard.users_failed_n', { count: String(row.failed_runs) })}</span>}
+                        </span>
+                      )}
+                      {row.last_ask_question && (
+                        <span style={{ color: 'var(--tm-text-2)' }}>
+                          {t('dashboard.users_last_ask_did') ?? 'Last question to answer'}: «{row.last_ask_question}»
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.3rem' }}>{t('dashboard.users_facts_title') ?? 'Stored preferences and facts'}</div>
                   {facts === null ? (
                     <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)' }}>{t('common.loading') ?? 'Loading…'}</span>

@@ -913,6 +913,13 @@ export interface UserFact {
   created_at: string
 }
 
+export interface UserLastRun {
+  project: string
+  status: string
+  title?: string
+  run_id: string
+}
+
 export interface UserMetricsRow {
   id: string
   name: string
@@ -922,10 +929,15 @@ export interface UserMetricsRow {
   runs_total: number
   runs_week: number
   last_run_at?: string
+  last_run?: UserLastRun
+  failed_runs: number
+  timed_out_asks: number
   asks_open: number
   asks_total: number
   wait_seconds: number
+  hab_seconds: number
   last_ask_at?: string
+  last_ask_question?: string
 }
 
 export interface User {
