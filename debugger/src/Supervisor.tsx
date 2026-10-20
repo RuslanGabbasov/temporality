@@ -326,8 +326,11 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
           reason: t('supervisor.action_generalized_reason', { id }),
         })
       }
+      // The helper adds each id to the session ack-set optimistically: the
+      // acks ride the async outbox, so the reload below cannot see them yet —
+      // without the optimistic add the row resurrected and looked broken.
       for (const eventID of row.eventIDs) {
-        try { await workspaceApi.acknowledgeSupervisorVerdict(eventID) } catch { /* queue hygiene is best-effort */ }
+        await acknowledge(eventID)
       }
       setGeneralize(null)
       await load(true)
@@ -422,8 +425,10 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
           reason: t('supervisor.action_invalidated_reason', { score: (conflict.score || 0).toFixed(2) }),
         })
       }
+      // Same optimistic ack-set add: invalidate → acknowledge → refresh must
+      // hide the row on the first click, not after the next manual reload.
       for (const eventID of row.eventIDs) {
-        try { await workspaceApi.acknowledgeSupervisorVerdict(eventID) } catch { /* queue hygiene is best-effort */ }
+        await acknowledge(eventID)
       }
       await load(true)
     } catch (failure) {
