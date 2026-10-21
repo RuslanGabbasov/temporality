@@ -6,8 +6,6 @@ import {
   InlineNotification,
   Tag,
   Tile,
-  Grid,
-  Column,
   Stack,
   Heading,
   Select,
@@ -21,6 +19,7 @@ import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
+import Markdown from './Markdown'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
 
@@ -59,8 +58,14 @@ export default function Artifacts() {
   const [providerFilter, setProviderFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [orgFilter, setOrgFilter] = useState('')
-  const [reviewArtifact, setReviewArtifact] = useState<Artifact | null>(null)
+  // Two-column layout (docs/artifact-registry.md §8): the left column is the
+  // filterable list, the right column is the selected artifact — body first,
+  // so an approver reads the document where the decision is made.
+  const [selectedId, setSelectedId] = useState('')
+  const [selectedBody, setSelectedBody] = useState('')
+  const [bodyTruncated, setBodyTruncated] = useState(false)
   const [reviews, setReviews] = useState<ArtifactReview[]>([])
+  const [reviewsOpen, setReviewsOpen] = useState(false)
   const [submitOpen, setSubmitOpen] = useState(false)
   const [submitReviewers, setSubmitReviewers] = useState('')
   const [submitNote, setSubmitNote] = useState('')
@@ -81,6 +86,30 @@ export default function Artifacts() {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  const selected = artifacts.find((a) => a.id === selectedId) ?? null
+
+  // The body loads on selection: an approver must read the document in the
+  // same view where they decide. url-provider bodies live outside the
+  // registry — the reader follows the external reference instead.
+  useEffect(() => {
+    setSelectedBody('')
+    setBodyTruncated(false)
+    setReviews([])
+    setReviewsOpen(false)
+    setDecisionComment('')
+    if (!selected) return
+    if (selected.provider === 'url') return
+    let stale = false
+    workspaceApi.getArtifact(selected.id)
+      .then((page) => {
+        if (stale) return
+        setSelectedBody(page.artifact.content ?? '')
+        setBodyTruncated(Boolean(page.truncated))
+      })
+      .catch((f) => { if (!stale) setError(message(f)) })
+    return () => { stale = true }
+  }, [selected?.id, selected?.version, selected?.provider]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lifecycle counters drive the status filter chips: how many artifacts sit in
   // each state. Pending reviews first — that is the human queue.
@@ -128,226 +157,347 @@ export default function Artifacts() {
     fontSize: '0.75rem',
   })
 
+  const rowStyle = (active: boolean): CSSProperties => ({
+    border: `1px solid ${active ? 'var(--tm-teal)' : 'var(--tm-border)'}`,
+    borderRadius: '8px',
+    padding: '0.55rem 0.7rem',
+    cursor: 'pointer',
+    background: active ? 'var(--tm-elevated)' : 'transparent',
+    marginBottom: '0.4rem',
+  })
+
   const startCreate = () => {
+    setForm({ id: '', title: '', description: '', provider: 'builtin', content: '', mime_type: '', kind: 'reference' })
     setEditing(null)
-    setForm({ id: '', title: '', description: '', provider: 'builtin', content: '', mime_type: 'text/markdown', kind: 'reference' })
     setShowForm(true)
   }
 
   const startEdit = async (a: Artifact) => {
+    let content = a.content ?? ''
+    if (a.provider !== 'url') {
+      try {
+        const page = await workspaceApi.getArtifact(a.id)
+        content = page.artifact.content ?? ''
+      } catch { /* the form still opens with what the listing carries */ }
+    }
+    setForm({ ...a, content })
     setEditing(a)
-    setForm({ ...a, content: '' })
     setShowForm(true)
-    // List rows ship no bodies: pull the document itself for the editor.
-    try {
-      const page = await workspaceApi.getArtifact(a.id)
-      setForm((prev) => ({ ...prev, content: page.artifact.content ?? '' }))
-    } catch (f) { setError(message(f)) }
   }
 
   const save = async () => {
-    if (!form.title?.trim()) return
-    setLoading(true); setError('')
+    setError('')
+    setBusy(true)
     try {
       if (editing) {
         await workspaceApi.updateArtifact(editing.id, {
-          title: form.title, description: form.description, provider: form.provider,
-          external_ref: form.external_ref, content: form.content, mime_type: form.mime_type,
-          kind: form.kind, saga_id: form.saga_id,
+          title: form.title,
+          description: form.description,
+          provider: form.provider,
+          external_ref: form.external_ref,
+          content: form.content,
+          mime_type: form.mime_type,
+          kind: form.kind,
+          saga_id: form.saga_id,
+          org_unit_id: form.org_unit_id,
         })
-        // PUT payloads keep the stored org binding: re-scoping goes through
-        // the admin binding endpoint, same contract as secrets and skills.
-        if (org.isAdmin && (form.org_unit_id ?? '') !== (editing.org_unit_id ?? '')) {
-          await workspaceApi.setResourceBinding('artifact', editing.id, form.org_unit_id ?? '')
-        }
       } else {
         await workspaceApi.createArtifact({
-          id: form.id ?? '', title: form.title, description: form.description,
-          provider: form.provider ?? 'builtin', external_ref: form.external_ref,
-          content: form.content, mime_type: form.mime_type, org_unit_id: form.org_unit_id,
-          kind: form.kind ?? 'reference', saga_id: form.saga_id,
+          id: form.id?.trim() ?? '',
+          title: form.title ?? '',
+          description: form.description,
+          provider: form.provider,
+          external_ref: form.external_ref,
+          content: form.content,
+          mime_type: form.mime_type,
+          org_unit_id: form.org_unit_id,
+          kind: form.kind,
+          saga_id: form.saga_id,
         })
       }
-      setShowForm(false); setEditing(null)
-      void load()
+      setShowForm(false)
+      setEditing(null)
+      await load()
     } catch (f) { setError(message(f)) }
-    finally { setLoading(false) }
+    finally { setBusy(false) }
   }
 
   const remove = async (a: Artifact) => {
-    if (!(await confirmDialog({ title: t('artifacts.delete_confirm', { name: a.title }) ?? `Delete artifact "${a.title}"?`, body: t('action.delete_warning') ?? 'This cannot be undone.', danger: true, confirmLabel: t('action.delete') ?? 'Delete' }))) return
-    setLoading(true); setError('')
+    const ok = await confirmDialog({
+      title: t('artifacts.delete_confirm', { name: a.title }),
+      body: t('action.delete_warning'),
+      danger: true,
+      confirmLabel: t('action.delete'),
+    })
+    if (!ok) return
+    setError('')
     try {
       await workspaceApi.deleteArtifact(a.id)
-      void load()
+      if (selectedId === a.id) setSelectedId('')
+      await load()
     } catch (f) { setError(message(f)) }
-    finally { setLoading(false) }
   }
 
   const openReviews = async (a: Artifact) => {
-    setReviewArtifact(a)
-    setDecisionComment('')
     try {
       const page = await workspaceApi.listArtifactReviews(a.id)
       setReviews(page.reviews ?? [])
-    } catch (f) {
-      setError(message(f))
-      setReviews([])
-    }
+      setReviewsOpen(true)
+    } catch (f) { setError(message(f)) }
   }
 
   const submit = async () => {
-    if (!reviewArtifact) return
+    if (!selected) return
     const reviewers = submitReviewers.split(',').map((s) => s.trim()).filter(Boolean)
-    if (reviewers.length === 0) return
-    setBusy(true); setError('')
+    setBusy(true)
     try {
-      await workspaceApi.submitArtifact(reviewArtifact.id, { reviewers, note: submitNote })
-      setSubmitOpen(false); setSubmitReviewers(''); setSubmitNote('')
-      await openReviews(reviewArtifact)
-      void load()
+      await workspaceApi.submitArtifact(selected.id, { reviewers, note: submitNote })
+      setSubmitOpen(false)
+      setSubmitReviewers('')
+      setSubmitNote('')
+      await load()
     } catch (f) { setError(message(f)) }
     finally { setBusy(false) }
   }
 
-  const decide = async (review: ArtifactReview, approve: boolean) => {
-    if (!reviewArtifact) return
-    setBusy(true); setError('')
+  const decide = async (r: ArtifactReview, approve: boolean) => {
+    if (!selected) return
+    setBusy(true)
     try {
-      await workspaceApi.resolveArtifactReview(reviewArtifact.id, review.id, approve, decisionComment)
+      await workspaceApi.resolveArtifactReview(selected.id, r.id, approve, decisionComment)
       setDecisionComment('')
-      await openReviews(reviewArtifact)
-      void load()
+      const page = await workspaceApi.listArtifactReviews(selected.id)
+      setReviews(page.reviews ?? [])
+      await load()
     } catch (f) { setError(message(f)) }
     finally { setBusy(false) }
   }
 
-  const fmtTime = (iso?: string) => {
-    if (!iso) return ''
-    try { return new Date(iso).toLocaleString() } catch { return iso }
-  }
+  const fmtTime = (v?: string) => (v ? new Date(v).toLocaleString() : '')
 
   return (
     <div style={{ padding: '1rem' }}>
       {confirmDialogNode}
-      {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
+      {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onCloseButtonClick={() => setError('')} lowContrast style={{ marginBottom: '0.75rem' }} />}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
         <Heading>{t('artifacts.title') ?? 'Reference Artifacts'}</Heading>
         <Button renderIcon={Add} onClick={startCreate}>{t('artifacts.new') ?? 'New Artifact'}</Button>
       </div>
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end', position: 'sticky', top: '3rem', background: 'var(--tm-bg)', zIndex: 1, paddingBottom: '0.5rem', marginBottom: '0.5rem' }}>
-        <div style={{ maxWidth: '420px', flex: '1 1 260px' }}>
-          <ListFilter value={filter} onChange={setFilter} placeholder={t('artifacts.filter_placeholder') ?? 'Filter artifacts…'} />
-        </div>
-        {/* Compact toolbar selects in the same style as the knowledge and
-            timeline toolbars (.toolbar-select); the Carbon Select used in
-            dialogs is too heavy here and its absolutely-positioned chevron
-            breaks loose in a flex row. */}
-        <label className="toolbar-select">{t('artifacts.filter_provider_label') ?? 'Source'}
-          <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)}>
-            <option value="">{t('artifacts.filter_all_providers') ?? 'All providers'}</option>
-            <option value="builtin">{providerLabel('builtin')}</option>
-            <option value="url">{providerLabel('url')}</option>
-          </select>
-        </label>
-        {org.units.length > 0 && (
-          <label className="toolbar-select">{t('artifacts.filter_org_label') ?? 'Unit'}
-            <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)}>
-              <option value="">{t('artifacts.filter_all_orgs') ?? 'All units'}</option>
-              {org.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
-          </label>
-        )}
-      </div>
 
-      {/* Status chips behave like the inbox filters: a click narrows the grid,
-          an active chip is filled. Open reviews float to the top of the queue. */}
-      {orderedStatuses.length > 1 && (
-        <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.75rem', marginTop: '0.25rem' }}>
-          <button type="button" onClick={() => setStatusFilter('')} style={chipStyle(statusFilter === '')}>
-            {t('inbound.filter_all') ?? 'All'} · {artifacts.length}
-          </button>
-          {orderedStatuses.map((s) => (
-            <button key={s} type="button" onClick={() => setStatusFilter(statusFilter === s ? '' : s)} style={chipStyle(statusFilter === s)}>
-              {statusLabel(s)} · {statusCounts[s]}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: '1rem', alignItems: 'start' }}>
+        {/* Left column: filters and the list. Rows carry no buttons — every
+            action lives in the detail pane, so nothing ever overflows. */}
+        <div>
+          <div style={{ marginBottom: '0.5rem' }}>
+            <ListFilter value={filter} onChange={setFilter} placeholder={t('artifacts.filter_placeholder') ?? 'Filter artifacts…'} />
+          </div>
+          <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+            <button type="button" onClick={() => setStatusFilter('')} style={chipStyle(statusFilter === '')}>
+              {t('inbound.filter_all') ?? 'All'} · {artifacts.length}
             </button>
-          ))}
+            {orderedStatuses.map((s) => (
+              <button key={s} type="button" onClick={() => setStatusFilter(statusFilter === s ? '' : s)} style={chipStyle(statusFilter === s)}>
+                {statusLabel(s)} · {statusCounts[s]}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'grid', gap: '0.4rem', marginBottom: '0.6rem' }}>
+            <label className="toolbar-select">{t('artifacts.filter_provider_label') ?? 'Source'}
+              <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)}>
+                <option value="">{t('artifacts.filter_all_providers') ?? 'All providers'}</option>
+                <option value="builtin">{providerLabel('builtin')}</option>
+                <option value="url">{providerLabel('url')}</option>
+              </select>
+            </label>
+            {org.units.length > 0 && (
+              <label className="toolbar-select">{t('artifacts.filter_org_label') ?? 'Unit'}
+                <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)}>
+                  <option value="">{t('artifacts.filter_all_orgs') ?? 'All units'}</option>
+                  {org.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
+
+          <div style={{ maxHeight: 'calc(100vh - 18rem)', overflowY: 'auto', paddingRight: '0.15rem' }}>
+            {visibleArtifacts.map((a) => (
+              <div key={a.id} style={rowStyle(selectedId === a.id)} onClick={() => setSelectedId(a.id)}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                  <strong style={{ fontSize: '0.85rem' }}>{a.title}</strong>
+                  <Tag type={statusTagType(a.status)} size="sm">{statusLabel(a.status)}</Tag>
+                </div>
+                <div style={{ fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.7rem', color: 'var(--tm-text-3)', marginTop: '0.15rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span>{a.id}{a.version && a.version > 1 ? ` · v${a.version}` : ''}</span>
+                  <span>{humanArtifactSize(a.size_bytes)}</span>
+                  {(references[a.id] ?? []).length > 0 && <span title={(references[a.id] ?? []).join(', ')}>🔗 {(references[a.id] ?? []).length}</span>}
+                </div>
+              </div>
+            ))}
+            {visibleArtifacts.length === 0 && !loading && artifacts.length > 0 && (
+              <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0.25rem' }}>{t('artifacts.filter_empty') ?? 'Nothing matches the filters.'}</p>
+            )}
+          </div>
         </div>
-      )}
 
-      {artifacts.length === 0 && !loading && (
-        <Tile style={{ textAlign: 'center', padding: '3rem', color: 'var(--tm-text-3)' }}>
-          <p>{t('artifacts.empty') ?? 'No reference artifacts yet.'}</p>
-          <p style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>
-            {t('artifacts.empty_hint') ?? 'Regulations, approved instructions and checklists live here. Skills reference them from the manifest; agents load the body on demand instead of keeping it in the prompt.'}
-          </p>
-        </Tile>
-      )}
+        {/* Right column: the selected artifact — header, actions, the readable
+            body and the review rounds in one place, so approving never needs
+            a second window. */}
+        <div style={{ minWidth: 0 }}>
+          {!selected && !loading && (
+            <Tile style={{ textAlign: 'center', padding: '3rem', color: 'var(--tm-text-3)' }}>
+              {artifacts.length === 0 ? (
+                <>
+                  <p>{t('artifacts.empty') ?? 'No reference artifacts yet.'}</p>
+                  <p style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>
+                    {t('artifacts.empty_hint') ?? 'Regulations, approved instructions and checklists live here. Skills reference them from the manifest; agents load the body on demand instead of keeping it in the prompt.'}
+                  </p>
+                </>
+              ) : (
+                <p>{t('artifacts.select_hint') ?? 'Select an artifact on the left to read it.'}</p>
+              )}
+            </Tile>
+          )}
 
-      <Grid>
-        {visibleArtifacts.map((a) => {
-          const usedBy = references[a.id] ?? []
-          const openReview = (a.status ?? '') === 'in_review'
-          return (
-            <Column key={a.id} sm={4} md={4} lg={4}>
-              <Tile style={{ marginBottom: '0.75rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
-                      <strong>{a.title}</strong>
-                      <OrgBadge orgUnitID={a.org_unit_id} org={org} />
+          {selected && (() => {
+            const usedBy = references[selected.id] ?? []
+            const reviewable = selected.status === 'draft' || selected.status === 'rejected'
+            const openReview = (selected.status ?? '') === 'in_review'
+            return (
+              <Tile style={{ padding: '1rem 1.1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <Heading style={{ margin: 0, fontSize: '1.05rem' }}>{selected.title}</Heading>
+                      <OrgBadge orgUnitID={selected.org_unit_id} org={org} />
                     </div>
-                    <p style={{ fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.15rem' }}>
-                      {a.id}{a.version && a.version > 1 ? ` · v${a.version}` : ''}
+                    <p style={{ fontFamily: 'var(--tm-font-mono, monospace)', fontSize: '0.72rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
+                      {selected.id}{selected.version && selected.version > 1 ? ` · v${selected.version}` : ''}
                     </p>
-                    {a.description && (
-                      <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', marginTop: '0.25rem', wordBreak: 'break-word' }}>{a.description}</p>
-                    )}
-                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem', alignItems: 'center' }}>
-                      <Tag type={statusTagType(a.status)} size="sm" title={`status: ${a.status ?? 'approved'}`}>{statusLabel(a.status)}</Tag>
-                      <Tag type={a.provider === 'builtin' ? 'blue' : 'gray'} size="sm" title={a.provider}>{providerLabel(a.provider)}</Tag>
-                      {a.kind === 'work' && <Tag type="cool-gray" size="sm">{t('artifacts.kind_work') ?? 'work product'}</Tag>}
-                      <Tag type="cool-gray" size="sm">{humanArtifactSize(a.size_bytes)}</Tag>
-                      {usedBy.length > 0
-                        ? <Tag type="green" size="sm" title={usedBy.join(', ')}>{t('artifacts.used_by', { n: String(usedBy.length) }) ?? `used by ${usedBy.length} skill(s)`}</Tag>
-                        : <Tag size="sm">{t('artifacts.not_used') ?? 'not referenced'}</Tag>}
-                    </div>
-                    <p style={{ fontSize: '0.7rem', marginTop: '0.4rem', color: 'var(--tm-text-3)' }}>
-                      {t('artifacts.origin_prefix') ?? 'created by'}: {originLabel(a)}
-                      {a.saga_id ? ` · ${t('artifacts.saga_prefix') ?? 'saga'}: ${a.saga_id}` : ''}
-                    </p>
-                    {a.provider === 'url' && a.external_ref && (
-                      <p style={{ fontSize: '0.7rem', marginTop: '0.5rem', wordBreak: 'break-all', color: 'var(--tm-text-3)' }}>{a.external_ref}</p>
-                    )}
                   </div>
-                  <Stack orientation="horizontal" gap={1}>
-                    {(a.status === 'draft' || a.status === 'rejected') && (
-                      <Button size="sm" kind="ghost" onClick={() => { setReviewArtifact(a); setSubmitReviewers(''); setSubmitNote(''); setSubmitOpen(true) }}>
+                  <Stack orientation="horizontal" gap={2}>
+                    {reviewable && (
+                      <Button size="sm" onClick={() => { setSubmitReviewers(''); setSubmitNote(''); setSubmitOpen(true) }}>
                         {t('artifacts.submit_review') ?? 'Send to review'}
                       </Button>
                     )}
-                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'}
-                      disabled={a.status === 'approved' || a.status === 'in_review'}
-                      title={a.status === 'approved' ? (t('artifacts.edit_locked_approved') ?? 'The approved body is immutable') : a.status === 'in_review' ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
-                      onClick={() => void startEdit(a)} />
-                    <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription="Delete" onClick={() => void remove(a)} />
+                    <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'}
+                      disabled={selected.status === 'approved' || selected.status === 'in_review'}
+                      title={selected.status === 'approved' ? (t('artifacts.edit_locked_approved') ?? 'The approved body is immutable') : selected.status === 'in_review' ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
+                      onClick={() => void startEdit(selected)} />
+                    <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
                   </Stack>
                 </div>
-                {(openReview || a.status === 'rejected') && (
-                  <div style={{ marginTop: '0.5rem' }}>
-                    <Button size="sm" kind="secondary" onClick={() => void openReviews(a)}>
+
+                <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.5rem', alignItems: 'center' }}>
+                  <Tag type={statusTagType(selected.status)} size="sm" title={`status: ${selected.status ?? 'approved'}`}>{statusLabel(selected.status)}</Tag>
+                  <Tag type={selected.provider === 'builtin' ? 'blue' : 'gray'} size="sm" title={selected.provider}>{providerLabel(selected.provider)}</Tag>
+                  {selected.kind === 'work' && <Tag type="cool-gray" size="sm">{t('artifacts.kind_work') ?? 'work product'}</Tag>}
+                  <Tag type="cool-gray" size="sm">{humanArtifactSize(selected.size_bytes)}</Tag>
+                  {usedBy.length > 0
+                    ? <Tag type="green" size="sm" title={usedBy.join(', ')}>{t('artifacts.used_by', { n: String(usedBy.length) }) ?? `used by ${usedBy.length} skill(s)`}</Tag>
+                    : <Tag size="sm">{t('artifacts.not_used') ?? 'not referenced'}</Tag>}
+                </div>
+
+                {selected.description && (
+                  <p style={{ color: 'var(--tm-text-2)', fontSize: '0.8rem', marginTop: '0.6rem', wordBreak: 'break-word' }}>{selected.description}</p>
+                )}
+                <p style={{ fontSize: '0.7rem', marginTop: '0.4rem', color: 'var(--tm-text-3)' }}>
+                  {t('artifacts.origin_prefix') ?? 'created by'}: {originLabel(selected)}
+                  {selected.saga_id ? ` · ${t('artifacts.saga_prefix') ?? 'saga'}: ${selected.saga_id}` : ''}
+                </p>
+
+                {(openReview || selected.status === 'rejected' || reviewsOpen) && (
+                  <div style={{ marginTop: '0.75rem' }}>
+                    <Button size="sm" kind="secondary" onClick={() => (reviewsOpen ? setReviewsOpen(false) : void openReviews(selected))}>
                       {openReview
                         ? (t('artifacts.open_reviews') ?? 'Review queue')
                         : (t('artifacts.review_history') ?? 'Review history')}
                     </Button>
                   </div>
                 )}
+
+                {reviewsOpen && (
+                  <div style={{ marginTop: '0.6rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.6rem' }}>
+                    <Stack gap={3}>
+                      {reviews.length === 0 && (
+                        <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.reviews_empty') ?? 'No review rounds yet.'}</p>
+                      )}
+                      {reviews.map((r) => (
+                        <div key={r.id} style={{ border: '1px solid var(--tm-border)', borderRadius: '8px', padding: '0.6rem 0.75rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <div>
+                              <Tag type={r.status === 'open' ? 'purple' : r.status === 'approved' ? 'green' : 'red'} size="sm">
+                                {r.status === 'open'
+                                  ? (t('artifacts.review_open') ?? 'open')
+                                  : r.status === 'approved'
+                                    ? (t('artifacts.status_approved') ?? 'approved')
+                                    : (t('artifacts.status_rejected') ?? 'rejected')}
+                              </Tag>
+                              <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', marginLeft: '0.5rem' }}>
+                                v{r.artifact_version} · {t('artifacts.review_mode_label') ?? 'mode'}: {r.mode} · {fmtTime(r.requested_at)}
+                              </span>
+                            </div>
+                            {r.status === 'open' && (
+                              <Stack orientation="horizontal" gap={2}>
+                                <Button size="sm" renderIcon={CheckmarkOutline} disabled={busy} onClick={() => void decide(r, true)}>{t('artifacts.approve') ?? 'Approve'}</Button>
+                                <Button size="sm" kind="danger" renderIcon={CloseOutline} disabled={busy} onClick={() => void decide(r, false)}>{t('artifacts.reject') ?? 'Reject'}</Button>
+                              </Stack>
+                            )}
+                          </div>
+                          <p style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', marginTop: '0.4rem' }}>
+                            {t('artifacts.reviewers_label') ?? 'Reviewers'}: {r.reviewers.join(', ')}
+                          </p>
+                          {r.note && <p style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>{r.note}</p>}
+                          {Object.entries(r.decisions ?? {}).map(([who, d]) => (
+                            <p key={who} style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
+                              <strong>{who}{d.decided_by && d.decided_by !== who ? ` (${d.decided_by})` : ''}</strong>: {d.decision}{d.comment ? ` — ${d.comment}` : ''} ({fmtTime(d.at)})
+                            </p>
+                          ))}
+                        </div>
+                      ))}
+                      {reviews.some((r) => r.status === 'open') && (
+                        <TextInput
+                          id="artifact-decision-comment"
+                          labelText={t('artifacts.decision_comment_label') ?? 'Decision comment (optional)'}
+                          value={decisionComment}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDecisionComment(e.target.value)}
+                          placeholder={t('artifacts.decision_comment_placeholder') ?? 'Shown to the requesting agent in the resolution event'}
+                        />
+                      )}
+                    </Stack>
+                  </div>
+                )}
+
+                {/* The body: the document itself, rendered for reading. */}
+                <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.75rem' }}>
+                  {selected.provider === 'url' ? (
+                    selected.external_ref
+                      ? <p style={{ fontSize: '0.85rem', wordBreak: 'break-all' }}>
+                          {t('artifacts.external_body_hint') ?? 'The body lives in the external system:'}{' '}
+                          <a href={selected.external_ref} target="_blank" rel="noreferrer">{selected.external_ref}</a>
+                        </p>
+                      : <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.external_body_missing') ?? 'No external reference set.'}</p>
+                  ) : selectedBody ? (
+                    <>
+                      <div className="artifact-body">
+                        <Markdown content={selectedBody} />
+                      </div>
+                      {bodyTruncated && (
+                        <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', marginTop: '0.5rem' }}>
+                          {t('artifacts.body_truncated') ?? 'The body is shown partially; agents read it in 32 KiB chunks.'}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.body_empty') ?? 'No stored body.'}</p>
+                  )}
+                </div>
               </Tile>
-            </Column>
-          )
-        })}
-      </Grid>
+            )
+          })()}
+        </div>
+      </div>
 
       {showForm && (
         <AppModal onClose={() => { setShowForm(false); setEditing(null) }} panelStyle={{ width: '640px' }}>
@@ -445,75 +595,19 @@ export default function Artifacts() {
               />
             )}
             <div className="form-actions">
-              <Button onClick={() => void save()} disabled={!form.title?.trim() || (!editing && !form.id?.trim()) || ((form.provider ?? 'builtin') === 'url' ? !form.external_ref?.trim() : !form.content?.trim())}>{t('action.save') ?? 'Save'}</Button>
+              <Button onClick={() => void save()} disabled={busy || !form.title?.trim() || (!editing && !form.id?.trim()) || ((form.provider ?? 'builtin') === 'url' ? !form.external_ref?.trim() : !form.content?.trim())}>{t('action.save') ?? 'Save'}</Button>
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null) }}>{t('action.cancel') ?? 'Cancel'}</Button>
             </div>
           </Stack>
         </AppModal>
       )}
 
-      {reviewArtifact && (
-        <AppModal onClose={() => { setReviewArtifact(null); setReviews([]) }} panelStyle={{ width: '680px' }}>
-          <Heading>{t('artifacts.reviews_title', { name: reviewArtifact.title }) ?? `Reviews — ${reviewArtifact.title}`}</Heading>
-          <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', margin: '0.25rem 0 0.75rem' }}>
-            {t('artifacts.reviews_hint') ?? 'Agents create drafts and request review; the decision is always human. mode=all needs every reviewer; mode=any closes on the first decision.'}
-          </p>
-          <Stack gap={4}>
-            {reviews.length === 0 && (
-              <p style={{ color: 'var(--tm-text-3)' }}>{t('artifacts.reviews_empty') ?? 'No review rounds yet.'}</p>
-            )}
-            {reviews.map((r) => (
-              <Tile key={r.id}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <div>
-                    <Tag type={r.status === 'open' ? 'purple' : r.status === 'approved' ? 'green' : 'red'} size="sm">
-                      {r.status === 'open'
-                        ? (t('artifacts.review_open') ?? 'open')
-                        : r.status === 'approved'
-                          ? (t('artifacts.status_approved') ?? 'approved')
-                          : (t('artifacts.status_rejected') ?? 'rejected')}
-                    </Tag>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', marginLeft: '0.5rem' }}>
-                      v{r.artifact_version} · {t('artifacts.review_mode_label') ?? 'mode'}: {r.mode} · {fmtTime(r.requested_at)}
-                    </span>
-                  </div>
-                  {r.status === 'open' && (
-                    <Stack orientation="horizontal" gap={2}>
-                      <Button size="sm" renderIcon={CheckmarkOutline} disabled={busy} onClick={() => void decide(r, true)}>{t('artifacts.approve') ?? 'Approve'}</Button>
-                      <Button size="sm" kind="danger" renderIcon={CloseOutline} disabled={busy} onClick={() => void decide(r, false)}>{t('artifacts.reject') ?? 'Reject'}</Button>
-                    </Stack>
-                  )}
-                </div>
-                <p style={{ fontSize: '0.78rem', color: 'var(--tm-text-2)', marginTop: '0.4rem' }}>
-                  {t('artifacts.reviewers_label') ?? 'Reviewers'}: {r.reviewers.join(', ')}
-                </p>
-                {r.note && <p style={{ fontSize: '0.78rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>{r.note}</p>}
-                {Object.entries(r.decisions ?? {}).map(([who, d]) => (
-                  <p key={who} style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>
-                    <strong>{who}{d.decided_by && d.decided_by !== who ? ` (${d.decided_by})` : ''}</strong>: {d.decision}{d.comment ? ` — ${d.comment}` : ''} ({fmtTime(d.at)})
-                  </p>
-                ))}
-              </Tile>
-            ))}
-            {r0OpenReviews(reviews) > 0 && (
-              <TextInput
-                id="artifact-decision-comment"
-                labelText={t('artifacts.decision_comment_label') ?? 'Decision comment (optional)'}
-                value={decisionComment}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDecisionComment(e.target.value)}
-                placeholder={t('artifacts.decision_comment_placeholder') ?? 'Shown to the requesting agent in the resolution event'}
-              />
-            )}
-          </Stack>
-        </AppModal>
-      )}
-
-      {submitOpen && reviewArtifact && (
+      {submitOpen && selected && (
         <AppModal onClose={() => setSubmitOpen(false)} panelStyle={{ width: '560px' }}>
           <Heading>{t('artifacts.submit_title') ?? 'Send to review'}</Heading>
           <Stack gap={3}>
             <p style={{ color: 'var(--tm-text-3)', fontSize: '0.85rem' }}>
-              {reviewArtifact.title} · v{reviewArtifact.version ?? 1}
+              {selected.title} · v{selected.version ?? 1}
             </p>
             <TextInput
               id="artifact-submit-reviewers"
@@ -542,8 +636,4 @@ export default function Artifacts() {
       {loading && <PageLoading />}
     </div>
   )
-}
-
-function r0OpenReviews(reviews: ArtifactReview[]): number {
-  return reviews.filter((r) => r.status === 'open').length
 }

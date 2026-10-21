@@ -3030,3 +3030,22 @@ button.header-nav-link {
 .cds--btn:not(.cds--btn--icon-only):not(:has(.cds--btn__icon)) {
   padding-inline-end: calc(0.75rem - 1px);
 }
+
+// Artifact detail body (Artifacts.tsx): the document is the point of the
+// right-hand pane — give the rendered markdown real reading rhythm instead
+// of the dense chat look.
+.artifact-body { font-size: 0.85rem; line-height: 1.55; color: var(--tm-text); }
+.artifact-body h1, .artifact-body h2, .artifact-body h3 { margin: 1em 0 0.4em; line-height: 1.25; }
+.artifact-body h1 { font-size: 1.15rem; }
+.artifact-body h2 { font-size: 1.02rem; }
+.artifact-body h3 { font-size: 0.92rem; }
+.artifact-body p, .artifact-body ul, .artifact-body ol { margin: 0.45em 0; }
+.artifact-body ul, .artifact-body ol { padding-left: 1.3rem; }
+.artifact-body li { margin: 0.2em 0; }
+.artifact-body code { font-family: var(--tm-font-mono, monospace); font-size: 0.8em; background: var(--tm-surface-2); border-radius: 4px; padding: 0.08em 0.3em; }
+.artifact-body pre { background: var(--tm-surface-2); border: 1px solid var(--tm-border); border-radius: 6px; padding: 0.6rem 0.75rem; overflow-x: auto; margin: 0.6em 0; }
+.artifact-body pre code { background: transparent; padding: 0; }
+.artifact-body blockquote { border-left: 3px solid var(--tm-border); margin: 0.6em 0; padding: 0.1em 0 0.1em 0.8rem; color: var(--tm-text-2); }
+.artifact-body table { border-collapse: collapse; margin: 0.6em 0; font-size: 0.8rem; }
+.artifact-body th, .artifact-body td { border: 1px solid var(--tm-border); padding: 0.3rem 0.55rem; text-align: left; }
+.artifact-body a { color: var(--tm-teal); }
