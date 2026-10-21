@@ -1,4 +1,4 @@
--- Baseline of the workspace schema as of release v2026.2.19 (the squash of
+-- Baseline of the workspace schema as of release v2026.2.21 (the squash of
 -- migrations/workspace 000021-000075). Two sections:
 --
 --   1. The final schema: tables, sequences, indexes, constraints in their

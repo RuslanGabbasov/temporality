@@ -70,7 +70,7 @@ func TestMigrationDirectoriesOwnTheirChains(t *testing.T) {
 		}
 	}
 	// The workspace chain starts at the release baseline; increments follow.
-	assertHas("../migrations/workspace", "0001_baseline_v2026.2.19.up.sql")
+	assertHas("../migrations/workspace", "0001_baseline_v2026.2.21.up.sql")
 	assertHas("../migrations/outbox", "000019_kernel_event_outbox.up.sql")
 	assertHas("../migrations/quota", "000020_kernel_run_quota.up.sql")
 	if _, err := ListMigrations("../migrations/runtime"); err == nil {
