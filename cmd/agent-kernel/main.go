@@ -1674,7 +1674,7 @@ func main() {
 			{"key": "judge_model", "configured": judgeOK, "used_by": []string{"skill_propose (fallback)", "knowledge contradiction triage (B1)", "knowledge hygiene (B4)", "area normalization"},
 				"fix": "Agents → Quality settings → pick a judge model"},
 			{"key": "embeddings", "configured": embedStatus.Ready, "used_by": []string{"semantic hints", "knowledge conflict prediction (C5)", "semantic knowledge search"},
-				"fix": "Wait for the model to load (first boot downloads it); check KERNEL_EMBEDDINGS_MODEL", "detail": embedStatus.Error},
+				"fix": "A failed load retries automatically with a growing backoff; check detail for the real cause; verify KERNEL_EMBEDDINGS_MODEL and network access to huggingface.co", "detail": embedStatus.Error},
 			{"key": "sandbox_image", "configured": sandboxOK, "used_by": []string{"run_command", "write_file", "read_file", "web_fetch (page rendering)"},
 				"fix": "Run the sandbox build in onboarding, or set KERNEL_SANDBOX_IMAGE"},
 			{"key": "journal_auth", "configured": strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")) != "" || !gate.Enabled(), "used_by": []string{"operations panel", "knowledge extraction", "saga tools"},
