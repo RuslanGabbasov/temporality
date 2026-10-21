@@ -341,6 +341,12 @@ func main() {
 		log.Error("migrate workspace v74 (user facts)", "error", err)
 		os.Exit(1)
 	}
+	// 000075 adds the per-profile docker-socket passthrough flag (DooD,
+	// docs/sandbox-profiles.md §5.3); the profile queries select the column.
+	if err = ws.Migrate(ctx, "migrations/000075_profile_docker_socket.up.sql"); err != nil {
+		log.Error("migrate workspace v75 (profile docker socket)", "error", err)
+		os.Exit(1)
+	}
 	// Curated builtin agents are templates, not auto-created agents
 	// (docs/evaluable-agent.md §16): the user creates them deliberately from
 	// the template gallery. Cleanup removes agents left by the earlier
