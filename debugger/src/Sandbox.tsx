@@ -219,6 +219,9 @@ export default function Sandbox({ project }: { project?: string }) {
         scratch_size: draft.scratch_size ?? '',
         tmp_size: draft.tmp_size ?? '',
         cache_env: '',
+        // The builder never proposes the socket passthrough: it is an
+        // operator-only decision made in the profile form.
+        docker_socket: false,
       })
       setDraftRationale(draft.rationale ?? '')
       setEditing(null)
