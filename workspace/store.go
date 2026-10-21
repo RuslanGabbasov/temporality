@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -44,6 +47,54 @@ func (s *Store) Migrate(ctx context.Context, path string) error {
 	}
 	_, err = s.pool.Exec(ctx, string(data))
 	return err
+}
+
+// ListMigrations returns the up-migration file names in dir that belong to
+// the chain floor or later, in application order (the zero-padded 000NNN
+// prefixes sort lexicographically; os.ReadDir already returns sorted names).
+// The floor is ownership, not housekeeping: migrations below it belong to
+// other stores — 000001-000018 are the historical runtime chain the journal
+// carries as its embedded schema, 000019/000020 belong to the outbox and
+// quota stores.
+func ListMigrations(dir, floor string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read migrations directory %s: %w", dir, err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".up.sql") {
+			continue
+		}
+		if entry.Name() < floor {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	return names, nil
+}
+
+// MigrateAll applies every workspace migration in dir from the floor onward,
+// in file order. Every migration is written idempotent — CREATE IF NOT
+// EXISTS, ADD COLUMN IF NOT EXISTS, ON CONFLICT DO NOTHING, guarded index
+// creates, condition-matched UPDATEs — because the set re-runs on every boot;
+// that property lets a new migration land as a single file, with no boot
+// wiring to forget (which is exactly how the 000075 column once shipped
+// without ever executing).
+func (s *Store) MigrateAll(ctx context.Context, dir, floor string, log func(msg string, args ...any)) error {
+	files, err := ListMigrations(dir, floor)
+	if err != nil {
+		return err
+	}
+	for _, name := range files {
+		if err := s.Migrate(ctx, filepath.Join(dir, name)); err != nil {
+			return fmt.Errorf("apply %s: %w", name, err)
+		}
+		if log != nil {
+			log("migration applied", "file", name)
+		}
+	}
+	return nil
 }
 
 // Projects
