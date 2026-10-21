@@ -31,6 +31,13 @@ if [ "$(id -u)" = "0" ]; then
     chown -R "$TARGET_UID:$TARGET_GID" "$SANDBOX_ROOT" 2>/dev/null || \
       echo "WARN: could not chown $SANDBOX_ROOT — pre-create it manually and chown to $TARGET_UID:$TARGET_GID"
   fi
+  # The docker CLI reads $HOME/.docker/config.json; the image ships HOME=/root,
+  # which the dropped user cannot read — every invocation printed a WARNING and
+  # could never use a config. Point the config at a writable location instead.
+  DOCKER_CONFIG="${DOCKER_CONFIG:-/tmp/temporality-docker}"
+  export DOCKER_CONFIG
+  mkdir -p "$DOCKER_CONFIG" 2>/dev/null || true
+  chown "$TARGET_UID:$TARGET_GID" "$DOCKER_CONFIG" 2>/dev/null || true
   exec setpriv --reuid="$TARGET_UID" --regid="$TARGET_GID" \
     --groups="$socket_gid" --inh-caps=-all --bounding-set=-all \
     -- /usr/local/bin/temporality-agent-kernel "$@"

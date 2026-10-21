@@ -54,8 +54,11 @@ COPY --from=build /out/test-mcp /usr/local/bin/test-mcp
 # filesystem before serving traffic.
 COPY migrations ./migrations
 # The optional run_command sandbox shells out to the Docker CLI against the
-# host daemon socket, so the CLI must exist inside the image.
+# host daemon socket, so the CLI must exist inside the image. The buildx
+# plugin rides along: without it `docker build` falls back to the deprecated
+# legacy builder (loud WARNING on every sandbox/profile image build).
 COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker/buildx-bin:0.17.1 /buildx /usr/local/lib/docker/cli-plugins/docker-buildx
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
