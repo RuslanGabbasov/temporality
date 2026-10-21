@@ -93,7 +93,41 @@ spec.md, decomposition.md; postgres (workspace_task/workspace_run/observation_ev
   `TestNudgeNotFoundHealsGoneRun` — чужой незакоммиченный WIP (nudge.go/nudge_test.go),
   падает независимо от этих правок (доказано прогоном без новых тестов), не чинился.
 
+## Дополнение: ревью-раунд 2 и полное покрытие R1 (поставка)
+
+Первый гейт Reviewer'а вернул дифф с CHANGES_REQUESTED: R1 оказался реализован частично —
+под дедлайном стояли только точки корня инцидента, а атрибуция таймаута через
+`errors.Is(err, context.DeadlineExceeded)` не покрывала реальные gRPC-статус-ошибки
+(`codes.DeadlineExceeded`). Реворк (коммит `3fc9340`) закрыл:
+- F1: ВСЕ handler-initiated Temporal-RPC под дедлайном — JSON-API точки через `temporalRPC`
+  (503 «temporal rpc timeout», прежние маппинги не-таймаутных ошибок сохранены), не-HTTP
+  пути (webhook-ретрай, schedule-loop, intake/eventtriggers/eval-воркеры, temporalLiveness,
+  channel-loops) — через `context.WithTimeout` без смены контракта; RPC внутри SSE
+  `/tokens` ограничены, по таймауту стрим корректно завершается через `TokenDoneEvent`
+  (R2-комментарий «hang safety comes from the per-RPC deadlines» стал правдой);
+- F2: `isTemporalRPCDeadline` покрывает `context.DeadlineExceeded`, gRPC
+  `codes.DeadlineExceeded` и истёкший `rpcCtx` при ошибке;
+- F3: мидлварь nudge матчится точно на `POST /v1/agent/runs/{runID}/nudge`
+  (позитив/негатив контролем).
+
+Финальный вердикт Reviewer — **APPROVED** (архитектура, безопасность, надёжность,
+производительность, управляемость — все оси PASSED). QA-верификация HEAD `3fc9340` —
+зелёная: build/vet чисто, `go test ./cmd/agent-kernel/ ./kernel/agent/` стабильно на
+повторе `-count=1`, 26 именованных тестов (включая TestGRPCDeadlineStatusAnswerMapsTo503,
+TestExpiredRPCDeadlineContextMapsTo503, TestNonDeadlineErrorWithLiveDeadlineKeeps409,
+TestNudgeRouteExactMatch) — все PASS.
+
+Ограничение доказательств: `Layout.projects.test.tsx` не стартует в среде QA
+(`ERR_REQUIRE_ESM` / html-encoding-sniffer, инфраструктура); в окружении упаковщика тот же
+сьют проходил 4/4. Истина между прогонами не установлена, сьют заявлен зелёным только для
+окружения упаковщика.
+
+Follow-up (дополнение к списку выше): сборка с тегом `agent_examples`
+(`examples_enabled.go`) остаётся вне охвата дедлайнов — вне радиуса спеки, зафиксировано
+как отдельная задача; известный R1[HIGH] IDOR в heal-ветке `/terminate` — существующий риск,
+снятый с этого диффа (не ухудшен), ведётся отдельной задачей.
 ## Follow-up (зафиксированы, не в этой итерации)
+
 1. D2: аудит вотчдогов `CallModel` — любая попытка должна завершаться событием
    (успех/ошибка/ретрай), зависание не допускается молча.
 2. D4: персистентные логи ядра (вне stdout контейнера) + pprof/дампы горутин по требованию —
