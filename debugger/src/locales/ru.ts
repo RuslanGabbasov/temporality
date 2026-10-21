@@ -809,7 +809,7 @@ export const ru: Record<string, string> = {
     'agents.copy_suffix': ' (копия)',
     'agents.ftab_general': 'Основное',
     'agents.ftab_params': 'Параметры',
-    'agents.ftab_bindings': 'Навыки и MCP',
+    'agents.ftab_bindings': 'Навыки и доступы',
     'agents.ftab_tools': 'Инструменты',
     'agents.no_bindings': 'Навыки и MCP-серверы пока не настроены.',
     'agents.skills': 'Навыки',

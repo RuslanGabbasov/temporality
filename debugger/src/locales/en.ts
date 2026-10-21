@@ -809,7 +809,7 @@ export const en: Record<string, string> = {
     'agents.copy_suffix': ' (copy)',
     'agents.ftab_general': 'General',
     'agents.ftab_params': 'Parameters',
-    'agents.ftab_bindings': 'Skills & MCP',
+    'agents.ftab_bindings': 'Skills & access',
     'agents.ftab_tools': 'Tools',
     'agents.no_bindings': 'No skills or MCP servers configured yet.',
     'agents.skills': 'Skills',
