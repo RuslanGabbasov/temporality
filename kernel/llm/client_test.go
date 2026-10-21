@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 )
@@ -382,10 +381,13 @@ func TestImageMessagesMarshalAsMultimodalParts(t *testing.T) {
 	}
 }
 
-func TestLateSystemMessagesHoistToTheFront(t *testing.T) {
+func TestLateSystemMessagesDemoteToUserInPlace(t *testing.T) {
 	// Strict OpenAI-compatible servers (vLLM + Qwen chat template) reject any
-	// system role after the conversation started, so the wire form must carry
-	// one leading system block no matter where the caller appended them.
+	// system role after the conversation started. Late blocks must therefore
+	// travel as user turns IN PLACE: re-roling preserves every prompt-cache
+	// prefix (the bare block-0 system prompt shared across runs, the stable
+	// history prefix the final-turn and finale calls reuse), which hoisting
+	// into block 0 would erase.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request chatRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -393,22 +395,17 @@ func TestLateSystemMessagesHoistToTheFront(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		var systemBlocks int
-		var systemContent string
 		for i, m := range request.Messages {
-			if m.Role == "system" {
-				systemBlocks++
-				systemContent = m.Content
-				if i != 0 {
-					t.Errorf("system message at wire position %d, want only position 0", i)
-				}
+			if m.Role == "system" && i != 0 {
+				t.Errorf("system message at wire position %d, want only position 0", i)
 			}
 		}
-		if systemBlocks != 1 {
-			t.Errorf("system blocks = %d, want exactly 1", systemBlocks)
+		if got := request.Messages[0]; got.Role != "system" || got.Content != "base prompt" {
+			t.Errorf("block 0 = %s/%q, want the untouched shared system prompt", got.Role, got.Content)
 		}
-		if !strings.Contains(systemContent, "base prompt") || !strings.Contains(systemContent, "late hint") {
-			t.Errorf("merged system block lost content: %q", systemContent)
+		last := request.Messages[len(request.Messages)-1]
+		if last.Role != "user" || last.Content != "late hint" {
+			t.Errorf("last message = %s/%q, want user/late hint in place", last.Role, last.Content)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
@@ -425,6 +422,11 @@ func TestLateSystemMessagesHoistToTheFront(t *testing.T) {
 	}
 	if _, err := client.Complete(context.Background(), messages, nil); err != nil {
 		t.Fatalf("Complete: %v", err)
+	}
+	// The caller's slice must keep the original roles: the workflow reuses it
+	// as the history base for the next turn.
+	if messages[len(messages)-1].Role != "system" {
+		t.Fatalf("caller's messages mutated: last role = %s", messages[len(messages)-1].Role)
 	}
 }
 

@@ -455,36 +455,32 @@ func reasoningRequest(preset string) map[string]any {
 	}
 }
 
-// normalizeSystemMessages hoists every system message that follows the first
-// non-system message up into the leading system block, preserving order and
-// joining the blocks with blank lines. Strict OpenAI-compatible servers
-// (vLLM with the Qwen chat template, among others) reject any system role
-// after the conversation started — «System message must be at the
-// beginning» — while the run loop legitimately appends late instructions
-// (knowledge hints, final-turn and forced-finale reminders) for every
-// provider. Lenient providers merge leading system blocks anyway, so the
-// normalized shape is safe everywhere.
+// normalizeSystemMessages keeps leading system messages untouched and demotes
+// every system message that follows the first non-system message to the user
+// role, in place. Strict OpenAI-compatible servers (vLLM with the Qwen chat
+// template, among others) reject any system role after the conversation
+// started — «System message must be at the beginning» — while the run loop
+// legitimately appends late instructions (knowledge hints, final-turn and
+// forced-finale reminders). Hoisting them into block 0 instead would mutate
+// the one block every call of a run shares and erase prompt-cache prefixes:
+// the bare system prompt is the only cross-run shared block, and the history
+// prefix must stay byte-identical for the final-turn and finale calls to hit
+// the cache. Re-roling late blocks as user turns keeps every byte of every
+// prefix where it was.
 func normalizeSystemMessages(messages []Message) []Message {
-	if len(messages) == 0 {
-		return messages
-	}
-	var system []string
-	rest := make([]Message, 0, len(messages))
-	for _, m := range messages {
-		if m.Role == "system" {
-			system = append(system, m.Content)
+	normalized := make([]Message, len(messages))
+	copy(normalized, messages)
+	seenNonSystem := false
+	for i := range normalized {
+		if normalized[i].Role != "system" {
+			seenNonSystem = true
 			continue
 		}
-		rest = append(rest, m)
+		if seenNonSystem {
+			normalized[i].Role = "user"
+		}
 	}
-	if len(system) == 0 {
-		return messages
-	}
-	// System messages are plain instructions in this codebase — no tool calls,
-	// tool replies or images ride on them.
-	normalized := make([]Message, 0, len(rest)+1)
-	normalized = append(normalized, Message{Role: "system", Content: strings.Join(system, "\n\n")})
-	return append(normalized, rest...)
+	return normalized
 }
 
 func toRequestMessages(messages []Message) []requestMessage {
