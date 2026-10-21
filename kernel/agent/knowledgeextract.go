@@ -310,7 +310,6 @@ func (a *Activities) projectKnowledge(ctx context.Context, project string) ([]ob
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 200))
 		return nil, fmt.Errorf("knowledge listing HTTP %d: %s", response.StatusCode, string(body))
-		return nil, fmt.Errorf("journal knowledge returned HTTP %d", response.StatusCode)
 	}
 	var reply struct {
 		Knowledge []observation.Knowledge `json:"knowledge"`
