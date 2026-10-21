@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -101,15 +102,63 @@ func embedWorkers() int {
 	return embedWorkersDefault
 }
 
-// embedderState guards the lazy one-time model load. A failure is retried on
-// the next EmbedTexts call — a transient Hub outage must not brick the
-// feature for the process lifetime.
-type embedderState struct {
-	mu       sync.Mutex
+// embedderState tracks the lazy model load as an explicit state machine
+// (docs/fixes/embeddings-load-lifecycle): at most one attempt is in flight,
+// every attempt — success or failure — settles its own channel so waiters
+// learn the real outcome immediately, and a failed attempt schedules a
+// bounded exponential auto-retry that needs no caller to fire.
+type embedAttempt struct {
+	ready    chan struct{} // closed when this attempt settles (success OR failure)
 	embedder *rembed.Embedder
-	ready    chan struct{} // closed on load success OR failure
-	err      error
+	err      error // valid once ready is closed; nil on success
 }
+
+type embedderState struct {
+	embedder *rembed.Embedder // set once a load succeeds; terminal
+	attempt  *embedAttempt    // current in-flight or last settled attempt
+	loading  bool             // an attempt is in flight (guarded by embedMu)
+	failures int              // consecutive failed attempts; drives the retry backoff
+	// lastErr keeps the most recent settled failure across in-flight
+	// retries so the status keeps reporting the real cause until a load
+	// finally succeeds.
+	lastErr error
+	// retryTimer fires the automatic retry after a failure; nil when none is
+	// scheduled. Stopped whenever a new attempt starts so a caller-forced
+	// immediate retry supersedes the pending backoff wait.
+	retryTimer *time.Timer
+	// retrySeq invalidates stale retry timers: every new attempt or newly
+	// scheduled retry bumps it, so a callback captured with an older seq is
+	// a leftover from a superseded generation and must not fire a load.
+	retrySeq uint64
+}
+
+// Auto-retry backoff after a failed load (R3): starts at embedRetryBase and
+// doubles per consecutive failure up to embedRetryMax. Vars, not consts, so
+// tests can shrink them.
+var (
+	embedRetryBase = 30 * time.Second
+	embedRetryMax  = 5 * time.Minute
+)
+
+// embedRetryBackoff returns the delay before the next automatic retry given
+// the number of consecutive failures (>= 1).
+func embedRetryBackoff(failures int) time.Duration {
+	delay := embedRetryBase
+	for i := 1; i < failures; i++ {
+		delay *= 2
+		if delay >= embedRetryMax {
+			return embedRetryMax
+		}
+	}
+	if delay > embedRetryMax {
+		return embedRetryMax
+	}
+	return delay
+}
+
+// loadEmbedder is the model loader seam: production wires rembed.Load, the
+// unit tests substitute a fake to drive the state machine without the Hub.
+var loadEmbedder = rembed.Load
 
 var (
 	embedMu    sync.Mutex
@@ -117,30 +166,30 @@ var (
 )
 
 // getEmbedder returns the loaded embedder, waiting for an in-flight load.
-// Kicks off the load when nobody has attempted it yet; a failed attempt is
-// retried by the caller re-invoking after embedWaitTimeout.
+// Kicks off the load when none is in flight yet; a settled failure is
+// retried immediately by the caller re-invoking — the external call skips
+// the remaining backoff, while the automatic retry covers the no-caller case.
+// A failed attempt surfaces its real error at once: the embedWaitTimeout
+// text only ever applies to a load that is genuinely still in flight.
 func (a *Activities) getEmbedder(ctx context.Context) (*rembed.Embedder, error) {
 	embedMu.Lock()
-	if embedState.ready == nil {
-		// Nobody attempted yet: kick off the preload in the background and
-		// wait for it below, bounded by the caller's deadline.
-		a.startEmbeddingPreloadLocked()
+	if emb := embedState.embedder; emb != nil {
+		embedMu.Unlock()
+		return emb, nil
 	}
-	ready := embedState.ready
+	if !embedState.loading {
+		// Nobody is loading: start (or immediately re-attempt) the load.
+		a.startEmbeddingAttemptLocked()
+	}
+	attempt := embedState.attempt
 	embedMu.Unlock()
 
 	select {
-	case <-ready:
-		embedMu.Lock()
-		defer embedMu.Unlock()
-		if embedState.err != nil {
-			// Allow a retry on the next call.
-			embedMu.Lock()
-			embedState.ready = nil
-			embedMu.Unlock()
-			return nil, embedState.err
+	case <-attempt.ready:
+		if attempt.err != nil {
+			return nil, attempt.err
 		}
-		return embedState.embedder, nil
+		return attempt.embedder, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-time.After(embedWaitTimeout):
@@ -148,30 +197,79 @@ func (a *Activities) getEmbedder(ctx context.Context) (*rembed.Embedder, error) 
 	}
 }
 
-// startEmbeddingPreloadLocked begins the model load; embedMu must be held.
-func (a *Activities) startEmbeddingPreloadLocked() {
-	embedState.ready = make(chan struct{})
+// startEmbeddingAttemptLocked begins one load attempt in the background;
+// embedMu must be held and the caller must have verified that none is in
+// flight. Any pending automatic retry is cancelled: this attempt supersedes
+// it and will schedule the next one if it fails too.
+func (a *Activities) startEmbeddingAttemptLocked() {
+	if embedState.retryTimer != nil {
+		embedState.retryTimer.Stop()
+		embedState.retryTimer = nil
+	}
 	model := embeddingModelID()
 	workers := embedWorkers()
 	cacheDir := embedCacheDir()
 	_ = os.Setenv("REMBED_CACHE", cacheDir)
+	attempt := &embedAttempt{ready: make(chan struct{})}
+	embedState.attempt = attempt
+	embedState.loading = true
+	embedState.retrySeq++
+	seq := embedState.retrySeq
 	go func() {
+		started := time.Now()
 		opts := []rembed.Option{rembed.WithInt8()}
 		if workers > 0 {
 			opts = append(opts, rembed.WithWorkers(workers))
 		}
-		emb, err := rembed.Load(model, opts...)
+		emb, err := loadEmbedder(model, opts...)
 		embedMu.Lock()
 		defer embedMu.Unlock()
-		embedState.err = err
+		embedState.loading = false
+		attempt.embedder, attempt.err = emb, err
 		if err != nil {
-			// Retryable: the next getEmbedder call re-attempts the load.
-			embedState.ready = nil
-			return
+			// Retryable: the automatic retry below re-attempts the load
+			// whether or not any caller ever asks again (D4).
+			embedState.lastErr = err
+			embedState.failures++
+			delay := embedRetryBackoff(embedState.failures)
+			embedState.retryTimer = time.AfterFunc(delay, func() { a.retryEmbeddingLoad(seq) })
+			slog.Error("embedding model load failed",
+				"model", model,
+				"cache_dir", cacheDir,
+				"error", err.Error(),
+				"duration", time.Since(started).String(),
+				"attempt", embedState.failures,
+				"retry_in", delay.String())
+		} else {
+			embedState.embedder = emb
+			embedState.failures = 0
+			embedState.lastErr = nil
+			slog.Info("embedding model loaded",
+				"model", model,
+				"cache_dir", cacheDir,
+				"duration", time.Since(started).String())
 		}
-		embedState.embedder = emb
-		close(embedState.ready)
+		// Settle the attempt on both paths so waiters get the real outcome
+		// immediately instead of hanging until embedWaitTimeout (D1).
+		close(attempt.ready)
 	}()
+}
+
+// retryEmbeddingLoad is the automatic retry scheduled after a failed
+// attempt. A callback carrying a stale generation seq is a leftover from a
+// superseded schedule and does nothing; so does one that finds the model
+// loaded or another attempt in flight — at most one load is ever in flight.
+func (a *Activities) retryEmbeddingLoad(seq uint64) {
+	embedMu.Lock()
+	defer embedMu.Unlock()
+	if seq != embedState.retrySeq {
+		return
+	}
+	embedState.retryTimer = nil
+	if embedState.embedder != nil || embedState.loading {
+		return
+	}
+	a.startEmbeddingAttemptLocked()
 }
 
 // EmbeddingsStatus is the operator-facing health of the in-process semantic
@@ -184,36 +282,40 @@ type EmbeddingsStatus struct {
 	Error string `json:"error,omitempty"`
 }
 
-// EmbeddingsStatus reports the current semantic-layer state.
+// EmbeddingsStatus reports the current semantic-layer state. A failed
+// attempt surfaces its real error (never masked as "load not attempted"),
+// so the readiness detail shows why the model is missing (D2).
 func (a *Activities) EmbeddingsStatus() EmbeddingsStatus {
 	embedMu.Lock()
 	defer embedMu.Unlock()
 	status := EmbeddingsStatus{Model: embeddingModelID()}
-	if embedState.ready != nil {
-		select {
-		case <-embedState.ready:
-			status.Ready = embedState.err == nil
-			if embedState.err != nil {
-				status.Error = embedState.err.Error()
-			}
-		default:
-			status.Error = "model is loading"
-		}
-	} else {
+	switch {
+	case embedState.embedder != nil:
+		status.Ready = true
+	case embedState.lastErr != nil:
+		// A settled attempt failed and no load has succeeded since; report
+		// the real cause (even while a retry is already in flight) instead
+		// of masking the failure as "load not attempted" (D2).
+		status.Error = embedState.lastErr.Error()
+	case embedState.loading:
+		status.Error = "model is loading"
+	default:
 		status.Error = "load not attempted"
 	}
 	return status
 }
 
 // StartEmbeddingPreload kicks off the model load in the background at kernel
-// boot so the first hint slot does not pay the Hub download.
+// boot so the first hint slot does not pay the Hub download. Safe to call at
+// any time: it is a no-op while the model is loading or already loaded, and
+// after a failure it retries immediately, skipping the backoff.
 func (a *Activities) StartEmbeddingPreload() {
 	embedMu.Lock()
 	defer embedMu.Unlock()
-	if embedState.ready != nil {
+	if embedState.embedder != nil || embedState.loading {
 		return
 	}
-	a.startEmbeddingPreloadLocked()
+	a.startEmbeddingAttemptLocked()
 }
 
 // EmbedTexts computes embeddings for the texts in-process. kind selects the
