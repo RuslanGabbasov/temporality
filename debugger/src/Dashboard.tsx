@@ -628,6 +628,57 @@ export default function Dashboard({ project, setProject }: Props) {
   )
 }
 
+// The Users table grid: ONE template shared by the header and every row.
+// Header cells, row cells and tracks must stay in lockstep — a revision once
+// shipped 10 header cells against 8 header tracks and the columns drifted
+// apart from the data rows (commit 8c81742).
+export const USERS_COLUMNS = 'minmax(10rem, 2fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(8rem, 1.2fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(4rem, 0.5fr) minmax(7rem, 1.1fr)'
+
+/** Column header of the Users table — same ColHead, same tracks as the rows. */
+export function UsersTableHead() {
+  const { t } = useI18n()
+  return (
+    <ColHead columns={USERS_COLUMNS}>
+      <span>{t('dashboard.users_col_user') ?? 'User'}</span>
+      <span title={t('dashboard.users_runs_hint') ?? undefined}>{t('runs.task_col_runs') ?? 'Runs'}</span>
+      <span title={t('dashboard.users_runs_hint') ?? undefined}>7d</span>
+      <span title={t('dashboard.users_asks_hint') ?? undefined}>⏳ {t('dashboard.users_open') ?? 'open'}</span>
+      <span>{t('dashboard.users_last_run') ?? 'Last run'}</span>
+      <span title={t('dashboard.users_asks_hint') ?? undefined}>{t('dashboard.users_answered') ?? 'Answered'}</span>
+      <span title={t('dashboard.users_wait_hint') ?? undefined}>⏳ {t('dashboard.users_wait') ?? 'wait'}</span>
+      <span title={t('dashboard.users_hab_hint') ?? undefined}>🧠 {t('dashboard.users_hab') ?? 'HAB'}</span>
+      <span title={t('dashboard.users_problems_hint') ?? undefined}>⚠</span>
+      <span title={t('dashboard.users_last_ask_hint') ?? undefined}>{t('dashboard.users_last_ask') ?? 'Last ask'}</span>
+    </ColHead>
+  )
+}
+
+/** One metrics row on USERS_COLUMNS; the facts drawer renders below it in UsersTab. */
+export function UsersTableRow({ row, expanded, onOpen }: { row: UserMetricsRow; expanded: boolean; onOpen: (userID: string) => void }) {
+  const { t } = useI18n()
+  return (
+    <div
+      onClick={() => onOpen(row.id)}
+      title={t('dashboard.users_facts_hint') ?? undefined}
+      style={{ ...tableGrid(USERS_COLUMNS), fontSize: '0.8rem', padding: '0.35rem 0.6rem', cursor: 'pointer' }}
+    >
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }} title={`${row.name} · ${row.role ?? ''}${row.org_unit_id ? ' · ' + row.org_unit_id : ''}`}>
+        {expanded ? '▾ ' : '▸ '}{row.name || row.id}
+        {!row.active && <Tag type="cool-gray" size="sm" style={{ marginLeft: '0.35rem' }}>{t('dashboard.users_inactive') ?? 'inactive'}</Tag>}
+      </span>
+      <span>{row.runs_total}</span>
+      <span>{row.runs_week}</span>
+      <span style={row.asks_open > 0 ? { color: 'var(--tm-warning)', fontWeight: 600 } : undefined}>{row.asks_open > 0 ? row.asks_open : '—'}</span>
+      <span style={{ color: 'var(--tm-text-2)' }}>{row.last_run_at ? new Date(row.last_run_at).toLocaleString() : '—'}</span>
+      <span>{row.asks_total}</span>
+      <span title={t('dashboard.users_wait_hint') ?? undefined}>{row.wait_seconds > 0 ? formatDuration(row.wait_seconds * 1000) : '—'}</span>
+      <span title={t('dashboard.users_hab_hint') ?? undefined}>{row.hab_seconds > 0 ? formatDuration(row.hab_seconds * 1000) : '—'}</span>
+      <span style={(row.failed_runs > 0 || row.timed_out_asks > 0) ? { color: 'var(--tm-danger)', fontWeight: 600 } : undefined}>{(row.failed_runs + row.timed_out_asks) > 0 ? row.failed_runs + row.timed_out_asks : '—'}</span>
+      <span style={{ color: 'var(--tm-text-2)' }}>{row.last_ask_at ? new Date(row.last_ask_at).toLocaleString() : '—'}</span>
+    </div>
+  )
+}
+
 // UsersTab: the workspace's people and their live metrics — what they run,
 // what waits on them (open asks), what they already decided. The server
 // rolls the numbers up (exec_context actor + resolved_user); this renders.
@@ -697,39 +748,10 @@ function UsersTab() {
         <Tile style={{ color: 'var(--tm-text-3)' }}>{t('dashboard.users_empty') ?? 'No users yet'}</Tile>
       ) : (
         <div style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(10rem, 2fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(8rem, 1.2fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(7rem, 1.1fr)', gap: '0.25rem 0.6rem', fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tm-text-3)', padding: '0.35rem 0.6rem', background: 'var(--tm-raised)' }}>
-            <span>{t('dashboard.users_col_user') ?? 'User'}</span>
-            <span title={t('dashboard.users_runs_hint') ?? undefined}>{t('runs.task_col_runs') ?? 'Runs'}</span>
-            <span title={t('dashboard.users_runs_hint') ?? undefined}>7d</span>
-            <span title={t('dashboard.users_asks_hint') ?? undefined}>⏳ {t('dashboard.users_open') ?? 'open'}</span>
-            <span>{t('dashboard.users_last_run') ?? 'Last run'}</span>
-            <span title={t('dashboard.users_asks_hint') ?? undefined}>{t('dashboard.users_answered') ?? 'Answered'}</span>
-            <span title={t('dashboard.users_wait_hint') ?? undefined}>⏳ {t('dashboard.users_wait') ?? 'wait'}</span>
-            <span title={t('dashboard.users_hab_hint') ?? undefined}>🧠 {t('dashboard.users_hab') ?? 'HAB'}</span>
-            <span title={t('dashboard.users_problems_hint') ?? undefined}>⚠</span>
-            <span title={t('dashboard.users_last_ask_hint') ?? undefined}>{t('dashboard.users_last_ask') ?? 'Last ask'}</span>
-          </div>
+          <UsersTableHead />
           {rows.map((row) => (
             <div key={row.id} style={{ borderTop: '1px solid var(--tm-border)' }}>
-              <div
-                onClick={() => void openFacts(row.id)}
-                title={t('dashboard.users_facts_hint') ?? undefined}
-                style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: 'minmax(10rem, 2fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(4rem, 0.7fr) minmax(8rem, 1.2fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(5rem, 0.9fr) minmax(4rem, 0.5fr) minmax(7rem, 1.1fr)', gap: '0.25rem 0.6rem', fontSize: '0.8rem', alignItems: 'baseline', padding: '0.35rem 0.6rem' }}
-              >
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--tm-text)' }} title={`${row.name} · ${row.role ?? ''}${row.org_unit_id ? ' · ' + row.org_unit_id : ''}`}>
-                {expandedUser === row.id ? '▾ ' : '▸ '}{row.name || row.id}
-                {!row.active && <Tag type="cool-gray" size="sm" style={{ marginLeft: '0.35rem' }}>{t('dashboard.users_inactive') ?? 'inactive'}</Tag>}
-              </span>
-              <span>{row.runs_total}</span>
-              <span>{row.runs_week}</span>
-              <span style={row.asks_open > 0 ? { color: 'var(--tm-warning)', fontWeight: 600 } : undefined}>{row.asks_open > 0 ? row.asks_open : '—'}</span>
-              <span style={{ color: 'var(--tm-text-2)' }}>{row.last_run_at ? new Date(row.last_run_at).toLocaleString() : '—'}</span>
-              <span>{row.asks_total}</span>
-              <span title={t('dashboard.users_wait_hint') ?? undefined}>{row.wait_seconds > 0 ? formatDuration(row.wait_seconds * 1000) : '—'}</span>
-              <span title={t('dashboard.users_hab_hint') ?? undefined}>{row.hab_seconds > 0 ? formatDuration(row.hab_seconds * 1000) : '—'}</span>
-              <span style={(row.failed_runs > 0 || row.timed_out_asks > 0) ? { color: 'var(--tm-danger)', fontWeight: 600 } : undefined}>{(row.failed_runs + row.timed_out_asks) > 0 ? row.failed_runs + row.timed_out_asks : '—'}</span>
-              <span style={{ color: 'var(--tm-text-2)' }}>{row.last_ask_at ? new Date(row.last_ask_at).toLocaleString() : '—'}</span>
-              </div>
+              <UsersTableRow row={row} expanded={expandedUser === row.id} onOpen={(userID) => void openFacts(userID)} />
               {expandedUser === row.id && (
                 <div style={{ padding: '0.35rem 0.6rem 0.6rem 1.5rem', background: 'var(--tm-raised)' }}>
                   {(row.last_run || row.last_ask_question) && (
