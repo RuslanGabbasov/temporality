@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-
 func TestNormalizeFrictionText(t *testing.T) {
 	a := normalizeFrictionText("Переслать отчёт 17 октября")
 	b := normalizeFrictionText("  переслать отчёт  18 октября\n")
