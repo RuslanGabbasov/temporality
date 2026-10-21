@@ -1,10 +1,12 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   Button,
   Checkbox,
   TextInput,
   TextArea,
   InlineNotification,
+  RadioButton,
+  RadioButtonGroup,
   Select,
   SelectItem,
   Tag,
@@ -15,6 +17,16 @@ import {
 import PageLoading from './PageLoading'
 import { Add, TrashCan, Renew, Edit, Download, MagicWand } from '@carbon/icons-react'
 import { workspaceApi, type SandboxProfile } from './workspaceApi'
+import {
+  emptySandboxProfileForm as emptyForm,
+  prefilledDockerfile,
+  buildSandboxProfilePayload,
+  recipeModeFor,
+  sandboxSaveBlocked,
+  type DockerfileCheck,
+  type SandboxProfileForm as ProfileForm,
+  type SandboxRecipeMode,
+} from './sandboxProfileForm'
 import { observationApi } from './observationApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
@@ -22,24 +34,6 @@ import AppModal from './Modal'
 import { useConfirm } from './ConfirmDialog'
 
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
-
-type ProfileForm = {
-  id: string
-  name: string
-  description: string
-  image: string
-  base: string
-  packages: string
-  toolchains: string
-  memory: string
-  cpus: string
-  scratch_size: string
-  tmp_size: string
-  cache_env: string
-  docker_socket: boolean
-}
-
-const emptyForm: ProfileForm = { id: '', name: '', description: '', image: '', base: '', packages: '', toolchains: '', memory: '', cpus: '', scratch_size: '', tmp_size: '', cache_env: '', docker_socket: false }
 
 // Sandbox profile registry (docs/sandbox-profiles.md §8): the catalog of
 // execution environments, builtin recipes with a Build action and custom
@@ -64,6 +58,16 @@ export default function Sandbox({ project }: { project?: string }) {
   // Layer-builder preview (§5.1 phase 2): the composed Dockerfile for the
   // current base+packages, refreshed as the operator edits.
   const [recipePreview, setRecipePreview] = useState('')
+  // Recipe source of the open form (D6): base[+packages] vs the operator's
+  // own Dockerfile text; exactly one is ever sent (D2.1 XOR).
+  const [recipeMode, setRecipeMode] = useState<SandboxRecipeMode>('base')
+  // Live check of the operator text against the preview endpoint (spec §4):
+  // 'valid' is the only state the save button accepts (AC-8).
+  const [dockerfileCheck, setDockerfileCheck] = useState<DockerfileCheck>('empty')
+  const [dockerfileError, setDockerfileError] = useState('')
+  // Monotonic sequence so a slow in-flight check never overwrites the state
+  // of newer text.
+  const checkSeq = useRef(0)
   // Build history (§5.1 phase 2): journal events per opened profile.
   const [historyFor, setHistoryFor] = useState('')
   const [history, setHistory] = useState<{ at: string; image: string; pulled?: boolean }[]>([])
@@ -133,6 +137,57 @@ export default function Sandbox({ project }: { project?: string }) {
     return undefined
   }, [showForm, editing, form.base, form.packages])
 
+  // Live validation of the operator's Dockerfile: the text is checked through
+  // the same preview endpoint a build would use (spec §4) — 422 carries the
+  // line-numbered violations, which are shown verbatim and block saving.
+  useEffect(() => {
+    const seq = ++checkSeq.current
+    if (!showForm || recipeMode !== 'dockerfile' || editing?.builtin) {
+      setDockerfileError('')
+      return undefined
+    }
+    const text = form.dockerfile
+    if (!text.trim()) {
+      setDockerfileCheck('empty')
+      setDockerfileError('')
+      return undefined
+    }
+    setDockerfileCheck('checking')
+    const timer = setTimeout(() => {
+      workspaceApi.previewSandboxDockerfile(text)
+        .then(() => {
+          if (checkSeq.current === seq) { setDockerfileCheck('valid'); setDockerfileError('') }
+        })
+        .catch((f) => {
+          if (checkSeq.current === seq) { setDockerfileCheck('invalid'); setDockerfileError(message(f)) }
+        })
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [showForm, recipeMode, editing, form.dockerfile])
+
+  // Mode switch (D6): entering "own Dockerfile" prefills the textarea with
+  // the currently composed base+packages recipe — typed operator text is
+  // never overwritten.
+  const switchRecipeMode = (mode: SandboxRecipeMode) => {
+    if (mode === recipeMode) return
+    setRecipeMode(mode)
+    setDockerfileError('')
+    if (mode !== 'dockerfile') return
+    const composed = prefilledDockerfile(form.dockerfile, recipePreview)
+    if (composed !== form.dockerfile) {
+      setForm((f) => ({ ...f, dockerfile: composed }))
+      return
+    }
+    if (!composed.trim() && form.base) {
+      // The debounced base preview may not have landed yet — compose now so
+      // the textarea still opens with the current recipe.
+      const packages = form.packages.split(',').map((s) => s.trim()).filter(Boolean)
+      workspaceApi.previewSandboxRecipe(form.base, packages)
+        .then((r) => setForm((f) => (f.dockerfile.trim() ? f : { ...f, dockerfile: r.dockerfile })))
+        .catch(() => { /* no composed text available — start empty */ })
+    }
+  }
+
   const remove = async (p: SandboxProfile) => {
     const ok = await confirmDialog({
       title: t('sandbox.delete_confirm', { name: p.name }),
@@ -150,6 +205,10 @@ export default function Sandbox({ project }: { project?: string }) {
 
   const startEdit = (p: SandboxProfile) => {
     setEditing(p)
+    const mode = recipeModeFor(p)
+    setRecipeMode(mode)
+    setDockerfileError('')
+    setDockerfileCheck(p.dockerfile_override?.trim() ? 'checking' : 'empty')
     setForm({
       id: p.id,
       name: p.name,
@@ -157,6 +216,7 @@ export default function Sandbox({ project }: { project?: string }) {
       image: p.image ?? '',
       base: p.base ?? '',
       packages: (p.packages ?? []).join(', '),
+      dockerfile: p.dockerfile_override ?? '',
       toolchains: (p.toolchains ?? []).join(', '),
       memory: p.memory ?? '',
       cpus: p.cpus ?? '',
@@ -169,21 +229,12 @@ export default function Sandbox({ project }: { project?: string }) {
   }
 
   const saveCustom = async () => {
+    if (sandboxSaveBlocked(form, recipeMode, dockerfileCheck, editing)) return
     setError('')
     const payload = {
+      ...buildSandboxProfilePayload(form, recipeMode),
       id: editing ? editing.id : form.id.trim(),
       name: form.name.trim(),
-      description: form.description,
-      image: form.base ? '' : form.image.trim(),
-      base: form.base,
-      packages: form.base ? form.packages.split(',').map((s) => s.trim()).filter(Boolean) : [],
-      toolchains: form.toolchains.split(',').map((s) => s.trim()).filter(Boolean),
-      memory: form.memory.trim(),
-      cpus: form.cpus.trim(),
-      scratch_size: form.scratch_size.trim(),
-      tmp_size: form.tmp_size.trim(),
-      cache_env: form.cache_env.split('\n').map((s) => s.trim()).filter(Boolean),
-      docker_socket: form.docker_socket,
     }
     try {
       if (editing) {
@@ -194,6 +245,9 @@ export default function Sandbox({ project }: { project?: string }) {
       }
       setShowForm(false)
       setForm(emptyForm)
+      setRecipeMode('base')
+      setDockerfileCheck('empty')
+      setDockerfileError('')
       setDraftRationale('')
       await load()
     } catch (f) { setError(message(f)) }
@@ -206,6 +260,11 @@ export default function Sandbox({ project }: { project?: string }) {
     setWizardBusy(true); setWizardError('')
     try {
       const draft = await workspaceApi.sandboxBuilder(wizardText)
+      // The builder never proposes an override (D2.2) — the draft always
+      // lands in base mode for the operator to edit.
+      setRecipeMode('base')
+      setDockerfileCheck('empty')
+      setDockerfileError('')
       setForm({
         id: draft.id,
         name: draft.name,
@@ -213,6 +272,7 @@ export default function Sandbox({ project }: { project?: string }) {
         image: '',
         base: draft.base ?? '',
         packages: (draft.packages ?? []).join(', '),
+        dockerfile: '',
         toolchains: (draft.toolchains ?? []).join(', '),
         memory: draft.memory ?? '',
         cpus: draft.cpus ?? '',
@@ -244,7 +304,7 @@ export default function Sandbox({ project }: { project?: string }) {
           <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', marginTop: '0.25rem' }}>{t('sandbox.subtitle')}</p>
         </div>
         <Button size="sm" kind="secondary" renderIcon={MagicWand} onClick={() => { setWizardText(''); setWizardError(''); setWizardOpen(true) }}>{t('sandbox.wizard_button') ?? 'From description'}</Button>
-        <Button size="sm" onClick={() => setShowForm(true)} renderIcon={Add}>{t('sandbox.add_custom')}</Button>
+        <Button size="sm" onClick={() => { setRecipeMode('base'); setDockerfileCheck('empty'); setDockerfileError(''); setShowForm(true) }} renderIcon={Add}>{t('sandbox.add_custom')}</Button>
       </div>
       <div style={{ position: 'sticky', top: '3rem', background: 'var(--tm-bg)', zIndex: 1, paddingBottom: '0.5rem', marginBottom: '0.5rem', maxWidth: '420px' }}>
         <ListFilter value={filter} onChange={setFilter} placeholder={t('sandbox.filter')} />
@@ -264,12 +324,12 @@ export default function Sandbox({ project }: { project?: string }) {
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0 }}>
                   <Button size="sm" kind="ghost" renderIcon={Edit} onClick={() => startEdit(p)}>{t('sandbox.edit')}</Button>
-                  {(p.builtin || p.base) && (
+                  {(p.builtin || p.base || p.dockerfile_override) && (
                     <Button size="sm" kind="secondary" renderIcon={Renew} disabled={building === p.id} onClick={() => void build(p)}>
                       {building === p.id ? t('sandbox.building') : p.image ? t('sandbox.rebuild') : t('sandbox.build')}
                     </Button>
                   )}
-                  {!p.builtin && !p.base && (
+                  {!p.builtin && !p.base && !p.dockerfile_override && (
                     <Button
                       size="sm"
                       kind="secondary"
@@ -290,6 +350,7 @@ export default function Sandbox({ project }: { project?: string }) {
               <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.5rem', flexWrap: 'wrap', alignItems: 'center', opacity: p.image ? 1 : 0.55 }}>
                 {(p.toolchains ?? []).map((tc) => <Tag key={tc} type="blue" size="sm">{tc}</Tag>)}
                 {p.base && <Tag type="purple" size="sm">{t('sandbox.base_tag', { base: p.base })}</Tag>}
+                {p.dockerfile_override?.trim() && <Tag type="teal" size="sm">{t('sandbox.override_tag')}</Tag>}
                 {(p.packages ?? []).map((pkg) => <Tag key={pkg} type="cool-gray" size="sm">{pkg}</Tag>)}
                 {p.docker_socket && <Tag type="red" size="sm">{t('sandbox.socket_tag') ?? 'docker socket'}</Tag>}
                 {p.image
@@ -337,6 +398,18 @@ export default function Sandbox({ project }: { project?: string }) {
             <TextInput id="sp-name" labelText={t('sandbox.field_name')} value={form.name} disabled={!!editing?.builtin} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Rust toolchain" />
             <TextArea id="sp-desc" labelText={t('sandbox.field_description')} rows={2} value={form.description} disabled={!!editing?.builtin} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             {!editing?.builtin && (
+              <RadioButtonGroup
+                legendText={t('sandbox.recipe_mode_legend')}
+                name="sp-recipe-mode"
+                orientation="horizontal"
+                valueSelected={recipeMode}
+                onChange={(selection) => switchRecipeMode(selection as SandboxRecipeMode)}
+              >
+                <RadioButton value="base" labelText={t('sandbox.mode_base')} />
+                <RadioButton value="dockerfile" labelText={t('sandbox.mode_dockerfile')} />
+              </RadioButtonGroup>
+            )}
+            {recipeMode === 'base' && !editing?.builtin && (
               <Select
                 id="sp-base"
                 labelText={t('sandbox.field_base')}
@@ -350,17 +423,61 @@ export default function Sandbox({ project }: { project?: string }) {
                 <SelectItem value="browser-e2e" text={t('sandbox.base_browser')} />
               </Select>
             )}
-            {!editing?.builtin && form.base && (
+            {recipeMode === 'base' && !editing?.builtin && form.base && (
               <TextInput id="sp-packages" labelText={t('sandbox.field_packages')} value={form.packages} onChange={(e) => setForm({ ...form, packages: e.target.value })} placeholder="gcc, musl-dev" />
             )}
-            {!editing?.builtin && form.base && recipePreview && (
+            {recipeMode === 'base' && !editing?.builtin && form.base && recipePreview && (
               <div>
                 <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--tm-text-3)', marginBottom: '0.25rem' }}>{t('sandbox.recipe_preview') ?? 'Dockerfile preview'}</div>
                 <pre style={{ background: 'var(--tm-surface-2)', borderRadius: '4px', padding: '0.5rem', fontSize: '0.7rem', overflowX: 'auto', margin: 0, whiteSpace: 'pre-wrap' }}>{recipePreview}</pre>
               </div>
             )}
-            {!editing?.builtin && !form.base && (
+            {recipeMode === 'base' && !editing?.builtin && !form.base && (
               <TextInput id="sp-image" labelText={t('sandbox.field_image')} value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} placeholder="registry.local/toolbox@sha256:…" />
+            )}
+            {recipeMode === 'dockerfile' && !editing?.builtin && (
+              <div>
+                <TextArea
+                  id="sp-dockerfile"
+                  labelText={t('sandbox.field_dockerfile')}
+                  rows={14}
+                  value={form.dockerfile}
+                  onChange={(e) => setForm({ ...form, dockerfile: e.target.value })}
+                  placeholder={'FROM python:3.12-alpine\nRUN apk add --no-cache gcc'}
+                  style={{ fontFamily: 'var(--tm-font-mono)', fontSize: '0.75rem' }}
+                />
+                <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', marginTop: '0.25rem' }}>{t('sandbox.dockerfile_hint')}</p>
+              </div>
+            )}
+            {recipeMode === 'dockerfile' && !editing?.builtin && dockerfileCheck === 'checking' && (
+              <InlineNotification
+                kind="info"
+                lowContrast
+                hideCloseButton
+                title={t('sandbox.dockerfile_checking')}
+                subtitle=""
+                style={{ marginBottom: 0 }}
+              />
+            )}
+            {recipeMode === 'dockerfile' && !editing?.builtin && dockerfileCheck === 'valid' && (
+              <InlineNotification
+                kind="success"
+                lowContrast
+                hideCloseButton
+                title={t('sandbox.dockerfile_valid')}
+                subtitle=""
+                style={{ marginBottom: 0 }}
+              />
+            )}
+            {recipeMode === 'dockerfile' && !editing?.builtin && dockerfileCheck === 'invalid' && dockerfileError && (
+              <InlineNotification
+                kind="error"
+                lowContrast
+                hideCloseButton
+                title={t('sandbox.dockerfile_invalid')}
+                subtitle={dockerfileError}
+                style={{ marginBottom: 0 }}
+              />
             )}
             <TextInput id="sp-toolchains" labelText={t('sandbox.field_toolchains')} value={form.toolchains} disabled={!!editing?.builtin} onChange={(e) => setForm({ ...form, toolchains: e.target.value })} placeholder="rust, wasm" />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.5rem' }}>
@@ -381,10 +498,21 @@ export default function Sandbox({ project }: { project?: string }) {
                 <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', margin: 0 }}>{t('sandbox.docker_socket_hint')}</p>
               </div>
             )}
-            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>{editing?.builtin ? t('sandbox.edit_hint') : form.base ? t('sandbox.recipe_hint') : t('sandbox.custom_hint')}</p>
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>
+              {editing?.builtin
+                ? t('sandbox.edit_hint')
+                : recipeMode === 'dockerfile'
+                  ? t('sandbox.dockerfile_save_hint')
+                  : form.base
+                    ? t('sandbox.recipe_hint')
+                    : t('sandbox.custom_hint')}
+            </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null); setDraftRationale('') }}>{t('action.cancel')}</Button>
-              <Button onClick={() => void saveCustom()} disabled={!form.id.trim() || !form.name.trim() || (!editing && !form.base && !form.image.trim())}>{editing ? t('action.save') : t('action.create')}</Button>
+              <Button
+                onClick={() => void saveCustom()}
+                disabled={sandboxSaveBlocked(form, recipeMode, dockerfileCheck, editing)}
+              >{editing ? t('action.save') : t('action.create')}</Button>
             </div>
           </Stack>
         </AppModal>

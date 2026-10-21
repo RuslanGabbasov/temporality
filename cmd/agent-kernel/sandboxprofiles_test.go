@@ -126,8 +126,8 @@ func (f *fakeSandboxProfileStore) SetCustomProfileImage(_ context.Context, id, i
 	if current.Builtin {
 		return errors.New("not custom")
 	}
-	if current.Base == "" {
-		return errors.New("no base recipe")
+	if current.Base == "" && strings.TrimSpace(current.DockerfileOverride) == "" {
+		return errors.New("no build recipe")
 	}
 	if !workspace.IsDigestPinnedImage(image) {
 		return errors.New("not digest pinned")
