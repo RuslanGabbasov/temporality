@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -79,6 +80,11 @@ type Request struct {
 	// CacheEnv replaces the legacy Go cache env set with the profile's cache
 	// pointers (KEY=VALUE against /cache). Empty keeps GOCACHE/GOMODCACHE.
 	CacheEnv []string
+	// DockerSocket mounts the host daemon socket into the sandbox
+	// (Docker-out-of-Docker, docs/sandbox-profiles.md §5.3). Opt-in per
+	// custom profile: the socket is host-root-equivalent, so only profiles an
+	// operator explicitly flagged get it.
+	DockerSocket bool
 	// Labels tag the container for observability (docker --label): the health
 	// endpoint lists running sandboxes with their run/agent/actor so the
 	// dashboard can show who consumes the host. Keys are used verbatim.
@@ -295,6 +301,19 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 	if err != nil {
 		return Result{}, err
 	}
+	// Resolved up front so a broken socket request fails the command with a
+	// clear message instead of a baffling docker-run mount error.
+	var socketArgs []string
+	if request.DockerSocket {
+		info, statErr := os.Stat(dockerSocketPath)
+		if statErr != nil {
+			return Result{}, fmt.Errorf("docker socket mount requested but %s is not accessible: %w", dockerSocketPath, statErr)
+		}
+		socketArgs, err = socketMountArgs(dockerSocketPath, info)
+		if err != nil {
+			return Result{}, err
+		}
+	}
 	timeout := request.TimeoutSeconds
 	if timeout <= 0 {
 		timeout = defaultTimeout
@@ -308,7 +327,7 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 	if err != nil {
 		return Result{}, err
 	}
-	args := d.arguments(workspace, request, name)
+	args := d.arguments(workspace, request, name, socketArgs)
 	if err := d.ensureNetwork(d.effectiveNetwork(request)); err != nil {
 		return Result{}, err
 	}
@@ -355,6 +374,28 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 // rebuilds. KERNEL_SANDBOX_NETWORK overrides the mapping entirely.
 const SandboxNetworkName = "temporality-sandbox"
 
+// dockerSocketPath is the daemon socket both inside the kernel container and
+// on the host: sandbox bind mounts need the path to mean the same thing in
+// both namespaces (the same discipline as the sandbox root mount).
+const dockerSocketPath = "/var/run/docker.sock"
+
+// socketMountArgs renders the Docker-out-of-Docker passthrough: the socket
+// volume plus a supplementary group carrying the socket's own group id, so
+// the sandbox user gains exactly the access the host granted to that group —
+// nothing more. DOCKER_HOST is pinned so an installed CLI talks to the
+// passthrough even if an operator image carries a daemon default.
+func socketMountArgs(path string, info os.FileInfo) ([]string, error) {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil, fmt.Errorf("docker socket mount requested but %s has no unix group id", path)
+	}
+	return []string{
+		"--volume", path + ":" + path,
+		"--group-add", strconv.FormatUint(uint64(stat.Gid), 10),
+		"--env", "DOCKER_HOST=unix://" + path,
+	}, nil
+}
+
 // ensureNetwork idempotently materializes the dedicated sandbox network
 // before a run that needs it: an inspect hit is a no-op, a create race
 // («already exists») is a win. Only the dedicated name triggers this —
@@ -396,7 +437,7 @@ func (d *Docker) effectiveNetwork(request Request) string {
 	return network
 }
 
-func (d *Docker) arguments(workspace string, request Request, name string) []string {
+func (d *Docker) arguments(workspace string, request Request, name string, socketArgs []string) []string {
 	mode := "rw"
 	if request.ReadOnly {
 		mode = "ro"
@@ -420,6 +461,9 @@ func (d *Docker) arguments(workspace string, request Request, name string) []str
 		pids = request.PIDs
 	}
 	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=" + network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(pids), "--memory", memory, "--memory-swap", memory, "--cpus", cpus, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=" + tmpSize, "--tmpfs", "/scratch:rw,exec,nosuid,size=" + scratchSize, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode}
+	// Socket passthrough flags land with the other volume/env flags — before
+	// the image, where every docker argument must stay.
+	args = append(args, socketArgs...)
 	// Per-project persistent cache: a host directory under the sandbox root,
 	// outside any git workspace, so `git clean` and workspace resets cannot
 	// destroy toolchain caches. Toolchains see it at /cache; it stays writable

@@ -728,6 +728,7 @@ func (a *Activities) sandboxRequest(request ToolRequest, command []string, timeo
 		req.ScratchSize = spec.ScratchSize
 		req.TmpSize = spec.TmpSize
 		req.CacheEnv = spec.CacheEnv
+		req.DockerSocket = spec.DockerSocket
 	}
 	return req, nil
 }

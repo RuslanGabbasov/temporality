@@ -167,6 +167,9 @@ export interface SandboxProfile {
   scratch_size?: string
   tmp_size?: string
   cache_env?: string[]
+  /** Host docker daemon socket is mounted into the sandbox (DooD). Custom
+   *  profiles only; grants the agent host-root-equivalent access. */
+  docker_socket?: boolean
   builtin: boolean
   available?: boolean
   created_at: string

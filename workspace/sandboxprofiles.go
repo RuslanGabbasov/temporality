@@ -43,10 +43,15 @@ type SandboxProfile struct {
 	// CacheEnv entries are KEY=VALUE pairs pointing toolchain caches at /cache
 	// (the persistent per-project cache mount). Values outside /cache are
 	// rejected at save time (§12).
-	CacheEnv  []string  `json:"cache_env,omitempty"`
-	Builtin   bool      `json:"builtin"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CacheEnv []string `json:"cache_env,omitempty"`
+	// DockerSocket mounts the host daemon socket into sandbox containers of
+	// this profile (Docker-out-of-Docker, §5.3). The socket is host-root-
+	// equivalent, so this is an explicit operator decision, custom profiles
+	// only, and it never travels through the model-driven profile builder.
+	DockerSocket bool      `json:"docker_socket,omitempty"`
+	Builtin      bool      `json:"builtin"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // ErrProfileBuiltin reports an attempt to delete or rewrite a builtin profile.
@@ -182,6 +187,12 @@ func ValidateSandboxProfile(p SandboxProfile) error {
 	} else if len(p.Packages) > 0 {
 		return fmt.Errorf("packages require a base recipe")
 	}
+	// The socket passthrough hands the host daemon to whatever runs in the
+	// sandbox; it is a custom-profile capability the operator types in, never
+	// a builtin default and never a model decision.
+	if p.DockerSocket && p.Builtin {
+		return fmt.Errorf("builtin profiles cannot mount the docker socket")
+	}
 	return nil
 }
 
@@ -223,12 +234,12 @@ func isValidResourceValue(field, value string) bool {
 	return digits != "" && strings.Trim(digits, "0123456789") == ""
 }
 
-const sandboxProfileColumns = `id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, builtin, created_at, updated_at`
+const sandboxProfileColumns = `id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, docker_socket, builtin, created_at, updated_at`
 
 func scanSandboxProfile(row interface{ Scan(dest ...any) error }) (SandboxProfile, error) {
 	var p SandboxProfile
 	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.Image, &p.Base, &p.Packages, &p.Toolchains,
-		&p.Memory, &p.CPUs, &p.ScratchSize, &p.TmpSize, &p.CacheEnv, &p.Builtin, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.Memory, &p.CPUs, &p.ScratchSize, &p.TmpSize, &p.CacheEnv, &p.DockerSocket, &p.Builtin, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return p, ErrNotFound
 		}
@@ -294,9 +305,9 @@ func (s *Store) CreateSandboxProfile(ctx context.Context, p *SandboxProfile) err
 	p.CreatedAt = now
 	p.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_sandbox_profile (id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, builtin, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,FALSE,$13,$13)`,
-		p.ID, p.Name, p.Description, p.Image, p.Base, p.Packages, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, now)
+		`INSERT INTO workspace_sandbox_profile (id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, docker_socket, builtin, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,FALSE,$14,$14)`,
+		p.ID, p.Name, p.Description, p.Image, p.Base, p.Packages, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, p.DockerSocket, now)
 	return err
 }
 
@@ -316,6 +327,7 @@ func (s *Store) UpdateSandboxProfile(ctx context.Context, p SandboxProfile) erro
 		p.Image = existing.Image
 		p.Base = ""
 		p.Packages = nil
+		p.DockerSocket = existing.DockerSocket
 		p.Builtin = true
 	} else {
 		p.Builtin = false
@@ -330,9 +342,9 @@ func (s *Store) UpdateSandboxProfile(ctx context.Context, p SandboxProfile) erro
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_sandbox_profile
-		 SET name=$2, description=$3, image=$4, base=$5, packages=$6, toolchains=$7, memory=$8, cpus=$9, scratch_size=$10, tmp_size=$11, cache_env=$12, updated_at=$13
+		 SET name=$2, description=$3, image=$4, base=$5, packages=$6, toolchains=$7, memory=$8, cpus=$9, scratch_size=$10, tmp_size=$11, cache_env=$12, docker_socket=$13, updated_at=$14
 		 WHERE id=$1`,
-		p.ID, p.Name, p.Description, p.Image, p.Base, p.Packages, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, time.Now().UTC())
+		p.ID, p.Name, p.Description, p.Image, p.Base, p.Packages, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, p.DockerSocket, time.Now().UTC())
 	if err != nil {
 		return err
 	}

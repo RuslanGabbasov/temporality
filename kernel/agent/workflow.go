@@ -286,6 +286,11 @@ type SandboxSpec struct {
 	ScratchSize string   `json:"scratch_size,omitempty"`
 	TmpSize     string   `json:"tmp_size,omitempty"`
 	CacheEnv    []string `json:"cache_env,omitempty"`
+	// DockerSocket passes the host daemon socket into the sandbox — the
+	// profile's explicit operator opt-in (docs/sandbox-profiles.md §5.3),
+	// carried here only because the run_command activity needs it at the
+	// execution boundary.
+	DockerSocket bool `json:"docker_socket,omitempty"`
 }
 
 type ToolResult struct {

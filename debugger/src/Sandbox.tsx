@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Button,
+  Checkbox,
   TextInput,
   TextArea,
   InlineNotification,
@@ -35,9 +36,10 @@ type ProfileForm = {
   scratch_size: string
   tmp_size: string
   cache_env: string
+  docker_socket: boolean
 }
 
-const emptyForm: ProfileForm = { id: '', name: '', description: '', image: '', base: '', packages: '', toolchains: '', memory: '', cpus: '', scratch_size: '', tmp_size: '', cache_env: '' }
+const emptyForm: ProfileForm = { id: '', name: '', description: '', image: '', base: '', packages: '', toolchains: '', memory: '', cpus: '', scratch_size: '', tmp_size: '', cache_env: '', docker_socket: false }
 
 // Sandbox profile registry (docs/sandbox-profiles.md §8): the catalog of
 // execution environments, builtin recipes with a Build action and custom
@@ -161,6 +163,7 @@ export default function Sandbox({ project }: { project?: string }) {
       scratch_size: p.scratch_size ?? '',
       tmp_size: p.tmp_size ?? '',
       cache_env: (p.cache_env ?? []).join('\n'),
+      docker_socket: Boolean(p.docker_socket),
     })
     setShowForm(true)
   }
@@ -180,6 +183,7 @@ export default function Sandbox({ project }: { project?: string }) {
       scratch_size: form.scratch_size.trim(),
       tmp_size: form.tmp_size.trim(),
       cache_env: form.cache_env.split('\n').map((s) => s.trim()).filter(Boolean),
+      docker_socket: form.docker_socket,
     }
     try {
       if (editing) {
@@ -284,6 +288,7 @@ export default function Sandbox({ project }: { project?: string }) {
                 {(p.toolchains ?? []).map((tc) => <Tag key={tc} type="blue" size="sm">{tc}</Tag>)}
                 {p.base && <Tag type="purple" size="sm">{t('sandbox.base_tag', { base: p.base })}</Tag>}
                 {(p.packages ?? []).map((pkg) => <Tag key={pkg} type="cool-gray" size="sm">{pkg}</Tag>)}
+                {p.docker_socket && <Tag type="red" size="sm">{t('sandbox.socket_tag') ?? 'docker socket'}</Tag>}
                 {p.image
                   ? (p.available
                       ? <Tag type="green" size="sm">{t('sandbox.built')}</Tag>
@@ -362,6 +367,17 @@ export default function Sandbox({ project }: { project?: string }) {
               <TextInput id="sp-tmp" labelText={t('sandbox.field_tmp')} value={form.tmp_size} onChange={(e) => setForm({ ...form, tmp_size: e.target.value })} placeholder="512m" />
             </div>
             <TextArea id="sp-cache" labelText={t('sandbox.field_cache')} rows={2} value={form.cache_env} onChange={(e) => setForm({ ...form, cache_env: e.target.value })} placeholder={'CARGO_HOME=/cache/cargo'} />
+            {!editing?.builtin && (
+              <div>
+                <Checkbox
+                  id="sp-docker-socket"
+                  labelText={t('sandbox.field_docker_socket') ?? 'Mount the host docker socket'}
+                  checked={form.docker_socket}
+                  onChange={(_, { checked }) => setForm({ ...form, docker_socket: checked })}
+                />
+                <p style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', margin: 0 }}>{t('sandbox.docker_socket_hint')}</p>
+              </div>
+            )}
             <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem' }}>{editing?.builtin ? t('sandbox.edit_hint') : form.base ? t('sandbox.recipe_hint') : t('sandbox.custom_hint')}</p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
               <Button kind="secondary" onClick={() => { setShowForm(false); setEditing(null); setDraftRationale('') }}>{t('action.cancel')}</Button>

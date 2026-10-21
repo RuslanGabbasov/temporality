@@ -8206,6 +8206,7 @@ func resolveAgentSandbox(ctx context.Context, ws *workspace.Store, a *workspace.
 		spec.ScratchSize = profile.ScratchSize
 		spec.TmpSize = profile.TmpSize
 		spec.CacheEnv = profile.CacheEnv
+		spec.DockerSocket = profile.DockerSocket
 	}
 	input.Sandbox = spec
 }

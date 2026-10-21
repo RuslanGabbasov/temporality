@@ -76,6 +76,7 @@ func TestValidateSandboxProfile(t *testing.T) {
 		"packages no base": func(p *SandboxProfile) { p.Packages = []string{"gcc"} },
 		"bad package":      func(p *SandboxProfile) { p.Base = "python"; p.Packages = []string{"gcc; rm"} },
 		"builtin base":     func(p *SandboxProfile) { p.Base = "python"; p.Builtin = true },
+		"builtin socket":   func(p *SandboxProfile) { p.Builtin = true; p.DockerSocket = true },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -88,6 +89,11 @@ func TestValidateSandboxProfile(t *testing.T) {
 	// Recipe-based custom profile: no image yet, base from the known set.
 	recipe := SandboxProfile{ID: "qa-tools", Name: "QA tools", Base: "python", Packages: []string{"gcc", "linux-headers"}}
 	require.NoError(t, ValidateSandboxProfile(recipe))
+
+	// The socket passthrough is a custom-profile capability: valid on a
+	// custom row (recipe or external image), refused on builtins.
+	require.NoError(t, ValidateSandboxProfile(SandboxProfile{ID: "dev-dind", Name: "Platform dev", Base: "base", DockerSocket: true}))
+	require.NoError(t, ValidateSandboxProfile(SandboxProfile{ID: "dev-external", Name: "External toolbox", Image: "repo@sha256:" + strings.Repeat("ab", 32), DockerSocket: true}))
 }
 
 func TestIsDigestPinnedImage(t *testing.T) {

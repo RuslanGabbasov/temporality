@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -130,7 +131,7 @@ func TestWorkspaceMustStayWithinConfiguredRoot(t *testing.T) {
 
 func TestDockerArgumentsEnforceIsolation(t *testing.T) {
 	runner := &Docker{Image: "sandbox@sha256:abc", Memory: "1g", CPUs: "2", PIDs: 512, UID: 10001, GID: 10001, ScratchSize: "512m", TmpSize: "256m"}
-	args := runner.arguments("/srv/work/repo", Request{Command: []string{"go", "test", "./..."}, ReadOnly: true}, "temporality-sandbox-test")
+	args := runner.arguments("/srv/work/repo", Request{Command: []string{"go", "test", "./..."}, ReadOnly: true}, "temporality-sandbox-test", nil)
 	joined := strings.Join(args, " ")
 	for _, required := range []string{"--init", "--pull=never", "--name temporality-sandbox-test", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit 512", "--memory 1g", "--memory-swap 1g", "--cpus 2", "--ulimit nofile=1024:1024", "--user 10001:10001", "/srv/work/repo:/workspace:ro", "--tmpfs /tmp:rw,noexec,nosuid,size=256m", "--tmpfs /scratch:rw,exec,nosuid,size=512m", "--env HOME=/scratch", "--env TMPDIR=/scratch"} {
 		if !strings.Contains(joined, required) {
@@ -141,7 +142,7 @@ func TestDockerArgumentsEnforceIsolation(t *testing.T) {
 		t.Fatalf("unexpected privileged container: %s", joined)
 	}
 	// A Docker built without an explicit scratch size still gets a sane default.
-	defaultScratch := (&Docker{}).arguments("/w", Request{Command: []string{"ls"}, ReadOnly: true}, "n")
+	defaultScratch := (&Docker{}).arguments("/w", Request{Command: []string{"ls"}, ReadOnly: true}, "n", nil)
 	defaultJoined := strings.Join(defaultScratch, " ")
 	if !strings.Contains(defaultJoined, "--tmpfs /scratch:rw,exec,nosuid,size=512m") {
 		t.Fatalf("missing default scratch tmpfs: %s", defaultScratch)
@@ -156,14 +157,14 @@ func TestDockerArgumentsCarrySortedLabels(t *testing.T) {
 	args := runner.arguments("/w", Request{
 		Command: []string{"ls"},
 		Labels:  map[string]string{"temporality.run": "r-1", "temporality.agent": "lead", "temporality.project": "omni"},
-	}, "n")
+	}, "n", nil)
 	joined := strings.Join(args, " ")
 	// Labels are appended sorted by key so identical requests yield identical argv.
 	want := "--label temporality.agent=lead --label temporality.project=omni --label temporality.run=r-1"
 	if !strings.Contains(joined, want) {
 		t.Errorf("docker args missing sorted labels %q: %s", want, joined)
 	}
-	noLabels := strings.Join(runner.arguments("/w", Request{Command: []string{"ls"}}, "n"), " ")
+	noLabels := strings.Join(runner.arguments("/w", Request{Command: []string{"ls"}}, "n", nil), " ")
 	if strings.Contains(noLabels, "--label") {
 		t.Errorf("unlabeled request must not emit --label: %s", noLabels)
 	}
@@ -234,24 +235,24 @@ func TestOutputBufferTruncatesWithoutBlockingWriter(t *testing.T) {
 
 func TestNetworkDefaultsToNoneAndBridgeIsExplicit(t *testing.T) {
 	runner := &Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Memory: "1g", CPUs: "2", PIDs: 128}
-	base := runner.arguments("/w", Request{Command: []string{"ls"}}, "n")
+	base := runner.arguments("/w", Request{Command: []string{"ls"}}, "n", nil)
 	if got := flagValue(base, "--network"); got != "none" {
 		t.Fatalf("default network = %q, want none", got)
 	}
 	// Request-level bridge maps onto the DEDICATED sandbox network: compose
 	// rebuilds and host workloads share docker0, and a stack restart must not
 	// churn the bridge a running E2E session depends on.
-	bridged := runner.arguments("/w", Request{Command: []string{"ls"}, Network: "bridge"}, "n")
+	bridged := runner.arguments("/w", Request{Command: []string{"ls"}, Network: "bridge"}, "n", nil)
 	if got := flagValue(bridged, "--network"); got != SandboxNetworkName {
 		t.Fatalf("request network = %q, want %s", got, SandboxNetworkName)
 	}
 	// A runner explicitly configured with bridge keeps it when the request is silent.
-	configured := (&Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Network: "bridge", Memory: "1g", CPUs: "2", PIDs: 128}).arguments("/w", Request{Command: []string{"ls"}}, "n")
+	configured := (&Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Network: "bridge", Memory: "1g", CPUs: "2", PIDs: 128}).arguments("/w", Request{Command: []string{"ls"}}, "n", nil)
 	if got := flagValue(configured, "--network"); got != SandboxNetworkName {
 		t.Fatalf("runner network = %q, want %s", got, SandboxNetworkName)
 	}
 	// An explicit operator override passes through untouched.
-	override := (&Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Network: "temporality-e2e", Memory: "1g", CPUs: "2", PIDs: 128}).arguments("/w", Request{Command: []string{"ls"}}, "n")
+	override := (&Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Network: "temporality-e2e", Memory: "1g", CPUs: "2", PIDs: 128}).arguments("/w", Request{Command: []string{"ls"}}, "n", nil)
 	if got := flagValue(override, "--network"); got != "temporality-e2e" {
 		t.Fatalf("override network = %q, want temporality-e2e", got)
 	}
@@ -259,7 +260,7 @@ func TestNetworkDefaultsToNoneAndBridgeIsExplicit(t *testing.T) {
 
 func TestEnvironmentCarriesNoCredentials(t *testing.T) {
 	runner := &Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Memory: "1g", CPUs: "2", PIDs: 128}
-	args := runner.arguments("/w", Request{Command: []string{"ls"}}, "n")
+	args := runner.arguments("/w", Request{Command: []string{"ls"}}, "n", nil)
 	envs := map[string]bool{}
 	for i, token := range args {
 		if token == "--env" && i+1 < len(args) {
@@ -286,7 +287,7 @@ func TestWorkspaceIsTheOnlyVolumeMount(t *testing.T) {
 	// test pins the baseline: no Root, no cache, workspace stays the only mount.
 	runner := &Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Memory: "1g", CPUs: "2", PIDs: 128}
 	for _, request := range []Request{{Command: []string{"ls"}}, {Command: []string{"ls"}, ReadOnly: true}} {
-		args := runner.arguments("/srv/work/repo", request, "n")
+		args := runner.arguments("/srv/work/repo", request, "n", nil)
 		mounts := 0
 		for i, token := range args {
 			if token == "--volume" {
@@ -339,7 +340,7 @@ func TestProjectCacheMountsPerProjectUnderRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &Docker{Root: root, Image: "sandbox@sha256:" + strings.Repeat("a", 64), Memory: "1g", CPUs: "2", PIDs: 128}
-	args := runner.arguments(workspace, Request{Command: []string{"ls"}, ReadOnly: true}, "n")
+	args := runner.arguments(workspace, Request{Command: []string{"ls"}, ReadOnly: true}, "n", nil)
 	joined := strings.Join(args, " ")
 	cache := filepath.Join(root, "cache", "demo")
 	for _, required := range []string{
@@ -384,7 +385,7 @@ func TestDockerArgumentsApplySandboxProfile(t *testing.T) {
 		ScratchSize: "1g",
 		TmpSize:     "512m",
 		CacheEnv:    []string{"NPM_CONFIG_CACHE=/cache/npm"},
-	}, "n")
+	}, "n", nil)
 	joined := strings.Join(args, " ")
 
 	if got := flagValue(args, "--memory"); got != "2g" {
@@ -459,4 +460,70 @@ func TestMaxTimeoutStaysBelowActivityBudget(t *testing.T) {
 	if maxTimeout() > activityBudget-60 {
 		t.Fatalf("sandbox max timeout %ds exceeds the run_tool activity budget (%ds minus teardown head room)", maxTimeout(), activityBudget)
 	}
+}
+
+func TestDockerSocketMountAddsSocketGroupAccess(t *testing.T) {
+	// DooD passthrough: the socket volume plus a supplementary group carrying
+	// the socket's own gid — the sandbox user gains exactly the access the
+	// host granted to that group, nothing more.
+	runner := &Docker{Image: "sandbox@sha256:" + strings.Repeat("a", 64), Memory: "1g", CPUs: "2", PIDs: 128, UID: 10001, GID: 10001}
+	socket := filepath.Join(t.TempDir(), "docker.sock")
+	if err := os.WriteFile(socket, nil, 0o660); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socketArgs, err := socketMountArgs(socket, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := runner.arguments("/srv/work/repo", Request{Command: []string{"docker", "ps"}, DockerSocket: true}, "n", socketArgs)
+	joined := strings.Join(args, " ")
+	for _, required := range []string{
+		"--volume " + socket + ":" + socket,
+		"--group-add ",
+		"--env DOCKER_HOST=unix://" + socket,
+	} {
+		if !strings.Contains(joined, required) {
+			t.Errorf("socket args missing %q: %s", required, joined)
+		}
+	}
+	// Flags must stay before the image reference: docker rejects post-image
+	// arguments as part of the command.
+	if idx := slices.Index(args, "--volume"); idx > slices.Index(args, runner.Image) {
+		t.Errorf("socket mount flags landed after the image: %s", joined)
+	}
+	// Isolation flags survive: the passthrough grants daemon access, not
+	// container privileges.
+	for _, kept := range []string{"--cap-drop=ALL", "--security-opt=no-new-privileges"} {
+		if !strings.Contains(joined, kept) {
+			t.Errorf("isolation flag %q lost: %s", kept, joined)
+		}
+	}
+
+	// Without the flag, no socket artifacts at all.
+	plain := strings.Join(runner.arguments("/srv/work/repo", Request{Command: []string{"ls"}}, "n", nil), " ")
+	if strings.Contains(plain, "docker.sock") || strings.Contains(plain, "group-add") {
+		t.Errorf("plain request must not mount the socket: %s", plain)
+	}
+}
+
+func TestDockerSocketMountRejectsNonUnixFile(t *testing.T) {
+	// A plain regular file carries no group id through Sys() on this platform
+	// shape only if the stat type differs; on unix builds the gid resolves,
+	// so this test pins the error path via a missing socket instead.
+	if _, err := socketMountArgs("/nonexistent/docker.sock", mustStat(t, "/nonexistent/docker.sock")); err == nil {
+		t.Error("expected an error for a missing socket path")
+	}
+}
+
+func mustStat(t *testing.T, path string) os.FileInfo {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Skipf("stat %s: %v", path, err)
+	}
+	return info
 }
