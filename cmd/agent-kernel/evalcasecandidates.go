@@ -214,7 +214,12 @@ func refreshFinishedRuns(ctx context.Context, ws *workspace.Store, temporalClien
 			return
 		}
 		workflowID := workflowIDFor(sourceID, run.ProjectID, run.RunID)
-		response, describeErr := temporalClient.DescribeWorkflowExecution(ctx, workflowID, "")
+		// R1 (kernel-wedge-2026-10-21): both harvest RPCs ride the temporal
+		// RPC deadline — a wedged Temporal skips this row (retried until it
+		// ages out), never the whole pass.
+		describeCtx, cancelDescribe := context.WithTimeout(ctx, temporalRPCTimeout())
+		response, describeErr := temporalClient.DescribeWorkflowExecution(describeCtx, workflowID, "")
+		cancelDescribe()
 		if describeErr != nil {
 			continue // no workflow (or transient API error): retried until the row ages out
 		}
@@ -223,7 +228,10 @@ func refreshFinishedRuns(ctx context.Context, ws *workspace.Store, temporalClien
 			continue
 		}
 		var result agent.RunResult
-		if getErr := temporalClient.GetWorkflow(ctx, workflowID, "").Get(ctx, &result); getErr != nil {
+		getCtx, cancelGet := context.WithTimeout(ctx, temporalRPCTimeout())
+		getErr := temporalClient.GetWorkflow(getCtx, workflowID, "").Get(getCtx, &result)
+		cancelGet()
+		if getErr != nil {
 			continue
 		}
 		if result.Status == "" || result.Status == "running" {

@@ -45,6 +45,8 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // BuildVersion is injected at link time by the release pipeline
@@ -88,8 +90,15 @@ func temporalRPCTimeout() time.Duration {
 
 // isTemporalRPCDeadline reports that a call failed because its deadline
 // expired — the one failure mode handlers must translate into R1's 503.
+// Two shapes count: the context error (errors.Is … context.DeadlineExceeded)
+// and the gRPC status the Temporal transport actually returns when an RPC
+// deadline expires (codes.DeadlineExceeded) — that status does not wrap the
+// context error, so attribution must read the gRPC status as well.
 func isTemporalRPCDeadline(err error) bool {
-	return errors.Is(err, context.DeadlineExceeded)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	return status.Code(err) == codes.DeadlineExceeded
 }
 
 // temporalRPCDeadlineError formats R1's client-visible error text:
@@ -107,7 +116,14 @@ func temporalRPC(w http.ResponseWriter, ctx context.Context, rpc func(ctx contex
 	rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
 	defer cancel()
 	err = rpc(rpcCtx)
-	if err == nil || !isTemporalRPCDeadline(err) {
+	if err == nil {
+		return nil, false
+	}
+	// Expiry of this RPC's own deadline is the attributable cause of the
+	// failure even when the returned error itself does not read as a timeout
+	// (the transport may surface a sibling error at the same instant): an
+	// expired R1 deadline still answers 503.
+	if !isTemporalRPCDeadline(err) && rpcCtx.Err() != context.DeadlineExceeded {
 		return err, false
 	}
 	writeError(w, http.StatusServiceUnavailable, temporalRPCDeadlineError(err))
@@ -129,6 +145,24 @@ func nudgeWithRPCDeadline(w http.ResponseWriter, r *http.Request, next http.Hand
 		expired:        func() bool { return isTemporalRPCDeadline(ctx.Err()) },
 	}
 	next.ServeHTTP(recorder, r.WithContext(ctx))
+}
+
+// matchesNudgeRPCRoute reports whether the request is exactly the route
+// nudgeWithRPCDeadline guards: POST /v1/agent/runs/{runID}/nudge — five
+// non-empty path segments with a non-empty runID. The earlier loose
+// HasPrefix/HasSuffix match also caught neighbours (…/nudgeX, …/runs//nudge);
+// the 409→503 rewrite must fire only on the real route, where a rewritten
+// 409 can only come from the deadline installed here. The path is matched in
+// its escaped form — ServeMux segments the same way, so a run id carrying
+// %2F stays one segment.
+func matchesNudgeRPCRoute(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	segments := strings.Split(r.URL.EscapedPath(), "/") // ["", "v1", "agent", "runs", runID, "nudge"]
+	return len(segments) == 6 &&
+		segments[1] == "v1" && segments[2] == "agent" && segments[3] == "runs" &&
+		segments[4] != "" && segments[5] == "nudge"
 }
 
 // nudgeDeadlineWriter rewrites the route's stable 409 signal failure into
@@ -649,9 +683,20 @@ func main() {
 		}
 		workflowID := workflowIDFor(activities.SourceID, input.Project, input.RunID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-		run, err := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
-		if err != nil {
-			writeError(w, 409, err)
+		// R1 (kernel-wedge-2026-10-21): the workflow start rides the temporal
+		// RPC deadline — expiry answers 503 "temporal rpc timeout: …"; every
+		// other failure keeps the 409 mapping below.
+		var run client.WorkflowRun
+		startErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			var rpcErr error
+			run, rpcErr = temporalClient.ExecuteWorkflow(ctx, options, "AgentRun", input)
+			return rpcErr
+		})
+		if done {
+			return
+		}
+		if startErr != nil {
+			writeError(w, 409, startErr)
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]string{"run_id": input.RunID, "project": input.Project, "workflow_id": run.GetID(), "temporal_run_id": run.GetRunID(), "status": "started"})
@@ -826,9 +871,20 @@ func main() {
 		}
 		workflowID := workflowIDFor(activities.SourceID, req.Project, runID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-		run, wfErr := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
-		if wfErr != nil {
-			writeError(w, 409, wfErr)
+		// R1 (kernel-wedge-2026-10-21): the team workflow start rides the
+		// temporal RPC deadline — expiry answers 503 "temporal rpc timeout: …";
+		// every other failure keeps the 409 mapping below.
+		var run client.WorkflowRun
+		startErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			var rpcErr error
+			run, rpcErr = temporalClient.ExecuteWorkflow(ctx, options, "AgentRun", input)
+			return rpcErr
+		})
+		if done {
+			return
+		}
+		if startErr != nil {
+			writeError(w, 409, startErr)
 			return
 		}
 		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamRunStarted, "team", team.ID, map[string]any{"run_id": runID, "version": input.Team.Version, "project": req.Project})
@@ -981,8 +1037,17 @@ func main() {
 			// workflow (top-level or child) is identified by the full run path.
 			workflowID = workflowIDFor(sourceID, project, childRunID)
 		}
-		if err := temporalClient.SignalWorkflow(r.Context(), workflowID, "", agent.ApprovalSignal, approval); err != nil {
-			writeError(w, 409, err)
+		// R1 (kernel-wedge-2026-10-21): the approval signal rides the temporal
+		// RPC deadline — expiry answers 503 "temporal rpc timeout: …"; every
+		// other failure keeps the 409 mapping below.
+		signalErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
+		})
+		if done {
+			return
+		}
+		if signalErr != nil {
+			writeError(w, 409, signalErr)
 			return
 		}
 		// Close the human_request row when this approval answers one
@@ -1040,8 +1105,17 @@ func main() {
 		}
 		sourceID := querySourceID(r, activities.SourceID)
 		workflowID := workflowIDFor(sourceID, project, r.PathValue("runID"))
-		if err := temporalClient.CancelWorkflow(r.Context(), workflowID, ""); err != nil {
-			writeError(w, 409, err)
+		// R1 (kernel-wedge-2026-10-21): the cancel rides the temporal RPC
+		// deadline — expiry answers 503 "temporal rpc timeout: …"; every
+		// other failure keeps the 409 mapping below.
+		cancelErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			return temporalClient.CancelWorkflow(ctx, workflowID, "")
+		})
+		if done {
+			return
+		}
+		if cancelErr != nil {
+			writeError(w, 409, cancelErr)
 			return
 		}
 		writeJSON(w, 200, map[string]string{"run_id": r.PathValue("runID"), "status": "cancel_requested"})
@@ -1113,12 +1187,24 @@ func main() {
 			Scope: agent.EventScope(sourceID, project, runID) + "-extract",
 		}
 		options := client.StartWorkflowOptions{ID: agent.ExtractionWorkflowIDPublic(sourceID, project, runID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-		if _, err := temporalClient.ExecuteWorkflow(r.Context(), options, "KnowledgeExtraction", input); err != nil {
-			if strings.Contains(err.Error(), "already started") || strings.Contains(err.Error(), "already exists") {
+		// R1 (kernel-wedge-2026-10-21): the extraction start rides the temporal
+		// RPC deadline — expiry answers 503 "temporal rpc timeout: …"; every
+		// other failure keeps the existing mapping below (409 already started,
+		// 500 otherwise).
+		startErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			var rpcErr error
+			_, rpcErr = temporalClient.ExecuteWorkflow(ctx, options, "KnowledgeExtraction", input)
+			return rpcErr
+		})
+		if done {
+			return
+		}
+		if startErr != nil {
+			if strings.Contains(startErr.Error(), "already started") || strings.Contains(startErr.Error(), "already exists") {
 				writeJSON(w, http.StatusConflict, map[string]any{"error": "extraction already started for this run", "run_id": runID})
 				return
 			}
-			writeError(w, 500, err)
+			writeError(w, 500, startErr)
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true, "run_id": runID, "project": project, "detail": "extraction started; knowledge will appear in the journal projection and in hints"})
@@ -1141,14 +1227,24 @@ func main() {
 		runID := r.PathValue("runID")
 		sourceID := querySourceID(r, activities.SourceID)
 		workflowID := workflowIDFor(sourceID, project, runID)
-		if err := temporalClient.TerminateWorkflow(r.Context(), workflowID, "", "terminated by operator"); err != nil {
+		// R1 (kernel-wedge-2026-10-21): the terminate rides the temporal RPC
+		// deadline — expiry answers 503 "temporal rpc timeout: …" and never
+		// enters the already-gone heal path below; every other failure keeps
+		// its existing mapping (409 / heal on "not found").
+		terminateErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			return temporalClient.TerminateWorkflow(ctx, workflowID, "", "terminated by operator")
+		})
+		if done {
+			return
+		}
+		if terminateErr != nil {
 			// A workflow Temporal does not know is already gone — the common case
 			// being a stand whose Temporal volume was rebuilt while the journal
 			// kept older runs. Those zombies stay 'running' in lists forever and
 			// every stop press 409s. Heal instead: journal the terminal event and
 			// settle the workspace status, answer success.
-			if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "NotFound") {
-				writeError(w, 409, err)
+			if !strings.Contains(terminateErr.Error(), "not found") && !strings.Contains(terminateErr.Error(), "NotFound") {
+				writeError(w, 409, terminateErr)
 				return
 			}
 			actorGone := requestUserID(r)
@@ -3286,8 +3382,17 @@ func main() {
 			return
 		}
 		workflowID := workflowIDFor(activities.SourceID, run.ProjectID, run.RunID)
-		if err := temporalClient.CancelWorkflow(r.Context(), workflowID, ""); err != nil {
-			writeError(w, 409, err)
+		// R1 (kernel-wedge-2026-10-21): the cancel rides the temporal RPC
+		// deadline — expiry answers 503 "temporal rpc timeout: …"; every
+		// other failure keeps the 409 mapping below.
+		cancelErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			return temporalClient.CancelWorkflow(ctx, workflowID, "")
+		})
+		if done {
+			return
+		}
+		if cancelErr != nil {
+			writeError(w, 409, cancelErr)
 			return
 		}
 		_ = ws.UpdateRunStatus(r.Context(), run.ID, "cancelled", "", 0, "")
@@ -3436,11 +3541,25 @@ func main() {
 		ctx := r.Context()
 		statusTicker := time.NewTicker(5 * time.Second)
 		defer statusTicker.Stop()
+		// hangup is armed by the dErr path below when the describe's own R1
+		// deadline expired. Headers were sent long ago, so there is no HTTP
+		// status to rewrite mid-stream — the stream ends on this tick through
+		// the same terminal-event path a finished run takes, instead of
+		// probing a wedged Temporal forever (the R2-exemption promise: hang
+		// safety comes from the per-RPC deadlines (R1)).
+		hangup := false
 		terminal := func() bool {
-			description, dErr := temporalClient.DescribeWorkflowExecution(ctx, workflowIDFor(activities.SourceID, run.ProjectID, run.RunID), "")
+			// R1 (kernel-wedge-2026-10-21): the status probe is a Temporal-RPC
+			// like any other — it rides its own deadline even though the SSE
+			// connection itself is exempt from the server write budget (R2).
+			rpcCtx, cancelRPC := context.WithTimeout(ctx, temporalRPCTimeout())
+			defer cancelRPC()
+			description, dErr := temporalClient.DescribeWorkflowExecution(rpcCtx, workflowIDFor(activities.SourceID, run.ProjectID, run.RunID), "")
 			if dErr != nil {
+				hangup = isTemporalRPCDeadline(dErr) || rpcCtx.Err() == context.DeadlineExceeded
 				return false
 			}
+			hangup = false
 			if description.WorkflowExecutionInfo == nil {
 				return false
 			}
@@ -3470,6 +3589,13 @@ func main() {
 			case <-statusTicker.C:
 				if terminal() {
 					activities.Tokens.Close(runID)
+					writeEvent(TokenDoneEvent)
+					return
+				}
+				if hangup {
+					// R1: the describe deadline expired — end this stream
+					// through the dErr path. The bus stays open (the run is
+					// not finished); only this connection stops probing.
 					writeEvent(TokenDoneEvent)
 					return
 				}
@@ -5930,7 +6056,13 @@ func main() {
 		emitTriggerEvent("trigger.accepted", "000001", triggerEventData)
 		workflowID := workflowIDFor(activities.SourceID, projectID, input.RunID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-		run, wfErr := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
+		// R1 (kernel-wedge-2026-10-21): this delivery attempt rides the
+		// temporal RPC deadline (KERNEL_TEMPORAL_RPC_TIMEOUT per attempt).
+		// The webhook is not the JSON API — no 503 rewrite here: the error
+		// keeps the existing duplicate/409 handling below.
+		attemptCtx, cancelAttempt := context.WithTimeout(r.Context(), temporalRPCTimeout())
+		run, wfErr := temporalClient.ExecuteWorkflow(attemptCtx, options, "AgentRun", input)
+		cancelAttempt()
 		if wfErr != nil {
 			// Duplicate delivery of the same source event: the workflow already
 			// exists — report the existing run instead of erroring (§4).
@@ -6058,7 +6190,14 @@ func main() {
 				input.ExecutionIdentityID = identityID
 				workflowID := workflowIDFor(activities.SourceID, t.ProjectID, input.RunID)
 				options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-				if _, wfErr := temporalClient.ExecuteWorkflow(context.Background(), options, "AgentRun", input); wfErr != nil {
+				// R1 (kernel-wedge-2026-10-21): every scheduled fire bounds its
+				// own start RPC with the temporal RPC deadline — a wedged
+				// Temporal costs this one attempt (logged, skipped below), not
+				// the whole schedule loop.
+				attemptCtx, cancelAttempt := context.WithTimeout(context.Background(), temporalRPCTimeout())
+				_, wfErr := temporalClient.ExecuteWorkflow(attemptCtx, options, "AgentRun", input)
+				cancelAttempt()
+				if wfErr != nil {
 					slog.Error("start trigger run", "trigger", t.ID, "error", wfErr)
 					continue
 				}
@@ -7040,11 +7179,21 @@ func main() {
 					journal:    runJournal,
 					sourceID:   activities.SourceID,
 					log:        log,
+					// R1 (kernel-wedge-2026-10-21): this pipeline runs both
+					// from the channel webhook's HTTP request and from the
+					// poll loop — either way every signal/note rides the
+					// temporal RPC deadline; failures keep the loop's
+					// existing log-and-skip handling (a channel webhook is
+					// not the JSON API, so no 503 rewrite applies).
 					signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
-						return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
+						rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
+						defer cancel()
+						return temporalClient.SignalWorkflow(rpcCtx, workflowID, "", agent.ApprovalSignal, approval)
 					},
 					note: func(ctx context.Context, workflowID string, note agent.UserNote) error {
-						return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.UserNoteSignal, note)
+						rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
+						defer cancel()
+						return temporalClient.SignalWorkflow(rpcCtx, workflowID, "", agent.UserNoteSignal, note)
 					},
 					intake: func(ctx context.Context, message agent.InboundMessage, senderUserID string) (string, error) {
 						user, err := senderUser(ctx, ws, senderUserID)
@@ -7080,11 +7229,18 @@ func main() {
 			journal:    runJournal,
 			sourceID:   activities.SourceID,
 			log:        log,
+			// R1 (kernel-wedge-2026-10-21): the poll-loop signals ride the
+			// temporal RPC deadline like every other handler-initiated RPC —
+			// failures keep the loop's existing log-and-skip handling.
 			signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
-				return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
+				rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
+				defer cancel()
+				return temporalClient.SignalWorkflow(rpcCtx, workflowID, "", agent.ApprovalSignal, approval)
 			},
 			note: func(ctx context.Context, workflowID string, note agent.UserNote) error {
-				return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.UserNoteSignal, note)
+				rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
+				defer cancel()
+				return temporalClient.SignalWorkflow(rpcCtx, workflowID, "", agent.UserNoteSignal, note)
 			},
 			intake: func(ctx context.Context, message agent.InboundMessage, senderUserID string) (string, error) {
 				user, err := senderUser(ctx, ws, senderUserID)
@@ -7147,7 +7303,9 @@ func main() {
 		// Its handler lives in nudge.go (a parallel working-tree change
 		// outside this fix's radius), so the deadline and the 503 translation
 		// are installed here, at the wiring point — see nudgeWithRPCDeadline.
-		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/agent/runs/") && strings.HasSuffix(r.URL.Path, "/nudge") {
+		// The match is the exact route pattern (matchesNudgeRPCRoute), so the
+		// rewrite can only ever fire for POST /v1/agent/runs/{runID}/nudge.
+		if matchesNudgeRPCRoute(r) {
 			nudgeWithRPCDeadline(w, r, authed)
 			return
 		}
@@ -7378,7 +7536,13 @@ type temporalLiveness struct {
 }
 
 func (t *temporalLiveness) IsWorkflowRunning(ctx context.Context, sourceID, project, runID string) (bool, error) {
-	description, err := t.client.DescribeWorkflowExecution(ctx, workflowIDFor(sourceID, project, runID), "")
+	// R1 (kernel-wedge-2026-10-21): this helper is called from the uncertain-
+	// operations listing — the describe rides the temporal RPC deadline so a
+	// wedged Temporal fails this probe instead of the request; the error
+	// keeps its existing handling below.
+	rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
+	defer cancel()
+	description, err := t.client.DescribeWorkflowExecution(rpcCtx, workflowIDFor(sourceID, project, runID), "")
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return false, nil

@@ -231,8 +231,15 @@ func (r *intakeRunner) start(ctx context.Context, message agent.InboundMessage, 
 		TaskQueue:             r.taskQueue,
 		WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
 	}
-	if _, err := r.temporal.ExecuteWorkflow(ctx, options, "AgentRun", input); err != nil {
-		return "", err
+	// R1 (kernel-wedge-2026-10-21): the intake start rides the temporal RPC
+	// deadline — the pipeline runs both from the channel webhook's request
+	// and from the poll loop, so the bound lives on the RPC itself; failures
+	// keep the caller's existing handling.
+	rpcCtx, cancelRPC := context.WithTimeout(ctx, temporalRPCTimeout())
+	_, rpcErr := r.temporal.ExecuteWorkflow(rpcCtx, options, "AgentRun", input)
+	cancelRPC()
+	if rpcErr != nil {
+		return "", rpcErr
 	}
 	// The row is what the channel answer watcher and the workspace run API
 	// read — a failed insert means the run's answer is undeliverable, so it is
@@ -537,8 +544,17 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			writeError(w, 403, fmt.Errorf("run %q was not started from this sender's messages", targetRun))
 			return
 		}
-		if err := r.temporal.CancelWorkflow(req.Context(), workflowIDFor(r.sourceID, projectID, targetRun), ""); err != nil {
-			writeError(w, 409, err)
+		// R1 (kernel-wedge-2026-10-21): the cancel rides the temporal RPC
+		// deadline — expiry answers 503 "temporal rpc timeout: …"; every
+		// other failure keeps the 409 mapping below.
+		cancelErr, done := temporalRPC(w, req.Context(), func(ctx context.Context) error {
+			return r.temporal.CancelWorkflow(ctx, workflowIDFor(r.sourceID, projectID, targetRun), "")
+		})
+		if done {
+			return
+		}
+		if cancelErr != nil {
+			writeError(w, 409, cancelErr)
 			return
 		}
 		_ = r.ws.UpdateRunStatus(req.Context(), targetRun, "cancelled", "", 0, "cancelled by sender from channel")
@@ -873,9 +889,20 @@ func registerIntakeRoutes(mux *http.ServeMux, gate *controlplane.Gate, r *intake
 			}
 		}
 		options := client.StartWorkflowOptions{ID: workflowIDFor(r.sourceID, body.ProjectID, runID), TaskQueue: r.taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-		run, wfErr := r.temporal.ExecuteWorkflow(req.Context(), options, "AgentRun", input)
-		if wfErr != nil {
-			writeError(w, 409, wfErr)
+		// R1 (kernel-wedge-2026-10-21): the target run start rides the temporal
+		// RPC deadline — expiry answers 503 "temporal rpc timeout: …"; every
+		// other failure keeps the 409 mapping below.
+		var run client.WorkflowRun
+		startErr, done := temporalRPC(w, req.Context(), func(ctx context.Context) error {
+			var rpcErr error
+			run, rpcErr = r.temporal.ExecuteWorkflow(ctx, options, "AgentRun", input)
+			return rpcErr
+		})
+		if done {
+			return
+		}
+		if startErr != nil {
+			writeError(w, 409, startErr)
 			return
 		}
 		execContext := runExecContextFor(principal, &input, agentID, effectiveRole)
