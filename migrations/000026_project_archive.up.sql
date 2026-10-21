@@ -1,1 +1,0 @@
-ALTER TABLE workspace_project ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false;

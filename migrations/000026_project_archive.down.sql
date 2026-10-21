@@ -1,1 +1,0 @@
-ALTER TABLE workspace_project DROP COLUMN IF EXISTS archived;

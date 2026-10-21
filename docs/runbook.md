@@ -87,26 +87,27 @@ docker compose exec -T postgres psql -U temporality -c "DROP DATABASE test_resto
    автоматически при старте journal и kernel.
 5. Проверить health (см. §5).
 
-### Ручные миграции
+### Миграции
 
-Миграции journal: `migrations/000018_observation_events.up.sql` и выше.
-Миграции kernel outbox: `migrations/000019_kernel_event_outbox.up.sql`.
-Миграции квот: `migrations/000020_kernel_run_quota.up.sql`.
+Схема живёт в `migrations/`, каталог = владелец:
 
-Применяются автоматически при старте. Для ручного применения:
+- `migrations/workspace/` — kernel применяет всё при каждом старте
+  (`MigrateAll`); baseline `0001_baseline_v2026.2.19` держит финальную
+  схему, файлы `0002+` — инкременты после него;
+- `migrations/outbox/`, `migrations/quota/` — по одному файлу на стор;
+- `migrations/runtime/` не существует: историческая цепочка удалена, схему
+  журнала journal несёт встроенной константой.
+
+Каждая миграция **идемпотентна** — набор перечитывается при каждом
+старте, новая миграция это просто новый файл (подключать её вручную никуда
+не надо). Для апгрейда с версии до baseline: один промежуточный старт
+v2026.2.19 (последней версии с полной цепочкой), затем обновление дальше.
+
+Ручное применение:
 
 ```sh
 docker compose exec postgres psql -U temporality temporality \
   -f /path/to/migration.up.sql
-```
-
-### Откат миграции
-
-```sh
-docker compose stop journal agent-kernel
-docker compose exec postgres psql -U temporality temporality \
-  -f migrations/NNNNNN_*.down.sql
-docker compose up -d
 ```
 
 ---

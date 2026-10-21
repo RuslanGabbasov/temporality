@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
@@ -37,14 +36,11 @@ type candidateOutbox interface {
 	Enqueue(context.Context, observation.Event) error
 }
 
-// RegisterEvalCandidateRoutes wires the eval-case candidate migration, review
-// endpoints and the harvesting job (which also refreshes terminal run rows
-// from Temporal — see refreshFinishedRuns).
+// RegisterEvalCandidateRoutes wires the eval-case candidate review endpoints
+// and the harvesting job (which also refreshes terminal run rows from
+// Temporal — see refreshFinishedRuns). The store schema arrives with the
+// boot-time workspace migration pass (migrations/workspace).
 func RegisterEvalCandidateRoutes(ctx context.Context, mux *http.ServeMux, ws *workspace.Store, gate *controlplane.Gate, events candidateOutbox, temporalClient client.Client, sourceID string, log *slog.Logger) {
-	if err := ws.Migrate(ctx, "migrations/000059_eval_case_candidates.up.sql"); err != nil {
-		log.Error("migrate workspace v59 (eval case candidates)", "error", err)
-		os.Exit(1)
-	}
 
 	// Review queue of harvested candidates (§4.4). Writer/owner access, like
 	// the evaluation endpoints — candidates carry production text (§10.3).

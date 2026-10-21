@@ -67,7 +67,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer quotas.Close()
-	if err = quotas.Migrate(ctx, "migrations/000020_kernel_run_quota.up.sql"); err != nil {
+	if err = quotas.Migrate(ctx, "migrations/quota/000020_kernel_run_quota.up.sql"); err != nil {
 		log.Error("migrate run quotas", "error", err)
 		os.Exit(1)
 	}
@@ -88,16 +88,13 @@ func main() {
 		os.Exit(1)
 	}
 	defer ws.Close()
-	// Workspace migrations apply themselves: every migrations/*.up.sql from the
-	// chain floor onward runs in file order on every boot — each file is written
-	// idempotent (CREATE/ADD COLUMN IF NOT EXISTS, ON CONFLICT DO NOTHING,
-	// guarded index creates, condition-matched UPDATEs), so a new migration
-	// lands as one file with no boot wiring to forget (the 000075 column once
-	// shipped without ever executing). The floor is ownership, not
-	// housekeeping: below it live the historical runtime chain (000001-000018,
-	// the journal's embedded schema) and the outbox/quota stores (000019/000020,
-	// applied above from their own single files).
-	if err = ws.MigrateAll(ctx, "migrations", "000021", func(msg string, args ...any) { log.Info(msg, args...) }); err != nil {
+	// Each store applies its own migration directory — the directory is the
+	// ownership boundary, so a new migration lands as one file with no boot
+	// wiring to forget (the 000075 column once shipped without ever
+	// executing). Every migration is idempotent: the set re-runs on every
+	// boot. migrations/runtime is the historical chain the journal carries as
+	// its embedded schema — nothing applies it anymore.
+	if err = ws.MigrateAll(ctx, "migrations/workspace", func(msg string, args ...any) { log.Info(msg, args...) }); err != nil {
 		log.Error("migrate workspace", "error", err)
 		os.Exit(1)
 	}
@@ -183,7 +180,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer events.Close()
-	if err = events.Migrate(ctx, "migrations/000019_kernel_event_outbox.up.sql"); err != nil {
+	if err = events.Migrate(ctx, "migrations/outbox/000019_kernel_event_outbox.up.sql"); err != nil {
 		log.Error("migrate kernel outbox", "error", err)
 		os.Exit(1)
 	}
