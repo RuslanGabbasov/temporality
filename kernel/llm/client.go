@@ -455,7 +455,40 @@ func reasoningRequest(preset string) map[string]any {
 	}
 }
 
+// normalizeSystemMessages hoists every system message that follows the first
+// non-system message up into the leading system block, preserving order and
+// joining the blocks with blank lines. Strict OpenAI-compatible servers
+// (vLLM with the Qwen chat template, among others) reject any system role
+// after the conversation started — «System message must be at the
+// beginning» — while the run loop legitimately appends late instructions
+// (knowledge hints, final-turn and forced-finale reminders) for every
+// provider. Lenient providers merge leading system blocks anyway, so the
+// normalized shape is safe everywhere.
+func normalizeSystemMessages(messages []Message) []Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	var system []string
+	rest := make([]Message, 0, len(messages))
+	for _, m := range messages {
+		if m.Role == "system" {
+			system = append(system, m.Content)
+			continue
+		}
+		rest = append(rest, m)
+	}
+	if len(system) == 0 {
+		return messages
+	}
+	// System messages are plain instructions in this codebase — no tool calls,
+	// tool replies or images ride on them.
+	normalized := make([]Message, 0, len(rest)+1)
+	normalized = append(normalized, Message{Role: "system", Content: strings.Join(system, "\n\n")})
+	return append(normalized, rest...)
+}
+
 func toRequestMessages(messages []Message) []requestMessage {
+	messages = normalizeSystemMessages(messages)
 	out := make([]requestMessage, 0, len(messages))
 	for _, m := range messages {
 		rm := requestMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID, Images: m.Images}

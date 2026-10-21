@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -378,5 +379,59 @@ func TestImageMessagesMarshalAsMultimodalParts(t *testing.T) {
 	want := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngHeader)
 	if uri != want {
 		t.Errorf("image url = %q, want data URI", uri[:min(30, len(uri))])
+	}
+}
+
+func TestLateSystemMessagesHoistToTheFront(t *testing.T) {
+	// Strict OpenAI-compatible servers (vLLM + Qwen chat template) reject any
+	// system role after the conversation started, so the wire form must carry
+	// one leading system block no matter where the caller appended them.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var systemBlocks int
+		var systemContent string
+		for i, m := range request.Messages {
+			if m.Role == "system" {
+				systemBlocks++
+				systemContent = m.Content
+				if i != 0 {
+					t.Errorf("system message at wire position %d, want only position 0", i)
+				}
+			}
+		}
+		if systemBlocks != 1 {
+			t.Errorf("system blocks = %d, want exactly 1", systemBlocks)
+		}
+		if !strings.Contains(systemContent, "base prompt") || !strings.Contains(systemContent, "late hint") {
+			t.Errorf("merged system block lost content: %q", systemContent)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+	}))
+	defer server.Close()
+
+	client := New(Config{BaseURL: server.URL, Model: "m", Timeout: 5 * time.Second})
+	messages := []Message{
+		{Role: "system", Content: "base prompt"},
+		{Role: "user", Content: "do things"},
+		{Role: "assistant", Content: "", ToolCalls: []ToolCall{{ID: "c1", Name: "t", ArgsRaw: "{}"}}},
+		{Role: "tool", ToolCallID: "c1", Content: "done"},
+		{Role: "system", Content: "late hint"},
+	}
+	if _, err := client.Complete(context.Background(), messages, nil); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+}
+
+func TestSystemlessConversationUntouchedByNormalization(t *testing.T) {
+	messages := []Message{{Role: "user", Content: "hi"}}
+	got := normalizeSystemMessages(messages)
+	if len(got) != 1 || got[0].Role != "user" {
+		t.Fatalf("systemless input changed: %+v", got)
 	}
 }
