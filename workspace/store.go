@@ -592,6 +592,26 @@ func (s *Store) UpdateRunStatus(ctx context.Context, id, status, answer string, 
 	return nil
 }
 
+// SettleRunCancelled moves a still-active run to "cancelled" — the heal path
+// of POST /v1/agent/runs/{runID}/nudge when the workflow is gone from the
+// orchestrator. The guard keeps a terminal status intact: a completed or
+// failed run must never be rolled back to cancelled by a late heal, and a
+// repeated heal settles nothing twice. ErrNotFound means no workspace row
+// (delegated child runs) or nothing to settle — a no-op for the caller.
+func (s *Store) SettleRunCancelled(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE workspace_run SET status = 'cancelled', answer = '', turns = 0, error = '', updated_at = $2
+		 WHERE id = $1 AND status NOT IN ('completed', 'failed', 'cancelled')`,
+		id, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListRuns(ctx context.Context, taskID string) ([]Run, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, COALESCE(task_id, '') AS task_id, project_id, agent_id, agent_version, exec_context, run_id, status, model, answer, turns, error, created_at, updated_at
@@ -727,6 +747,27 @@ func (s *Store) RunProjectID(ctx context.Context, runID string) (string, error) 
 	return project, err
 }
 
+// RunSourceID resolves a run's authoritative source id from its run.started
+// journal row — the very source the run's Temporal workflow identity is
+// digested from (agent.WorkflowID). Clients may send a source_id hint, but it
+// often misses a child run's run.started in the window they loaded, so the
+// journal is the only trusted answer. ErrNotFound means the journal knows no
+// such run in the project.
+func (s *Store) RunSourceID(ctx context.Context, project, runID string) (string, error) {
+	var source string
+	err := s.pool.QueryRow(ctx,
+		`SELECT source_id FROM observation_events
+		 WHERE type = 'run.started' AND run_id = $1 AND project_id = $2
+		 ORDER BY occurred_at DESC LIMIT 1`, runID, project).Scan(&source)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	return source, nil
+}
+
 // StreamRunEvents fetches observation events for a run, optionally starting
 // after a cursor (event_id). Returns events ordered by occurred_at.
 func (s *Store) StreamRunEvents(ctx context.Context, projectID, runID, afterCursor string, limit int) ([]StreamEvent, string, error) {
@@ -815,6 +856,33 @@ func (s *Store) StreamRunEventsTail(ctx context.Context, projectID, runID string
 		events[i], events[j] = events[j], events[i]
 	}
 	return events, events[len(events)-1].EventID, nil
+}
+
+// RunTerminalStatuses maps run ids to their latest terminal journal event
+// (run.completed / run.failed / run.cancelled → completed / failed /
+// cancelled). Ids without a terminal event are absent — the caller renders
+// them as running, exactly like the old client-side status scan did.
+func (s *Store) RunTerminalStatuses(ctx context.Context, runIDs []string) (map[string]string, error) {
+	statuses := make(map[string]string, len(runIDs))
+	if len(runIDs) == 0 {
+		return statuses, nil
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT ON (run_id) run_id, type FROM observation_events
+		 WHERE type IN ('run.completed', 'run.failed', 'run.cancelled') AND run_id = ANY($1)
+		 ORDER BY run_id, occurred_at DESC`, runIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var runID, eventType string
+		if err := rows.Scan(&runID, &eventType); err != nil {
+			return nil, err
+		}
+		statuses[runID] = strings.TrimPrefix(eventType, "run.")
+	}
+	return statuses, rows.Err()
 }
 
 // Triggers
