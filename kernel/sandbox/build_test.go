@@ -98,6 +98,22 @@ func TestCustomDefinitionRejects(t *testing.T) {
 	if _, err := CustomDefinition("ok-id", "python", sixtyFive); err == nil {
 		t.Error("expected error for too many packages")
 	}
+	// A Debian name on an alpine base (or the reverse) fails the build minutes
+	// in with a bare apk error — reject it up front and name the right package.
+	if _, err := CustomDefinition("ok-id", "node", []string{"golang-go", "docker.io", "docker-compose"}); err == nil {
+		t.Error("expected error for apt names on an alpine base")
+	} else if !strings.Contains(err.Error(), `"go"`) {
+		t.Errorf("error must name the alpine equivalent, got: %v", err)
+	}
+	if _, err := CustomDefinition("ok-id", "browser-e2e", []string{"build-base"}); err == nil {
+		t.Error("expected error for an apk name on the debian base")
+	} else if !strings.Contains(err.Error(), `"build-essential"`) {
+		t.Errorf("error must name the apt equivalent, got: %v", err)
+	}
+	// Names that exist in both distros pass untouched.
+	if _, err := CustomDefinition("ok-id", "node", []string{"go", "docker-cli", "make"}); err != nil {
+		t.Errorf("alpine names must pass: %v", err)
+	}
 	if !ValidPackageName("libicu-dev") || !ValidPackageName("python3-dev") || !ValidPackageName("postgresql-client") {
 		t.Error("valid package names rejected")
 	}

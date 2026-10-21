@@ -116,6 +116,52 @@ func ValidPackageName(name string) bool { return validPackageName.MatchString(na
 // layer never needs more.
 const maxRecipePackages = 64
 
+// aptToApkNames maps the Debian/Ubuntu package names models and developers
+// reach for by habit onto their alpine equivalents: the apk index has no such
+// names, and the build would waste minutes pulling layers before dying with
+// a bare «no such package». The custom-profile validator turns every hit
+// into an actionable error before any docker call.
+var aptToApkNames = map[string]string{
+	"golang-go":       "go",
+	"docker.io":       "docker-cli",
+	"docker-compose":  "docker-cli-compose",
+	"build-essential": "build-base",
+	"python3-pip":     "py3-pip",
+	"python3-venv":    "python3",
+	"libssl-dev":      "openssl-dev",
+	"libpq-dev":       "postgresql-dev",
+	"pkg-config":      "pkgconf",
+}
+
+// apkToAptNames is the reverse check for the debian-based browser-e2e base.
+var apkToAptNames = map[string]string{
+	"go":                 "golang-go",
+	"docker-cli":         "docker.io",
+	"docker-cli-compose": "docker-compose",
+	"build-base":         "build-essential",
+	"py3-pip":            "python3-pip",
+	"openssl-dev":        "libssl-dev",
+	"postgresql-dev":     "libpq-dev",
+	"pkgconf":            "pkg-config",
+}
+
+// packageManagerMismatch reports the correct name when package is a valid
+// name of the OTHER distro: the builtin bases are alpine (apk) except
+// browser-e2e (apt), and Debian names are written far more often than alpine
+// ones.
+func packageManagerMismatch(base, name string) (string, bool) {
+	if base == "browser-e2e" {
+		if apt, ok := apkToAptNames[name]; ok {
+			return apt, true
+		}
+		return "", false
+	}
+	if apk, ok := aptToApkNames[name]; ok {
+		return apk, true
+	}
+	return "", false
+}
+
 // CustomDefinition composes the build recipe for a custom profile: the base
 // recipe plus one extra package-install layer using the base distro's package
 // manager. profileID names the local tag so rebuilds overwrite in place.
@@ -133,6 +179,15 @@ func CustomDefinition(profileID, base string, packages []string) (ProfileDefinit
 	for _, name := range packages {
 		if len(name) > 64 || !ValidPackageName(name) {
 			return ProfileDefinition{}, fmt.Errorf("package name %q is not a valid apk/apt package", name)
+		}
+		if fix, mismatch := packageManagerMismatch(base, name); mismatch {
+			distro, manager := "alpine", "apk"
+			wrong := "Debian (apt)"
+			if base == "browser-e2e" {
+				distro, manager = "debian", "apt"
+				wrong = "alpine (apk)"
+			}
+			return ProfileDefinition{}, fmt.Errorf("package %q is an %s name and does not exist in %s repositories; the %q base installs with %s — use %q instead", name, wrong, distro, base, manager, fix)
 		}
 	}
 	dockerfile := baseDef.Dockerfile
