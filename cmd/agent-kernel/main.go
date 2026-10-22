@@ -3522,9 +3522,25 @@ func main() {
 			return
 		}
 		runID := r.PathValue("runID")
+		// Child runs carry no workspace_run row (same resolution /stream uses):
+		// fall back to the journal's project mapping, or every delegated child
+		// would 404 here and never stream live tokens.
 		run, err := ws.GetRun(r.Context(), runID)
-		if err != nil {
-			writeError(w, 404, err)
+		if err != nil && !errors.Is(err, workspace.ErrNotFound) {
+			writeError(w, 500, err)
+			return
+		}
+		project := ""
+		if err == nil {
+			project = run.ProjectID
+		} else if resolved, perr := ws.RunProjectID(r.Context(), runID); perr == nil {
+			project = resolved
+			// Re-read the row with the project resolved: the terminal probe
+			// below only needs ProjectID; a missing row is fine.
+			run = workspace.Run{RunID: runID, ProjectID: project}
+			err = nil
+		} else {
+			writeError(w, 404, workspace.ErrNotFound)
 			return
 		}
 		flusher, ok := w.(http.Flusher)
@@ -3558,6 +3574,7 @@ func main() {
 			return event.Type == "done"
 		}
 		if snapshot.Type == "done" {
+			slog.Info("token stream: subscribe to a closed run", "run_id", runID)
 			writeEvent(TokenDoneEvent)
 			return
 		}
@@ -3619,6 +3636,7 @@ func main() {
 				}
 			case <-statusTicker.C:
 				if terminal() {
+					slog.Info("token stream: run terminal", "run_id", runID)
 					activities.Tokens.Close(runID)
 					writeEvent(TokenDoneEvent)
 					return

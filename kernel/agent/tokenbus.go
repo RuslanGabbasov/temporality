@@ -89,13 +89,20 @@ func (r *tokenRun) broadcastLocked(event TokenEvent) {
 }
 
 // Publish appends a live delta for the run. A turn change resets the
-// accumulated text: the UI renders one live segment per model call.
+// accumulated text: the UI renders one live segment per model call. A
+// previously closed entry is revived: a publish is proof the run is still
+// generating, and a stale close (a terminal-looking describe during a
+// restart, a previous SSE connection's sweep) must not poison every later
+// model call of the same run — deltas would drop silently and every
+// reconnecting UI would get an instant done forever.
 func (b *TokenBus) Publish(runID string, turn int, text, reasoning string) {
 	r := b.run(runID)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		return
+		r.closed = false
+		r.subs = make(map[chan TokenEvent]struct{})
+		r.resetLocked(turn)
 	}
 	if r.turn != turn {
 		r.resetLocked(turn)
@@ -111,13 +118,15 @@ func (b *TokenBus) Publish(runID string, turn int, text, reasoning string) {
 
 // PublishTool appends a live tool-call delta. Name is set on the first chunk
 // that carries it; later chunks stream argument fragments. Text turns and tool
-// turns share the turn-reset semantics.
+// turns share the turn-reset semantics. Revives a closed entry like Publish.
 func (b *TokenBus) PublishTool(runID string, turn int, name, argsDelta string) {
 	r := b.run(runID)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		return
+		r.closed = false
+		r.subs = make(map[chan TokenEvent]struct{})
+		r.resetLocked(turn)
 	}
 	if r.turn != turn {
 		r.resetLocked(turn)
