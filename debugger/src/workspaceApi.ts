@@ -1000,13 +1000,42 @@ export class ApiError extends Error {
   }
 }
 
+/** Overall deadline for one API call (spec R3, incident 2026-10-21): a hung
+ *  kernel request must fail with a typed ApiError instead of pinning the
+ *  caller forever. Response contracts are unchanged — this only adds the
+ *  failure mode for requests that never answer. */
+const REQUEST_TIMEOUT_MS = 60000
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${KERNEL_API}${path}`, { ...init, headers: headers() })
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    throw new ApiError(response.status, body)
+  // Additive guard around the existing fetch: AbortController + setTimeout
+  // covers both the response headers and the body read, and a caller-supplied
+  // AbortSignal (e.g. listHumanRequests) keeps working through the relay.
+  const deadline = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    deadline.abort()
+  }, REQUEST_TIMEOUT_MS)
+  const callerSignal = init?.signal
+  const relayAbort = () => deadline.abort(callerSignal?.reason)
+  if (callerSignal?.aborted) relayAbort()
+  else callerSignal?.addEventListener('abort', relayAbort, { once: true })
+  try {
+    const response = await fetch(`${KERNEL_API}${path}`, { ...init, headers: headers(), signal: deadline.signal })
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      throw new ApiError(response.status, body)
+    }
+    return await response.json()
+  } catch (e) {
+    if (timedOut && !(e instanceof ApiError)) {
+      throw new ApiError(408, { error: `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s` })
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+    callerSignal?.removeEventListener('abort', relayAbort)
   }
-  return response.json()
 }
 
 export const workspaceApi = {

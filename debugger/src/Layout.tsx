@@ -265,6 +265,10 @@ export default function Layout({ children, activePage }: LayoutProps) {
   // system intake project is bootstrapped on every install and must not count
   // as a user project here, or a fresh install would skip the wizard.
   const [projectsLoaded, setProjectsLoaded] = useState(false)
+  // Incident 2026-10-21 (F5/D3, spec R3): a failed project load used to be
+  // swallowed into a silently empty selector — now it is a visible state with
+  // a Retry button; a successful load clears it.
+  const [projectsError, setProjectsError] = useState<string | null>(null)
   const onboarding = projectsLoaded && !projects.some((p) => p.id !== INTAKE_PROJECT_ID)
 
   useEffect(() => {
@@ -339,6 +343,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
       if (resp.ok) {
         const data = await resp.json()
         const list: Project[] = data.projects ?? []
+        setProjectsError(null)
         setProjects(list)
         setProject((current) => {
           // "" is the explicit All-projects filter (docs/activity-scoping.md
@@ -365,7 +370,12 @@ export default function Layout({ children, activePage }: LayoutProps) {
         })
         return list
       }
-    } catch { /* ignore */ }
+      // Incident 2026-10-21 (R3): a non-OK answer surfaces as an error state
+      // instead of a silently empty selector.
+      setProjectsError(`HTTP ${resp.status}`)
+    } catch (e) {
+      setProjectsError(e instanceof Error && e.message ? e.message : 'network error')
+    }
     return []
   }, [])
 
@@ -634,6 +644,16 @@ export default function Layout({ children, activePage }: LayoutProps) {
         )}
 
         <HeaderGlobalBar>
+          {/* Incident 2026-10-21 (spec R3): a failed project load must be
+              visible with a Retry, not a silently empty selector. Deliberately
+              not gated on onboarding: an error leaves the list empty, which is
+              exactly the state that would otherwise hide the selector. */}
+          {projectsError && (
+            <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginRight: '0.5rem', padding: '0.25rem 0.6rem', border: '1px solid #da1e28', borderRadius: 'var(--tm-radius-sm)', background: 'rgba(214, 48, 49, 0.15)' }}>
+              <span style={{ color: '#ffb4ab', fontSize: 'var(--tm-text-sm)' }}>Failed to load projects: {projectsError}</span>
+              <Button size="sm" onClick={() => { void loadProjects() }}>Retry</Button>
+            </div>
+          )}
           {/* Project selector — hidden during onboarding */}
           {!onboarding && (
           <div style={{ position: 'relative', marginRight: '0.5rem' }} ref={projectPanelRef}>

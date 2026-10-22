@@ -373,9 +373,16 @@ func (l *eventTriggerListener) fire(ctx context.Context, t *parsedEventTrigger, 
 	input.ExecutionIdentityID = identityID
 	workflowID := workflowIDFor(l.sourceID, t.trigger.ProjectID, input.RunID)
 	options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: l.taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-	if _, err := l.temporal.ExecuteWorkflow(ctx, options, "AgentRun", input); err != nil {
-		if !strings.Contains(err.Error(), "already running") && !strings.Contains(err.Error(), "WorkflowExecutionAlreadyStarted") && !isWorkflowExistsError(err) {
-			l.log.Error("event trigger: start run", "trigger", t.trigger.ID, "error", err)
+	// R1 (kernel-wedge-2026-10-21): the event-trigger start rides the temporal
+	// RPC deadline — a wedged Temporal costs this one event (logged below),
+	// not the listener; failures keep the existing already-started/error
+	// handling.
+	rpcCtx, cancelRPC := context.WithTimeout(ctx, temporalRPCTimeout())
+	_, rpcErr := l.temporal.ExecuteWorkflow(rpcCtx, options, "AgentRun", input)
+	cancelRPC()
+	if rpcErr != nil {
+		if !strings.Contains(rpcErr.Error(), "already running") && !strings.Contains(rpcErr.Error(), "WorkflowExecutionAlreadyStarted") && !isWorkflowExistsError(rpcErr) {
+			l.log.Error("event trigger: start run", "trigger", t.trigger.ID, "error", rpcErr)
 		}
 		return
 	}
