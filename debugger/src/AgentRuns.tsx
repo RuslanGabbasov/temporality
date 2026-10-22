@@ -1205,18 +1205,26 @@ export default function AgentRuns({ project }: { project: string }) {
                           // A tool name here means the model is streaming a tool
                           // call right now (no answer text this turn) — the most
                           // informative thing the row can show.
-                          if (tokenMetrics.tool) liveParts.push(`⚙ ${tokenMetrics.tool}`)
-                          if (tokenMetrics.approxTokens > 0) liveParts.push(`~${tokenMetrics.approxTokens} tok`)
-                          if (tokenMetrics.tps > 0) liveParts.push(`${tokenMetrics.tps} tok/s`)
-                          const stalled = tokenMetrics.lastChunkAgoMs > 15_000
-                          if (tokenMetrics.streaming) {
-                            liveParts.push(stalled
-                              ? t('runs.live.stalled', { seconds: String(Math.floor(tokenMetrics.lastChunkAgoMs / 1000)) })
-                              : t('runs.live.alive'))
-                          } else if (tokenMetrics.approxTokens === 0) {
-                            // No chunks yet: either the thinking phase before
-                            // the first token or a non-streaming transport.
-                            liveParts.push(t('runs.live.waiting_first_token'))
+                          if (!tokenMetrics.connected) {
+                            // The token channel never opened (auth, proxy,
+                            // dead endpoint): the silence is the transport's,
+                            // not the model's — say so instead of blaming the
+                            // first token.
+                            liveParts.push(t('runs.live.sse_down'))
+                          } else {
+                            if (tokenMetrics.tool) liveParts.push(`⚙ ${tokenMetrics.tool}`)
+                            if (tokenMetrics.approxTokens > 0) liveParts.push(`~${tokenMetrics.approxTokens} tok`)
+                            if (tokenMetrics.tps > 0) liveParts.push(`${tokenMetrics.tps} tok/s`)
+                            const stalled = tokenMetrics.lastChunkAgoMs > 15_000
+                            if (tokenMetrics.streaming) {
+                              liveParts.push(stalled
+                                ? t('runs.live.stalled', { seconds: String(Math.floor(tokenMetrics.lastChunkAgoMs / 1000)) })
+                                : t('runs.live.alive'))
+                            } else if (tokenMetrics.approxTokens === 0) {
+                              // No chunks yet: either the thinking phase before
+                              // the first token or a non-streaming transport.
+                              liveParts.push(t('runs.live.waiting_first_token'))
+                            }
                           }
                         }
                       }

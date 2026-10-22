@@ -15,6 +15,10 @@ export interface RunTokenMetrics {
   /** Tool name when the model is currently streaming a tool call (no answer
    * text this turn — the args are the output). Feeds the live “⚙ tool” hint. */
   tool?: string
+  /** False while the EventSource has not opened (or died): without it the UI
+   * cannot tell a thinking model from a dead token channel, and a broken
+   * transport reads as "waiting for the first token" forever. */
+  connected: boolean
 }
 
 /** Sliding window for the rate estimate: long enough to smooth out bursty
@@ -88,7 +92,7 @@ export class TokenMeter {
     else if (frame.text) this.tool = ''
   }
 
-  metrics(now: number = Date.now()): RunTokenMetrics {
+  metrics(now: number = Date.now()): Omit<RunTokenMetrics, 'connected'> {
     while (this.window.length > 0 && now - this.window[0].t > RATE_WINDOW_MS) this.window.shift()
     const spanS = (now - (this.window[0]?.t ?? now)) / 1000
     const windowChars = this.window.reduce((sum, sample) => sum + sample.chars, 0)
@@ -105,21 +109,24 @@ export class TokenMeter {
 }
 
 /** Subscribe to the run's ephemeral token stream while `active` and expose
- * live metrics at ~1Hz. Returns null until the first frame arrives (auth
+ * live metrics at ~1Hz. Returns null until the subscription settles (auth
  * failure, non-streaming run or a pre-first-token thinking phase all land
- * there — the caller falls back to the static model.started row). */
+ * there — the caller falls back to the static model.started row). The
+ * `connected` flag distinguishes a live channel from one that never opened. */
 export function useRunTokenMetrics(runId: string, active: boolean): RunTokenMetrics | null {
   const [metrics, setMetrics] = useState<RunTokenMetrics | null>(null)
   const meterRef = useRef(new TokenMeter())
+  const connectedRef = useRef(false)
 
   useEffect(() => {
     meterRef.current = new TokenMeter()
+    connectedRef.current = false
     setMetrics(null)
     if (!active || !runId) return
     const meter = meterRef.current
     const token = localStorage.getItem('temporality_token') ?? ''
     const es = new EventSource(`/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/tokens${token ? `?token=${token}` : ''}`)
-    const touch = () => setMetrics(meter.metrics())
+    const touch = () => setMetrics({ ...meter.metrics(), connected: connectedRef.current })
     const onFrame = (e: MessageEvent) => {
       try {
         meter.apply(JSON.parse(e.data) as TokenStreamFrame)
@@ -133,7 +140,18 @@ export function useRunTokenMetrics(runId: string, active: boolean): RunTokenMetr
       touch()
       es.close()
     })
-    es.onerror = () => es.close()
+    // The kernel flushes an SSE comment right after the headers, so 'open'
+    // fires within one round-trip — before it, the channel is blind and the
+    // caller must not read the silence as a thinking model.
+    es.onopen = () => {
+      connectedRef.current = true
+      touch()
+    }
+    es.onerror = () => {
+      connectedRef.current = false
+      touch()
+      es.close()
+    }
     // 1Hz refresh keeps "last chunk Ns ago" ticking between deltas.
     const ticker = window.setInterval(touch, 1000)
     return () => {

@@ -737,6 +737,7 @@ export const ru: Record<string, string> = {
     'runs.live.alive': 'стрим идёт',
     'runs.live.stalled': 'нет данных {{seconds}} с',
     'runs.live.waiting_first_token': 'ждём первый токен',
+    'runs.live.sse_down': 'канал токенов не подключился (транспорт, не модель)',
 
     // Reconcile operations (inline cards in the run trace)
     'operations.check_external': 'Проверьте внешнюю систему (база данных, API, файловая система) и сообщите Temporality, что произошло на самом деле.',

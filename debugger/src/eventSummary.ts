@@ -222,12 +222,14 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       // first token is a real stream; one late delta means the provider
       // buffered the whole answer — the live tok/s display is not possible
       // there, and this line is where that becomes visible.
-      const shape = d.transport === 'stream' && d.deltas !== undefined
-        ? (d.deltas <= 1
+      const deltas = Number(d.deltas)
+      const firstTokenMs = Number(d.first_token_ms)
+      const shape = d.transport === 'stream' && d.deltas != null
+        ? (deltas <= 1
             ? `⛔ ${t('runs.event.stream_buffered')}`
-            : `${d.deltas} ${t('runs.event.stream_chunks')} · ttft ${((Number(d.first_token_ms) || 0) / 1000).toFixed(1)}s`)
+            : `${deltas} ${t('runs.event.stream_chunks')} · ttft ${(firstTokenMs / 1000).toFixed(1)}s`)
         : ''
-      const retried = d.stream_retried ? `↻ ${t('runs.event.stream_retried', { seconds: ((Number(d.stream_retried_ms) || 0) / 1000).toFixed(0) })}` : ''
+      const retried = d.stream_retried ? `↻ ${t('runs.event.stream_retried', { seconds: String((Number(d.stream_retried_ms) || 0) / 1000) })}` : ''
       const parts = [tokens, cached, latency, calls, shape, retried, regen].filter(Boolean).join(' · ')
       return { icon: '🧠', label: t('runs.event.model_response'), detail: parts, color: '#bb9af7' }
     }

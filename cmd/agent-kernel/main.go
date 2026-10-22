@@ -3541,6 +3541,14 @@ func main() {
 		// after its budget; the write deadline is cleared for this connection
 		// and hang safety comes from the per-RPC deadlines (R1).
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+		// Flush the headers and a comment line immediately: Go does not write
+		// headers until the first body write, so without this the browser (and
+		// every proxy on the way) waits for the response to BEGIN until the
+		// first delta — the EventSource stays CONNECTING and the live metrics
+		// look dead even when the provider streams fine. A comment line is SSE
+		// liveness: no event fires on the client for it.
+		fmt.Fprint(w, ": open\n\n")
+		flusher.Flush()
 		events, snapshot, cancel := activities.Tokens.Subscribe(runID)
 		defer cancel()
 		writeEvent := func(event agent.TokenEvent) bool {
@@ -3559,6 +3567,11 @@ func main() {
 		ctx := r.Context()
 		statusTicker := time.NewTicker(5 * time.Second)
 		defer statusTicker.Stop()
+		// Keepalive comments: proxies and load balancers see traffic on an
+		// otherwise silent connection (a thinking model can stream nothing for
+		// a minute+) and neither close it nor buffer past it.
+		keepaliveTicker := time.NewTicker(15 * time.Second)
+		defer keepaliveTicker.Stop()
 		// hangup is armed by the dErr path below when the describe's own R1
 		// deadline expired. Headers were sent long ago, so there is no HTTP
 		// status to rewrite mid-stream — the stream ends on this tick through
@@ -3617,6 +3630,9 @@ func main() {
 					writeEvent(TokenDoneEvent)
 					return
 				}
+			case <-keepaliveTicker.C:
+				fmt.Fprint(w, ": ping\n\n")
+				flusher.Flush()
 			}
 		}
 	})
