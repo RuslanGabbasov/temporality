@@ -693,6 +693,16 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	}()
 	response, err := c.streamHTTP.Do(request)
 	if err != nil {
+		// The watchdogs may have canceled the request while Do was still waiting
+		// for the response headers — the server-side queue in its purest form
+		// (the provider accepted the connection and sends nothing). The cancel
+		// must keep its watchdog identity: as a bare transport error it sends
+		// callers into the blocking retry ladder, which joins the same queue and
+		// adds minutes of silent waiting — exactly what the watchdogs exist to
+		// cut short.
+		if reason, ok := cancelReason.Load().(string); ok {
+			return Completion{}, &watchdogError{reason: reason, cause: err}
+		}
 		return Completion{}, &transportError{err: err}
 	}
 	defer response.Body.Close()

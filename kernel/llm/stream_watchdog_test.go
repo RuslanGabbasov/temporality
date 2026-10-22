@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -231,6 +232,46 @@ func TestStreamTimedOutRejectsNonWatchdogErrors(t *testing.T) {
 	}
 	if StreamTimedOut(nil) {
 		t.Fatal("nil is not a watchdog timeout")
+	}
+}
+
+// A provider that accepts the connection and then sends nothing — not even
+// response headers — parks Do() itself. The watchdog cancel must keep its
+// identity through the Do error path: as a bare transport error it would
+// misroute callers into the blocking retry ladder, which joins the same queue
+// and hangs for minutes (the exact 5-10-minute first-token waits the traces
+// show).
+func TestStreamWatchdogCancelDuringDoKeepsWatchdogIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Drain the body first: only after the body hits EOF does the test
+		// server arm its disconnect detection (background read), and without it
+		// the handler would never learn that the client went away.
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done() // headers never sent: a pure server-side queue
+	}))
+	defer server.Close()
+	client := New(Config{
+		BaseURL:           server.URL,
+		Model:             "test",
+		StreamIdleTimeout: 250 * time.Millisecond,
+		// Isolate the idle watchdog: the other budgets would fire later.
+		StreamNoProgressTimeout: time.Minute,
+		StreamFirstTokenTimeout: time.Minute,
+	})
+
+	started := time.Now()
+	_, err := client.StreamComplete(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err == nil {
+		t.Fatal("expected the idle watchdog to cancel a header-less queue")
+	}
+	if !StreamTimedOut(err) {
+		t.Fatalf("a watchdog cancel during Do must stay a watchdog error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "idle timeout") {
+		t.Fatalf("error should name the fired budget, got: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("watchdog fired too late: %s", elapsed)
 	}
 }
 
