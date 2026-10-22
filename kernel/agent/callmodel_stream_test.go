@@ -255,6 +255,11 @@ func TestCallModelStreamTimeoutRetriesOnFreshConnection(t *testing.T) {
 	if !strings.Contains(completion.Content, "STREAMED") {
 		t.Fatalf("content = %q", completion.Content)
 	}
+	// The recovered stream must not hide the dead first attempt behind its
+	// own (healthy) latency: the marker carries the wasted time.
+	if !completion.StreamRetried || completion.StreamMs <= 0 {
+		t.Fatalf("a retried stream must carry stream_retried + wasted ms, got: retried=%v ms=%d", completion.StreamRetried, completion.StreamMs)
+	}
 	if got := atomic.LoadInt32(&requests); got != 2 {
 		t.Fatalf("HTTP requests = %d, want 2 (dead stream + fresh-connection retry)", got)
 	}

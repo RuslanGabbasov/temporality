@@ -218,7 +218,17 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       // The stream died mid-flight and the blocking fallback regenerated the
       // answer — the latency already includes both generations.
       const regen = d.stream_failed ? `↻ ${t('runs.event.stream_regen')}` : ''
-      const parts = [tokens, cached, latency, calls, regen].filter(Boolean).join(' · ')
+      // Stream shape (streaming transports only): many deltas with an early
+      // first token is a real stream; one late delta means the provider
+      // buffered the whole answer — the live tok/s display is not possible
+      // there, and this line is where that becomes visible.
+      const shape = d.transport === 'stream' && d.deltas !== undefined
+        ? (d.deltas <= 1
+            ? `⛔ ${t('runs.event.stream_buffered')}`
+            : `${d.deltas} ${t('runs.event.stream_chunks')} · ttft ${((Number(d.first_token_ms) || 0) / 1000).toFixed(1)}s`)
+        : ''
+      const retried = d.stream_retried ? `↻ ${t('runs.event.stream_retried', { seconds: ((Number(d.stream_retried_ms) || 0) / 1000).toFixed(0) })}` : ''
+      const parts = [tokens, cached, latency, calls, shape, retried, regen].filter(Boolean).join(' · ')
       return { icon: '🧠', label: t('runs.event.model_response'), detail: parts, color: '#bb9af7' }
     }
     case 'model.failed': {

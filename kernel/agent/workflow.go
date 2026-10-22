@@ -2454,6 +2454,16 @@ func modelObservability(completion llm.Completion) map[string]any {
 			}
 		}
 	}
+	// A stream recovered by the fresh-connection retry kept the transport but
+	// still burned the first attempt: the event carries the dead attempt's
+	// duration next to the (healthy) latency, so "latency 3.5s" never reads
+	// as "the whole call took 3.5s".
+	if completion.StreamRetried {
+		data["stream_retried"] = true
+		if completion.StreamMs > 0 {
+			data["stream_retried_ms"] = completion.StreamMs
+		}
+	}
 	return data
 }
 

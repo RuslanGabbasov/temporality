@@ -631,6 +631,11 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 				return false
 			}, llm.WithPromptCacheKey(request.PromptCacheKey))
 			if retryErr == nil {
+				// The retry answered, but the latency number must not hide the
+				// dead first attempt: the trace shows "3.5s" next to a turn that
+				// really waited minutes unless the salvage is marked here too.
+				retryCompletion.StreamRetried = true
+				retryCompletion.StreamMs = streamMs
 				return retryCompletion, nil
 			}
 			if ctx.Err() != nil {
