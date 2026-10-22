@@ -13,8 +13,9 @@ import (
 // needs the exact agent ids valid in the project. Ids are not always derivable
 // from display names ("Lead" → lead-ai-agent), and a wrong guess costs a full
 // failed-resolution round-trip (or a plan rejection). The roster returns id,
-// name, purpose and the capability profile — the fields a delegating agent
-// needs to pick a target.
+// name, purpose, the capability profile and the turn budget a child of this
+// agent would run with — the fields a delegating agent needs to pick a target
+// and size its task budgets.
 
 // agentLite is the roster's unmarshal target: the workspace API returns full
 // Agent rows, only the delegation-relevant fields are kept.
@@ -23,6 +24,7 @@ type agentLite struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	ProjectID   string `json:"project_id"`
+	MaxTurns    *int   `json:"max_turns,omitempty"`
 	Definition  *struct {
 		Capabilities struct {
 			ReadFiles   *bool `json:"read_files"`
@@ -45,6 +47,11 @@ type agentCard struct {
 	Scope        string   `json:"scope,omitempty"` // set for project-scoped agents
 	CanDelegate  bool     `json:"can_delegate"`
 	Capabilities []string `json:"capabilities"` // always an array; empty for legacy agents
+	// MaxTurns is the budget a delegated child of this agent runs with when
+	// the delegate/plan call does not set its own — the same value
+	// applyAgentConfig enforces. Without it the lead sizes budgets blind:
+	// an 8-turn card quietly kills any real subtask mid-work.
+	MaxTurns int `json:"max_turns"`
 }
 
 func (a *Activities) handleAgents(ctx context.Context, request ToolRequest) (ToolResult, error) {
@@ -114,6 +121,14 @@ func agentCardFor(a agentLite) agentCard {
 	if a.ProjectID != "" {
 		card.Scope = "project:" + a.ProjectID
 	}
+	// The effective child budget: the card value when configured, the workflow
+	// default otherwise — normalizeTurnBudget applies the same rule at run
+	// start, so the number here is what a child would actually run with.
+	cardTurns := 0
+	if a.MaxTurns != nil {
+		cardTurns = *a.MaxTurns
+	}
+	card.MaxTurns = normalizeTurnBudget(cardTurns)
 	if a.Definition == nil {
 		card.Capabilities = []string{}
 		return card

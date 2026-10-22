@@ -28,8 +28,8 @@ func agentsStub(t *testing.T, agentsJSON string) *httptest.Server {
 
 func rosterFixture() string {
 	return `{"agents":[
-		{"id":"lead-ai-agent","name":"Lead","description":"Decomposes features and drives the dev pipeline",
-		 "definition":{"capabilities":{"delegation":true,"modify_files":true,"run_commands":true,"skills":true,"knowledge":true,"read_files":false}}},
+		{"id":"lead-ai-agent","name":"Lead","description":"Decomposes features and drives the dev pipeline","max_turns":50,
+			 "definition":{"capabilities":{"delegation":true,"modify_files":true,"run_commands":true,"skills":true,"knowledge":true,"read_files":false}}},
 		{"id":"researcher","name":"Product Analyst","description":"Researches the market and competitors"},
 		{"id":"intake","name":"Intake","description":"Routes inbound messages","project_id":"delegate-smoke"}
 	]}`
@@ -74,10 +74,16 @@ func TestAgentsToolRendersDelegationRoster(t *testing.T) {
 	require.Contains(t, lead["capabilities"], "modify_files")
 	require.NotContains(t, lead["capabilities"], "read_files")
 
+	// The effective child budget: the card's configured value, or the
+	// workflow default when the card does not configure one — the number a
+	// delegated child runs with when the call sets no max_turns.
+	require.EqualValues(t, 50, lead["max_turns"])
+
 	// A legacy agent (no definition): no delegation, empty capabilities.
 	researcher := cards[1]
 	require.False(t, researcher["can_delegate"].(bool))
 	require.Equal(t, []any{}, researcher["capabilities"])
+	require.EqualValues(t, 8, researcher["max_turns"], "unset card falls back to the workflow default")
 
 	// Project scope is surfaced.
 	intake := cards[2]
