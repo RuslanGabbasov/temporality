@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/temporality-project/temporality/controlplane"
@@ -106,6 +107,10 @@ func writeSandboxProfileError(w http.ResponseWriter, err error) {
 		writeError(w, 409, err)
 	case errors.Is(err, workspace.ErrProfileInUse):
 		writeError(w, 409, err)
+	case errors.Is(err, workspace.ErrProfileUnprocessable):
+		// Recipe-source violations (D2.1/D2.4): the request is well-formed
+		// but semantically inconsistent — explicit 422, never a silent fix.
+		writeError(w, 422, err)
 	default:
 		writeError(w, 400, err)
 	}
@@ -196,8 +201,9 @@ func RegisterSandboxProfileRoutes(mux *http.ServeMux, gate *controlplane.Gate, w
 			return
 		}
 		var req struct {
-			Base     string   `json:"base"`
-			Packages []string `json:"packages"`
+			Base               string   `json:"base"`
+			Packages           []string `json:"packages"`
+			DockerfileOverride string   `json:"dockerfile_override"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
 			writeError(w, 400, err)
@@ -205,7 +211,22 @@ func RegisterSandboxProfileRoutes(mux *http.ServeMux, gate *controlplane.Gate, w
 		}
 		// The composed recipe without touching Docker: the layer-builder UI
 		// shows the operator exactly what a build would produce (docs/
-		// sandbox-profiles.md §5.1) before any image exists.
+		// sandbox-profiles.md §5.1) before any image exists. An operator
+		// override (D1) travels verbatim through the same strict validation
+		// and is echoed back only when valid.
+		if strings.TrimSpace(req.DockerfileOverride) != "" {
+			if strings.TrimSpace(req.Base) != "" || len(req.Packages) > 0 {
+				writeError(w, 422, errors.New("dockerfile_override excludes base and packages — preview one recipe source at a time"))
+				return
+			}
+			def, err := sandbox.OverrideDefinition("preview", req.DockerfileOverride)
+			if err != nil {
+				writeError(w, 422, err)
+				return
+			}
+			writeJSON(w, 200, map[string]any{"dockerfile": def.Dockerfile})
+			return
+		}
 		def, err := sandbox.CustomDefinition("preview", req.Base, req.Packages)
 		if err != nil {
 			writeError(w, 422, err)
@@ -271,14 +292,24 @@ func RegisterSandboxProfileRoutes(mux *http.ServeMux, gate *controlplane.Gate, w
 				writeSandboxProfileError(w, err)
 				return
 			}
-			if profile.Base == "" {
+			if profile.Base == "" && strings.TrimSpace(profile.DockerfileOverride) == "" {
 				writeError(w, 409, fmt.Errorf("profile %q has no build recipe; set its image reference directly", id))
 				return
 			}
-			def, err = sandbox.CustomDefinition(profile.ID, profile.Base, profile.Packages)
-			if err != nil {
-				writeError(w, 422, err)
-				return
+			if strings.TrimSpace(profile.DockerfileOverride) != "" {
+				// Operator recipe (D1): the exact stored text, same strict
+				// validation, same tag convention as composed recipes.
+				def, err = sandbox.OverrideDefinition(profile.ID, profile.DockerfileOverride)
+				if err != nil {
+					writeError(w, 422, err)
+					return
+				}
+			} else {
+				def, err = sandbox.CustomDefinition(profile.ID, profile.Base, profile.Packages)
+				if err != nil {
+					writeError(w, 422, err)
+					return
+				}
 			}
 			custom = true
 		}

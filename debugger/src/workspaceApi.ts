@@ -161,6 +161,9 @@ export interface SandboxProfile {
    *  digest lands in image. Empty for external-image and builtin rows. */
   base?: string
   packages?: string[]
+  /** Operator-authored full Dockerfile (spec D1/D6): XOR with base/packages
+   *  and with a direct image; travels verbatim to docker build stdin. */
+  dockerfile_override?: string
   toolchains?: string[]
   memory?: string
   cpus?: string
@@ -1155,6 +1158,11 @@ export const workspaceApi = {
   // Dockerfile a build would run, composed without touching Docker.
   previewSandboxRecipe: (base: string, packages: string[]) =>
     request<{ dockerfile: string }>('/v1/workspace/sandbox-profiles/preview', { method: 'POST', body: JSON.stringify({ base, packages }) }),
+  // Operator-recipe preview (spec §4): validates dockerfile_override through
+  // the same strict path a build would take and echoes the text back when
+  // valid; a 422 carries the line-numbered violations the form shows.
+  previewSandboxDockerfile: (dockerfile: string) =>
+    request<{ dockerfile: string }>('/v1/workspace/sandbox-profiles/preview', { method: 'POST', body: JSON.stringify({ dockerfile_override: dockerfile }) }),
   // Pull an external image reference and pin its digest into the profile.
   pullSandboxProfile: (id: string, reference: string) =>
     request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${encodeURIComponent(id)}/pull`, { method: 'POST', body: JSON.stringify({ reference }) }),

@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -35,6 +37,13 @@ type SandboxProfile struct {
 	Base       string   `json:"base,omitempty"`
 	Packages   []string `json:"packages,omitempty"`
 	Toolchains []string `json:"toolchains,omitempty"`
+	// DockerfileOverride is the operator recipe (D1): a full Dockerfile the
+	// operator authors instead of base+packages. Exactly one recipe source is
+	// allowed — base[+packages] XOR this field XOR Image (D2.1); builtin rows
+	// never carry it (D2.4) and the model-driven builder has no such field
+	// (D2.2). kernel/sandbox.OverrideDefinition is the build-side authority;
+	// ValidateSandboxProfile mirrors its checks for early save-time errors.
+	DockerfileOverride string `json:"dockerfile_override,omitempty"`
 	// Resource overrides; empty = the runner's installation defaults.
 	Memory      string `json:"memory,omitempty"`
 	CPUs        string `json:"cpus,omitempty"`
@@ -60,6 +69,11 @@ var ErrProfileBuiltin = errors.New("sandbox profile is builtin")
 // ErrProfileInUse reports a delete blocked by agents still assigned to the
 // profile: removing it would strand their runs on a missing image.
 var ErrProfileInUse = errors.New("sandbox profile is assigned to agents")
+
+// ErrProfileUnprocessable reports a recipe-source violation of the operator
+// override rules (D2.1/D2.4): the API maps it to 422 with the explicit
+// reason instead of silently dropping or substituting a source.
+var ErrProfileUnprocessable = errors.New("sandbox profile recipe source is inconsistent")
 
 // sandboxProfileIDPattern is the profile id shape; kernel/sandbox keeps a
 // mirror (it travels into build tags).
@@ -160,6 +174,25 @@ func ValidateSandboxProfile(p SandboxProfile) error {
 			return fmt.Errorf("cache_env %q must point inside /cache/ (e.g. /cache/npm)", entry)
 		}
 	}
+	// The operator override is one of three mutually exclusive recipe
+	// sources (D2.1): base[+packages] XOR dockerfile_override XOR an
+	// external image. Mixing sources is an explicit 422-class error — a
+	// silent substitution would rebuild a different sandbox than the one
+	// the operator sees.
+	if p.DockerfileOverride != "" {
+		if p.Base != "" || len(p.Packages) > 0 {
+			return fmt.Errorf("%w: dockerfile_override excludes base and packages — clear them or drop the override", ErrProfileUnprocessable)
+		}
+		if p.Image != "" {
+			return fmt.Errorf("%w: dockerfile_override excludes a direct image — the build pins the digest; clear image or drop the override", ErrProfileUnprocessable)
+		}
+		if p.Builtin {
+			return fmt.Errorf("%w: builtin profiles never take a dockerfile override — the catalog ships with kernel updates", ErrProfileUnprocessable)
+		}
+		if err := ValidSandboxDockerfile(p.DockerfileOverride); err != nil {
+			return fmt.Errorf("dockerfile_override: %w", err)
+		}
+	}
 	// Recipe-based vs external-image custom profiles are mutually exclusive:
 	// a recipe's image is produced by the build, never typed by hand.
 	if p.Base != "" {
@@ -204,6 +237,373 @@ var validSandboxPackageName = regexp.MustCompile(`^[a-z0-9][a-z0-9.+_-]*$`)
 // ValidSandboxPackageName reports whether name is a safe OS package name.
 func ValidSandboxPackageName(name string) bool { return validSandboxPackageName.MatchString(name) }
 
+// maxSandboxDockerfileBytes mirrors kernel/sandbox's override size budget.
+const maxSandboxDockerfileBytes = 16 * 1024
+
+// sandboxParserDirective mirrors kernel/sandbox's parserDirective: a
+// # syntax= / # escape= comment (D7.1 forbidden in an operator recipe).
+var sandboxParserDirective = regexp.MustCompile(`(?i)^#\s*(syntax|escape)\s*=`)
+
+// sandboxDirectiveFormComment mirrors kernel/sandbox's directiveFormComment:
+// any directive-shaped comment (# key=…) before the first instruction — the
+// parser treats that shape as a directive generically (F-01), so the mirror
+// blocks it too.
+var sandboxDirectiveFormComment = regexp.MustCompile(`(?i)^#\s*([a-z][a-z0-9]*)\s*=`)
+
+// sandboxNormalizeDockerfileText mirrors kernel/sandbox's
+// normalizeDockerfileText: strip the UTF-8 BOM and fold \r\n to \n the way
+// the docker parser does before interpreting the file (F-01).
+func sandboxNormalizeDockerfileText(text string) string {
+	return strings.ReplaceAll(strings.TrimPrefix(text, "\xef\xbb\xbf"), "\r\n", "\n")
+}
+
+// sandboxDockerfileInstruction mirrors kernel/sandbox's dockerfileInstruction:
+// one logical line joined the way the docker parser joins continuations
+// (byte concatenation, no separator — F-02), with the physical line of each
+// segment for line-numbered errors.
+type sandboxDockerfileInstruction struct {
+	text         string
+	segmentLines []sandboxSegmentStart
+}
+
+type sandboxSegmentStart struct {
+	offset int
+	line   int
+}
+
+func (u sandboxDockerfileInstruction) line() int {
+	return u.segmentLines[0].line
+}
+
+func (u sandboxDockerfileInstruction) lineAt(offset int) int {
+	line := u.segmentLines[0].line
+	for _, seg := range u.segmentLines {
+		if seg.offset > offset {
+			break
+		}
+		line = seg.line
+	}
+	return line
+}
+
+// sandboxDockerfileComment mirrors kernel/sandbox's dockerfileComment.
+type sandboxDockerfileComment struct {
+	line        int
+	text        string
+	beforeFirst bool
+}
+
+// sandboxParseDockerfileInstructions mirrors kernel/sandbox's
+// parseDockerfileInstructions.
+func sandboxParseDockerfileInstructions(text string) ([]sandboxDockerfileInstruction, []sandboxDockerfileComment) {
+	var (
+		instructions []sandboxDockerfileInstruction
+		comments     []sandboxDockerfileComment
+		current      sandboxDockerfileInstruction
+		open         bool // an instruction is in continuation
+	)
+	for idx, raw := range strings.Split(text, "\n") {
+		physLine := idx + 1
+		line := strings.TrimRight(raw, "\r\n")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			if !open {
+				comments = append(comments, sandboxDockerfileComment{line: physLine, text: trimmed, beforeFirst: len(instructions) == 0})
+			}
+			continue
+		}
+		if !open {
+			line = strings.TrimLeftFunc(line, unicode.IsSpace)
+			current = sandboxDockerfileInstruction{}
+		}
+		content, continued := sandboxTrimDockerfileContinuation(line)
+		current.segmentLines = append(current.segmentLines, sandboxSegmentStart{offset: len(current.text), line: physLine})
+		current.text += content
+		if !continued {
+			instructions = append(instructions, current)
+			open = false
+			continue
+		}
+		open = true
+	}
+	if open {
+		instructions = append(instructions, current)
+	}
+	return instructions, comments
+}
+
+// sandboxTrimDockerfileContinuation mirrors kernel/sandbox's
+// trimDockerfileContinuation (docker's trimContinuationCharacter).
+func sandboxTrimDockerfileContinuation(line string) (string, bool) {
+	end := len(line)
+	for end > 0 && (line[end-1] == ' ' || line[end-1] == '\t') {
+		end--
+	}
+	if end == 0 || line[end-1] != '\\' {
+		return line, false
+	}
+	if end >= 2 && line[end-2] == '\\' {
+		return line, false // an escaped backslash is literal
+	}
+	return line[:end-1], true
+}
+
+// ValidSandboxDockerfile mirrors kernel/sandbox.ValidateDockerfileOverride —
+// the same D3/D7 rules at save time so a bad operator recipe fails at the API
+// with a line-numbered error instead of minutes later at the docker daemon:
+// non-empty, ≤16 KiB, UTF-8 without NUL, at least one FROM (multi-stage
+// allowed), no ADD / COPY without --from / ONBUILD (the build has no
+// context), no parser directives — BOM/CRLF-proof, any # key= before the
+// first instruction (F-01) — and no RUN --network=host / --security=
+// insecure|privileged / --mount except type=cache, scanned on
+// continuation-joined text so a token cut by a line continuation is whole
+// again (F-02…F-04). A cmd-level test keeps the two validators from
+// drifting apart.
+func ValidSandboxDockerfile(text string) error {
+	text = sandboxNormalizeDockerfileText(text)
+	if strings.TrimSpace(text) == "" {
+		return errors.New("dockerfile override is required (the operator recipe is empty)")
+	}
+	if !utf8.ValidString(text) {
+		return fmt.Errorf("строка %d: dockerfile override must be valid UTF-8", 1+strings.Count(text[:firstInvalidUTF8(text)], "\n"))
+	}
+	if idx := strings.IndexByte(text, 0); idx >= 0 {
+		return fmt.Errorf("строка %d: недопустимый символ NUL в тексте dockerfile", 1+strings.Count(text[:idx], "\n"))
+	}
+	if len(text) > maxSandboxDockerfileBytes {
+		return fmt.Errorf("строка %d: dockerfile override слишком большой: %d байт > %d (16 KiB)", sandboxSizeViolationLine(text), len(text), maxSandboxDockerfileBytes)
+	}
+	instructions, comments := sandboxParseDockerfileInstructions(text)
+	var (
+		fromSeen   bool
+		violations []string
+	)
+	for _, comment := range comments {
+		if match := sandboxParserDirective.FindStringSubmatch(comment.text); match != nil {
+			violations = append(violations, sandboxDirectiveViolation(comment.line, strings.ToLower(match[1])))
+			continue
+		}
+		if !comment.beforeFirst {
+			continue
+		}
+		if match := sandboxDirectiveFormComment.FindStringSubmatch(comment.text); match != nil {
+			violations = append(violations, sandboxDirectiveViolation(comment.line, strings.ToLower(match[1])))
+		}
+	}
+	for _, instr := range instructions {
+		fields := strings.Fields(instr.text)
+		if len(fields) == 0 {
+			continue
+		}
+		switch strings.ToUpper(fields[0]) {
+		case "FROM":
+			fromSeen = true
+		case "ADD":
+			violations = append(violations, fmt.Sprintf("строка %d: ADD запрещён — сборка идёт без контекста (только Dockerfile через stdin), скачивание и распаковка архивов в образ недоступны; используйте RUN", instr.line()))
+		case "COPY":
+			if !strings.Contains(strings.ToLower(instr.text), "--from=") {
+				violations = append(violations, fmt.Sprintf("строка %d: COPY без --from не работает — build context отсутствует, копировать можно только из другого этапа сборки (COPY --from=<stage>)", instr.line()))
+			}
+		case "ONBUILD":
+			violations = append(violations, fmt.Sprintf("строка %d: ONBUILD запрещён — триггерные инструкции отложат неизвестное действие до сборки образа-потребителя", instr.line()))
+		case "RUN":
+			violations = append(violations, sandboxRunFlagViolations(instr)...)
+		}
+	}
+	if !fromSeen {
+		violations = append(violations, "ни одной инструкции FROM во всём файле: образ должен начинаться с базового (FROM …), включая multi-stage сборки")
+	}
+	if len(violations) > 0 {
+		return errors.New(strings.Join(violations, "; "))
+	}
+	return nil
+}
+
+// sandboxDockerfileToken mirrors kernel/sandbox's dockerfileToken.
+type sandboxDockerfileToken struct {
+	text   string
+	offset int
+}
+
+// sandboxInstructionTokens mirrors kernel/sandbox's instructionTokens.
+func sandboxInstructionTokens(instr sandboxDockerfileInstruction) []sandboxDockerfileToken {
+	var tokens []sandboxDockerfileToken
+	for offset := 0; offset < len(instr.text); {
+		r, size := utf8.DecodeRuneInString(instr.text[offset:])
+		if unicode.IsSpace(r) {
+			offset += size
+			continue
+		}
+		start := offset
+		for offset < len(instr.text) {
+			r, size = utf8.DecodeRuneInString(instr.text[offset:])
+			if unicode.IsSpace(r) {
+				break
+			}
+			offset += size
+		}
+		tokens = append(tokens, sandboxDockerfileToken{text: instr.text[start:offset], offset: start})
+	}
+	return tokens
+}
+
+// sandboxRunFlagViolations mirrors kernel/sandbox's runFlagViolations: the
+// RUN leading flag section scanned against the D7 deny-list.
+func sandboxRunFlagViolations(instr sandboxDockerfileInstruction) []string {
+	var out []string
+	tokens := sandboxInstructionTokens(instr)
+	if len(tokens) == 0 {
+		return nil
+	}
+	// tokens[0] is the RUN keyword itself — the flag section starts right
+	// after it; without skipping it the first HasPrefix check would break
+	// before any flag is ever seen (mirror of kernel runFlagViolations).
+	for _, token := range tokens[1:] {
+		if !strings.HasPrefix(token.text, "--") {
+			break
+		}
+		if violation := sandboxRunFlagViolation(token.text, instr.lineAt(token.offset)); violation != "" {
+			out = append(out, violation)
+		}
+	}
+	return out
+}
+
+// sandboxRunFlagViolation mirrors kernel/sandbox's runFlagViolation: the
+// D7.2 deny-list for RUN flags (F-02…F-04a).
+func sandboxRunFlagViolation(token string, line int) string {
+	name, value, hasValue := token, "", false
+	if eq := strings.IndexByte(token, '='); eq >= 0 {
+		name, value, hasValue = token[:eq], strings.Trim(token[eq+1:], `"'`), true
+	}
+	switch strings.ToLower(name) {
+	case "--network":
+		if hasValue && strings.EqualFold(value, "host") {
+			return sandboxRunHostNetworkViolation(line)
+		}
+	case "--security":
+		if hasValue && (strings.EqualFold(value, "insecure") || strings.EqualFold(value, "privileged")) {
+			return fmt.Sprintf("строка %d: RUN --security=%s запрещён — шаг сборки выполняется без seccomp/AppArmor-изоляции демона; уберите флаг", line, strings.ToLower(value))
+		}
+	case "--mount":
+		// A bare --mount (no '=') and an empty value both arrive as "" and
+		// are rejected by the same strict parse with the same message.
+		if ok, reason := sandboxIsCacheMount(value); !ok {
+			return fmt.Sprintf("строка %d: RUN --mount запрещён — %s; допустим только один type=cache без дублей ключей; уберите флаг либо оставьте type=cache", line, reason)
+		}
+	}
+	return ""
+}
+
+// sandboxCacheMountIDPattern mirrors kernel/sandbox's cacheMountIDPattern:
+// 1..64 chars of letters, digits, dot, dash and underscore — a path shape
+// never matches, so an id cannot steer the mount out of its cache directory
+// (F-04b read as a path vector; the shared well-formed id is the audit's
+// accepted residue of F-04b).
+var sandboxCacheMountIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+
+// sandboxIsCacheMount mirrors kernel/sandbox's isCacheMount: the strict
+// F-04a parse of a RUN --mount option set. Buildkit resolves duplicated
+// keys by overwrite (duplicate-key semantics), so "any type=cache" would
+// pass type=cache,type=bind; the mirror therefore requires exactly one
+// cache type spelled once — no repeated key, only cache-mount allowlisted
+// keys (type,target,id,sharing,mode,uid,gid), type=cache after unquoting
+// the option value and folding case, sharing ∈ {shared,private,locked},
+// id ∈ [A-Za-z0-9_.-]{1,64} and digits-only mode/uid/gid. An empty value —
+// the bare --mount flag included — is rejected: an empty option set is not
+// a cache mount.
+func sandboxIsCacheMount(value string) (bool, string) {
+	if strings.TrimSpace(value) == "" {
+		return false, "значение флага отсутствует или пустое"
+	}
+	seen := make(map[string]bool)
+	typeSeen := false
+	for _, option := range strings.Split(value, ",") {
+		opt := strings.TrimSpace(option)
+		if opt == "" {
+			return false, "пустая опция в списке (двойная запятая)"
+		}
+		eq := strings.IndexByte(opt, '=')
+		if eq < 0 {
+			return false, fmt.Sprintf("опция %q без = (нужен key=value)", opt)
+		}
+		key := strings.ToLower(strings.TrimSpace(opt[:eq]))
+		val := strings.Trim(strings.TrimSpace(opt[eq+1:]), `"'`)
+		if seen[key] {
+			return false, fmt.Sprintf("дубль ключа опции %q", key)
+		}
+		seen[key] = true
+		switch key {
+		case "type":
+			typeSeen = true
+			if !strings.EqualFold(val, "cache") {
+				return false, fmt.Sprintf("тип %q вместо cache", val)
+			}
+		case "target":
+			if val == "" {
+				return false, "пустое значение target"
+			}
+		case "id":
+			if !sandboxCacheMountIDPattern.MatchString(val) {
+				return false, fmt.Sprintf("id %q вне [A-Za-z0-9_.-]{1,64}", val)
+			}
+		case "sharing":
+			if val != "shared" && val != "private" && val != "locked" {
+				return false, fmt.Sprintf("sharing %q — допустимы shared, private, locked", val)
+			}
+		case "mode", "uid", "gid":
+			if val == "" || strings.Trim(val, "0123456789") != "" {
+				return false, fmt.Sprintf("%s %q должно быть числом", key, val)
+			}
+		default:
+			return false, fmt.Sprintf("ключ %q не входит в список разрешённых (type,target,id,sharing,mode,uid,gid)", key)
+		}
+	}
+	if !typeSeen {
+		return false, "нет ключа type"
+	}
+	return true, ""
+}
+
+// sandboxDirectiveViolation mirrors kernel/sandbox's directiveViolation.
+func sandboxDirectiveViolation(line int, name string) string {
+	return fmt.Sprintf("строка %d: parser-директива #%s= запрещена — она меняет разбор/фронтенд сборки, а смена frontend-образа влечёт его pull по сети на хост", line, name)
+}
+
+// sandboxRunHostNetworkViolation mirrors kernel/sandbox's runHostNetworkViolation.
+func sandboxRunHostNetworkViolation(line int) string {
+	return fmt.Sprintf("строка %d: RUN --network=host запрещён — команда сборки выполняется в network-неймспейсе хоста; уберите флаг", line)
+}
+
+// firstInvalidUTF8 mirrors kernel/sandbox's helper: byte offset of the first
+// malformed rune, for line-numbered errors.
+func firstInvalidUTF8(text string) int {
+	for i := 0; i < len(text); {
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if r == utf8.RuneError && size == 1 {
+			return i
+		}
+		i += size
+	}
+	return len(text)
+}
+
+// sandboxSizeViolationLine mirrors kernel/sandbox's helper: the 1-based line
+// on which the text crosses the size budget.
+func sandboxSizeViolationLine(text string) int {
+	total := 0
+	for i, line := range strings.SplitAfter(text, "\n") {
+		total += len(line)
+		if total > maxSandboxDockerfileBytes {
+			return i + 1
+		}
+	}
+	return 1 + strings.Count(text, "\n")
+}
+
 // IsDigestPinnedImage reports whether ref is repo@sha256:<64 hex>. It mirrors
 // kernel/sandbox's validateImage so both sides reject mutable tags without
 // importing each other.
@@ -234,12 +634,12 @@ func isValidResourceValue(field, value string) bool {
 	return digits != "" && strings.Trim(digits, "0123456789") == ""
 }
 
-const sandboxProfileColumns = `id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, docker_socket, builtin, created_at, updated_at`
+const sandboxProfileColumns = `id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, docker_socket, dockerfile_override, builtin, created_at, updated_at`
 
 func scanSandboxProfile(row interface{ Scan(dest ...any) error }) (SandboxProfile, error) {
 	var p SandboxProfile
 	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.Image, &p.Base, &p.Packages, &p.Toolchains,
-		&p.Memory, &p.CPUs, &p.ScratchSize, &p.TmpSize, &p.CacheEnv, &p.DockerSocket, &p.Builtin, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.Memory, &p.CPUs, &p.ScratchSize, &p.TmpSize, &p.CacheEnv, &p.DockerSocket, &p.DockerfileOverride, &p.Builtin, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return p, ErrNotFound
 		}
@@ -255,8 +655,8 @@ func (s *Store) SeedSandboxProfiles(ctx context.Context) error {
 	for _, p := range BuiltinSandboxProfiles() {
 		now := time.Now().UTC()
 		_, err := s.pool.Exec(ctx,
-			`INSERT INTO workspace_sandbox_profile (id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, builtin, created_at, updated_at)
-			 VALUES ($1,$2,$3,'','','{}',$4,$5,$6,$7,$8,$9,TRUE,$10,$10)
+			`INSERT INTO workspace_sandbox_profile (id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, dockerfile_override, builtin, created_at, updated_at)
+			 VALUES ($1,$2,$3,'','','{}',$4,$5,$6,$7,$8,$9,'',TRUE,$10,$10)
 			 ON CONFLICT (id) DO NOTHING`,
 			p.ID, p.Name, p.Description, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, now)
 		if err != nil {
@@ -305,9 +705,9 @@ func (s *Store) CreateSandboxProfile(ctx context.Context, p *SandboxProfile) err
 	p.CreatedAt = now
 	p.UpdatedAt = now
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO workspace_sandbox_profile (id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, docker_socket, builtin, created_at, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,FALSE,$14,$14)`,
-		p.ID, p.Name, p.Description, p.Image, p.Base, p.Packages, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, p.DockerSocket, now)
+		`INSERT INTO workspace_sandbox_profile (id, name, description, image, base, packages, toolchains, memory, cpus, scratch_size, tmp_size, cache_env, docker_socket, dockerfile_override, builtin, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,FALSE,$15,$15)`,
+		p.ID, p.Name, p.Description, p.Image, p.Base, p.Packages, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, p.DockerSocket, p.DockerfileOverride, now)
 	return err
 }
 
@@ -320,31 +720,15 @@ func (s *Store) UpdateSandboxProfile(ctx context.Context, p SandboxProfile) erro
 	if err != nil {
 		return err
 	}
-	if existing.Builtin {
-		p.Name = existing.Name
-		p.Description = existing.Description
-		p.Toolchains = existing.Toolchains
-		p.Image = existing.Image
-		p.Base = ""
-		p.Packages = nil
-		p.DockerSocket = existing.DockerSocket
-		p.Builtin = true
-	} else {
-		p.Builtin = false
-		// Editing the recipe invalidates the pinned image: the digest on the
-		// row would silently not match what the recipe now produces.
-		if p.Base != "" && (existing.Base != p.Base || !equalStrings(existing.Packages, p.Packages)) {
-			p.Image = ""
-		}
-	}
+	p = prepareSandboxProfileUpdate(existing, p)
 	if err := ValidateSandboxProfile(p); err != nil {
 		return err
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE workspace_sandbox_profile
-		 SET name=$2, description=$3, image=$4, base=$5, packages=$6, toolchains=$7, memory=$8, cpus=$9, scratch_size=$10, tmp_size=$11, cache_env=$12, docker_socket=$13, updated_at=$14
+		 SET name=$2, description=$3, image=$4, base=$5, packages=$6, toolchains=$7, memory=$8, cpus=$9, scratch_size=$10, tmp_size=$11, cache_env=$12, docker_socket=$13, dockerfile_override=$14, updated_at=$15
 		 WHERE id=$1`,
-		p.ID, p.Name, p.Description, p.Image, p.Base, p.Packages, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, p.DockerSocket, time.Now().UTC())
+		p.ID, p.Name, p.Description, p.Image, p.Base, p.Packages, p.Toolchains, p.Memory, p.CPUs, p.ScratchSize, p.TmpSize, p.CacheEnv, p.DockerSocket, p.DockerfileOverride, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -352,6 +736,34 @@ func (s *Store) UpdateSandboxProfile(ctx context.Context, p SandboxProfile) erro
 		return ErrNotFound
 	}
 	return nil
+}
+
+// prepareSandboxProfileUpdate folds an incoming PUT onto the stored row.
+// A builtin keeps its catalog identity and image; its recipe fields are not
+// touched — an override attempt stays on the incoming row so validation
+// rejects it explicitly (a silent drop would be a substitution, §4.3).
+// Editing a recipe invalidates the pinned image: the digest on the row would
+// silently not match what the recipe now produces — the same holds for the
+// operator override text (D2.3).
+func prepareSandboxProfileUpdate(existing, incoming SandboxProfile) SandboxProfile {
+	if existing.Builtin {
+		incoming.Name = existing.Name
+		incoming.Description = existing.Description
+		incoming.Toolchains = existing.Toolchains
+		incoming.Image = existing.Image
+		incoming.Base = ""
+		incoming.Packages = nil
+		incoming.DockerSocket = existing.DockerSocket
+		incoming.Builtin = true
+		return incoming
+	}
+	incoming.Builtin = false
+	if existing.Base != incoming.Base ||
+		!equalStrings(existing.Packages, incoming.Packages) ||
+		existing.DockerfileOverride != incoming.DockerfileOverride {
+		incoming.Image = ""
+	}
+	return incoming
 }
 
 // SetSandboxProfileImage pins a freshly built digest into a builtin profile
@@ -406,6 +818,9 @@ func (s *Store) SetExternalProfileImage(ctx context.Context, id, image string) e
 	if existing.Base != "" {
 		return fmt.Errorf("profile %s composes on a base recipe; build it instead of pulling", id)
 	}
+	if existing.DockerfileOverride != "" {
+		return fmt.Errorf("profile %s carries an operator dockerfile override; build it instead of pulling", id)
+	}
 	if !IsDigestPinnedImage(image) {
 		return fmt.Errorf("image %q must be pinned by a sha256 digest", image)
 	}
@@ -422,8 +837,9 @@ func (s *Store) SetExternalProfileImage(ctx context.Context, id, image string) e
 }
 
 // SetCustomProfileImage pins a freshly built digest into a recipe-based
-// custom profile. Unlike the builtin variant it touches no metadata — a
-// custom row owns its name/description/toolchains.
+// custom profile — composed from a base or built from the operator's
+// dockerfile override. Unlike the builtin variant it touches no metadata —
+// a custom row owns its name/description/toolchains.
 func (s *Store) SetCustomProfileImage(ctx context.Context, id, image string) error {
 	existing, err := s.GetSandboxProfile(ctx, id)
 	if err != nil {
@@ -432,8 +848,8 @@ func (s *Store) SetCustomProfileImage(ctx context.Context, id, image string) err
 	if existing.Builtin {
 		return fmt.Errorf("%w: %s is a builtin profile", ErrProfileBuiltin, id)
 	}
-	if existing.Base == "" {
-		return fmt.Errorf("profile %s has no base recipe; set its image reference directly", id)
+	if existing.Base == "" && existing.DockerfileOverride == "" {
+		return fmt.Errorf("profile %s has no build recipe; set its image reference directly", id)
 	}
 	if !IsDigestPinnedImage(image) {
 		return fmt.Errorf("image %q must be pinned by a sha256 digest", image)
