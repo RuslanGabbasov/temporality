@@ -18,6 +18,8 @@ import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
 import RunDisputes from './RunDisputes'
 import TraceLayers from './TraceLayers'
+import { parseTraceState, stripTraceParams, traceStateQuery, type TraceUrlState } from './traceFilters'
+import { useDebouncedValue } from './useDebouncedValue'
 import Markdown from './Markdown'
 import { useT, useI18n, pluralT } from './i18n'
 import { eventSummary, shortTime, restoreMarkdownLines, formatDuration, approvalHint } from './eventSummary'
@@ -216,6 +218,27 @@ export default function AgentRuns({ project }: { project: string }) {
   })
   const viewRef = useRef(view)
   useEffect(() => { viewRef.current = view }, [view])
+  // §8: the trace filter/search state lives in the URL (trace* params) so a
+  // link restores the exact filtered view; the existing run/view params stay
+  // intact. Keystrokes commit through a ≥300 ms debounce (NFR-9) before they
+  // touch the URL or the filtering; the panel itself fetches nothing.
+  const [traceState, setTraceState] = useState<TraceUrlState>(() => parseTraceState(new URLSearchParams(window.location.search)))
+  const committedTraceState = useDebouncedValue(traceState)
+  useEffect(() => {
+    const current = new URLSearchParams(window.location.search)
+    const qs = traceStateQuery(committedTraceState.filter, committedTraceState.query, committedTraceState.chips)
+    if (!qs) {
+      const stripped = stripTraceParams(window.location.search)
+      if (stripped === current.toString()) return
+      window.history.replaceState(null, '', `${window.location.pathname}?${stripped}`)
+      return
+    }
+    for (const key of [...current.keys()]) {
+      if (key.startsWith('trace')) current.delete(key)
+    }
+    for (const [key, value] of new URLSearchParams(qs)) current.set(key, value)
+    window.history.replaceState(null, '', `${window.location.pathname}?${current.toString()}`)
+  }, [committedTraceState])
   // The run whose extras (trajectory, budgets) are on screen; loadRun drops
   // them only when this changes (run switch), not on silent refreshes.
   const loadedRunRef = useRef('')
@@ -1308,6 +1331,8 @@ export default function AgentRuns({ project }: { project: string }) {
                       : undefined)}
                     live={selectedLive}
                     emptyHint={trace.visible.length === 0 ? (t('runs.layers.timeline.empty')) : undefined}
+                    filterState={committedTraceState}
+                    onFilterState={setTraceState}
                   />
                   {/* NFR-5: the window never grows by itself — the reader
                       asks for TRACE_WINDOW_STEP more rows each time. */}

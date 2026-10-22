@@ -173,9 +173,15 @@ export function hintAggregate(events: ObservationEvent[]): { total: number; used
 }
 
 /** Quick chips over the folded items (§8): «только ошибки», «только
- *  инструменты», «только решения человека» — pure, works on the loaded
- *  window, no network (NFR-9). */
-export type TraceChip = 'all' | 'errors' | 'tools' | 'human'
+ *  инструменты», «только решения человека», «только мой ввод» — pure, works
+ *  on the loaded window, no network (NFR-9). */
+export type TraceChip = 'all' | 'errors' | 'tools' | 'human' | 'myInput'
+
+/** §8 «только мой ввод»: the event types carrying the user's own words. */
+function isMyInputType(type: string): boolean {
+  return type === 'run.user_note' || type === 'hitl.verdict.recorded'
+    || type === 'human.answered' || type === 'human.rejected'
+}
 
 export function matchesChip(item: TraceItem, chip: TraceChip): boolean {
   if (chip === 'all') return true
@@ -183,15 +189,20 @@ export function matchesChip(item: TraceItem, chip: TraceChip): boolean {
     case 'group':
       if (chip === 'errors') return item.hasError
       if (chip === 'tools') return item.events.some((e) => e.type.startsWith('tool.') || e.type.startsWith('mcp.'))
+      if (chip === 'myInput') return item.events.some((e) => isMyInputType(e.type))
       return false
     case 'approvalPair':
-      return chip === 'human' || (chip === 'errors' && item.status === 'error')
+      // §8 «только мой ввод»: an unanswered question the human must answer
+      // is their pending input; a decided pair is their decision.
+      return chip === 'human' || chip === 'myInput'
+        || (chip === 'errors' && item.status === 'error')
     case 'saga':
       return chip === 'errors' && item.row.status === 'error'
     case 'event': {
       const { row, event } = item
       if (chip === 'errors') return row.status === 'error'
       if (chip === 'tools') return row.category === 'tools' || row.category === 'mcp' || event.type.startsWith('tool.') || event.type.startsWith('mcp.')
+      if (chip === 'myInput') return isMyInputType(event.type)
       return row.category === 'approvals' || event.type.startsWith('human.')
     }
   }

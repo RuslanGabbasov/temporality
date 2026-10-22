@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { ObservationEvent } from './observationApi'
 import { eventDetails, timelineRow, rawEnvelope } from './eventPresentation'
 import { foldTrace, groupSummary, matchesChip, type TraceChip, type TraceItem } from './traceModel'
+import { filterTraceItems, searchItems, type TraceUrlState } from './traceFilters'
+import TraceFiltersPanel, { consoleSearchIndex, type ConsoleStateLike } from './TraceFiltersPanel'
 import type { Locale } from './locales'
 import Markdown from './Markdown'
 import ConsoleOutput from './ConsoleOutput'
@@ -212,8 +214,10 @@ function TraceChips({ chip, onChip, items, t }: { chip: TraceChip; onChip: (chip
   )
 }
 
-/** Grouped trace: the §5 folded timeline with the three-layer rows. */
-export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint }: {
+/** Grouped trace: the §5 folded timeline with the three-layer rows, the §8
+ *  filter panel (category/type/status/participant/duration, quick chips,
+ *  text search — all URL-backed) above it. */
+export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates }: {
   events: ObservationEvent[]
   locale: Locale
   t: TFn
@@ -225,11 +229,29 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
   knowledgeDoubtOf?: (event: ObservationEvent) => React.ReactNode
   live?: boolean
   emptyHint?: string
+  /** §8 controlled filter/search state (URL-backed by the owner). When
+   *  absent the panel renders nothing and the trace shows unfiltered. */
+  filterState?: TraceUrlState
+  onFilterState?: (state: TraceUrlState) => void
+  /** Loaded console buffers by operation id (T4 ConsoleOutput) — the text
+   *  search covers exactly these, never the network (§8, NFR-9). */
+  consoleStates?: ReadonlyMap<string, ConsoleStateLike>
 }) {
   const [chip, setChip] = useState<TraceChip>('all')
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
-  const items = foldTrace(events, locale, t)
-  const visibleItems = items.filter((item) => matchesChip(item, chip))
+  const allItems = foldTrace(events, locale, t)
+  // Alias for the legacy chips row and the render loop below.
+  const items = allItems
+  // §8: with no filter state the trace renders unfiltered (back-compat and
+  // the other views); with one, the three dimensions AND together and the
+  // chips OR inside their set. Search highlights hits on top.
+  const activeFilter = Boolean(filterState && onFilterState)
+  const visibleItems = activeFilter
+    ? filterTraceItems(allItems, filterState!.filter, filterState!.chips, locale, t)
+    : items.filter((item) => matchesChip(item, chip))
+  const searchEntries = activeFilter && filterState!.query.trim()
+    ? searchItems(visibleItems, filterState!.query, locale, t, consoleSearchIndex(consoleStates, allItems))
+    : []
   const keyOf = (item: TraceItem): string => {
     switch (item.kind) {
       case 'event': return `${item.event.source.id}:${item.event.event_id}`
@@ -248,7 +270,33 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
   }
   return (
     <div>
-      <TraceChips chip={chip} onChip={setChip} items={items} t={t} />
+      {activeFilter && filterState && onFilterState ? (
+        <TraceFiltersPanel
+          state={filterState}
+          onState={onFilterState}
+          items={allItems}
+          consoleStates={consoleStates}
+          locale={locale}
+          t={t}
+        />
+      ) : (
+        <TraceChips chip={chip} onChip={setChip} items={items} t={t} />
+      )}
+      {searchEntries.length > 0 && (
+        <div style={{ marginBottom: '0.4rem', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.35rem 0.5rem' }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', marginBottom: '0.2rem' }}>
+            {t('runs.filters.results', { count: String(searchEntries.length) })}
+          </div>
+          {searchEntries.slice(0, 20).map((entry, index) => (
+            <div key={`${entry.event.event_id}:${index}`} style={{ fontSize: '0.72rem', color: 'var(--tm-text-2)', overflowWrap: 'anywhere' }}>
+              <span aria-hidden>🔍 </span>{entry.snippet}
+            </div>
+          ))}
+          {searchEntries.length > 20 && (
+            <div style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }}>… +{searchEntries.length - 20}</div>
+          )}
+        </div>
+      )}
       {visibleItems.length === 0 && <div style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0' }}>{emptyHint ?? t('runs.layers.timeline.empty')}</div>}
       {visibleItems.map((item) => {
         if (item.kind === 'group') {
