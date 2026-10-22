@@ -1872,6 +1872,32 @@ button.header-nav-link {
   padding-top: 0.6rem;
 }
 
+// Run-overview graphs (delegation tree + plan DAG): the overview renders them
+// inside flex/grid chains where a flex item defaults to min-width:auto and a
+// wide DAG inflates the whole layout. The wrapper bounds itself to the tile
+// width; each graph's own scroll shell (chat-plan-scroll) then does the
+// horizontal scrolling block-locally.
+.run-overview-graphs {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+// The same bound for the flex-item ancestors inside the wrapper: without it
+// a wide canvas stretches the wrapper instead of scrolling. The body bounds
+// too — an expanded child's trace rows may carry long unbreakable strings.
+.run-overview-graphs .chat-delegation,
+.run-overview-graphs .chat-delegation-body,
+.run-overview-graphs .chat-plan,
+.run-overview-graphs .chat-plan-graph {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.run-overview-graphs .chat-delegation-trace {
+  overflow-x: auto;
+}
+
 .chat-plan-title {
   font-size: 0.68rem;
   font-weight: 600;

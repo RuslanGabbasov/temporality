@@ -1177,11 +1177,16 @@ export default function AgentRuns({ project }: { project: string }) {
                 {/* Cross-agent knowledge disputes across the selected run's chain */}
                 <RunDisputes project={selectedProject} selected={selected} rows={rows} onOpenRun={setSelected} />
 
-                {/* Delegation call tree — children runs with live status */}
-                <DelegationTree project={selectedProject} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
+                {/* Delegation call tree — children runs with live status.
+                    The wrapper bounds the flex-item width (min-width: 0)
+                    so a wide plan DAG scrolls inside its own block instead of
+                    stretching the whole overview layout. */}
+                <div className="run-overview-graphs">
+                  <DelegationTree project={selectedProject} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
 
-                {/* Plan DAG view — task graph of plan calls with live statuses */}
-                <PlanGraph project={selectedProject} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
+                  {/* Plan DAG view — task graph of plan calls with live statuses */}
+                  <PlanGraph project={selectedProject} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
+                </div>
                 </>)}
 
                 {view === 'trace' && (
