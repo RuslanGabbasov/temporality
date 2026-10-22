@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -79,10 +80,28 @@ func embeddingModelID() string {
 
 // embedCacheDir resolves where downloaded weights persist.
 func embedCacheDir() string {
+	return resolveEmbedCacheDir(embedCacheDirDefault)
+}
+
+// resolveEmbedCacheDir prefers an explicit REMBED_CACHE, then the FHS path
+// the container image provisions (compose persists it as the rembed_cache
+// volume), and falls back to the OS user cache dir elsewhere: on a bare-metal
+// stand (/var/cache does not exist and /private/var is root-owned on macOS)
+// the FHS path is not creatable by a normal user, and pinning it made every
+// local load fail with "mkdir /var/cache: permission denied" on an endless
+// retry loop. A terminal fallback to fhs lets the loader surface the real
+// mkdir error when neither path works.
+func resolveEmbedCacheDir(fhs string) string {
 	if value := strings.TrimSpace(os.Getenv("REMBED_CACHE")); value != "" {
 		return value
 	}
-	return embedCacheDirDefault
+	if err := os.MkdirAll(fhs, 0o755); err == nil {
+		return fhs
+	}
+	if base, err := os.UserCacheDir(); err == nil {
+		return filepath.Join(base, "rembed")
+	}
+	return fhs
 }
 
 // embedWorkers caps inference CPU (env override, 0 = rembed default).

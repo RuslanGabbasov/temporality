@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rostamlabs/rembed"
 	"github.com/temporality-project/temporality/kernel/mcpclient"
 	"github.com/temporality-project/temporality/kernel/sandbox"
 )
@@ -91,6 +93,13 @@ func TestSkillSearchReportsHTTPErrorsAsToolErrors(t *testing.T) {
 }
 
 func TestSkillSearchMatchesAnyKeyword(t *testing.T) {
+	// The ranking under test is the lexical tier; the semantic tier is pinned
+	// offline so the test never depends on the Hub (a real model load here
+	// would make keyword ordering environment-dependent).
+	resetEmbedderState(t)
+	loadEmbedder = func(string, ...rembed.Option) (*rembed.Embedder, error) {
+		return nil, errors.New("embeddings disabled for this test")
+	}
 	// A multi-word query must match per keyword, not as one literal substring:
 	// "code review quality gate" should still surface review-related skills.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

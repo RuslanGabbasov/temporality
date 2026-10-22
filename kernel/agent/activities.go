@@ -1459,6 +1459,13 @@ func (a *Activities) skillCosines(ctx context.Context, project, query string, sk
 			return out // zeros: pure lexical fallback
 		}
 		a.skillEmbedMu.Lock()
+		// Lazy init: Activities is constructed by composite literal in several
+		// places (tests, NewActivities), and a nil map write here crashed the
+		// first semantic skill_search the moment the embedding model actually
+		// loaded — until then every stand failed the load earlier and masked it.
+		if a.skillEmbedCache == nil {
+			a.skillEmbedCache = map[string]skillEmbedEntry{}
+		}
 		for j, i := range missing {
 			vectors[i] = fresh[j]
 			a.skillEmbedCache[skills[i].ID] = skillEmbedEntry{version: skills[i].Version, vec: fresh[j]}

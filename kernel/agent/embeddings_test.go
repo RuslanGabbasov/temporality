@@ -9,6 +9,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -49,6 +51,46 @@ func waitFor(t *testing.T, what string, deadline time.Duration, cond func() bool
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+// TestMain makes the package hermetic: the model loader defaults to an
+// offline stub, so no test accidentally reaches the Hugging Face Hub (a real
+// load there is slow, network-dependent and changes which code paths run —
+// the semantic tiers were designed and tested against "no embedder"). Tests
+// that need a specific loader behavior set loadEmbedder themselves; the
+// production loader (rembed.Load) is only ever exercised outside tests.
+func TestMain(m *testing.M) {
+	loadEmbedder = func(string, ...rembed.Option) (*rembed.Embedder, error) {
+		return nil, errors.New("embedding model load is stubbed out in tests")
+	}
+	os.Exit(m.Run())
+}
+
+// The cache dir must follow the environment: an explicit REMBED_CACHE wins,
+// a creatable FHS path keeps the container behavior, and — the local-stand
+// regression — an uncreatable FHS path (/var/cache on macOS) falls back to
+// the OS user cache instead of failing every load forever.
+func TestResolveEmbedCacheDir(t *testing.T) {
+	t.Setenv("REMBED_CACHE", "/explicit/cache")
+	if got := resolveEmbedCacheDir("/var/cache/rembed"); got != "/explicit/cache" {
+		t.Fatalf("explicit REMBED_CACHE must win, got %q", got)
+	}
+
+	t.Setenv("REMBED_CACHE", "")
+	creatable := filepath.Join(t.TempDir(), "cache", "rembed")
+	if got := resolveEmbedCacheDir(creatable); got != creatable {
+		t.Fatalf("a creatable FHS candidate must be used, got %q", got)
+	}
+
+	// A path that cannot be created on any platform: its parent is a file.
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	blocked := filepath.Join(blocker, "cache", "rembed")
+	if got := resolveEmbedCacheDir(blocked); got == blocked || got == blocker {
+		t.Fatalf("an uncreatable FHS path must fall back to the user cache, got %q", got)
+	}
 }
 
 func TestEmbeddingLoadSuccess(t *testing.T) {
