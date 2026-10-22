@@ -508,6 +508,12 @@ func main() {
 	// Ephemeral live-token streaming: the activity worker and the HTTP server
 	// share one process, so an in-memory bus connects them without a broker.
 	activities.Tokens = agent.NewTokenBus()
+	// Ephemeral run_command console (v2-consolidated.md §6): the same
+	// single-process topology as Tokens — the worker's OnOutput hook writes
+	// into the registry, the HTTP routes (registerConsoleRoutes) read it.
+	// Output is never persisted (§11.1): the registry lives and dies with
+	// this process.
+	activities.Console = agent.NewConsole()
 	// Admin-editable channel settings (channel_transport row) overlay the
 	// KERNEL_CHANNEL__* env vars: delivery reads the database per send, so
 	// saving the settings screen takes effect without a restart.
@@ -1066,6 +1072,10 @@ func main() {
 	// GET twin of POST /v1/agent/runs above — one cursor page of runs with
 	// statuses instead of the client's four journal scans + per-row N+1.
 	registerRunListRoute(mux, runListDeps{store: ws, gate: gate, log: log})
+	// Live console of run_command (v2-consolidated.md §6): the registry is
+	// created next to the activity worker (below), the HTTP handlers read
+	// the same process memory. ?project= drives auth like /v1/agent/runs.
+	registerConsoleRoutes(mux, consoleDeps{console: activities.Console, gate: gate})
 	mux.HandleFunc("GET /v1/agent/runs/{runID}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		if project == "" {

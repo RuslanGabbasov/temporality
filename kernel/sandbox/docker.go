@@ -89,6 +89,14 @@ type Request struct {
 	// endpoint lists running sandboxes with their run/agent/actor so the
 	// dashboard can show who consumes the host. Keys are used verbatim.
 	Labels map[string]string
+	// OnOutput, when set, receives stdout/stderr chunks as the command runs —
+	// the live console stream of the run_command special scenario
+	// (docs/specs/trassirovka-vkladka-zapuski/v2-consolidated.md §6). The two
+	// streams arrive separately, matching the runner's own split buffers.
+	// Chunks are ephemeral: they never enter the journal, the database or
+	// files (§11.1 — persistent storage of output is deferred). Nil keeps the
+	// classic wait-for-completion behavior.
+	OnOutput func(stream string, chunk []byte)
 }
 
 type Result struct {
@@ -338,6 +346,8 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 	}()
 	started := time.Now()
 	var stdout, stderr limitedBuffer
+	stdout.onChunk, stderr.onChunk = request.OnOutput, request.OnOutput
+	stdout.stream, stderr.stream = "stdout", "stderr"
 	cmd := exec.CommandContext(ctx, d.Binary, args...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()
@@ -625,9 +635,19 @@ func validateCommand(args []string) error {
 type limitedBuffer struct {
 	bytes.Buffer
 	truncated bool
+	// stream names this buffer's data for onChunk ("stdout" | "stderr").
+	// onChunk, when set, sees every byte written — before the 64 KiB result
+	// truncation below, because the console tail keeps its own, larger budget
+	// (v2-consolidated.md §6: 256 KiB / 2000 lines per stream). The final
+	// Result.Output stays bounded as before.
+	stream  string
+	onChunk func(stream string, chunk []byte)
 }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if b.onChunk != nil && len(p) > 0 {
+		b.onChunk(b.stream, p)
+	}
 	n := len(p)
 	remaining := maxOutputBytes - b.Len()
 	if remaining > 0 {

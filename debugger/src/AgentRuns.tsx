@@ -17,6 +17,7 @@ import {
 import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
 import RunDisputes from './RunDisputes'
+import ConsoleOutput from './ConsoleOutput'
 import Markdown from './Markdown'
 import { useT, useI18n, pluralT } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString, formatDuration, approvalHint } from './eventSummary'
@@ -159,9 +160,16 @@ const REASON_KEYS: Record<string, string> = {
  * the run's model.text_delta/model.reasoning events) is shown as the primary
  * content; the observability payload is reduced to what the summary line
  * doesn't already say. */
-function EventDetail({ event, t, project, response, reasoning, knowledgeDoubt }: { event: ObservationEvent; t: (key: string, vars?: Record<string, string>) => string; project: string; response?: string; reasoning?: string; knowledgeDoubt?: React.ReactNode }) {
+function EventDetail({ event, t, project, response, reasoning, knowledgeDoubt, live }: { event: ObservationEvent; t: (key: string, vars?: Record<string, string>) => string; project: string; response?: string; reasoning?: string; knowledgeDoubt?: React.ReactNode; live?: boolean }) {
   const [expanded, setExpanded] = useState(false)
   const d = event.data ?? {}
+  // run_command console (v2-consolidated.md §6, DoD-5): the operation id of
+  // this tool call addresses its output stream. Present on tool.started /
+  // tool.completed / tool.failed of run_command calls; anything else — any
+  // other tool, or an event without an operation id — renders no console.
+  const tool = typeof d.tool === 'string' ? d.tool : ''
+  const operationId = typeof d.operation_id === 'string' ? d.operation_id : ''
+  const consoleOpId = tool === 'run_command' && operationId ? operationId : ''
   // Knowledge-bearing events (knowledge.*, hint.*) can be doubted in place:
   // the reader is looking at the exact moment the knowledge was used/formed.
   const knowledgeID = typeof d.knowledge_id === 'string' && d.knowledge_id
@@ -237,6 +245,12 @@ function EventDetail({ event, t, project, response, reasoning, knowledgeDoubt }:
           </button>
           {expanded && (
             <>
+              {/* Console output of run_command: lazy (only while expanded),
+                  one subscription per expanded event (NFR-9) — mount/unmount
+                  of this component is exactly the subscription lifecycle. */}
+              {consoleOpId && (
+                <ConsoleOutput operationId={consoleOpId} project={project} live={Boolean(live)} />
+              )}
               {response && (
                 <div className="run-model-response" style={{ marginTop: '0.35rem' }}>
                   <Markdown content={response} />
@@ -1491,6 +1505,7 @@ export default function AgentRuns({ project }: { project: string }) {
                           </div>
                           <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>
                             <EventDetail event={event} t={t} project={selectedProject} response={turnKey ? trace.responseByKey.get(turnKey) : undefined} reasoning={turnKey ? trace.reasoningByKey.get(turnKey) : undefined}
+                              live={runID(event) === selected && selectedLive}
                               knowledgeDoubt={typeof event.data?.knowledge_id === 'string' && event.data.knowledge_id
                                 ? <KnowledgeActions knowledgeID={String(event.data.knowledge_id)} project={selectedProject} actorID={humanActorID} onDone={() => setKnowledgeRevision((r) => r + 1)} />
                                 : undefined} />
