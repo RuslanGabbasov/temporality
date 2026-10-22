@@ -738,6 +738,7 @@ export const en: Record<string, string> = {
     'runs.live.stalled': 'no data for {{seconds}}s',
     'runs.live.waiting_first_token': 'waiting for first token',
     'runs.live.sse_down': 'token stream not connected (transport, not the model)',
+    'runs.live.sse_reconnecting': 'token stream reconnecting (attempt {{count}})',
 
     // Reconcile operations (inline cards in the run trace)
     'operations.check_external': 'Check the external system (database, API, file system) and tell Temporality what actually happened.',

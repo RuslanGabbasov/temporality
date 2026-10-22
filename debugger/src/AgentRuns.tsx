@@ -1206,11 +1206,13 @@ export default function AgentRuns({ project }: { project: string }) {
                           // call right now (no answer text this turn) — the most
                           // informative thing the row can show.
                           if (!tokenMetrics.connected) {
-                            // The token channel never opened (auth, proxy,
-                            // dead endpoint): the silence is the transport's,
-                            // not the model's — say so instead of blaming the
-                            // first token.
-                            liveParts.push(t('runs.live.sse_down'))
+                            // The token channel never opened or is mid-backoff
+                            // (auth, proxy, kernel restart): the silence is the
+                            // transport's, not the model's — say so instead of
+                            // blaming the first token.
+                            liveParts.push(tokenMetrics.reconnects > 0
+                              ? t('runs.live.sse_reconnecting', { count: String(tokenMetrics.reconnects) })
+                              : t('runs.live.sse_down'))
                           } else {
                             if (tokenMetrics.tool) liveParts.push(`⚙ ${tokenMetrics.tool}`)
                             if (tokenMetrics.approxTokens > 0) liveParts.push(`~${tokenMetrics.approxTokens} tok`)
