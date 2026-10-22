@@ -26,6 +26,7 @@ import { eventSummary, shortTime, restoreMarkdownLines, formatDuration, approval
 import { humanFactorsOf, type RunHumanFactors } from './humanFactors'
 import { useRunTokenMetrics } from './tokenStream'
 import { subscribeRunJournal } from './journalStream'
+import type { ConsoleState } from './consoleStream'
 import {
   Button,
   TextInput,
@@ -384,6 +385,19 @@ export default function AgentRuns({ project }: { project: string }) {
     timeline.some((event) => event.type === 'run.started' && runID(event) === selected)
       && !timeline.some((event) => (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') && runID(event) === selected),
     [timeline, selected])
+  // §8/NFR-9 (T4): console buffers actually loaded by expanded rows, keyed
+  // by operation_id — the ONLY source the trace text search reads for
+  // command output (the search never fetches; unopened consoles stay out).
+  // Cleared on run switch: another run's buffers must not survive it.
+  const [consoleStates, setConsoleStates] = useState<ReadonlyMap<string, ConsoleState>>(() => new Map())
+  const collectConsoleState = useCallback((state: ConsoleState) => {
+    setConsoleStates((prev) => {
+      if (prev.get(state.operationId) === state) return prev
+      const next = new Map(prev)
+      next.set(state.operationId, state)
+      return next
+    })
+  }, [])
   // Live model-call progress: the journal only records the call when it
   // completes, so an in-flight "Вызов модели" row would sit silent for minutes.
   // The ephemeral token stream (same SSE the chat preview uses) fills the gap:
@@ -580,6 +594,8 @@ export default function AgentRuns({ project }: { project: string }) {
       resultAbortRef.current?.abort()
       trajectoryAbortRef.current?.abort()
       budgetAbortRef.current?.abort()
+      // §8 search index holds only this run's loaded console buffers.
+      setConsoleStates(new Map())
     }
     if (!silent) {
       // A fresh selection cancels the previous run's in-flight load; silent
@@ -1333,6 +1349,8 @@ export default function AgentRuns({ project }: { project: string }) {
                     emptyHint={trace.visible.length === 0 ? (t('runs.layers.timeline.empty')) : undefined}
                     filterState={committedTraceState}
                     onFilterState={setTraceState}
+                    consoleStates={consoleStates}
+                    onConsoleState={collectConsoleState}
                   />
                   {/* NFR-5: the window never grows by itself — the reader
                       asks for TRACE_WINDOW_STEP more rows each time. */}

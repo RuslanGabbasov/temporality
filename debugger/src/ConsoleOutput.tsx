@@ -2,18 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@carbon/react'
 import { Copy } from '@carbon/icons-react'
 import { useT } from './i18n'
-import {
-  applyConsoleFrame,
-  consoleCopyText,
-  consoleDroppedBytes,
-  consoleDroppedLines,
-  consoleTailShort,
-  consoleURI,
-  fetchConsoleTail,
-  subscribeConsoleStream,
-  type ConsoleFrame,
-  type ConsoleState,
-} from './consoleStream'
+import { applyConsoleFrame, consoleCopyText, consoleDroppedBytes, consoleDroppedLines, consoleTailShort, consoleURI, fetchConsoleTail, subscribeConsoleStream, type ConsoleFrame, type ConsoleState } from './consoleStream'
 import { copyText } from './clipboard'
 
 /** Console panel of one run_command event (v2-consolidated.md §6): separate
@@ -54,15 +43,22 @@ export function shouldAutoScroll(distanceFromBottomPx: number): boolean {
   return distanceFromBottomPx <= 24
 }
 
-interface ConsoleOutputProps {
+export interface ConsoleOutputProps {
   operationId: string
   /** The event lives under a run; the console endpoint scopes by project. */
   project: string
-  /** True while tool.completed/tool.failed has not landed in the trace. */
+  /** True while tool.completed/tool.failed has not landed in the trace —
+   *  i.e. the run is selected AND still live. Gates the SSE subscription:
+   *  a console opened on a run that is no longer live holds the tail fetch
+   *  but no stream (NFR-9: one subscription per expanded live event). */
   live: boolean
+  /** §8/NFR-9: publish each settled console state to the owner (AgentRuns)
+   *  so the trace text search covers exactly the loaded buffers — the
+   *  search itself never fetches. */
+  onStateLoaded?: (state: ConsoleState) => void
 }
 
-export default function ConsoleOutput({ operationId, project, live }: ConsoleOutputProps) {
+export default function ConsoleOutput({ operationId, project, live, onStateLoaded }: ConsoleOutputProps) {
   const t = useT()
   const [tab, setTab] = useState<ConsoleTab>('stdout')
   const [state, setState] = useState<ConsoleState | null>(null)
@@ -85,6 +81,14 @@ export default function ConsoleOutput({ operationId, project, live }: ConsoleOut
     setState((prev) => applyConsoleFrame(prev, frame))
   }, [])
 
+  /** §8/NFR-9 publish: the owner collects loaded buffers for the text
+   *  search (by operation id). Sent after the tail lands and on every
+   *  streamed frame; dropped identity-stable (no extra owner renders). */
+  useEffect(() => {
+    if (!state || !onStateLoaded) return
+    onStateLoaded(state)
+  }, [state, onStateLoaded])
+
   // Visibility pause state (declared before the subscription effect: it is
   // one of that effect's deps — tsc TSB2448/2454 on a use-before-declaration
   // flagged by `tsc -b`; behavior unchanged, the hook order is identical).
@@ -93,7 +97,11 @@ export default function ConsoleOutput({ operationId, project, live }: ConsoleOut
   // One subscription per expanded event: the tail snapshot + the live SSE
   // stream share a single AbortController. Collapsing the event aborts both;
   // re-expanding re-subscribes (a fresh tail request also covers anything the
-  // previous subscription missed while the reader was away).
+  // previous subscription missed while the reader was away). NFR-9: the
+  // subscription belongs to the SELECTED run's live event — `live` is the
+  // owner's selectedLive — so a tail on a settled/unselected run never
+  // holds a stream; re-selecting a live run re-subscribes (a fresh tail
+  // covers the gap).
   useEffect(() => {
     if (!operationId) return
     // NFR-6 spirit at event granularity: a hidden document pauses the live
@@ -107,8 +115,11 @@ export default function ConsoleOutput({ operationId, project, live }: ConsoleOut
       .then((tail) => {
         if (controller.signal.aborted) return
         setState(tail)
-        // A finished operation needs no live frames — the tail is the answer.
-        if (tail.done) return
+        // NFR-9: the SSE subscription exists only for the selected AND live
+        // event (`live` is the owner's selectedLive) — a tail on a settled
+        // run never holds a stream. A finished operation needs no live
+        // frames either: the tail is the answer.
+        if (!live || tail.done) return
         subscribeConsoleStream(operationId, project, applyFrame, controller.signal, { tail: true })
       })
       .catch((failure) => {
@@ -116,7 +127,7 @@ export default function ConsoleOutput({ operationId, project, live }: ConsoleOut
         setError(failure instanceof Error ? failure.message : String(failure))
       })
     return stop
-  }, [operationId, project, applyFrame, stop, visibleTick])
+  }, [operationId, project, live, applyFrame, stop, visibleTick])
 
   // Visibility pause: on hide, abort the network subscription; on return,
   // bump visibleTick (a subscription-effect dep) — the effect above aborts

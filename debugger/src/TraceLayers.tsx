@@ -4,6 +4,7 @@ import { eventDetails, timelineRow, rawEnvelope } from './eventPresentation'
 import { foldTrace, groupSummary, matchesChip, type TraceChip, type TraceItem } from './traceModel'
 import { filterTraceItems, searchItems, type TraceUrlState } from './traceFilters'
 import TraceFiltersPanel, { consoleSearchIndex, type ConsoleStateLike } from './TraceFiltersPanel'
+import type { ConsoleState } from './consoleStream'
 import type { Locale } from './locales'
 import Markdown from './Markdown'
 import ConsoleOutput from './ConsoleOutput'
@@ -35,6 +36,9 @@ export interface EventRowVisualProps {
   reasoning?: string
   knowledgeDoubt?: React.ReactNode
   live?: boolean
+  /** §8/NFR-9 (T4): receive each loaded console buffer of this row so the
+   *  owner can index it for the text search (no fetches in the search). */
+  onConsoleState?: (state: ConsoleState) => void
 }
 
 /** Discloser shared by the details toggle and the raw envelope. Keyboard
@@ -59,7 +63,7 @@ function Discloser({ open, onToggle, label, children }: { open: boolean; onToggl
 }
 
 /** Layers 2 + 3 of one event: inline details and the collapsed raw envelope. */
-function EventLayeredDetails({ event, t, project, response, reasoning, knowledgeDoubt, live }: Omit<EventRowVisualProps, 'locale'>) {
+function EventLayeredDetails({ event, t, project, response, reasoning, knowledgeDoubt, live, onConsoleState }: Omit<EventRowVisualProps, 'locale'>) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [rawOpen, setRawOpen] = useState(false)
   const d = event.data ?? {}
@@ -106,10 +110,15 @@ function EventLayeredDetails({ event, t, project, response, reasoning, knowledge
           ))}
           {/* run_command console slot (§6): lazy — mounts only while the
               details are open, one subscription per open event (NFR-9);
-              addresses console://<operation_id>, never artifact://. */}
+              addresses console://<operation_id>, never artifact://.
+              onStateLoaded feeds the §8 search index (loaded buffers only). */}
           {details.consoleOperationId && (
-            <ConsoleOutput operationId={details.consoleOperationId} project={project} live={Boolean(live)} />
-          )}
+            <ConsoleOutput
+              operationId={details.consoleOperationId}
+              project={project}
+              live={Boolean(live)}
+              onStateLoaded={onConsoleState}
+            />          )}
           {response && (
             <div className="run-model-response">
               <Markdown content={response} />
@@ -151,7 +160,7 @@ function EventLayeredDetails({ event, t, project, response, reasoning, knowledge
 }
 
 /** One standalone timeline row (layer 1) + its expandable layers. */
-export function TraceEventRow({ event, locale, t, project, response, reasoning, knowledgeDoubt, live }: EventRowVisualProps) {
+export function TraceEventRow({ event, locale, t, project, response, reasoning, knowledgeDoubt, live, onConsoleState }: EventRowVisualProps) {
   const [open, setOpen] = useState(false)
   const row = timelineRow(event, locale, t)
   const statusDot = row.status === 'error' ? '#f7768e'
@@ -181,7 +190,7 @@ export function TraceEventRow({ event, locale, t, project, response, reasoning, 
       </div>
       {open && (
         <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>
-          <EventLayeredDetails event={event} t={t} project={project} response={response} reasoning={reasoning} knowledgeDoubt={knowledgeDoubt} live={live} />
+          <EventLayeredDetails event={event} t={t} project={project} response={response} reasoning={reasoning} knowledgeDoubt={knowledgeDoubt} live={live} onConsoleState={onConsoleState} />
         </div>
       )}
     </div>
@@ -217,7 +226,7 @@ function TraceChips({ chip, onChip, items, t }: { chip: TraceChip; onChip: (chip
 /** Grouped trace: the §5 folded timeline with the three-layer rows, the §8
  *  filter panel (category/type/status/participant/duration, quick chips,
  *  text search — all URL-backed) above it. */
-export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates }: {
+export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates, onConsoleState }: {
   events: ObservationEvent[]
   locale: Locale
   t: TFn
@@ -236,6 +245,9 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
   /** Loaded console buffers by operation id (T4 ConsoleOutput) — the text
    *  search covers exactly these, never the network (§8, NFR-9). */
   consoleStates?: ReadonlyMap<string, ConsoleStateLike>
+  /** §8/NFR-9 (T4): receive each console buffer loaded by an expanded row
+   *  so the owner can index it for the text search (by operation id). */
+  onConsoleState?: (state: ConsoleState) => void
 }) {
   const [chip, setChip] = useState<TraceChip>('all')
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
@@ -323,7 +335,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
               {open && (
                 <div style={{ marginTop: '0.35rem', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
                   {item.events.map((event) => (
-                    <TraceEventRow key={`${event.source.id}:${event.event_id}`} event={event} locale={locale} t={t} project={project} knowledgeDoubt={knowledgeDoubtOf?.(event)} live={live} />
+                    <TraceEventRow key={`${event.source.id}:${event.event_id}`} event={event} locale={locale} t={t} project={project} knowledgeDoubt={knowledgeDoubtOf?.(event)} live={live} onConsoleState={onConsoleState} />
                   ))}
                 </div>
               )}
@@ -368,6 +380,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
             reasoning={turnProps(item.event).reasoning}
             knowledgeDoubt={knowledgeDoubtOf?.(item.event)}
             live={live}
+            onConsoleState={onConsoleState}
           />
         )
       })}
