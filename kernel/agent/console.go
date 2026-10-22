@@ -71,6 +71,9 @@ type consoleOp struct {
 	subs     map[chan consoleChunk]struct{}
 	done     bool
 	exitCode *int
+	// lastSeen is owned by mu (op.mu): Write, Done, Subscribe, op and sweep
+	// touch it only while holding it — the registry lock c.mu is never used
+	// for this field, the two locks must not protect the same data.
 	lastSeen time.Time
 }
 
@@ -224,24 +227,28 @@ func (c *Console) Snapshot(project, operationID string) (ConsoleState, bool) {
 
 // Subscribe taps one operation's live output. With tail=false the current
 // tails replay first (a reconnecting UI catches up); tail=true receives only
-// new data written after the subscription. ok=false means the operation is
-// unknown under this project. On a finished operation Events is closed (with
-// the backlog replayed when requested) so the handler still emits done.
+// new data written after the subscription. Subscribing to an operation that
+// has not produced output yet is the normal lazy-UI flow (§6: the watcher
+// attaches when the run_command row expands, often before the first chunk),
+// so Subscribe registers the entry instead of failing it — the live frames
+// start with the command's first output. ok=false is reserved for a nil
+// registry; a foreign project still cannot observe the operation because
+// the registry key is (project, operation_id).
 func (c *Console) Subscribe(project, operationID string, tail bool) (ConsoleSubscription, bool) {
 	if c == nil {
 		return ConsoleSubscription{}, false
 	}
 	c.sweep()
+	key := consoleKey{project, operationID}
 	c.mu.Lock()
-	op, ok := c.ops[consoleKey{project, operationID}]
-	if ok {
-		op.lastSeen = c.now()
+	op := c.ops[key]
+	if op == nil {
+		op = &consoleOp{subs: make(map[chan consoleChunk]struct{}), lastSeen: c.now()}
+		c.ops[key] = op
 	}
 	c.mu.Unlock()
-	if !ok {
-		return ConsoleSubscription{}, false
-	}
 	op.mu.Lock()
+	op.lastSeen = c.now()
 	defer op.mu.Unlock()
 	ch := make(chan consoleChunk, consoleSubBuffer)
 	if !tail {
@@ -272,13 +279,18 @@ func (c *Console) Subscribe(project, operationID string, tail bool) (ConsoleSubs
 func (c *Console) op(project, operationID string) *consoleOp {
 	key := consoleKey{project, operationID}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	op, ok := c.ops[key]
 	if !ok {
 		op = &consoleOp{subs: make(map[chan consoleChunk]struct{}), lastSeen: c.now()}
 		c.ops[key] = op
 	}
+	c.mu.Unlock()
+	// The lastSeen refresh belongs under op.mu: sweeping and every other
+	// reader expect it there, and taking op.mu under c.mu would invert the
+	// lock order used by Write/Done/Snapshot.
+	op.mu.Lock()
 	op.lastSeen = c.now()
+	op.mu.Unlock()
 	return op
 }
 

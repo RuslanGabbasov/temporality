@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/temporality-project/temporality/controlplane"
@@ -66,10 +67,13 @@ func registerConsoleRoutes(mux *http.ServeMux, deps consoleDeps) {
 		// its budget runs out; a command may legitimately outlive 120s and
 		// the stream lives as long as the subscriber wants.
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
-		sub, found := deps.console.Subscribe(project, operationID, r.URL.Query().Get("tail") == "true")
+		// tail accepts "true"/"1" — the stream client sends ?tail=1.
+		tailOnly, _ := strconv.ParseBool(r.URL.Query().Get("tail"))
+		sub, found := deps.console.Subscribe(project, operationID, tailOnly)
 		if !found {
-			// SSE headers are already out, so the miss travels as a framed
-			// error event rather than a status code.
+			// Only a nil registry lands here; SSE headers are already out,
+			// so the miss travels as a framed error event rather than a
+			// status code.
 			writeSSE(w, flusher, "error", map[string]string{"error": fmt.Sprintf("no console for operation %q in project %q", operationID, project)})
 			return
 		}

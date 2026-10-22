@@ -20,7 +20,7 @@ func consoleTestServer(t *testing.T, console *agent.Console) *httptest.Server {
 	t.Helper()
 	gate, err := controlplane.NewGate(
 		"admintoken:admin:admin:*\n" +
-			"readertoken:reader:*\n" +
+			"readertoken:reader:reader:*\n" +
 			"projecttoken:scoped:reader:proj-a")
 	require.NoError(t, err)
 	mux := http.NewServeMux()
@@ -129,7 +129,9 @@ func TestConsoleStreamTailTrueSkipsBacklog(t *testing.T) {
 	case body := <-responseCh:
 		require.NotContains(t, body, "old\n", "tail=true must not replay the backlog")
 		require.Contains(t, body, "event: stdout\ndata: {\"chunk\":\"new\\n\"}", body)
-		require.Contains(t, body, "event: done\ndata: {}", body)
+		// Exit code 0 is a real result, not "unknown": the done frame must
+		// carry it explicitly (the §6 contract — done-фрейм c exit_code).
+		require.Contains(t, body, "event: done\ndata: {\"exit_code\":0}", body)
 	case <-time.After(5 * time.Second):
 		t.Fatal("the stream must end once the operation is done")
 	}
@@ -156,8 +158,73 @@ func TestConsoleStreamFinishedOperationStillEndsWithDone(t *testing.T) {
 	require.Contains(t, body, "event: done\ndata: {\"exit_code\":2}", body)
 }
 
-func TestConsoleStreamUnknownOperationFramedError(t *testing.T) {
-	server := consoleTestServer(t, agent.NewConsole())
+func TestConsoleStreamSubscribesBeforeFirstChunk(t *testing.T) {
+	// §6 lazy flow: the UI attaches when the run_command row expands —
+	// typically before the command has produced any output (the journal
+	// event only appears after the tool returns). The subscription must
+	// register the operation and go live with the first chunk; a framed
+	// error here would break the primary "watch it run" scenario.
+	console := agent.NewConsole()
+	server := consoleTestServer(t, console)
+
+	responseCh := make(chan string, 1)
+	go func() {
+		request, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/agent/console/op-early/stream?project=p1", nil)
+		request.Header.Set("Authorization", "Bearer readertoken")
+		response, err := server.Client().Do(request)
+		require.NoError(t, err)
+		defer response.Body.Close()
+		raw, _ := io.ReadAll(response.Body)
+		responseCh <- string(raw)
+	}()
+	time.Sleep(200 * time.Millisecond)
+	console.Write("p1", "op-early", "stdout", []byte("live\n"))
+	console.Done("p1", "op-early", 0)
+
+	select {
+	case body := <-responseCh:
+		require.Contains(t, body, "event: stdout\ndata: {\"chunk\":\"live\\n\"}", body)
+		require.Contains(t, body, "event: done\ndata: {\"exit_code\":0}", body)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream must end once the operation is done")
+	}
+}
+
+func TestConsoleStreamTailParamAcceptsClientSpelling(t *testing.T) {
+	// The stream client sends ?tail=1 (consoleStream.ts); the contract
+	// spelling "true" must behave identically — the backlog stays out.
+	console := agent.NewConsole()
+	console.Write("p1", "op-one", "stdout", []byte("old\n"))
+	server := consoleTestServer(t, console)
+
+	responseCh := make(chan string, 1)
+	go func() {
+		request, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/agent/console/op-one/stream?project=p1&tail=1", nil)
+		request.Header.Set("Authorization", "Bearer readertoken")
+		response, err := server.Client().Do(request)
+		require.NoError(t, err)
+		defer response.Body.Close()
+		raw, _ := io.ReadAll(response.Body)
+		responseCh <- string(raw)
+	}()
+	time.Sleep(200 * time.Millisecond)
+	console.Write("p1", "op-one", "stdout", []byte("new\n"))
+	console.Done("p1", "op-one", 0)
+
+	select {
+	case body := <-responseCh:
+		require.NotContains(t, body, "old\n", "?tail=1 must skip the backlog like ?tail=true")
+		require.Contains(t, body, "event: stdout\ndata: {\"chunk\":\"new\\n\"}", body)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream must end once the operation is done")
+	}
+}
+
+func TestConsoleStreamNilRegistryFramedError(t *testing.T) {
+	// Only a nil registry can fail a subscribe now (an unknown operation
+	// auto-registers); SSE headers are already out, so the miss is a framed
+	// error event.
+	server := consoleTestServer(t, nil)
 	request, err := http.NewRequest(http.MethodGet, server.URL+"/v1/agent/console/missing/stream?project=p1", nil)
 	require.NoError(t, err)
 	request.Header.Set("Authorization", "Bearer readertoken")
@@ -166,7 +233,7 @@ func TestConsoleStreamUnknownOperationFramedError(t *testing.T) {
 	defer response.Body.Close()
 	raw, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
-	require.Contains(t, string(raw), "event: error", "SSE headers are already out, so the miss is a framed error")
+	require.Contains(t, string(raw), "event: error")
 }
 
 // ── Authorization: the same wall as GET /v1/agent/runs ───────────────────────

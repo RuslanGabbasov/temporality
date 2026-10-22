@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -39,7 +38,7 @@ func TestConsoleTailByteOverflowKeepsNewestBytesAndCountsDropped(t *testing.T) {
 }
 
 func TestConsoleTailLineOverflowKeepsNewestWholeLines(t *testing.T) {
-	c := newTestConsole(1 << 20, 2)
+	c := newTestConsole(1<<20, 2)
 	c.Write("proj", "op-1", "stdout", []byte("l1\nl2\nl3\nl4\n"))
 	state, _ := c.Snapshot("proj", "op-1")
 	// The line budget keeps whole lines only: the newest two complete lines.
@@ -57,7 +56,7 @@ func TestConsoleTailLineOverflowKeepsNewestWholeLines(t *testing.T) {
 func TestConsolePartialTailLineStaysWithinLineBudget(t *testing.T) {
 	// A tail without a trailing newline is one partial line; two writes
 	// forming three newline-free fragments must not evict anything.
-	c := newTestConsole(1 << 20, 2)
+	c := newTestConsole(1<<20, 2)
 	c.Write("proj", "op-1", "stdout", []byte("ab"))
 	c.Write("proj", "op-1", "stdout", []byte("cd"))
 	c.Write("proj", "op-1", "stdout", []byte("ef"))
@@ -255,7 +254,7 @@ func TestConsoleSlowSubscriberIsDroppedNotBlocking(t *testing.T) {
 }
 
 func TestConsoleConcurrentWritesAreRaceFree(t *testing.T) {
-	c := newTestConsole(1 << 10, 500)
+	c := newTestConsole(1<<10, 500)
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -355,23 +354,17 @@ func TestConsoleOutputNeverEntersTheJournal(t *testing.T) {
 	}
 	if _, err := activities.RunTool(t.Context(), ToolRequest{
 		RunID: "run-console", OperationID: "frame-1/call-5", Project: "proj",
-		Name: "run_command",
+		Name:      "run_command",
 		Arguments: map[string]any{"command": []string{"echo", "hi"}},
 	}); err != nil {
 		t.Fatalf("run_command must succeed: %v", err)
 	}
-	// The command produced output; no journal event may carry it.
-	if len(outbox.events) == 0 {
-		t.Fatal("precondition: RunTool enqueued journal events for the operation")
-	}
-	for _, event := range outbox.events {
-		raw, err := json.Marshal(event)
-		if err != nil {
-			t.Fatalf("marshal journal event: %v", err)
-		}
-		if strings.Contains(string(raw), "hello-from-command") || strings.Contains(string(raw), "warn-from-command") {
-			t.Fatalf("console output leaked into journal event %s: %s", event.Type, raw)
-		}
+	// §11.1: the console stream adds no journaling of its own — at the
+	// activity layer run_command enqueues nothing (tool envelopes are the
+	// workflow's business, pre-existing), so the registry is the only place
+	// the output bytes exist while the command runs.
+	if len(outbox.events) != 0 {
+		t.Fatalf("run_command must not journal anything at the activity layer, got %d events", len(outbox.events))
 	}
 	// The registry still holds the tail for the live console; the done state
 	// is resolved with the exit code.
