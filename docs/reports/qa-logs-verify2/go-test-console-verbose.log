@@ -1,0 +1,72 @@
+=== RUN   TestConsoleTailByteOverflowKeepsNewestBytesAndCountsDropped
+--- PASS: TestConsoleTailByteOverflowKeepsNewestBytesAndCountsDropped (0.00s)
+=== RUN   TestConsoleTailLineOverflowKeepsNewestWholeLines
+--- PASS: TestConsoleTailLineOverflowKeepsNewestWholeLines (0.00s)
+=== RUN   TestConsolePartialTailLineStaysWithinLineBudget
+--- PASS: TestConsolePartialTailLineStaysWithinLineBudget (0.00s)
+=== RUN   TestConsoleStreamsBufferSeparately
+--- PASS: TestConsoleStreamsBufferSeparately (0.00s)
+=== RUN   TestConsoleRejectsUnknownStreamAndEmptyChunk
+--- PASS: TestConsoleRejectsUnknownStreamAndEmptyChunk (0.00s)
+=== RUN   TestConsoleWriteAfterDoneIsIgnored
+--- PASS: TestConsoleWriteAfterDoneIsIgnored (0.00s)
+=== RUN   TestConsoleSnapshotOfUnknownOperationFails
+--- PASS: TestConsoleSnapshotOfUnknownOperationFails (0.00s)
+=== RUN   TestConsoleContractFields
+--- PASS: TestConsoleContractFields (0.00s)
+=== RUN   TestConsoleFanOutReachesLiveSubscribers
+--- PASS: TestConsoleFanOutReachesLiveSubscribers (0.00s)
+=== RUN   TestConsoleSubscribeTailTrueSkipsBacklog
+--- PASS: TestConsoleSubscribeTailTrueSkipsBacklog (0.00s)
+=== RUN   TestConsoleSubscribeTailFalseReplaysBacklog
+--- PASS: TestConsoleSubscribeTailFalseReplaysBacklog (0.00s)
+=== RUN   TestConsoleSubscribeToFinishedOperationDeliversDoneClosure
+--- PASS: TestConsoleSubscribeToFinishedOperationDeliversDoneClosure (0.00s)
+=== RUN   TestConsoleCancelStopsDelivery
+--- PASS: TestConsoleCancelStopsDelivery (0.00s)
+=== RUN   TestConsoleSlowSubscriberIsDroppedNotBlocking
+--- PASS: TestConsoleSlowSubscriberIsDroppedNotBlocking (0.00s)
+=== RUN   TestConsoleConcurrentWritesAreRaceFree
+--- PASS: TestConsoleConcurrentWritesAreRaceFree (0.00s)
+=== RUN   TestConsoleSweepDropsIdleUnsubscribedEntries
+--- PASS: TestConsoleSweepDropsIdleUnsubscribedEntries (0.00s)
+=== RUN   TestConsoleHookWiring
+--- PASS: TestConsoleHookWiring (0.00s)
+=== RUN   TestConsoleNilReceiverIsSafe
+--- PASS: TestConsoleNilReceiverIsSafe (0.00s)
+=== RUN   TestConsoleOutputNeverEntersTheJournal
+--- PASS: TestConsoleOutputNeverEntersTheJournal (0.00s)
+PASS
+ok  	github.com/temporality-project/temporality/kernel/agent	0.029s
+=== RUN   TestConsoleSnapshotEndpointContract
+--- PASS: TestConsoleSnapshotEndpointContract (0.01s)
+=== RUN   TestConsoleSnapshotUnknownOperationIs404
+--- PASS: TestConsoleSnapshotUnknownOperationIs404 (0.00s)
+=== RUN   TestConsoleStreamDeliversFramesAndDoneWithExitCode
+--- PASS: TestConsoleStreamDeliversFramesAndDoneWithExitCode (0.20s)
+=== RUN   TestConsoleStreamTailTrueSkipsBacklog
+--- PASS: TestConsoleStreamTailTrueSkipsBacklog (0.20s)
+=== RUN   TestConsoleStreamFinishedOperationStillEndsWithDone
+--- PASS: TestConsoleStreamFinishedOperationStillEndsWithDone (0.00s)
+=== RUN   TestConsoleStreamSubscribesBeforeFirstChunk
+--- PASS: TestConsoleStreamSubscribesBeforeFirstChunk (0.20s)
+=== RUN   TestConsoleStreamTailParamAcceptsClientSpelling
+--- PASS: TestConsoleStreamTailParamAcceptsClientSpelling (0.20s)
+=== RUN   TestConsoleStreamNilRegistryFramedError
+--- PASS: TestConsoleStreamNilRegistryFramedError (0.00s)
+=== RUN   TestConsoleAuthorization
+=== RUN   TestConsoleAuthorization/enabled_gate_rejects_anonymous
+=== RUN   TestConsoleAuthorization/foreign_project_token_is_forbidden
+=== RUN   TestConsoleAuthorization/missing_project_parameter_is_400
+=== RUN   TestConsoleAuthorization/authorized_reader_sees_the_tail
+=== RUN   TestConsoleAuthorization/stream_endpoint_enforces_the_same_wall
+--- PASS: TestConsoleAuthorization (0.00s)
+    --- PASS: TestConsoleAuthorization/enabled_gate_rejects_anonymous (0.00s)
+    --- PASS: TestConsoleAuthorization/foreign_project_token_is_forbidden (0.00s)
+    --- PASS: TestConsoleAuthorization/missing_project_parameter_is_400 (0.00s)
+    --- PASS: TestConsoleAuthorization/authorized_reader_sees_the_tail (0.00s)
+    --- PASS: TestConsoleAuthorization/stream_endpoint_enforces_the_same_wall (0.00s)
+=== RUN   TestConsoleProjectIsolationOverHTTP
+--- PASS: TestConsoleProjectIsolationOverHTTP (0.00s)
+PASS
+ok  	github.com/temporality-project/temporality/cmd/agent-kernel	0.860s

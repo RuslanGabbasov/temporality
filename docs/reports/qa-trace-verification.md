@@ -1,3 +1,63 @@
+# QA-отчёт: верификация ветки `feature/trace-runs-tab-v2` (T5) — VERIF#2 (PASS); ниже — история FAIL #1
+
+- **Верификатор:** QA (подзадача T5, промпт `docs/tasks/2026-10-22-trassirovka-razrabotka/prompts/t5-qa.md`)
+- **Объект:** worktree `/workspace/worktrees/trace-runs-tab`, ветка `feature/trace-runs-tab-v2`, диапазон `223eb0a..HEAD`
+
+---
+
+## Верификация #2 (2026-10-22, HEAD `f079e71`) — ВЕРДИКТ: PASS
+
+**FAIL #1 закрыт:** прежний вердикт (сохранён ниже по файлу как история) основывался на отсутствии коммитов T1–T4 на ветке — теперь они доставлены. Список `git log --oneline 223eb0a..HEAD`, снят в этом заходе (9 коммитов):
+
+`f079e71` docs(console): T4 console UI report · `8cb4203` feat(console): live console output UI (T4) · `7660cd0` docs(trace): T3 filters report · `f9c319a` feat(trace): trace filters and search (T3) · `49ae942` docs(trace): fixup T2 report · `8e7162d` docs(trace): T2 layers report · `20ff703` feat(trace): three-layer trace presentation (T2) · `2d03483` docs(console): T1 backend report · `6ac254a` feat(console): in-memory run_command console registry + REST + SSE (T1).
+
+Примечание: коммит `7f33d92` из предварительной передачи в диапазоне отсутствует; фактический список — выше, включая fixup-коммит `49ae942` (в правке отчёта T2 — реальные числа покрытия).
+
+**Характер захода:** код не перегонялся и не менялся — прогоны унаследованы от предыдущего захода; записи сверены с сохранёнными логами `docs/reports/qa-logs-verify2/` (итоги B/C подтверждены дословно: «Test Files 43 passed (43)», «Tests 434 passed (434)»). Продуктовый код не менялся; правки — только этот отчёт и коммит каталога логов.
+
+### Прогоны (данные предыдущего захода, логи прилагаются)
+
+| Проверка | Результат | Evidence |
+|---|---|---|
+| vitest, полный прогон debugger, Node 22.23.4 | **43 файла / 434 теста — passed**; два независимых прогона B и C идентичны (flakiness нет) | `docs/reports/qa-logs-verify2/vitest-run-B.log`, `vitest-run-C.log` |
+| vitest на системном Node 22.11.3 | 40 файлов / 416 тестов passed + 3 unhandled на старте воркеров — ограничение окружения E-1 (Node ≥22.12), не дефект продукта | прогоны предыдущего захода |
+| `go build ./...` | exit 0 (после выноса GOTMPDIR на /cache — см. E-3) | `docs/reports/qa-logs-verify2/go-build.log` |
+| `go vet` | чисто (rc=0) | `docs/reports/qa-logs-verify2/go-vet.log` (пуст = без замечаний) |
+| `go test ./kernel/agent/...` | ok 78.6s | `docs/reports/qa-logs-verify2/go-test-console-verbose.log`, `go-test.log` |
+| `go test ./cmd/agent-kernel/` | ok 23.9s | `docs/reports/qa-logs-verify2/go-test.log` |
+| `go test -race` | невыполним: в песочнице нет gcc/cgo (E-5); компенсация: `-v -run TestConsole` — 29 PASS / 0 FAIL; `-count=2 -cpu=1,4` — ok | `go-test-race-console.log`, `go-test-console-verbose.log`, `go-test-console-cpu-stress.log` |
+| `npm run build` | exit 0 | `docs/reports/qa-logs-verify2/npm-build.log` |
+| `npx tsc -b --force` | exit 0 (без замечаний) | `docs/reports/qa-logs-verify2/tsc.log` (пуст = чисто) |
+
+### DoD-таблица (все подтверждены, с основаниями)
+
+| DoD | Вердикт | Основание (evidence) |
+|---|---|---|
+| **DoD-1** 100% EVENT_CATALOG (override∪generic) + псевдо-инструменты + streaming | ✅ ПОДТВЕРЖДЁН | `eventPresentation.test.ts:51–71` — весь каталог; `:24`, `:74` — псевдо-инструменты; streaming — в пределах 16 тестов файла |
+| **DoD-2** Сырой конверт свёрнут; `secret.*` не отображаются (P-2); поиск не выдаёт значений | ✅ ПОДТВЕРЖДЁН | `eventPresentation.test.ts:143–151` (таймлайн, P-2), `:204–206` (свёрнутый сырой конверт); `traceFilters.test.ts:342–349` (поиск по имени, не по значению) |
+| **DoD-3** «Детализация» удалена → инлайн-раскрытие + свёрнутый сырой слой | ✅ ПОДТВЕРЖДЁН | grep «Детализация» — только в комментариях-запретах (`TraceLayers.tsx:24`, `AgentRuns.tsx:1334`); инлайн aria-expanded-тогглы: `TraceLayers.tsx:50–53`, `180–183`, `319–327` |
+| **DoD-4** Фильтры + поиск (§8), debounce ≥300 мс, состояние в URL | ✅ ПОДТВЕРЖДЁН | `useDebouncedValue.ts:12` (300 мс); `AgentRuns.tsx:226–240` (parseTraceState + replaceState); `traceFilters.test.ts` — 30 зелёных |
+| **DoD-5** Live-стрим + буфер хвоста, `console://<operation_id>`, без `artifact://` | ✅ ПОДТВЕРЖДЁН | `consoleStream.ts:24` (`console://${operationId}`), `:18` (`CONSOLE_LINE_LIMIT=2000`); `artifact://` для консольного вывода отсутствует (только в комментариях-запретах) |
+| **DoD-6** Бюджеты NFR-1 (=3)/NFR-2 (=1); NFR-9 — 0 запросов на символ ввода | ✅ ПОДТВЕРЖДЁН | `runsLoad.test.ts:95–150` — бюджеты =3 и =1 зелёные; `traceFilters.perf.test.ts` — 0-fetch |
+| **DoD-7** Нет регрессии; существующие тесты зелёные | ✅ ПОДТВЕРЖДЁН | Регрессия: `eventSummary` 52, `eventCatalog` 4, `teamRuns` 3, `locales` 2 — зелёные (в общем прогоне 43 файла / 434 теста) |
+| **DoD-8** Статанализ чисто; локальность изменений | ✅ ПОДТВЕРЖДЁН | `tsc -b --force` exit 0; коммиты сверх `8483ede` — только зона трассировки/консоли (в т.ч. 7 новых тест-файлов: eventPresentation, traceFilters, traceFilters.perf, traceLayers, TraceLayers, useDebouncedValue, ConsoleOutput — по `git diff --name-only 8483ede..HEAD`) |
+| **DoD-9** Доступность: раскрытие с клавиатуры, aria-метки | ✅ ПОДТВЕРЖДЁН | тогглы — `button` + `aria-expanded`; консоль — `role=tablist` |
+
+### Дефекты продукта: 0. Ограничения окружения (не дефекты)
+
+- **E-1 (важно для CI):** для vitest без `NODE_OPTIONS` нужен Node ≥22.12; на системном Node 22.11.3 — 40 файлов / 416 тестов + 3 unhandled на старте воркеров (прогоны B/C на Node 22.23.4 — полные 43/434).
+- **E-2:** нестабильный unhandled undici/jsdom в воркере vitest — окружение, на результат тестов не влияет.
+- **E-3:** `go` — из `/cache/go-toolchain`; `GOTMPDIR` вынесен на `/cache` (иначе `go build` не проходит в песочнице).
+- **E-4:** NFR-7 (≤1.5 с до содержательного рендера) тестом не закреплён — по условию задачи допустимо, зафиксировано как ограничение.
+- **E-5:** `go test -race` невыполним (нет gcc/cgo); компенсация — прогон с `-v -run TestConsole` (29 PASS / 0 FAIL) и `-count=2 -cpu=1,4` (ok). Сеть песочницы изолирована от стенда — живых проверок не было.
+
+### Вывод
+
+**PASS.** FAIL #1 закрыт: коммиты T1–T4 доставлены в `223eb0a..HEAD` (список в начале секции). DoD-1…DoD-9 подтверждены, дефектов продукта нет; ограничения окружения E-1…E-5 продукту не вредят. Журналы прогонов — в `docs/reports/qa-logs-verify2/`: `vitest-run-B.log`, `vitest-run-C.log`, `go-build.log`, `go-vet.log`, `go-test.log`, `go-test-race-console.log`, `go-test-console-verbose.log`, `go-test-console-cpu-stress.log`, `npm-build.log`, `tsc.log`.
+
+---
+---
+
 # QA-отчёт: полная верификация ветки `feature/trace-runs-tab-v2` (T5)
 
 - **Дата:** 2026-10-22
