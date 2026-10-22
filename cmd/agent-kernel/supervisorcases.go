@@ -20,6 +20,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/temporality-project/temporality/kernel/agent"
@@ -279,7 +280,9 @@ func mineSkillCandidates(ctx context.Context, log *slog.Logger, activities *agen
 		log.Warn("supervisor cases: list tool events", "error", err.Error())
 		return
 	}
-	// Per-run ordered tool sequences → repeated 2-grams across DISTINCT runs.
+	// Per-run ordered tool sequences → repeated 3-grams across DISTINCT runs.
+	// A triple (read → mutate → verify) actually names a procedure where a
+	// pair mostly names a habit; the deterministic gate keeps the noise out.
 	perRun := map[string][]string{}
 	runOrder := []string{}
 	for _, event := range tools {
@@ -308,19 +311,23 @@ func mineSkillCandidates(ctx context.Context, log *slog.Logger, activities *agen
 				break
 			}
 		}
-		for i := 0; i+1 < len(seq); i++ {
-			sig := seq[i] + " → " + seq[i+1]
+		for i := 0; i+2 < len(seq); i++ {
+			a, b, c := seq[i], seq[i+1], seq[i+2]
+			if !skillPatternWorthMining(a, b, c) {
+				continue
+			}
+			sig := a + " → " + b + " → " + c
 			if seenInRun[sig] {
 				continue
 			}
 			seenInRun[sig] = true
-			c := grams[sig]
-			if c == nil {
-				c = &candidate{runs: map[string]bool{}, project: project}
-				grams[sig] = c
+			entry := grams[sig]
+			if entry == nil {
+				entry = &candidate{runs: map[string]bool{}, project: project}
+				grams[sig] = entry
 			}
-			c.runs[run] = true
-			c.count++
+			entry.runs[run] = true
+			entry.count++
 		}
 	}
 	// Rank by distinct-run spread.
@@ -350,7 +357,7 @@ func mineSkillCandidates(ctx context.Context, log *slog.Logger, activities *agen
 			break
 		}
 		subject := patternHash(r.sig)
-		if !caseDue(done, agent.CaseSkillCandidate, subject) {
+		if !caseDue(done, agent.CaseSkillCandidate, subject) || recentlyRejectedSkillPattern(r.sig) {
 			continue
 		}
 		// A skill candidate is only interesting when no existing skill name
@@ -384,6 +391,15 @@ func mineSkillCandidates(ctx context.Context, log *slog.Logger, activities *agen
 			log.Warn("supervisor cases: skill candidate", "signature", r.sig, "error", err.Error())
 			continue
 		}
+		if !verdict.WorthSkill {
+			// The judge's rejection is a decision, not a failure: remember it so
+			// the next pass reaches deeper into rankedList instead of re-asking
+			// the same pair (the journal cannot remember it — a rejection is
+			// never published, the feed being the point).
+			log.Info("supervisor cases: skill candidate rejected as trivial", "signature", r.sig, "explanation", verdict.Explanation)
+			rememberRejectedSkillPattern(r.sig)
+			continue
+		}
 		summary := fmt.Sprintf("Последовательность «%s» повторяется в %d ранах — кандидат в навыки «%s»: %s", r.sig, len(r.c.runs), verdict.SkillName, verdict.Description)
 		if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseSkillCandidate, subject, r.c.project, summary, verdict.Recommendation, map[string]any{
 			"signature": r.sig, "runs": len(r.c.runs), "skill_name": verdict.SkillName, "description": verdict.Description, "steps": verdict.Steps,
@@ -398,6 +414,74 @@ func mineSkillCandidates(ctx context.Context, log *slog.Logger, activities *agen
 func patternHash(sig string) string {
 	sum := sha256.Sum256([]byte(sig))
 	return hex.EncodeToString(sum[:8])
+}
+
+// skillPatternWorthMining is the cheap deterministic gate ahead of the judge:
+// adjacent same-tool steps are pagination or a retry, and a sequence of only
+// read-only tools is navigation every run performs — none of it encodes a
+// procedure, and proposing them as skills floods the human queue with noise.
+// A sequence with at least one mutating tool (run_command, write_file,
+// delegate…) stays in: whether it is a real procedure is the judge's call.
+// Variadic over the n-gram length: the same rules hold for pairs and triples.
+func skillPatternWorthMining(tools ...string) bool {
+	readonly := 0
+	for i, tool := range tools {
+		if looksLikeReadonlyTool(tool) {
+			readonly++
+		}
+		if i > 0 && tools[i-1] == tool {
+			return false
+		}
+	}
+	return readonly < len(tools)
+}
+
+// skillReadonlyMarkers are name fragments that mark a builtin tool as a pure
+// lookup/read (skill_search, artifact_read, saga_list, web_fetch,
+// run_status…), grounded in the builtin tool names; exact matches cover the
+// names without a marker ("agents").
+var skillReadonlyMarkers = []string{
+	"search", "list", "read", "inspect", "fetch", "explore", "lookup",
+	"history", "diff", "executions", "status",
+}
+
+// Exact names without a distinctive marker; "view" as a substring would
+// wrongly catch submit_review.
+var skillReadonlyNames = map[string]bool{"agents": true, "view_image": true}
+
+func looksLikeReadonlyTool(name string) bool {
+	if skillReadonlyNames[name] {
+		return true
+	}
+	for _, marker := range skillReadonlyMarkers {
+		if strings.Contains(name, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// Rejected skill patterns are remembered in-process for the same window the
+// journal dedup uses. The judge's "trivial" verdict is deliberately not
+// published (it would re-appear in the human feed), so the journal cannot
+// remember it; the cost of a restart is one judge call per stale top
+// candidate, bounded by the pass cap.
+var (
+	skillRejectedMu       sync.Mutex
+	skillRejectedPatterns = map[string]time.Time{}
+)
+
+func rememberRejectedSkillPattern(sig string) {
+	skillRejectedMu.Lock()
+	defer skillRejectedMu.Unlock()
+	skillRejectedPatterns[sig] = time.Now()
+}
+
+func recentlyRejectedSkillPattern(sig string) bool {
+	skillRejectedMu.Lock()
+	defer skillRejectedMu.Unlock()
+	at, ok := skillRejectedPatterns[sig]
+	return ok && time.Since(at) < supervisorCaseDedupWindow
 }
 
 // ── C1: user friction patterns ──────────────────────────────────────────────
