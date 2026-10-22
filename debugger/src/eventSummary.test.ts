@@ -8,6 +8,53 @@ const t = (key: string) => key
 const event = (type: string, data: Record<string, unknown>): ObservationEvent =>
   ({ type, data } as unknown as ObservationEvent)
 
+describe('model.completed stream shape', () => {
+  const shapeOf = (data: Record<string, unknown>) => {
+    const info = eventSummary(event('model.completed', data), t)
+    // The shape is the segment of the detail line the verdict lives in.
+    return info.detail
+  }
+
+  it('reports a real stream with its chunk count and ttft', () => {
+    const detail = shapeOf({ transport: 'stream', deltas: 87, first_token_ms: 1200, latency_ms: 9000, total_tokens: 100 })
+    expect(detail).toContain('87')
+    expect(detail).toContain('runs.event.stream_chunks')
+    expect(detail).toContain('ttft 1.2s')
+    expect(detail).not.toContain('runs.event.stream_buffered')
+  })
+
+  it('does not call a short single-chunk answer buffered', () => {
+    // A 3.5s call with one chunk: could be a buffered gateway, could be a
+    // short answer — the evidence cannot tell, so no verdict.
+    const detail = shapeOf({ transport: 'stream', deltas: 1, first_token_ms: 3400, latency_ms: 3500, total_tokens: 180 })
+    expect(detail).not.toContain('runs.event.stream_buffered')
+    expect(detail).not.toContain('runs.event.stream_chunks')
+  })
+
+  it('fires the buffered verdict only for a long call delivered as one late chunk', () => {
+    const detail = shapeOf({ transport: 'stream', deltas: 1, first_token_ms: 39500, latency_ms: 40000, total_tokens: 500 })
+    expect(detail).toContain('runs.event.stream_buffered')
+  })
+
+  it('stays silent on a long call whose single chunk arrived early', () => {
+    // One chunk 100ms into a 40s call: the other 39.9s streamed as chunks we
+    // did not see counted — not enough evidence to blame the provider.
+    const detail = shapeOf({ transport: 'stream', deltas: 1, first_token_ms: 100, latency_ms: 40_000, total_tokens: 2000 })
+    expect(detail).not.toContain('runs.event.stream_buffered')
+  })
+
+  it('skips the shape for blocking transports and legacy events', () => {
+    for (const data of [
+      { transport: 'blocking', deltas: 1, latency_ms: 50_000, first_token_ms: 49_000 },
+      { deltas: 1, latency_ms: 50_000 },
+      {},
+    ]) {
+      expect(shapeOf(data)).not.toContain('runs.event.stream_buffered')
+      expect(shapeOf(data)).not.toContain('runs.event.stream_chunks')
+    }
+  })
+})
+
 const COLLAPSED_QA_REPORT = '## Отчёт QA-субагента: проверка lighthouse ### Статус: завершено --- ### 1. Что сделано | Шаг | Результат | Доказательство | |---|---|---| | Клонирование | OK | журнал | | Проверка | OK | отчёт |'
 
 describe('unwrapJsonString', () => {
