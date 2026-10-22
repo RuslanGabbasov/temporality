@@ -574,7 +574,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			tasksData = append(tasksData, entry)
 		}
-		if err := emit(activityCtx, state, "plan.started", map[string]any{"operation_id": operationID, "goal": spec.Goal, "tasks": tasksData, "max_rework": maxRework}); err != nil {
+		startedData := map[string]any{"operation_id": operationID, "goal": spec.Goal, "tasks": tasksData, "max_rework": maxRework, "on_failure": planOnFailurePolicy(spec.OnFailure)}
+		if spec.Mode == PlanModeWave {
+			startedData["mode"] = PlanModeWave
+		}
+		if err := emit(activityCtx, state, "plan.started", startedData); err != nil {
 			return "", nil, err
 		}
 		summarizeChild := func(runID string) *ChildRunSummary {
@@ -594,6 +598,11 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		answers := map[string]string{}
 		outcomesByTask := map[string]planTaskOutcome{}
 		var inflightPlan []*planPendingTask
+		// Wave mode (mode="wave"): after the first in-flight batch settles, the
+		// call returns instead of driving the whole DAG — newly-ready tasks are
+		// left pending for the parent's re-issue (see the launch phase gate).
+		drainedOnce := false
+		stagedRemaining := []string{}
 		// Acceptance-gate state (docs/agent-delegation.md): rework rounds used
 		// per task, child launches per task, per-round feedback, and why a
 		// running child was cancelled (its upstream reopened or died).
@@ -641,6 +650,66 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					return
 				}
 			}
+		}
+		// Failure policies (on_failure): after the first failed or incomplete
+		// task, "abort" cancels running children and returns the summary
+		// immediately; "stop" keeps running branches and only stops launching
+		// new work. Both settle pending tasks synchronously in spec order —
+		// deterministic executor state — and make the summary lead with the
+		// cause, so the parent can diagnose and re-issue instead of waiting out
+		// a doomed DAG.
+		onFailureAbort := spec.OnFailure == PlanOnFailureAbort
+		onFailureStop := spec.OnFailure == PlanOnFailureStop
+		abortedBy := ""
+		stoppedBy := ""
+		settlePending := func(reason, blockedBy string) error {
+			for index := range spec.Tasks {
+				id := spec.Tasks[index].ID
+				if statuses[id] != "" {
+					continue
+				}
+				statuses[id] = planStatusSkipped
+				outcomesByTask[id] = planTaskOutcome{TaskID: id, AgentID: agentIDs[id], Status: planStatusSkipped, SkipReason: reason, BlockedBy: blockedBy}
+				if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": id, "agent_id": agentIDs[id], "reason": reason, "blocked_by": blockedBy}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		requestAbort := func(taskID string) error {
+			if !onFailureAbort || abortedBy != "" {
+				return nil
+			}
+			abortedBy = taskID
+			if err := emit(activityCtx, state, "plan.aborted", map[string]any{"operation_id": operationID, "task_id": taskID, "agent_id": agentIDs[taskID]}); err != nil {
+				return err
+			}
+			if err := settlePending("plan_aborted", taskID); err != nil {
+				return err
+			}
+			for _, pending := range inflightPlan {
+				cancelRunningChild(pending.taskID)
+			}
+			return nil
+		}
+		requestStop := func(taskID string) error {
+			if !onFailureStop || stoppedBy != "" || abortedBy != "" {
+				return nil
+			}
+			stoppedBy = taskID
+			if err := emit(activityCtx, state, "plan.stopped", map[string]any{"operation_id": operationID, "task_id": taskID, "agent_id": agentIDs[taskID]}); err != nil {
+				return err
+			}
+			return settlePending("plan_stopped", taskID)
+		}
+		// A policy already fired: tasks reopened later (a rework verdict after a
+		// stop) must settle instead of staying pending forever.
+		haltFired := func() bool { return abortedBy != "" || stoppedBy != "" }
+		requestFailurePolicy := func(taskID string) error {
+			if err := requestAbort(taskID); err != nil {
+				return err
+			}
+			return requestStop(taskID)
 		}
 		// regateDownstream re-opens the consumers of a reopened task: completed
 		// dependents go back to pending (their stale answers are dropped), running
@@ -743,6 +812,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			if err := emit(activityCtx, state, "plan.task.failed", data); err != nil {
 				return err
 			}
+			if err := requestFailurePolicy(taskID); err != nil {
+				return err
+			}
 			return skipBranch(taskID, "upstream_failed")
 		}
 		// The loop runs until every task reaches a terminal status (completed,
@@ -768,10 +840,36 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 			}
 			// Launch every ready task in spec order while slots are free. Past the
 			// launch budget (rework included) ready tasks are skipped honestly.
+			// Wave mode gates the second and later launch phases: only tasks that
+			// already ran (rework reopenings) may launch — never-run tasks stay
+			// pending for the parent's re-issue, and the call returns after the
+			// current in-flight batch settles.
 			budgetExhausted := totalLaunches >= launchBudget
+			stagedRemaining = stagedRemaining[:0]
 			for index := range spec.Tasks {
 				task := spec.Tasks[index]
 				if statuses[task.ID] != "" || dag.DepsLeft[task.ID] > 0 {
+					continue
+				}
+				if haltFired() {
+					// A failure policy fired after this task was reopened: settle it
+					// instead of launching into a stopped/aborted plan.
+					reason := "plan_stopped"
+					blockedBy := stoppedBy
+					if abortedBy != "" {
+						reason, blockedBy = "plan_aborted", abortedBy
+					}
+					statuses[task.ID] = planStatusSkipped
+					outcomesByTask[task.ID] = planTaskOutcome{TaskID: task.ID, AgentID: agentIDs[task.ID], Status: planStatusSkipped, SkipReason: reason, BlockedBy: blockedBy}
+					if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": task.ID, "agent_id": agentIDs[task.ID], "reason": reason, "blocked_by": blockedBy}); err != nil {
+						return "", nil, err
+					}
+					continue
+				}
+				if spec.Mode == PlanModeWave && drainedOnce && launches[task.ID] == 0 {
+					// A newly-ready task from a later stage: leave pending for the
+					// parent's re-issue.
+					stagedRemaining = append(stagedRemaining, task.ID)
 					continue
 				}
 				if len(inflightPlan) >= delegationWidthLimit(&input) {
@@ -798,6 +896,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					statuses[task.ID] = planStatusFailed
 					outcomesByTask[task.ID] = planTaskOutcome{TaskID: task.ID, AgentID: task.AgentID, ChildRunID: childRunID, Status: planStatusFailed, Error: boundedFailureDetail(resolveErr)}
 					if err := emit(activityCtx, state, "plan.task.failed", map[string]any{"operation_id": operationID, "task_id": task.ID, "child_run_id": childRunID, "agent_id": task.AgentID, "error_type": "agent_resolution_failed", "error": boundedFailureDetail(resolveErr), "effect": "none"}); err != nil {
+						return "", nil, err
+					}
+					if err := requestFailurePolicy(task.ID); err != nil {
 						return "", nil, err
 					}
 					if err := skipBranch(task.ID, "upstream_failed"); err != nil {
@@ -909,6 +1010,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				subtree.tokens += child.TotalTokens
 				subtree.costUSD += child.CostUSD
 			}
+			drainedOnce = true
 			// Stale settlement first (docs/agent-delegation.md, acceptance
 			// gates): this child was cancelled because its upstream reopened or
 			// died. Whatever it produced is discarded — no failure event here,
@@ -947,6 +1049,17 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				return "", nil, ctx.Err()
 			}
 			if childErr != nil {
+				// A cancelled child after an abort is the policy working, not a
+				// failure: settle it honestly as skipped instead of stacking a
+				// bogus plan.task.failed on top of the abort.
+				if abortedBy != "" {
+					statuses[p.taskID] = planStatusSkipped
+					outcomesByTask[p.taskID] = planTaskOutcome{TaskID: p.taskID, AgentID: p.agentID, ChildRunID: p.childRunID, Status: planStatusSkipped, SkipReason: "plan_aborted", BlockedBy: abortedBy}
+					if err := emit(activityCtx, state, "plan.task.skipped", map[string]any{"operation_id": operationID, "task_id": p.taskID, "agent_id": p.agentID, "reason": "plan_aborted", "blocked_by": abortedBy}); err != nil {
+						return "", nil, err
+					}
+					continue
+				}
 				if err := failTask(p.taskID, p.childRunID, "delegated_run_failed", childErr, summarizeChild(p.childRunID)); err != nil {
 					return "", nil, err
 				}
@@ -969,6 +1082,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 					return "", nil, err
 				}
 				if err := skipBranch(p.taskID, "upstream_incomplete"); err != nil {
+					return "", nil, err
+				}
+				if err := requestFailurePolicy(p.taskID); err != nil {
 					return "", nil, err
 				}
 				continue
@@ -1025,6 +1141,9 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 								return "", nil, err
 							}
 							if err := discardDownstream(reviewed); err != nil {
+								return "", nil, err
+							}
+							if err := requestFailurePolicy(reviewed); err != nil {
 								return "", nil, err
 							}
 						} else {
@@ -1107,10 +1226,30 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 		for id, s := range statuses {
 			statusData[id] = s
 		}
-		if err := emit(activityCtx, state, "plan.completed", map[string]any{"operation_id": operationID, "goal": spec.Goal, "statuses": statusData}); err != nil {
+		completedData := map[string]any{"operation_id": operationID, "goal": spec.Goal, "statuses": statusData}
+		halt := planHalt{}
+		if abortedBy != "" {
+			completedData["aborted_by"] = abortedBy
+			halt.kind, halt.by = "aborted", abortedBy
+		} else if stoppedBy != "" {
+			completedData["stopped_by"] = stoppedBy
+			halt.kind, halt.by = "stopped", stoppedBy
+		}
+		if spec.Mode == PlanModeWave {
+			completedData["mode"] = PlanModeWave
+			for index := range spec.Tasks {
+				if statuses[spec.Tasks[index].ID] == "" {
+					halt.remaining = append(halt.remaining, spec.Tasks[index].ID)
+				}
+			}
+			if len(halt.remaining) > 0 {
+				completedData["remaining"] = append([]string{}, halt.remaining...)
+			}
+		}
+		if err := emit(activityCtx, state, "plan.completed", completedData); err != nil {
 			return "", nil, err
 		}
-		content := planSummary(spec, outcomes, rejections)
+		content := planSummary(spec, outcomes, rejections, halt)
 		if err := emit(activityCtx, state, "tool.completed", map[string]any{"operation_id": operationID, "arguments_hash": argumentsHash, "tool": "plan", "output": compactJSON(content, 1000)}); err != nil {
 			return "", nil, err
 		}
@@ -3315,12 +3454,14 @@ func KernelTools() []llm.ToolDef {
 		{Name: "run_status", Description: "List the earlier tasks the message sender started through this channel, with the current status and answer of each run. Use it for progress questions (\"what happened to my estimate?\") instead of starting new work", Parameters: map[string]any{"type": "object", "properties": map[string]any{"limit": map[string]any{"type": "integer", "description": "Optional cap, default 10"}}}},
 		{Name: "cancel_run", Description: "Cancel a run the sender started through this channel. Only runs produced from the sender's own messages may be cancelled; pass the run_id exactly as run_status reported it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"run_id": map[string]any{"type": "string", "description": "Target run id from run_status"}}, "required": []string{"run_id"}}},
 		{Name: "agent_propose", Description: "Propose an evolution of an agent definition (purpose, constraints, completion checks) grounded in evidence: what problem you observed, what change you propose and the expected effect. The proposal lands as pending and changes nothing until a human applies it in the Agents UI. Use it to turn repeated friction into a durable definition fix; capabilities cannot be proposed — a proposal never grants new powers", Parameters: map[string]any{"type": "object", "properties": map[string]any{"agent_id": map[string]any{"type": "string", "description": "Agent whose definition should change (usually you)"}, "problem": map[string]any{"type": "string", "description": "The observed problem: what kept going wrong or missing, grounded in concrete runs"}, "change": map[string]any{"type": "string", "description": "The proposed definition change: purpose, constraints or completion checks"}, "effect": map[string]any{"type": "string", "description": "Expected effect once a human applies it"}, "description": map[string]any{"type": "string", "description": "Optional new purpose text for the agent"}, "constraints": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Full replacement list of constraints (what the agent must never do)"}, "completion": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Full replacement list of completion checks (what to verify before declaring done)"}, "evidence": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Run ids, knowledge ids or other refs supporting the problem"}}, "required": []string{"agent_id", "problem", "change"}}},
-		{Name: "delegate", Description: "Delegate a self-contained subtask to another agent and wait for its result. The delegated agent runs with its own model, system prompt and capabilities — you cannot grant it anything beyond what it already has. Give a complete, self-contained prompt: everything the agent needs to know must be in it", Parameters: map[string]any{"type": "object", "properties": map[string]any{"agent_id": map[string]any{"type": "string", "description": "Agent to delegate to"}, "prompt": map[string]any{"type": "string", "description": "Self-contained subtask description"}, "max_turns": map[string]any{"type": "integer", "description": "Turn budget for the delegated run, 1–100. Budget generously: a child that dies mid-work returns incomplete. Real subtasks need 25+ turns; budgets below 24 are raised to 24"}}, "required": []string{"agent_id", "prompt"}}},
-		{Name: "plan", Description: "Execute a plan of dependent subtasks as a DAG across agents, in one call. Each task names an agent and a self-contained prompt; depends_on lists task ids that must complete successfully first — their final answers are appended to the dependent task's prompt automatically, or place them inline with {{task-id.answer}} placeholders. Tasks without shared dependencies run in parallel. A failed task skips only its transitive dependents; independent branches still finish. A task with review_of is an acceptance gate: its run receives the submit_review tool, and a rework verdict sends the rejected tasks back with concrete feedback and re-runs their consumers (bounded by max_rework). Use this instead of several delegate calls whenever the work has ordering dependencies, can fan out, or needs review gates.", Parameters: map[string]any{
+		{Name: "delegate", Description: "Delegate a self-contained subtask to another agent and wait for its result. The delegated agent runs with its own model, system prompt and capabilities — you cannot grant it anything beyond what it already has. Give a complete, self-contained prompt: everything the agent needs to know must be in it. Concurrent delegates share your project workspace with no isolation: parallel calls must touch disjoint files — chain mutating work (git, builds, the same files) instead of running it side by side", Parameters: map[string]any{"type": "object", "properties": map[string]any{"agent_id": map[string]any{"type": "string", "description": "Agent to delegate to"}, "prompt": map[string]any{"type": "string", "description": "Self-contained subtask description"}, "max_turns": map[string]any{"type": "integer", "description": "Turn budget for the delegated run, 1–100. Budget generously: a child that dies mid-work returns incomplete. Real subtasks need 25+ turns; budgets below 24 are raised to 24"}}, "required": []string{"agent_id", "prompt"}}},
+		{Name: "plan", Description: "Execute a plan of dependent subtasks as a DAG across agents, in one call. Each task names an agent and a self-contained prompt; depends_on lists task ids that must complete successfully first — their final answers are appended to the dependent task's prompt automatically, or place them inline with {{task-id.answer}} placeholders. All tasks run in the SAME shared project workspace with no isolation: only tasks with disjoint file sets and read-only work (research, lookups, reviews) may run in parallel; tasks that write files, build, run tests, or execute git MUST be chained with depends_on or merged into one task — parallel writers on the same tree clobber each other and fail. A failed task skips only its transitive dependents; independent branches still finish. on_failure tunes what a failure costs you: continue (default) keeps everything independent running; stop — after the first failed or incomplete task no new task launches and the summary returns as soon as running ones settle (bounds the waste without killing healthy branches); abort — running tasks are cancelled and the summary returns immediately (only when the remaining work is pointless regardless). For step-by-step control use mode=\"wave\": the call returns after each ready batch settles instead of driving the whole DAG, so every outcome reaches you before the next batch — diagnose and re-issue the remainder corrected; completed results stay addressable as {{task-id.answer}}. A task with review_of is an acceptance gate: its run receives the submit_review tool, and a rework verdict sends the rejected tasks back with concrete feedback and re-runs their consumers (bounded by max_rework). Use this instead of several delegate calls whenever the work has ordering dependencies, can fan out read-only, or needs review gates.", Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"goal":       map[string]any{"type": "string", "description": "Short human-readable goal of the plan"},
 				"max_rework": map[string]any{"type": "integer", "description": "How many times a reviewer may send a task back for rework, 0-4 (default 2)"},
+				"mode":       map[string]any{"type": "string", "enum": []string{"full", "wave"}, "description": "full (default) drives the whole DAG in one call; wave returns after each ready batch settles so you see every outcome before committing the next — re-issue the plan for the remainder, results addressable as {{task-id.answer}}"},
+				"on_failure": map[string]any{"type": "string", "enum": []string{"continue", "stop", "abort"}, "description": "What happens when a task fails or finishes incomplete: continue (default) keeps independent branches running; stop stops all new launches but lets running tasks finish; abort cancels running tasks and returns immediately — reserve it for goals that are dead regardless"},
 				"tasks": map[string]any{
 					"type":        "array",
 					"description": "Plan tasks; ids must be unique, depends_on references task ids",

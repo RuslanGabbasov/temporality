@@ -36,10 +36,41 @@ type PlanTask struct {
 	MaxTurns  int      `json:"max_turns,omitempty"`
 }
 
+// Plan failure policy (docs/agent-delegation.md, plans): what happens to the
+// rest of the DAG when one task settles failed or incomplete.
+//
+//   - continue (the default) keeps independent branches running — a wide
+//     fan-out where most tasks are expected to survive.
+//   - stop bounds the waste without killing healthy work: after the first
+//     failure no new task launches (pending ones are skipped, rework rounds
+//     included), already-running branches finish, and the summary returns
+//     when they settle.
+//   - abort is the hard stop: running children are cancelled, the summary
+//     returns immediately. Only for plans whose remaining work is pointless
+//     regardless of which branch died.
+const (
+	PlanOnFailureContinue = "continue"
+	PlanOnFailureStop     = "stop"
+	PlanOnFailureAbort    = "abort"
+)
+
+// Plan execution mode: "full" (the default) drives the whole DAG inside one
+// call; "wave" returns after each ready batch settles, so the parent sees
+// every outcome before committing the next batch and re-issues the remainder
+// corrected (completed results stay addressable as {{task-id.answer}}). The
+// kernel keeps no cross-call plan state — the model carries the rest of the
+// DAG, the run-scoped answer store already spans plans.
+const (
+	PlanModeFull = "full"
+	PlanModeWave = "wave"
+)
+
 // PlanSpec is the validated form of the `plan` tool arguments.
 type PlanSpec struct {
 	Goal      string     `json:"goal,omitempty"`
 	MaxRework int        `json:"max_rework,omitempty"` // 0 when absent; executor applies DefaultMaxRework
+	OnFailure string     `json:"on_failure,omitempty"` // "" = continue
+	Mode      string     `json:"mode,omitempty"`       // "" = full
 	Tasks     []PlanTask `json:"tasks"`
 }
 
@@ -97,6 +128,12 @@ func planSpecFromArgs(args map[string]any) (PlanSpec, string) {
 		}
 		spec.Tasks = append(spec.Tasks, task)
 	}
+	if v, ok := args["on_failure"].(string); ok {
+		spec.OnFailure = v
+	}
+	if v, ok := args["mode"].(string); ok {
+		spec.Mode = v
+	}
 	if v, ok := numericArg(args["max_rework"]); ok {
 		spec.MaxRework = int(v)
 	}
@@ -113,6 +150,16 @@ func validatePlanSpec(spec PlanSpec, priorAnswers map[string]string) (*planDAG, 
 	}
 	if len(spec.Tasks) > MaxPlanTasks {
 		return nil, fmt.Sprintf("a plan may have at most %d tasks", MaxPlanTasks)
+	}
+	switch spec.OnFailure {
+	case "", PlanOnFailureContinue, PlanOnFailureStop, PlanOnFailureAbort:
+	default:
+		return nil, fmt.Sprintf("on_failure must be %q, %q or %q", PlanOnFailureContinue, PlanOnFailureStop, PlanOnFailureAbort)
+	}
+	switch spec.Mode {
+	case "", PlanModeFull, PlanModeWave:
+	default:
+		return nil, fmt.Sprintf("mode must be %q or %q", PlanModeFull, PlanModeWave)
 	}
 	dag := &planDAG{
 		DependsOn:    map[string][]string{},
@@ -343,7 +390,22 @@ func planSpecToArgs(spec PlanSpec) map[string]any {
 	if spec.MaxRework > 0 {
 		args["max_rework"] = spec.MaxRework
 	}
+	if spec.OnFailure != "" {
+		args["on_failure"] = spec.OnFailure
+	}
+	if spec.Mode != "" {
+		args["mode"] = spec.Mode
+	}
 	return args
+}
+
+// planOnFailurePolicy normalizes the spec value for events and summaries:
+// an absent policy IS "continue".
+func planOnFailurePolicy(onFailure string) string {
+	if onFailure == "" {
+		return PlanOnFailureContinue
+	}
+	return onFailure
 }
 
 // planTaskStatus is the per-task terminal status inside a plan execution.
@@ -382,10 +444,19 @@ type planRejection struct {
 // rejectionFeedbackBound caps one feedback entry in the summary.
 const rejectionFeedbackBound = 240
 
+// planHalt carries why a plan stopped short of its full DAG: an on_failure
+// policy that fired ("aborted"/"stopped", by = the trigger task) and/or a
+// staged (wave-mode) call that leaves part of the DAG for the re-issue.
+type planHalt struct {
+	kind      string
+	by        string
+	remaining []string
+}
+
 // planSummary renders the tool-result content the parent model reads: every
 // task with its status and, for completed tasks, a bounded final answer.
 // Rework history makes the quality loop visible: who rejected what and why.
-func planSummary(spec PlanSpec, outcomes []planTaskOutcome, rejections []planRejection) string {
+func planSummary(spec PlanSpec, outcomes []planTaskOutcome, rejections []planRejection, halt planHalt) string {
 	counts := map[string]int{}
 	for index := range outcomes {
 		counts[outcomes[index].Status]++
@@ -396,6 +467,15 @@ func planSummary(spec PlanSpec, outcomes []planTaskOutcome, rejections []planRej
 		goal = "plan"
 	}
 	fmt.Fprintf(&b, "Plan %q finished: %d completed, %d incomplete, %d failed, %d skipped, %d invalidated.", goal, counts[planStatusCompleted], counts[planStatusIncomplete], counts[planStatusFailed], counts[planStatusSkipped], counts[planStatusInvalidated])
+	switch halt.kind {
+	case "aborted":
+		fmt.Fprintf(&b, "\n\nThe plan was aborted when %s failed (on_failure=abort): running tasks were cancelled, pending ones skipped. Fix or remove the failing branch and re-issue the plan; completed results are addressable as {{task-id.answer}}.", halt.by)
+	case "stopped":
+		fmt.Fprintf(&b, "\n\nThe plan stopped launching new tasks when %s failed (on_failure=stop): already-running tasks finished, the rest was skipped. Fix or remove the failing branch and re-issue the plan; completed results are addressable as {{task-id.answer}}.", halt.by)
+	}
+	if len(halt.remaining) > 0 {
+		fmt.Fprintf(&b, "\n\nStaged plan (mode=wave): %d task(s) not started in this call (%s). Re-issue the plan to continue — completed results are addressable as {{task-id.answer}}.", len(halt.remaining), strings.Join(halt.remaining, ", "))
+	}
 	for index := range outcomes {
 		outcome := &outcomes[index]
 		switch outcome.Status {
