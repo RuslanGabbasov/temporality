@@ -82,6 +82,14 @@ type Completion struct {
 	RequestRef  string `json:"request_ref,omitempty"`
 	ResponseRef string `json:"response_ref,omitempty"`
 	Attempts    int    `json:"attempts,omitempty"`
+	// Stream shape (transport="stream" only): Deltas counts the SSE chunks
+	// that carried generated tokens and FirstTokenMs is the wait for the first
+	// one. A real stream shows many deltas with an early first token; one
+	// late delta means the gateway buffered the whole answer — the call looks
+	// streaming-dead even though it succeeded, which is exactly what the
+	// operator needs to see to blame the provider, not the kernel.
+	Deltas       int   `json:"deltas,omitempty"`
+	FirstTokenMs int64 `json:"first_token_ms,omitempty"`
 	// Transport records how the completion was delivered: "stream" (SSE) or
 	// "blocking" (single JSON response). StreamFailed marks a stream that died
 	// mid-flight and was salvaged by the blocking fallback — the wall latency
@@ -719,6 +727,8 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	toolCallAccum := make(map[int]*ToolCall)
 	var finish string
 	var usage Usage
+	deltas := 0
+	var firstTokenAt time.Time
 	stop := false
 
 	for scanner.Scan() {
@@ -757,6 +767,10 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		if choice.Delta.Content != "" || choice.Delta.ReasoningContent != "" || len(choice.Delta.ToolCalls) > 0 {
 			lastProgress.Store(time.Now().UnixNano())
 			anyProgress.Store(true)
+			deltas++
+			if firstTokenAt.IsZero() {
+				firstTokenAt = time.Now()
+			}
 		}
 		// Accumulate content
 		if choice.Delta.Content != "" {
@@ -806,14 +820,16 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 
 	// Build final completion
 	completion := Completion{
-		Content:    accumulated.String(),
-		Reasoning:  reasoning.String(),
-		Finish:     finish,
-		Provider:   c.providerHost,
-		LatencyMs:  time.Since(started).Milliseconds(),
-		Usage:      usage,
-		RequestRef: contentRef(payload),
-		Transport:  "stream",
+		Content:      accumulated.String(),
+		Reasoning:    reasoning.String(),
+		Finish:       finish,
+		Provider:     c.providerHost,
+		LatencyMs:    time.Since(started).Milliseconds(),
+		Usage:        usage,
+		RequestRef:   contentRef(payload),
+		Transport:    "stream",
+		Deltas:       deltas,
+		FirstTokenMs: firstTokenAt.Sub(started).Milliseconds(),
 	}
 	for _, tc := range toolCallAccum {
 		args := map[string]any{}

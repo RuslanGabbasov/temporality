@@ -202,25 +202,35 @@ func TestCallModelFallsBackWhenStreamingFails(t *testing.T) {
 }
 
 // A provider that accepts the request and then goes silent is queueing the
-// request server-side: the blocking salvage would join the same queue and add
-// minutes of silence. CallModel must fail the attempt instead (one HTTP
-// request total) and journal a stream_timeout marker — the activity retry
-// opens a fresh connection, which is the automatic version of a manual nudge.
-func TestCallModelStreamTimeoutSkipsBlockingSalvage(t *testing.T) {
+// A queued provider accepts the request and keeps empty-choice pings flowing:
+// only the first-token budget catches it. The first dead stream must journal a
+// stream_timeout marker; the immediate fresh-connection retry then succeeds —
+// the healthy backend behind the gateway answers and streaming survives
+// without burning Temporal backoff on an activity failure.
+func TestCallModelStreamTimeoutRetriesOnFreshConnection(t *testing.T) {
 	var requests int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&requests, 1)
+		if atomic.AddInt32(&requests, 1) == 1 {
+			// First attempt: queue — pings keep it alive, the first-token
+			// watchdog is the only budget that can catch it.
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher := w.(http.Flusher)
+			for {
+				if _, err := fmt.Fprint(w, "data: {\"choices\":[]}\n\n"); err != nil {
+					return // the watchdog cancelled the stream
+				}
+				flusher.Flush()
+				time.Sleep(20 * time.Millisecond)
+			}
+		}
+		// Second attempt (fresh connection): a healthy backend that streams.
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
-		// Empty-choice pings keep data lines flowing — the request looks alive
-		// to the idle watchdog, only the first-token budget can catch it.
-		for {
-			if _, err := fmt.Fprint(w, "data: {\"choices\":[]}\n\n"); err != nil {
-				return // the watchdog cancelled the stream — let server.Close() finish
-			}
-			flusher.Flush()
-			time.Sleep(20 * time.Millisecond)
-		}
+		body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "STREAMED"}}}})
+		fmt.Fprintf(w, "data: %s\n\n", body)
+		flusher.Flush()
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		flusher.Flush()
 	}))
 	defer server.Close()
 	activities := &Activities{
@@ -232,30 +242,87 @@ func TestCallModelStreamTimeoutSkipsBlockingSalvage(t *testing.T) {
 		}),
 		Tokens:   NewTokenBus(),
 		Events:   &capturedOutbox{},
-		SourceID: "kernel", // markers validate source.id — NewActivities always sets one
+		SourceID: "kernel",
 	}
 
-	_, err := activities.CallModel(context.Background(), ModelRequest{
-		RunID: "run-queued", Turn: 2, Project: "p",
+	completion, err := activities.CallModel(context.Background(), ModelRequest{
+		RunID: "run-retry-stream", Turn: 2, Project: "p",
 		Messages: []llm.Message{{Role: "user", Content: "hi"}},
 	})
-	if err == nil {
-		t.Fatal("expected the watchdog timeout to fail the attempt")
+	if err != nil {
+		t.Fatalf("the fresh-connection retry must recover: %v", err)
 	}
-	if !llm.StreamTimedOut(err) {
-		t.Fatalf("error should classify as a stream timeout, got: %v", err)
+	if !strings.Contains(completion.Content, "STREAMED") {
+		t.Fatalf("content = %q", completion.Content)
 	}
-	if got := atomic.LoadInt32(&requests); got != 1 {
-		t.Fatalf("HTTP requests = %d, want 1 — no blocking salvage after a watchdog timeout", got)
+	if got := atomic.LoadInt32(&requests); got != 2 {
+		t.Fatalf("HTTP requests = %d, want 2 (dead stream + fresh-connection retry)", got)
 	}
-	outbox, ok := activities.Events.(*capturedOutbox)
-	if !ok || len(outbox.events) != 1 {
-		t.Fatalf("enqueued events = %d, want exactly the stream_timeout marker", len(outbox.events))
+	outbox := activities.Events.(*capturedOutbox)
+	if len(outbox.events) != 1 || outbox.events[0].Data["reason"] != "stream_timeout" {
+		t.Fatalf("markers = %+v, want exactly one stream_timeout", outbox.events)
 	}
-	if outbox.events[0].Type != "model.attempt" || outbox.events[0].Data["reason"] != "stream_timeout" {
-		t.Fatalf("marker = %v, want model.attempt/stream_timeout", outbox.events[0])
+}
+
+// When even the fresh-connection retry dies of the watchdog, the blocking
+// fallback takes over: the turn owes an answer more than it owes speed. The
+// salvage is marked (stream_failed + how long both streams lived), and the
+// trace shows the whole ladder: stream_timeout then stream_fallback.
+func TestCallModelStreamTimeoutFallsBackAfterTwoStreamDeaths(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		var payload struct {
+			Stream bool `json:"stream"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		if !payload.Stream {
+			// The blocking fallback: a normal JSON completion.
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": "BLOCKED-OK"}, "finish_reason": "stop"}}})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		for {
+			if _, err := fmt.Fprint(w, "data: {\"choices\":[]}\n\n"); err != nil {
+				return // the watchdog cancelled the stream
+			}
+			flusher.Flush()
+			time.Sleep(20 * time.Millisecond)
+		}
+	}))
+	defer server.Close()
+	activities := &Activities{
+		Model: llm.New(llm.Config{
+			BaseURL: server.URL, Model: "test", APIKey: "k", Timeout: 10 * time.Second,
+			StreamIdleTimeout:       time.Minute,
+			StreamNoProgressTimeout: 5 * time.Minute,
+			StreamFirstTokenTimeout: 150 * time.Millisecond,
+		}),
+		Tokens:   NewTokenBus(),
+		Events:   &capturedOutbox{},
+		SourceID: "kernel",
 	}
-	if outbox.events[0].Data["error"] == nil || !strings.Contains(fmt.Sprint(outbox.events[0].Data["error"]), "first token timeout") {
-		t.Fatalf("marker error should name the fired budget, got: %v", outbox.events[0].Data["error"])
+
+	completion, err := activities.CallModel(context.Background(), ModelRequest{
+		RunID: "run-double-death", Turn: 2, Project: "p",
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("the blocking salvage must answer when streams die twice: %v", err)
+	}
+	if !completion.StreamFailed {
+		t.Fatal("the salvaged completion must be marked stream_failed")
+	}
+	if got := atomic.LoadInt32(&requests); got != 3 {
+		t.Fatalf("HTTP requests = %d, want 3 (two stream attempts + blocking)", got)
+	}
+	outbox := activities.Events.(*capturedOutbox)
+	if len(outbox.events) != 2 {
+		t.Fatalf("markers = %+v, want stream_timeout then stream_fallback", outbox.events)
+	}
+	if outbox.events[0].Data["reason"] != "stream_timeout" || outbox.events[1].Data["reason"] != "stream_fallback" {
+		t.Fatalf("markers = %v, %v", outbox.events[0].Data["reason"], outbox.events[1].Data["reason"])
 	}
 }

@@ -2427,6 +2427,15 @@ func modelObservability(completion llm.Completion) map[string]any {
 	if completion.Transport != "" {
 		data["transport"] = completion.Transport
 	}
+	// Stream shape: deltas + first-token latency tell a real stream (many
+	// chunks, early first) from a buffered one (a single late chunk) — the
+	// operator reads the provider's streaming health straight off the event.
+	if completion.Deltas > 0 {
+		data["deltas"] = completion.Deltas
+	}
+	if completion.FirstTokenMs > 0 {
+		data["first_token_ms"] = completion.FirstTokenMs
+	}
 	// A dead stream salvaged by the blocking fallback means the provider
 	// generated the answer twice; the marker makes the hidden regeneration
 	// visible next to the (inflated) latency. StreamMs/StreamError say how long

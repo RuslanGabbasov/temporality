@@ -600,23 +600,58 @@ func (a *Activities) CallModel(ctx context.Context, request ModelRequest) (llm.C
 		}
 		streamMs := time.Since(streamStarted).Milliseconds()
 		// A stream that dies of a watchdog timeout means the provider accepted
-		// the request and then went silent — it is queueing us server-side. A
-		// blocking retry of the same request joins the same queue and only adds
-		// minutes of silent waiting (3 attempts × request timeout); failing the
-		// attempt here lets the activity retry open a fresh connection, which is
-		// exactly the recovery a manual nudge provides — but automatic and
-		// sooner. Protocol/status failures keep the blocking fallback: those can
-		// be a gateway that simply cannot stream this request.
+		// the request and then went silent — it is queueing us server-side. One
+		// immediate retry on a fresh connection is the cheap recovery (a healthy
+		// backend behind the gateway answers, and streaming survives); failing
+		// the activity instead would burn Temporal backoff between attempts and,
+		// after three of them, kill the whole run — a queued provider must cost
+		// latency, never the answer. When the retry dies too, the blocking
+		// fallback takes over: it joins the same queue, but the turn owes an
+		// answer more than it owes speed. Protocol/status failures skip the
+		// retry: those can be a gateway that simply cannot stream this request.
 		if llm.StreamTimedOut(streamErr) {
 			if activity.IsActivity(ctx) {
 				if logger := activity.GetLogger(ctx); logger != nil {
-					logger.Warn("model stream timed out, retrying on a fresh connection",
+					logger.Warn("model stream timed out, retrying once on a fresh connection",
 						"run_id", request.RunID, "turn", request.Turn,
 						"stream_ms", streamMs, "error", streamErr.Error())
 				}
 			}
 			a.emitModelAttempt(ctx, request, attempt, activityID, "stream_timeout", streamMs, boundedAttemptError(streamErr))
-			return llm.Completion{}, streamErr
+			retryStarted := time.Now()
+			retryCompletion, retryErr := client.StreamComplete(ctx, request.Messages, request.Tools, func(delta llm.StreamDelta) bool {
+				if delta.Text != "" || delta.Reasoning != "" {
+					a.Tokens.Publish(request.RunID, request.Turn, delta.Text, delta.Reasoning)
+				}
+				for _, call := range delta.ToolCalls {
+					if call.Name != "" || call.ArgsDelta != "" {
+						a.Tokens.PublishTool(request.RunID, request.Turn, call.Name, call.ArgsDelta)
+					}
+				}
+				return false
+			}, llm.WithPromptCacheKey(request.PromptCacheKey))
+			if retryErr == nil {
+				return retryCompletion, nil
+			}
+			if ctx.Err() != nil {
+				return llm.Completion{}, retryErr
+			}
+			retryMs := time.Since(retryStarted).Milliseconds()
+			if activity.IsActivity(ctx) {
+				if logger := activity.GetLogger(ctx); logger != nil {
+					logger.Error("model stream timed out twice, falling back to blocking",
+						"run_id", request.RunID, "turn", request.Turn,
+						"retry_ms", retryMs, "error", retryErr.Error())
+				}
+			}
+			a.emitModelAttempt(ctx, request, attempt, activityID, "stream_fallback", streamMs+retryMs, boundedAttemptError(retryErr))
+			completion, err := client.Complete(ctx, request.Messages, request.Tools, llm.WithPromptCacheKey(request.PromptCacheKey))
+			if err == nil {
+				completion.StreamFailed = true
+				completion.StreamMs = streamMs + retryMs
+				completion.StreamError = retryErr.Error()
+			}
+			return completion, err
 		}
 		// A stream that stalls behind gateway keepalives can burn most of the
 		// activity budget before dying; the fallback then looks suspiciously
