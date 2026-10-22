@@ -908,21 +908,20 @@ func StreamTimedOut(err error) bool {
 }
 
 // firstTokenPrefillBonus scales the first-token watchdog with the prompt
-// size that actually costs prefill time. Three corrections over raw byte
-// counting: the estimate is in TOKENS (~4 chars each), not bytes — prefill
-// throughput is token-shaped; slow uncached backends prefill at hundreds of
-// tokens/s, so ~2.5ms per estimated token covers them (a 37k-token context
-// buys ~90s of prefill patience on top of the 2-minute base — killing a
-// legitimate prefill wastes the whole wait, while the fresh-connection retry
-// that follows only succeeds through the provider's prompt cache); and base64
-// image payloads are discounted to near zero (a screenshot contributes
-// megabytes of bytes but a bounded number of vision tokens — without this,
-// browser agents with screenshots bought dead providers 20-30 minute
-// first-token budgets). The cap keeps no payload shape past ~10 minutes of
-// bonus.
+// size that actually costs prefill time. Two corrections over raw byte
+// counting: base64 image payloads are discounted to near zero (a screenshot
+// contributes megabytes of bytes but a bounded number of vision tokens —
+// without this, browser agents with screenshots bought dead providers
+// 20-30 minute first-token budgets), and the bonus is capped so no payload
+// shape can push the watchdog past ~12 minutes total.
+//
+// Deliberately modest: a slower-than-this prefill is recovered by the
+// fresh-connection retry (which lands on the provider's warm prompt cache
+// and is fast), while a generous budget is paid on EVERY stalled call — an
+// operator's nudge against a hung provider must stay a near-immediate
+// relief, not a fresh 3-minute silent wait.
 func firstTokenPrefillBonus(payload []byte) time.Duration {
-	estTokens := textPayloadBytes(payload) / 4
-	bonus := time.Duration(estTokens) * 2500 * time.Microsecond
+	bonus := time.Duration(float64(textPayloadBytes(payload)) / 1_000_000 * float64(60*time.Second))
 	if bonus > 10*time.Minute {
 		bonus = 10 * time.Minute
 	}

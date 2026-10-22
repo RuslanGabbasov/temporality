@@ -34,11 +34,10 @@ func TestTextPayloadBytesHandlesPlainPayload(t *testing.T) {
 }
 
 func TestFirstTokenPrefillBonusCapped(t *testing.T) {
-	// ~4MB of text ≈ 1M estimated tokens × 2.5ms ≈ 42m — the cap holds it at
-	// 10 minutes.
+	// ~4MB of text: +60s per MB → ~4m12s, under the cap.
 	text4MB := []byte(strings.Repeat("a", 4<<20))
-	if bonus := firstTokenPrefillBonus(text4MB); bonus != 10*time.Minute {
-		t.Fatalf("4MB text bonus = %s, want the 10m cap", bonus)
+	if bonus := firstTokenPrefillBonus(text4MB); bonus < 4*time.Minute || bonus > 4*time.Minute+15*time.Second {
+		t.Fatalf("4MB text bonus = %s", bonus)
 	}
 	// 40MB of raw base64 images: the raw-length formula would give +40m;
 	// discounted the images contribute nearly nothing — that is the fix.
@@ -46,12 +45,13 @@ func TestFirstTokenPrefillBonusCapped(t *testing.T) {
 	if bonus := firstTokenPrefillBonus(images); bonus > 30*time.Second {
 		t.Fatalf("image-heavy payload bonus = %s, want the base64 discount", bonus)
 	}
-	// A 150KB text payload (~37k tokens) buys ~90s of prefill patience on top
-	// of the base — an uncached big-context prefill at a few hundred tokens/s
-	// must survive instead of being killed mid-work.
+	// Deliberately modest patience: a 150KB (~37k tokens) prompt buys ~9s on
+	// top of the base — slower uncached prefills are the fresh-connection
+	// retry's job (it lands on the provider's warm prompt cache), not a
+	// longer silent wait that makes every stall and every nudge feel dead.
 	payload150KB := []byte(strings.Repeat("x", 150_000))
-	if bonus := firstTokenPrefillBonus(payload150KB); bonus < 90*time.Second || bonus > 95*time.Second {
-		t.Fatalf("150KB text bonus = %s, want ~93s of token-scaled patience", bonus)
+	if bonus := firstTokenPrefillBonus(payload150KB); bonus > 15*time.Second {
+		t.Fatalf("150KB text bonus = %s, want the bounded ~9s", bonus)
 	}
 	// No payload: just the base 2-minute budget.
 	client := &Client{cfg: Config{StreamFirstTokenTimeout: 2 * time.Minute}}
