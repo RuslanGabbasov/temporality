@@ -3,6 +3,7 @@ import { CenterToFit, ChevronDown } from '@carbon/icons-react'
 import { API_BASE } from './api'
 import { pluralT, useI18n, useT } from './i18n'
 import { observationApi, type ObservationEvent } from './observationApi'
+import { DEFAULT_RANGE, fetchBudgeted, initialRange, PAGE_LIMIT, RANGE_MS, type RangeFilter } from './timelineLoad'
 import { aliveRowAt, buildRunChains, detectMisleads, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type MisleadSignal, type RunChain, type RunInfo } from './experience'
 import { useOrgUnits } from './orgUnits'
 import { workspaceApi, type User } from './workspaceApi'
@@ -31,9 +32,6 @@ const MEMORY_BUCKETS: MemoryBucket[] = ['active', 'stale', 'invalidated', 'archi
 
 type RecencyFilter = 'all' | 'last-run' | '24h' | '7d' | '30d'
 type TerminalFilter = 'all' | 'alive' | 'dead'
-/** Server-side load window: the timeline never needs the full history to be
- * useful — a week of runs is already thousands of events at team scale. */
-type RangeFilter = '24h' | '7d' | '30d' | 'all'
 const RANGE_OPTIONS: { value: RangeFilter; label: string }[] = [
   { value: '24h', label: 'timeline.range.24h' },
   { value: '7d', label: 'timeline.range.7d' },
@@ -48,7 +46,6 @@ const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: 'day', label: 'timeline.group.day' },
   { value: 'none', label: 'timeline.group.none' },
 ]
-const RANGE_MS: Record<Exclude<RangeFilter, 'all'>, number> = { '24h': 86400e3, '7d': 7 * 86400e3, '30d': 30 * 86400e3 }
 
 /** One collapsed run group: everything a team lead needs before drilling into
  * individual chains — volume, failures, knowledge touched, disagreements. */
@@ -200,9 +197,13 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const [events, setEvents] = useState<ObservationEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState<{ count: number; more: boolean } | null>(null)
+  // Lazy continuation: where the budgeted auto-load stopped — «load more»
+  // resumes from this cursor instead of re-fetching the window.
+  const [pending, setPending] = useState<{ cursor: string; since?: string } | null>(null)
+  const [moreBusy, setMoreBusy] = useState(false)
   const [error, setError] = useState('')
   const [users, setUsers] = useState<User[]>([])
-  const [range, setRange] = useState<RangeFilter>(() => { const v = params.get('range'); return (['24h','7d','30d','all'] as const).includes(v as RangeFilter) ? v as RangeFilter : '7d' })
+  const [range, setRange] = useState<RangeFilter>(() => initialRange(params))
   const [groupBy, setGroupBy] = useState<GroupBy>(() => { const v = params.get('group'); return (['unit','agent','day','none'] as const).includes(v as GroupBy) ? v as GroupBy : 'unit' })
   const parseLens = (s: string | null): Lens => { if (!s) return DEFAULT_LENS; try { return { ...DEFAULT_LENS, ...JSON.parse(s) } } catch { return DEFAULT_LENS } }
   const [lens, setLens] = useState<Lens>(() => parseLens(params.get('lens')))
@@ -243,28 +244,52 @@ export default function ExperienceTimeline({ project }: { project: string }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const dragRef = useRef<{ x: number; t0: number; t1: number } | null>(null)
 
+  // Load generation: switching range/project mid-flight must not let the old
+  // fetch append its pages into the new window.
+  const loadGen = useRef(0)
   const load = useCallback(async (projectID: string, rangeFilter: RangeFilter) => {
     if (!projectID.trim()) return
-    setLoading(true); setError(''); setEvents([]); setWindow(null); setSelected('')
+    const gen = ++loadGen.current
+    setLoading(true); setError(''); setEvents([]); setWindow(null); setSelected(''); setPending(null)
     try {
       const since = rangeFilter !== 'all' ? new Date(Date.now() - RANGE_MS[rangeFilter]).toISOString() : undefined
-      const collected: ObservationEvent[] = []
-      let cursor: string | undefined
-      let pages = 0
-      do {
-        const page = await observationApi.events(projectID.trim(), cursor, undefined, undefined, { limit: 500, since })
-        collected.push(...page.events)
-        cursor = page.next_cursor
-        pages += 1
-        setProgress({ count: collected.length, more: Boolean(cursor) })
-        if (pages > 60) break
-      } while (cursor)
-      setEvents(collected)
+      const page = await fetchBudgeted(
+        (cursor) => observationApi.events(projectID.trim(), cursor, undefined, undefined, { limit: PAGE_LIMIT, since }),
+        undefined,
+        (events, count, more) => {
+          if (gen !== loadGen.current) return
+          // Render per page: the first page paints immediately instead of
+          // waiting for the whole window (the old loop loaded every page
+          // before showing anything).
+          setEvents((prev) => [...prev, ...events])
+          setProgress({ count, more })
+        },
+      )
+      if (gen !== loadGen.current) return
+      // Whatever the budget left behind is one click away, not lost.
+      setPending(page.next_cursor ? { cursor: page.next_cursor, since } : null)
       const query = new URLSearchParams({ project: projectID.trim() })
       window.history.replaceState(null, '', `/experience?${query}`)
-    } catch (failure) { setError(message(failure)) }
-    finally { setLoading(false); setProgress(null) }
+    } catch (failure) { if (gen === loadGen.current) setError(message(failure)) }
+    finally { if (gen === loadGen.current) { setLoading(false); setProgress(null) } }
   }, [])
+
+  // «Load more»: continue the stored cursor within the same window, appending
+  // (never replacing) — the folded model grows from what is already on screen.
+  const loadMore = useCallback(async () => {
+    if (!pending || moreBusy) return
+    const gen = ++loadGen.current
+    setMoreBusy(true); setError('')
+    try {
+      const page = await fetchBudgeted(
+        (cursor) => observationApi.events(project.trim(), cursor, undefined, undefined, { limit: PAGE_LIMIT, since: pending.since }),
+        pending.cursor,
+        (events) => { if (gen === loadGen.current) setEvents((prev) => [...prev, ...events]) },
+      )
+      if (gen === loadGen.current) setPending(page.next_cursor ? { cursor: page.next_cursor, since: pending.since } : null)
+    } catch (failure) { if (gen === loadGen.current) setError(message(failure)) }
+    finally { if (gen === loadGen.current) setMoreBusy(false) }
+  }, [pending, moreBusy, project])
 
   const [initialised, setInitialised] = useState(false)
   useEffect(() => { setInitialised(true); void load(project, range) }, [project, load])
@@ -295,7 +320,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
     if (query) urlParams.set('q', query)
     if (selected) urlParams.set('selected', selected)
     if (window_) urlParams.set('w', `${window_.t0},${window_.t1}`)
-    if (range !== '7d') urlParams.set('range', range)
+    if (range !== DEFAULT_RANGE) urlParams.set('range', range)
     if (groupBy !== 'unit') urlParams.set('group', groupBy)
     window.history.replaceState(null, '', `/experience?${urlParams.toString()}`)
   }, [project, lens, kinds, roleFilter, scopeFilter, bucketFilter, strengthMin, recencyFilter, hasActivations, crossScopeOnly, terminalFilter, hiddenRoots, query, selected, window_, range, groupBy])
@@ -641,6 +666,13 @@ export default function ExperienceTimeline({ project }: { project: string }) {
       <span className="experience-note">
         {t('timeline.active')} {model.rows.filter((row) => stateBucket(row.state) === 'active').length} · {t('timeline.stale')} {model.rows.filter((row) => stateBucket(row.state) === 'stale').length} · {t('timeline.invalidated')} {model.rows.filter((row) => stateBucket(row.state) === 'invalidated').length} · {t('timeline.archived')} {model.rows.filter((row) => stateBucket(row.state) === 'archived').length} · {t('timeline.activations')} {view.visibleLinks.length}
       </span>
+      {pending && (
+        <span className="experience-note">
+          <button className="preset-chip" disabled={moreBusy} title={t('timeline.more_available')} onClick={() => void loadMore()}>
+            {moreBusy ? t('timeline.loading') : t('timeline.load_more')}
+          </button>
+        </span>
+      )}
       {lens.conflicts && !view.conflictsPresent && <span className="experience-note">{t('timeline.no_conflicts')}</span>}
     </div>
     <div className="experience-toolbar">

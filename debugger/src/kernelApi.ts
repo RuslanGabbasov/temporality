@@ -99,13 +99,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 // The project filter is optional (docs/activity-scoping.md §5): an empty
 // value asks for the global listing, which the server constrains to the
 // caller's visible projects.
-export function operations(project?: string): Promise<{ operations: UncertainOperation[]; count: number }> {
+export function operations(project?: string, signal?: AbortSignal): Promise<{ operations: UncertainOperation[]; count: number }> {
   const suffix = project && project.trim() ? `?project=${encodeURIComponent(project.trim())}` : ''
-  return request(`/v1/agent/operations${suffix}`)
+  return request(`/v1/agent/operations${suffix}`, { signal })
 }
 
-export function whoami(): Promise<Whoami> {
-  return request('/v1/agent/whoami')
+/** Abortable: the reconcile card's identity probe shares the mount-scoped
+ *  AbortController (NFR-4), legacy callers simply pass nothing. */
+export function whoami(signal?: AbortSignal): Promise<Whoami> {
+  return request('/v1/agent/whoami', { signal })
 }
 
 // Federation login surface (docs/auth-federation.md §8-§9): which buttons the
@@ -177,8 +179,8 @@ export interface RunCost {
   call_count: number
 }
 
-export function runCost(project: string, runID: string): Promise<RunCost> {
-  return request(`/v1/agent/cost/run?project=${encodeURIComponent(project)}&run=${encodeURIComponent(runID)}`)
+export function runCost(project: string, runID: string, signal?: AbortSignal): Promise<RunCost> {
+  return request(`/v1/agent/cost/run?project=${encodeURIComponent(project)}&run=${encodeURIComponent(runID)}`, { signal })
 }
 
 // Task budget spans every run of the task — conversation follow-ups and the
@@ -232,8 +234,8 @@ export interface TaskCost {
   agents: TaskAgentRollup[]
 }
 
-export function taskCost(project: string, taskID: string): Promise<TaskCost> {
-  return request(`/v1/agent/cost/task?project=${encodeURIComponent(project)}&task=${encodeURIComponent(taskID)}`)
+export function taskCost(project: string, taskID: string, signal?: AbortSignal): Promise<TaskCost> {
+  return request(`/v1/agent/cost/task?project=${encodeURIComponent(project)}&task=${encodeURIComponent(taskID)}`, { signal })
 }
 
 // Human-approval budget of a scope: decisions asked of people, how they

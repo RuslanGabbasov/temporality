@@ -50,11 +50,13 @@ func sandboxDraftPrompt(description, bases string) string {
 	b.WriteString(`You configure a Docker sandbox profile for an AI agent. The operator describes in plain language what tasks the agent will perform; you propose the sandbox.
 
 Pick ONE base image from the list below (do not invent bases). Add only OS packages the described tasks genuinely need. Package names MUST match the base distro's package manager index — alpine bases install with apk, the debian base with apt. Common apk names: go (never golang-go), docker-cli (never docker.io), build-base (never build-essential), py3-pip (never python3-pip). A wrong-manager name fails the image build.
+Propose ONLY packages you are confident exist in the base distro's standard repositories right now. When you are not certain a package is indexed under that exact name, OMIT it entirely — never guess or invent names. This is strict for security/pentest tooling (sqlmap, nikto, nmap, hydra, metasploit and the like): propose such a package only with full confidence it exists in the base's index; otherwise leave it out and say so in the rationale. An omitted package costs the operator one manual addition; a guessed one fails the whole image build.
 Size resources by workload class:
 - light scripts/config edits: memory 512m, cpus 0.5, scratch 512m, tmp 256m
 - builds/tests of a typical service: memory 2g, cpus 2, scratch 1g, tmp 512m
 - heavy e2e suites, browsers, large compiles: memory 4g, cpus 4, scratch 2g, tmp 1g
 Never exceed memory 8g / cpus 8 / scratch 4g / tmp 2g. id: 2-32 chars, lowercase latin/digits/dash. name: short human label. description: 1-2 sentences.
+You never design or edit Dockerfiles: the draft only names the base and packages; the platform assembles the image recipe. The operator may later hand-write an image recipe themselves — that is out of your contract and never part of your answer.
 
 Known bases:
 `)

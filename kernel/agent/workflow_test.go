@@ -274,7 +274,10 @@ func TestNudgeDoesNotResetScheduleToCloseBudget(t *testing.T) {
 	}, 3*time.Second)
 
 	const budget = 6 * time.Second
-	opts := workflow.ActivityOptions{StartToCloseTimeout: 2 * time.Second, ScheduleToCloseTimeout: budget, RetryPolicy: &temporal.RetryPolicy{InitialInterval: 100 * time.Millisecond, MaximumInterval: time.Second, MaximumAttempts: 5}}
+	// StartToClose must outlive the first nudge (t=2s): with both timers due at
+	// the same mock instant the activity timeout can win the race and end the
+	// probe before any nudge is applied, which is not what this test is about.
+	opts := workflow.ActivityOptions{StartToCloseTimeout: 4 * time.Second, ScheduleToCloseTimeout: budget, RetryPolicy: &temporal.RetryPolicy{InitialInterval: 100 * time.Millisecond, MaximumInterval: time.Second, MaximumAttempts: 5}}
 	env.ExecuteWorkflow("budgetProbeWorkflow", opts)
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError(), "a provider that never answers must fail the model call")

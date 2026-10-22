@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // sandboxProfileIDPattern mirrors workspace's profile id shape: lowercase
@@ -214,6 +216,195 @@ func packageInstallLine(base string, packages []string) string {
 	}
 }
 
+// F-06: sanitization of captured docker output. The build/pull/verify log is
+// untrusted (a mutable or external FROM can emit anything from a layer), and
+// it travels into error messages, server logs and the UI: raw control bytes
+// there mean forged log lines (CR overwrite), ANSI escapes rendered in a
+// terminal or less, and broken error markup. Every docker output that
+// reaches an error text goes through sanitizeDockerOutput exactly once, at
+// capture; classification and formatting then work on the sanitized text.
+const (
+	// dockerOutputLimit caps the docker output embedded in an error message:
+	// a runaway build must not blow up server logs or the UI error panel.
+	dockerOutputLimit = 16384
+	// outputTruncationMarker marks the cut in front of a kept tail. The tail
+	// is what gets kept: the build failure summary lives at the end of the
+	// log, not at the start.
+	outputTruncationMarker = "[output truncated by Agent Kernel; showing the tail]\n"
+)
+
+// sanitizeDockerOutput strips everything from captured docker CLI output that
+// must never reach an error message or a log line (F-06):
+//   - ANSI/VT escape sequences: CSI (ESC [ … final), OSC/DCS/SOS/PM/APC string
+//     sequences (terminated by BEL or ST) and the remaining ESC forms;
+//   - C0 control bytes except \n and \t, DEL (U+007F) and C1 (U+0080–U+009F);
+//   - CR rewrites: \r\n and a lone \r both become \n, so a hostile log cannot
+//     overwrite an already rendered line;
+//   - invalid UTF-8 byte sequences (dropped, not replaced).
+// The result is capped at dockerOutputLimit bytes keeping the tail, with a
+// truncation marker up front; the cut lands on a rune boundary.
+func sanitizeDockerOutput(s string) string {
+	s = stripEscapeSequences(s)
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = strings.ToValidUTF8(s, "")
+	var kept strings.Builder
+	kept.Grow(len(s))
+	for _, r := range s {
+		// Keep \n and \t, printable ASCII (U+0020–U+007E) and everything
+		// above U+009F; drop C0 (except \n/\t), DEL and the C1 range.
+		if r == '\n' || r == '\t' || r >= 0x20 && r <= 0x7E || r >= 0xA0 {
+			kept.WriteRune(r)
+		}
+	}
+	s = kept.String()
+	if len(s) <= dockerOutputLimit {
+		return s
+	}
+	tail := s[len(s)-(dockerOutputLimit-len(outputTruncationMarker)):]
+	// The byte cut may split a multi-byte rune; skip continuation bytes so
+	// the tail starts at a rune boundary.
+	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+		tail = tail[1:]
+	}
+	return outputTruncationMarker + tail
+}
+
+// stripEscapeSequences removes ANSI/VT escape sequences from s: CSI (ESC [ …
+// final byte 0x40–0x7E), the string sequences OSC/DCS/SOS/PM/APC (ESC ] P X
+// ^ _ … terminated by BEL or ST) and every other ESC form (optional
+// intermediate bytes 0x20–0x2F plus one final byte 0x30–0x7E — covers
+// ESC 7, ESC M, ESC ( B, ESC = …). A dangling or malformed ESC tail is
+// dropped along with the ESC itself.
+func stripEscapeSequences(s string) string {
+	if !strings.ContainsRune(s, '\x1b') {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		if s[i] != 0x1b {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		i++ // consume the ESC itself
+		if i >= len(s) {
+			break
+		}
+		switch s[i] {
+		case '[': // CSI: parameter/intermediate bytes, then one final byte
+			i++
+			for i < len(s) && (s[i] < 0x40 || s[i] > 0x7E) {
+				i++
+			}
+			if i < len(s) {
+				i++ // the final byte
+			}
+		case ']', 'P', 'X', '^', '_': // OSC/DCS/SOS/PM/APC string sequence
+			i++
+			for i < len(s) {
+				if s[i] == 0x07 {
+					i++
+					break
+				}
+				if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
+					i += 2 // ST = ESC \
+					break
+				}
+				i++
+			}
+		default: // other ESC forms: intermediates then a final byte
+			for i < len(s) && s[i] >= 0x20 && s[i] <= 0x2F {
+				i++
+			}
+			if i < len(s) && s[i] >= 0x30 && s[i] <= 0x7E {
+				i++
+			}
+		}
+	}
+	return b.String()
+}
+
+// Package-manager refusal patterns (D4): apk names the missing package as
+// «sqlmap (no such package)», apt as «E: Unable to locate package sqlmap».
+// The apk pattern is deliberately unanchored: buildkit prefixes every log
+// line with a step stamp (#6 0.725 …), so the package name is found as the
+// token right before the refusal. A bare build failure is unactionable — the
+// operator gets the raw log but not which of the packages (or why) died.
+var (
+	apkMissingPackage = regexp.MustCompile(`(\S+) \(no such package\)`)
+	aptMissingPackage = regexp.MustCompile(`(?m)E: Unable to locate package (\S+)`)
+)
+
+// packageInstallFailure turns an apk/apt «no such package» refusal into an
+// error that names the package, the base image and the apt↔apk alias when
+// the name belongs to the other distro, on top of the build log. The log is
+// expected to be already sanitized by sanitizeDockerOutput (F-06): the
+// caller captures it once and classification/formatting share that text.
+func packageInstallFailure(def ProfileDefinition, output string) error {
+	var manager, rawName string
+	switch {
+	case strings.Contains(output, "unable to select packages"):
+		match := apkMissingPackage.FindStringSubmatch(output)
+		if match == nil {
+			return nil
+		}
+		manager, rawName = "apk", match[1]
+	case aptMissingPackage.MatchString(output):
+		manager = "apt"
+		rawName = strings.TrimSpace(aptMissingPackage.FindStringSubmatch(output)[1])
+	default:
+		return nil
+	}
+	name := strings.TrimSuffix(strings.TrimSuffix(rawName, ":"), ",")
+	alias := ""
+	if fix, ok := packageManagerAlias(manager, name); ok {
+		alias = fmt.Sprintf("; подсказка: %s — имя другой пакетной системы, в %s пакет называется %q", name, manager, fix)
+	}
+	base := strings.TrimSpace(firstFromImage(def.Dockerfile))
+	if base == "" {
+		base = def.Profile
+	}
+	return fmt.Errorf("пакет %q не найден в репозиториях %s базы %q; проверьте имя пакета%s\n\n--- docker build log ---\n%s",
+		name, manager, base, alias, output)
+}
+
+// packageManagerAlias resolves a name from the other distro's index to its
+// equivalent in the manager that failed: apk failures consult the
+// Debian→alpine map, apt failures the reverse.
+func packageManagerAlias(manager, name string) (string, bool) {
+	if manager == "apk" {
+		fix, ok := aptToApkNames[name]
+		return fix, ok
+	}
+	fix, ok := apkToAptNames[name]
+	return fix, ok
+}
+
+// firstFromImage returns the image reference of the first FROM instruction —
+// the build's actual base, whether composed from the catalog or typed by the
+// operator.
+func firstFromImage(dockerfile string) string {
+	for _, raw := range strings.Split(dockerfile, "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if strings.ToUpper(fields[0]) != "FROM" {
+			continue
+		}
+		for _, field := range fields[1:] {
+			if strings.HasPrefix(field, "--") {
+				continue
+			}
+			return field
+		}
+	}
+	return ""
+}
+
 // PreflightSocket proves the daemon socket is usable by the current kernel
 // user before a build or run is attempted, and turns the two deployment-level
 // failures into instructions an operator can follow straight from the UI:
@@ -226,7 +417,7 @@ func PreflightSocket(ctx context.Context, binary string) error {
 	var output limitedBuffer
 	probe.Stdout, probe.Stderr = &output, &output
 	if err := probe.Run(); err != nil {
-		return socketError(strings.TrimSpace(output.String()), err, os.Getuid())
+		return socketError(strings.TrimSpace(sanitizeDockerOutput(output.String())), err, os.Getuid())
 	}
 	return nil
 }
@@ -278,7 +469,13 @@ func BuildDefinition(ctx context.Context, binary string, def ProfileDefinition) 
 		if ctxErr != nil {
 			return "", fmt.Errorf("sandbox image build timed out after %s: %w", buildTimeout, ctxErr)
 		}
-		return "", fmt.Errorf("sandbox image build: %w: %s", err, output.String())
+		// F-06: sanitize exactly once at capture — the classification and
+		// both error formats below only ever see the sanitized text.
+		log := sanitizeDockerOutput(output.String())
+		if actionable := packageInstallFailure(def, log); actionable != nil {
+			return "", fmt.Errorf("sandbox image build: %w: %s", err, actionable.Error())
+		}
+		return "", fmt.Errorf("sandbox image build: %w: %s", err, log)
 	}
 	ref, err := pinnedRef(ctx, binary, def.Tag)
 	if err != nil {
@@ -321,7 +518,7 @@ func PullImage(ctx context.Context, binary, reference string) (string, error) {
 		if ctxErr != nil {
 			return "", fmt.Errorf("image pull timed out after %s: %w", buildTimeout, ctxErr)
 		}
-		return "", fmt.Errorf("image pull: %w: %s", err, output.String())
+		return "", fmt.Errorf("image pull: %w: %s", err, sanitizeDockerOutput(output.String()))
 	}
 	// A tag reference needs the local tag→digest resolution; a digest-pinned
 	// input is already its own answer but still gets verified below.
@@ -362,16 +559,44 @@ func pinnedRef(ctx context.Context, binary, tag string) (string, error) {
 	return repo + "@" + digest, nil
 }
 
+// verifyRunArgs builds the verification probe for a pinned reference
+// (D7.3): --entrypoint overrides the image's own entrypoint, so the image
+// config never executes on the check step — a daemon-like ENTRYPOINT would
+// otherwise start running on the host the moment the digest is probed.
+// PATH resolution of "true" still happens inside the image (F-05), so the
+// probe runs under the full sandbox isolation contour mirrored from the
+// runtime flags in docker.go (read-only rootfs, --cap-drop=ALL,
+// no-new-privileges, pids-limit, --network=none, an unprivileged user): the
+// image's own executable gains nothing beyond an ordinary sandbox run. The
+// flags sit before the image, where every docker run flag must stay.
+func verifyRunArgs(ref string) []string {
+	return []string{"run", "--rm", "--pull=never",
+		"--network=none", "--read-only", "--cap-drop=ALL",
+		"--security-opt=no-new-privileges",
+		"--pids-limit", strconv.Itoa(verifyPidsLimit),
+		"--user", verifyUser,
+		"--entrypoint", "true", ref}
+}
+
+// verifyPidsLimit and verifyUser pin the probe to the runtime defaults
+// (docker.go: KERNEL_SANDBOX_PIDS fallback and an unprivileged uid/gid): the
+// probe needs no tunables, only the same ceiling as a sandbox run.
+const (
+	verifyPidsLimit = 512
+	verifyUser      = "65534:65534"
+)
+
 // verifyPinned proves the digest reference resolves in the local store by
-// running it exactly the way the kernel will (--pull=never).
+// running it exactly the way the kernel will (--pull=never), with the
+// image's entrypoint overridden off.
 func verifyPinned(ctx context.Context, binary, ref string) error {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	run := exec.CommandContext(ctx, binary, "run", "--rm", "--pull=never", ref, "true")
+	run := exec.CommandContext(ctx, binary, verifyRunArgs(ref)...)
 	var output limitedBuffer
 	run.Stdout, run.Stderr = &output, &output
 	if err := run.Run(); err != nil {
-		return fmt.Errorf("verify built sandbox image %s: %w: %s", ref, err, output.String())
+		return fmt.Errorf("verify built sandbox image %s: %w: %s", ref, err, sanitizeDockerOutput(output.String()))
 	}
 	return nil
 }

@@ -161,6 +161,9 @@ export interface SandboxProfile {
    *  digest lands in image. Empty for external-image and builtin rows. */
   base?: string
   packages?: string[]
+  /** Operator-authored full Dockerfile (spec D1/D6): XOR with base/packages
+   *  and with a direct image; travels verbatim to docker build stdin. */
+  dockerfile_override?: string
   toolchains?: string[]
   memory?: string
   cpus?: string
@@ -997,13 +1000,42 @@ export class ApiError extends Error {
   }
 }
 
+/** Overall deadline for one API call (spec R3, incident 2026-10-21): a hung
+ *  kernel request must fail with a typed ApiError instead of pinning the
+ *  caller forever. Response contracts are unchanged — this only adds the
+ *  failure mode for requests that never answer. */
+const REQUEST_TIMEOUT_MS = 60000
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${KERNEL_API}${path}`, { ...init, headers: headers() })
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
-    throw new ApiError(response.status, body)
+  // Additive guard around the existing fetch: AbortController + setTimeout
+  // covers both the response headers and the body read, and a caller-supplied
+  // AbortSignal (e.g. listHumanRequests) keeps working through the relay.
+  const deadline = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    deadline.abort()
+  }, REQUEST_TIMEOUT_MS)
+  const callerSignal = init?.signal
+  const relayAbort = () => deadline.abort(callerSignal?.reason)
+  if (callerSignal?.aborted) relayAbort()
+  else callerSignal?.addEventListener('abort', relayAbort, { once: true })
+  try {
+    const response = await fetch(`${KERNEL_API}${path}`, { ...init, headers: headers(), signal: deadline.signal })
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      throw new ApiError(response.status, body)
+    }
+    return await response.json()
+  } catch (e) {
+    if (timedOut && !(e instanceof ApiError)) {
+      throw new ApiError(408, { error: `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s` })
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+    callerSignal?.removeEventListener('abort', relayAbort)
   }
-  return response.json()
 }
 
 export const workspaceApi = {
@@ -1155,6 +1187,11 @@ export const workspaceApi = {
   // Dockerfile a build would run, composed without touching Docker.
   previewSandboxRecipe: (base: string, packages: string[]) =>
     request<{ dockerfile: string }>('/v1/workspace/sandbox-profiles/preview', { method: 'POST', body: JSON.stringify({ base, packages }) }),
+  // Operator-recipe preview (spec §4): validates dockerfile_override through
+  // the same strict path a build would take and echoes the text back when
+  // valid; a 422 carries the line-numbered violations the form shows.
+  previewSandboxDockerfile: (dockerfile: string) =>
+    request<{ dockerfile: string }>('/v1/workspace/sandbox-profiles/preview', { method: 'POST', body: JSON.stringify({ dockerfile_override: dockerfile }) }),
   // Pull an external image reference and pin its digest into the profile.
   pullSandboxProfile: (id: string, reference: string) =>
     request<SandboxProfile>(`/v1/workspace/sandbox-profiles/${encodeURIComponent(id)}/pull`, { method: 'POST', body: JSON.stringify({ reference }) }),
@@ -1463,14 +1500,14 @@ export const workspaceApi = {
     request<{ deleted: boolean }>(`/v1/workspace/users/${id}`, { method: 'DELETE' }),
 
   // Human-in-the-loop requests (docs/org-structure.md §28, §37)
-  listHumanRequests: (params?: { project?: string; status?: string; user?: string; onlyOpen?: boolean }) => {
+  listHumanRequests: (params?: { project?: string; status?: string; user?: string; onlyOpen?: boolean; signal?: AbortSignal }) => {
     const query = new URLSearchParams()
     if (params?.project) query.set('project', params.project)
     if (params?.status) query.set('status', params.status)
     if (params?.user) query.set('user', params.user)
     if (params?.onlyOpen) query.set('open', '1')
     const suffix = query.size > 0 ? `?${query.toString()}` : ''
-    return request<{ requests: HumanRequest[] }>(`/v1/workspace/human-requests${suffix}`)
+    return request<{ requests: HumanRequest[] }>(`/v1/workspace/human-requests${suffix}`, { signal: params?.signal })
   },
 
   // Intake inbox (docs/inbound-messages.md §11): channel-initiated messages

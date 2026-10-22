@@ -40,6 +40,7 @@ import (
 	"github.com/temporality-project/temporality/skills"
 	"github.com/temporality-project/temporality/workspace"
 	"go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
@@ -49,6 +50,285 @@ import (
 // BuildVersion is injected at link time by the release pipeline
 // (-ldflags "-X main.buildVersion=v2026.1.0"); "dev" when built by hand.
 var buildVersion = "dev"
+
+// ── Batch run list (GET /v1/agent/runs) ──────────────────────────────────────
+//
+// One cursor-paginated page of run.started rows with terminal status
+// resolved server-side: the Runs tab's list, its status tags and the
+// auto-selected first run in ≤3 requests (docs/trace-rework/01-spec §3E
+// NFR-1, K-2). Status resolution failure degrades the page to
+// partial:true + status "unknown" (K-3) instead of failing the list or
+// silently pretending every run is still running.
+
+// runListStore is the journal slice this route reads (satisfied by
+// *workspace.Store; faked in tests).
+type runListStore interface {
+	ListRunsPage(ctx context.Context, project string, projects []string, limit int, after *workspace.RunListCursor) ([]workspace.RunListEntry, string, error)
+	RunTerminalStatuses(ctx context.Context, runIDs []string) (map[string]string, error)
+	AgentDisplayNames(ctx context.Context, agentIDs []string) (map[string]string, error)
+}
+
+type runListDeps struct {
+	store runListStore
+	gate  *controlplane.Gate
+	log   *slog.Logger
+}
+
+// runListScope decides the store-side project constraint for one listing:
+// a concrete project rides as-is (the gate already authorized it), an
+// all-projects principal gets no constraint, a scoped principal gets its
+// visible list — and emptyVisible=true means "answer an empty page without
+// querying" (docs/activity-scoping.md §5: an empty visibility must never
+// degrade into an unfiltered listing).
+func runListScope(principal controlplane.Principal, project string) (projects []string, emptyVisible bool) {
+	if project != "" {
+		return nil, false
+	}
+	visible, all := principal.AllowedProjects()
+	if all {
+		return nil, false
+	}
+	if len(visible) == 0 {
+		return nil, true
+	}
+	return visible, false
+}
+
+func registerRunListRoute(mux *http.ServeMux, deps runListDeps) {
+	mux.HandleFunc("GET /v1/agent/runs", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		principal, allowed := deps.gate.AllowQuery(w, r, controlplane.RoleReader, project)
+		if !allowed {
+			return
+		}
+		// Page size per spec: 50–100, default 100. Outside the range the
+		// contract is broken loudly, not clamped silently.
+		limit := 100
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 50 || parsed > 100 {
+				writeError(w, 400, errors.New("limit must be between 50 and 100"))
+				return
+			}
+			limit = parsed
+		}
+		after, err := workspace.DecodeRunListCursor(r.URL.Query().Get("cursor"))
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		// An absent cursor means "first page": the store gets nil, not a
+		// pointer to the zero position.
+		var afterPtr *workspace.RunListCursor
+		if r.URL.Query().Get("cursor") != "" {
+			afterPtr = &after
+		}
+		// Empty project = global listing constrained to the principal's
+		// visible projects (docs/activity-scoping.md §5), same as
+		// GET /v1/agent/operations. A principal with no visible projects gets
+		// an empty page — never an unfiltered one.
+		projects, emptyVisible := runListScope(principal, project)
+		if emptyVisible {
+			writeJSON(w, 200, map[string]any{"runs": []any{}, "count": 0, "next_cursor": "", "partial": false, "partial_error": ""})
+			return
+		}
+		entries, next, err := deps.store.ListRunsPage(r.Context(), project, projects, limit, afterPtr)
+		if err != nil {
+			deps.log.Warn("list runs page", "project", project, "error", err)
+			writeError(w, 500, err)
+			return
+		}
+		runIDs := make([]string, 0, len(entries))
+		agentIDs := make([]string, 0, len(entries))
+		seenAgents := make(map[string]bool, len(entries))
+		for _, entry := range entries {
+			runIDs = append(runIDs, entry.RunID)
+			if entry.AgentID != "" && !seenAgents[entry.AgentID] {
+				seenAgents[entry.AgentID] = true
+				agentIDs = append(agentIDs, entry.AgentID)
+			}
+		}
+		// Statuses are a separate query on purpose: when it fails the list
+		// still renders (K-3) — rows report status "unknown", the response
+		// carries partial:true with the reason, and the failure is logged.
+		statuses, statusErr := deps.store.RunTerminalStatuses(r.Context(), runIDs)
+		partial := statusErr != nil
+		partialError := ""
+		if statusErr != nil {
+			partialError = statusErr.Error()
+			deps.log.Warn("resolve run statuses for list", "error", statusErr)
+			statuses = map[string]string{}
+		}
+		// Agent names are cosmetics — a failure keeps the list, names fall
+		// back to ids client-side.
+		names, nameErr := deps.store.AgentDisplayNames(r.Context(), agentIDs)
+		if nameErr != nil {
+			deps.log.Warn("resolve run agent names", "error", nameErr)
+			names = map[string]string{}
+		}
+		runs := make([]map[string]any, 0, len(entries))
+		for _, entry := range entries {
+			status := "running"
+			if partial {
+				status = "unknown"
+			} else if resolved, ok := statuses[entry.RunID]; ok {
+				status = resolved
+			}
+			row := map[string]any{
+				"run_id":        entry.RunID,
+				"project":       entry.Project,
+				"title":         entry.Title,
+				"role":          entry.Role,
+				"parent_run_id": entry.ParentRunID,
+				"started_at":    entry.StartedAt,
+				"status":        status,
+				"source_id":     entry.SourceID,
+			}
+			if entry.Workflow != "" {
+				row["workflow"] = entry.Workflow
+			}
+			if entry.AgentID != "" {
+				row["agent_id"] = entry.AgentID
+				if name, ok := names[entry.AgentID]; ok {
+					row["agent_name"] = name
+				}
+			}
+			runs = append(runs, row)
+		}
+		writeJSON(w, 200, map[string]any{
+			"runs":          runs,
+			"count":         len(runs),
+			"next_cursor":   next,
+			"partial":       partial,
+			"partial_error": partialError,
+		})
+	})
+}
+
+// ── Temporal-RPC deadline & HTTP server budgets (docs/fixes/kernel-wedge-2026-10-21, R1/R2) ──
+//
+// Incident 2026-10-21: HTTP-triggered Temporal-RPCs rode r.Context() with no
+// deadline and http.Server carried no WriteTimeout, so an unresponsive
+// Temporal wedged a handler forever — the browser got a transport
+// NetworkError with no HTTP answer and the run never started. Every
+// handler-initiated RPC in scope now runs under temporalRPCTimeout (default
+// 15s, override KERNEL_TEMPORAL_RPC_TIMEOUT); an expired deadline answers
+// HTTP 503 {"error":"temporal rpc timeout: …"} instead of hanging.
+
+// defaultTemporalRPCTimeout is R1's deadline. It is deliberately far above
+// any healthy RPC latency, so a healthy Temporal never sees it (R5).
+const defaultTemporalRPCTimeout = 15 * time.Second
+
+// envDuration reads a duration env override; empty, malformed or
+// non-positive values keep the fallback — a broken env var must degrade to
+// the safe default, never to no timeout at all.
+func envDuration(name string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+// temporalRPCTimeout returns the R1 deadline for one RPC (default 15s,
+// override KERNEL_TEMPORAL_RPC_TIMEOUT).
+func temporalRPCTimeout() time.Duration {
+	return envDuration("KERNEL_TEMPORAL_RPC_TIMEOUT", defaultTemporalRPCTimeout)
+}
+
+// isTemporalRPCDeadline reports that a call failed because its deadline
+// expired — the one failure mode handlers must translate into R1's 503.
+func isTemporalRPCDeadline(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded)
+}
+
+// temporalRPCDeadlineError formats R1's client-visible error text:
+// "temporal rpc timeout: …".
+func temporalRPCDeadlineError(err error) error {
+	return fmt.Errorf("temporal rpc timeout: %w", err)
+}
+
+// temporalRPC runs one handler-initiated Temporal-RPC under the R1 deadline
+// and owns R1's error contract: an expired deadline writes HTTP 503
+// {"error":"temporal rpc timeout: …"} and reports done=true (the caller
+// returns at once); every other outcome is handed back untouched so the
+// caller keeps its original mapping (404/409/502).
+func temporalRPC(w http.ResponseWriter, ctx context.Context, rpc func(ctx context.Context) error) (err error, done bool) {
+	rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
+	defer cancel()
+	err = rpc(rpcCtx)
+	if err == nil || !isTemporalRPCDeadline(err) {
+		return err, false
+	}
+	writeError(w, http.StatusServiceUnavailable, temporalRPCDeadlineError(err))
+	return err, true
+}
+
+// nudgeWithRPCDeadline serves POST /v1/agent/runs/{runID}/nudge under the R1
+// deadline. The route's handler lives in nudge.go — a parallel working-tree
+// change outside this fix's radius — so the deadline and R1's 503
+// translation are installed here, at the wiring point: nudge.go maps every
+// signal failure to a stable 409, and nudgeDeadlineWriter rewrites exactly
+// that 409 into 503 "temporal rpc timeout: …" when — and only when — the
+// failure came from the deadline installed here.
+func nudgeWithRPCDeadline(w http.ResponseWriter, r *http.Request, next http.Handler) {
+	ctx, cancel := context.WithTimeout(r.Context(), temporalRPCTimeout())
+	defer cancel()
+	recorder := &nudgeDeadlineWriter{
+		ResponseWriter: w,
+		expired:        func() bool { return isTemporalRPCDeadline(ctx.Err()) },
+	}
+	next.ServeHTTP(recorder, r.WithContext(ctx))
+}
+
+// nudgeDeadlineWriter rewrites the route's stable 409 signal failure into
+// R1's 503 once the installed deadline has expired; every other status and
+// all success bodies pass through untouched.
+type nudgeDeadlineWriter struct {
+	http.ResponseWriter
+	expired func() bool
+	rewrote bool
+}
+
+func (w *nudgeDeadlineWriter) WriteHeader(status int) {
+	if !w.rewrote && status == http.StatusConflict && w.expired() {
+		w.rewrote = true
+		w.Header().Set("Content-Type", "application/json")
+		w.ResponseWriter.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w.ResponseWriter).Encode(map[string]string{"error": temporalRPCDeadlineError(context.DeadlineExceeded).Error()})
+		return
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *nudgeDeadlineWriter) Write(p []byte) (int, error) {
+	if w.rewrote {
+		// The original 409 body was already replaced; swallow it.
+		return len(p), nil
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+// newKernelHTTPServer builds the kernel's http.Server with R2's budgets:
+// WriteTimeout and IdleTimeout (default 120s each, overrides
+// KERNEL_HTTP_WRITE_TIMEOUT / KERNEL_HTTP_IDLE_TIMEOUT) so a wedged handler
+// can never hold a connection open forever. The SSE routes
+// (/v1/workspace/runs/{runID}/stream and …/tokens) explicitly clear the
+// write deadline for their own connections — see the R2 exemption comments
+// in their handlers.
+func newKernelHTTPServer(address string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              address,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      envDuration("KERNEL_HTTP_WRITE_TIMEOUT", 120*time.Second),
+		IdleTimeout:       envDuration("KERNEL_HTTP_IDLE_TIMEOUT", 120*time.Second),
+	}
+}
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -782,6 +1062,10 @@ func main() {
 		}
 		writeJSON(w, 200, preview)
 	})
+	// Batch list for the Runs tab (docs/trace-rework/01-spec §3E NFR-1): the
+	// GET twin of POST /v1/agent/runs above — one cursor page of runs with
+	// statuses instead of the client's four journal scans + per-row N+1.
+	registerRunListRoute(mux, runListDeps{store: ws, gate: gate, log: log})
 	mux.HandleFunc("GET /v1/agent/runs/{runID}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		if project == "" {
@@ -792,9 +1076,20 @@ func main() {
 			return
 		}
 		sourceID := querySourceID(r, activities.SourceID)
-		response, err := temporalClient.DescribeWorkflowExecution(r.Context(), workflowIDFor(sourceID, project, r.PathValue("runID")), "")
-		if err != nil {
-			writeError(w, 404, err)
+		// R1 (kernel-wedge-2026-10-21): the describe/result RPCs ride the
+		// temporal RPC deadline — an unresponsive Temporal answers 503
+		// "temporal rpc timeout: …" instead of wedging the request forever.
+		var response *workflowservice.DescribeWorkflowExecutionResponse
+		describeErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			var rpcErr error
+			response, rpcErr = temporalClient.DescribeWorkflowExecution(ctx, workflowIDFor(sourceID, project, r.PathValue("runID")), "")
+			return rpcErr
+		})
+		if done {
+			return
+		}
+		if describeErr != nil {
+			writeError(w, 404, describeErr)
 			return
 		}
 		var status string
@@ -804,8 +1099,14 @@ func main() {
 		reply := map[string]any{"run_id": r.PathValue("runID"), "project": project, "status": status}
 		if response.WorkflowExecutionInfo != nil && response.WorkflowExecutionInfo.Status == enums.WORKFLOW_EXECUTION_STATUS_COMPLETED {
 			var result agent.RunResult
-			if err := temporalClient.GetWorkflow(r.Context(), workflowIDFor(sourceID, project, r.PathValue("runID")), "").Get(r.Context(), &result); err != nil {
-				writeError(w, 502, err)
+			getErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+				return temporalClient.GetWorkflow(ctx, workflowIDFor(sourceID, project, r.PathValue("runID")), "").Get(ctx, &result)
+			})
+			if done {
+				return
+			}
+			if getErr != nil {
+				writeError(w, 502, getErr)
 				return
 			}
 			reply["result"] = result
@@ -1042,35 +1343,10 @@ func main() {
 		}
 		writeJSON(w, 200, map[string]string{"run_id": runID, "status": "terminated"})
 	})
-	mux.HandleFunc("POST /v1/agent/runs/{runID}/nudge", func(w http.ResponseWriter, r *http.Request) {
-		var nudge agent.Nudge
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&nudge); err != nil && !errors.Is(err, io.EOF) {
-			writeError(w, 400, err)
-			return
-		}
-		if nudge.ActorID == "" {
-			if principal, ok := controlplane.FromContext(r.Context()); ok && principal.UserID != "" {
-				nudge.ActorID = principal.UserID
-			}
-		}
-		project := r.URL.Query().Get("project")
-		if project == "" {
-			writeError(w, 400, errors.New("project query parameter is required"))
-			return
-		}
-		if !gate.Allow(w, r, controlplane.RoleWriter, project) {
-			return
-		}
-		sourceID := querySourceID(r, activities.SourceID)
-		workflowID := workflowIDFor(sourceID, project, r.PathValue("runID"))
-		// Turn 0 means "any in-flight model call" — the workflow selector
-		// matches it against every live turn.
-		if err := temporalClient.SignalWorkflow(r.Context(), workflowID, "", agent.NudgeSignal, nudge); err != nil {
-			writeError(w, 409, err)
-			return
-		}
-		writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
-	})
+	// Nudge (cancel a stuck model call and retry the turn): workflow identity
+	// resolves from the journal, a gone workflow heals like /terminate and
+	// other signal failures answer structurally — see nudge.go.
+	registerNudgeRoute(mux, nudgeDeps{gate: gate, store: ws, journal: events, signaler: temporalClient, log: log})
 	mux.HandleFunc("POST /v1/agent/runs/{runID}/note", func(w http.ResponseWriter, r *http.Request) {
 		var note agent.UserNote
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&note); err != nil && !errors.Is(err, io.EOF) {
@@ -1098,9 +1374,17 @@ func main() {
 		workflowID := workflowIDFor(sourceID, project, r.PathValue("runID"))
 		// The workflow drains the note at the nearest turn boundary and appends
 		// it to the conversation; signaling a terminal run fails here with 409,
-		// which the client turns into a fresh-run fallback.
-		if err := temporalClient.SignalWorkflow(r.Context(), workflowID, "", agent.UserNoteSignal, note); err != nil {
-			writeError(w, 409, err)
+		// which the client turns into a fresh-run fallback. R1
+		// (kernel-wedge-2026-10-21): the signal rides the temporal RPC
+		// deadline — expiry answers 503 "temporal rpc timeout: …".
+		signalErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.UserNoteSignal, note)
+		})
+		if done {
+			return
+		}
+		if signalErr != nil {
+			writeError(w, 409, signalErr)
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
@@ -3019,9 +3303,21 @@ func main() {
 		}
 		workflowID := workflowIDFor(activities.SourceID, task.ProjectID, runID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-		run, wfErr := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
-		if wfErr != nil {
-			writeError(w, 409, wfErr)
+		// R1 (kernel-wedge-2026-10-21): the workflow start rides the temporal
+		// RPC deadline — the incident's wedge (a hung ExecuteWorkflow left the
+		// chat send with no HTTP answer forever). Expiry answers 503
+		// "temporal rpc timeout: …"; any other failure keeps the 409 mapping.
+		var run client.WorkflowRun
+		startErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			var rpcErr error
+			run, rpcErr = temporalClient.ExecuteWorkflow(ctx, options, "AgentRun", input)
+			return rpcErr
+		})
+		if done {
+			return
+		}
+		if startErr != nil {
+			writeError(w, 409, startErr)
 			return
 		}
 		wsRun := &workspace.Run{
@@ -3050,7 +3346,18 @@ func main() {
 			project = run.ProjectID
 		}
 		workflowID := workflowIDFor(activities.SourceID, project, run.RunID)
-		response, tErr := temporalClient.DescribeWorkflowExecution(ctx, workflowID, "")
+		// R1 (kernel-wedge-2026-10-21): both RPCs ride the temporal RPC
+		// deadline. A deadline expiry is the one Temporal failure
+		// resolveRunState does not swallow: the API route translates it into
+		// 503 "temporal rpc timeout: …" and the channel watchers log it —
+		// where before an unresponsive Temporal hung the whole resolve
+		// forever. Non-deadline failures degrade to the stored row, as before.
+		describeCtx, cancelDescribe := context.WithTimeout(ctx, temporalRPCTimeout())
+		response, tErr := temporalClient.DescribeWorkflowExecution(describeCtx, workflowID, "")
+		cancelDescribe()
+		if isTemporalRPCDeadline(tErr) {
+			return run, temporalRPCDeadlineError(tErr)
+		}
 		if tErr != nil || response.WorkflowExecutionInfo == nil {
 			return run, nil
 		}
@@ -3059,7 +3366,13 @@ func main() {
 			return run, nil
 		}
 		var result agent.RunResult
-		if gErr := temporalClient.GetWorkflow(ctx, workflowID, "").Get(ctx, &result); gErr != nil {
+		getCtx, cancelGet := context.WithTimeout(ctx, temporalRPCTimeout())
+		gErr := temporalClient.GetWorkflow(getCtx, workflowID, "").Get(getCtx, &result)
+		cancelGet()
+		if isTemporalRPCDeadline(gErr) {
+			return run, temporalRPCDeadlineError(gErr)
+		}
+		if gErr != nil {
 			return run, nil
 		}
 		run.Answer = result.Answer
@@ -3104,6 +3417,12 @@ func main() {
 		if err != nil {
 			if errors.Is(err, workspace.ErrNotFound) {
 				writeError(w, 404, err)
+				return
+			}
+			if isTemporalRPCDeadline(err) {
+				// R1: resolveRunState's temporal RPC deadline expired mid-resolve;
+				// the error already carries the "temporal rpc timeout: …" text.
+				writeError(w, http.StatusServiceUnavailable, err)
 				return
 			}
 			writeError(w, 500, err)
@@ -3164,6 +3483,13 @@ func main() {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("X-Accel-Buffering", "no")
+		// R2 exemption (kernel-wedge-2026-10-21): the server-wide WriteTimeout
+		// is set when the request headers are read and covers every later
+		// chunk — it would sever this stream once its budget (120s) runs out.
+		// SSE lives as long as the run does, so the write deadline is cleared
+		// for this connection; the hang safety here comes from the per-RPC
+		// deadlines (R1), not from the write budget.
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 		ctx := r.Context()
 		var cursor string
 		done := false
@@ -3245,6 +3571,11 @@ func main() {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("X-Accel-Buffering", "no")
+		// R2 exemption (kernel-wedge-2026-10-21), same as /stream: the
+		// server-wide WriteTimeout would sever this run-long token stream
+		// after its budget; the write deadline is cleared for this connection
+		// and hang safety comes from the per-RPC deadlines (R1).
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 		events, snapshot, cancel := activities.Tokens.Subscribe(runID)
 		defer cancel()
 		writeEvent := func(event agent.TokenEvent) bool {
@@ -6970,9 +7301,17 @@ func main() {
 			mux.ServeHTTP(w, r)
 			return
 		}
+		// R1 (kernel-wedge-2026-10-21): /nudge rides the temporal RPC deadline.
+		// Its handler lives in nudge.go (a parallel working-tree change
+		// outside this fix's radius), so the deadline and the 503 translation
+		// are installed here, at the wiring point — see nudgeWithRPCDeadline.
+		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/agent/runs/") && strings.HasSuffix(r.URL.Path, "/nudge") {
+			nudgeWithRPCDeadline(w, r, authed)
+			return
+		}
 		authed.ServeHTTP(w, r)
 	})
-	server := &http.Server{Addr: address, Handler: root, ReadHeaderTimeout: 5 * time.Second}
+	server := newKernelHTTPServer(address, root)
 	go func() { <-ctx.Done(); _ = server.Shutdown(context.Background()) }()
 	log.Info("agent kernel started", "address", address, "task_queue", taskQueue)
 	serveErr := server.ListenAndServe()
