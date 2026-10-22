@@ -1469,14 +1469,32 @@ func main() {
 	}
 
 	// wizardModelClient serves every description→draft wizard (agent, skill,
-	// team): the env gateway when configured, otherwise the first workspace
-	// provider. Fresh installs configured purely through onboarding have no env
-	// gateway — activities.Model is nil there — and the wizards must keep
-	// working the same way runs do, through the provider registry. On failure it
-	// writes the 502 response itself and returns nil.
+	// team): the env gateway when configured, else the installation's
+	// supervisor judge model — the model the operator already picked for
+	// exactly this kind of structured quality work (Agents → Quality
+	// settings) — and only when even that is unset the first workspace
+	// provider model that looks chat-capable (catalogs mix in ASR/embedding
+	// entries the wizard cannot call — see workspaceDraftModel). Fresh installs
+	// configured purely through onboarding have no env gateway —
+	// activities.Model is nil there — and the wizards must keep working the
+	// same way runs do, through the provider registry. On failure it writes
+	// the 502 response itself and returns nil.
 	wizardModelClient := func(w http.ResponseWriter, r *http.Request) *llm.Client {
 		if activities.Model != nil {
 			return activities.Model
+		}
+		// A configured judge wins and its failures are loud: silently falling
+		// back to another model would run the wizard on something the operator
+		// did not pick. Only an unconfigured judge falls through to the
+		// deterministic first-provider pick (a fresh install that never opened
+		// Quality settings).
+		if config, err := ws.JudgeConfig(r.Context()); err == nil && config.Configured {
+			client, err := judgeModelClient(r.Context(), ws, secretMasterKey)
+			if err != nil {
+				writeError(w, 502, err)
+				return nil
+			}
+			return client
 		}
 		client, err := workspaceDraftModel(r.Context(), ws, func(ctx context.Context, ref string) (string, error) {
 			return resolveProviderAPIKey(ctx, ws, ref, secretMasterKey)
@@ -8793,20 +8811,22 @@ var providerEnvNameRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 // only in memory and never in the database (docs/secrets-management.md §4).
 // workspaceDraftModel picks a model client for workspace-level LLM features
 // (the agent wizard) on installs that have no env gateway: the first
-// provider (by ID, for determinism) that lists models, first model in its
-// catalog. Mirrors the run-path routing contract — provider credentials
-// resolve at the boundary — without inventing a "default model" setting.
+// provider (by ID, for determinism) that lists models, first chat-capable
+// model in its catalog. Mirrors the run-path routing contract — provider
+// credentials resolve at the boundary — without inventing a "default model"
+// setting.
+//
+// "First model" needs the chat filter: catalogs are alphabetical
+// (normalizeModelIDs), and gateways that also serve speech or image models
+// (xiaomi lists MiMo-ASR next to MiMo-VL) would otherwise hand the wizard
+// an ASR model, failing every draft call at the provider.
 func workspaceDraftModel(ctx context.Context, lister providerLister, resolveKey func(ctx context.Context, ref string) (string, error)) (*llm.Client, error) {
 	providers, err := lister.ListProviders(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list providers for the agent wizard: %w", err)
 	}
 	sort.Slice(providers, func(i, j int) bool { return providers[i].ID < providers[j].ID })
-	for _, p := range providers {
-		if len(p.Models) == 0 {
-			continue
-		}
-		model := p.Models[0]
+	clientFor := func(p workspace.Provider, model string) (*llm.Client, error) {
 		apiKey, kErr := resolveKey(ctx, p.APIKeyRef)
 		if kErr != nil {
 			return nil, fmt.Errorf("provider %q credential: %w", p.ID, kErr)
@@ -8824,7 +8844,67 @@ func workspaceDraftModel(ctx context.Context, lister providerLister, resolveKey 
 		config.APIKey = apiKey
 		return llm.New(config), nil
 	}
+	for _, p := range providers {
+		if len(p.Models) == 0 {
+			continue
+		}
+		if model := pickChatModel(p.Models); model != "" {
+			return clientFor(p, model)
+		}
+	}
+	// Nothing in any catalog looks chat-capable (unusual naming): keep the
+	// historic pick — first provider with models, first model — rather than
+	// inventing a new failure mode. The provider's own error on a wrong
+	// model is the operator's signal.
+	for _, p := range providers {
+		if len(p.Models) == 0 {
+			continue
+		}
+		return clientFor(p, p.Models[0])
+	}
 	return nil, errors.New("no model configured for the agent wizard: add a provider with models (Providers page) or set TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID")
+}
+
+// draftNonChatHints are name fragments that reliably mark a catalog entry as
+// not a text-in/text-out chat model: speech recognition and synthesis,
+// audio-language, embeddings, rerankers, moderation classifiers and
+// image/video generators. The wizard speaks chat completions only, so one of
+// these picked as "first model" 400s every draft call. Deliberately a
+// blocklist, not an allowlist: chat naming across gateways is too diverse to
+// enumerate, while these fragments mark non-chat ids across vendors.
+var draftNonChatHints = []string{
+	"asr", "whisper", "stt", "tts", "speech", "voice", "transcribe", "transcription",
+	"audio", "music",
+	"embed", "rerank",
+	"moderation", "guard", "shield",
+	"image", "diffusion", "dall", "flux", "imagen", "sdxl",
+	"video", "sora", "veo", "kling",
+}
+
+// looksLikeNonChatModel matches case-insensitively on substrings: families
+// tokenize inconsistently ("MiMo-ASR", "whisper-large-v3",
+// "text-embedding-3-small"), and the fragments are distinctive enough that
+// plain containment has no known chat-model collisions.
+func looksLikeNonChatModel(id string) bool {
+	id = strings.ToLower(id)
+	for _, hint := range draftNonChatHints {
+		if strings.Contains(id, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+// pickChatModel returns the first catalog entry that looks chat-capable, or
+// "" when none does — the caller then falls back to the historic first-model
+// pick instead of refusing to work.
+func pickChatModel(models []string) string {
+	for _, model := range models {
+		if !looksLikeNonChatModel(model) {
+			return model
+		}
+	}
+	return ""
 }
 
 type providerLister interface {

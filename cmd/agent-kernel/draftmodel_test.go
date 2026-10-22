@@ -97,3 +97,56 @@ func TestWorkspaceDraftModelMalformedEnvFails(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `provider "a" model config`)
 }
+
+// Regression: catalogs are alphabetical (normalizeModelIDs), so "first
+// model" is luck on gateways that also serve non-chat families — xiaomi
+// lists MiMo-ASR before MiMo-VL, and a draft prompt sent to an ASR model
+// fails at the provider.
+func TestWorkspaceDraftModelSkipsNonChatModels(t *testing.T) {
+	lister := stubProviderLister{providers: []workspace.Provider{
+		{ID: "a", BaseURL: "http://a/v1", Models: []string{"MiMo-ASR", "MiMo-Audio-7B", "text-embedding-3-small", "MiMo-VL-7B"}},
+	}}
+	client, err := workspaceDraftModel(context.Background(), lister, func(_ context.Context, _ string) (string, error) { return "", nil })
+	require.NoError(t, err)
+	require.Equal(t, "MiMo-VL-7B", client.Model())
+}
+
+// A provider whose whole catalog is non-chat must be skipped in favor of the
+// next one, not hand the wizard a model that cannot answer.
+func TestWorkspaceDraftModelSkipsProviderWithoutChatModels(t *testing.T) {
+	lister := stubProviderLister{providers: []workspace.Provider{
+		{ID: "a", BaseURL: "http://a/v1", Models: []string{"whisper-1", "text-embedding-3-small"}},
+		{ID: "b", BaseURL: "http://b/v1", Models: []string{"bm1"}},
+	}}
+	client, err := workspaceDraftModel(context.Background(), lister, func(_ context.Context, _ string) (string, error) { return "", nil })
+	require.NoError(t, err)
+	require.Equal(t, "bm1", client.Model())
+}
+
+// A catalog where nothing looks chat-capable keeps the historic pick (first
+// provider, first model): the heuristic is advisory, and the provider's own
+// error on a wrong model is the operator's signal.
+func TestWorkspaceDraftModelFallsBackWhenNothingLooksChat(t *testing.T) {
+	lister := stubProviderLister{providers: []workspace.Provider{
+		{ID: "a", BaseURL: "http://a/v1", Models: []string{"whisper-1"}},
+	}}
+	client, err := workspaceDraftModel(context.Background(), lister, func(_ context.Context, _ string) (string, error) { return "", nil })
+	require.NoError(t, err)
+	require.Equal(t, "whisper-1", client.Model())
+}
+
+func TestLooksLikeNonChatModel(t *testing.T) {
+	for _, id := range []string{
+		"MiMo-ASR", "whisper-large-v3", "text-embedding-3-small", "bge-reranker-v2-m3",
+		"omni-moderation-latest", "llama-guard-3", "flux.1-dev", "dall-e-3",
+		"stable-diffusion-xl", "gpt-4o-audio-preview", "sora-2", "qwen-image",
+	} {
+		require.True(t, looksLikeNonChatModel(id), id)
+	}
+	for _, id := range []string{
+		"glm-4.6", "MiMo-VL-7B", "gpt-4o", "qwen3-32b", "deepseek-chat",
+		"claude-sonnet-4", "llama-3.3-70b-instruct",
+	} {
+		require.False(t, looksLikeNonChatModel(id), id)
+	}
+}
