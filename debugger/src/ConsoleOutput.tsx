@@ -85,6 +85,11 @@ export default function ConsoleOutput({ operationId, project, live }: ConsoleOut
     setState((prev) => applyConsoleFrame(prev, frame))
   }, [])
 
+  // Visibility pause state (declared before the subscription effect: it is
+  // one of that effect's deps — tsc TSB2448/2454 on a use-before-declaration
+  // flagged by `tsc -b`; behavior unchanged, the hook order is identical).
+  const [visibleTick, setVisibleTick] = useState(0)
+
   // One subscription per expanded event: the tail snapshot + the live SSE
   // stream share a single AbortController. Collapsing the event aborts both;
   // re-expanding re-subscribes (a fresh tail request also covers anything the
@@ -116,7 +121,6 @@ export default function ConsoleOutput({ operationId, project, live }: ConsoleOut
   // Visibility pause: on hide, abort the network subscription; on return,
   // bump visibleTick (a subscription-effect dep) — the effect above aborts
   // nothing stale (already aborted), re-fetches a fresh tail and re-subscribes.
-  const [visibleTick, setVisibleTick] = useState(0)
   useEffect(() => {
     const onChange = () => {
       if (document.hidden) {

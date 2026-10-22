@@ -17,10 +17,10 @@ import {
 import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
 import RunDisputes from './RunDisputes'
-import ConsoleOutput from './ConsoleOutput'
+import TraceLayers from './TraceLayers'
 import Markdown from './Markdown'
 import { useT, useI18n, pluralT } from './i18n'
-import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString, formatDuration, approvalHint } from './eventSummary'
+import { eventSummary, shortTime, restoreMarkdownLines, formatDuration, approvalHint } from './eventSummary'
 import { humanFactorsOf, type RunHumanFactors } from './humanFactors'
 import { useRunTokenMetrics } from './tokenStream'
 import { subscribeRunJournal } from './journalStream'
@@ -37,7 +37,7 @@ import {
   Heading,
 } from '@carbon/react'
 import PageLoading from './PageLoading'
-import { Time, Play, ChevronDown, ChevronRight } from '@carbon/icons-react'
+import { Time, Play } from '@carbon/icons-react'
 import ListFilter, { matchesFilter } from './ListFilter'
 import {
   runCost, taskCost, type RunCost, type TaskCost,
@@ -154,148 +154,6 @@ const REASON_KEYS: Record<string, string> = {
   crash_window: 'operations.reason.crash_window',
   stale_in_flight: 'operations.reason.stale_in_flight',
   failed_uncertain: 'operations.reason.failed_uncertain',
-}
-
-/** Expandable event detail. For model.completed rows the response text (from
- * the run's model.text_delta/model.reasoning events) is shown as the primary
- * content; the observability payload is reduced to what the summary line
- * doesn't already say. */
-function EventDetail({ event, t, project, response, reasoning, knowledgeDoubt, live }: { event: ObservationEvent; t: (key: string, vars?: Record<string, string>) => string; project: string; response?: string; reasoning?: string; knowledgeDoubt?: React.ReactNode; live?: boolean }) {
-  const [expanded, setExpanded] = useState(false)
-  const d = event.data ?? {}
-  // run_command console (v2-consolidated.md §6, DoD-5): the operation id of
-  // this tool call addresses its output stream. Present on tool.started /
-  // tool.completed / tool.failed of run_command calls; anything else — any
-  // other tool, or an event without an operation id — renders no console.
-  const tool = typeof d.tool === 'string' ? d.tool : ''
-  const operationId = typeof d.operation_id === 'string' ? d.operation_id : ''
-  const consoleOpId = tool === 'run_command' && operationId ? operationId : ''
-  // Knowledge-bearing events (knowledge.*, hint.*) can be doubted in place:
-  // the reader is looking at the exact moment the knowledge was used/formed.
-  const knowledgeID = typeof d.knowledge_id === 'string' && d.knowledge_id
-    && (event.type.startsWith('knowledge.') || event.type.startsWith('hint.')) ? d.knowledge_id : ''
-
-  // Human-readable failure explanation: Temporal wraps the real cause into
-  // "child workflow execution error (…): activity error (…): cause" — peel it
-  // and show the cause, the activity chain and a child-run link when present.
-  const rawError = typeof d.error === 'string' && d.error.trim() ? d.error : null
-  const explained = rawError ? explainKernelError(rawError) : null
-  const childRunId = typeof d.child_run_id === 'string' && d.child_run_id ? d.child_run_id : null
-  const isFailure = event.type === 'run.failed' || event.type === 'model.failed' || event.type === 'tool.failed' || event.type === 'delegation.failed' || event.type === 'mcp.call.failed'
-
-  // Show useful fields first, skip noise
-  const skipFields = new Set(['caused_by', 'frame_id', 'parent_frame_id', 'sequence'])
-  if (event.type === 'model.completed') {
-    // tokens/latency/tools are already in the row summary; refs, retries and
-    // token splits are plumbing nobody reads.
-    for (const k of ['turn', 'total_tokens', 'latency_ms', 'tool_call_count', 'finish_reason', 'model', 'provider', 'prompt_tokens', 'completion_tokens', 'input_ref', 'output_ref', 'truncated', 'attempts']) skipFields.add(k)
-  }
-  if (rawError && explained) skipFields.add('error') // shown in the explanation block
-  const importantFields: [string, unknown][] = []
-  const otherFields: [string, unknown][] = []
-  for (const [k, v] of Object.entries(d)) {
-    if (skipFields.has(k)) continue
-    if (v === '' || v === null || v === undefined) continue
-    if (['tool', 'turn', 'total_tokens', 'latency_ms', 'exit_code', 'tool_call_count', 'finish_reason', 'model', 'provider', 'error', 'proposition', 'answer', 'arguments', 'output'].includes(k)) {
-      importantFields.push([k, v])
-    } else {
-      otherFields.push([k, v])
-    }
-  }
-  const fields = [...importantFields, ...otherFields]
-
-  return (
-    <div>
-      {/* Failure explanation — what a human actually needs to read */}
-      {isFailure && explained && (explained.chain.length > 0 || explained.timeout) && (
-        <div className="run-failure-cause">
-          <div className="run-failure-cause-title">{t('errors.cause')}</div>
-          <div className="run-failure-cause-text">{explained.cause}</div>
-          {explained.timeout && (
-            <div className="run-failure-cause-hint">{t('errors.model_timeout_hint')}</div>
-          )}
-          {explained.chain.length > 0 && (
-            <div className="run-failure-cause-chain">{explained.chain.join(' → ')}</div>
-          )}
-          {rawError && rawError !== explained.cause && (
-            <details className="run-failure-raw">
-              <summary>{t('errors.raw_error')}</summary>
-              <div>{rawError}</div>
-            </details>
-          )}
-        </div>
-      )}
-      {/* Child run link — delegate failures point at the crashed subagent run */}
-      {childRunId && (
-        <a className="run-failure-child-link" href={`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(childRunId)}`}>
-          ↗ {t('runs.event.open_child_run')} <span className="run-failure-child-id">{childRunId}</span>
-        </a>
-      )}
-      {/* Model response/reasoning are the heaviest nodes on the trace (a turn
-          can run to thousands of tokens): NFR-5 renders them only once the row
-          is expanded — the summary line above carries the headline either way. */}
-      {(fields.length > 0 || Boolean(response) || Boolean(reasoning)) && (
-        <>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.7rem', padding: '0.15rem 0', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-          >
-            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            {expanded ? t('runs.hide_details') : t('runs.show_details')}
-          </button>
-          {expanded && (
-            <>
-              {/* Console output of run_command: lazy (only while expanded),
-                  one subscription per expanded event (NFR-9) — mount/unmount
-                  of this component is exactly the subscription lifecycle. */}
-              {consoleOpId && (
-                <ConsoleOutput operationId={consoleOpId} project={project} live={Boolean(live)} />
-              )}
-              {response && (
-                <div className="run-model-response" style={{ marginTop: '0.35rem' }}>
-                  <Markdown content={response} />
-                </div>
-              )}
-              {reasoning && (
-                <details className="run-model-reasoning" style={{ marginTop: '0.35rem' }}>
-                  <summary>💭 {t('runs.reasoning')}</summary>
-                  <div className="run-model-reasoning-content">{reasoning}</div>
-                </details>
-              )}
-              {fields.length > 0 && (
-                <div style={{ marginTop: '0.35rem', padding: '0.5rem', background: 'var(--tm-raised)', borderRadius: '4px', fontSize: '0.7rem', fontFamily: '"SFMono-Regular", Consolas, monospace', maxHeight: '300px', overflowY: 'auto', minWidth: 0, overflowWrap: 'anywhere' }}>
-                  {/* Show answer/content if present */}
-                  {typeof d.answer === 'string' && (
-                    <div style={{ marginBottom: '0.5rem' }}>
-                      <div style={{ color: 'var(--tm-text-3)', marginBottom: '0.25rem' }}>answer:</div>
-                      {/* Older agent.summary events carry the answer newline-collapsed — restore its markdown structure */}
-                      <div style={{ color: 'var(--tm-text)', background: 'var(--tm-elevated)', padding: '0.5rem', borderRadius: '3px', maxHeight: '150px', overflowY: 'auto' }}><Markdown content={restoreMarkdownLines(d.answer.slice(0, 2000))} /></div>
-                    </div>
-                  )}
-                  {/* Show other data */}
-                  {fields.map(([k, v]) => (
-                    <div key={k} style={{ marginBottom: '0.2rem' }}>
-                      <span style={{ color: 'var(--tm-text-3)' }}>{k}: </span>
-                      <span style={{ color: 'var(--tm-text)', overflowWrap: 'anywhere' }}>
-                        {/* Tool outputs arrive JSON-encoded (MCP sometimes doubly
-                         * so) — unwrap the string layers for readability. */}
-                        {typeof v === 'object' ? JSON.stringify(v).slice(0, 200) : (k === 'output' ? unwrapJsonString(String(v)) : String(v)).slice(0, 200)}
-                      </span>
-                    </div>
-                  ))}
-                  {/* Event metadata */}
-                  <div style={{ marginTop: '0.35rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.35rem', color: 'var(--tm-muted)' }}>
-                    event_id: {event.event_id}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </>
-      )}
-      {knowledgeID && knowledgeDoubt}
-    </div>
-  )
 }
 
 export default function AgentRuns({ project }: { project: string }) {
@@ -1432,88 +1290,25 @@ export default function AgentRuns({ project }: { project: string }) {
                 {view === 'trace' && (
                 <Tile>
                   <Heading style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>{t('runs.trace') ?? 'Trace'} ({t('runs.events_count', { count: String(trace.visible.length) })})</Heading>
-                  <Stack gap={0}>
-                    {traceWindow.map((event, index) => {
-                      const info = eventSummary(event, t, (id) => knowledgeItems.get(id)?.proposition)
-                      const turnKey = event.type === 'model.completed' ? `${runID(event)}:${event.data?.turn}` : undefined
-                      // The newest trace row being model.started of the selected
-                      // run means the call is in flight right now — render it as a
-                      // live progress row (elapsed time always; tokens/rate when
-                      // the provider streams). Event timestamps come from the
-                      // journal clock, same as every other row on the page.
-                      const isLiveModelCall = index === 0 && selectedLive && event.type === 'model.started' && runID(event) === selected
-                      const liveParts: string[] = []
-                      if (isLiveModelCall) {
-                        const elapsedMs = Math.max(0, nowTick - Date.parse(event.occurred_at))
-                        liveParts.push(formatDuration(elapsedMs))
-                        if (tokenMetrics) {
-                          // A tool name here means the model is streaming a tool
-                          // call right now (no answer text this turn) — the most
-                          // informative thing the row can show.
-                          if (tokenMetrics.tool) liveParts.push(`⚙ ${tokenMetrics.tool}`)
-                          if (tokenMetrics.approxTokens > 0) liveParts.push(`~${tokenMetrics.approxTokens} tok`)
-                          if (tokenMetrics.tps > 0) liveParts.push(`${tokenMetrics.tps} tok/s`)
-                          const stalled = tokenMetrics.lastChunkAgoMs > 15_000
-                          if (tokenMetrics.streaming) {
-                            liveParts.push(stalled
-                              ? t('runs.live.stalled', { seconds: String(Math.floor(tokenMetrics.lastChunkAgoMs / 1000)) })
-                              : t('runs.live.alive'))
-                          } else if (tokenMetrics.approxTokens === 0) {
-                            // No chunks yet: either the thinking phase before
-                            // the first token or a non-streaming transport.
-                            liveParts.push(t('runs.live.waiting_first_token'))
-                          }
-                        }
-                      }
-                      const detail = isLiveModelCall ? liveParts.join(' · ') || info.detail : info.detail
-                      // An event whose operation effect is still unresolved ties
-                      // this row to the reconcile card above — mark it in place.
-                      const unresolvedOp = opById.get(String(event.data?.operation_id ?? ''))
-                      return (
-                        <div
-                          key={`${event.source.id}:${event.event_id}`}
-                          style={{
-                            padding: '0.4rem 0.5rem',
-                            borderLeft: `3px solid ${unresolvedOp ? '#f7768e' : info.color}`,
-                            marginBottom: '0.15rem',
-                            background: 'var(--tm-surface)',
-                            borderRadius: '0 4px 4px 0',
-                            // The rows live in a CSS-grid Stack; without min-width:0
-                            // a long nowrap detail line inflates the row's intrinsic
-                            // width and stretches every row past the column edge.
-                            minWidth: 0,
-                            overflow: 'hidden',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
-                            <span style={{ color: info.color, width: '1.2rem', textAlign: 'center', flexShrink: 0 }} className={isLiveModelCall ? 'live-dot' : undefined}>{info.icon}</span>
-                            <strong style={{ color: info.color, minWidth: '100px' }}>{info.label}</strong>
-                            <span style={{ color: isLiveModelCall ? 'var(--tm-teal)' : 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</span>
-                            {isLiveModelCall && (
-                              <button
-                                onClick={() => void nudge(Number(event.data?.turn ?? 0) || 0)}
-                                disabled={busy}
-                                title={t('runs.nudge_hint') ?? 'Cancel the stuck model call and retry immediately'}
-                                aria-label={t('runs.nudge') ?? 'Nudge model call'}
-                                style={{ background: 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.1rem 0.35rem', lineHeight: 1, borderRadius: '4px', flexShrink: 0 }}
-                              >↻</button>
-                            )}
-                            {unresolvedOp && (
-                              <span style={{ color: '#f7768e', fontSize: '0.7rem', flexShrink: 0 }} title={t('runs.ops_trace_mark')}>⚠</span>
-                            )}
-                            <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{shortTime(event.occurred_at)}</span>
-                          </div>
-                          <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>
-                            <EventDetail event={event} t={t} project={selectedProject} response={turnKey ? trace.responseByKey.get(turnKey) : undefined} reasoning={turnKey ? trace.reasoningByKey.get(turnKey) : undefined}
-                              live={runID(event) === selected && selectedLive}
-                              knowledgeDoubt={typeof event.data?.knowledge_id === 'string' && event.data.knowledge_id
-                                ? <KnowledgeActions knowledgeID={String(event.data.knowledge_id)} project={selectedProject} actorID={humanActorID} onDone={() => setKnowledgeRevision((r) => r + 1)} />
-                                : undefined} />
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </Stack>
+                  {/* T2: the three-layer trace (v2-consolidated.md §4–§5) —
+                      the §5-folded timeline, inline details and the collapsed
+                      raw envelope replace the old «Детализация» row body
+                      (DoD-1/2/3/9). NFR-5: the bounded window feeds the
+                      renderer; heavy texts (model responses) render only for
+                      expanded rows. */}
+                  <TraceLayers
+                    events={traceWindow}
+                    locale={locale}
+                    t={t}
+                    project={selectedProject}
+                    responsesByTurn={trace.responseByKey}
+                    reasoningsByTurn={trace.reasoningByKey}
+                    knowledgeDoubtOf={(event) => (typeof event.data?.knowledge_id === 'string' && event.data.knowledge_id
+                      ? <KnowledgeActions knowledgeID={String(event.data.knowledge_id)} project={selectedProject} actorID={humanActorID} onDone={() => setKnowledgeRevision((r) => r + 1)} />
+                      : undefined)}
+                    live={selectedLive}
+                    emptyHint={trace.visible.length === 0 ? (t('runs.layers.timeline.empty')) : undefined}
+                  />
                   {/* NFR-5: the window never grows by itself — the reader
                       asks for TRACE_WINDOW_STEP more rows each time. */}
                   {trace.visible.length > traceLimit && (
