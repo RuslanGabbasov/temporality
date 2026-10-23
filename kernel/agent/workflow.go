@@ -382,6 +382,14 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 	if input.AgentID != "" {
 		started["agent_id"] = input.AgentID
 	}
+	// The initiating request rides the start event: the run overview renders
+	// it, and without it the journal has no readable trace of what the run
+	// was asked to do (the task row holds the full prompt, but child runs of
+	// delegate/plan have no task row at all). Bounded — prompts reach tens of
+	// kilobytes and the event stream is not the place for the full body.
+	if prompt := strings.TrimSpace(input.Prompt); prompt != "" {
+		started["request"] = truncate(prompt, 2000)
+	}
 	if input.AgentVersion > 0 {
 		started["agent_version"] = input.AgentVersion
 	}
@@ -943,7 +951,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				if taskDeps == nil {
 					taskDeps = []string{}
 				}
-				startedData := map[string]any{"operation_id": operationID, "task_id": task.ID, "child_run_id": childRunID, "agent_id": task.AgentID, "depends_on": taskDeps, "round": launches[task.ID] + 1, "max_turns": child.MaxTurns}
+				startedData := map[string]any{"operation_id": operationID, "task_id": task.ID, "child_run_id": childRunID, "agent_id": task.AgentID, "depends_on": taskDeps, "round": launches[task.ID] + 1, "max_turns": child.MaxTurns, "prompt": truncate(task.Prompt, 2000)}
 				if len(task.ReviewOf) > 0 {
 					startedData["review_of"] = append([]string{}, task.ReviewOf...)
 				}
@@ -1578,7 +1586,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				}
 				inflight = inflight[1:]
 			}
-			if err := emit(activityCtx, state, "delegation.started", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "ordinal": delegations, "depth": input.DelegationDepth + 1}); err != nil {
+			if err := emit(activityCtx, state, "delegation.started", map[string]any{"operation_id": operationID, "child_run_id": childRunID, "agent_id": delegateAgentID, "ordinal": delegations, "depth": input.DelegationDepth + 1, "prompt": truncate(delegatePrompt, 2000), "max_turns": delegateMaxTurns}); err != nil {
 				return "", false, err
 			}
 			childInput.ParentRunID = input.RunID

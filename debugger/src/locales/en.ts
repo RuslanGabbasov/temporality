@@ -530,6 +530,7 @@ export const en: Record<string, string> = {
     'runs.no_runs': 'No runs yet',
     'runs.project_col': 'project',
     'runs.answer': 'Agent Answer',
+    'runs.request': 'Request',
     'runs.count': 'Runs ({{count}})',
     'runs.result': 'Run Result',
     'runs.approval_required': 'Approval Required',

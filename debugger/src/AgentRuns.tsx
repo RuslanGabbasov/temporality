@@ -1147,6 +1147,29 @@ export default function AgentRuns({ project }: { project: string }) {
                   </Tile>
                 )}
 
+                {/* The initiating request: what this run was asked to do — the
+                    first thing a reader needs on the overview, before any
+                    answer or graph makes sense. For delegated children the
+                    parent's plan.task.started/delegation.started prompt is the
+                    same text; the run.started copy covers every run kind. */}
+                {(() => {
+                  const startedEvent = ownEvents.find((event) => event.type === 'run.started' && runID(event) === selected)
+                  const request = typeof startedEvent?.data?.request === 'string' ? startedEvent.data.request.trim() : ''
+                  if (!request) return null
+                  const agent = typeof startedEvent?.data?.agent_id === 'string' ? startedEvent.data.agent_id : ''
+                  const turns = Number(startedEvent?.data?.max_turns ?? 0)
+                  return (
+                    <Tile>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                        <Heading style={{ fontSize: '0.875rem' }}>🎯 {t('runs.request') ?? 'Request'}</Heading>
+                        {agent && <Tag type="gray" size="sm">{agent}</Tag>}
+                        {turns > 0 && <Tag type="gray" size="sm">≤ {turns} {t('runs.turns')}</Tag>}
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--tm-text)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '14rem', overflowY: 'auto', background: 'var(--tm-raised)', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>{request}</div>
+                    </Tile>
+                  )
+                })()}
+
                 {/* Answer — the overview tab opens with what the run concluded */}
                 {typeof answer === 'string' && (
                   <Tile>

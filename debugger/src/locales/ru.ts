@@ -530,6 +530,7 @@ export const ru: Record<string, string> = {
     'runs.no_runs': 'Запусков пока нет',
     'runs.project_col': 'проект',
     'runs.answer': 'Ответ агента',
+    'runs.request': 'Запрос',
     'runs.count': 'Запуски ({{count}})',
     'runs.result': 'Результат запуска',
     'runs.approval_required': 'Требуется подтверждение',
