@@ -1227,6 +1227,14 @@ export default function AgentRuns({ project }: { project: string }) {
                       (DoD-1/2/3/9). NFR-5: the bounded window feeds the
                       renderer; heavy texts (model responses) render only for
                       expanded rows. */}
+                  {olderAvailable && view === 'trace' && (
+                    <TraceOlderSentinel onVisible={loadOlder} />
+                  )}
+                  {olderAvailable && view === 'trace' && (
+                    <div style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--tm-text-3)', padding: '0.25rem 0' }}>
+                      {t('runs.trace.older_hint', { shown: String(traceWindow.length), total: String(trace.visible.length) })}
+                    </div>
+                  )}
                   <TraceLayers
                     events={traceWindow}
                     locale={locale}
@@ -1245,14 +1253,6 @@ export default function AgentRuns({ project }: { project: string }) {
                     onConsoleState={collectConsoleState}
                     liveModelParts={liveModelParts}
                   />
-                  {olderAvailable && view === 'trace' && (
-                    <TraceOlderSentinel onVisible={loadOlder} />
-                  )}
-                  {olderAvailable && (
-                    <div style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--tm-text-3)', padding: '0.35rem 0' }}>
-                      {t('runs.trace.older_hint', { shown: String(traceWindow.length), total: String(trace.visible.length) })}
-                    </div>
-                  )}
                 </Tile>
                 )}
 

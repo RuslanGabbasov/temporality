@@ -30,8 +30,11 @@ export type TraceItem =
   | { kind: 'saga'; sagaId: string; events: ObservationEvent[]; row: TimelineRow }
   | { kind: 'group'; group: TraceGroupKey; events: ObservationEvent[]; hasError: boolean }
 
-/** §5.7: ops noise — folded/filterable by default, never standalone rows. */
-const NOISE_TYPES = new Set(['storage.snapshot', 'operation.reconciled', 'notification.sent', 'memory.read.failed'])
+/** §5.7: ops noise — folded/filterable by default, never standalone rows.
+ *  run.started is the run itself (the page already says it) and the memory
+ *  probe / hint query / secret issuance are plumbing the reader skips —
+ *  all fold into «Эксплуатация» instead of rendering as empty-ish rows. */
+const NOISE_TYPES = new Set(['storage.snapshot', 'operation.reconciled', 'notification.sent', 'memory.read.failed', 'run.started', 'memory.read', 'hint.query', 'secret.issued'])
 
 /** §5.4: minor plan-task transitions fold into «изменения плана». */
 const MINOR_PLAN_TYPES = new Set(['plan.task.skipped', 'plan.task.invalidated', 'plan.task.reopened', 'plan.task.incomplete'])
@@ -44,6 +47,13 @@ const APPROVAL_REQUESTS = new Set(['approval.requested', 'human.requested'])
  *  approval.* without an operation id) stays a standalone row, it never
  *  disappears into «Эксплуатация». */
 const isNoise = (type: string): boolean => NOISE_TYPES.has(type)
+
+/** An event earns a timeline row when its title is a real one: the generic
+ *  fallback («Событие: …» / «Event: …») renders nothing a reader can act on
+ *  — such shells are dropped instead of rendering empty boxes. */
+function eventHasPresentation(row: { title: string }): boolean {
+  return !row.title.startsWith('Событие:') && !row.title.startsWith('Event:')
+}
 const isHint = (type: string): boolean => type.startsWith('hint.')
 const isKnowledge = (type: string): boolean =>
   type === 'knowledge.proposed' || type === 'knowledge.extraction.started' || type === 'knowledge.extraction.completed'
@@ -78,11 +88,19 @@ export function foldTrace(events: ObservationEvent[], locale: Locale, t: Transla
 
   for (const event of events) {
     if (paired.has(event.event_id)) continue
+    // §5.2 + the empty-row rule: streaming types never become rows. An
+    // event with no override, no catalog title and no payload text would
+    // render as the generic «Событие: …» shell — it folds into the ops-noise
+    // group instead of standing as an empty box.
     const row = timelineRow(event, locale, t)
     const type = event.type
-    // §5.2: streaming types never become timeline items — they feed the live
-    // model row and the parent call's details (AgentRuns trace memo).
     if (row.kind === 'stream') continue
+    if (!eventHasPresentation(row) && (type === 'run.started' || isNoise(type))) {
+      const group = groupOf('opsNoise')
+      group.events.push(event)
+      continue
+    }
+    if (!eventHasPresentation(row)) continue
 
     // §5.5: the decision closes its request pair.
     if (APPROVAL_OUTCOMES.has(type)) {

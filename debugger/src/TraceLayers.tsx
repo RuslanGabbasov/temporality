@@ -151,33 +151,39 @@ export function TraceEventRow({ event, locale, t, project, response, reasoning, 
           : ''
   return (
     <div style={{ padding: '0.4rem 0.5rem', borderLeft: `3px solid ${row.color}`, marginBottom: '0.15rem', background: 'var(--tm-surface)', borderRadius: '0 4px 4px 0', minWidth: 0, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+      {/* The whole header line toggles the details — the reader clicks the
+          row, not a 12px chevron. The {} and chevron buttons stop the
+          propagation and keep their own a11y contracts. */}
+      <div
+        onClick={row.hasDetails ? () => setOpen((value) => !value) : undefined}
+        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: row.hasDetails ? 'pointer' : 'default', minWidth: 0 }}
+      >
         <span style={{ color: row.color, width: '1.2rem', textAlign: 'center', flexShrink: 0 }}>{row.icon}</span>
-        <strong style={{ color: row.color, minWidth: '100px' }}>{row.title}</strong>
-        {row.fact && <span style={{ color: 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.fact}</span>}
+        <strong style={{ color: row.color, flexShrink: 0 }}>{row.title}</strong>
+        {row.fact && <span style={{ color: 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{row.fact}</span>}
         {row.duration && <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{row.duration}</span>}
         {statusDot && <span aria-hidden title={row.status} style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: statusDot, flexShrink: 0 }} />}
+        {(
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setRawOpen((value) => !value) }}
+            aria-expanded={rawOpen}
+            aria-label={`${t('runs.layers.raw_summary')}: ${row.title}`}
+            title={t('runs.layers.raw_summary')}
+            style={{ background: rawOpen ? 'var(--tm-raised)' : 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.62rem', fontFamily: 'monospace', padding: '0.05rem 0.28rem', lineHeight: 1.4, borderRadius: '4px', flexShrink: 0, marginLeft: 'auto' }}
+          >
+            {'{}'}
+          </button>
+        )}
         {row.hasDetails && (
           <button
             type="button"
-            onClick={() => setOpen((value) => !value)}
+            onClick={(e) => { e.stopPropagation(); setOpen((value) => !value) }}
             aria-expanded={open}
             aria-label={`${t('runs.layers.toggle_details')}: ${row.title}`}
             style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.1rem 0.35rem', lineHeight: 1, borderRadius: '4px', flexShrink: 0 }}
           >
             {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          </button>
-        )}
-        {(
-          <button
-            type="button"
-            onClick={() => setRawOpen((value) => !value)}
-            aria-expanded={rawOpen}
-            aria-label={`${t('runs.layers.raw_summary')}: ${row.title}`}
-            title={t('runs.layers.raw_summary')}
-            style={{ background: rawOpen ? 'var(--tm-raised)' : 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.62rem', fontFamily: 'monospace', padding: '0.05rem 0.28rem', lineHeight: 1.4, borderRadius: '4px', flexShrink: 0 }}
-          >
-            {'{}'}
           </button>
         )}
       </div>
@@ -487,18 +493,20 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
           )}
         </div>
       )}
+      {visibleItems.length === 0 && !activeFilter && <div style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0' }}>{emptyHint ?? t('runs.layers.timeline.empty')}</div>}
+      {activeFilter ? (
+        visibleItems.map((item) => renderFolded(item, 'flat:'))
+      ) : (
+        tree.map((segment, index) => renderSegment(segment, index))
+      )}
+      {/* Chronological order: the in-flight call is the newest event, so its
+          live row closes the timeline. */}
       {liveModelParts && liveModelParts.length > 0 && (
         <div style={{ padding: '0.4rem 0.5rem', marginBottom: '0.15rem', background: 'var(--tm-surface)', borderRadius: '0 4px 4px 0', borderLeft: '3px solid var(--tm-teal)', minWidth: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
           <span style={{ color: 'var(--tm-teal)', width: '1.2rem', textAlign: 'center', flexShrink: 0 }}>⏳</span>
           <strong style={{ minWidth: '100px' }}>{t('runs.event.model_call')}</strong>
           <span style={{ color: 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{liveModelParts.join(' · ')}</span>
         </div>
-      )}
-      {visibleItems.length === 0 && !activeFilter && <div style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0' }}>{emptyHint ?? t('runs.layers.timeline.empty')}</div>}
-      {activeFilter ? (
-        visibleItems.map((item) => renderFolded(item, 'flat:'))
-      ) : (
-        tree.map((segment, index) => renderSegment(segment, index))
       )}
     </div>
   )

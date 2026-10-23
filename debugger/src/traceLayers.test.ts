@@ -40,8 +40,8 @@ describe('foldTrace (§5)', () => {
     const turns = items.filter((item) => item.kind === 'group' && item.group === 'turns')
     expect(turns).toHaveLength(1)
     expect((turns[0] as Extract<typeof turns[0], { kind: 'group' }>).events).toHaveLength(4)
-    // run.started stays a standalone row before the group.
-    expect(items[0].kind).toBe('event')
+    // run.started (no title) folds into the ops-noise group before the turn group.
+    expect(items[0].kind).toBe('group')
   })
 
   it('aggregates hints into «N подсказок, M использовано» (§5.6)', () => {
@@ -154,8 +154,11 @@ describe('foldTrace (§5)', () => {
       ev('tool.completed', { tool: 'run_command', exit_code: 0 }, 3),
       ev('run.completed', { turns: 2 }, 4),
     ], RU, t)
+    // run.started carries no title: it folds into the ops-noise group (the
+    // run page itself already names the run), so the first item is that
+    // group, then the turn group, then the terminal rows.
     const kinds = items.map((item) => (item.kind === 'group' ? `group:${item.group}` : item.kind))
-    expect(kinds).toEqual(['event', 'group:turns', 'event', 'event'])
+    expect(kinds).toEqual(['group:opsNoise', 'group:turns', 'event', 'event'])
   })
 })
 
