@@ -340,6 +340,14 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
   'knowledge.extraction.completed': (d, { t }) => ({ title: t('runs.event.extraction_completed'), fact: t('runs.extraction_candidates', { count: squash(d.candidates_count ?? 0) }), status: 'ok' }),
   'knowledge.extraction.failed': (d, { t }) => ({ title: t('runs.event.extraction_failed'), fact: causeOf(d), status: 'error' }),
   'hint.query': (d, { t }) => ({ title: t('runs.event.memory_lookup'), fact: t('runs.candidates', { count: squash(d.candidate_count ?? 0) }) }),
+  'memory.read': (d, { t }) => ({
+    title: t('runs.event.memory_read'),
+    fact: t('runs.event.memory_read_detail', {
+      hints: squash(d.hint_count ?? 0),
+      primed: squash(d.primed_hints ?? 0),
+    }),
+    hasDetails: false,
+  }),
   'hint.offered': (d, { t }) => ({ title: t('runs.event.hint_offered'), fact: squash(d.proposition).slice(0, 90) }),
   'hint.used': (d, { t }) => ({ title: t('runs.event.hint_used'), fact: squash(d.proposition).slice(0, 90) }),
   'hint.ignored': (d, { t }) => ({ title: t('runs.event.hint_ignored'), fact: squash(d.proposition).slice(0, 90) }),

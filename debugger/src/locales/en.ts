@@ -657,6 +657,8 @@ export const en: Record<string, string> = {
     'runs.extraction_skipped': 'already extracted',
     'runs.event.memory_lookup': 'Memory lookup',
     'runs.event.memory_read': 'Memory read',
+    'runs.event.memory_read_detail': '{{hints}} hints, {{primed}} primed into the prompt',
+    'runs.event.memory_read': 'Memory read',
     'runs.event.approval_needed': 'Approval needed',
     'runs.event.approved': 'Approved',
     'runs.event.auto_approved': 'Auto-approved',
