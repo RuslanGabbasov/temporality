@@ -349,16 +349,24 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
     if (item.kind === 'group') {
       const open = openGroups.has(item.group)
       const summary = groupSummary(item, t)
+      // The whole header block toggles: the button keeps the keyboard/a11y
+      // contract, the container onClick makes every pixel of the header —
+      // padding included — clickable the way a reader expects.
+      const toggle = () => setOpenGroups((prev) => {
+        const next = new Set(prev)
+        if (next.has(item.group)) next.delete(item.group)
+        else next.add(item.group)
+        return next
+      })
       return (
-        <div key={key} style={{ padding: '0.35rem 0.5rem', marginBottom: '0.15rem', background: 'var(--tm-raised)', borderRadius: '4px', borderLeft: `3px solid ${item.hasError ? '#f7768e' : 'var(--tm-border)'}` }}>
+        <div
+          key={key}
+          onClick={toggle}
+          style={{ padding: '0.35rem 0.5rem', marginBottom: '0.15rem', background: 'var(--tm-raised)', borderRadius: '4px', borderLeft: `3px solid ${item.hasError ? '#f7768e' : 'var(--tm-border)'}`, cursor: 'pointer' }}
+        >
           <button
             type="button"
-            onClick={() => setOpenGroups((prev) => {
-              const next = new Set(prev)
-              if (next.has(item.group)) next.delete(item.group)
-              else next.add(item.group)
-              return next
-            })}
+            onClick={(e) => { e.stopPropagation(); toggle() }}
             aria-expanded={open}
             aria-label={summary.label}
             style={{ background: 'none', border: 'none', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.78rem', padding: 0, display: 'flex', alignItems: 'center', gap: '0.35rem', width: '100%', textAlign: 'left' }}
@@ -368,7 +376,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
             <span style={{ color: 'var(--tm-text-3)', fontWeight: 400 }}>{summary.detail}</span>
           </button>
           {open && (
-            <div style={{ marginTop: '0.35rem', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+            <div style={{ marginTop: '0.35rem', display: 'flex', flexDirection: 'column', gap: '0.15rem' }} onClick={(e) => e.stopPropagation()}>
               {item.events.map((event) => (
                 <TraceEventRow key={`${event.source.id}:${event.event_id}`} event={event} locale={locale} t={t} project={project} knowledgeDoubt={knowledgeDoubtOf?.(event)} live={live} onConsoleState={onConsoleState} />
               ))}
