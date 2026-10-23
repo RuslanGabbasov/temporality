@@ -1,0 +1,408 @@
+=== RUN   TestAgentRunPlanAbortOnFailure
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskFailedRequest. ActivityID 1 ActivityType kernel.generate_run_title
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 2 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 3 ActivityType kernel.knowledge_hints
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 4 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 5 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 6 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 7 ActivityType kernel.call_model
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 8 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 9 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 10 ActivityType kernel.resolve_agent
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 11 ActivityType kernel.resolve_agent
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 12 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 13 ActivityType kernel.resolve_agent
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 14 ActivityType kernel.record_event
+2026/10/23 07:36:22 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 15 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 16 ActivityType kernel.resolve_agent
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 17 ActivityType kernel.knowledge_hints
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 18 ActivityType kernel.record_event
+2026/10/23 07:36:22 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 19 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 20 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 22 ActivityType kernel.record_event
+==================
+WARNING: DATA RACE
+Read at 0x00c000168a80 by goroutine 63:
+  github.com/temporality-project/temporality/kernel/agent.TestAgentRunPlanAbortOnFailure.func1()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow_test.go:2002 +0x8c
+  runtime.call512()
+      /usr/lib/go/src/runtime/asm_arm64.s:674 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.executeFunctionWithContext()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2812 +0x1b8
+  go.temporal.io/sdk/internal.(*activityEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_activity.go:357 +0xa8
+  go.temporal.io/sdk/internal.(*activityExecutor).ExecuteWithActualArgs()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1181 +0x1a4
+  go.temporal.io/sdk/internal.(*activityExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1167 +0x318
+  go.temporal.io/sdk/internal.(*activityExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2041 +0x628
+  go.temporal.io/sdk/internal.(*activityTaskHandlerImpl).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_task_handlers.go:2461 +0x1584
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).executeActivityWithRetryForTest()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1675 +0xf8
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity.func3()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1457 +0x1d0
+
+Previous write at 0x00c000168a80 by goroutine 65:
+  github.com/temporality-project/temporality/kernel/agent.TestAgentRunPlanAbortOnFailure.func1()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow_test.go:2002 +0x13c
+  runtime.call512()
+      /usr/lib/go/src/runtime/asm_arm64.s:674 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.executeFunctionWithContext()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2812 +0x1b8
+  go.temporal.io/sdk/internal.(*activityEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_activity.go:357 +0xa8
+  go.temporal.io/sdk/internal.(*activityExecutor).ExecuteWithActualArgs()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1181 +0x1a4
+  go.temporal.io/sdk/internal.(*activityExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1167 +0x318
+  go.temporal.io/sdk/internal.(*activityExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2041 +0x628
+  go.temporal.io/sdk/internal.(*activityTaskHandlerImpl).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_task_handlers.go:2461 +0x1584
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).executeActivityWithRetryForTest()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1675 +0xf8
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity.func3()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1457 +0x1d0
+
+Goroutine 63 (running) created at:
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1404 +0x10d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1132 +0xc30
+  go.temporal.io/sdk/internal.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1050 +0x1e0
+  go.temporal.io/sdk/workflow.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/workflow/workflow.go:262 +0x64c
+  github.com/temporality-project/temporality/kernel/agent.emit()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow.go:3044 +0x5c8
+  github.com/temporality-project/temporality/kernel/agent.AgentRun()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow.go:1298 +0x24d0
+  runtime.call1024()
+      /usr/lib/go/src/runtime/asm_arm64.s:675 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1003 +0x1c4
+  go.temporal.io/sdk/internal.(*workflowExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1125 +0x4b4
+  go.temporal.io/sdk/internal.(*workflowExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2140 +0xa48
+  go.temporal.io/sdk/internal.(*syncWorkflowDefinition).Execute.func1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:553 +0x100
+  go.temporal.io/sdk/internal.(*coroutineState).run()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1227 +0x118
+  go.temporal.io/sdk/internal.(*dispatcherImpl).NewCoroutine.gowrap1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1236 +0x48
+
+Goroutine 65 (finished) created at:
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1404 +0x10d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1132 +0xc30
+  go.temporal.io/sdk/internal.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1050 +0x1e0
+  go.temporal.io/sdk/workflow.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/workflow/workflow.go:262 +0x64c
+  github.com/temporality-project/temporality/kernel/agent.emit()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow.go:3044 +0x5c8
+  github.com/temporality-project/temporality/kernel/agent.AgentRun()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow.go:409 +0xb7c
+  runtime.call1024()
+      /usr/lib/go/src/runtime/asm_arm64.s:675 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1003 +0x1c4
+  go.temporal.io/sdk/internal.(*workflowExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1125 +0x4b4
+  go.temporal.io/sdk/internal.(*workflowExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2140 +0xa48
+  go.temporal.io/sdk/internal.(*syncWorkflowDefinition).Execute.func1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:553 +0x100
+  go.temporal.io/sdk/internal.(*coroutineState).run()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1227 +0x118
+  go.temporal.io/sdk/internal.(*dispatcherImpl).NewCoroutine.gowrap1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1236 +0x48
+==================
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 21 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 23 ActivityType kernel.knowledge_hints
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 25 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 26 ActivityType kernel.record_event
+2026/10/23 07:36:22 ERROR Activity error. WorkflowID agent-run/ed104fc5857c2cd790c7e27bd9202c68 RunID agent-run/ed104fc5857c2cd790c7e27bd9202c68_RunID ActivityType kernel.call_model Attempt 1 Error child model unavailable (type: model_unavailable, retryable: false)
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskFailedRequest. ActivityID 24 ActivityType kernel.call_model
+==================
+WARNING: DATA RACE
+Read at 0x00c0002e1d08 by goroutine 77:
+  runtime.growslice()
+      /usr/lib/go/src/runtime/slice.go:178 +0x0
+  github.com/temporality-project/temporality/kernel/agent.TestAgentRunPlanAbortOnFailure.func1()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow_test.go:2002 +0xbc
+  runtime.call512()
+      /usr/lib/go/src/runtime/asm_arm64.s:674 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.executeFunctionWithContext()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2812 +0x1b8
+  go.temporal.io/sdk/internal.(*activityEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_activity.go:357 +0xa8
+  go.temporal.io/sdk/internal.(*activityExecutor).ExecuteWithActualArgs()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1181 +0x1a4
+  go.temporal.io/sdk/internal.(*activityExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1167 +0x318
+  go.temporal.io/sdk/internal.(*activityExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2041 +0x628
+  go.temporal.io/sdk/internal.(*activityTaskHandlerImpl).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_task_handlers.go:2461 +0x1584
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).executeActivityWithRetryForTest()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1675 +0xf8
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity.func3()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1457 +0x1d0
+
+Previous write at 0x00c0002e1d08 by goroutine 75:
+  github.com/temporality-project/temporality/kernel/agent.TestAgentRunPlanAbortOnFailure.func1()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow_test.go:2002 +0xe8
+  runtime.call512()
+      /usr/lib/go/src/runtime/asm_arm64.s:674 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.executeFunctionWithContext()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2812 +0x1b8
+  go.temporal.io/sdk/internal.(*activityEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_activity.go:357 +0xa8
+  go.temporal.io/sdk/internal.(*activityExecutor).ExecuteWithActualArgs()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1181 +0x1a4
+  go.temporal.io/sdk/internal.(*activityExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1167 +0x318
+  go.temporal.io/sdk/internal.(*activityExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2041 +0x628
+  go.temporal.io/sdk/internal.(*activityTaskHandlerImpl).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_task_handlers.go:2461 +0x1584
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).executeActivityWithRetryForTest()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1675 +0xf8
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity.func3()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1457 +0x1d0
+
+Goroutine 77 (running) created at:
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1404 +0x10d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1132 +0xc30
+  go.temporal.io/sdk/internal.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1050 +0x1e0
+  go.temporal.io/sdk/workflow.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/workflow/workflow.go:262 +0x64c
+  github.com/temporality-project/temporality/kernel/agent.emit()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow.go:3044 +0x5c8
+  github.com/temporality-project/temporality/kernel/agent.AgentRun()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow.go:1330 +0x4ca0
+  github.com/temporality-project/temporality/kernel/agent.AgentRun()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow.go:1328 +0x272c
+  runtime.call1024()
+      /usr/lib/go/src/runtime/asm_arm64.s:675 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1003 +0x1c4
+  go.temporal.io/sdk/internal.(*workflowExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1125 +0x4b4
+  go.temporal.io/sdk/internal.(*workflowExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2140 +0xa48
+  go.temporal.io/sdk/internal.(*syncWorkflowDefinition).Execute.func1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:553 +0x100
+  go.temporal.io/sdk/internal.(*coroutineState).run()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1227 +0x118
+  go.temporal.io/sdk/internal.(*dispatcherImpl).NewCoroutine.gowrap1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1236 +0x48
+
+Goroutine 75 (running) created at:
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1404 +0x10d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1132 +0xc30
+  go.temporal.io/sdk/internal.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1050 +0x1e0
+  go.temporal.io/sdk/workflow.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/workflow/workflow.go:262 +0x64c
+  github.com/temporality-project/temporality/kernel/agent.emit()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow.go:3044 +0x5c8
+  github.com/temporality-project/temporality/kernel/agent.AgentRun()
+      /workspace/worktrees/flake-probe-main/kernel/agent/workflow.go:1298 +0x24d0
+  runtime.call1024()
+      /usr/lib/go/src/runtime/asm_arm64.s:675 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1003 +0x1c4
+  go.temporal.io/sdk/internal.(*workflowExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1125 +0x4b4
+  go.temporal.io/sdk/internal.(*workflowExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2140 +0xa48
+  go.temporal.io/sdk/internal.(*syncWorkflowDefinition).Execute.func1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:553 +0x100
+  go.temporal.io/sdk/internal.(*coroutineState).run()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1227 +0x118
+  go.temporal.io/sdk/internal.(*dispatcherImpl).NewCoroutine.gowrap1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1236 +0x48
+==================
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 28 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 27 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 29 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 30 ActivityType kernel.call_model
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 31 ActivityType kernel.summarize_child_run
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 32 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 33 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 34 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 35 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 36 ActivityType kernel.run_tool
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 37 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 38 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 39 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 40 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 41 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 42 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 43 ActivityType kernel.call_model
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 44 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 45 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 46 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 47 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 48 ActivityType kernel.record_event
+2026/10/23 07:36:22 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+    testing.go:1712: race detected during execution of test
+--- FAIL: TestAgentRunPlanAbortOnFailure (0.11s)
+=== RUN   TestAgentRunPlanAbortOnFailure
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskFailedRequest. ActivityID 1 ActivityType kernel.generate_run_title
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 2 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 3 ActivityType kernel.knowledge_hints
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 4 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 5 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 6 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 7 ActivityType kernel.call_model
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 8 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 9 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 10 ActivityType kernel.resolve_agent
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 11 ActivityType kernel.resolve_agent
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 12 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 13 ActivityType kernel.resolve_agent
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 14 ActivityType kernel.record_event
+2026/10/23 07:36:22 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 15 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 16 ActivityType kernel.resolve_agent
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 17 ActivityType kernel.knowledge_hints
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 19 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 18 ActivityType kernel.record_event
+2026/10/23 07:36:22 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 20 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 21 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 23 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 24 ActivityType kernel.knowledge_hints
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 25 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 26 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 27 ActivityType kernel.record_event
+2026/10/23 07:36:22 ERROR Activity error. WorkflowID agent-run/ed104fc5857c2cd790c7e27bd9202c68 RunID agent-run/ed104fc5857c2cd790c7e27bd9202c68_RunID ActivityType kernel.call_model Attempt 1 Error child model unavailable (type: model_unavailable, retryable: false)
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskFailedRequest. ActivityID 22 ActivityType kernel.call_model
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 28 ActivityType kernel.call_model
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 29 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 30 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 31 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 32 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 33 ActivityType kernel.summarize_child_run
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 34 ActivityType kernel.run_tool
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 35 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 36 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 37 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 38 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 39 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 40 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 41 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 42 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 43 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 44 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 45 ActivityType kernel.call_model
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 46 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 47 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 48 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 49 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 50 ActivityType kernel.record_event
+2026/10/23 07:36:22 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+--- PASS: TestAgentRunPlanAbortOnFailure (0.04s)
+=== RUN   TestAgentRunPlanAbortOnFailure
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskFailedRequest. ActivityID 1 ActivityType kernel.generate_run_title
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 2 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 3 ActivityType kernel.knowledge_hints
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 4 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 5 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 6 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 7 ActivityType kernel.call_model
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 8 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 9 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 10 ActivityType kernel.resolve_agent
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 11 ActivityType kernel.resolve_agent
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 12 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 13 ActivityType kernel.resolve_agent
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 14 ActivityType kernel.record_event
+2026/10/23 07:36:22 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 15 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 16 ActivityType kernel.resolve_agent
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 17 ActivityType kernel.knowledge_hints
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 18 ActivityType kernel.record_event
+2026/10/23 07:36:22 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 19 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 20 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 21 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 22 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 24 ActivityType kernel.knowledge_hints
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 25 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 26 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 27 ActivityType kernel.record_event
+2026/10/23 07:36:22 ERROR Activity error. WorkflowID agent-run/ed104fc5857c2cd790c7e27bd9202c68 RunID agent-run/ed104fc5857c2cd790c7e27bd9202c68_RunID ActivityType kernel.call_model Attempt 1 Error child model unavailable (type: model_unavailable, retryable: false)
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskFailedRequest. ActivityID 23 ActivityType kernel.call_model
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 29 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 30 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 28 ActivityType kernel.call_model
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 31 ActivityType kernel.summarize_child_run
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 32 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 33 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 34 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 35 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 36 ActivityType kernel.run_tool
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 37 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 38 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 39 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 40 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 41 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 42 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 43 ActivityType kernel.call_model
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 44 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 45 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 46 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 47 ActivityType kernel.record_event
+2026/10/23 07:36:22 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 48 ActivityType kernel.record_event
+2026/10/23 07:36:22 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+--- PASS: TestAgentRunPlanAbortOnFailure (0.03s)
+FAIL
+FAIL	github.com/temporality-project/temporality/kernel/agent	0.209s
+FAIL
