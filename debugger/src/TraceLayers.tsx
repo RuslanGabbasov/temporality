@@ -229,7 +229,7 @@ function TraceChips({ chip, onChip, items, t }: { chip: TraceChip; onChip: (chip
 /** Grouped trace: the §5 folded timeline with the three-layer rows, the §8
  *  filter panel (category/type/status/participant/duration, quick chips,
  *  text search — all URL-backed) above it. */
-export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates, onConsoleState, liveModelParts }: {
+export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates, onConsoleState, liveModelParts, newestFirst }: {
   events: ObservationEvent[]
   locale: Locale
   t: TFn
@@ -256,6 +256,10 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
    *  Non-empty renders as the first timeline row — the live call is the most
    *  recent thing in the trace. */
   liveModelParts?: string[]
+  /** Display order of the turn tree: newest segment first (the running turn
+   *  opens the view). The segment EVENTS stay chronological — a turn reads
+   *  top-down like a log regardless of the spine's direction. */
+  newestFirst?: boolean
 }) {
   // Turn tree expansion (§5.1 reworked): a turn node is expanded while it is
   // the running one and collapses when it completes; the reader's manual
@@ -513,7 +517,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
       {activeFilter ? (
         visibleItems.map((item) => renderFolded(item, 'flat:'))
       ) : (
-        tree.map((segment, index) => renderSegment(segment, index))
+        (newestFirst ? [...tree].reverse() : tree).map((segment, index) => renderSegment(segment, index))
       )}
     </div>
   )

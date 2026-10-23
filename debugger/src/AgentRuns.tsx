@@ -402,11 +402,11 @@ export default function AgentRuns({ project }: { project: string }) {
   const [traceLimit, setTraceLimit] = useState(TRACE_WINDOW)
   useEffect(() => { setTraceLimit(TRACE_WINDOW) }, [selected, view])
   // The window snaps back to the nearest turn boundary (a cut mid-turn would
-  // strand the turn's tool calls and answers outside their «Ход N» node),
-  // then flips to newest-first: the running turn opens the trace, older
-  // ones follow below.
+  // strand the turn's tool calls and answers outside their «Ход N» node) and
+  // stays CHRONOLOGICAL: foldTraceTree parses the turn spans in order. The
+  // newest-first display order is the renderer's concern (newestFirst prop).
   const traceWindow = useMemo(
-    () => turnAlignedWindow(trace.visible, traceLimit).slice().reverse(),
+    () => turnAlignedWindow(trace.visible, traceLimit),
     [trace, traceLimit],
   )
   const olderAvailable = trace.visible.length > traceWindow.length
@@ -1251,6 +1251,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     consoleStates={consoleStates}
                     onConsoleState={collectConsoleState}
                     liveModelParts={liveModelParts}
+                    newestFirst
                   />
                   {olderAvailable && view === 'trace' && (
                     <TraceOlderSentinel onVisible={loadOlder} />
