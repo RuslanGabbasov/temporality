@@ -2136,6 +2136,16 @@ export const en: Record<string, string> = {
     'settings.dark': 'Dark',
     'settings.system': 'System',
     'settings.notifications': 'Notifications',
+    'settings.account': 'Account',
+    'password.change': 'Change password',
+    'password.change_title': 'Change password',
+    'password.current': 'Current password',
+    'password.new': 'New password',
+    'password.repeat': 'Repeat new password',
+    'password.too_short': 'At least 8 characters',
+    'password.mismatch': 'Passwords do not match',
+    'password.saving': 'Saving…',
+    'password.changed': 'Password changed. Use it on your next sign-in — the current session stays alive.',
 
     // Status
     'status.completed': 'completed',

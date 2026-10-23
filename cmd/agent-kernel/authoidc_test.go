@@ -168,6 +168,29 @@ func (f *fakeAuthStore) UpdateUserToken(_ context.Context, id, token string) err
 	return nil
 }
 
+func (f *fakeAuthStore) GetUser(_ context.Context, id string) (workspace.User, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, u := range f.users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return workspace.User{}, workspace.ErrNotFound
+}
+
+func (f *fakeAuthStore) SetUserPassword(_ context.Context, id, passwordHash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.users {
+		if f.users[i].ID == id {
+			f.users[i].PasswordHash = passwordHash
+			return nil
+		}
+	}
+	return workspace.ErrNotFound
+}
+
 func (f *fakeAuthStore) userByExternal(issuer, sub string) (workspace.User, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -598,6 +621,67 @@ func TestPasswordLoginBreakGlass(t *testing.T) {
 	require.Equal(t, 200, loginRequest(serverOn, "root", "hunter2"))
 	// Wrong password stays a 401 for the admin too — no oracle.
 	require.Equal(t, 401, loginRequest(serverOn, "root", "wrong"))
+}
+
+// Self-service password change: the signed-in user re-checks the current
+// password, meets the 8-character bar, and the hash rotates — while the
+// wrong current password and a short new one are refused.
+func TestPasswordChangeSelfService(t *testing.T) {
+	hash, err := workspace.HashPassword("hunter2")
+	require.NoError(t, err)
+	store := newFakeAuthStore(workspace.AuthIdPConfig{})
+	store.users = []workspace.User{
+		{ID: "u-admin", Name: "root", Role: "admin", Active: true, Token: "roottoken", PasswordHash: hash},
+		{ID: "u-sso", Name: "jane", Role: "writer", Active: true, Token: "janetoken", ExternalIssuer: "https://idp", ExternalID: "jane"},
+	}
+	server := newAuthTestServer(t, store)
+
+	// A session for the password user (the resolver maps it to a principal
+	// with the user id — the same path the browser flow takes).
+	now := time.Now().UTC()
+	require.NoError(t, store.CreateAuthSession(context.Background(), &workspace.AuthSession{
+		ID: "sess-pw", UserID: "u-admin", CreatedAt: now, LastSeen: now, ExpiresAt: now.Add(time.Hour),
+	}))
+	require.NoError(t, store.CreateAuthSession(context.Background(), &workspace.AuthSession{
+		ID: "sess-sso", UserID: "u-sso", CreatedAt: now, LastSeen: now, ExpiresAt: now.Add(time.Hour),
+	}))
+
+	change := func(cookie, current, next string) (int, string) {
+		body, err := json.Marshal(map[string]string{"current_password": current, "new_password": next})
+		require.NoError(t, err)
+		request, rErr := http.NewRequest(http.MethodPost, server.URL+"/v1/auth/password", strings.NewReader(string(body)))
+		require.NoError(t, rErr)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Cookie", controlplane.SessionCookie+"="+cookie)
+		response, rErr := http.DefaultClient.Do(request)
+		require.NoError(t, rErr)
+		defer response.Body.Close()
+		raw, _ := io.ReadAll(response.Body)
+		return response.StatusCode, string(raw)
+	}
+
+	// Wrong current password → 401, hash untouched.
+	status, _ := change("sess-pw", "wrong", "newpassword1")
+	require.Equal(t, 401, status)
+	admin, _ := store.GetUser(context.Background(), "u-admin")
+	require.True(t, workspace.CheckPassword(admin.PasswordHash, "hunter2"))
+
+	// Short new password → 422.
+	status, _ = change("sess-pw", "hunter2", "short")
+	require.Equal(t, 422, status)
+
+	// Happy path: the hash rotates, and the new password logs the user in.
+	status, _ = change("sess-pw", "hunter2", "newpassword1")
+	require.Equal(t, 200, status)
+	admin, _ = store.GetUser(context.Background(), "u-admin")
+	require.True(t, workspace.CheckPassword(admin.PasswordHash, "newpassword1"))
+	require.True(t, workspace.CheckPassword(admin.PasswordHash, "hunter2") == false)
+
+	// An SSO user without a local password: 409 — setting the first password
+	// is the admin's decision.
+	status, body := change("sess-sso", "", "newpassword1")
+	require.Equal(t, 409, status)
+	require.Contains(t, body, "no local password")
 }
 
 // Logout drops the session row and kills the cookie.

@@ -2136,6 +2136,16 @@ export const ru: Record<string, string> = {
     'settings.dark': 'Тёмная',
     'settings.system': 'Системная',
     'settings.notifications': 'Уведомления',
+    'settings.account': 'Аккаунт',
+    'password.change': 'Сменить пароль',
+    'password.change_title': 'Смена пароля',
+    'password.current': 'Текущий пароль',
+    'password.new': 'Новый пароль',
+    'password.repeat': 'Повторите новый пароль',
+    'password.too_short': 'Минимум 8 символов',
+    'password.mismatch': 'Пароли не совпадают',
+    'password.saving': 'Сохраняем…',
+    'password.changed': 'Пароль изменён. Используйте его при следующем входе — текущая сессия остаётся активной.',
 
     // Status
     'status.completed': 'завершён',

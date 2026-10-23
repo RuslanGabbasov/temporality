@@ -23,6 +23,7 @@ import { LOCALES, useI18n, useT, type Locale } from './i18n'
 import { useTheme } from './theme'
 import { whoami, login as apiLogin, authMethods, authLogout, INTAKE_PROJECT_ID, type Whoami, type AuthMethods } from './kernelApi'
 import ChannelsDialog from './ChannelsDialog'
+import PasswordChangeDialog from './PasswordChangeDialog'
 import AppModal from './Modal'
 import { workspaceApi, type OrgUnit } from './workspaceApi'
 import { flattenUnits } from './orgUnits'
@@ -231,6 +232,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [])
   const [showChannels, setShowChannels] = useState(false)
+  const [showPasswordChange, setShowPasswordChange] = useState(false)
   const { locale, setLocale, t } = useI18n()
   const { theme, setTheme, resolved } = useTheme()
   const [token, setToken] = useState(authToken() ?? '')
@@ -780,7 +782,7 @@ export default function Layout({ children, activePage }: LayoutProps) {
                   ))}
                   {identity?.user_id && (
                     <>
-                      <div style={{ padding: '0.4rem 0.5rem', fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.25rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.5rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('settings.notifications') ?? 'Notifications'}</div>
+                      <div style={{ padding: '0.4rem 0.5rem', fontSize: '0.7rem', color: 'var(--tm-muted)', marginTop: '0.25rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.5rem', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('settings.account') ?? 'Account'}</div>
                       <div
                         onClick={() => { setShowChannels(true); setShowUserMenu(false) }}
                         style={{ padding: '0.3rem 0.5rem 0.3rem 1.2rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-text-2)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
@@ -788,6 +790,14 @@ export default function Layout({ children, activePage }: LayoutProps) {
                         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                       >
                         <span style={{ width: '0.75rem', textAlign: 'center', fontSize: '0.7rem' }} />{t('channels.menu') ?? 'Notification channels'}
+                      </div>
+                      <div
+                        onClick={() => { setShowPasswordChange(true); setShowUserMenu(false) }}
+                        style={{ padding: '0.3rem 0.5rem 0.3rem 1.2rem', cursor: 'pointer', fontSize: '0.8rem', borderRadius: '4px', color: 'var(--tm-text-2)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <span style={{ width: '0.75rem', textAlign: 'center', fontSize: '0.7rem' }} />{t('password.change') ?? 'Change password'}
                       </div>
                     </>
                   )}
@@ -851,6 +861,11 @@ export default function Layout({ children, activePage }: LayoutProps) {
       {/* Notification channels (self-service profile) */}
       {showChannels && identity?.user_id && (
         <ChannelsDialog userId={identity.user_id} onClose={() => setShowChannels(false)} />
+      )}
+
+      {/* Change own password (self-service) */}
+      {showPasswordChange && identity?.user_id && (
+        <PasswordChangeDialog onClose={() => setShowPasswordChange(false)} />
       )}
 
       {/* Login modal */}

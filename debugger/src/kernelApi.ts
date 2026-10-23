@@ -125,6 +125,16 @@ export function authLogout(): Promise<void> {
   return fetch(`${KERNEL_API}/v1/auth/logout`, { method: 'POST' }).then(() => undefined)
 }
 
+// A signed-in user changes their own local password. The server re-checks
+// the current one, enforces the same 8-character bar the admin path uses,
+// and keeps the bearer token alive — the session survives the change.
+export function changePassword(currentPassword: string, newPassword: string): Promise<{ ok: boolean }> {
+  return request('/v1/auth/password', {
+    method: 'POST',
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  })
+}
+
 // First-run bootstrap status (docs/ROADMAP.md — onboarding): tells the wizard
 // which pieces (admin user, provider, sandbox image) are still missing.
 // INTAKE_PROJECT_ID mirrors the kernel-side system project (cmd/agent-kernel

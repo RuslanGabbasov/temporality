@@ -481,12 +481,14 @@ func registerAuthRoutes(mux *http.ServeMux, deps authDependencies, gate *control
 	})
 }
 
-// loginStore extends authStore with the two methods the password path
-// needs — kept separate so the fake in tests covers one surface.
+// loginStore extends authStore with the methods the password paths need —
+// kept separate so the fake in tests covers one surface.
 type loginStore interface {
 	authStore
+	GetUser(ctx context.Context, id string) (workspace.User, error)
 	GetUserByLogin(ctx context.Context, login string) (workspace.User, error)
 	UpdateUserToken(ctx context.Context, id, token string) error
+	SetUserPassword(ctx context.Context, id, passwordHash string) error
 }
 
 // registerPasswordLogin mounts POST /v1/auth/login — local credentials for
@@ -540,6 +542,56 @@ func registerPasswordLogin(mux *http.ServeMux, deps authDependencies, tokens log
 			}
 		}
 		writeJSON(w, 200, map[string]any{"token": token, "user_id": user.ID, "subject": user.Name})
+	})
+
+	// POST /v1/auth/password — a signed-in user changes their OWN password:
+	// the current one is re-checked (a stolen session cannot lock the owner
+	// out), the new one meets the same 8-character bar the admin path
+	// enforces, and the bearer token survives — a password change is not a
+	// logout. SSO users without a local password get a 409: setting the first
+	// password is the admin's decision (docs/auth-federation.md §5.5 — local
+	// credentials are the break-glass path, not a second identity).
+	mux.HandleFunc("POST /v1/auth/password", func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := controlplane.FromContext(r.Context())
+		if !ok || principal.UserID == "" {
+			writeError(w, 401, errors.New("authentication required"))
+			return
+		}
+		var req struct {
+			CurrentPassword string `json:"current_password"`
+			NewPassword     string `json:"new_password"`
+		}
+		if err := decodeJSONBody(w, r, &req); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		user, err := tokens.GetUser(r.Context(), principal.UserID)
+		if err != nil {
+			writeError(w, 401, errors.New("authentication required"))
+			return
+		}
+		if user.PasswordHash == "" {
+			writeError(w, 409, errors.New("this account has no local password; ask an administrator to set one first"))
+			return
+		}
+		if !workspace.CheckPassword(user.PasswordHash, req.CurrentPassword) {
+			writeError(w, 401, errors.New("current password is incorrect"))
+			return
+		}
+		if len(req.NewPassword) < 8 {
+			writeError(w, 422, errors.New("password must be at least 8 characters"))
+			return
+		}
+		hash, err := workspace.HashPassword(req.NewPassword)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if err := tokens.SetUserPassword(r.Context(), user.ID, hash); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 }
 
