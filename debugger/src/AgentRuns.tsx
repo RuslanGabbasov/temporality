@@ -10,7 +10,7 @@ import { useT, useI18n, pluralT } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString, formatDuration, approvalHint } from './eventSummary'
 import { humanFactorsOf, type RunHumanFactors } from './humanFactors'
 import { useRunTokenMetrics } from './tokenStream'
-import { turnAlignedWindow } from './traceModel'
+import { operationKey, turnAlignedWindow } from './traceModel'
 import { subscribeRunJournal } from './journalStream'
 import {
   Button,
@@ -409,6 +409,17 @@ export default function AgentRuns({ project }: { project: string }) {
     () => turnAlignedWindow(trace.visible, traceLimit),
     [trace, traceLimit],
   )
+  // Operations whose tool.completed has landed — over the FULL run timeline,
+  // not the render window: a completed tool.started row whose completed
+  // counterpart fell out of the window would otherwise mount its live console
+  // block and 404 against the kernel's swept buffer.
+  const completedOps = useMemo(() => {
+    const ids = new Set<string>()
+    for (const event of timeline) {
+      if (event.type === 'tool.completed') ids.add(operationKey(event))
+    }
+    return ids
+  }, [timeline])
   const olderAvailable = trace.visible.length > traceWindow.length
   const loadOlder = useCallback(() => {
     setTraceLimit((value) => value + TRACE_WINDOW_STEP)
@@ -1253,6 +1264,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     onConsoleState={collectConsoleState}
                     liveModelParts={liveModelParts}
                     liveModelTurn={liveModelTurn}
+                    completedOps={completedOps}
                     newestFirst
                     onNudgeTurn={(turn) => void nudge(turn)}
                   />

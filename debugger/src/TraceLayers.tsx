@@ -241,7 +241,7 @@ function TraceChips({ chip, onChip, items, t }: { chip: TraceChip; onChip: (chip
 /** Grouped trace: the §5 folded timeline with the three-layer rows, the §8
  *  filter panel (category/type/status/participant/duration, quick chips,
  *  text search — all URL-backed) above it. */
-export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates, onConsoleState, liveModelParts, newestFirst, liveModelTurn, onNudgeTurn }: {
+export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates, onConsoleState, liveModelParts, completedOps, newestFirst, liveModelTurn, onNudgeTurn }: {
   events: ObservationEvent[]
   locale: Locale
   t: TFn
@@ -276,6 +276,10 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
    *  opens the view). The segment EVENTS stay chronological — a turn reads
    *  top-down like a log regardless of the spine's direction. */
   newestFirst?: boolean
+  /** Operations whose tool.completed has landed, over the owner's FULL
+   *  timeline. The render window may not reach an old tool.completed, so the
+   *  window-local fallback below is only for bare renders (tests). */
+  completedOps?: ReadonlySet<string>
 }) {
   // Turn tree expansion (§5.1 reworked): a turn node is expanded while it is
   // the running one and collapses when it completes; the reader's manual
@@ -337,14 +341,16 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
   }
   // Operations whose tool.completed has landed: a tool.started row of such an
   // operation is finished, so its always-on console block switches off (the
-  // completed row carries the output in its details).
-  const completedOps = useMemo(() => {
+  // completed row carries the output in its details). The owner's full-
+  // timeline set wins; the window-local set covers bare renders (tests).
+  const windowCompletedOps = useMemo(() => {
     const ids = new Set<string>()
     for (const event of events) {
       if (event.type === 'tool.completed') ids.add(operationKey(event))
     }
     return ids
   }, [events])
+  const finishedOps = completedOps ?? windowCompletedOps
   const pinTurn = (number: number, open: boolean) => {
     setPinnedTurns((prev) => {
       const next = new Map(prev)
@@ -495,7 +501,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
         reasoning={reasoning}
         knowledgeDoubt={knowledgeDoubtOf?.(item.event)}
         live={live}
-        showLiveConsole={Boolean(live) && item.event.type === 'tool.started' && !completedOps.has(operationKey(item.event))}
+        showLiveConsole={Boolean(live) && item.event.type === 'tool.started' && !finishedOps.has(operationKey(item.event))}
         onConsoleState={onConsoleState}
       />
     )
