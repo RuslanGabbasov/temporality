@@ -1986,6 +1986,281 @@ func TestAgentRunPlanFailureSkipsDependents(t *testing.T) {
 	require.True(t, childRuns["run-plan-fail/plan/04-c"])
 }
 
+// on_failure="abort": the first failed task must end the plan immediately —
+// the still-running independent branch is cancelled (settled as skipped
+// plan_aborted, NOT completed), no new task launches, and the summary leads
+// with the abort so the parent can diagnose and re-issue instead of waiting
+// out the doomed DAG.
+func TestAgentRunPlanAbortOnFailure(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	// DAG: a fails on its first model call; independent b keeps issuing tool
+	// calls (a long-running branch the abort must cut short, never complete).
+	sawSummary := false
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			prompt := request.Messages[1].Content
+			switch {
+			case strings.Contains(prompt, "sabotage"):
+				// Non-retryable: the failing branch must settle on its first model
+				// call, before the spinning branch can burn its turn budget.
+				return llm.Completion{}, temporal.NewNonRetryableApplicationError("child model unavailable", "model_unavailable", nil)
+			case strings.Contains(prompt, "spin the branch"):
+				if len(request.Tools) == 0 {
+					t.Fatal("the spinning branch must be cancelled before its forced finale")
+				}
+				return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "spin-" + strconv.Itoa(request.Turn), Name: "run_command", Args: map[string]any{"command": []any{"ls"}}}}}, nil
+			}
+			t.Fatalf("unexpected child prompt: %s", prompt)
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
+				"goal":       "cut losses fast",
+				"on_failure": "abort",
+				"tasks": []any{
+					map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "sabotage the build"},
+					map[string]any{"id": "b", "agent_id": "repo-a-qa", "prompt": "spin the branch", "max_turns": 40},
+				},
+			}}}}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "aborted") {
+				sawSummary = true
+			}
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: request.MaxTurns}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(context.Context, ChildRunSummaryRequest) (ChildRunSummary, error) {
+		return ChildRunSummary{Total: 0, Unresolved: 0}, nil
+	}, activity.RegisterOptions{Name: ActivitySummarizeChildRun})
+	// The abort cancels the still-running branch. Depending on the simulated
+	// interleaving the child may already be gone from the env registry when the
+	// cancel lands — the mock covers that case (the running-child fast path
+	// needs no mock).
+	env.OnRequestCancelExternalWorkflow(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	env.RegisterActivityWithOptions(func(_ context.Context, request ToolRequest) (ToolResult, error) {
+		require.Equal(t, "run_command", request.Name)
+		return ToolResult{Content: "ok", ExitCode: exitCode(0)}, nil
+	}, activity.RegisterOptions{Name: ActivityRunTool})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-plan-abort", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "run the plan", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var parentResult RunResult
+	require.NoError(t, env.GetWorkflowResult(&parentResult))
+	require.Equal(t, "completed", parentResult.Status)
+	require.True(t, sawSummary, "the parent must see the abort summary")
+
+	var aborted, planDone *observation.Event
+	for index := range recorded {
+		event := recorded[index]
+		switch {
+		case event.Type == "plan.aborted":
+			aborted = &recorded[index]
+		case event.Type == "plan.completed":
+			planDone = &recorded[index]
+		}
+	}
+	require.NotNil(t, aborted, "the abort must be recorded")
+	require.Equal(t, "a", aborted.Data["task_id"])
+	require.NotNil(t, planDone)
+	require.Equal(t, "a", planDone.Data["aborted_by"])
+	statuses, ok := planDone.Data["statuses"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "failed", statuses["a"])
+	require.NotEqual(t, "completed", statuses["b"], "the surviving branch must not read as a deliverable after an abort")
+}
+
+// on_failure="stop" bounds the waste without the abort's cruelty: the failed
+// branch settles, no new task launches (pending ones skip with plan_stopped),
+// but the already-running independent branch finishes and its result lands in
+// the summary. No cancellation events.
+func TestAgentRunPlanStopOnFailure(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	// DAG: a fails immediately; independent b completes normally; c depends on
+	// b — still pending when the stop fires, so it never launches.
+	sawSummary := false
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			prompt := request.Messages[1].Content
+			switch {
+			case strings.Contains(prompt, "sabotage"):
+				return llm.Completion{}, temporal.NewNonRetryableApplicationError("child model unavailable", "model_unavailable", nil)
+			case strings.Contains(prompt, "work b"):
+				return llm.Completion{Content: "B-DONE"}, nil
+			}
+			t.Fatalf("unexpected child prompt: %s", prompt)
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
+				"goal":       "bound the damage",
+				"on_failure": "stop",
+				"tasks": []any{
+					map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "sabotage the build"},
+					map[string]any{"id": "b", "agent_id": "repo-a-qa", "prompt": "work b"},
+					map[string]any{"id": "c", "agent_id": "repo-a-reviewer", "prompt": "use b", "depends_on": []any{"b"}},
+				},
+			}}}}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "B-DONE") && strings.Contains(message.Content, "stopped launching") {
+				sawSummary = true
+			}
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: 4}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(context.Context, ChildRunSummaryRequest) (ChildRunSummary, error) {
+		return ChildRunSummary{Total: 0, Unresolved: 0}, nil
+	}, activity.RegisterOptions{Name: ActivitySummarizeChildRun})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-plan-stop", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "run the plan", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.True(t, sawSummary, "the summary must carry the stop and the surviving branch result")
+
+	var stopped, planDone *observation.Event
+	childRuns := map[string]bool{}
+	for index := range recorded {
+		event := recorded[index]
+		switch {
+		case event.Type == "run.started" && strings.HasPrefix(event.Context.Run, "run-plan-stop/plan/"):
+			childRuns[event.Context.Run] = true
+		case event.Type == "plan.stopped":
+			stopped = &recorded[index]
+		case event.Type == "plan.completed":
+			planDone = &recorded[index]
+		}
+	}
+	require.NotNil(t, stopped, "the stop must be recorded")
+	require.Equal(t, "a", stopped.Data["task_id"])
+	require.Nil(t, planDone.Data["aborted_by"], "stop must not read as an abort")
+	require.Equal(t, "a", planDone.Data["stopped_by"])
+	statuses, ok := planDone.Data["statuses"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "failed", statuses["a"])
+	require.Equal(t, "completed", statuses["b"], "a running healthy branch must finish")
+	require.Equal(t, "skipped", statuses["c"])
+	require.True(t, childRuns["run-plan-stop/plan/02-b"], "the healthy branch must have run")
+	require.False(t, childRuns["run-plan-stop/plan/03-c"], "a stopped task must not start a child run")
+}
+
+// mode="wave": the call returns after the first ready batch settles — gated
+// tasks stay pending, and the parent re-issues the remainder as a second plan
+// whose prompt consumes the first wave's answers via {{task-id.answer}}.
+func TestAgentRunPlanWaveStages(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
+	registerExtractionChild(env)
+	var recorded []observation.Event
+	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
+		require.NoError(t, event.Validate())
+		recorded = append(recorded, event)
+		return nil
+	}, activity.RegisterOptions{Name: ActivityRecordEvent})
+	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
+	sawStagedSummary := false
+	cPrompt := ""
+	parentCalls := 0
+	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
+		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
+			cPrompt = request.Messages[1].Content
+			if strings.Contains(cPrompt, "work a") {
+				return llm.Completion{Content: "A-DONE"}, nil
+			}
+			return llm.Completion{Content: "C-DONE"}, nil
+		}
+		parentCalls++
+		if parentCalls == 1 {
+			// Wave 1: a runs; c is gated on a and must NOT start in this call.
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-1", Name: "plan", Args: map[string]any{
+				"goal": "stage by stage",
+				"mode": "wave",
+				"tasks": []any{
+					map[string]any{"id": "a", "agent_id": "repo-a-coder", "prompt": "work a"},
+					map[string]any{"id": "c", "agent_id": "repo-a-qa", "prompt": "finish {{a.answer}}", "depends_on": []any{"a"}},
+				},
+			}}}}, nil
+		}
+		if parentCalls == 2 {
+			// Wave 2 (re-issue): only c, consuming the recorded answer.
+			return llm.Completion{ToolCalls: []llm.ToolCall{{ID: "plan-2", Name: "plan", Args: map[string]any{
+				"goal": "stage by stage, wave 2",
+				"mode": "wave",
+				"tasks": []any{
+					map[string]any{"id": "c", "agent_id": "repo-a-qa", "prompt": "finish {{a.answer}}"},
+				},
+			}}}}, nil
+		}
+		for _, message := range request.Messages {
+			if message.Role == "tool" && strings.Contains(message.Content, "not started in this call") {
+				sawStagedSummary = true
+			}
+		}
+		return llm.Completion{Content: "parent done"}, nil
+	}, activity.RegisterOptions{Name: ActivityCallModel})
+	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
+		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: 4}, nil
+	}, activity.RegisterOptions{Name: ActivityResolveAgent})
+	env.RegisterActivityWithOptions(func(context.Context, ChildRunSummaryRequest) (ChildRunSummary, error) {
+		return ChildRunSummary{Total: 0, Unresolved: 0}, nil
+	}, activity.RegisterOptions{Name: ActivitySummarizeChildRun})
+
+	registerExtraction(env, KnowledgeExtractResult{}, nil)
+	env.ExecuteWorkflow("AgentRun", RunInput{RunID: "run-plan-wave", Project: "repo-a", TaskID: "task-1", ActorID: "lead", Prompt: "run the plan", MaxTurns: 4})
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	require.True(t, sawStagedSummary, "the wave summary must name the tasks left for the re-issue")
+	require.Contains(t, cPrompt, "A-DONE", "the re-issued task must consume the first wave's answer")
+
+	var planDone *observation.Event
+	childRuns := map[string]bool{}
+	for index := range recorded {
+		event := recorded[index]
+		switch {
+		case event.Type == "run.started" && strings.HasPrefix(event.Context.Run, "run-plan-wave/plan"):
+			childRuns[event.Context.Run] = true
+		case event.Type == "plan.completed":
+			planDone = &recorded[index]
+		}
+	}
+	require.NotNil(t, planDone)
+	require.True(t, childRuns["run-plan-wave/plan/01-a"], "wave 1 runs a")
+	require.False(t, childRuns["run-plan-wave/plan/02-c"], "wave 1 must not start the gated task")
+	require.True(t, childRuns["run-plan-wave/plan2/01-c"], "the re-issued plan runs c as a fresh staged call")
+}
+
 // A child that ends by a policy limit (forced finale: turn_limit and friends)
 // finishes its workflow without an error, so the old settlement marked the
 // task completed even when its report said "work NOT finished". The task must

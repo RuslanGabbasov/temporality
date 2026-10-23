@@ -88,6 +88,30 @@ func TestStreamCompleteCancelsStalledStreamAfterIdleTimeout(t *testing.T) {
 	}
 }
 
+// The stream shape (deltas + first-token latency) is the operator's
+// stream-health signal: a buffered gateway shows one late delta where a real
+// stream shows many early ones — recorded on every streaming completion.
+func TestStreamCompleteRecordsStreamShape(t *testing.T) {
+	server := streamServer(t, 4, 40*time.Millisecond, 0)
+	defer server.Close()
+	client := New(Config{
+		BaseURL: server.URL, Model: "test", APIKey: "k",
+		StreamIdleTimeout: 2 * time.Second,
+	})
+
+	completion, err := client.StreamComplete(context.Background(),
+		[]Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("StreamComplete: %v", err)
+	}
+	if completion.Deltas != 4 {
+		t.Fatalf("deltas = %d, want 4", completion.Deltas)
+	}
+	if completion.FirstTokenMs < 0 {
+		t.Fatalf("first_token_ms = %d", completion.FirstTokenMs)
+	}
+}
+
 func TestNewDefaultsStreamIdleTimeout(t *testing.T) {
 	client := New(Config{BaseURL: "http://localhost:1", Model: "m"})
 	if client.cfg.StreamIdleTimeout != 90*time.Second {

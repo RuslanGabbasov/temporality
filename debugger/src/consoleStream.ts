@@ -1,6 +1,13 @@
 import { authHeaders } from './api'
-import { isAbortError } from './runsLoad'
 import { parseSSEBlock } from './journalStream'
+
+/** True when a failure is the fetch abort (subscriber navigated away or the
+ *  run switched) — the console subscribe loop must stop silently for it and
+ *  surface every other failure. Local helper: the console stream is
+ *  self-contained and imports nothing from the run-list loader. */
+function isAbortError(failure: unknown): boolean {
+  return failure instanceof Error && failure.name === 'AbortError'
+}
 
 /** Client contract of the run_command console (v2-consolidated.md §6, §11.2):
  *  `GET /v1/agent/console/{operationID}` returns the tail snapshot, the

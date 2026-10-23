@@ -1,32 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react'
 import { API_BASE, authHeaders } from './api'
-import { observationApi, type KnowledgeItem, type ObservationEvent } from './observationApi'
+import { observationApi, runEvents, type KnowledgeItem, type ObservationEvent } from './observationApi'
 import { workspaceApi, type Agent } from './workspaceApi'
-import {
-  buildRunRows,
-  fetchRunList,
-  fetchRunResult,
-  fetchRunTrajectory,
-  isAbortError,
-  mergeRunEntries,
-  openTabLoads,
-  selectRunEvents,
-  type RunListEntry,
-  type RunRow,
-} from './runsLoad'
 import DelegationTree from './DelegationTree'
 import PlanGraph from './PlanGraph'
 import RunDisputes from './RunDisputes'
-import TraceLayers from './TraceLayers'
-import { parseTraceState, stripTraceParams, traceStateQuery, type TraceUrlState } from './traceFilters'
-import { useDebouncedValue } from './useDebouncedValue'
 import Markdown from './Markdown'
 import { useT, useI18n, pluralT } from './i18n'
-import { eventSummary, shortTime, restoreMarkdownLines, formatDuration, approvalHint } from './eventSummary'
+import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString, formatDuration, approvalHint } from './eventSummary'
 import { humanFactorsOf, type RunHumanFactors } from './humanFactors'
 import { useRunTokenMetrics } from './tokenStream'
 import { subscribeRunJournal } from './journalStream'
-import type { ConsoleState } from './consoleStream'
 import {
   Button,
   TextInput,
@@ -47,6 +31,10 @@ import {
   operations as fetchOperations, reconcile, canReconcile, whoami,
   type UncertainOperation, type ReconcileEffect, type Whoami,
 } from './kernelApi'
+import TraceLayers from './TraceLayers'
+import { parseTraceState, stripTraceParams, traceStateQuery, type TraceUrlState } from './traceFilters'
+import { useDebouncedValue } from './useDebouncedValue'
+import type { ConsoleState } from './consoleStream'
 
 const KERNEL_API = '/kernel-api'
 function message(error: unknown) { return error instanceof Error ? error.message : 'Request failed' }
@@ -56,6 +44,8 @@ function pendingApprovals(events: ObservationEvent[]) {
   const ended = new Set(events.filter((event) => ['approval.granted', 'approval.rejected', 'approval.timed_out', 'human.answered', 'human.cancelled', 'human.timed_out', 'human.rejected'].includes(event.type)).map((event) => event.data?.operation_id))
   return events.filter((event) => (event.type === 'approval.requested' || event.type === 'human.requested') && !ended.has(event.data?.operation_id))
 }
+
+type RunStatus = 'completed' | 'failed' | 'running' | 'cancelled'
 
 type RunView = 'overview' | 'trace' | 'trajectory' | 'budget'
 const RUN_VIEWS: RunView[] = ['overview', 'trace', 'trajectory', 'budget']
@@ -159,52 +149,73 @@ const REASON_KEYS: Record<string, string> = {
   failed_uncertain: 'operations.reason.failed_uncertain',
 }
 
+interface RunRow {
+  id: string
+  title: string
+  role: string
+  at: string
+  parent: string | null
+  depth: number
+  status: RunStatus
+  sourceId: string
+  workflow?: string
+  agentId?: string
+  /** Project attribution of the run (docs/activity-scoping.md §4): global
+   * listings span projects, so every row carries its own project — detail
+   * calls (result, cost, nudge) must use it, not the header filter. */
+  project?: string
+}
+
+/** Build the run call tree: roots are runs without a known parent, children
+ * (delegated runs carry parent_run_id) are nested under their parent. */
+function buildRunRows(started: ObservationEvent[], statuses: Map<string, RunStatus>): RunRow[] {
+  const byId = new Map<string, ObservationEvent>()
+  for (const event of started) {
+    const id = runID(event)
+    if (id) byId.set(id, event)
+  }
+  const childrenOf = new Map<string, ObservationEvent[]>()
+  const roots: ObservationEvent[] = []
+  for (const event of started) {
+    const id = runID(event)
+    if (!id) continue
+    const parent = event.data?.parent_run_id ? String(event.data.parent_run_id) : ''
+    if (parent && parent !== id && byId.has(parent)) {
+      const list = childrenOf.get(parent) ?? []
+      list.push(event)
+      childrenOf.set(parent, list)
+    } else {
+      roots.push(event)
+    }
+  }
+  const rows: RunRow[] = []
+  const walk = (event: ObservationEvent, depth: number) => {
+    const id = runID(event)
+    const rawTitle = event.data?.title
+    rows.push({
+      id,
+      title: typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle.trim() : '',
+      role: String(event.data?.role ?? 'agent'),
+      at: event.occurred_at,
+      parent: depth === 0 ? null : String(event.data?.parent_run_id ?? ''),
+      depth,
+      status: statuses.get(id) ?? 'running',
+      sourceId: event.source.id,
+      workflow: typeof event.data?.workflow === 'string' ? event.data.workflow : undefined,
+      agentId: typeof event.data?.agent_id === 'string' && event.data.agent_id ? event.data.agent_id : undefined,
+      project: event.context?.project || undefined,
+    })
+    for (const child of childrenOf.get(id) ?? []) walk(child, depth + 1)
+  }
+  // Journal returns oldest-first; show newest runs first.
+  for (const root of roots.reverse()) walk(root, 0)
+  return rows
+}
+
 export default function AgentRuns({ project }: { project: string }) {
   const t = useT()
   const { locale } = useI18n()
-  // The batch list (GET /v1/agent/runs) accumulates here: a fresh page
-  // updates known runs, rows the reader explicitly loaded («show older»)
-  // survive every silent refresh. Rows are derived — no journal scans.
-  const [entries, setEntries] = useState<Map<string, RunListEntry>>(() => new Map())
-  const rows = useMemo(() => buildRunRows([...entries.values()]), [entries])
-  /** Cursor of the next older batch page (empty = everything loaded). */
-  const [listNext, setListNext] = useState('')
-  /** K-3: terminal statuses failed to resolve — the list still renders, this
-   *  flag raises the «statuses unavailable» indicator; the reason is logged
-   *  server-side and in the console instead of being swallowed. */
-  const [listPartial, setListPartial] = useState(false)
-  const [listPartialError, setListPartialError] = useState('')
-  const [loadingMore, setLoadingMore] = useState(false)
-  /** Per-request abort scopes (NFR-4): every load owns a controller; a new
-   *  load of the same kind cancels the in-flight one, unmount cancels all. */
-  const listAbortRef = useRef<AbortController | null>(null)
-  const runAbortRef = useRef<AbortController | null>(null)
-  const resultAbortRef = useRef<AbortController | null>(null)
-  const trajectoryAbortRef = useRef<AbortController | null>(null)
-  const budgetAbortRef = useRef<AbortController | null>(null)
-  const unmountRef = useRef(new AbortController())
-  /** Per-run guards of the view-lazy loaders: one fetch per run per view —
-   *  timeline updates (poll/SSE) never re-trigger them (NFR-2 laziness). */
-  const resultRunRef = useRef('')
-  const trajectoryRunRef = useRef('')
-  const budgetRunRef = useRef('')
-  /** Identity resolves once, and only when the reconcile card needs it. */
-  const identityTriedRef = useRef(false)
-  // NFR-6: polling and SSE pause while the document is hidden.
-  const [pageVisible, setPageVisible] = useState(() => !document.hidden)
-  useEffect(() => {
-    const onChange = () => setPageVisible(!document.hidden)
-    document.addEventListener('visibilitychange', onChange)
-    return () => document.removeEventListener('visibilitychange', onChange)
-  }, [])
-  useEffect(() => () => {
-    unmountRef.current.abort()
-    listAbortRef.current?.abort()
-    runAbortRef.current?.abort()
-    resultAbortRef.current?.abort()
-    trajectoryAbortRef.current?.abort()
-    budgetAbortRef.current?.abort()
-  }, [])
+  const [rows, setRows] = useState<RunRow[]>([])
   // Read the run from the URL up front (links from other panels point at
   // /agents?project=…&run=…) — an initializer, not an effect, so the first
   // loadRuns call sees it through its closure and skips auto-select.
@@ -219,27 +230,6 @@ export default function AgentRuns({ project }: { project: string }) {
   })
   const viewRef = useRef(view)
   useEffect(() => { viewRef.current = view }, [view])
-  // §8: the trace filter/search state lives in the URL (trace* params) so a
-  // link restores the exact filtered view; the existing run/view params stay
-  // intact. Keystrokes commit through a ≥300 ms debounce (NFR-9) before they
-  // touch the URL or the filtering; the panel itself fetches nothing.
-  const [traceState, setTraceState] = useState<TraceUrlState>(() => parseTraceState(new URLSearchParams(window.location.search)))
-  const committedTraceState = useDebouncedValue(traceState)
-  useEffect(() => {
-    const current = new URLSearchParams(window.location.search)
-    const qs = traceStateQuery(committedTraceState.filter, committedTraceState.query, committedTraceState.chips)
-    if (!qs) {
-      const stripped = stripTraceParams(window.location.search)
-      if (stripped === current.toString()) return
-      window.history.replaceState(null, '', `${window.location.pathname}?${stripped}`)
-      return
-    }
-    for (const key of [...current.keys()]) {
-      if (key.startsWith('trace')) current.delete(key)
-    }
-    for (const [key, value] of new URLSearchParams(qs)) current.set(key, value)
-    window.history.replaceState(null, '', `${window.location.pathname}?${current.toString()}`)
-  }, [committedTraceState])
   // The run whose extras (trajectory, budgets) are on screen; loadRun drops
   // them only when this changes (run switch), not on silent refreshes.
   const loadedRunRef = useRef('')
@@ -247,42 +237,10 @@ export default function AgentRuns({ project }: { project: string }) {
   // change (and re-trigger the list effect) every time the user picks a run.
   const selectedRef = useRef(selected)
   useEffect(() => { selectedRef.current = selected }, [selected])
-  /** Agent records for the name lookups of the list and the trees: the batch
-   *  list carries agent_id + agent_name per row, so no workspace request runs
-   *  for display names (the old listAllAgents mount fetch is gone). Fields
-   *  beyond id/name are empty — nothing else on those consumers reads them. */
-  const agents = useMemo<Agent[]>(() => {
-    const catalog: Agent[] = []
-    const seen = new Set<string>()
-    for (const entry of entries.values()) {
-      if (!entry.agent_id || seen.has(entry.agent_id)) continue
-      seen.add(entry.agent_id)
-      catalog.push({
-        id: entry.agent_id,
-        name: entry.agent_name || entry.agent_id,
-        description: '',
-        model: '',
-        provider: '',
-        system_prompt: '',
-        skills: [],
-        mcp_servers: [],
-        approval_mode: '',
-        labels: {},
-        created_at: '',
-        updated_at: '',
-        // Display-only catalog rows: the sandbox profile of an agent is a
-        // server-side field nothing in the name/tree lookups reads.
-        sandbox_profile: '',
-      })
-    }
-    return catalog
-  }, [entries])
+  const [agents, setAgents] = useState<Agent[]>([])
   const [timeline, setTimeline] = useState<ObservationEvent[]>([])
   const [trajectory, setTrajectory] = useState<any>(null)
-  // Human factors (§7): what this session cost its humans — derived from the
-  // events on screen (the merged timeline, including lazily expanded
-  // delegated children), never a second journal pass.
-  const humanFactors = useMemo<RunHumanFactors>(() => humanFactorsOf(timeline), [timeline])
+  const [humanFactors, setHumanFactors] = useState<RunHumanFactors | null>(null)
   const [runCostData, setRunCostData] = useState<RunCost | null>(null)
   // Task budget spans every run of the task (follow-ups + delegation tree).
   const [taskCostData, setTaskCostData] = useState<TaskCost | null>(null)
@@ -385,19 +343,6 @@ export default function AgentRuns({ project }: { project: string }) {
     timeline.some((event) => event.type === 'run.started' && runID(event) === selected)
       && !timeline.some((event) => (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') && runID(event) === selected),
     [timeline, selected])
-  // §8/NFR-9 (T4): console buffers actually loaded by expanded rows, keyed
-  // by operation_id — the ONLY source the trace text search reads for
-  // command output (the search never fetches; unopened consoles stay out).
-  // Cleared on run switch: another run's buffers must not survive it.
-  const [consoleStates, setConsoleStates] = useState<ReadonlyMap<string, ConsoleState>>(() => new Map())
-  const collectConsoleState = useCallback((state: ConsoleState) => {
-    setConsoleStates((prev) => {
-      if (prev.get(state.operationId) === state) return prev
-      const next = new Map(prev)
-      next.set(state.operationId, state)
-      return next
-    })
-  }, [])
   // Live model-call progress: the journal only records the call when it
   // completes, so an in-flight "Вызов модели" row would sit silent for minutes.
   // The ephemeral token stream (same SSE the chat preview uses) fills the gap:
@@ -408,9 +353,7 @@ export default function AgentRuns({ project }: { project: string }) {
     const timer = window.setInterval(() => setNowTick(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [selectedLive])
-  // NFR-6: the ephemeral token stream is network traffic too — it pauses
-  // with the document and comes back (fresh meter) on the visible page.
-  const tokenMetrics = useRunTokenMetrics(selected, selectedLive && pageVisible)
+  const tokenMetrics = useRunTokenMetrics(selected, selectedLive)
   // model.text_delta/model.reasoning carry each turn's response text. They are
   // joined into their model.completed row instead of polluting the trace with
   // duplicate per-turn entries.
@@ -436,48 +379,49 @@ export default function AgentRuns({ project }: { project: string }) {
   useEffect(() => { setTraceLimit(TRACE_WINDOW) }, [selected, view])
   const traceWindow = useMemo(() => windowedTrace(trace.visible, traceLimit), [trace, traceLimit])
 
-  // NFR-3: delegated children never preload their events (the old
-  // Promise.all over child runs is gone). A meta row lists each child with
-  // the status from the batch list; its events load on request through the
-  // same per-run cache as the selection timeline.
-  const childRuns = useMemo(() => {
-    const seen = new Map<string, string>()
-    for (const event of timeline) {
-      if (event.type !== 'delegation.started' && event.type !== 'plan.task.started') continue
-      const child = String(event.data?.child_run_id ?? '')
-      if (!child || child === selected || seen.has(child)) continue
-      seen.set(child, event.type === 'plan.task.started' ? 'plan' : 'delegation')
+  // §8: the trace filter/search state lives in the URL (trace* params) so a
+  // link restores the exact filtered view; the existing run/view params stay
+  // intact. Keystrokes commit through a ≥300 ms debounce (NFR-9) before they
+  // touch the URL or the filtering; the panel itself fetches nothing.
+  const [traceState, setTraceState] = useState<TraceUrlState>(() => parseTraceState(new URLSearchParams(window.location.search)))
+  const committedTraceState = useDebouncedValue(traceState)
+  useEffect(() => {
+    const current = new URLSearchParams(window.location.search)
+    const qs = traceStateQuery(committedTraceState.filter, committedTraceState.query, committedTraceState.chips)
+    if (!qs) {
+      const stripped = stripTraceParams(window.location.search)
+      if (stripped === current.toString()) return
+      window.history.replaceState(null, '', `${window.location.pathname}?${stripped}`)
+      return
     }
-    return [...seen.entries()].map(([childRunId, kind]) => ({ childRunId, kind }))
-  }, [timeline, selected])
-  const [childLoading, setChildLoading] = useState('')
-  const childEventsLoaded = (childRunId: string) => timeline.some((event) => runID(event) === childRunId)
-  const loadChildEvents = async (childRunId: string) => {
-    setChildLoading(childRunId)
-    try {
-      const childEvents = await selectRunEvents(childRunId, { signal: unmountRef.current.signal })
-      setTimeline((prev) => {
-        const seen = new Set(prev.map((event) => `${event.source.id}:${event.event_id}`))
-        const fresh = childEvents.filter((event) => !seen.has(`${event.source.id}:${event.event_id}`))
-        if (!fresh.length) return prev
-        return [...prev, ...fresh].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
-      })
-    } catch (failure) {
-      if (!isAbortError(failure)) setError(message(failure))
-    } finally {
-      setChildLoading('')
+    for (const key of [...current.keys()]) {
+      if (key.startsWith('trace')) current.delete(key)
     }
-  }
+    for (const [key, value] of new URLSearchParams(qs)) current.set(key, value)
+    window.history.replaceState(null, '', `${window.location.pathname}?${current.toString()}`)
+  }, [committedTraceState])
 
-  // Re-fetch unresolved operations and group them by run — the post-verdict
-  // refresh (the open path fetches its own copy inside openTabLoads). The
-  // project filter is optional: the global listing spans every project the
-  // caller may see (docs/activity-scoping.md §5). Failures log the reason
-  // instead of silently showing an empty map; older kernels without the
+  // §8/NFR-9 (T4): console buffers actually loaded by expanded rows, keyed
+  // by operation_id — the ONLY source the trace text search reads for
+  // command output (the search never fetches; unopened consoles stay out).
+  // Cleared on run switch: another run's buffers must not survive it.
+  const [consoleStates, setConsoleStates] = useState<ReadonlyMap<string, ConsoleState>>(() => new Map())
+  const collectConsoleState = useCallback((state: ConsoleState) => {
+    setConsoleStates((prev) => {
+      if (prev.get(state.operationId) === state) return prev
+      const next = new Map(prev)
+      next.set(state.operationId, state)
+      return next
+    })
+  }, [])
+
+  // Fetch unresolved operations and group them by run. The project filter is
+  // optional: the global listing spans every project the caller may see
+  // (docs/activity-scoping.md §5). Best-effort: older kernels without the
   // endpoint simply show no markers.
   const refreshOps = useCallback(async () => {
     try {
-      const page = await fetchOperations(project.trim() || undefined, unmountRef.current.signal)
+      const page = await fetchOperations(project.trim() || undefined)
       const map = new Map<string, UncertainOperation[]>()
       for (const op of page.operations ?? []) {
         const list = map.get(op.run_id) ?? []
@@ -485,13 +429,13 @@ export default function AgentRuns({ project }: { project: string }) {
         map.set(op.run_id, list)
       }
       setOpsByRun(map)
-    } catch (failure) {
-      if (isAbortError(failure)) return
-      console.warn(`[agent-runs] reconcile operations refresh failed: ${message(failure)}`)
-      setOpsByRun(new Map())
-    }
+    } catch { setOpsByRun(new Map()) }
   }, [project])
 
+  // The header filter is a filter, not a mode: empty = every project the
+  // caller may see (docs/activity-scoping.md §7). The journal scopes an
+  // unfiltered query server-side, so the same code path serves both.
+  const scope = project.trim() || undefined
   // Force stop (docs/agent-delegation.md §runs ops): a two-click guard — the
   // first click asks, the second terminates the workflow and journals the
   // terminal event. Terminate lands even when the workflow is stuck failing
@@ -509,228 +453,133 @@ export default function AgentRuns({ project }: { project: string }) {
   const loadRuns = useCallback(async (autoSelect = false, silent = false) => {
     if (!autoSelect && !silent) setBusy(true)
     if (!silent) setError('')
-    // One abort scope per list load: a newer load (or unmount) cancels the
-    // in-flight one instead of racing its setState (NFR-4).
-    listAbortRef.current?.abort()
-    const controller = new AbortController()
-    listAbortRef.current = controller
     try {
-      // The whole list path in one round: batch page + open human questions +
-      // reconcile ops — OPEN_REQUEST_BUDGET requests. No journal scans, no
-      // per-row detail probes (K-2), agent names ride the rows (NFR-1).
-      const loaded = await openTabLoads({ project, signal: controller.signal })
-      // K-3: unresolved statuses are a visible state, never a swallowed
-      // rejection — the indicator explains it, the console carries the reason.
-      setListPartial(Boolean(loaded.page.partial))
-      setListPartialError(loaded.page.partial_error ?? '')
-      if (loaded.page.partial) {
-        console.warn(`[agent-runs] run statuses unavailable (partial list): ${loaded.page.partial_error || 'no reason given'}`)
+      void refreshOps()
+      const startedPage = await observationApi.events(scope, undefined, undefined, undefined, { type: 'run.started', limit: 500 })
+      // Terminal events give every list row (roots and delegated children
+      // alike) its status tag without opening each run. run.cancelled matters
+      // as much: without it a cancelled run shows "running" forever.
+      const [completedPage, failedPage, cancelledPage] = await Promise.all([
+        observationApi.events(scope, undefined, undefined, undefined, { type: 'run.completed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
+        observationApi.events(scope, undefined, undefined, undefined, { type: 'run.failed', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
+        observationApi.events(scope, undefined, undefined, undefined, { type: 'run.cancelled', limit: 500 }).catch(() => ({ events: [] as ObservationEvent[], count: 0 })),
+      ])
+      const statuses = new Map<string, RunStatus>()
+      for (const event of failedPage.events) statuses.set(runID(event), 'failed')
+      for (const event of cancelledPage.events) statuses.set(runID(event), 'cancelled')
+      for (const event of completedPage.events) statuses.set(runID(event), 'completed')
+      const allRows = buildRunRows(startedPage.events, statuses)
+      setRows(allRows)
+      // Open human questions mark the asking runs (best-effort — the badge
+      // in the header falls back to events when the endpoint is missing).
+      try {
+        const open = await workspaceApi.listHumanRequests({ project: scope, onlyOpen: true })
+        setQuestionRuns(new Set((open.requests ?? []).map((request) => request.run_id)))
+      } catch { setQuestionRuns(new Set()) }
+      const rootRuns = allRows.filter((row) => row.depth === 0)
+      // Only auto-select on initial load when nothing is selected
+      const currentSelected = selectedRef.current
+      if (autoSelect && !currentSelected && rootRuns.length) {
+        let found = ''
+        for (const row of rootRuns) {
+          // The detail endpoint needs the run's own project — in the global
+          // listing it is not the header filter.
+          const query = new URLSearchParams({ project: row.project ?? '', source_id: row.sourceId })
+          let response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(row.id)}?${query}`, { headers: authHeaders() })
+          if (!response.ok && row.workflow === 'LeadCoderReviewerQA') {
+            response = await fetch(`${KERNEL_API}/v1/agent/examples/lead-coder-reviewer-qa/runs/${encodeURIComponent(row.id)}?${query}`, { headers: authHeaders() })
+          }
+          if (response.ok) { found = row.id; break }
+        }
+        setSelected(found || rootRuns[0]?.id || '')
       }
-      if (loaded.errors.questions) console.warn(`[agent-runs] open human requests unavailable: ${loaded.errors.questions}`)
-      if (loaded.errors.ops) console.warn(`[agent-runs] reconcile operations unavailable: ${loaded.errors.ops}`)
-      setQuestionRuns(new Set(loaded.questionRunIDs))
-      setOpsByRun(loaded.opsByRun)
-      setEntries((prev) => mergeRunEntries(prev, loaded.page.runs))
-      // A refresh keeps the reader's pagination position; a fresh load takes
-      // the first page's cursor.
-      setListNext((prev) => (silent && prev ? prev : loaded.page.next_cursor ?? ''))
-      // Auto-select the newest root of the first page: its status rides the
-      // row — the per-run detail probes (K-2) are gone.
-      if (autoSelect && !selectedRef.current) {
-        const firstRows = buildRunRows(loaded.page.runs)
-        const root = firstRows.find((row) => row.depth === 0)
-        setSelected(root?.id ?? '')
-      }
-    } catch (failure) {
-      if (isAbortError(failure)) return
-      if (!silent) setError(message(failure))
-      else console.warn(`[agent-runs] background list refresh failed: ${message(failure)}`)
-    } finally {
-      if (listAbortRef.current === controller) listAbortRef.current = null
-      if (!autoSelect && !silent) setBusy(false)
-    }
-  }, [project])
-
-  // «Show older runs»: the next batch page appends to the accumulated
-  // entries; dedup by run_id keeps a refresh-advanced boundary harmless.
-  const loadOlderRuns = useCallback(async () => {
-    if (!listNext || loadingMore) return
-    setLoadingMore(true)
-    try {
-      const page = await fetchRunList({ project, cursor: listNext, signal: unmountRef.current.signal })
-      setEntries((prev) => mergeRunEntries(prev, page.runs))
-      setListNext(page.next_cursor ?? '')
-      if (page.partial) {
-        setListPartial(true)
-        setListPartialError(page.partial_error ?? '')
-        console.warn(`[agent-runs] run statuses unavailable (partial list): ${page.partial_error || 'no reason given'}`)
-      }
-    } catch (failure) {
-      if (!isAbortError(failure)) setError(message(failure))
-    } finally {
-      setLoadingMore(false)
-    }
-  }, [project, listNext, loadingMore])
+    } catch (failure) { if (!silent) setError(message(failure)) }
+    finally { if (!autoSelect && !silent) setBusy(false) }
+  }, [project, refreshOps])
 
   const loadRun = useCallback(async (run: string, silent = false) => {
     if (!run) return
-    // Extras (result, trajectory, budgets) belong to a specific run; reset
-    // them only when switching runs — the silent poll refreshes the same run
-    // and must not flash the tabs' empty placeholders while refetching. The
-    // view-lazy loaders below repopulate them when their view needs them
-    // (NFR-2: selection itself only fetches the timeline).
+    // Extras (trajectory, budgets) belong to a specific run; reset them only
+    // when switching runs — the silent poll refreshes the same run and must
+    // not flash the tabs' empty placeholders while refetching.
     const runChanged = run !== loadedRunRef.current
     loadedRunRef.current = run
     if (!silent) setBusy(true)
     setError('')
     if (runChanged) {
-      setResult(null)
       setTrajectory(null)
       setRunCostData(null)
       setTaskCostData(null)
-      resultRunRef.current = ''
-      trajectoryRunRef.current = ''
-      budgetRunRef.current = ''
-      resultAbortRef.current?.abort()
-      trajectoryAbortRef.current?.abort()
-      budgetAbortRef.current?.abort()
-      // §8 search index holds only this run's loaded console buffers.
-      setConsoleStates(new Map())
     }
-    if (!silent) {
-      // A fresh selection cancels the previous run's in-flight load; silent
-      // polls join the cache's in-flight request instead of stacking (NFR-4).
-      runAbortRef.current?.abort()
-    }
-    const controller = new AbortController()
-    runAbortRef.current = controller
     try {
-      // Exactly one journal page for a fresh run (NFR-2), cursor catch-up to
-      // the run's end preserved (the old runEvents loop, NFR-4), served from
-      // the per-run cache with in-flight deduplication. Events are fetched by
-      // run id alone: the journal scopes the query server-side
-      // (docs/activity-scoping.md §5), the run's own project comes from its
-      // root event — the header filter may be the global "All projects".
-      const events = await selectRunEvents(run, {
-        refresh: silent,
-        signal: silent ? unmountRef.current.signal : controller.signal,
-      })
-      const root = events.find((event) => event.type === 'run.started')
+      // Events are fetched by run id alone: the journal scopes the query to
+      // the caller's visible projects server-side (docs/activity-scoping.md
+      // §5), and the run's own project comes from its root event — the header
+      // filter may be the global "All projects". runEvents follows cursors to
+      // the run's end: a single page would cut long runs and hide terminal
+      // events (answered questions would never clear their cards).
+      const runEventsAll = await runEvents(run)
+      const root = runEventsAll.find((event) => event.type === 'run.started')
       const runProject = root?.context?.project ?? project.trim()
+      const teamRun = root?.data?.workflow === 'LeadCoderReviewerQA'
+      let allEvents = runEventsAll
+      if (teamRun) {
+        const childIDs = runEventsAll
+          .filter((event) => event.type === 'delegation.started' || event.type === 'plan.task.started')
+          .map((event) => String(event.data?.child_run_id ?? ''))
+          .filter(Boolean)
+        const childEventLists = await Promise.all(childIDs.map((child) => runEvents(child)))
+        allEvents = [...runEventsAll, ...childEventLists.flat()].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
+      }
       setTimeline((prev) => {
-        if (!silent) return events
-        // The live SSE tail (and lazily expanded children) may hold events
-        // the poll snapshot lacks — merge, never drop.
-        const seen = new Set(events.map((e) => `${e.source.id}:${e.event_id}`))
+        if (!silent) return allEvents
+        // The live SSE tail may have appended events the poll snapshot lacks
+        // (frames raced the DB snapshot) — merge, never drop.
+        const seen = new Set(allEvents.map((e) => `${e.source.id}:${e.event_id}`))
         const extra = prev.filter((e) => !seen.has(`${e.source.id}:${e.event_id}`))
-        return [...events, ...extra].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
+        return [...allEvents, ...extra].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
       })
+      // Human factors (§7): what this session cost its humans — from the same
+      // events the trace already loaded, no second journal scan.
+      setHumanFactors(humanFactorsOf(allEvents))
+      const resultPath = teamRun ? `/v1/agent/examples/lead-coder-reviewer-qa/runs/${encodeURIComponent(run)}` : `/v1/agent/runs/${encodeURIComponent(run)}`
+      const sourceQuery = new URLSearchParams({ project: runProject, source_id: root?.source.id ?? '' })
+      let response = await fetch(`${KERNEL_API}${resultPath}?${sourceQuery}`, { headers: authHeaders() })
+      if (!response.ok && teamRun) response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(run)}?${sourceQuery}`, { headers: authHeaders() })
+      if (response.ok) {
+        setResult(await response.json() as Record<string, unknown>)
+      } else if (response.status === 404) {
+        setResult({ status: 'workflow_expired', error: 'Workflow no longer available in Temporal (events preserved in journal)' })
+      } else {
+        const detail = await response.text()
+        throw new Error(`${response.status} ${detail}`)
+      }
       const query = new URLSearchParams({ project: runProject, run, view: viewRef.current })
       window.history.replaceState(null, '', `/agents?${query}`)
-    } catch (failure) {
-      if (isAbortError(failure)) return
-      setError(message(failure))
-    } finally {
-      if (runAbortRef.current === controller) runAbortRef.current = null
-      if (!silent) setBusy(false)
-    }
+      // Fetch trajectory extraction (deterministic patterns from event stream)
+      try {
+        const tResp = await fetch(`${KERNEL_API}/v1/workspace/runs/${encodeURIComponent(run)}/trajectory?project=${encodeURIComponent(runProject)}`, { headers: authHeaders() })
+        if (tResp.ok) setTrajectory(await tResp.json())
+      } catch { /* ignore */ }
+      // Token/cost totals for the run (cached prompt tokens billed at half
+      // price); stays zero until model prices are configured.
+      try {
+        setRunCostData(await runCost(runProject, run))
+      } catch { /* totals stay hidden */ }
+      // Task-wide budget: every run sharing the selected run's task — the
+      // conversation follow-ups and the whole delegation tree.
+      const taskID = root?.context?.task ?? ''
+      if (taskID) {
+        try {
+          setTaskCostData(await taskCost(runProject, taskID))
+        } catch { /* totals stay hidden */ }
+      }
+    } catch (failure) { setError(message(failure)) }
+    finally { if (!silent) setBusy(false) }
   }, [project])
 
   useEffect(() => { void loadRuns(true) }, [loadRuns])
   useEffect(() => { if (selected) void loadRun(selected) }, [selected, loadRun])
-
-  // ── View-lazy extras (NFR-2): selection fetches ONLY the timeline. ──────
-  // Result feeds the overview (answer/stages/expired status). It needs the
-  // timeline root for the run's own project + workflow, waits for it, then
-  // loads once per run — poll/SSE timeline updates never re-trigger it.
-  useEffect(() => {
-    if (!selected || view !== 'overview') {
-      resultAbortRef.current?.abort()
-      resultAbortRef.current = null
-      resultRunRef.current = ''
-      return
-    }
-    if (resultRunRef.current === selected) return
-    const root = timeline.find((event) => event.type === 'run.started' && runID(event) === selected)
-    if (!root) return
-    resultAbortRef.current?.abort()
-    const controller = new AbortController()
-    resultAbortRef.current = controller
-    resultRunRef.current = selected
-    const runProject = root.context?.project ?? project.trim()
-    const teamRun = root.data?.workflow === 'LeadCoderReviewerQA'
-    void fetchRunResult(selected, { project: runProject, sourceID: root.source.id, teamRun, signal: controller.signal })
-      .then((payload) => { if (!controller.signal.aborted) setResult(payload) })
-      .catch((failure) => {
-        if (isAbortError(failure)) return
-        resultRunRef.current = '' // failed once — the next view pass retries
-        setError(message(failure))
-      })
-  }, [selected, view, timeline, project])
-
-  // Trajectory extraction + run cost totals — trajectory view only.
-  useEffect(() => {
-    if (!selected || view !== 'trajectory') {
-      trajectoryAbortRef.current?.abort()
-      trajectoryAbortRef.current = null
-      trajectoryRunRef.current = ''
-      return
-    }
-    if (trajectoryRunRef.current === selected) return
-    const root = timeline.find((event) => event.type === 'run.started' && runID(event) === selected)
-    if (!root) return
-    trajectoryAbortRef.current?.abort()
-    const controller = new AbortController()
-    trajectoryAbortRef.current = controller
-    trajectoryRunRef.current = selected
-    const runProject = root.context?.project ?? project.trim()
-    void (async () => {
-      try {
-        const extracted = await fetchRunTrajectory(selected, runProject, controller.signal)
-        if (controller.signal.aborted) return
-        setTrajectory(extracted)
-      } catch (failure) {
-        if (isAbortError(failure)) return
-        trajectoryRunRef.current = ''
-        console.warn(`[agent-runs] trajectory load failed: ${message(failure)}`)
-      }
-    })()
-    // Token/cost totals for the run (cached prompt tokens billed at half
-    // price); stays hidden until model prices are configured.
-    void runCost(runProject, selected, controller.signal)
-      .then((costs) => { if (!controller.signal.aborted) setRunCostData(costs) })
-      .catch((failure) => {
-        if (isAbortError(failure)) return
-        console.warn(`[agent-runs] run cost unavailable: ${message(failure)}`)
-      })
-  }, [selected, view, timeline, project])
-
-  // Task-wide budget — budget view only; the task id lives on the root event.
-  useEffect(() => {
-    if (!selected || view !== 'budget') {
-      budgetAbortRef.current?.abort()
-      budgetAbortRef.current = null
-      budgetRunRef.current = ''
-      return
-    }
-    if (budgetRunRef.current === selected) return
-    const root = timeline.find((event) => event.type === 'run.started' && runID(event) === selected)
-    if (!root) return
-    const taskID = root.context?.task ?? ''
-    if (!taskID) { budgetRunRef.current = selected; return }
-    budgetAbortRef.current?.abort()
-    const controller = new AbortController()
-    budgetAbortRef.current = controller
-    budgetRunRef.current = selected
-    const runProject = root.context?.project ?? project.trim()
-    void taskCost(runProject, taskID, controller.signal)
-      .then((data) => { if (!controller.signal.aborted) setTaskCostData(data) })
-      .catch((failure) => {
-        if (isAbortError(failure)) return
-        budgetRunRef.current = ''
-        console.warn(`[agent-runs] task budget unavailable: ${message(failure)}`)
-      })
-  }, [selected, view, timeline, project])
   // Tab switches update the URL so a trace/trajectory/budget view is
   // shareable; loadRun preserves the current tab via viewRef.
   useEffect(() => {
@@ -741,13 +590,11 @@ export default function AgentRuns({ project }: { project: string }) {
     window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
   }, [view, selected])
   useEffect(() => {
-    if (!selected || !pageVisible) return
-    // Poll only the selected run's events, don't re-fetch the full run list.
-    // NFR-6: hidden document → the polling pauses (the interval re-arms on
-    // visibility, the next tick refreshes within 10s).
+    if (!selected) return
+    // Poll only the selected run's events, don't re-fetch the full run list
     const timer = window.setInterval(() => { void loadRun(selected, true) }, 10000)
     return () => window.clearInterval(timer)
-  }, [selected, loadRun, pageVisible])
+  }, [selected, loadRun])
   // Live journal tail: while the selected run is in flight, events arrive over
   // SSE at the server's ~1.5s cadence instead of the 10s poll above — without
   // it a finishing model call, its tool events and the next turn land in one
@@ -756,10 +603,10 @@ export default function AgentRuns({ project }: { project: string }) {
   // context) is stamped from the run's own root event. The poll stays as the
   // safety net (and covers team-run children the per-run stream skips).
   useEffect(() => {
-    // NFR-6: the SSE tail pauses while the document is hidden — aborting the
-    // subscription (the poll above pauses too); a visible page re-subscribes.
-    if (!selected || !selectedLive || !pageVisible) return
+    if (!selected || !selectedLive) return
     const controller = new AbortController()
+    // §8 search index holds only this run's loaded console buffers.
+    setConsoleStates(new Map())
     subscribeRunJournal(selected, (frame) => {
       if (frame.event === 'done') return
       let parsed: { type?: string; event_id?: string; occurred_at?: string; data?: Record<string, unknown> }
@@ -782,18 +629,17 @@ export default function AgentRuns({ project }: { project: string }) {
       })
     }, controller.signal, { tail: true })
     return () => controller.abort()
-  }, [selected, selectedLive, pageVisible])
+  }, [selected, selectedLive])
   // Silent list refresh: keeps status tags and newly started runs (including
   // delegated children) fresh without touching the current selection.
   useEffect(() => {
-    // NFR-6: the refresh interval pauses while the document is hidden and
-    // re-arms on the next visible tick.
-    if (!pageVisible) return
     const timer = window.setInterval(() => { void loadRuns(true, true) }, 15000)
     return () => window.clearInterval(timer)
-  }, [loadRuns, pageVisible])
-  // Agent display names ride the batch list rows (agent_name) — the old
-  // listAllAgents mount fetch is gone; the catalog memo above feeds the trees.
+  }, [loadRuns])
+  // Agents power the delegation tree node names; they rarely change.
+  useEffect(() => {
+    workspaceApi.listAllAgents().then((page) => setAgents(page.agents)).catch(() => { /* names fall back to ids */ })
+  }, [])
   // The selected run's own project: detail endpoints (result, approval,
   // nudge, knowledge doubt actions) need it even when the header filter is the
   // global "All projects". Falls back to the filter for run ids the list
@@ -809,34 +655,18 @@ export default function AgentRuns({ project }: { project: string }) {
   useEffect(() => {
     const projectID = selectedProject.trim()
     if (!projectID) { setKnowledgeItems(new Map()); return }
-    // Lazy per view (NFR-2): the trace rows and the trajectory knowledge list
-    // are the only consumers — the overview falls back to bare ids, so
-    // selecting a run costs no knowledge request.
-    const wantKnowledge = view === 'trace' || view === 'trajectory'
-    if (!wantKnowledge || !selected) return
-    const controller = new AbortController()
-    observationApi.knowledge(projectID, undefined, undefined, { signal: controller.signal })
+    observationApi.knowledge(projectID)
       .then((page) => {
         const map = new Map<string, KnowledgeItem>()
         for (const item of page.knowledge ?? []) map.set(item.id, item)
         setKnowledgeItems(map)
       })
-      .catch((failure) => { if (!isAbortError(failure)) console.warn(`[agent-runs] knowledge list unavailable: ${message(failure)}`) })
-    return () => controller.abort()
-  }, [selectedProject, knowledgeRevision, view, selected])
-  // Verdict buttons need the caller's role — only the reconcile card does:
-  // identity resolves when one appears instead of on mount (the open path
-  // stays at its three budgeted requests). Kernels without /whoami are
+      .catch(() => { /* bare ids stay as the fallback */ })
+  }, [selectedProject, knowledgeRevision])
+  // Verdict buttons need the caller's role. Kernels without /whoami are
   // legacy no-auth deployments — treated as operator (the kernel still
   // enforces the ladder server-side on the reconcile call itself).
-  const needsIdentity = selectedOps.length > 0
-  useEffect(() => {
-    if (!needsIdentity || identityTriedRef.current) return
-    identityTriedRef.current = true
-    void whoami(unmountRef.current.signal)
-      .then(setIdentity)
-      .catch((failure) => { if (!isAbortError(failure)) setIdentity(null) })
-  }, [needsIdentity])
+  useEffect(() => { void whoami().then(setIdentity).catch(() => setIdentity(null)) }, [])
   const operator = identity === null || canReconcile(identity.role)
   // Manual knowledge verdicts need an actor id; fall back to a stable label
   // for anonymous/no-auth kernels (the server records it as-is in the event).
@@ -890,30 +720,12 @@ export default function AgentRuns({ project }: { project: string }) {
     setBusy(true); setError('')
     try {
       const root = timeline.find((item) => item.type === 'run.started' && runID(item) === selected)
-      const query = new URLSearchParams({ project: selectedProject })
-      // source_id is only a legacy hint (identity comes from the kernel's
-      // journal), and an absent run.started must not ship an empty parameter.
-      const hintedSource = root?.source.id
-      if (hintedSource) query.set('source_id', hintedSource)
+      const query = new URLSearchParams({ project: selectedProject, source_id: root?.source.id ?? '' })
       const response = await fetch(`${KERNEL_API}/v1/agent/runs/${encodeURIComponent(selected)}/nudge?${query}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ turn, actor_id: identity?.subject && identity.subject !== 'anonymous' ? identity.subject : 'human-ui' }),
       })
-      const raw = await response.text()
-      let payload: Record<string, unknown> = {}
-      try { payload = JSON.parse(raw) as Record<string, unknown> } catch { /* non-JSON body: raw text stays as the fallback below */ }
-      if (response.ok && payload.status === 'already_gone') {
-        // The workflow is gone and the kernel healed the run: say so in the
-        // user's language instead of raw JSON, then show the settled run.
-        setError(t('runs.nudge_already_gone'))
-        await loadRun(selected, true)
-        return
-      }
-      if (!response.ok) {
-        // Errors carry a stable human-readable message in the JSON error
-        // field; the raw body is only the fallback for a non-JSON failure.
-        throw new Error(String(payload.error ?? `${response.status} ${raw}`))
-      }
+      if (!response.ok) throw new Error(`${response.status} ${await response.text()}`)
       // Pull the trace right away instead of waiting for the 10s poll: the
       // workflow journals model.nudged within ~1–2s of the signal, and that
       // row is the user-visible confirmation the nudge worked.
@@ -980,19 +792,6 @@ export default function AgentRuns({ project }: { project: string }) {
               </div>
               <ListFilter value={filter} onChange={setFilter} placeholder={t('common.filter_runs') ?? 'Filter runs…'} />
             </div>
-            {/* K-3: the batch page's partial flag is a visible state — rows
-                lose their status tags, so the list says why instead of
-                silently rendering no statuses (the reason is also logged). */}
-            {listPartial && (
-              <InlineNotification
-                kind="warning"
-                lowContrast
-                hideCloseButton
-                title={t('runs.statuses_unavailable') ?? 'Run statuses unavailable'}
-                subtitle={[t('runs.statuses_unavailable_hint') ?? '', listPartialError].filter(Boolean).join(' · ')}
-                style={{ marginTop: '0.5rem' }}
-              />
-            )}
             <Stack gap={1}>
               {rows.length === 0 && <Tile style={{ color: 'var(--tm-text-3)', textAlign: 'center' }}>{t('runs.no_runs') ?? 'No runs for this project'}</Tile>}
               {visibleRuns.map((row) => {
@@ -1319,11 +1118,16 @@ export default function AgentRuns({ project }: { project: string }) {
                 {/* Cross-agent knowledge disputes across the selected run's chain */}
                 <RunDisputes project={selectedProject} selected={selected} rows={rows} onOpenRun={setSelected} />
 
-                {/* Delegation call tree — children runs with live status */}
-                <DelegationTree project={selectedProject} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
+                {/* Delegation call tree — children runs with live status.
+                    The wrapper bounds the flex-item width (min-width: 0)
+                    so a wide plan DAG scrolls inside its own block instead of
+                    stretching the whole overview layout. */}
+                <div className="run-overview-graphs">
+                  <DelegationTree project={selectedProject} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
 
-                {/* Plan DAG view — task graph of plan calls with live statuses */}
-                <PlanGraph project={selectedProject} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
+                  {/* Plan DAG view — task graph of plan calls with live statuses */}
+                  <PlanGraph project={selectedProject} runId={selected} agents={agents} live={selectedLive} onOpenRun={setSelected} />
+                </div>
                 </>)}
 
                 {view === 'trace' && (
@@ -1352,16 +1156,6 @@ export default function AgentRuns({ project }: { project: string }) {
                     consoleStates={consoleStates}
                     onConsoleState={collectConsoleState}
                   />
-                  {/* NFR-5: the window never grows by itself — the reader
-                      asks for TRACE_WINDOW_STEP more rows each time. */}
-                  {trace.visible.length > traceLimit && (
-                    <button
-                      onClick={() => setTraceLimit((limit) => limit + TRACE_WINDOW_STEP)}
-                      style={{ marginTop: '0.5rem', width: '100%', background: 'var(--tm-raised)', border: '1px solid var(--tm-border)', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.35rem', borderRadius: '4px' }}
-                    >
-                      {t('runs.trace_show_more', { count: String(Math.min(TRACE_WINDOW_STEP, trace.visible.length - traceLimit)) })}
-                    </button>
-                  )}
                 </Tile>
                 )}
 

@@ -289,10 +289,6 @@ export default function Artifacts() {
         {/* Left column: filters and the list. Rows carry no buttons — every
             action lives in the detail pane, so nothing ever overflows. */}
         <div>
-          {/* The list header (search, status chips, source/unit selects) sticks
-              under the app bar while the reader pane scrolls — the two-column
-              redesign (d9193a5) dropped the sticky the old toolbar had. */}
-          <div style={{ position: 'sticky', top: '3rem', background: 'var(--tm-bg)', zIndex: 1, paddingTop: '0.25rem' }}>
           <div style={{ marginBottom: '0.5rem' }}>
             <ListFilter value={filter} onChange={setFilter} placeholder={t('artifacts.filter_placeholder') ?? 'Filter artifacts…'} />
           </div>
@@ -322,7 +318,6 @@ export default function Artifacts() {
                 </select>
               </label>
             )}
-          </div>
           </div>
 
           <div style={{ maxHeight: 'calc(100vh - 18rem)', overflowY: 'auto', paddingRight: '0.15rem' }}>

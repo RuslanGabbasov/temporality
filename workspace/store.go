@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -859,123 +858,6 @@ func (s *Store) StreamRunEventsTail(ctx context.Context, projectID, runID string
 	return events, events[len(events)-1].EventID, nil
 }
 
-// ── Batch run listing (GET /v1/agent/runs, docs/trace-rework §3E NFR-1) ──────
-//
-// The Runs tab used to build its list from four client-side journal scans
-// (run.started plus three terminal types) and a per-row detail N+1. This page
-// answers the whole list with one cursor-paginated query over run.started,
-// newest first; terminal status is resolved separately so its failure degrades
-// the row statuses to "unknown" (partial) instead of failing the page.
-
-// RunListEntry is one row of the batch run listing: exactly the fields the
-// run list renders, taken from the run.started event — no per-row detail
-// calls on the client (K-2).
-type RunListEntry struct {
-	RunID       string
-	Project     string
-	Title       string
-	Role        string
-	ParentRunID string
-	StartedAt   time.Time
-	SourceID    string
-	EventID     string
-	Workflow    string
-	AgentID     string
-}
-
-// RunListCursor walks run.started rows newest first: (occurred_at, source_id,
-// event_id) descending — the journal's ascending tie-break chain flipped, so
-// pagination stays deterministic when several runs start in the same instant.
-type RunListCursor struct {
-	OccurredAt time.Time `json:"occurred_at"`
-	SourceID   string    `json:"source_id"`
-	EventID    string    `json:"event_id"`
-}
-
-// EncodeRunListCursor renders the opaque page token (base64url JSON).
-func EncodeRunListCursor(value RunListCursor) string {
-	payload, _ := json.Marshal(value)
-	return base64.RawURLEncoding.EncodeToString(payload)
-}
-
-// DecodeRunListCursor parses the opaque token; anything but a well-formed
-// own cursor is an error — a corrupted cursor must not silently restart the
-// listing from the newest page. Empty input means "first page".
-func DecodeRunListCursor(raw string) (RunListCursor, error) {
-	if raw == "" {
-		return RunListCursor{}, nil
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil {
-		return RunListCursor{}, fmt.Errorf("invalid cursor encoding: %w", err)
-	}
-	var value RunListCursor
-	if err := json.Unmarshal(payload, &value); err != nil {
-		return RunListCursor{}, fmt.Errorf("invalid cursor: %w", err)
-	}
-	if value.OccurredAt.IsZero() || value.SourceID == "" || value.EventID == "" {
-		return RunListCursor{}, errors.New("invalid cursor: incomplete position")
-	}
-	return value, nil
-}
-
-// ListRunsPage returns one page of run.started rows newest first, with the
-// cursor of the next page ("" when the page is short — no more rows).
-// project="" with projects=nil lists every project (caller already resolved
-// the principal's visibility); projects non-nil constrains the listing to it
-// (an empty list must yield an empty page, never an unfiltered one).
-func (s *Store) ListRunsPage(ctx context.Context, project string, projects []string, limit int, after *RunListCursor) ([]RunListEntry, string, error) {
-	if limit < 1 {
-		limit = 100
-	}
-	query := `SELECT run_id, project_id, occurred_at, source_id, event_id,
-	                 COALESCE(data->>'title', ''), COALESCE(data->>'role', 'agent'),
-	                 COALESCE(data->>'parent_run_id', ''),
-	                 COALESCE(data->>'workflow', ''), COALESCE(data->>'agent_id', '')
-	          FROM observation_events
-	          WHERE type = 'run.started'`
-	args := make([]any, 0, 4)
-	if project != "" {
-		args = append(args, project)
-		query += fmt.Sprintf(` AND project_id = $%d`, len(args))
-	} else if projects != nil {
-		args = append(args, projects)
-		query += fmt.Sprintf(` AND project_id = ANY($%d)`, len(args))
-	}
-	if after != nil {
-		args = append(args, after.OccurredAt, after.SourceID, after.EventID)
-		query += fmt.Sprintf(` AND (occurred_at, source_id, event_id) < ($%d::timestamptz, $%d::text, $%d::text)`,
-			len(args)-2, len(args)-1, len(args))
-	}
-	args = append(args, limit)
-	query += fmt.Sprintf(` ORDER BY occurred_at DESC, source_id DESC, event_id DESC LIMIT $%d`, len(args))
-
-	rows, err := s.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, "", err
-	}
-	defer rows.Close()
-	entries := make([]RunListEntry, 0, limit)
-	for rows.Next() {
-		var entry RunListEntry
-		var startedAt time.Time
-		if err := rows.Scan(&entry.RunID, &entry.Project, &startedAt, &entry.SourceID, &entry.EventID,
-			&entry.Title, &entry.Role, &entry.ParentRunID, &entry.Workflow, &entry.AgentID); err != nil {
-			return nil, "", err
-		}
-		entry.StartedAt = startedAt.UTC()
-		entries = append(entries, entry)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", err
-	}
-	if len(entries) < limit {
-		return entries, "", nil
-	}
-	last := entries[len(entries)-1]
-	return entries, EncodeRunListCursor(RunListCursor{OccurredAt: last.StartedAt, SourceID: last.SourceID, EventID: last.EventID}), nil
-}
-
 // RunTerminalStatuses maps run ids to their latest terminal journal event
 // (run.completed / run.failed / run.cancelled → completed / failed /
 // cancelled). Ids without a terminal event are absent — the caller renders
@@ -1001,28 +883,6 @@ func (s *Store) RunTerminalStatuses(ctx context.Context, runIDs []string) (map[s
 		statuses[runID] = strings.TrimPrefix(eventType, "run.")
 	}
 	return statuses, rows.Err()
-}
-
-// AgentDisplayNames resolves agent ids to display names for list rows
-// (best-effort cosmetics; the caller keeps the list when this fails).
-func (s *Store) AgentDisplayNames(ctx context.Context, agentIDs []string) (map[string]string, error) {
-	names := make(map[string]string, len(agentIDs))
-	if len(agentIDs) == 0 {
-		return names, nil
-	}
-	rows, err := s.pool.Query(ctx, `SELECT id, name FROM workspace_agent WHERE id = ANY($1)`, agentIDs)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id, name string
-		if err := rows.Scan(&id, &name); err != nil {
-			return nil, err
-		}
-		names[id] = name
-	}
-	return names, rows.Err()
 }
 
 // Triggers

@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -25,6 +26,8 @@ import (
 	"github.com/temporality-project/temporality/controlplane"
 	"github.com/temporality-project/temporality/observation"
 	"go.temporal.io/sdk/client"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ── fakes ────────────────────────────────────────────────────────────────────
@@ -49,16 +52,51 @@ func (f fakeWorkflowRun) GetWithOptions(context.Context, any, client.WorkflowRun
 // fakeTemporalClient is the fake temporal client of the R1 tests: a blocking
 // RPC hangs until the ctx deadline breaks it and returns ctx.Err() — the way
 // the real transport surfaces a deadline — a fast one answers immediately.
+// err answers immediately (a live deadline, the caller's own mapping), lateErr
+// hangs until the deadline passes and then returns a non-timeout error (the
+// transport shape where the deadline expired but the surfaced error is not
+// readable as one).
 type fakeTemporalClient struct {
 	blocking bool
+	err      error
+	lateErr  error
+}
+
+// outcome is the shared failure shape of every fake RPC below.
+func (f *fakeTemporalClient) outcome(ctx context.Context) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.lateErr != nil {
+		<-ctx.Done()
+		return f.lateErr
+	}
+	if f.blocking {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return nil
 }
 
 func (f *fakeTemporalClient) ExecuteWorkflow(ctx context.Context, _ client.StartWorkflowOptions, _ string, _ ...any) (client.WorkflowRun, error) {
-	if f.blocking {
-		<-ctx.Done()
-		return nil, ctx.Err()
+	if err := f.outcome(ctx); err != nil {
+		return nil, err
 	}
 	return fakeWorkflowRun{id: "workflow-1", runID: "temporal-run-1"}, nil
+}
+
+// SignalWorkflow/CancelWorkflow/TerminateWorkflow serve the R1 route mirrors
+// of the approval/cancel/terminate handlers.
+func (f *fakeTemporalClient) SignalWorkflow(ctx context.Context, _, _, _ string, _ any) error {
+	return f.outcome(ctx)
+}
+
+func (f *fakeTemporalClient) CancelWorkflow(ctx context.Context, _, _ string) error {
+	return f.outcome(ctx)
+}
+
+func (f *fakeTemporalClient) TerminateWorkflow(ctx context.Context, _, _, _ string) error {
+	return f.outcome(ctx)
 }
 
 // rpcStartedHandler mirrors the production wiring of the in-scope start-run
@@ -167,7 +205,7 @@ func nudgeDeadlineServer(t *testing.T, signaler *stubSignaler) *httptest.Server 
 	})
 	authed := gate.Authenticate(mux)
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/agent/runs/") && strings.HasSuffix(r.URL.Path, "/nudge") {
+		if matchesNudgeRPCRoute(r) {
 			nudgeWithRPCDeadline(w, r, authed)
 			return
 		}
@@ -377,4 +415,248 @@ func TestSSEWriteDeadlineExemptionSurvivesWriteTimeout(t *testing.T) {
 	body, _ = streamedBody(false)
 	require.NotContains(t, body, "chunk-2",
 		"without the exemption the WriteTimeout severs the stream (the incident R2 protects SSE from)")
+}
+
+// ── R1 rework: gRPC-status attribution, the remaining routes, exact /nudge match ──
+
+// postRPC POSTs path with an empty JSON body and returns the status, the
+// decoded body and the round-trip duration (what proves «не зависает»).
+func postRPC(t *testing.T, server *httptest.Server, path string) (int, map[string]any, time.Duration) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, server.URL+path, strings.NewReader("{}"))
+	require.NoError(t, err)
+	started := time.Now()
+	response, err := server.Client().Do(request)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body), "response must be JSON: %s", string(raw))
+	return response.StatusCode, body, time.Since(started)
+}
+
+// approvalRPCHandler mirrors the production wiring of POST
+// /v1/agent/runs/{runID}/approval: the signal runs through temporalRPC under
+// the R1 deadline, expiry is answered by temporalRPC itself (503) and every
+// other failure keeps the route's original 409 mapping.
+func approvalRPCHandler(fake *fakeTemporalClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		signalErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			return fake.SignalWorkflow(ctx, "workflow-1", "", "agent.approval", nil)
+		})
+		if done {
+			return
+		}
+		if signalErr != nil {
+			writeError(w, http.StatusConflict, signalErr)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
+	}
+}
+
+// cancelRPCHandler mirrors the production wiring of the two cancel routes
+// (POST /v1/agent/runs/{runID}/cancel and POST /v1/workspace/runs/{runID}/cancel
+// — wiring-identical: temporalRPC, 409 on failure, 200 cancel_requested).
+func cancelRPCHandler(fake *fakeTemporalClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cancelErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			return fake.CancelWorkflow(ctx, "workflow-1", "")
+		})
+		if done {
+			return
+		}
+		if cancelErr != nil {
+			writeError(w, http.StatusConflict, cancelErr)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"run_id": "run-1", "status": "cancel_requested"})
+	}
+}
+
+// terminateRPCHandler mirrors POST /v1/agent/runs/{runID}/terminate: the RPC
+// and both mappings (409 / already-gone 200). The production heal branch also
+// journals the terminal event — the deadline must short-circuit before any
+// branch, which the blocked test pins.
+func terminateRPCHandler(fake *fakeTemporalClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		terminateErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			return fake.TerminateWorkflow(ctx, "workflow-1", "", "terminated by operator")
+		})
+		if done {
+			return
+		}
+		if terminateErr != nil {
+			if !strings.Contains(terminateErr.Error(), "not found") && !strings.Contains(terminateErr.Error(), "NotFound") {
+				writeError(w, http.StatusConflict, terminateErr)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"run_id": "run-1", "status": "already_gone"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"run_id": "run-1", "status": "terminated"})
+	}
+}
+
+// TestIsTemporalRPCDeadlineAttribution pins the two error shapes R1 counts as
+// a timeout: the context error (errors.Is) and the gRPC status the Temporal
+// transport actually returns for an expired RPC deadline (codes.DeadlineExceeded,
+// wrapped forms included). Every other failure — other gRPC statuses, plain
+// errors, nil — is not a timeout.
+func TestIsTemporalRPCDeadlineAttribution(t *testing.T) {
+	require.True(t, isTemporalRPCDeadline(context.DeadlineExceeded))
+	require.True(t, isTemporalRPCDeadline(fmt.Errorf("rpc: %w", context.DeadlineExceeded)))
+	require.True(t, isTemporalRPCDeadline(status.Error(codes.DeadlineExceeded, "context deadline exceeded")))
+	require.True(t, isTemporalRPCDeadline(fmt.Errorf("start run: %w", status.Error(codes.DeadlineExceeded, "deadline exceeded"))))
+	require.False(t, isTemporalRPCDeadline(status.Error(codes.NotFound, "workflow not found")))
+	require.False(t, isTemporalRPCDeadline(status.Error(codes.AlreadyExists, "workflow execution already started")))
+	require.False(t, isTemporalRPCDeadline(errors.New("connection refused: temporal-frontend:7233")))
+	require.False(t, isTemporalRPCDeadline(nil))
+}
+
+// TestGRPCDeadlineStatusAnswerMapsTo503: the fake returns a real gRPC status
+// error codes.DeadlineExceeded — the shape the Temporal transport surfaces
+// for an expired RPC deadline, with no context error anywhere — and the
+// handler must still answer R1's 503 "temporal rpc timeout: …".
+func TestGRPCDeadlineStatusAnswerMapsTo503(t *testing.T) {
+	t.Setenv("KERNEL_TEMPORAL_RPC_TIMEOUT", "5s")
+	server := httptest.NewServer(approvalRPCHandler(&fakeTemporalClient{err: status.Error(codes.DeadlineExceeded, "context deadline exceeded")}))
+	t.Cleanup(server.Close)
+
+	code, body, _ := postRPC(t, server, "/v1/agent/runs/run-1/approval")
+	require.Equal(t, http.StatusServiceUnavailable, code)
+	require.Contains(t, body["error"], "temporal rpc timeout:",
+		"a gRPC DeadlineExceeded status must be attributed as R1's timeout, got %v", body["error"])
+}
+
+// TestExpiredRPCDeadlineContextMapsTo503 pins temporalRPC's second
+// attribution rule: an error that itself does not read as a timeout still
+// answers 503 when this RPC's own deadline expired while the call was in
+// flight — the deadline is the attributable cause of the refusal.
+func TestExpiredRPCDeadlineContextMapsTo503(t *testing.T) {
+	t.Setenv("KERNEL_TEMPORAL_RPC_TIMEOUT", "100ms")
+	server := httptest.NewServer(approvalRPCHandler(&fakeTemporalClient{lateErr: errors.New("transport closed while waiting")}))
+	t.Cleanup(server.Close)
+
+	code, body, elapsed := postRPC(t, server, "/v1/agent/runs/run-1/approval")
+	require.Equal(t, http.StatusServiceUnavailable, code)
+	require.Contains(t, body["error"], "temporal rpc timeout:")
+	require.Less(t, elapsed, 5*time.Second, "the handler must answer inside the deadline, not hang")
+}
+
+// TestNonDeadlineErrorWithLiveDeadlineKeeps409: a failure that arrives while
+// the deadline is still alive keeps the route's original mapping — R1 must
+// not reshape non-timeout errors (R5), neither plain nor gRPC-status ones.
+func TestNonDeadlineErrorWithLiveDeadlineKeeps409(t *testing.T) {
+	t.Setenv("KERNEL_TEMPORAL_RPC_TIMEOUT", "5s")
+	for name, failure := range map[string]error{
+		"plain error":        errors.New("connection refused: temporal-frontend:7233"),
+		"gRPC NotFound":      status.Error(codes.NotFound, "workflow not found"),
+		"gRPC AlreadyExists": status.Error(codes.AlreadyExists, "workflow execution already started"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(approvalRPCHandler(&fakeTemporalClient{err: failure}))
+			t.Cleanup(server.Close)
+			code, body, _ := postRPC(t, server, "/v1/agent/runs/run-1/approval")
+			require.Equal(t, http.StatusConflict, code,
+				"a live-deadline non-timeout failure must keep the route's 409, got %v: %v", code, body)
+		})
+	}
+}
+
+// TestBlockedApproveSignalAnswers503WithinDeadline: a wedged approval signal
+// breaks at the R1 deadline and answers 503 instead of hanging the handler.
+func TestBlockedApproveSignalAnswers503WithinDeadline(t *testing.T) {
+	t.Setenv("KERNEL_TEMPORAL_RPC_TIMEOUT", "100ms")
+	server := httptest.NewServer(approvalRPCHandler(&fakeTemporalClient{blocking: true}))
+	t.Cleanup(server.Close)
+
+	code, body, elapsed := postRPC(t, server, "/v1/agent/runs/run-1/approval")
+	require.Equal(t, http.StatusServiceUnavailable, code)
+	require.Contains(t, body["error"], "temporal rpc timeout:")
+	require.Less(t, elapsed, 5*time.Second, "the handler must answer inside the deadline, not hang")
+}
+
+// TestFastApproveSignalKeepsAcceptedAnswer: a healthy approval signal keeps
+// the route's 202 — the deadline only fires for a wedged RPC (R5).
+func TestFastApproveSignalKeepsAcceptedAnswer(t *testing.T) {
+	server := httptest.NewServer(approvalRPCHandler(&fakeTemporalClient{}))
+	t.Cleanup(server.Close)
+
+	code, body, _ := postRPC(t, server, "/v1/agent/runs/run-1/approval")
+	require.Equal(t, http.StatusAccepted, code)
+	require.Equal(t, true, body["accepted"])
+}
+
+// TestBlockedCancelAnswers503WithinDeadline: a wedged cancel breaks at the
+// R1 deadline with 503, never the old hang.
+func TestBlockedCancelAnswers503WithinDeadline(t *testing.T) {
+	t.Setenv("KERNEL_TEMPORAL_RPC_TIMEOUT", "100ms")
+	server := httptest.NewServer(cancelRPCHandler(&fakeTemporalClient{blocking: true}))
+	t.Cleanup(server.Close)
+
+	code, body, elapsed := postRPC(t, server, "/v1/agent/runs/run-1/cancel")
+	require.Equal(t, http.StatusServiceUnavailable, code)
+	require.Contains(t, body["error"], "temporal rpc timeout:")
+	require.Less(t, elapsed, 5*time.Second, "the handler must answer inside the deadline, not hang")
+}
+
+// TestFastCancelKeepsPreviousAnswer: a healthy cancel keeps the 200
+// cancel_requested (R5).
+func TestFastCancelKeepsPreviousAnswer(t *testing.T) {
+	server := httptest.NewServer(cancelRPCHandler(&fakeTemporalClient{}))
+	t.Cleanup(server.Close)
+
+	code, body, _ := postRPC(t, server, "/v1/agent/runs/run-1/cancel")
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, "cancel_requested", body["status"])
+}
+
+// TestBlockedTerminateAnswers503WithinDeadline: a wedged terminate breaks at
+// the R1 deadline with 503 and never enters the already-gone heal branch.
+func TestBlockedTerminateAnswers503WithinDeadline(t *testing.T) {
+	t.Setenv("KERNEL_TEMPORAL_RPC_TIMEOUT", "100ms")
+	server := httptest.NewServer(terminateRPCHandler(&fakeTemporalClient{blocking: true}))
+	t.Cleanup(server.Close)
+
+	code, body, elapsed := postRPC(t, server, "/v1/agent/runs/run-1/terminate")
+	require.Equal(t, http.StatusServiceUnavailable, code)
+	require.Contains(t, body["error"], "temporal rpc timeout:")
+	require.Less(t, elapsed, 5*time.Second, "the handler must answer inside the deadline, not hang")
+}
+
+// TestFastTerminateKeepsPreviousAnswer: a healthy terminate keeps the 200
+// terminated (R5); a fast "not found" keeps the heal 200 already_gone.
+func TestFastTerminateKeepsPreviousAnswer(t *testing.T) {
+	server := httptest.NewServer(terminateRPCHandler(&fakeTemporalClient{err: status.Error(codes.NotFound, "workflow not found")}))
+	t.Cleanup(server.Close)
+	code, body, _ := postRPC(t, server, "/v1/agent/runs/run-1/terminate")
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, "already_gone", body["status"])
+
+	server = httptest.NewServer(terminateRPCHandler(&fakeTemporalClient{}))
+	t.Cleanup(server.Close)
+	code, body, _ = postRPC(t, server, "/v1/agent/runs/run-1/terminate")
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, "terminated", body["status"])
+}
+
+// TestNudgeRouteExactMatch pins the narrowed wiring match: only
+// POST /v1/agent/runs/{runID}/nudge (non-empty runID, exactly five path
+// segments) is wrapped by nudgeWithRPCDeadline — …/nudgeX and …/runs//nudge
+// are not, so the 409→503 rewrite can never fire for a neighbour route.
+func TestNudgeRouteExactMatch(t *testing.T) {
+	matches := func(method, path string) bool {
+		return matchesNudgeRPCRoute(httptest.NewRequest(method, path, nil))
+	}
+	require.True(t, matches(http.MethodPost, "/v1/agent/runs/abc/nudge"))
+	// ServeMux segments the escaped path: a run id carrying %2F is one segment.
+	require.True(t, matches(http.MethodPost, "/v1/agent/runs/a%2Fb/nudge"))
+	require.False(t, matches(http.MethodPost, "/v1/agent/runs/abc/nudgeX"))
+	require.False(t, matches(http.MethodPost, "/v1/agent/runs//nudge"))
+	require.False(t, matches(http.MethodPost, "/v1/agent/runs/abc/nudge/"))
+	require.False(t, matches(http.MethodPost, "/v1/agent/runs/abc/extra/nudge"))
+	require.False(t, matches(http.MethodPost, "/v1/workspace/runs/abc/nudge"))
+	require.False(t, matches(http.MethodGet, "/v1/agent/runs/abc/nudge"))
 }

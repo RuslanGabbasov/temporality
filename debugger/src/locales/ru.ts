@@ -622,6 +622,9 @@ export const ru: Record<string, string> = {
     'runs.event.model_call': 'Вызов модели',
     'runs.event.model_response': 'Ответ модели',
     'runs.event.stream_regen': 'повторная генерация',
+    'runs.event.stream_buffered': 'провайдер не стримит (один чанк)',
+    'runs.event.stream_chunks': 'чанков',
+    'runs.event.stream_retried': 'первая попытка сожгла {{seconds}}с',
     'runs.event.learned': 'Изучено',
     'runs.event.recalled': 'Восстановлено',
     'runs.event.knowledge_used': 'Знание применено',
@@ -735,6 +738,8 @@ export const ru: Record<string, string> = {
     'runs.live.alive': 'стрим идёт',
     'runs.live.stalled': 'нет данных {{seconds}} с',
     'runs.live.waiting_first_token': 'ждём первый токен',
+    'runs.live.sse_down': 'канал токенов не подключился (транспорт, не модель)',
+    'runs.live.sse_reconnecting': 'канал токенов переподключается (попытка {{count}})',
 
     // Console output of run_command (v2-consolidated.md §6, DoD-5)
     'runs.console.tabs': 'Потоки вывода команды',

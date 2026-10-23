@@ -96,8 +96,6 @@ export interface KnowledgeListFilters {
   knowledge_id?: string
   limit?: number
   cursor?: string
-  /** Aborts the in-flight list request (NFR-4: every request is abortable). */
-  signal?: AbortSignal
 }
 
 async function request<T>(path: string, init?: RequestInit, query?: Record<string, string | number | undefined>): Promise<T> {
@@ -115,8 +113,8 @@ async function request<T>(path: string, init?: RequestInit, query?: Record<strin
 const post = <T>(path: string, body: unknown) => request<T>(path, { method: 'POST', body: JSON.stringify(body) })
 
 export const observationApi = {
-  events: (project?: string, cursor?: string, sourceID?: string, eventID?: string, filters?: { run?: string; type?: string; limit?: number; since?: string; until?: string; signal?: AbortSignal }) => request<{ events: ObservationEvent[]; count: number; next_cursor?: string }>(
-    '/v1/observations/events', { signal: filters?.signal }, { project, limit: filters?.limit ?? 100, cursor, source_id: sourceID, event_id: eventID, run: filters?.run, type: filters?.type, since: filters?.since, until: filters?.until }),
+  events: (project?: string, cursor?: string, sourceID?: string, eventID?: string, filters?: { run?: string; type?: string; limit?: number; since?: string; until?: string }) => request<{ events: ObservationEvent[]; count: number; next_cursor?: string }>(
+    '/v1/observations/events', undefined, { project, limit: filters?.limit ?? 100, cursor, source_id: sourceID, event_id: eventID, run: filters?.run, type: filters?.type, since: filters?.since, until: filters?.until }),
   event: async (sourceID: string, eventID: string) => {
     const page = await request<{ events: ObservationEvent[]; count: number }>('/v1/observations/events', undefined, { source_id: sourceID, event_id: eventID, limit: 1 })
     const event = page.events[0]
@@ -124,7 +122,7 @@ export const observationApi = {
     return event
   },
   knowledge: (project: string, asOf?: string, knownAt?: string, filters?: KnowledgeListFilters) => request<{ knowledge: KnowledgeItem[]; count: number; total?: number; next_cursor?: string; facets?: KnowledgeFacets }>(
-    '/v1/observations/knowledge', { signal: filters?.signal }, {
+    '/v1/observations/knowledge', undefined, {
       project, as_of: asOf, known_at: knownAt,
       q: filters?.q, state: filters?.state, scope: filters?.scope,
       topic: filters?.topic, entity: filters?.entity, origin: filters?.origin, kind: filters?.kind,

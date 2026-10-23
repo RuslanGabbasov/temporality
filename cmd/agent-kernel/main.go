@@ -45,165 +45,13 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // BuildVersion is injected at link time by the release pipeline
 // (-ldflags "-X main.buildVersion=v2026.1.0"); "dev" when built by hand.
 var buildVersion = "dev"
-
-// ── Batch run list (GET /v1/agent/runs) ──────────────────────────────────────
-//
-// One cursor-paginated page of run.started rows with terminal status
-// resolved server-side: the Runs tab's list, its status tags and the
-// auto-selected first run in ≤3 requests (docs/trace-rework/01-spec §3E
-// NFR-1, K-2). Status resolution failure degrades the page to
-// partial:true + status "unknown" (K-3) instead of failing the list or
-// silently pretending every run is still running.
-
-// runListStore is the journal slice this route reads (satisfied by
-// *workspace.Store; faked in tests).
-type runListStore interface {
-	ListRunsPage(ctx context.Context, project string, projects []string, limit int, after *workspace.RunListCursor) ([]workspace.RunListEntry, string, error)
-	RunTerminalStatuses(ctx context.Context, runIDs []string) (map[string]string, error)
-	AgentDisplayNames(ctx context.Context, agentIDs []string) (map[string]string, error)
-}
-
-type runListDeps struct {
-	store runListStore
-	gate  *controlplane.Gate
-	log   *slog.Logger
-}
-
-// runListScope decides the store-side project constraint for one listing:
-// a concrete project rides as-is (the gate already authorized it), an
-// all-projects principal gets no constraint, a scoped principal gets its
-// visible list — and emptyVisible=true means "answer an empty page without
-// querying" (docs/activity-scoping.md §5: an empty visibility must never
-// degrade into an unfiltered listing).
-func runListScope(principal controlplane.Principal, project string) (projects []string, emptyVisible bool) {
-	if project != "" {
-		return nil, false
-	}
-	visible, all := principal.AllowedProjects()
-	if all {
-		return nil, false
-	}
-	if len(visible) == 0 {
-		return nil, true
-	}
-	return visible, false
-}
-
-func registerRunListRoute(mux *http.ServeMux, deps runListDeps) {
-	mux.HandleFunc("GET /v1/agent/runs", func(w http.ResponseWriter, r *http.Request) {
-		project := r.URL.Query().Get("project")
-		principal, allowed := deps.gate.AllowQuery(w, r, controlplane.RoleReader, project)
-		if !allowed {
-			return
-		}
-		// Page size per spec: 50–100, default 100. Outside the range the
-		// contract is broken loudly, not clamped silently.
-		limit := 100
-		if raw := r.URL.Query().Get("limit"); raw != "" {
-			parsed, err := strconv.Atoi(raw)
-			if err != nil || parsed < 50 || parsed > 100 {
-				writeError(w, 400, errors.New("limit must be between 50 and 100"))
-				return
-			}
-			limit = parsed
-		}
-		after, err := workspace.DecodeRunListCursor(r.URL.Query().Get("cursor"))
-		if err != nil {
-			writeError(w, 400, err)
-			return
-		}
-		// An absent cursor means "first page": the store gets nil, not a
-		// pointer to the zero position.
-		var afterPtr *workspace.RunListCursor
-		if r.URL.Query().Get("cursor") != "" {
-			afterPtr = &after
-		}
-		// Empty project = global listing constrained to the principal's
-		// visible projects (docs/activity-scoping.md §5), same as
-		// GET /v1/agent/operations. A principal with no visible projects gets
-		// an empty page — never an unfiltered one.
-		projects, emptyVisible := runListScope(principal, project)
-		if emptyVisible {
-			writeJSON(w, 200, map[string]any{"runs": []any{}, "count": 0, "next_cursor": "", "partial": false, "partial_error": ""})
-			return
-		}
-		entries, next, err := deps.store.ListRunsPage(r.Context(), project, projects, limit, afterPtr)
-		if err != nil {
-			deps.log.Warn("list runs page", "project", project, "error", err)
-			writeError(w, 500, err)
-			return
-		}
-		runIDs := make([]string, 0, len(entries))
-		agentIDs := make([]string, 0, len(entries))
-		seenAgents := make(map[string]bool, len(entries))
-		for _, entry := range entries {
-			runIDs = append(runIDs, entry.RunID)
-			if entry.AgentID != "" && !seenAgents[entry.AgentID] {
-				seenAgents[entry.AgentID] = true
-				agentIDs = append(agentIDs, entry.AgentID)
-			}
-		}
-		// Statuses are a separate query on purpose: when it fails the list
-		// still renders (K-3) — rows report status "unknown", the response
-		// carries partial:true with the reason, and the failure is logged.
-		statuses, statusErr := deps.store.RunTerminalStatuses(r.Context(), runIDs)
-		partial := statusErr != nil
-		partialError := ""
-		if statusErr != nil {
-			partialError = statusErr.Error()
-			deps.log.Warn("resolve run statuses for list", "error", statusErr)
-			statuses = map[string]string{}
-		}
-		// Agent names are cosmetics — a failure keeps the list, names fall
-		// back to ids client-side.
-		names, nameErr := deps.store.AgentDisplayNames(r.Context(), agentIDs)
-		if nameErr != nil {
-			deps.log.Warn("resolve run agent names", "error", nameErr)
-			names = map[string]string{}
-		}
-		runs := make([]map[string]any, 0, len(entries))
-		for _, entry := range entries {
-			status := "running"
-			if partial {
-				status = "unknown"
-			} else if resolved, ok := statuses[entry.RunID]; ok {
-				status = resolved
-			}
-			row := map[string]any{
-				"run_id":        entry.RunID,
-				"project":       entry.Project,
-				"title":         entry.Title,
-				"role":          entry.Role,
-				"parent_run_id": entry.ParentRunID,
-				"started_at":    entry.StartedAt,
-				"status":        status,
-				"source_id":     entry.SourceID,
-			}
-			if entry.Workflow != "" {
-				row["workflow"] = entry.Workflow
-			}
-			if entry.AgentID != "" {
-				row["agent_id"] = entry.AgentID
-				if name, ok := names[entry.AgentID]; ok {
-					row["agent_name"] = name
-				}
-			}
-			runs = append(runs, row)
-		}
-		writeJSON(w, 200, map[string]any{
-			"runs":          runs,
-			"count":         len(runs),
-			"next_cursor":   next,
-			"partial":       partial,
-			"partial_error": partialError,
-		})
-	})
-}
 
 // ── Temporal-RPC deadline & HTTP server budgets (docs/fixes/kernel-wedge-2026-10-21, R1/R2) ──
 //
@@ -242,8 +90,15 @@ func temporalRPCTimeout() time.Duration {
 
 // isTemporalRPCDeadline reports that a call failed because its deadline
 // expired — the one failure mode handlers must translate into R1's 503.
+// Two shapes count: the context error (errors.Is … context.DeadlineExceeded)
+// and the gRPC status the Temporal transport actually returns when an RPC
+// deadline expires (codes.DeadlineExceeded) — that status does not wrap the
+// context error, so attribution must read the gRPC status as well.
 func isTemporalRPCDeadline(err error) bool {
-	return errors.Is(err, context.DeadlineExceeded)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	return status.Code(err) == codes.DeadlineExceeded
 }
 
 // temporalRPCDeadlineError formats R1's client-visible error text:
@@ -261,7 +116,14 @@ func temporalRPC(w http.ResponseWriter, ctx context.Context, rpc func(ctx contex
 	rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
 	defer cancel()
 	err = rpc(rpcCtx)
-	if err == nil || !isTemporalRPCDeadline(err) {
+	if err == nil {
+		return nil, false
+	}
+	// Expiry of this RPC's own deadline is the attributable cause of the
+	// failure even when the returned error itself does not read as a timeout
+	// (the transport may surface a sibling error at the same instant): an
+	// expired R1 deadline still answers 503.
+	if !isTemporalRPCDeadline(err) && rpcCtx.Err() != context.DeadlineExceeded {
 		return err, false
 	}
 	writeError(w, http.StatusServiceUnavailable, temporalRPCDeadlineError(err))
@@ -283,6 +145,24 @@ func nudgeWithRPCDeadline(w http.ResponseWriter, r *http.Request, next http.Hand
 		expired:        func() bool { return isTemporalRPCDeadline(ctx.Err()) },
 	}
 	next.ServeHTTP(recorder, r.WithContext(ctx))
+}
+
+// matchesNudgeRPCRoute reports whether the request is exactly the route
+// nudgeWithRPCDeadline guards: POST /v1/agent/runs/{runID}/nudge — five
+// non-empty path segments with a non-empty runID. The earlier loose
+// HasPrefix/HasSuffix match also caught neighbours (…/nudgeX, …/runs//nudge);
+// the 409→503 rewrite must fire only on the real route, where a rewritten
+// 409 can only come from the deadline installed here. The path is matched in
+// its escaped form — ServeMux segments the same way, so a run id carrying
+// %2F stays one segment.
+func matchesNudgeRPCRoute(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	segments := strings.Split(r.URL.EscapedPath(), "/") // ["", "v1", "agent", "runs", runID, "nudge"]
+	return len(segments) == 6 &&
+		segments[1] == "v1" && segments[2] == "agent" && segments[3] == "runs" &&
+		segments[4] != "" && segments[5] == "nudge"
 }
 
 // nudgeDeadlineWriter rewrites the route's stable 409 signal failure into
@@ -508,12 +388,14 @@ func main() {
 	// Ephemeral live-token streaming: the activity worker and the HTTP server
 	// share one process, so an in-memory bus connects them without a broker.
 	activities.Tokens = agent.NewTokenBus()
+
 	// Ephemeral run_command console (v2-consolidated.md §6): the same
 	// single-process topology as Tokens — the worker's OnOutput hook writes
 	// into the registry, the HTTP routes (registerConsoleRoutes) read it.
 	// Output is never persisted (§11.1): the registry lives and dies with
 	// this process.
 	activities.Console = agent.NewConsole()
+
 	// Admin-editable channel settings (channel_transport row) overlay the
 	// KERNEL_CHANNEL__* env vars: delivery reads the database per send, so
 	// saving the settings screen takes effect without a restart.
@@ -809,9 +691,20 @@ func main() {
 		}
 		workflowID := workflowIDFor(activities.SourceID, input.Project, input.RunID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-		run, err := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
-		if err != nil {
-			writeError(w, 409, err)
+		// R1 (kernel-wedge-2026-10-21): the workflow start rides the temporal
+		// RPC deadline — expiry answers 503 "temporal rpc timeout: …"; every
+		// other failure keeps the 409 mapping below.
+		var run client.WorkflowRun
+		startErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			var rpcErr error
+			run, rpcErr = temporalClient.ExecuteWorkflow(ctx, options, "AgentRun", input)
+			return rpcErr
+		})
+		if done {
+			return
+		}
+		if startErr != nil {
+			writeError(w, 409, startErr)
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]string{"run_id": input.RunID, "project": input.Project, "workflow_id": run.GetID(), "temporal_run_id": run.GetRunID(), "status": "started"})
@@ -986,9 +879,20 @@ func main() {
 		}
 		workflowID := workflowIDFor(activities.SourceID, req.Project, runID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-		run, wfErr := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
-		if wfErr != nil {
-			writeError(w, 409, wfErr)
+		// R1 (kernel-wedge-2026-10-21): the team workflow start rides the
+		// temporal RPC deadline — expiry answers 503 "temporal rpc timeout: …";
+		// every other failure keeps the 409 mapping below.
+		var run client.WorkflowRun
+		startErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			var rpcErr error
+			run, rpcErr = temporalClient.ExecuteWorkflow(ctx, options, "AgentRun", input)
+			return rpcErr
+		})
+		if done {
+			return
+		}
+		if startErr != nil {
+			writeError(w, 409, startErr)
 			return
 		}
 		_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditTeamRunStarted, "team", team.ID, map[string]any{"run_id": runID, "version": input.Team.Version, "project": req.Project})
@@ -1068,14 +972,6 @@ func main() {
 		}
 		writeJSON(w, 200, preview)
 	})
-	// Batch list for the Runs tab (docs/trace-rework/01-spec §3E NFR-1): the
-	// GET twin of POST /v1/agent/runs above — one cursor page of runs with
-	// statuses instead of the client's four journal scans + per-row N+1.
-	registerRunListRoute(mux, runListDeps{store: ws, gate: gate, log: log})
-	// Live console of run_command (v2-consolidated.md §6): the registry is
-	// created next to the activity worker (below), the HTTP handlers read
-	// the same process memory. ?project= drives auth like /v1/agent/runs.
-	registerConsoleRoutes(mux, consoleDeps{console: activities.Console, gate: gate})
 	mux.HandleFunc("GET /v1/agent/runs/{runID}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		if project == "" {
@@ -1149,8 +1045,17 @@ func main() {
 			// workflow (top-level or child) is identified by the full run path.
 			workflowID = workflowIDFor(sourceID, project, childRunID)
 		}
-		if err := temporalClient.SignalWorkflow(r.Context(), workflowID, "", agent.ApprovalSignal, approval); err != nil {
-			writeError(w, 409, err)
+		// R1 (kernel-wedge-2026-10-21): the approval signal rides the temporal
+		// RPC deadline — expiry answers 503 "temporal rpc timeout: …"; every
+		// other failure keeps the 409 mapping below.
+		signalErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
+		})
+		if done {
+			return
+		}
+		if signalErr != nil {
+			writeError(w, 409, signalErr)
 			return
 		}
 		// Close the human_request row when this approval answers one
@@ -1208,8 +1113,17 @@ func main() {
 		}
 		sourceID := querySourceID(r, activities.SourceID)
 		workflowID := workflowIDFor(sourceID, project, r.PathValue("runID"))
-		if err := temporalClient.CancelWorkflow(r.Context(), workflowID, ""); err != nil {
-			writeError(w, 409, err)
+		// R1 (kernel-wedge-2026-10-21): the cancel rides the temporal RPC
+		// deadline — expiry answers 503 "temporal rpc timeout: …"; every
+		// other failure keeps the 409 mapping below.
+		cancelErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			return temporalClient.CancelWorkflow(ctx, workflowID, "")
+		})
+		if done {
+			return
+		}
+		if cancelErr != nil {
+			writeError(w, 409, cancelErr)
 			return
 		}
 		writeJSON(w, 200, map[string]string{"run_id": r.PathValue("runID"), "status": "cancel_requested"})
@@ -1281,12 +1195,24 @@ func main() {
 			Scope: agent.EventScope(sourceID, project, runID) + "-extract",
 		}
 		options := client.StartWorkflowOptions{ID: agent.ExtractionWorkflowIDPublic(sourceID, project, runID), TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-		if _, err := temporalClient.ExecuteWorkflow(r.Context(), options, "KnowledgeExtraction", input); err != nil {
-			if strings.Contains(err.Error(), "already started") || strings.Contains(err.Error(), "already exists") {
+		// R1 (kernel-wedge-2026-10-21): the extraction start rides the temporal
+		// RPC deadline — expiry answers 503 "temporal rpc timeout: …"; every
+		// other failure keeps the existing mapping below (409 already started,
+		// 500 otherwise).
+		startErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			var rpcErr error
+			_, rpcErr = temporalClient.ExecuteWorkflow(ctx, options, "KnowledgeExtraction", input)
+			return rpcErr
+		})
+		if done {
+			return
+		}
+		if startErr != nil {
+			if strings.Contains(startErr.Error(), "already started") || strings.Contains(startErr.Error(), "already exists") {
 				writeJSON(w, http.StatusConflict, map[string]any{"error": "extraction already started for this run", "run_id": runID})
 				return
 			}
-			writeError(w, 500, err)
+			writeError(w, 500, startErr)
 			return
 		}
 		writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true, "run_id": runID, "project": project, "detail": "extraction started; knowledge will appear in the journal projection and in hints"})
@@ -1309,14 +1235,24 @@ func main() {
 		runID := r.PathValue("runID")
 		sourceID := querySourceID(r, activities.SourceID)
 		workflowID := workflowIDFor(sourceID, project, runID)
-		if err := temporalClient.TerminateWorkflow(r.Context(), workflowID, "", "terminated by operator"); err != nil {
+		// R1 (kernel-wedge-2026-10-21): the terminate rides the temporal RPC
+		// deadline — expiry answers 503 "temporal rpc timeout: …" and never
+		// enters the already-gone heal path below; every other failure keeps
+		// its existing mapping (409 / heal on "not found").
+		terminateErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			return temporalClient.TerminateWorkflow(ctx, workflowID, "", "terminated by operator")
+		})
+		if done {
+			return
+		}
+		if terminateErr != nil {
 			// A workflow Temporal does not know is already gone — the common case
 			// being a stand whose Temporal volume was rebuilt while the journal
 			// kept older runs. Those zombies stay 'running' in lists forever and
 			// every stop press 409s. Heal instead: journal the terminal event and
 			// settle the workspace status, answer success.
-			if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "NotFound") {
-				writeError(w, 409, err)
+			if !strings.Contains(terminateErr.Error(), "not found") && !strings.Contains(terminateErr.Error(), "NotFound") {
+				writeError(w, 409, terminateErr)
 				return
 			}
 			actorGone := requestUserID(r)
@@ -1357,6 +1293,12 @@ func main() {
 	// resolves from the journal, a gone workflow heals like /terminate and
 	// other signal failures answer structurally — see nudge.go.
 	registerNudgeRoute(mux, nudgeDeps{gate: gate, store: ws, journal: events, signaler: temporalClient, log: log})
+
+	// Live console routes wiring (v2-consolidated.md §6): the registry is
+	// created next to the activity worker (above), the HTTP handlers read
+	// the same process memory. ?project= drives auth like /v1/agent/runs.
+	registerConsoleRoutes(mux, consoleDeps{console: activities.Console, gate: gate})
+
 	mux.HandleFunc("POST /v1/agent/runs/{runID}/note", func(w http.ResponseWriter, r *http.Request) {
 		var note agent.UserNote
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&note); err != nil && !errors.Is(err, io.EOF) {
@@ -1541,14 +1483,32 @@ func main() {
 	}
 
 	// wizardModelClient serves every description→draft wizard (agent, skill,
-	// team): the env gateway when configured, otherwise the first workspace
-	// provider. Fresh installs configured purely through onboarding have no env
-	// gateway — activities.Model is nil there — and the wizards must keep
-	// working the same way runs do, through the provider registry. On failure it
-	// writes the 502 response itself and returns nil.
+	// team): the env gateway when configured, else the installation's
+	// supervisor judge model — the model the operator already picked for
+	// exactly this kind of structured quality work (Agents → Quality
+	// settings) — and only when even that is unset the first workspace
+	// provider model that looks chat-capable (catalogs mix in ASR/embedding
+	// entries the wizard cannot call — see workspaceDraftModel). Fresh installs
+	// configured purely through onboarding have no env gateway —
+	// activities.Model is nil there — and the wizards must keep working the
+	// same way runs do, through the provider registry. On failure it writes
+	// the 502 response itself and returns nil.
 	wizardModelClient := func(w http.ResponseWriter, r *http.Request) *llm.Client {
 		if activities.Model != nil {
 			return activities.Model
+		}
+		// A configured judge wins and its failures are loud: silently falling
+		// back to another model would run the wizard on something the operator
+		// did not pick. Only an unconfigured judge falls through to the
+		// deterministic first-provider pick (a fresh install that never opened
+		// Quality settings).
+		if config, err := ws.JudgeConfig(r.Context()); err == nil && config.Configured {
+			client, err := judgeModelClient(r.Context(), ws, secretMasterKey)
+			if err != nil {
+				writeError(w, 502, err)
+				return nil
+			}
+			return client
 		}
 		client, err := workspaceDraftModel(r.Context(), ws, func(ctx context.Context, ref string) (string, error) {
 			return resolveProviderAPIKey(ctx, ws, ref, secretMasterKey)
@@ -1968,7 +1928,7 @@ func main() {
 			{"key": "judge_model", "configured": judgeOK, "used_by": []string{"skill_propose (fallback)", "knowledge contradiction triage (B1)", "knowledge hygiene (B4)", "area normalization"},
 				"fix": "Agents → Quality settings → pick a judge model"},
 			{"key": "embeddings", "configured": embedStatus.Ready, "used_by": []string{"semantic hints", "knowledge conflict prediction (C5)", "semantic knowledge search"},
-				"fix": "Wait for the model to load (first boot downloads it); check KERNEL_EMBEDDINGS_MODEL", "detail": embedStatus.Error},
+				"fix": "A failed load retries automatically with a growing backoff; check detail for the real cause; verify KERNEL_EMBEDDINGS_MODEL, network access to huggingface.co and writability of the cache dir (REMBED_CACHE, default /var/cache/rembed in the container, the OS user cache elsewhere)", "detail": embedStatus.Error},
 			{"key": "sandbox_image", "configured": sandboxOK, "used_by": []string{"run_command", "write_file", "read_file", "web_fetch (page rendering)"},
 				"fix": "Run the sandbox build in onboarding, or set KERNEL_SANDBOX_IMAGE"},
 			{"key": "journal_auth", "configured": strings.TrimSpace(os.Getenv("TEMPORALITY_API_TOKEN")) != "" || !gate.Enabled(), "used_by": []string{"operations panel", "knowledge extraction", "saga tools"},
@@ -3454,8 +3414,17 @@ func main() {
 			return
 		}
 		workflowID := workflowIDFor(activities.SourceID, run.ProjectID, run.RunID)
-		if err := temporalClient.CancelWorkflow(r.Context(), workflowID, ""); err != nil {
-			writeError(w, 409, err)
+		// R1 (kernel-wedge-2026-10-21): the cancel rides the temporal RPC
+		// deadline — expiry answers 503 "temporal rpc timeout: …"; every
+		// other failure keeps the 409 mapping below.
+		cancelErr, done := temporalRPC(w, r.Context(), func(ctx context.Context) error {
+			return temporalClient.CancelWorkflow(ctx, workflowID, "")
+		})
+		if done {
+			return
+		}
+		if cancelErr != nil {
+			writeError(w, 409, cancelErr)
 			return
 		}
 		_ = ws.UpdateRunStatus(r.Context(), run.ID, "cancelled", "", 0, "")
@@ -3567,9 +3536,25 @@ func main() {
 			return
 		}
 		runID := r.PathValue("runID")
+		// Child runs carry no workspace_run row (same resolution /stream uses):
+		// fall back to the journal's project mapping, or every delegated child
+		// would 404 here and never stream live tokens.
 		run, err := ws.GetRun(r.Context(), runID)
-		if err != nil {
-			writeError(w, 404, err)
+		if err != nil && !errors.Is(err, workspace.ErrNotFound) {
+			writeError(w, 500, err)
+			return
+		}
+		project := ""
+		if err == nil {
+			project = run.ProjectID
+		} else if resolved, perr := ws.RunProjectID(r.Context(), runID); perr == nil {
+			project = resolved
+			// Re-read the row with the project resolved: the terminal probe
+			// below only needs ProjectID; a missing row is fine.
+			run = workspace.Run{RunID: runID, ProjectID: project}
+			err = nil
+		} else {
+			writeError(w, 404, workspace.ErrNotFound)
 			return
 		}
 		flusher, ok := w.(http.Flusher)
@@ -3586,6 +3571,14 @@ func main() {
 		// after its budget; the write deadline is cleared for this connection
 		// and hang safety comes from the per-RPC deadlines (R1).
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+		// Flush the headers and a comment line immediately: Go does not write
+		// headers until the first body write, so without this the browser (and
+		// every proxy on the way) waits for the response to BEGIN until the
+		// first delta — the EventSource stays CONNECTING and the live metrics
+		// look dead even when the provider streams fine. A comment line is SSE
+		// liveness: no event fires on the client for it.
+		fmt.Fprint(w, ": open\n\n")
+		flusher.Flush()
 		events, snapshot, cancel := activities.Tokens.Subscribe(runID)
 		defer cancel()
 		writeEvent := func(event agent.TokenEvent) bool {
@@ -3595,6 +3588,7 @@ func main() {
 			return event.Type == "done"
 		}
 		if snapshot.Type == "done" {
+			slog.Info("token stream: subscribe to a closed run", "run_id", runID)
 			writeEvent(TokenDoneEvent)
 			return
 		}
@@ -3604,11 +3598,30 @@ func main() {
 		ctx := r.Context()
 		statusTicker := time.NewTicker(5 * time.Second)
 		defer statusTicker.Stop()
+		// Keepalive comments: proxies and load balancers see traffic on an
+		// otherwise silent connection (a thinking model can stream nothing for
+		// a minute+) and neither close it nor buffer past it.
+		keepaliveTicker := time.NewTicker(15 * time.Second)
+		defer keepaliveTicker.Stop()
+		// hangup is armed by the dErr path below when the describe's own R1
+		// deadline expired. Headers were sent long ago, so there is no HTTP
+		// status to rewrite mid-stream — the stream ends on this tick through
+		// the same terminal-event path a finished run takes, instead of
+		// probing a wedged Temporal forever (the R2-exemption promise: hang
+		// safety comes from the per-RPC deadlines (R1)).
+		hangup := false
 		terminal := func() bool {
-			description, dErr := temporalClient.DescribeWorkflowExecution(ctx, workflowIDFor(activities.SourceID, run.ProjectID, run.RunID), "")
+			// R1 (kernel-wedge-2026-10-21): the status probe is a Temporal-RPC
+			// like any other — it rides its own deadline even though the SSE
+			// connection itself is exempt from the server write budget (R2).
+			rpcCtx, cancelRPC := context.WithTimeout(ctx, temporalRPCTimeout())
+			defer cancelRPC()
+			description, dErr := temporalClient.DescribeWorkflowExecution(rpcCtx, workflowIDFor(activities.SourceID, run.ProjectID, run.RunID), "")
 			if dErr != nil {
+				hangup = isTemporalRPCDeadline(dErr) || rpcCtx.Err() == context.DeadlineExceeded
 				return false
 			}
+			hangup = false
 			if description.WorkflowExecutionInfo == nil {
 				return false
 			}
@@ -3637,10 +3650,21 @@ func main() {
 				}
 			case <-statusTicker.C:
 				if terminal() {
+					slog.Info("token stream: run terminal", "run_id", runID)
 					activities.Tokens.Close(runID)
 					writeEvent(TokenDoneEvent)
 					return
 				}
+				if hangup {
+					// R1: the describe deadline expired — end this stream
+					// through the dErr path. The bus stays open (the run is
+					// not finished); only this connection stops probing.
+					writeEvent(TokenDoneEvent)
+					return
+				}
+			case <-keepaliveTicker.C:
+				fmt.Fprint(w, ": ping\n\n")
+				flusher.Flush()
 			}
 		}
 	})
@@ -6098,7 +6122,13 @@ func main() {
 		emitTriggerEvent("trigger.accepted", "000001", triggerEventData)
 		workflowID := workflowIDFor(activities.SourceID, projectID, input.RunID)
 		options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-		run, wfErr := temporalClient.ExecuteWorkflow(r.Context(), options, "AgentRun", input)
+		// R1 (kernel-wedge-2026-10-21): this delivery attempt rides the
+		// temporal RPC deadline (KERNEL_TEMPORAL_RPC_TIMEOUT per attempt).
+		// The webhook is not the JSON API — no 503 rewrite here: the error
+		// keeps the existing duplicate/409 handling below.
+		attemptCtx, cancelAttempt := context.WithTimeout(r.Context(), temporalRPCTimeout())
+		run, wfErr := temporalClient.ExecuteWorkflow(attemptCtx, options, "AgentRun", input)
+		cancelAttempt()
 		if wfErr != nil {
 			// Duplicate delivery of the same source event: the workflow already
 			// exists — report the existing run instead of erroring (§4).
@@ -6226,7 +6256,14 @@ func main() {
 				input.ExecutionIdentityID = identityID
 				workflowID := workflowIDFor(activities.SourceID, t.ProjectID, input.RunID)
 				options := client.StartWorkflowOptions{ID: workflowID, TaskQueue: taskQueue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}
-				if _, wfErr := temporalClient.ExecuteWorkflow(context.Background(), options, "AgentRun", input); wfErr != nil {
+				// R1 (kernel-wedge-2026-10-21): every scheduled fire bounds its
+				// own start RPC with the temporal RPC deadline — a wedged
+				// Temporal costs this one attempt (logged, skipped below), not
+				// the whole schedule loop.
+				attemptCtx, cancelAttempt := context.WithTimeout(context.Background(), temporalRPCTimeout())
+				_, wfErr := temporalClient.ExecuteWorkflow(attemptCtx, options, "AgentRun", input)
+				cancelAttempt()
+				if wfErr != nil {
 					slog.Error("start trigger run", "trigger", t.ID, "error", wfErr)
 					continue
 				}
@@ -7208,11 +7245,21 @@ func main() {
 					journal:    runJournal,
 					sourceID:   activities.SourceID,
 					log:        log,
+					// R1 (kernel-wedge-2026-10-21): this pipeline runs both
+					// from the channel webhook's HTTP request and from the
+					// poll loop — either way every signal/note rides the
+					// temporal RPC deadline; failures keep the loop's
+					// existing log-and-skip handling (a channel webhook is
+					// not the JSON API, so no 503 rewrite applies).
 					signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
-						return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
+						rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
+						defer cancel()
+						return temporalClient.SignalWorkflow(rpcCtx, workflowID, "", agent.ApprovalSignal, approval)
 					},
 					note: func(ctx context.Context, workflowID string, note agent.UserNote) error {
-						return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.UserNoteSignal, note)
+						rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
+						defer cancel()
+						return temporalClient.SignalWorkflow(rpcCtx, workflowID, "", agent.UserNoteSignal, note)
 					},
 					intake: func(ctx context.Context, message agent.InboundMessage, senderUserID string) (string, error) {
 						user, err := senderUser(ctx, ws, senderUserID)
@@ -7248,11 +7295,18 @@ func main() {
 			journal:    runJournal,
 			sourceID:   activities.SourceID,
 			log:        log,
+			// R1 (kernel-wedge-2026-10-21): the poll-loop signals ride the
+			// temporal RPC deadline like every other handler-initiated RPC —
+			// failures keep the loop's existing log-and-skip handling.
 			signal: func(ctx context.Context, workflowID string, approval agent.Approval) error {
-				return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.ApprovalSignal, approval)
+				rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
+				defer cancel()
+				return temporalClient.SignalWorkflow(rpcCtx, workflowID, "", agent.ApprovalSignal, approval)
 			},
 			note: func(ctx context.Context, workflowID string, note agent.UserNote) error {
-				return temporalClient.SignalWorkflow(ctx, workflowID, "", agent.UserNoteSignal, note)
+				rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
+				defer cancel()
+				return temporalClient.SignalWorkflow(rpcCtx, workflowID, "", agent.UserNoteSignal, note)
 			},
 			intake: func(ctx context.Context, message agent.InboundMessage, senderUserID string) (string, error) {
 				user, err := senderUser(ctx, ws, senderUserID)
@@ -7315,7 +7369,9 @@ func main() {
 		// Its handler lives in nudge.go (a parallel working-tree change
 		// outside this fix's radius), so the deadline and the 503 translation
 		// are installed here, at the wiring point — see nudgeWithRPCDeadline.
-		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/agent/runs/") && strings.HasSuffix(r.URL.Path, "/nudge") {
+		// The match is the exact route pattern (matchesNudgeRPCRoute), so the
+		// rewrite can only ever fire for POST /v1/agent/runs/{runID}/nudge.
+		if matchesNudgeRPCRoute(r) {
 			nudgeWithRPCDeadline(w, r, authed)
 			return
 		}
@@ -7546,7 +7602,13 @@ type temporalLiveness struct {
 }
 
 func (t *temporalLiveness) IsWorkflowRunning(ctx context.Context, sourceID, project, runID string) (bool, error) {
-	description, err := t.client.DescribeWorkflowExecution(ctx, workflowIDFor(sourceID, project, runID), "")
+	// R1 (kernel-wedge-2026-10-21): this helper is called from the uncertain-
+	// operations listing — the describe rides the temporal RPC deadline so a
+	// wedged Temporal fails this probe instead of the request; the error
+	// keeps its existing handling below.
+	rpcCtx, cancel := context.WithTimeout(ctx, temporalRPCTimeout())
+	defer cancel()
+	description, err := t.client.DescribeWorkflowExecution(rpcCtx, workflowIDFor(sourceID, project, runID), "")
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return false, nil
@@ -8797,20 +8859,22 @@ var providerEnvNameRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 // only in memory and never in the database (docs/secrets-management.md §4).
 // workspaceDraftModel picks a model client for workspace-level LLM features
 // (the agent wizard) on installs that have no env gateway: the first
-// provider (by ID, for determinism) that lists models, first model in its
-// catalog. Mirrors the run-path routing contract — provider credentials
-// resolve at the boundary — without inventing a "default model" setting.
+// provider (by ID, for determinism) that lists models, first chat-capable
+// model in its catalog. Mirrors the run-path routing contract — provider
+// credentials resolve at the boundary — without inventing a "default model"
+// setting.
+//
+// "First model" needs the chat filter: catalogs are alphabetical
+// (normalizeModelIDs), and gateways that also serve speech or image models
+// (xiaomi lists MiMo-ASR next to MiMo-VL) would otherwise hand the wizard
+// an ASR model, failing every draft call at the provider.
 func workspaceDraftModel(ctx context.Context, lister providerLister, resolveKey func(ctx context.Context, ref string) (string, error)) (*llm.Client, error) {
 	providers, err := lister.ListProviders(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list providers for the agent wizard: %w", err)
 	}
 	sort.Slice(providers, func(i, j int) bool { return providers[i].ID < providers[j].ID })
-	for _, p := range providers {
-		if len(p.Models) == 0 {
-			continue
-		}
-		model := p.Models[0]
+	clientFor := func(p workspace.Provider, model string) (*llm.Client, error) {
 		apiKey, kErr := resolveKey(ctx, p.APIKeyRef)
 		if kErr != nil {
 			return nil, fmt.Errorf("provider %q credential: %w", p.ID, kErr)
@@ -8828,7 +8892,67 @@ func workspaceDraftModel(ctx context.Context, lister providerLister, resolveKey 
 		config.APIKey = apiKey
 		return llm.New(config), nil
 	}
+	for _, p := range providers {
+		if len(p.Models) == 0 {
+			continue
+		}
+		if model := pickChatModel(p.Models); model != "" {
+			return clientFor(p, model)
+		}
+	}
+	// Nothing in any catalog looks chat-capable (unusual naming): keep the
+	// historic pick — first provider with models, first model — rather than
+	// inventing a new failure mode. The provider's own error on a wrong
+	// model is the operator's signal.
+	for _, p := range providers {
+		if len(p.Models) == 0 {
+			continue
+		}
+		return clientFor(p, p.Models[0])
+	}
 	return nil, errors.New("no model configured for the agent wizard: add a provider with models (Providers page) or set TEMPORALITY_MODEL_BASE_URL and TEMPORALITY_MODEL_ID")
+}
+
+// draftNonChatHints are name fragments that reliably mark a catalog entry as
+// not a text-in/text-out chat model: speech recognition and synthesis,
+// audio-language, embeddings, rerankers, moderation classifiers and
+// image/video generators. The wizard speaks chat completions only, so one of
+// these picked as "first model" 400s every draft call. Deliberately a
+// blocklist, not an allowlist: chat naming across gateways is too diverse to
+// enumerate, while these fragments mark non-chat ids across vendors.
+var draftNonChatHints = []string{
+	"asr", "whisper", "stt", "tts", "speech", "voice", "transcribe", "transcription",
+	"audio", "music",
+	"embed", "rerank",
+	"moderation", "guard", "shield",
+	"image", "diffusion", "dall", "flux", "imagen", "sdxl",
+	"video", "sora", "veo", "kling",
+}
+
+// looksLikeNonChatModel matches case-insensitively on substrings: families
+// tokenize inconsistently ("MiMo-ASR", "whisper-large-v3",
+// "text-embedding-3-small"), and the fragments are distinctive enough that
+// plain containment has no known chat-model collisions.
+func looksLikeNonChatModel(id string) bool {
+	id = strings.ToLower(id)
+	for _, hint := range draftNonChatHints {
+		if strings.Contains(id, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+// pickChatModel returns the first catalog entry that looks chat-capable, or
+// "" when none does — the caller then falls back to the historic first-model
+// pick instead of refusing to work.
+func pickChatModel(models []string) string {
+	for _, model := range models {
+		if !looksLikeNonChatModel(model) {
+			return model
+		}
+	}
+	return ""
 }
 
 type providerLister interface {

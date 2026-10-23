@@ -103,14 +103,33 @@ func TestTokenBusCloseDeliversDoneAndDropsEntry(t *testing.T) {
 	}
 }
 
-func TestTokenBusPublishAfterCloseIsDropped(t *testing.T) {
+// A publish after Close REVIVES the entry: a publish is proof the run is
+// still generating, and a stale close (a terminal-looking describe probe
+// during a restart, a previous SSE connection's sweep) must not poison every
+// later model call of the run — deltas would drop silently and every
+// reconnecting UI would get an instant done forever.
+func TestTokenBusPublishAfterCloseRevives(t *testing.T) {
 	bus := NewTokenBus()
 	bus.Close("run-1")
-	bus.Publish("run-1", 1, "late", "")
+	// A subscriber connected before the revival sees done-on-subscribe.
+	// A subscriber connected before the revival sees done-on-subscribe.
 	_, snapshot, cancel := bus.Subscribe("run-1")
-	defer cancel()
-	if snapshot.Type != "done" || snapshot.Text != "" {
-		t.Fatalf("snapshot = %+v, want empty done", snapshot)
+	if snapshot.Type != "done" {
+		t.Fatalf("pre-revival snapshot = %+v, want done", snapshot)
+	}
+	cancel()
+
+	// The next publish revives: deltas flow again and new subscribers get
+	// live snapshots instead of a terminal done.
+	bus.Publish("run-1", 1, "revived", "")
+	events, snapshot2, cancel2 := bus.Subscribe("run-1")
+	defer cancel2()
+	if snapshot2.Type != "snapshot" || snapshot2.Text != "revived" {
+		t.Fatalf("post-revival snapshot = %+v, want the revived text", snapshot2)
+	}
+	bus.Publish("run-1", 1, " more", "")
+	if ev := <-events; ev.Type != "delta" || ev.Text != " more" {
+		t.Fatalf("delta = %+v", ev)
 	}
 }
 

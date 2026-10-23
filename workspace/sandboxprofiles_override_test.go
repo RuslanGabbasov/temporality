@@ -61,14 +61,14 @@ func TestValidateSandboxProfileOverrideTextMirror(t *testing.T) {
 // kernel/sandbox authority fails the build.
 func TestValidSandboxDockerfileRejectsD7Rules(t *testing.T) {
 	for name, tc := range map[string]struct{ text, wantLine, wantReason string }{
-		"syntax directive":        {"# syntax=docker/dockerfile:1\nFROM alpine:3.20\n", "строка 1", "#syntax="},
-		"bom syntax directive":    {"\ufeff# syntax=docker/dockerfile:1\nFROM alpine:3.20\n", "строка 1", "#syntax="},
-		"escape directive":        {"FROM alpine:3.20\n# escape=`\nRUN echo hi\n", "строка 2", "#escape="},
-		"generic directive":       {"# key=value\nFROM alpine:3.20\n", "строка 1", "#key="},
-		"run network host":        {"FROM alpine:3.20\nRUN --network=host nmap -sS 10.0.0.0/8\n", "строка 2", "--network=host"},
-		"run network ho st":       {"FROM alpine:3.20\nRUN --network=ho\\\nst echo hi\n", "строка 2", "--network=host"},
-		"run network host quoted": {"FROM alpine:3.20\nRUN --network=\"host\" echo hi\n", "строка 2", "--network=host"},
-		"run security insecure":   {"FROM alpine:3.20\nRUN --security=insecure nmap\n", "строка 2", "--security=insecure"},
+		"syntax directive":          {"# syntax=docker/dockerfile:1\nFROM alpine:3.20\n", "строка 1", "#syntax="},
+		"bom syntax directive":      {"\ufeff# syntax=docker/dockerfile:1\nFROM alpine:3.20\n", "строка 1", "#syntax="},
+		"escape directive":          {"FROM alpine:3.20\n# escape=`\nRUN echo hi\n", "строка 2", "#escape="},
+		"generic directive":         {"# key=value\nFROM alpine:3.20\n", "строка 1", "#key="},
+		"run network host":          {"FROM alpine:3.20\nRUN --network=host nmap -sS 10.0.0.0/8\n", "строка 2", "--network=host"},
+		"run network ho st":         {"FROM alpine:3.20\nRUN --network=ho\\\nst echo hi\n", "строка 2", "--network=host"},
+		"run network host quoted":   {"FROM alpine:3.20\nRUN --network=\"host\" echo hi\n", "строка 2", "--network=host"},
+		"run security insecure":     {"FROM alpine:3.20\nRUN --security=insecure nmap\n", "строка 2", "--security=insecure"},
 		"run mount cache allowlist": {"FROM alpine:3.20\nRUN --mount=type=cache-allowlist,target=/x cmd\n", "строка 2", "--mount"},
 		// F-04a mirror: the --mount option set is one cache type spelled
 		// once — duplicated keys and non-cache types are rejected at save

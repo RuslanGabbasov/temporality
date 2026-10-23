@@ -241,6 +241,7 @@ const (
 //   - CR rewrites: \r\n and a lone \r both become \n, so a hostile log cannot
 //     overwrite an already rendered line;
 //   - invalid UTF-8 byte sequences (dropped, not replaced).
+//
 // The result is capped at dockerOutputLimit bytes keeping the tail, with a
 // truncation marker up front; the cut lands on a rune boundary.
 func sanitizeDockerOutput(s string) string {

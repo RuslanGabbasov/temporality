@@ -294,6 +294,10 @@ type SkillCandidateCaseInput struct {
 }
 
 type SkillDraftVerdict struct {
+	// WorthSkill is the judge's gate, not a formality: recurring pairs are
+	// mostly generic navigation (lookup → lookup, pagination, retries), and
+	// drafting a skill for each of them floods the human queue with noise.
+	WorthSkill     bool     `json:"worth_skill"`
 	SkillName      string   `json:"skill_name"`
 	Description    string   `json:"description"`
 	Steps          []string `json:"steps"`
@@ -303,10 +307,12 @@ type SkillDraftVerdict struct {
 
 func SkillCandidateCasePrompt(in SkillCandidateCaseInput) string {
 	var b strings.Builder
-	b.WriteString(`You mine a skill candidate for the platform administrator (wave C4): the same tool sequence keeps succeeding across runs, which usually means an undocumented repeatable procedure. Draft the skill a human could review and register.
+	b.WriteString(`You mine a skill candidate for the platform administrator (wave C4): a tool sequence that keeps repeating across successful runs. First judge whether the recurrence is a specific procedure worth registering — then draft the skill only if it is.
 
 Respond with one JSON object:
-{"skill_name": "<short-slug>", "description": "<what the procedure achieves, 1-2 sentences>", "steps": ["<step>", "..."], "explanation": "<why this recurrence is worth a skill>", "recommendation": "<one concrete next step>"}
+{"worth_skill": <true|false>, "skill_name": "<short-slug>", "description": "<what the procedure achieves, 1-2 sentences>", "steps": ["<step>", "..."], "explanation": "<why this recurrence is or is not worth a skill>", "recommendation": "<one concrete next step>"}
+
+Set worth_skill=false when the repetition is ambient work every run performs rather than a procedure: two consecutive lookups or reads, pagination or a retry of the same tool, a generic prepare-then-act opening. Tool names alone rarely carry a procedure — set true only when the sequence implies concrete inputs, artifacts or decisions a registered skill could encode, so the human queue keeps a high signal rate.
 
 Tool sequence: ` + in.Signature + `
 Distinct runs: ` + fmt.Sprint(in.Runs))
@@ -332,6 +338,13 @@ func SkillCandidateCase(ctx context.Context, model *llm.Client, in SkillCandidat
 		var v SkillDraftVerdict
 		if err := parseCaseReply(content, &v); err != nil {
 			return v, err
+		}
+		if !v.WorthSkill {
+			// A rejection without a reason cannot be audited in the logs.
+			if strings.TrimSpace(v.Explanation) == "" {
+				return v, fmt.Errorf("model returned an empty explanation")
+			}
+			return v, nil
 		}
 		name := strings.ToLower(strings.TrimSpace(v.SkillName))
 		name = strings.Map(func(r rune) rune {

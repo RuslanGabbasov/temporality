@@ -15,6 +15,13 @@ export interface RunTokenMetrics {
   /** Tool name when the model is currently streaming a tool call (no answer
    * text this turn — the args are the output). Feeds the live “⚙ tool” hint. */
   tool?: string
+  /** False while the EventSource has not opened (or died): without it the UI
+   * cannot tell a thinking model from a dead token channel, and a broken
+   * transport reads as "waiting for the first token" forever. */
+  connected: boolean
+  /** How many times the channel reconnected (or is about to): a non-zero
+   * count with connected=false means the view is mid-backoff, not dead. */
+  reconnects: number
 }
 
 /** Sliding window for the rate estimate: long enough to smooth out bursty
@@ -88,7 +95,7 @@ export class TokenMeter {
     else if (frame.text) this.tool = ''
   }
 
-  metrics(now: number = Date.now()): RunTokenMetrics {
+  metrics(now: number = Date.now()): Omit<RunTokenMetrics, 'connected' | 'reconnects'> {
     while (this.window.length > 0 && now - this.window[0].t > RATE_WINDOW_MS) this.window.shift()
     const spanS = (now - (this.window[0]?.t ?? now)) / 1000
     const windowChars = this.window.reduce((sum, sample) => sum + sample.chars, 0)
@@ -105,40 +112,85 @@ export class TokenMeter {
 }
 
 /** Subscribe to the run's ephemeral token stream while `active` and expose
- * live metrics at ~1Hz. Returns null until the first frame arrives (auth
- * failure, non-streaming run or a pre-first-token thinking phase all land
- * there — the caller falls back to the static model.started row). */
+ * live metrics at ~1Hz. Reconnects with capped backoff — a kernel restart or
+ * a proxy hiccup must not kill the live view for the page's lifetime (the
+ * server replays the accumulated text as a snapshot on re-subscribe).
+ * Returns null while the subscription has not settled; `connected` tells a
+ * live channel from one that never opened or is mid-backoff. */
 export function useRunTokenMetrics(runId: string, active: boolean): RunTokenMetrics | null {
   const [metrics, setMetrics] = useState<RunTokenMetrics | null>(null)
   const meterRef = useRef(new TokenMeter())
+  const connectedRef = useRef(false)
+  const reconnectsRef = useRef(0)
 
   useEffect(() => {
     meterRef.current = new TokenMeter()
+    connectedRef.current = false
+    reconnectsRef.current = 0
     setMetrics(null)
     if (!active || !runId) return
     const meter = meterRef.current
     const token = localStorage.getItem('temporality_token') ?? ''
-    const es = new EventSource(`/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/tokens${token ? `?token=${token}` : ''}`)
-    const touch = () => setMetrics(meter.metrics())
+    let disposed = false
+    let es: EventSource | null = null
+    let retryTimer: number | undefined
+    let backoff = 1_000
+
+    const touch = () => setMetrics({ ...meter.metrics(), connected: connectedRef.current, reconnects: reconnectsRef.current })
     const onFrame = (e: MessageEvent) => {
       try {
         meter.apply(JSON.parse(e.data) as TokenStreamFrame)
         touch()
       } catch { /* a malformed frame must not kill the stream */ }
     }
-    es.addEventListener('snapshot', onFrame)
-    es.addEventListener('delta', onFrame)
-    es.addEventListener('done', () => {
-      meter.apply({ type: 'done' })
+    const teardown = () => {
+      es?.close()
+      es = null
+    }
+    const connect = () => {
+      if (disposed) return
+      es = new EventSource(`/kernel-api/v1/workspace/runs/${encodeURIComponent(runId)}/tokens${token ? `?token=${token}` : ''}`)
+      es.addEventListener('snapshot', onFrame)
+      es.addEventListener('delta', onFrame)
+      es.addEventListener('done', () => {
+        meter.apply({ type: 'done' })
+        touch()
+        teardown()
+        schedule()
+      })
+      // The kernel flushes an SSE comment right after the headers, so 'open'
+      // fires within one round-trip — before it, the channel is blind and the
+      // caller must not read the silence as a thinking model.
+      es.onopen = () => {
+        backoff = 1_000
+        connectedRef.current = true
+        touch()
+      }
+      es.onerror = () => {
+        // The browser cannot tell a transient drop from a dead endpoint, and
+        // its own retry only works while the connection is kept — close and
+        // schedule a capped manual backoff instead.
+        connectedRef.current = false
+        touch()
+        teardown()
+        schedule()
+      }
+    }
+    const schedule = () => {
+      if (disposed) return
+      reconnectsRef.current += 1
       touch()
-      es.close()
-    })
-    es.onerror = () => es.close()
+      retryTimer = window.setTimeout(connect, backoff)
+      backoff = Math.min(backoff * 2, 30_000)
+    }
+    connect()
     // 1Hz refresh keeps "last chunk Ns ago" ticking between deltas.
     const ticker = window.setInterval(touch, 1000)
     return () => {
+      disposed = true
+      if (retryTimer) window.clearTimeout(retryTimer)
       window.clearInterval(ticker)
-      es.close()
+      teardown()
     }
   }, [runId, active])
 

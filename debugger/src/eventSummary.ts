@@ -218,7 +218,25 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       // The stream died mid-flight and the blocking fallback regenerated the
       // answer — the latency already includes both generations.
       const regen = d.stream_failed ? `↻ ${t('runs.event.stream_regen')}` : ''
-      const parts = [tokens, cached, latency, calls, regen].filter(Boolean).join(' · ')
+      // Stream shape (streaming transports only): two-plus deltas is a real
+      // stream regardless of the answer size. A single delta is ambiguous —
+      // a buffered gateway delivers the whole answer at once, but so does a
+      // provider finishing a SHORT answer in one chunk — so the buffered
+      // verdict only fires when the call ran long enough that a real stream
+      // could not have stayed at one chunk.
+      const deltas = Number(d.deltas)
+      const firstTokenMs = Number(d.first_token_ms)
+      const latencyMs = Number(d.latency_ms)
+      let shape = ''
+      if (d.transport === 'stream' && d.deltas != null) {
+        if (deltas >= 2) {
+          shape = `${deltas} ${t('runs.event.stream_chunks')} · ttft ${(firstTokenMs / 1000).toFixed(1)}s`
+        } else if (latencyMs >= 10_000 && firstTokenMs >= 0.8 * latencyMs) {
+          shape = `⛔ ${t('runs.event.stream_buffered')}`
+        }
+      }
+      const retried = d.stream_retried ? `↻ ${t('runs.event.stream_retried', { seconds: String((Number(d.stream_retried_ms) || 0) / 1000) })}` : ''
+      const parts = [tokens, cached, latency, calls, shape, retried, regen].filter(Boolean).join(' · ')
       return { icon: '🧠', label: t('runs.event.model_response'), detail: parts, color: '#bb9af7' }
     }
     case 'model.failed': {

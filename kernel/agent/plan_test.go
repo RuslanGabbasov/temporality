@@ -38,6 +38,35 @@ func TestValidatePlanSpecReviewOfAndMaxRework(t *testing.T) {
 	}
 }
 
+// The failure policy is a closed vocabulary: absent/continue/abort pass,
+// anything else rejects the plan before any child starts (effect=none).
+func TestValidatePlanSpecOnFailure(t *testing.T) {
+	tasks := []PlanTask{{ID: "a", AgentID: "coder", Prompt: "p"}}
+	for _, policy := range []string{"", PlanOnFailureContinue, PlanOnFailureStop, PlanOnFailureAbort} {
+		if _, rejection := validatePlanSpec(PlanSpec{Tasks: tasks, OnFailure: policy}, nil); rejection != "" {
+			t.Fatalf("on_failure=%q must pass, got: %s", policy, rejection)
+		}
+	}
+	if _, rejection := validatePlanSpec(PlanSpec{Tasks: tasks, OnFailure: "retry"}, nil); rejection == "" || !strings.Contains(rejection, "on_failure") {
+		t.Fatalf("unknown on_failure must reject, got: %s", rejection)
+	}
+	for _, mode := range []string{"", PlanModeFull, PlanModeWave} {
+		if _, rejection := validatePlanSpec(PlanSpec{Tasks: tasks, Mode: mode}, nil); rejection != "" {
+			t.Fatalf("mode=%q must pass, got: %s", mode, rejection)
+		}
+	}
+	if _, rejection := validatePlanSpec(PlanSpec{Tasks: tasks, Mode: "step"}, nil); rejection == "" || !strings.Contains(rejection, "mode") {
+		t.Fatalf("unknown mode must reject, got: %s", rejection)
+	}
+	spec, rejection := planSpecFromArgs(map[string]any{
+		"tasks":      []any{map[string]any{"id": "a", "agent_id": "coder", "prompt": "p"}},
+		"on_failure": "abort",
+	})
+	if rejection != "" || spec.OnFailure != PlanOnFailureAbort {
+		t.Fatalf("on_failure must parse: %q %q", rejection, spec.OnFailure)
+	}
+}
+
 func TestPlanSpecFromArgs(t *testing.T) {
 	args := map[string]any{
 		"goal": "ship it",
@@ -180,7 +209,7 @@ func TestPlanSummary(t *testing.T) {
 		{TaskID: "ok", AgentID: "coder", Status: planStatusCompleted, Turns: 3, Round: 2, Verdict: "accept", Answer: "shipped"},
 		{TaskID: "boom", AgentID: "coder", Status: planStatusFailed, Error: "model exploded"},
 		{TaskID: "later", AgentID: "qa", Status: planStatusSkipped, BlockedBy: "boom"},
-	}, []planRejection{{TaskID: "ok", By: "rev", Round: 1, Feedback: "fix the flaky assertion"}})
+	}, []planRejection{{TaskID: "ok", By: "rev", Round: 1, Feedback: "fix the flaky assertion"}}, planHalt{})
 	for _, expected := range []string{
 		"1 completed, 0 incomplete, 1 failed, 1 skipped, 0 invalidated",
 		"## ok (coder) — completed, round 2, verdict accept",
@@ -193,7 +222,7 @@ func TestPlanSummary(t *testing.T) {
 			t.Fatalf("summary missing %q:\n%s", expected, summary)
 		}
 	}
-	invalidated := planSummary(spec, []planTaskOutcome{{TaskID: "later", AgentID: "qa", Status: planStatusInvalidated, SkipReason: "upstream_rework"}}, nil)
+	invalidated := planSummary(spec, []planTaskOutcome{{TaskID: "later", AgentID: "qa", Status: planStatusInvalidated, SkipReason: "upstream_rework"}}, nil, planHalt{})
 	if !strings.Contains(invalidated, "## later (qa) — invalidated (result discarded: upstream_rework)") {
 		t.Fatalf("invalidated outcome missing from summary:\n%s", invalidated)
 	}
@@ -202,7 +231,7 @@ func TestPlanSummary(t *testing.T) {
 	incomplete := planSummary(spec, []planTaskOutcome{
 		{TaskID: "ok", AgentID: "coder", Status: planStatusIncomplete, ChildStatus: "turn_limit", Turns: 17, Round: 1, Answer: "work NOT finished: ran out of turns"},
 		{TaskID: "later", AgentID: "qa", Status: planStatusSkipped, BlockedBy: "ok", SkipReason: "upstream_incomplete"},
-	}, nil)
+	}, nil, planHalt{})
 	for _, expected := range []string{
 		"0 completed, 1 incomplete, 0 failed, 1 skipped, 0 invalidated",
 		"## ok (coder) — incomplete (turn_limit), 17 turns",
@@ -213,8 +242,42 @@ func TestPlanSummary(t *testing.T) {
 			t.Fatalf("incomplete summary missing %q:\n%s", expected, incomplete)
 		}
 	}
-	empty := planSummary(spec, []planTaskOutcome{{TaskID: "ok", AgentID: "coder", Status: planStatusIncomplete, ChildStatus: "budget_limit"}}, nil)
+	empty := planSummary(spec, []planTaskOutcome{{TaskID: "ok", AgentID: "coder", Status: planStatusIncomplete, ChildStatus: "budget_limit"}}, nil, planHalt{})
 	if !strings.Contains(empty, "(no final answer)") {
 		t.Fatalf("an incomplete outcome without an answer must say so:\n%s", empty)
+	}
+	// An aborted plan leads with the abort: what killed it and what to do next.
+	aborted := planSummary(spec, []planTaskOutcome{
+		{TaskID: "ok", AgentID: "coder", Status: planStatusFailed, Error: "boom"},
+		{TaskID: "later", AgentID: "qa", Status: planStatusSkipped, BlockedBy: "ok", SkipReason: "plan_aborted"},
+	}, nil, planHalt{kind: "aborted", by: "ok"})
+	for _, expected := range []string{
+		"The plan was aborted when ok failed (on_failure=abort)",
+		"{{task-id.answer}}",
+	} {
+		if !strings.Contains(aborted, expected) {
+			t.Fatalf("aborted summary missing %q:\n%s", expected, aborted)
+		}
+	}
+	// A stop names the trigger without claiming tasks were killed: running work
+	// finished, the rest was skipped.
+	stopped := planSummary(spec, []planTaskOutcome{
+		{TaskID: "ok", AgentID: "coder", Status: planStatusFailed, Error: "boom"},
+		{TaskID: "later", AgentID: "qa", Status: planStatusSkipped, BlockedBy: "ok", SkipReason: "plan_stopped"},
+	}, nil, planHalt{kind: "stopped", by: "ok"})
+	if !strings.Contains(stopped, "The plan stopped launching new tasks when ok failed (on_failure=stop)") {
+		t.Fatalf("stopped summary missing:\n%s", stopped)
+	}
+	// A staged (wave) call names the tasks it left for the re-issue.
+	staged := planSummary(spec, []planTaskOutcome{
+		{TaskID: "ok", AgentID: "coder", Status: planStatusCompleted, Answer: "shipped"},
+	}, nil, planHalt{remaining: []string{"later"}})
+	for _, expected := range []string{
+		"Staged plan (mode=wave): 1 task(s) not started in this call (later)",
+		"Re-issue the plan to continue",
+	} {
+		if !strings.Contains(staged, expected) {
+			t.Fatalf("staged summary missing %q:\n%s", expected, staged)
+		}
 	}
 }

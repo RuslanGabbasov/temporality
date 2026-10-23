@@ -622,6 +622,9 @@ export const en: Record<string, string> = {
     'runs.event.model_call': 'Model call',
     'runs.event.model_response': 'Model response',
     'runs.event.stream_regen': 'regenerated',
+    'runs.event.stream_buffered': 'provider does not stream (single chunk)',
+    'runs.event.stream_chunks': 'chunks',
+    'runs.event.stream_retried': 'first attempt wasted {{seconds}}s',
     'runs.event.learned': 'Learned',
     'runs.event.recalled': 'Recalled',
     'runs.event.knowledge_used': 'Knowledge applied',
@@ -735,6 +738,8 @@ export const en: Record<string, string> = {
     'runs.live.alive': 'streaming',
     'runs.live.stalled': 'no data for {{seconds}}s',
     'runs.live.waiting_first_token': 'waiting for first token',
+    'runs.live.sse_down': 'token stream not connected (transport, not the model)',
+    'runs.live.sse_reconnecting': 'token stream reconnecting (attempt {{count}})',
 
     // Console output of run_command (v2-consolidated.md §6, DoD-5)
     'runs.console.tabs': 'Command output streams',

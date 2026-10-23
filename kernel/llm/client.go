@@ -82,6 +82,14 @@ type Completion struct {
 	RequestRef  string `json:"request_ref,omitempty"`
 	ResponseRef string `json:"response_ref,omitempty"`
 	Attempts    int    `json:"attempts,omitempty"`
+	// Stream shape (transport="stream" only): Deltas counts the SSE chunks
+	// that carried generated tokens and FirstTokenMs is the wait for the first
+	// one. A real stream shows many deltas with an early first token; one
+	// late delta means the gateway buffered the whole answer — the call looks
+	// streaming-dead even though it succeeded, which is exactly what the
+	// operator needs to see to blame the provider, not the kernel.
+	Deltas       int   `json:"deltas,omitempty"`
+	FirstTokenMs int64 `json:"first_token_ms,omitempty"`
 	// Transport records how the completion was delivered: "stream" (SSE) or
 	// "blocking" (single JSON response). StreamFailed marks a stream that died
 	// mid-flight and was salvaged by the blocking fallback — the wall latency
@@ -93,6 +101,11 @@ type Completion struct {
 	StreamFailed bool   `json:"stream_failed,omitempty"`
 	StreamMs     int64  `json:"stream_ms,omitempty"`
 	StreamError  string `json:"stream_error,omitempty"`
+	// StreamRetried marks a first stream attempt that died of a watchdog and
+	// was recovered by the fresh-connection retry: the answer is still a
+	// stream, but the wall clock carries a dead attempt the latency number
+	// hides. StreamMs holds the wasted first attempt's duration.
+	StreamRetried bool `json:"stream_retried,omitempty"`
 }
 
 // Truncated reports whether the provider cut the completion off at the token
@@ -693,6 +706,16 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	}()
 	response, err := c.streamHTTP.Do(request)
 	if err != nil {
+		// The watchdogs may have canceled the request while Do was still waiting
+		// for the response headers — the server-side queue in its purest form
+		// (the provider accepted the connection and sends nothing). The cancel
+		// must keep its watchdog identity: as a bare transport error it sends
+		// callers into the blocking retry ladder, which joins the same queue and
+		// adds minutes of silent waiting — exactly what the watchdogs exist to
+		// cut short.
+		if reason, ok := cancelReason.Load().(string); ok {
+			return Completion{}, &watchdogError{reason: reason, cause: err}
+		}
 		return Completion{}, &transportError{err: err}
 	}
 	defer response.Body.Close()
@@ -709,6 +732,8 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 	toolCallAccum := make(map[int]*ToolCall)
 	var finish string
 	var usage Usage
+	deltas := 0
+	var firstTokenAt time.Time
 	stop := false
 
 	for scanner.Scan() {
@@ -747,6 +772,10 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		if choice.Delta.Content != "" || choice.Delta.ReasoningContent != "" || len(choice.Delta.ToolCalls) > 0 {
 			lastProgress.Store(time.Now().UnixNano())
 			anyProgress.Store(true)
+			deltas++
+			if firstTokenAt.IsZero() {
+				firstTokenAt = time.Now()
+			}
 		}
 		// Accumulate content
 		if choice.Delta.Content != "" {
@@ -796,14 +825,16 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 
 	// Build final completion
 	completion := Completion{
-		Content:    accumulated.String(),
-		Reasoning:  reasoning.String(),
-		Finish:     finish,
-		Provider:   c.providerHost,
-		LatencyMs:  time.Since(started).Milliseconds(),
-		Usage:      usage,
-		RequestRef: contentRef(payload),
-		Transport:  "stream",
+		Content:      accumulated.String(),
+		Reasoning:    reasoning.String(),
+		Finish:       finish,
+		Provider:     c.providerHost,
+		LatencyMs:    time.Since(started).Milliseconds(),
+		Usage:        usage,
+		RequestRef:   contentRef(payload),
+		Transport:    "stream",
+		Deltas:       deltas,
+		FirstTokenMs: firstTokenAt.Sub(started).Milliseconds(),
 	}
 	for _, tc := range toolCallAccum {
 		args := map[string]any{}
@@ -883,6 +914,12 @@ func StreamTimedOut(err error) bool {
 // without this, browser agents with screenshots bought dead providers
 // 20-30 minute first-token budgets), and the bonus is capped so no payload
 // shape can push the watchdog past ~12 minutes total.
+//
+// Deliberately modest: a slower-than-this prefill is recovered by the
+// fresh-connection retry (which lands on the provider's warm prompt cache
+// and is fast), while a generous budget is paid on EVERY stalled call — an
+// operator's nudge against a hung provider must stay a near-immediate
+// relief, not a fresh 3-minute silent wait.
 func firstTokenPrefillBonus(payload []byte) time.Duration {
 	bonus := time.Duration(float64(textPayloadBytes(payload)) / 1_000_000 * float64(60*time.Second))
 	if bonus > 10*time.Minute {
