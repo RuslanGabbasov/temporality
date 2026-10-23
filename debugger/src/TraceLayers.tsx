@@ -226,7 +226,7 @@ function TraceChips({ chip, onChip, items, t }: { chip: TraceChip; onChip: (chip
 /** Grouped trace: the §5 folded timeline with the three-layer rows, the §8
  *  filter panel (category/type/status/participant/duration, quick chips,
  *  text search — all URL-backed) above it. */
-export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates, onConsoleState }: {
+export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates, onConsoleState, liveModelParts }: {
   events: ObservationEvent[]
   locale: Locale
   t: TFn
@@ -248,6 +248,11 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
   /** §8/NFR-9 (T4): receive each console buffer loaded by an expanded row
    *  so the owner can index it for the text search (by operation id). */
   onConsoleState?: (state: ConsoleState) => void
+  /** Parts of the in-flight model-call row (elapsed · tokens · rate ·
+   *  channel state), assembled by the owner from the ephemeral token stream.
+   *  Non-empty renders as the first timeline row — the live call is the most
+   *  recent thing in the trace. */
+  liveModelParts?: string[]
 }) {
   const [chip, setChip] = useState<TraceChip>('all')
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
@@ -307,6 +312,13 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
           {searchEntries.length > 20 && (
             <div style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)' }}>… +{searchEntries.length - 20}</div>
           )}
+        </div>
+      )}
+      {liveModelParts && liveModelParts.length > 0 && (
+        <div style={{ padding: '0.4rem 0.5rem', marginBottom: '0.15rem', background: 'var(--tm-surface)', borderRadius: '0 4px 4px 0', borderLeft: '3px solid var(--tm-teal)', minWidth: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+          <span style={{ color: 'var(--tm-teal)', width: '1.2rem', textAlign: 'center', flexShrink: 0 }}>⏳</span>
+          <strong style={{ minWidth: '100px' }}>{t('runs.event.model_call')}</strong>
+          <span style={{ color: 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{liveModelParts.join(' · ')}</span>
         </div>
       )}
       {visibleItems.length === 0 && <div style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0' }}>{emptyHint ?? t('runs.layers.timeline.empty')}</div>}

@@ -379,6 +379,38 @@ export default function AgentRuns({ project }: { project: string }) {
   useEffect(() => { setTraceLimit(TRACE_WINDOW) }, [selected, view])
   const traceWindow = useMemo(() => windowedTrace(trace.visible, traceLimit), [trace, traceLimit])
 
+  // The live model-call row for the trace view: the newest visible event being
+  // this run's model.started means a call is in flight right now. The parts
+  // are assembled here (TraceLayers stays presentation-only): elapsed from the
+  // journal clock, then tokens/rate/statuses from the ephemeral token stream.
+  const liveModelParts = useMemo(() => {
+    if (!selectedLive || !tokenMetrics) return []
+    const newest = trace.visible[trace.visible.length - 1]
+    if (!newest || newest.type !== 'model.started' || runID(newest) !== selected) return []
+    const elapsedMs = Math.max(0, nowTick - Date.parse(newest.occurred_at))
+    const parts = [formatDuration(elapsedMs)]
+    if (!tokenMetrics.connected) {
+      parts.push(tokenMetrics.reconnects > 0
+        ? t('runs.live.sse_reconnecting', { count: String(tokenMetrics.reconnects) })
+        : t('runs.live.sse_down'))
+      return parts
+    }
+    if (tokenMetrics.tool) parts.push(`⚙ ${tokenMetrics.tool}`)
+    if (tokenMetrics.approxTokens > 0) parts.push(`~${tokenMetrics.approxTokens} tok`)
+    if (tokenMetrics.tps > 0) parts.push(`${tokenMetrics.tps} tok/s`)
+    const stalled = tokenMetrics.lastChunkAgoMs > 15_000
+    if (tokenMetrics.streaming) {
+      parts.push(stalled
+        ? t('runs.live.stalled', { seconds: String(Math.floor(tokenMetrics.lastChunkAgoMs / 1000)) })
+        : t('runs.live.alive'))
+    } else if (tokenMetrics.approxTokens === 0) {
+      // No chunks yet: either the thinking phase before the first token or a
+      // non-streaming transport.
+      parts.push(t('runs.live.waiting_first_token'))
+    }
+    return parts
+  }, [selectedLive, tokenMetrics, trace.visible, selected, nowTick, t])
+
   // §8: the trace filter/search state lives in the URL (trace* params) so a
   // link restores the exact filtered view; the existing run/view params stay
   // intact. Keystrokes commit through a ≥300 ms debounce (NFR-9) before they
@@ -1155,6 +1187,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     onFilterState={setTraceState}
                     consoleStates={consoleStates}
                     onConsoleState={collectConsoleState}
+                    liveModelParts={liveModelParts}
                   />
                 </Tile>
                 )}
