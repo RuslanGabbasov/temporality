@@ -1,0 +1,22 @@
+ok  	github.com/temporality-project/temporality/cmd/agent-kernel	13.944s
+ok  	github.com/temporality-project/temporality/cmd/temporality	0.014s
+?   	github.com/temporality-project/temporality/cmd/temporality-journal	[no test files]
+ok  	github.com/temporality-project/temporality/controlplane	0.004s
+ok  	github.com/temporality-project/temporality/examples/lead_coder_reviewer_qa	0.105s
+?   	github.com/temporality-project/temporality/examples/loadgen	[no test files]
+?   	github.com/temporality-project/temporality/examples/mockllm	[no test files]
+?   	github.com/temporality-project/temporality/examples/test-mcp	[no test files]
+ok  	github.com/temporality-project/temporality/kernel/agent	18.492s
+ok  	github.com/temporality-project/temporality/kernel/cost	0.004s
+ok  	github.com/temporality-project/temporality/kernel/llm	17.798s
+ok  	github.com/temporality-project/temporality/kernel/mcpclient	0.547s
+?   	github.com/temporality-project/temporality/kernel/outbox	[no test files]
+ok  	github.com/temporality-project/temporality/kernel/quota	0.001s
+ok  	github.com/temporality-project/temporality/kernel/sandbox	1.016s
+ok  	github.com/temporality-project/temporality/kernel/storage	0.018s
+ok  	github.com/temporality-project/temporality/observation	0.015s
+ok  	github.com/temporality-project/temporality/observation/httpapi	0.015s
+?   	github.com/temporality-project/temporality/observation/memory	[no test files]
+ok  	github.com/temporality-project/temporality/observation/postgres	0.002s
+ok  	github.com/temporality-project/temporality/skills	0.001s
+ok  	github.com/temporality-project/temporality/workspace	0.313s

@@ -1,0 +1,5 @@
+# ci-fix delivery verification — go build ./...
+# worktree: /workspace/worktrees/agent-tests-race-fix, branch fix/kernel-agent-test-event-race @ 4329a58
+# date (UTC): 2026-10-23T10:49:33Z
+# exit code: 0 — clean. go vet/go build print nothing on success, so the (empty) tool output below is the pass evidence.
+

@@ -167,6 +167,7 @@ func TestRunToolFaultByOperationIDExecutesEffectThenCrashes(t *testing.T) {
 	runner := &recordingSandbox{}
 	activities := &Activities{Sandbox: runner}
 	t.Setenv("KERNEL_FAULT_AFTER_EFFECT", "frame-1/call-1")
+	t.Cleanup(resetFaultDrilledForTest)
 
 	err := runCommand(t, activities, "run-fault-exact", "frame-1/call-1")
 	if err == nil || !strings.Contains(err.Error(), "injected worker crash") {
@@ -188,6 +189,7 @@ func TestRunToolFaultByToolNameFaultsFirstPerRun(t *testing.T) {
 	runner := &recordingSandbox{}
 	activities := &Activities{Sandbox: runner}
 	t.Setenv("KERNEL_FAULT_AFTER_EFFECT", "run_command")
+	t.Cleanup(resetFaultDrilledForTest)
 
 	faulted := func(runID, operationID string) bool {
 		err := runCommand(t, activities, runID, operationID)
@@ -215,6 +217,7 @@ func TestRunToolMCPFaultCommitsEffectBeforeCrash(t *testing.T) {
 	t.Setenv("KERNEL_MCP_ARGS", string(args))
 	t.Setenv("KERNEL_MCP_ALLOW", "create_issue")
 	t.Setenv("KERNEL_FAULT_AFTER_EFFECT", "mcp__create_issue")
+	t.Cleanup(resetFaultDrilledForTest)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	client, err := mcpclient.FromEnv(ctx)
