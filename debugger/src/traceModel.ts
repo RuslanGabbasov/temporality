@@ -62,7 +62,7 @@ const isKnowledge = (type: string): boolean =>
 /** The pair key of an approval/question event: the operation id carries both
  *  the flat (`operation_id`) and the nested (`operation.id`) shapes the
  *  kernel emits; otherwise the event's own id (never pairs across). */
-const operationKey = (event: ObservationEvent): string => {
+export const operationKey = (event: ObservationEvent): string => {
   const d = event.data ?? {}
   const id = typeof d.operation_id === 'string' && d.operation_id ? d.operation_id
     : (d.operation as Record<string, unknown> | undefined)?.id

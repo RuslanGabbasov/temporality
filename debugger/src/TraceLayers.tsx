@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react'
 import type { ObservationEvent } from './observationApi'
 import { eventDetails, timelineRow, rawEnvelope } from './eventPresentation'
 import { shortTime } from './eventSummary'
-import { foldTrace, foldTraceTree, groupSummary, matchesChip, type TraceChip, type TraceItem, type TurnNode } from './traceModel'
+import { foldTrace, foldTraceTree, groupSummary, matchesChip, operationKey, type TraceChip, type TraceItem, type TurnNode } from './traceModel'
 import { filterTraceItems, isTraceStateEmpty, searchItems, type TraceUrlState } from './traceFilters'
 import TraceFiltersPanel, { consoleSearchIndex, type ConsoleStateLike } from './TraceFiltersPanel'
 import type { ConsoleState } from './consoleStream'
@@ -49,6 +49,9 @@ export interface EventRowVisualProps {
   reasoning?: string
   knowledgeDoubt?: React.ReactNode
   live?: boolean
+  /** Running run_command: the live console tail mounts directly under the
+   *  row header — the reader watches output without expanding anything. */
+  showLiveConsole?: boolean
   /** §8/NFR-9 (T4): receive each loaded console buffer of this row so the
    *  owner can index it for the text search (no fetches in the search). */
   onConsoleState?: (state: ConsoleState) => void
@@ -57,7 +60,7 @@ export interface EventRowVisualProps {
 /** Layers 2 + 3 of one event, rendered inline in the expanded row: the human
  *  details, the run_command console as a small always-visible block, and —
  *  toggled by the {} icon in the row header — the raw envelope. */
-function EventLayeredDetails({ event, t, project, response, reasoning, knowledgeDoubt, live, onConsoleState, rawOpen, onRawToggle }: Omit<EventRowVisualProps, 'locale'> & { rawOpen: boolean; onRawToggle: () => void }) {
+function EventLayeredDetails({ event, t, project, response, reasoning, knowledgeDoubt, live, onConsoleState, rawOpen, onRawToggle, hideConsole }: Omit<EventRowVisualProps, 'locale'> & { rawOpen: boolean; onRawToggle: () => void; hideConsole?: boolean }) {
   const d = event.data ?? {}
   const details = eventDetails(event, t)
   const knowledgeID = typeof d.knowledge_id === 'string' && d.knowledge_id
@@ -98,7 +101,7 @@ function EventLayeredDetails({ event, t, project, response, reasoning, knowledge
           row expansion is the reader's intent signal, so the console mounts
           right here (one subscription per expanded event, NFR-9) instead of
           hiding behind a second discloser. */}
-      {details.consoleOperationId && (
+      {details.consoleOperationId && !hideConsole && (
         <ConsoleOutput
           operationId={details.consoleOperationId}
           project={project}
@@ -141,10 +144,11 @@ function EventLayeredDetails({ event, t, project, response, reasoning, knowledge
 /** One standalone timeline row (layer 1) + its expandable layers. The raw
  *  JSON envelope is the {} icon in the row's right corner — one click, not a
  *  full-width discloser button. */
-export function TraceEventRow({ event, locale, t, project, response, reasoning, knowledgeDoubt, live, onConsoleState }: EventRowVisualProps) {
+export function TraceEventRow({ event, locale, t, project, response, reasoning, knowledgeDoubt, live, showLiveConsole, onConsoleState }: EventRowVisualProps) {
   const [open, setOpen] = useState(false)
   const [rawOpen, setRawOpen] = useState(false)
   const row = timelineRow(event, locale, t)
+  const details = eventDetails(event, t)
   const statusDot = row.status === 'error' ? '#f7768e'
     : row.status === 'ok' ? '#9ece6a'
       : row.status === 'running' ? 'var(--tm-teal)'
@@ -191,9 +195,17 @@ export function TraceEventRow({ event, locale, t, project, response, reasoning, 
           </button>
         )}
       </div>
+      {/* A running run_command streams its console tail right under the
+          header — no second click; once the tool completes the block moves
+          into the expanded details of tool.completed. */}
+      {showLiveConsole && details.consoleOperationId && (
+        <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>
+          <ConsoleOutput operationId={details.consoleOperationId} project={project} runId={event.context?.run} live={Boolean(live)} onStateLoaded={onConsoleState} />
+        </div>
+      )}
       {(open || rawOpen) && (
         <div style={{ marginLeft: '1.7rem', marginTop: '0.15rem' }}>
-          <EventLayeredDetails event={event} t={t} project={project} response={response} reasoning={reasoning} knowledgeDoubt={knowledgeDoubt} live={live} onConsoleState={onConsoleState} rawOpen={rawOpen} onRawToggle={() => setRawOpen((value) => !value)} />
+          <EventLayeredDetails event={event} t={t} project={project} response={response} reasoning={reasoning} knowledgeDoubt={knowledgeDoubt} live={live} onConsoleState={onConsoleState} rawOpen={rawOpen} onRawToggle={() => setRawOpen((value) => !value)} hideConsole={Boolean(showLiveConsole)} />
         </div>
       )}
     </div>
@@ -308,14 +320,31 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
     }
   }
   const turnNodes = tree.filter((segment) => segment.turn !== null).map((segment) => segment.turn!)
-  // The running turn is the highest number, wherever it sits in the display
-  // order (the tree is newest-first).
-  const lastTurnNumber = turnNodes.length > 0 ? Math.max(...turnNodes.map((turn) => turn.number)) : -1
+  // While the run is live every still-open turn stays expanded (a merged team
+  // trace can run several at once) and the most recently completed turn stays
+  // open too: collapsing on turn.completed yanked the interior — the tool
+  // steps and the live console the reader was watching — the instant a turn
+  // ended. A finished turn folds away only when a newer turn completes.
+  const latestCompletedAt = turnNodes.reduce(
+    (latest, turn) => (turn.completed && turn.started.occurred_at > latest ? turn.started.occurred_at : latest),
+    '',
+  )
   const turnExpanded = (turn: TurnNode): boolean => {
     const pin = pinnedTurns.get(turn.number)
     if (pin !== undefined) return pin
-    return Boolean(live) && !turn.completed && turn.number === lastTurnNumber
+    if (!live) return false
+    return !turn.completed || turn.started.occurred_at === latestCompletedAt
   }
+  // Operations whose tool.completed has landed: a tool.started row of such an
+  // operation is finished, so its always-on console block switches off (the
+  // completed row carries the output in its details).
+  const completedOps = useMemo(() => {
+    const ids = new Set<string>()
+    for (const event of events) {
+      if (event.type === 'tool.completed') ids.add(operationKey(event))
+    }
+    return ids
+  }, [events])
   const pinTurn = (number: number, open: boolean) => {
     setPinnedTurns((prev) => {
       const next = new Map(prev)
@@ -340,6 +369,11 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
       // token spend and up to two lines of the model's intermediate answer —
       // the reader skims turns by these without expanding anything.
       const preview = response.replace(/\s+/g, ' ').trim().slice(0, 320)
+      const responseBlock = response ? (
+        <div style={{ marginTop: '0.25rem', padding: '0.35rem 0.5rem', background: 'var(--tm-raised)', borderRadius: '4px', fontSize: '0.78rem', overflowWrap: 'anywhere' }}>
+          <Markdown content={response} />
+        </div>
+      ) : null
       const running = Boolean(live) && !turn.completed
       const statusDot = turn.hasError ? '#f7768e' : running ? 'var(--tm-teal)' : turn.completed ? '#9ece6a' : ''
       return (
@@ -365,18 +399,19 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
           {expanded && (
             <div style={{ padding: '0.25rem 0.4rem 0.35rem 0.6rem' }}>
               {innerItems.length === 0 && <div style={{ color: 'var(--tm-text-3)', fontSize: '0.72rem', padding: '0.15rem 0' }}>{t('runs.layers.turn_empty')}</div>}
-              {innerItems.map((item) => renderFolded(item, `turn${turn.number}:`))}
-              {response && (
-                <div style={{ marginTop: '0.25rem', padding: '0.35rem 0.5rem', background: 'var(--tm-raised)', borderRadius: '4px', fontSize: '0.78rem', overflowWrap: 'anywhere' }}>
-                  <Markdown content={response} />
-                </div>
-              )}
+              {/* Newest-first: the turn's answer (the newest content) leads
+                  the node and the rows read newest→oldest, matching the
+                  spine; chronological mode keeps the log reading. */}
+              {newestFirst && responseBlock}
+              {(newestFirst ? [...innerItems].reverse() : innerItems).map((item) => renderFolded(item, `turn${turn.number}:`))}
+              {!newestFirst && responseBlock}
             </div>
           )}
         </div>
       )
     }
-    return <Fragment key={`plain:${index}`}>{foldTrace(segment.events, locale, t).map((item, itemIndex) => renderFolded(item, `plain${index}:${itemIndex}:`))}</Fragment>
+    const plainItems = foldTrace(segment.events, locale, t)
+    return <Fragment key={`plain:${index}`}>{(newestFirst ? [...plainItems].reverse() : plainItems).map((item, itemIndex) => renderFolded(item, `plain${index}:${itemIndex}:`))}</Fragment>
   }
   const renderFolded = (item: TraceItem, keyPrefix: string): React.ReactNode => {
     const key = keyPrefix + keyOf(item)
@@ -460,6 +495,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
         reasoning={reasoning}
         knowledgeDoubt={knowledgeDoubtOf?.(item.event)}
         live={live}
+        showLiveConsole={Boolean(live) && item.event.type === 'tool.started' && !completedOps.has(operationKey(item.event))}
         onConsoleState={onConsoleState}
       />
     )
