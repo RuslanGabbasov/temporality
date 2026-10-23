@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState } from 'react'
 import type { ObservationEvent } from './observationApi'
 import { eventDetails, timelineRow, rawEnvelope } from './eventPresentation'
+import { shortTime } from './eventSummary'
 import { foldTrace, foldTraceTree, groupSummary, matchesChip, type TraceChip, type TraceItem, type TurnNode } from './traceModel'
 import { filterTraceItems, isTraceStateEmpty, searchItems, type TraceUrlState } from './traceFilters'
 import TraceFiltersPanel, { consoleSearchIndex, type ConsoleStateLike } from './TraceFiltersPanel'
@@ -163,6 +164,9 @@ export function TraceEventRow({ event, locale, t, project, response, reasoning, 
         {row.fact && <span style={{ color: 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{row.fact}</span>}
         {row.duration && <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{row.duration}</span>}
         {statusDot && <span aria-hidden title={row.status} style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: statusDot, flexShrink: 0 }} />}
+        {(
+          <span style={{ color: 'var(--tm-muted)', fontSize: '0.65rem', flexShrink: 0, marginLeft: 'auto' }}>{shortTime(event.occurred_at)}</span>
+        )}
         {(
           <button
             type="button"
@@ -342,6 +346,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
               ? <span style={{ color: 'var(--tm-text-3)', flex: 1, minWidth: 0, fontSize: '0.72rem', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{preview}</span>
               : <span style={{ flex: 1 }} />}
             {duration && <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{duration}</span>}
+            <span style={{ color: 'var(--tm-muted)', fontSize: '0.65rem', flexShrink: 0 }}>{shortTime(turn.started.occurred_at)}</span>
             {statusDot && <span aria-hidden title={running ? 'running' : turn.hasError ? 'error' : 'completed'} style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: statusDot, flexShrink: 0 }} />}
           </button>
           {expanded && (
