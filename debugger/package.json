@@ -16,6 +16,7 @@
     "@carbon/styles": "^1.64.0",
     "highlight.js": "^11.12.0",
     "js-yaml": "^5.4.2",
+    "mermaid": "^11.17.2",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",

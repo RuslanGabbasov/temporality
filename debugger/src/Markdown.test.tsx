@@ -1,9 +1,42 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import Markdown, { linkifyWorkspacePaths } from './Markdown'
+import Markdown, { linkifyWorkspacePaths, splitMermaidSegments } from './Markdown'
 
 const URL_FOR = (projectId: string, path: string) =>
   `/kernel-api/v1/workspace/projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(path)}`
+
+describe('splitMermaidSegments', () => {
+  it('splits ```mermaid blocks from the markdown between them', () => {
+    const segments = splitMermaidSegments('# Intro\n\n```mermaid\nerDiagram\n  A ||--o{ B : has\n```\n\n## Next')
+    expect(segments).toEqual([
+      { kind: 'markdown', text: '# Intro\n\n' },
+      { kind: 'mermaid', chart: 'erDiagram\n  A ||--o{ B : has\n' },
+      { kind: 'markdown', text: '\n\n## Next' },
+    ])
+  })
+
+  it('returns one markdown segment when no diagram is present', () => {
+    expect(splitMermaidSegments('```js\nconst x = 1\n```')).toEqual([
+      { kind: 'markdown', text: '```js\nconst x = 1\n```' },
+    ])
+  })
+})
+
+describe('Markdown (mermaid content)', () => {
+  // renderToStaticMarkup of the async diagram component yields the
+  // placeholder container; the chart itself renders client-side.
+  it('renders a mermaid placeholder, not a code block', () => {
+    const html = renderToStaticMarkup(<Markdown content={'```mermaid\nerDiagram\n  A ||--o{ B : has\n```'} />)
+    expect(html).toContain('mermaid-diagram')
+    expect(html).not.toContain('language-mermaid')
+  })
+
+  it('leaves plain markdown untouched', () => {
+    const html = renderToStaticMarkup(<Markdown content={'# Just text'} />)
+    expect(html).toContain('Just text')
+    expect(html).not.toContain('mermaid-diagram')
+  })
+})
 
 describe('Markdown', () => {
   it('renders common Markdown and GFM tables', () => {
