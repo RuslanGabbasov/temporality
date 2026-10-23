@@ -286,7 +286,22 @@ const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContex
   // ── §5.5 approvals / human ──
   'approval.requested': (d, { t }) => ({ title: t('runs.event.approval_needed'), fact: approvalActionOf(d), status: 'running' }),
   'approval.granted': (d, { t }) => ({ title: t('runs.event.approved'), fact: [squash(d.approver), squash(d.reason)].filter(Boolean).join(' · '), status: 'ok' }),
-  'approval.auto_granted': (d, { t }) => ({ title: t('runs.event.auto_approved'), fact: approvalActionOf(d), status: 'ok' }),
+  'approval.auto_granted': (d, { t }) => {
+    const operation = d.operation as Record<string, unknown> | undefined
+    const tool = typeof operation?.tool === 'string' ? operation.tool : squash(d.action)
+    const args = operation?.arguments
+    const command = args && typeof args === 'object' && Array.isArray((args as Record<string, unknown>).command)
+      ? ((args as Record<string, unknown>).command as unknown[]).join(' ')
+      : ''
+    return {
+      title: `${t('runs.event.auto_approved')} · ${tool}`,
+      fact: command.slice(0, 120),
+      status: 'ok',
+      // The approved operation's arguments render in the details layer —
+      // the reader must see WHAT was auto-approved without leaving the trace.
+      hasDetails: true,
+    }
+  },
   'approval.rejected': (d, { t }) => ({ title: t('runs.event.rejected'), fact: squash(d.reason), status: 'error' }),
   'human.requested': (d, { t }) => ({ title: t('runs.event.human_requested'), fact: squash(d.question).slice(0, 100) }),
   'human.answered': (d, { t }) => ({ title: t('runs.event.human_answered'), fact: squash(d.response).slice(0, 80), status: 'ok' }),

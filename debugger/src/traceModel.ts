@@ -57,11 +57,14 @@ const isHint = (type: string): boolean => type.startsWith('hint.')
 const isKnowledge = (type: string): boolean =>
   type === 'knowledge.proposed' || type === 'knowledge.extraction.started' || type === 'knowledge.extraction.completed'
 
-/** The pair key of an approval/question event: the operation id when the
- *  payload carries one, otherwise the event's own id (never pairs across). */
+/** The pair key of an approval/question event: the operation id carries both
+ *  the flat (`operation_id`) and the nested (`operation.id`) shapes the
+ *  kernel emits; otherwise the event's own id (never pairs across). */
 const operationKey = (event: ObservationEvent): string => {
-  const id = event.data?.operation_id
-  return typeof id === 'string' && id ? id : event.event_id
+  const d = event.data ?? {}
+  const id = typeof d.operation_id === 'string' && d.operation_id ? d.operation_id
+    : (d.operation as Record<string, unknown> | undefined)?.id
+  return (typeof id === 'string' && id) ? id : event.event_id
 }
 
 /** Fold the trace window into render items (§5). Order preserved: items come
