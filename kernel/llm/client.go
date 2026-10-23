@@ -854,6 +854,16 @@ func (c *Client) StreamComplete(ctx context.Context, messages []Message, tools [
 		})
 	}
 	completion.ResponseRef = contentRef([]byte(completion.Content))
+	// A stream that ends without an answer, tool calls or a finish reason is
+	// a provider-side truncation (the connection closed mid-generation —
+	// reasoning may have streamed, but there is nothing to act on: no answer,
+	// nothing to execute, no "stop" to trust). Returning it as a successful
+	// completion completes the run with an empty answer; a transport-flavored
+	// error routes it into the caller's retry ladder instead. A consumer-
+	// requested stop (stop==true) owns the content it asked to stop at.
+	if !stop && completion.Finish == "" && completion.Content == "" && len(completion.ToolCalls) == 0 {
+		return Completion{}, &transportError{err: errors.New("stream ended mid-generation: no answer, tool calls or finish reason")}
+	}
 	return completion, nil
 }
 

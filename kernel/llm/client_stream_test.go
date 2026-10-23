@@ -112,6 +112,67 @@ func TestStreamCompleteRecordsStreamShape(t *testing.T) {
 	}
 }
 
+// A provider that streams reasoning and then closes the connection mid-
+// generation — no answer text, no tool calls, no finish reason, no [DONE] —
+// must surface as a transport failure, not as a successful empty answer:
+// CallModel would otherwise complete the run with an empty response.
+func TestStreamCompleteReasoningOnlyTruncationIsAnError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		for i := 0; i < 3; i++ {
+			body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"reasoning_content": fmt.Sprintf("thinking %d ", i)}}}})
+			fmt.Fprintf(w, "data: %s\n\n", body)
+			flusher.Flush()
+		}
+		// Connection drops mid-generation: no content, no finish_reason,
+		// no [DONE] — the provider just goes away.
+	}))
+	defer server.Close()
+	client := New(Config{
+		BaseURL: server.URL, Model: "test", APIKey: "k",
+		StreamIdleTimeout: 2 * time.Second,
+	})
+
+	completion, err := client.StreamComplete(context.Background(),
+		[]Message{{Role: "user", Content: "hi"}}, nil, nil)
+	if err == nil {
+		t.Fatalf("a reasoning-only truncated stream must fail, got completion %+v", completion)
+	}
+	if !transient(err) {
+		t.Fatalf("the truncation must be transient (retryable), got: %v", err)
+	}
+}
+
+// The same truncation is survivable when the consumer stopped the stream on
+// purpose: it owns the content it asked to stop at.
+func TestStreamCompleteConsumerStopKeepsPartialContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "partial answer"}}}})
+		fmt.Fprintf(w, "data: %s\n\n", body)
+		flusher.Flush()
+		time.Sleep(2 * time.Second) // no finish reason: the consumer stopped first
+	}))
+	defer server.Close()
+	client := New(Config{
+		BaseURL: server.URL, Model: "test", APIKey: "k",
+		StreamIdleTimeout: 2 * time.Second,
+	})
+
+	completion, err := client.StreamComplete(context.Background(),
+		[]Message{{Role: "user", Content: "hi"}}, nil, func(delta StreamDelta) bool {
+			return true // stop after the first chunk: the consumer's choice
+		})
+	if err != nil {
+		t.Fatalf("a consumer-stopped stream must keep its partial content, got: %v", err)
+	}
+	if completion.Content != "partial answer" {
+		t.Fatalf("content = %q", completion.Content)
+	}
+}
+
 func TestNewDefaultsStreamIdleTimeout(t *testing.T) {
 	client := New(Config{BaseURL: "http://localhost:1", Model: "m"})
 	if client.cfg.StreamIdleTimeout != 90*time.Second {
