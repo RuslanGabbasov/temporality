@@ -316,7 +316,7 @@ function itemAnchorEvent(item: TraceItem): ObservationEvent | undefined {
 export function groupLabelKey(group: Extract<TraceItem, { kind: 'group' }>['group']): string {
   switch (group) {
     case 'turns': return 'runs.layers.group.turns'
-    case 'hints': return 'runs.layers.group.hints'
+    case 'knowledge': return 'runs.layers.group.hints'
     case 'planMinor': return 'runs.layers.group.plan_minor'
     case 'opsNoise': return 'runs.layers.group.ops_noise'
   }

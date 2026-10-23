@@ -18,8 +18,10 @@ import type { Locale } from './locales'
  * already-loaded window — no network, no journal scans (NFR-9).
  */
 
-/** Foldable groups (§5). */
-export type TraceGroupKey = 'turns' | 'hints' | 'planMinor' | 'opsNoise'
+/** Foldable groups (§5). 'knowledge' merges the whole semantic layer: what
+ *  was learned, the extraction passes and the hint traffic — one node
+ *  instead of a dozen look-alike rows. */
+export type TraceGroupKey = 'turns' | 'knowledge' | 'planMinor' | 'opsNoise'
 
 /** One render item of the folded trace. */
 export type TraceItem =
@@ -43,6 +45,8 @@ const APPROVAL_REQUESTS = new Set(['approval.requested', 'human.requested'])
  *  disappears into «Эксплуатация». */
 const isNoise = (type: string): boolean => NOISE_TYPES.has(type)
 const isHint = (type: string): boolean => type.startsWith('hint.')
+const isKnowledge = (type: string): boolean =>
+  type === 'knowledge.proposed' || type === 'knowledge.extraction.started' || type === 'knowledge.extraction.completed'
 
 /** The pair key of an approval/question event: the operation id when the
  *  payload carries one, otherwise the event's own id (never pairs across). */
@@ -131,8 +135,8 @@ export function foldTrace(events: ObservationEvent[], locale: Locale, t: Transla
       group.hasError = group.hasError || row.status === 'error'
       continue
     }
-    if (isHint(type)) {
-      const group = groupOf('hints')
+    if (isHint(type) || isKnowledge(type)) {
+      const group = groupOf('knowledge')
       group.events.push(event)
       group.hasError = group.hasError || row.status === 'error'
       continue
@@ -143,8 +147,9 @@ export function foldTrace(events: ObservationEvent[], locale: Locale, t: Transla
   return items
 }
 
-/** Human summary of a folded group (§5.1 «Ход N», §5.6 «3 подсказки, 2
- *  использованы», §5.4 «изменения плана», §5.7 «Эксплуатация»). */
+/** Human summary of a folded group: the knowledge node aggregates the whole
+ *  semantic layer — learned propositions, extraction passes (with their
+ *  wall-clock duration) and the hint traffic. */
 export function groupSummary(group: Extract<TraceItem, { kind: 'group' }>, t: TranslateFn): { label: string; detail: string } {
   switch (group.group) {
     case 'turns':
@@ -153,12 +158,17 @@ export function groupSummary(group: Extract<TraceItem, { kind: 'group' }>, t: Tr
       return { label: t('runs.layers.group.plan_minor'), detail: t('runs.layers.group.plan_minor_hint', { count: String(group.events.length) }) }
     case 'opsNoise':
       return { label: t('runs.layers.group.ops_noise'), detail: t('runs.layers.group.ops_noise_hint', { count: String(group.events.length) }) }
-    case 'hints': {
-      const offered = group.events.filter((e) => e.type === 'hint.offered').length
-      const used = group.events.filter((e) => e.type === 'hint.used').length
-      return offered === 0
-        ? { label: t('runs.layers.group.hints'), detail: t('runs.layers.group.hints_zero') }
-        : { label: t('runs.layers.group.hints'), detail: t('runs.layers.group.hints_aggregate', { total: String(group.events.length), used: String(used), offered: String(offered) }) }
+    case 'knowledge': {
+      const learned = group.events.filter((e) => e.type === 'knowledge.proposed').length
+      const hints = group.events.filter((e) => isHint(e.type))
+      const used = hints.filter((e) => e.type === 'hint.used').length
+      const completed = group.events.find((e) => e.type === 'knowledge.extraction.completed')
+      const candidates = completed?.data?.candidates_count
+      const parts: string[] = []
+      if (learned > 0) parts.push(t('runs.layers.group.knowledge_learned', { count: String(learned) }))
+      if (candidates !== undefined) parts.push(t('runs.layers.group.knowledge_extracted', { count: String(candidates) }))
+      if (hints.length > 0) parts.push(t('runs.layers.group.hints_aggregate', { total: String(hints.length), used: String(used), offered: String(hints.filter((e) => e.type === 'hint.offered').length) }))
+      return { label: t('runs.layers.group.hints'), detail: parts.length > 0 ? parts.join(' · ') : t('runs.layers.group.hints_zero') }
     }
   }
 }

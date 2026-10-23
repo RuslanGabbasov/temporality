@@ -250,9 +250,9 @@ describe('filterTraceItems — folded groups (§8)', () => {
       ev('run.started', {}, 4),
     ])
     expect(labels(filterTraceItems(items, { ...EMPTY_FILTER, type: 'hint.used' }, chips(), RU, t)))
-      .toEqual(['group:hints'])
+      .toEqual(['group:knowledge'])
     expect(labels(filterTraceItems(items, { ...EMPTY_FILTER, participant: 'human' }, chips(), RU, t)))
-      .toEqual(['group:hints'])
+      .toEqual(['group:knowledge'])
   })
 
   it('a group with no matching member is dropped, not orphaned', () => {
@@ -271,7 +271,7 @@ describe('filterTraceItems — folded groups (§8)', () => {
       ev('hint.offered', { hint_id: 'h2' }, 2),
       ev('hint.used', { hint_id: 'h1' }, 3),
     ])
-    const group = items.find((item) => item.kind === 'group' && item.group === 'hints') as Extract<TraceItem, { kind: 'group' }>
+    const group = items.find((item) => item.kind === 'group' && item.group === 'knowledge') as Extract<TraceItem, { kind: 'group' }>
     expect(countMatchingMembers(group, { ...EMPTY_FILTER, type: 'hint.used' }, chips(), RU, t)).toBe(1)
     expect(countMatchingMembers(group, EMPTY_FILTER, chips(), RU, t)).toBe(3)
   })

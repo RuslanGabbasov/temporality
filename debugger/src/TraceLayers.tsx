@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react'
 import type { ObservationEvent } from './observationApi'
 import { eventDetails, timelineRow, rawEnvelope } from './eventPresentation'
 import { foldTrace, foldTraceTree, groupSummary, matchesChip, type TraceChip, type TraceItem, type TurnNode } from './traceModel'
-import { filterTraceItems, searchItems, type TraceUrlState } from './traceFilters'
+import { filterTraceItems, isTraceStateEmpty, searchItems, type TraceUrlState } from './traceFilters'
 import TraceFiltersPanel, { consoleSearchIndex, type ConsoleStateLike } from './TraceFiltersPanel'
 import type { ConsoleState } from './consoleStream'
 import type { Locale } from './locales'
@@ -259,7 +259,10 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
   // §8: with no filter state the trace renders as the turn tree (the spine of
   // the run); with one, it renders flat — filtering works over the folded
   // items with turn interiors flattened into them.
-  const activeFilter = Boolean(filterState && onFilterState)
+  // A filter/search state object is ALWAYS passed by the owner (URL-backed),
+  // so "activeFilter" means the state actually constrains something — an
+  // empty state renders the turn tree, not the flat folded list.
+  const activeFilter = Boolean(filterState && onFilterState) && filterState ? !isTraceStateEmpty(filterState) : false
   const visibleItems = activeFilter
     ? filterTraceItems(allItems, filterState!.filter, filterState!.chips, locale, t)
     : items.filter((item) => matchesChip(item, chip))

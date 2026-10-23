@@ -53,11 +53,11 @@ describe('foldTrace (§5)', () => {
       ev('hint.used', { hint_id: 'h2', proposition: 'b' }),
       ev('hint.outcome', { hint_id: 'h1', outcome: 'helpful' }),
     ], RU, t)
-    const group = items.find((item) => item.kind === 'group' && item.group === 'hints')
+    const group = items.find((item) => item.kind === 'group' && item.group === 'knowledge')
     expect(group).toBeTruthy()
     expect((group as { events: ObservationEvent[] }).events).toHaveLength(6)
     const summary = groupSummary(group as Parameters<typeof groupSummary>[0], t)
-    expect(summary.detail).toContain('6 подсказок')
+    expect(summary.detail).toContain('подсказок 6 (использовано 2)')
     const agg = hintAggregate((group as { events: ObservationEvent[] }).events)
     expect(agg).toEqual({ total: 6, used: 2, offered: 3 })
   })

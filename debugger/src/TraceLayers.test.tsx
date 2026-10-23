@@ -80,8 +80,21 @@ describe('TraceLayers (three layers, §4)', () => {
       ev('hint.offered', { hint_id: 'h2' }, 2),
       ev('hint.used', { hint_id: 'h1' }, 3),
     ])
-    expect(html).toContain('Подсказки и знания')
-    expect(html).toContain('3 подсказок, 1 применено')
+    expect(html).toContain('Знания и подсказки')
+    expect(html).toContain('подсказок 3 (использовано 1)')
+  })
+
+  it('the knowledge node merges learning, extraction and hints into one aggregate (§5.6 reworked)', () => {
+    const html = renderLayers([
+      ev('knowledge.extraction.started', { extraction_id: 'ex-1' }, 1),
+      ev('knowledge.proposed', { proposition: 'Тесты обязаны чистить KERNEL_FAULT_AFTER_EFFECT' }, 2),
+      ev('knowledge.extraction.completed', { candidates_count: 7 }, 3),
+      ev('hint.used', { hint_id: 'h1' }, 4),
+    ])
+    expect(html).toContain('Знания и подсказки')
+    expect(html).toContain('изучено 1')
+    expect(html).toContain('извлечено 7')
+    expect(html).toContain('подсказок 1 (использовано 1)')
   })
 
   it('renders the approval pair as one row with the decision (§5.5)', () => {
@@ -122,7 +135,7 @@ describe('TraceLayers (three layers, §4)', () => {
 
   it('chips render as toggle buttons with aria-pressed (§8, DoD-9)', () => {
     const html = renderLayers([ev('tool.completed', { tool: 'read_file', exit_code: 0 }, 1)])
-    expect(html).toContain('aria-pressed="true"')
+    expect(html).toContain('aria-pressed="false"')
     expect(html).toContain('Только ошибки')
     expect(html).toContain('Только инструменты')
     expect(html).toContain('Только решения человека')
