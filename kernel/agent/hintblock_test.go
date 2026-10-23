@@ -21,9 +21,9 @@ func TestAgentRunInjectsHintsAsSingleBudgetedBlock(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
 	registerExtractionChild(env)
-	var recorded []observation.Event
+	recorder := newEventRecorder()
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
-		recorded = append(recorded, event)
+		recorder.record(event)
 		return nil
 	}, activity.RegisterOptions{Name: ActivityRecordEvent})
 	var capturedHints []HintRequest
@@ -63,6 +63,7 @@ func TestAgentRunInjectsHintsAsSingleBudgetedBlock(t *testing.T) {
 	require.Contains(t, block, "caution: unconfirmed hypothesis")
 
 	var memoryRead *observation.Event
+	recorded := recorder.snapshot()
 	for index := range recorded {
 		if recorded[index].Type == "memory.read" {
 			memoryRead = &recorded[index]

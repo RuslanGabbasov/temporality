@@ -20,9 +20,9 @@ func TestAgentRunAskHumanCancelPolicyStopsRun(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
 	registerExtractionChild(env)
-	var recorded []observation.Event
+	recorder := newEventRecorder()
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
-		recorded = append(recorded, event)
+		recorder.record(event)
 		return nil
 	}, activity.RegisterOptions{Name: ActivityRecordEvent})
 	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
@@ -47,7 +47,7 @@ func TestAgentRunAskHumanCancelPolicyStopsRun(t *testing.T) {
 	require.Equal(t, 1, modelCalls, "no further model turns after a cancel policy")
 
 	types := make(map[string]bool)
-	for _, event := range recorded {
+	for _, event := range recorder.snapshot() {
 		types[event.Type] = true
 	}
 	require.True(t, types["human.timed_out"], "missing human.timed_out")
@@ -60,9 +60,9 @@ func TestAgentRunAskHumanRetryPolicyWaitsSecondRound(t *testing.T) {
 	env := suite.NewTestWorkflowEnvironment()
 	env.RegisterWorkflowWithOptions(AgentRun, workflow.RegisterOptions{Name: "AgentRun"})
 	registerExtractionChild(env)
-	var recorded []observation.Event
+	recorder := newEventRecorder()
 	env.RegisterActivityWithOptions(func(_ context.Context, event observation.Event) error {
-		recorded = append(recorded, event)
+		recorder.record(event)
 		return nil
 	}, activity.RegisterOptions{Name: ActivityRecordEvent})
 	env.RegisterActivityWithOptions(func(context.Context, HintRequest) ([]Hint, error) { return nil, nil }, activity.RegisterOptions{Name: ActivityKnowledgeHints})
@@ -89,7 +89,7 @@ func TestAgentRunAskHumanRetryPolicyWaitsSecondRound(t *testing.T) {
 
 	types := make(map[string]bool)
 	reasked := 0
-	for _, event := range recorded {
+	for _, event := range recorder.snapshot() {
 		types[event.Type] = true
 		if event.Type == "human.reasked" {
 			reasked++

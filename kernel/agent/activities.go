@@ -2118,6 +2118,14 @@ func faultAfterEffect(runID, toolName, operationID string) bool {
 	return true
 }
 
+// resetFaultDrilledForTest clears the per-run fault-drill ledger so a test
+// binary run with -count>1 starts each pass with fresh state.
+func resetFaultDrilledForTest() {
+	faultMu.Lock()
+	defer faultMu.Unlock()
+	faultDrilled = map[string]bool{}
+}
+
 func (a *Activities) KnowledgeHints(ctx context.Context, request HintRequest) ([]Hint, error) {
 	// The journal caps query at 4096 runes; long prompts (a pasted document,
 	// a big task brief) are truncated — the head of the task carries the
