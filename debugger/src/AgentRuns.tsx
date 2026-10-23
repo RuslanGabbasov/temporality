@@ -401,10 +401,12 @@ export default function AgentRuns({ project }: { project: string }) {
    *  whole run at once. Reset on every run switch / view open. */
   const [traceLimit, setTraceLimit] = useState(TRACE_WINDOW)
   useEffect(() => { setTraceLimit(TRACE_WINDOW) }, [selected, view])
-  // The window snaps back to the nearest turn boundary: a cut mid-turn would
-  // strand the turn's tool calls and answers outside their «Ход N» node.
+  // The window snaps back to the nearest turn boundary (a cut mid-turn would
+  // strand the turn's tool calls and answers outside their «Ход N» node),
+  // then flips to newest-first: the running turn opens the trace, older
+  // ones follow below.
   const traceWindow = useMemo(
-    () => turnAlignedWindow(trace.visible, traceLimit),
+    () => turnAlignedWindow(trace.visible, traceLimit).slice().reverse(),
     [trace, traceLimit],
   )
   const olderAvailable = trace.visible.length > traceWindow.length
@@ -1228,9 +1230,6 @@ export default function AgentRuns({ project }: { project: string }) {
                       renderer; heavy texts (model responses) render only for
                       expanded rows. */}
                   {olderAvailable && view === 'trace' && (
-                    <TraceOlderSentinel onVisible={loadOlder} />
-                  )}
-                  {olderAvailable && view === 'trace' && (
                     <div style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--tm-text-3)', padding: '0.25rem 0' }}>
                       {t('runs.trace.older_hint', { shown: String(traceWindow.length), total: String(trace.visible.length) })}
                     </div>
@@ -1253,6 +1252,9 @@ export default function AgentRuns({ project }: { project: string }) {
                     onConsoleState={collectConsoleState}
                     liveModelParts={liveModelParts}
                   />
+                  {olderAvailable && view === 'trace' && (
+                    <TraceOlderSentinel onVisible={loadOlder} />
+                  )}
                 </Tile>
                 )}
 

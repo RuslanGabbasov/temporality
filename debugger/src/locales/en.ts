@@ -2291,7 +2291,7 @@ export const en: Record<string, string> = {
     'runs.layers.group.turns_hint': 'Service turn boundaries are folded',
     'runs.layers.turn_n': 'Turn {{n}}',
     'runs.layers.turn_empty': 'No events in this turn',
-    'runs.trace.older_hint': 'Showing the latest {{shown}} of {{total}} events — scroll up to load older ones',
+    'runs.trace.older_hint': 'Showing the latest {{shown}} of {{total}} events — scroll down to load older ones',
     'runs.layers.group.hints': 'Knowledge and hints',
     'runs.layers.group.hints_zero': 'The agent used no hints',
     'runs.layers.group.hints_aggregate': '{{total}} hints ({{used}} used)',

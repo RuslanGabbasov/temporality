@@ -297,7 +297,9 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
     }
   }
   const turnNodes = tree.filter((segment) => segment.turn !== null).map((segment) => segment.turn!)
-  const lastTurnNumber = turnNodes.length > 0 ? turnNodes[turnNodes.length - 1].number : -1
+  // The running turn is the highest number, wherever it sits in the display
+  // order (the tree is newest-first).
+  const lastTurnNumber = turnNodes.length > 0 ? Math.max(...turnNodes.map((turn) => turn.number)) : -1
   const turnExpanded = (turn: TurnNode): boolean => {
     const pin = pinnedTurns.get(turn.number)
     if (pin !== undefined) return pin
@@ -498,20 +500,20 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
           )}
         </div>
       )}
-      {visibleItems.length === 0 && !activeFilter && <div style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0' }}>{emptyHint ?? t('runs.layers.timeline.empty')}</div>}
-      {activeFilter ? (
-        visibleItems.map((item) => renderFolded(item, 'flat:'))
-      ) : (
-        tree.map((segment, index) => renderSegment(segment, index))
-      )}
-      {/* Chronological order: the in-flight call is the newest event, so its
-          live row closes the timeline. */}
+      {/* Newest-first: the in-flight call is the newest event, so its live
+          row opens the timeline. */}
       {liveModelParts && liveModelParts.length > 0 && (
         <div style={{ padding: '0.4rem 0.5rem', marginBottom: '0.15rem', background: 'var(--tm-surface)', borderRadius: '0 4px 4px 0', borderLeft: '3px solid var(--tm-teal)', minWidth: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
           <span style={{ color: 'var(--tm-teal)', width: '1.2rem', textAlign: 'center', flexShrink: 0 }}>⏳</span>
           <strong style={{ minWidth: '100px' }}>{t('runs.event.model_call')}</strong>
           <span style={{ color: 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{liveModelParts.join(' · ')}</span>
         </div>
+      )}
+      {visibleItems.length === 0 && !activeFilter && <div style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0' }}>{emptyHint ?? t('runs.layers.timeline.empty')}</div>}
+      {activeFilter ? (
+        visibleItems.map((item) => renderFolded(item, 'flat:'))
+      ) : (
+        tree.map((segment, index) => renderSegment(segment, index))
       )}
     </div>
   )
