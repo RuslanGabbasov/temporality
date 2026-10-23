@@ -1664,6 +1664,16 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                   <Toggle id="agent-network" labelText={t('agents.network') ?? 'Network'} toggled={form.network_access ?? false} onToggle={(checked: boolean) => setForm({ ...form, network_access: checked })} />
                   <Toggle id="agent-readonly" labelText={t('agents.read_only') ?? 'Read-only'} toggled={form.read_only ?? false} onToggle={(checked: boolean) => setForm({ ...form, read_only: checked })} />
                 </div>
+                <Select
+                  id="agent-approval"
+                  labelText={t('agents.approval_mode') ?? 'Tool approvals'}
+                  value={form.approval_mode ?? ''}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, approval_mode: e.target.value })}
+                  helperText={t('agents.approval_mode_hint') ?? 'Default: workspace commands and web tools run without confirmation. "Every tool" asks a human before each consequential call.'}
+                >
+                  <SelectItem value="" text={t('agents.approval_auto') ?? 'Default (auto-approve workspace & web)'} />
+                  <SelectItem value="tools" text={t('agents.approval_tools') ?? 'Every tool (ask a human)'} />
+                </Select>
               </Stack>
             )}
             {formTab === 'bindings' && (

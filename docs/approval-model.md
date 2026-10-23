@@ -23,6 +23,19 @@ The digest is an identity check, not proof that the UI is trustworthy or that th
 
 When `Activities.PrepareRun` confirms that the Docker sandbox is configured, it assigns `run_command` to the workflow's auto-approval policy and removes it from the human approval list. The deterministic workflow emits `approval.auto_granted` before `tool.started`; the event includes the bounded operation display, canonical arguments hash, workspace path, and `policy_id: sandbox.workspace.v1`. The sandbox still enforces its container, workspace, network, and resource settings. This policy cannot auto-approve MCP tools or the explicit `request_approval` tool. API callers cannot choose the policy: `PrepareRun` replaces the policy fields from server configuration.
 
+The default auto-approval set: `run_command`, `write_file`, `edit_file` (with the sandbox configured) plus `web_fetch`, `web_search`, `fetch_image`, `browser` (with network access). Everything else — MCP tools above all — asks a human unless the MCP server config exempts it (`approval_tools` is the require-list; anything not listed follows the default posture).
+
+## Decision levels
+
+Per tool call the workflow evaluates, in order: `approvalRequired` wins over auto-approval.
+
+1. **Tool identity** — `request_approval` always asks; MCP tools listed in the server's `approval_tools` always ask.
+2. **Org policy** — `approval_mode: tools` on the effective org-unit policy forces confirmation for every consequential (non-observation) tool of every run in that scope.
+3. **Agent mode** — the agent's own `approval_mode` (`applyAgentConfig`): `prompt`, `manual` or `tools` forces confirmation for every consequential tool of this agent's runs and zeroes the sandbox auto-approval list; `auto` or empty keeps the default posture. Set it in the agent's Parameters tab ("Tool approvals"). Org policy is applied after and cannot be loosened by the agent.
+4. **Default** — otherwise the sandbox auto-approval list applies (see above).
+
+`approval.auto_granted` events carry `policy_id: sandbox.workspace.v1`, so filtered traces show exactly what ran unattended. To audit an agent's autonomy: filter the trace by `approval.auto_granted` and check which tools the policy covered.
+
 ## Validation evidence
 
 `TestApprovedToolOperationIsVisibleAndHashBound` checks `approval.requested → approval.granted → tool.started → tool.completed`, common run/frame/operation/hash, causal links, secret absence and denial when the signal hash differs. `TestSandboxAutoApprovalIsRecordedAndRunsWithoutHumanSignal` checks the sandbox policy event/order and verifies that it does not create a pending human request. `TestApprovalOperationHashesCanonicalArgsAndRedactsDisplay` checks canonical map-order stability and redaction. These are workflow-level tests; a human clicking the live UI against a real MCP write remains a separate acceptance test.

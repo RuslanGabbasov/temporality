@@ -8272,6 +8272,20 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	if a.ReadOnly != nil && *a.ReadOnly {
 		input.ReadOnly = true
 	}
+	// Agent-level tool approval (docs/approval-model.md): 'prompt', 'manual'
+	// or 'tools' forces every consequential tool through human confirmation —
+	// the sandbox auto-approval policy (sandbox.workspace.v1) stops applying.
+	// 'auto' and empty keep the default posture. Org policy still wins:
+	// applyRunPolicy runs after this and re-sets RequireToolApproval.
+	agentApprovalMode := ""
+	if a.ApprovalMode != nil {
+		agentApprovalMode = *a.ApprovalMode
+	}
+	switch strings.TrimSpace(strings.ToLower(agentApprovalMode)) {
+	case "prompt", "manual", "tools":
+		input.RequireToolApproval = true
+		input.AutoApproveTools = nil
+	}
 	resolveAgentSandbox(ctx, ws, a, input)
 	if useSkills {
 		resolveAgentSkills(ctx, ws, a, input)
