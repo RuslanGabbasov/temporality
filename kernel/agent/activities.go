@@ -37,6 +37,10 @@ type SandboxRunner interface {
 	SandboxRoot() string
 	ResolveWorkspace(path string) (string, error)
 	Execute(context.Context, sandbox.Request) (sandbox.Result, error)
+	// RunScratchDir maps a "<project>/<run>" scratch key onto the host
+	// directory run_command mounts at /scratch (run-scoped scratch). The file
+	// tools use it to resolve /scratch/… paths without a container.
+	RunScratchDir(key string) string
 }
 
 // sandboxConfigured reports whether a sandbox runner actually backs command
@@ -249,7 +253,7 @@ func (a *Activities) ToolDefs() []llm.ToolDef {
 // survives there and what does not.
 var runCommandTool = llm.ToolDef{
 	Name:        "run_command",
-	Description: "Run a command in an isolated sandbox container. The working directory is /workspace — persistent storage shared by all agents and runs of this project: files saved there survive across sessions and it may already contain files from earlier work, so treat them as shared and do not remove what you did not create. /tmp and /scratch are ephemeral and disappear between calls. Toolchain caches (GOCACHE, GOMODCACHE) point at the persistent per-project /cache volume, so builds keep their cache across runs. Network access depends on agent configuration. Provide argv as an array.",
+	Description: "Run a command in an isolated sandbox container. The working directory is /workspace — persistent storage shared by all agents and runs of this project: files saved there survive across sessions and it may already contain files from earlier work, so treat them as shared and do not remove what you did not create. /scratch is per-run scratch: files written there survive between the commands of this run and are wiped after the run — use it for multi-step file preparation and temp data; /tmp is ephemeral and disappears between calls. /cache persists toolchain caches across runs. Network access depends on agent configuration. Provide argv as an array.",
 	Parameters:  map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "timeout_sec": map[string]any{"type": "integer", "description": "Wall-clock cap for this command, up to 900 (15 min, the hard ceiling). Default 300. Test suites, builds and installs: pass 600+ explicitly instead of relying on the default"}}, "required": []string{"command"}},
 }
 
@@ -753,6 +757,10 @@ func (a *Activities) sandboxRequest(request ToolRequest, command []string, timeo
 		ReadOnly:       request.ReadOnly || request.Role == "reviewer" || request.Role == "qa",
 		Network:        net,
 		Env:            secretEnv,
+		// Run-scoped /scratch: files written there survive between the run's
+		// commands and are swept by age after the run is over. Keyed by
+		// project/run so concurrent runs never share files.
+		ScratchKey: sandbox.SanitizeScratchToken(request.Project) + "/" + sandbox.SanitizeScratchToken(request.RunID),
 		// Observability labels (docs/sandbox-storage.md): the health endpoint
 		// lists running sandboxes with their run/agent/actor so the dashboard
 		// can show who consumes the host.
@@ -2237,6 +2245,48 @@ func (a *Activities) WriteTeamContract(ctx context.Context, request TeamContract
 		return "", fmt.Errorf("write team contract: %w", err)
 	}
 	return rel, nil
+}
+
+// SweepRunScratch removes run-scoped /scratch trees whose newest change is
+// older than ttl: scratch outlives the run for inspection for a while, then
+// goes (docs/sandbox-storage.md — run-scoped scratch). The paths are
+// deterministic (<root>/scratch/<project>/<run>/), so an age sweep is enough.
+func (a *Activities) SweepRunScratch(now time.Time, ttl time.Duration) (int, error) {
+	if ttl <= 0 || !sandboxConfigured(a.Sandbox) {
+		return 0, nil
+	}
+	root := filepath.Join(a.Sandbox.SandboxRoot(), "scratch")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	removed := 0
+	for _, project := range entries {
+		if !project.IsDir() {
+			continue
+		}
+		runs, err := os.ReadDir(filepath.Join(root, project.Name()))
+		if err != nil {
+			continue
+		}
+		for _, run := range runs {
+			if !run.IsDir() {
+				continue
+			}
+			full := filepath.Join(root, project.Name(), run.Name())
+			info, err := run.Info()
+			if err != nil || now.Sub(info.ModTime()) <= ttl {
+				continue
+			}
+			if err := os.RemoveAll(full); err == nil {
+				removed++
+			}
+		}
+	}
+	return removed, nil
 }
 
 // SweepTeamScratch removes team scratch directories whose newest change is

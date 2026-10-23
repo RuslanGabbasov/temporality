@@ -34,7 +34,8 @@
 | Загрузки пользователя | `<root>/projects/<p>/uploads/` | `/workspace/uploads` | персистентная |
 | Входящие intake | `<root>/projects/<p>/inbox/` | `/workspace/inbox` | персистентная |
 | Стейджинг каналов | `<root>/inbound/…` | — | удаляется после обработки |
-| /tmp, /scratch | tmpfs | `/tmp`, `/scratch` | умирают с контейнером |
+| /tmp | tmpfs | `/tmp` | умирает с контейнером |
+| /scratch | `<root>/scratch/<project>/<run>/` | `/scratch` | пер-рановая: файлы живут между вызовами `run_command` одного рана, свипаются по TTL после него |
 
 Проблемы:
 

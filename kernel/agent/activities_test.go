@@ -262,3 +262,5 @@ func TestSandboxLabelsCarryRunIdentity(t *testing.T) {
 		t.Errorf("empty agent must be omitted: %v", bare)
 	}
 }
+
+func (r *recordingSandbox) RunScratchDir(string) string { return "" }

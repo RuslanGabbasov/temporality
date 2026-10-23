@@ -228,3 +228,47 @@ func TestResolveWorkspacePathAllowsWorkspacePrefixAndNestedTargets(t *testing.T)
 		t.Fatalf("non-existent nested write target must resolve: %v", err)
 	}
 }
+
+func (f *fileToolSandbox) RunScratchDir(key string) string {
+	project, run := "_", key
+	if i := strings.IndexByte(key, '/'); i >= 0 {
+		project, run = key[:i], key[i+1:]
+	}
+	return filepath.Join(f.root, "scratch", project, run)
+}
+
+// /scratch/… paths in the file tools land in the run's scratch host tree —
+// the same directory run_command mounts at /scratch — so a file written with
+// write_file is visible to the next command of the run (and nothing escapes
+// the tree).
+func TestFileToolsScratchPaths(t *testing.T) {
+	a, workspace := newFileToolActivities(t)
+	request := fileToolRequest("write_file", workspace, false, map[string]any{
+		"path":    "/scratch/payload.json",
+		"content": `{"ok":true}`,
+	})
+	request.Project = "demo"
+	if _, err := a.RunTool(context.Background(), request); err != nil {
+		t.Fatalf("write_file /scratch: %v", err)
+	}
+	written := filepath.Join(a.Sandbox.RunScratchDir("demo/run-1"), "payload.json")
+	if _, err := os.Stat(written); err != nil {
+		t.Fatalf("scratch file not on the expected host path: %v", err)
+	}
+
+	read := fileToolRequest("read_file", workspace, false, map[string]any{"path": "/scratch/payload.json"})
+	read.Project = "demo"
+	result, err := a.RunTool(context.Background(), read)
+	if err != nil {
+		t.Fatalf("read_file /scratch: %v", err)
+	}
+	if !strings.Contains(result.Content, `"ok":true`) {
+		t.Fatalf("read_file /scratch returned %q", result.Content)
+	}
+
+	for _, hostile := range []string{"/scratch/../secrets", "/scratch/../../etc/passwd", "/scratch/a/../../b"} {
+		if _, err := a.RunTool(context.Background(), fileToolRequest("write_file", workspace, false, map[string]any{"path": hostile, "content": "x"})); err == nil {
+			t.Fatalf("write_file %q: expected traversal to be rejected", hostile)
+		}
+	}
+}

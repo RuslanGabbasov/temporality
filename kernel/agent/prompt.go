@@ -82,9 +82,9 @@ func CompileAgentPrompt(in AgentPromptInput) string {
 	}
 	b.WriteString(". Choose your own trajectory; converge to a final answer before the turn budget runs out.")
 
-	// Sandbox note: caches go to /scratch, never the workspace.
+	// Sandbox note: /scratch is run-scoped; the workspace is the cross-run place.
 	if caps.Cap(caps.RunCommands) {
-		b.WriteString(" Every command sandbox has a writable /scratch directory (HOME and TMPDIR point there); use it for build and package caches, and never write caches into the workspace, which may be read-only for your role.")
+		b.WriteString(" Every command sandbox has a writable /scratch directory (HOME and TMPDIR point there) whose files survive between the commands of one run and are wiped after the run — use it for multi-step file preparation, build scratch and package caches, and never write caches into the workspace, which may be read-only for your role.")
 	}
 
 	// Memory recording policy (kept from the base contract; recording is

@@ -72,6 +72,16 @@ func (s *Swappable) ResolveWorkspace(path string) (string, error) {
 	return current.ResolveWorkspace(path)
 }
 
+// RunScratchDir maps a "<project>/<run>" scratch key onto the host directory
+// the backing runner mounts at /scratch; empty when not configured.
+func (s *Swappable) RunScratchDir(key string) string {
+	current := s.Current()
+	if current == nil {
+		return ""
+	}
+	return current.RunScratchDir(key)
+}
+
 func (s *Swappable) Execute(ctx context.Context, request Request) (Result, error) {
 	current := s.Current()
 	if current == nil {

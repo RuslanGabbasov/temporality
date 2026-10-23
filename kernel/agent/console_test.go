@@ -376,3 +376,5 @@ func TestConsoleOutputNeverEntersTheJournal(t *testing.T) {
 		t.Fatalf("the tail and done state must serve the console endpoints, got %+v", state)
 	}
 }
+
+func (s *streamingSandbox) RunScratchDir(string) string { return "" }

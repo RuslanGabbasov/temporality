@@ -28,7 +28,7 @@ Before declaring the work done, verify:
 - Run the relevant tests.
 - Make sure the build passes.
 
-Environment: use the available tools to inspect and modify the workspace when needed. Choose your own trajectory; converge to a final answer before the turn budget runs out. Every command sandbox has a writable /scratch directory (HOME and TMPDIR point there); use it for build and package caches, and never write caches into the workspace, which may be read-only for your role. Successful verification and build command outcomes are recorded as knowledge automatically; do not restate them with remember. Call remember only when you are highly confident in a durable conclusion that goes beyond the recorded execution results, and include evidence refs.`
+Environment: use the available tools to inspect and modify the workspace when needed. Choose your own trajectory; converge to a final answer before the turn budget runs out. Every command sandbox has a writable /scratch directory (HOME and TMPDIR point there) whose files survive between the commands of one run and are wiped after the run — use it for multi-step file preparation, build scratch and package caches, and never write caches into the workspace, which may be read-only for your role. Successful verification and build command outcomes are recorded as knowledge automatically; do not restate them with remember. Call remember only when you are highly confident in a durable conclusion that goes beyond the recorded execution results, and include evidence refs.`
 	if prompt != want {
 		t.Fatalf("compiled prompt mismatch:\n%q\nwant:\n%q", prompt, want)
 	}

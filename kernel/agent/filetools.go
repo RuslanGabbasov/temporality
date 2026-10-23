@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/temporality-project/temporality/kernel/llm"
+	"github.com/temporality-project/temporality/kernel/sandbox"
 	"go.temporal.io/sdk/temporal"
 )
 
@@ -32,22 +33,22 @@ var fileToolDefs = []llm.ToolDef{
 	viewImageTool,
 	{
 		Name:        "read_file",
-		Description: "Read a text file from the workspace. Returns the content directly, with no shell quoting hazards. Prefer this over cat for reading files.",
+		Description: "Read a text file from the workspace or the run's /scratch. Returns the content directly, with no shell quoting hazards. Prefer this over cat for reading files.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path": map[string]any{"type": "string", "description": "Workspace-relative path, e.g. kernel/agent/foo.go (a leading /workspace/ is accepted)"},
+				"path": map[string]any{"type": "string", "description": "Workspace-relative path (e.g. kernel/agent/foo.go, a leading /workspace/ is accepted) or /scratch/<file> for the run's scratch area"},
 			},
 			"required": []string{"path"},
 		},
 	},
 	{
 		Name:        "write_file",
-		Description: "Create or fully replace a workspace file. Parent directories are created automatically and the write is atomic. Always prefer this over shell heredocs (cat > file <<'EOF'): no argument size limits, no quoting or truncation hazards. For targeted changes to an existing file prefer edit_file.",
+		Description: "Create or fully replace a workspace file or a file in the run's /scratch. Parent directories are created automatically and the write is atomic. Always prefer this over shell heredocs (cat > file <<'EOF'): no argument size limits, no quoting or truncation hazards. For targeted changes to an existing file prefer edit_file.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":    map[string]any{"type": "string", "description": "Workspace-relative path (a leading /workspace/ is accepted)"},
+				"path":    map[string]any{"type": "string", "description": "Workspace-relative path (a leading /workspace/ is accepted) or /scratch/<file> for the run's scratch area"},
 				"content": map[string]any{"type": "string", "description": "Complete new content of the file"},
 			},
 			"required": []string{"path", "content"},
@@ -142,11 +143,17 @@ func requireWritableWorkspace(request ToolRequest) error {
 }
 
 // resolveToolTarget resolves the run workspace and the model-supplied path
-// inside it. Argument-shape failures are non-retryable: they are
-// deterministic caller errors with no side effect.
+// inside it — or, for /scratch/… paths, into the run-scoped scratch directory
+// (the same host tree run_command mounts at /scratch). Argument-shape
+// failures are non-retryable: they are deterministic caller errors with no
+// side effect.
 func (a *Activities) resolveToolTarget(request ToolRequest, pathArg string) (string, error) {
 	if !sandboxConfigured(a.Sandbox) {
 		return "", fileToolFailure(errors.New("sandbox is not configured"))
+	}
+	trimmed := strings.TrimSpace(pathArg)
+	if trimmed == "/scratch" || trimmed == "/scratch/" || strings.HasPrefix(trimmed, "/scratch/") {
+		return a.resolveScratchTarget(request, strings.TrimPrefix(trimmed, "/scratch"))
 	}
 	workspace, err := a.Sandbox.ResolveWorkspace(request.WorkspacePath)
 	if err != nil {
@@ -155,6 +162,26 @@ func (a *Activities) resolveToolTarget(request ToolRequest, pathArg string) (str
 	abs, err := resolveWorkspacePath(workspace, pathArg)
 	if err != nil {
 		return "", invalidToolArguments(err)
+	}
+	return abs, nil
+}
+
+// resolveScratchTarget maps a /scratch-relative model path onto the run's
+// scratch host directory. The scratch key mirrors sandboxRequest's, so the
+// files the tools write are exactly the files the next run_command sees.
+func (a *Activities) resolveScratchTarget(request ToolRequest, rel string) (string, error) {
+	key := sandbox.SanitizeScratchToken(request.Project) + "/" + sandbox.SanitizeScratchToken(request.RunID)
+	dir := a.Sandbox.RunScratchDir(key)
+	if rel == "" {
+		return dir, nil
+	}
+	clean := filepath.Clean(strings.TrimPrefix(rel, "/"))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", invalidToolArguments(fmt.Errorf("path %q escapes /scratch", rel))
+	}
+	abs := filepath.Join(dir, clean)
+	if !strings.HasPrefix(abs, dir+string(filepath.Separator)) {
+		return "", invalidToolArguments(fmt.Errorf("path %q escapes /scratch", rel))
 	}
 	return abs, nil
 }

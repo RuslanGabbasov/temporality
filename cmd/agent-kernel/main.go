@@ -6168,6 +6168,13 @@ func main() {
 			} else if removed > 0 {
 				slog.Info("swept team scratch directories", "removed", removed)
 			}
+			// Run-scoped /scratch (sandbox-storage): same TTL story — a run's
+			// scratch outlives the run for inspection, then goes.
+			if removed, err := activities.SweepRunScratch(time.Now(), ttl); err != nil {
+				slog.Warn("sweep run scratch", "error", err)
+			} else if removed > 0 {
+				slog.Info("swept run scratch directories", "removed", removed)
+			}
 		}
 	}()
 

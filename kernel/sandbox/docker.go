@@ -80,6 +80,11 @@ type Request struct {
 	// CacheEnv replaces the legacy Go cache env set with the profile's cache
 	// pointers (KEY=VALUE against /cache). Empty keeps GOCACHE/GOMODCACHE.
 	CacheEnv []string
+	// ScratchKey makes /scratch run-scoped instead of per-command tmpfs: a
+	// host directory (under the sandbox root) bind-mounted read-write, so
+	// files survive between run_command calls of one run and are swept by age
+	// afterwards. Sanitized by the caller; empty keeps the ephemeral tmpfs.
+	ScratchKey string
 	// DockerSocket mounts the host daemon socket into the sandbox
 	// (Docker-out-of-Docker, docs/sandbox-profiles.md §5.3). Opt-in per
 	// custom profile: the socket is host-root-equivalent, so only profiles an
@@ -109,6 +114,9 @@ type Runner interface {
 	SandboxRoot() string
 	ResolveWorkspace(path string) (string, error)
 	Execute(context.Context, Request) (Result, error)
+	// RunScratchDir maps a "<project>/<run>" scratch key onto the host
+	// directory the runner mounts at /scratch (run-scoped scratch).
+	RunScratchDir(key string) string
 }
 
 type Docker struct {
@@ -336,6 +344,15 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 		return Result{}, err
 	}
 	args := d.arguments(workspace, request, name, socketArgs)
+	// Run-scoped /scratch: the host directory must exist before the bind mount
+	// (docker would create it root-owned otherwise, and the sandbox user could
+	// not write into it).
+	if request.ScratchKey != "" {
+		scratchDir := d.runScratchDir(request.ScratchKey)
+		if err := os.MkdirAll(scratchDir, 0o777); err != nil {
+			return Result{}, fmt.Errorf("run scratch directory: %w", err)
+		}
+	}
 	if err := d.ensureNetwork(d.effectiveNetwork(request)); err != nil {
 		return Result{}, err
 	}
@@ -457,7 +474,19 @@ func (d *Docker) arguments(workspace string, request Request, name string, socke
 	// caches). /tmp stays noexec for plain temp files. HOME and TMPDIR point
 	// at /scratch so toolchain defaults work even when the workspace is
 	// mounted read-only (reviewer/qa roles).
+	// With a ScratchKey the area becomes run-scoped: a host directory under
+	// the sandbox root bind-mounted at /scratch, so files survive between
+	// commands of one run (a heredoc-then-curl sequence no longer needs to be
+	// one command) and the storage sweeper reclaims them by age afterwards.
+	// Bind mounts are exec-allowed by default; the size cap of the tmpfs is
+	// replaced by the storage sweeper + disk quotas of the sandbox root.
 	scratchSize := firstNonEmpty(request.ScratchSize, d.ScratchSize, "512m")
+	var scratchArgs []string
+	if request.ScratchKey != "" {
+		scratchArgs = []string{"--volume", d.runScratchDir(request.ScratchKey) + ":/scratch:rw"}
+	} else {
+		scratchArgs = []string{"--tmpfs", "/scratch:rw,exec,nosuid,size=" + scratchSize}
+	}
 	// Toolchains that ignore TMPDIR (some linkers, cgo, packaging steps)
 	// still land their temporaries in /tmp; 64m was too tight for real
 	// builds, so the cap is configurable and defaults to a size that
@@ -470,7 +499,9 @@ func (d *Docker) arguments(workspace string, request Request, name string, socke
 	if request.PIDs > 0 {
 		pids = request.PIDs
 	}
-	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=" + network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(pids), "--memory", memory, "--memory-swap", memory, "--cpus", cpus, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=" + tmpSize, "--tmpfs", "/scratch:rw,exec,nosuid,size=" + scratchSize, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode}
+	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=" + network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(pids), "--memory", memory, "--memory-swap", memory, "--cpus", cpus, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=" + tmpSize}
+	args = append(args, scratchArgs...)
+	args = append(args, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode)
 	// Socket passthrough flags land with the other volume/env flags — before
 	// the image, where every docker argument must stay.
 	args = append(args, socketArgs...)
@@ -511,6 +542,40 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// RunScratchDir is the exported form of runScratchDir: the file tools map
+// /scratch/… paths onto the same host tree run_command mounts at /scratch.
+func (d *Docker) RunScratchDir(key string) string { return d.runScratchDir(key) }
+
+// runScratchDir is the host directory behind a run-scoped /scratch: under the
+// sandbox root, keyed by "<project>/<run>" so different runs never share
+// files and the storage sweeper can reclaim whole trees by age.
+func (d *Docker) runScratchDir(key string) string {
+	project, run := "_", key
+	if i := strings.IndexByte(key, '/'); i >= 0 {
+		project, run = key[:i], key[i+1:]
+	}
+	return filepath.Join(d.Root, "scratch", SanitizeScratchToken(project), SanitizeScratchToken(run))
+}
+
+// SanitizeScratchToken keeps filename-safe characters so a hostile project or
+// run id can never traverse out of the scratch tree.
+func SanitizeScratchToken(s string) string {
+	if s == "" {
+		return "_"
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "_"
+	}
+	return b.String()
 }
 
 // projectCacheDir returns the host directory mounted at /cache for the

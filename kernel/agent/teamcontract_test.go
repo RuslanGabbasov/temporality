@@ -88,3 +88,5 @@ func TestSweepTeamScratch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, removed)
 }
+
+func (c *contractSandbox) RunScratchDir(string) string { return "" }
