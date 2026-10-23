@@ -2296,6 +2296,7 @@ export const en: Record<string, string> = {
     'runs.layers.group.hints': 'Knowledge and hints',
     'runs.layers.group.hints_zero': 'The agent used no hints',
     'runs.layers.group.hints_aggregate': '{{total}} hints ({{used}} used)',
+    'runs.layers.group.hints_total': '{{count}} hints',
     'runs.layers.group.knowledge_learned': '{{count}} learned',
     'runs.layers.group.knowledge_extracted': '{{count}} extracted',
     'runs.layers.group.hints_offered': 'offered: {{offered}}',

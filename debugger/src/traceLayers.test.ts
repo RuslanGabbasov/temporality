@@ -62,6 +62,20 @@ describe('foldTrace (§5)', () => {
     expect(agg).toEqual({ total: 6, used: 2, offered: 3 })
   })
 
+  it('drops the always-zero «использовано» from the run-start knowledge block', () => {
+    // The initial block holds primed hints / hint.query — usage happens later
+    // in the run, so «использовано 0» there is guaranteed noise.
+    const items = foldTrace([
+      ev('hint.query', { candidate_count: 8 }),
+      ev('memory.read', { hint_count: 8, primed_hints: 5 }),
+    ], RU, t)
+    const group = items.find((item) => item.kind === 'group' && item.group === 'knowledge')
+    expect(group).toBeTruthy()
+    const summary = groupSummary(group as Parameters<typeof groupSummary>[0], t)
+    expect(summary.detail).toContain('подсказок 1')
+    expect(summary.detail).not.toContain('использовано')
+  })
+
   it('folds minor plan transitions into «изменения плана», keeps rejected visible (§5.4)', () => {
     const items = foldTrace([
       ev('plan.task.skipped', { task_id: 'a' }),

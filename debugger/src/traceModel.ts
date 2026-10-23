@@ -189,7 +189,14 @@ export function groupSummary(group: Extract<TraceItem, { kind: 'group' }>, t: Tr
       const parts: string[] = []
       if (learned > 0) parts.push(t('runs.layers.group.knowledge_learned', { count: String(learned) }))
       if (candidates !== undefined) parts.push(t('runs.layers.group.knowledge_extracted', { count: String(candidates) }))
-      if (hints.length > 0) parts.push(t('runs.layers.group.hints_aggregate', { total: String(hints.length), used: String(used), offered: String(hints.filter((e) => e.type === 'hint.offered').length) }))
+      if (hints.length > 0) {
+        // «использовано 0» says nothing: hints are used during the run, so the
+        // run-start block (primed hints, hint.query) would always show zero.
+        const offered = hints.filter((e) => e.type === 'hint.offered').length
+        parts.push(used > 0
+          ? t('runs.layers.group.hints_aggregate', { total: String(hints.length), used: String(used), offered: String(offered) })
+          : t('runs.layers.group.hints_total', { count: String(hints.length) }))
+      }
       return { label: t('runs.layers.group.hints'), detail: parts.length > 0 ? parts.join(' · ') : t('runs.layers.group.hints_zero') }
     }
   }

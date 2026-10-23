@@ -2296,6 +2296,7 @@ export const ru: Record<string, string> = {
     'runs.layers.group.hints': 'Знания и подсказки',
     'runs.layers.group.hints_zero': 'Агент не обращался к подсказкам',
     'runs.layers.group.hints_aggregate': 'подсказок {{total}} (использовано {{used}})',
+    'runs.layers.group.hints_total': 'подсказок {{count}}',
     'runs.layers.group.knowledge_learned': 'изучено {{count}}',
     'runs.layers.group.knowledge_extracted': 'извлечено {{count}}',
     'runs.layers.group.hints_offered': 'предложено: {{offered}}',
