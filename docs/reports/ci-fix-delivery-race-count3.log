@@ -1,0 +1,611 @@
+=== RUN   TestAgentRunDelegationWidthLimit
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskFailedRequest. ActivityID 1 ActivityType kernel.generate_run_title
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 2 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 3 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 4 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 5 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 6 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 7 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 8 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 9 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 10 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 11 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 13 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 12 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 14 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 15 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 16 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 17 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 18 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 19 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 20 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 21 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 23 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 25 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 24 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 26 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 27 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 28 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 22 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 30 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 31 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 32 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 35 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 34 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 33 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 29 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 36 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 39 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 38 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 37 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 42 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 40 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 43 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 41 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 44 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 45 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 47 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 49 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 48 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 50 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 51 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 46 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 52 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 54 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 53 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 56 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 55 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 57 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 58 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 59 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 61 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 64 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 65 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 66 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 67 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 60 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 62 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 63 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 68 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 70 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 69 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 71 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 72 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 73 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 74 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 75 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 76 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 77 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 78 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 79 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 80 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 81 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 82 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 83 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 85 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 86 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 87 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 84 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 88 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 89 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 91 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 92 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 93 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 94 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 95 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 97 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 90 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 98 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 96 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 99 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 101 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 102 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 103 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 104 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 105 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 106 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 100 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 107 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 109 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 110 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 108 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 112 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 111 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 113 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 114 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 117 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 116 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 115 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 119 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 120 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 121 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 118 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 122 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 124 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 126 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 123 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 125 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 127 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 128 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 129 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 130 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 131 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 132 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 133 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 135 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 134 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 137 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 139 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 140 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 138 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 141 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 142 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 136 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 143 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 144 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 145 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 148 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 147 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 149 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 150 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 151 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 146 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 154 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 153 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 155 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 152 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 157 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 156 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 158 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 159 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 160 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 161 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 162 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 163 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 164 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 165 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 166 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 167 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 168 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 169 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 170 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 171 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 172 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 173 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 174 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 175 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 176 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 177 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+--- PASS: TestAgentRunDelegationWidthLimit (0.18s)
+=== RUN   TestAgentRunPlanAbortOnFailure
+    workflow_test.go:2096: temporal sdk v1.46.0: internal workflow-channel race (channelImpl.Close vs removeReceiveCallback), pre-existing on main @ 99c85b2 (see docs/reports/2026-10-23-kernel-agent-race-fix-dev.md)
+--- SKIP: TestAgentRunPlanAbortOnFailure (0.00s)
+=== RUN   TestAgentRunDelegationWidthLimit
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskFailedRequest. ActivityID 1 ActivityType kernel.generate_run_title
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 2 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 3 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 4 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 5 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 6 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 7 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 8 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 9 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 10 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 11 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 12 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 13 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 14 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 15 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 16 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 17 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 18 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 19 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 20 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 23 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 21 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 24 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 25 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 26 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 27 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 28 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 22 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 29 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 30 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 32 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 33 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 34 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 35 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 31 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 39 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 36 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 40 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 41 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 37 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 38 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 42 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 43 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 45 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 46 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 47 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 44 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 48 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 52 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 51 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 49 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 50 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 53 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 54 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 55 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 56 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 57 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 58 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 59 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 63 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 61 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 65 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 60 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 62 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 66 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 67 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 70 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 69 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 68 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 71 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 72 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 73 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 64 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 74 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 77 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 78 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 79 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 76 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 80 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 81 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 75 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 82 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 86 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 83 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 84 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 85 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 88 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 89 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 90 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 91 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 92 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 87 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 93 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 94 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 96 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 95 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 101 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 97 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 100 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 98 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 99 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 103 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 102 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 104 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 105 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 107 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 110 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 108 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 109 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 113 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 112 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 106 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 111 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 115 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 114 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 116 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 120 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 118 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 119 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 121 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 122 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 123 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 125 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 124 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 117 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 127 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 128 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 126 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 131 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 129 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 132 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 130 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 134 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 137 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 133 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 139 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 138 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 136 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 141 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 135 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 142 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 143 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 140 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 144 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 147 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 146 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 148 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 145 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 149 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 150 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 152 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 151 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 154 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 153 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 156 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 157 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 158 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 159 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 160 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 161 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 155 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 162 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 163 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 164 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 165 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 166 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 167 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 168 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 169 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 170 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 171 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 172 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 173 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 174 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 175 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 176 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 177 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+--- PASS: TestAgentRunDelegationWidthLimit (0.11s)
+=== RUN   TestAgentRunPlanAbortOnFailure
+    workflow_test.go:2096: temporal sdk v1.46.0: internal workflow-channel race (channelImpl.Close vs removeReceiveCallback), pre-existing on main @ 99c85b2 (see docs/reports/2026-10-23-kernel-agent-race-fix-dev.md)
+--- SKIP: TestAgentRunPlanAbortOnFailure (0.00s)
+=== RUN   TestAgentRunDelegationWidthLimit
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskFailedRequest. ActivityID 1 ActivityType kernel.generate_run_title
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 2 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 3 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 4 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 5 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 6 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 7 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 8 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 9 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 10 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 11 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 12 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 13 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 14 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 15 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 16 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 17 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 18 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 19 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 21 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 20 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 24 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 23 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 26 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 27 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 28 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 29 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 22 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 30 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 25 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 31 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 32 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 33 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 34 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 35 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 36 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 37 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 38 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 39 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 43 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 44 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 41 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 45 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 42 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 46 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 48 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 47 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 40 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 50 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 54 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 49 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 53 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 51 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 52 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 58 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 56 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 57 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 59 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 55 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 60 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 61 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 62 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 66 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 63 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 67 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 64 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 65 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 69 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 70 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 71 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 68 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 72 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 75 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 74 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 77 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 78 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 79 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 76 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 80 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 73 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 81 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 85 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 83 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 84 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 82 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 87 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 88 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 86 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 89 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 92 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 91 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 90 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 93 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 97 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 94 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 95 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 98 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 99 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 96 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 100 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 102 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 101 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 105 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 104 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 103 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 107 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 106 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 110 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 109 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 112 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 108 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 114 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 113 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 111 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 115 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 118 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 119 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 117 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 120 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 116 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 121 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 122 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 123 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 124 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 126 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 125 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 127 ActivityType kernel.resolve_agent
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 128 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 129 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 130 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 131 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 132 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 133 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 134 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 135 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType AgentRun
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 137 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 138 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 139 ActivityType kernel.knowledge_hints
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 141 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 140 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 142 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 136 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 143 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 144 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 145 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 147 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 148 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 146 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 150 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 151 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 149 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 153 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 152 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 154 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 155 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 156 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 157 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 159 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 158 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 160 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 161 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 162 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 163 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 164 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 165 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 166 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 167 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 168 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 169 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 170 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 171 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 172 ActivityType kernel.call_model
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 173 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 174 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 175 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 176 ActivityType kernel.record_event
+2026/10/23 10:48:53 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 177 ActivityType kernel.record_event
+2026/10/23 10:48:53 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+--- PASS: TestAgentRunDelegationWidthLimit (0.10s)
+=== RUN   TestAgentRunPlanAbortOnFailure
+    workflow_test.go:2096: temporal sdk v1.46.0: internal workflow-channel race (channelImpl.Close vs removeReceiveCallback), pre-existing on main @ 99c85b2 (see docs/reports/2026-10-23-kernel-agent-race-fix-dev.md)
+--- SKIP: TestAgentRunPlanAbortOnFailure (0.00s)
+PASS
+ok  	github.com/temporality-project/temporality/kernel/agent	1.496s
