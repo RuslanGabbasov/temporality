@@ -222,8 +222,8 @@ describe('turnAlignedWindow — the window never cuts a turn in half', () => {
     // limit=2 lands inside turn 2 (its tool.completed): the window must pull
     // back to include that turn's turn.started.
     const windowed = turnAlignedWindow(events, 2)
-    expect(windowed[0].type).toBe('turn.started')
-    expect(windowed[0].data.turn).toBe(2)
+    expect(windowed[0]?.type).toBe('turn.started')
+    expect(windowed[0]?.data?.turn).toBe(2)
   })
 
   it('does not pull in the previous turn', () => {
