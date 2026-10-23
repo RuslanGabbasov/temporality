@@ -287,40 +287,44 @@ export default function Artifacts() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) 1fr', gap: '1rem', alignItems: 'start' }}>
         {/* Left column: filters and the list. Rows carry no buttons — every
-            action lives in the detail pane, so nothing ever overflows. */}
-        <div>
-          <div style={{ marginBottom: '0.5rem' }}>
-            <ListFilter value={filter} onChange={setFilter} placeholder={t('artifacts.filter_placeholder') ?? 'Filter artifacts…'} />
-          </div>
-          <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-            <button type="button" onClick={() => setStatusFilter('')} style={chipStyle(statusFilter === '')}>
-              {t('inbound.filter_all') ?? 'All'} · {artifacts.length}
-            </button>
-            {orderedStatuses.map((s) => (
-              <button key={s} type="button" onClick={() => setStatusFilter(statusFilter === s ? '' : s)} style={chipStyle(statusFilter === s)}>
-                {statusLabel(s)} · {statusCounts[s]}
+            action lives in the detail pane, so nothing ever overflows.
+            Same sticky pattern as the runs page: the column is the scroller
+            and the filter block pins to its top. */}
+        <div style={{ position: 'sticky', top: '3rem', maxHeight: 'calc(100vh - 4rem)', overflowY: 'auto' }}>
+          <div style={{ padding: '0.5rem 0 0', borderBottom: '1px solid var(--tm-border)', position: 'sticky', top: 0, background: 'var(--tm-bg)', zIndex: 1 }}>
+            <div style={{ marginBottom: '0.5rem' }}>
+              <ListFilter value={filter} onChange={setFilter} placeholder={t('artifacts.filter_placeholder') ?? 'Filter artifacts…'} />
+            </div>
+            <div style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '0.5rem', paddingBottom: '0.5rem' }}>
+              <button type="button" onClick={() => setStatusFilter('')} style={chipStyle(statusFilter === '')}>
+                {t('inbound.filter_all') ?? 'All'} · {artifacts.length}
               </button>
-            ))}
-          </div>
-          <div style={{ display: 'grid', gap: '0.4rem', marginBottom: '0.6rem' }}>
-            <label className="toolbar-select">{t('artifacts.filter_provider_label') ?? 'Source'}
-              <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)}>
-                <option value="">{t('artifacts.filter_all_providers') ?? 'All providers'}</option>
-                <option value="builtin">{providerLabel('builtin')}</option>
-                <option value="url">{providerLabel('url')}</option>
-              </select>
-            </label>
-            {org.units.length > 0 && (
-              <label className="toolbar-select">{t('artifacts.filter_org_label') ?? 'Unit'}
-                <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)}>
-                  <option value="">{t('artifacts.filter_all_orgs') ?? 'All units'}</option>
-                  {org.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              {orderedStatuses.map((s) => (
+                <button key={s} type="button" onClick={() => setStatusFilter(statusFilter === s ? '' : s)} style={chipStyle(statusFilter === s)}>
+                  {statusLabel(s)} · {statusCounts[s]}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'grid', gap: '0.4rem', marginBottom: '0.6rem' }}>
+              <label className="toolbar-select">{t('artifacts.filter_provider_label') ?? 'Source'}
+                <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)}>
+                  <option value="">{t('artifacts.filter_all_providers') ?? 'All providers'}</option>
+                  <option value="builtin">{providerLabel('builtin')}</option>
+                  <option value="url">{providerLabel('url')}</option>
                 </select>
               </label>
-            )}
+              {org.units.length > 0 && (
+                <label className="toolbar-select">{t('artifacts.filter_org_label') ?? 'Unit'}
+                  <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)}>
+                    <option value="">{t('artifacts.filter_all_orgs') ?? 'All units'}</option>
+                    {org.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                </label>
+              )}
+            </div>
           </div>
 
-          <div style={{ maxHeight: 'calc(100vh - 18rem)', overflowY: 'auto', paddingRight: '0.15rem' }}>
+          <div style={{ paddingRight: '0.15rem' }}>
             {visibleArtifacts.map((a) => (
               <div key={a.id} style={rowStyle(selectedId === a.id)} onClick={() => setSelectedId(a.id)}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
