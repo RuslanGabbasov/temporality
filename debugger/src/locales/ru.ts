@@ -2143,6 +2143,7 @@ export const ru: Record<string, string> = {
     'password.change': 'Сменить пароль',
     'password.change_title': 'Смена пароля',
     'password.current': 'Текущий пароль',
+    'password.current_optional': 'Текущий пароль (не задан — оставьте пустым)',
     'password.new': 'Новый пароль',
     'password.repeat': 'Повторите новый пароль',
     'password.too_short': 'Минимум 8 символов',

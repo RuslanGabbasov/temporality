@@ -126,8 +126,9 @@ export function authLogout(): Promise<void> {
 }
 
 // A signed-in user changes their own local password. The server re-checks
-// the current one, enforces the same 8-character bar the admin path uses,
-// and keeps the bearer token alive — the session survives the change.
+// the current one when the account has a password (an SSO account without
+// one sets its first), enforces the same 8-character bar the admin path
+// uses, and keeps the bearer token alive — the session survives the change.
 export function changePassword(currentPassword: string, newPassword: string): Promise<{ ok: boolean }> {
   return request('/v1/auth/password', {
     method: 'POST',

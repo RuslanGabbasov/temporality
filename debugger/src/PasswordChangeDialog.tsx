@@ -4,12 +4,11 @@ import AppModal from './Modal'
 import { changePassword } from './kernelApi'
 import { useT } from './i18n'
 
-/** Self-service password change: the signed-in user re-enters their current
- *  password and picks a new one. The server re-checks the current one and
- *  enforces the same 8-character bar the admin path does; the bearer token
- *  survives, so the session stays alive. SSO accounts without a local
- *  password get the server's 409 (setting the first password is the admin's
- *  decision). */
+/** Self-service password change. An account that already has a local
+ *  password re-enters it (the server re-checks; a stolen session cannot lock
+ *  the owner out). An SSO-provisioned account without one leaves the field
+ *  empty — the authenticated principal sets the first password, the same
+ *  8-character bar applies, and the bearer token survives. */
 export default function PasswordChangeDialog({ onClose }: { onClose: () => void }) {
   const t = useT()
   const [current, setCurrent] = useState('')
@@ -21,7 +20,7 @@ export default function PasswordChangeDialog({ onClose }: { onClose: () => void 
 
   const mismatch = repeat !== '' && next !== repeat
   const tooShort = next !== '' && next.length < 8
-  const canSubmit = current !== '' && next.length >= 8 && next === repeat && !busy
+  const canSubmit = next.length >= 8 && next === repeat && !busy
 
   const submit = async () => {
     setBusy(true)
@@ -54,7 +53,7 @@ export default function PasswordChangeDialog({ onClose }: { onClose: () => void 
             <TextInput
               id="password-current"
               type="password"
-              labelText={t('password.current') ?? 'Current password'}
+              labelText={t('password.current_optional') ?? 'Current password (leave empty if none set)'}
               value={current}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrent(e.target.value)}
               autoComplete="current-password"

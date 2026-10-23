@@ -545,12 +545,12 @@ func registerPasswordLogin(mux *http.ServeMux, deps authDependencies, tokens log
 	})
 
 	// POST /v1/auth/password — a signed-in user changes their OWN password:
-	// the current one is re-checked (a stolen session cannot lock the owner
-	// out), the new one meets the same 8-character bar the admin path
-	// enforces, and the bearer token survives — a password change is not a
-	// logout. SSO users without a local password get a 409: setting the first
-	// password is the admin's decision (docs/auth-federation.md §5.5 — local
-	// credentials are the break-glass path, not a second identity).
+	// for an account that has one, the current password is re-checked (a
+	// stolen session cannot lock the owner out); an SSO-provisioned account
+	// without a local password sets its first one — the principal is already
+	// authenticated, there is no current password to re-check, and the same
+	// 8-character bar applies. The bearer token survives either way — a
+	// password change is not a logout.
 	mux.HandleFunc("POST /v1/auth/password", func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := controlplane.FromContext(r.Context())
 		if !ok || principal.UserID == "" {
@@ -570,11 +570,7 @@ func registerPasswordLogin(mux *http.ServeMux, deps authDependencies, tokens log
 			writeError(w, 401, errors.New("authentication required"))
 			return
 		}
-		if user.PasswordHash == "" {
-			writeError(w, 409, errors.New("this account has no local password; ask an administrator to set one first"))
-			return
-		}
-		if !workspace.CheckPassword(user.PasswordHash, req.CurrentPassword) {
+		if user.PasswordHash != "" && !workspace.CheckPassword(user.PasswordHash, req.CurrentPassword) {
 			writeError(w, 401, errors.New("current password is incorrect"))
 			return
 		}

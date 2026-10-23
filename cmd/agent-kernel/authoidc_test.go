@@ -677,11 +677,23 @@ func TestPasswordChangeSelfService(t *testing.T) {
 	require.True(t, workspace.CheckPassword(admin.PasswordHash, "newpassword1"))
 	require.True(t, workspace.CheckPassword(admin.PasswordHash, "hunter2") == false)
 
-	// An SSO user without a local password: 409 — setting the first password
-	// is the admin's decision.
-	status, body := change("sess-sso", "", "newpassword1")
-	require.Equal(t, 409, status)
-	require.Contains(t, body, "no local password")
+	// An SSO user without a local password sets their first one: the
+	// principal is already authenticated, there is no current password to
+	// re-check — the 8-character bar is the only gate.
+	// Short first password → 422, hash still absent.
+	status, _ = change("sess-sso", "", "short")
+	require.Equal(t, 422, status)
+
+	// First set succeeds.
+	status, _ = change("sess-sso", "", "newpassword1")
+	require.Equal(t, 200, status)
+	sso, _ := store.GetUser(context.Background(), "u-sso")
+	require.True(t, workspace.CheckPassword(sso.PasswordHash, "newpassword1"))
+
+	// Now that a local password exists, an empty current one is refused —
+	// the re-check applies again.
+	status, _ = change("sess-sso", "", "newpassword2")
+	require.Equal(t, 401, status)
 }
 
 // Logout drops the session row and kills the cookie.

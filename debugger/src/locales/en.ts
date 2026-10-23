@@ -2143,6 +2143,7 @@ export const en: Record<string, string> = {
     'password.change': 'Change password',
     'password.change_title': 'Change password',
     'password.current': 'Current password',
+    'password.current_optional': 'Current password (leave empty if none set)',
     'password.new': 'New password',
     'password.repeat': 'Repeat new password',
     'password.too_short': 'At least 8 characters',
