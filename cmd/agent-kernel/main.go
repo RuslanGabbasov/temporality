@@ -388,6 +388,14 @@ func main() {
 	// Ephemeral live-token streaming: the activity worker and the HTTP server
 	// share one process, so an in-memory bus connects them without a broker.
 	activities.Tokens = agent.NewTokenBus()
+
+	// Ephemeral run_command console (v2-consolidated.md §6): the same
+	// single-process topology as Tokens — the worker's OnOutput hook writes
+	// into the registry, the HTTP routes (registerConsoleRoutes) read it.
+	// Output is never persisted (§11.1): the registry lives and dies with
+	// this process.
+	activities.Console = agent.NewConsole()
+
 	// Admin-editable channel settings (channel_transport row) overlay the
 	// KERNEL_CHANNEL__* env vars: delivery reads the database per send, so
 	// saving the settings screen takes effect without a restart.
@@ -1285,6 +1293,12 @@ func main() {
 	// resolves from the journal, a gone workflow heals like /terminate and
 	// other signal failures answer structurally — see nudge.go.
 	registerNudgeRoute(mux, nudgeDeps{gate: gate, store: ws, journal: events, signaler: temporalClient, log: log})
+
+	// Live console routes wiring (v2-consolidated.md §6): the registry is
+	// created next to the activity worker (above), the HTTP handlers read
+	// the same process memory. ?project= drives auth like /v1/agent/runs.
+	registerConsoleRoutes(mux, consoleDeps{console: activities.Console, gate: gate})
+
 	mux.HandleFunc("POST /v1/agent/runs/{runID}/note", func(w http.ResponseWriter, r *http.Request) {
 		var note agent.UserNote
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&note); err != nil && !errors.Is(err, io.EOF) {

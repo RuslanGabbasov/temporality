@@ -1,0 +1,5 @@
+# runtime/cgo
+cgo: C compiler "gcc" not found: exec: "gcc": executable file not found in $PATH
+FAIL	github.com/temporality-project/temporality/kernel/agent [build failed]
+FAIL	github.com/temporality-project/temporality/cmd/agent-kernel [build failed]
+FAIL

@@ -1,0 +1,524 @@
+exit_code=1
+command: go test -race -run 'Nudge' ./cmd/agent-kernel/ ./kernel/agent/
+worktree: /scratch/race-probe @ origin/main (534ef76)
+date: 2026-10-23T05:21:22Z
+ok  	github.com/temporality-project/temporality/cmd/agent-kernel	1.179s
+2026/10/23 05:21:15 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskFailedRequest. ActivityID 2 ActivityType kernel.generate_run_title
+2026/10/23 05:21:15 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 3 ActivityType kernel.record_event
+2026/10/23 05:21:15 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 4 ActivityType kernel.knowledge_hints
+2026/10/23 05:21:15 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 5 ActivityType kernel.record_event
+2026/10/23 05:21:15 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 6 ActivityType kernel.record_event
+2026/10/23 05:21:15 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 7 ActivityType kernel.record_event
+2026/10/23 05:21:16 DEBUG Auto fire timer TimerID 0 TimerDuration 1s TimeSkipped 1s
+2026/10/23 05:21:16 DEBUG RequestCancelActivity ActivityID 8
+2026/10/23 05:21:16 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 9 ActivityType kernel.record_event
+==================
+WARNING: DATA RACE
+Read at 0x00c0004b4128 by goroutine 35:
+  github.com/temporality-project/temporality/kernel/agent.TestAgentRunNudgeCancelsStuckModelCallAndRetries.func3()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:203 +0x60
+  runtime.call512()
+      /usr/lib/go/src/runtime/asm_arm64.s:674 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.executeFunctionWithContext()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2812 +0x1b8
+  go.temporal.io/sdk/internal.(*activityEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_activity.go:357 +0xa8
+  go.temporal.io/sdk/internal.(*activityExecutor).ExecuteWithActualArgs()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1181 +0x1a4
+  go.temporal.io/sdk/internal.(*activityExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1167 +0x318
+  go.temporal.io/sdk/internal.(*activityExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2041 +0x628
+  go.temporal.io/sdk/internal.(*activityTaskHandlerImpl).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_task_handlers.go:2461 +0x1584
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).executeActivityWithRetryForTest()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1675 +0xf8
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity.func3()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1457 +0x1d0
+
+Previous write at 0x00c0004b4128 by goroutine 29:
+  github.com/temporality-project/temporality/kernel/agent.TestAgentRunNudgeCancelsStuckModelCallAndRetries.func3()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:203 +0x70
+  runtime.call512()
+      /usr/lib/go/src/runtime/asm_arm64.s:674 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.executeFunctionWithContext()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2812 +0x1b8
+  go.temporal.io/sdk/internal.(*activityEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_activity.go:357 +0xa8
+  go.temporal.io/sdk/internal.(*activityExecutor).ExecuteWithActualArgs()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1181 +0x1a4
+  go.temporal.io/sdk/internal.(*activityExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1167 +0x318
+  go.temporal.io/sdk/internal.(*activityExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2041 +0x628
+  go.temporal.io/sdk/internal.(*activityTaskHandlerImpl).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_task_handlers.go:2461 +0x1584
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).executeActivityWithRetryForTest()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1675 +0xf8
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity.func3()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1457 +0x1d0
+
+Goroutine 35 (running) created at:
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1404 +0x10d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1132 +0xc30
+  go.temporal.io/sdk/internal.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1050 +0x1e0
+  go.temporal.io/sdk/workflow.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/workflow/workflow.go:262 +0x1d0
+  github.com/temporality-project/temporality/kernel/agent.executeModelWithNudge()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:2842 +0x14c
+  github.com/temporality-project/temporality/kernel/agent.executeModelWithNudge()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:2859 +0x374
+  github.com/temporality-project/temporality/kernel/agent.AgentRun()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:1328 +0x272c
+  runtime.call1024()
+      /usr/lib/go/src/runtime/asm_arm64.s:675 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1003 +0x1c4
+  go.temporal.io/sdk/internal.(*workflowExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1125 +0x4b4
+  go.temporal.io/sdk/internal.(*workflowExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2140 +0xa48
+  go.temporal.io/sdk/internal.(*syncWorkflowDefinition).Execute.func1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:553 +0x100
+  go.temporal.io/sdk/internal.(*coroutineState).run()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1227 +0x118
+  go.temporal.io/sdk/internal.(*dispatcherImpl).NewCoroutine.gowrap1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1236 +0x48
+
+Goroutine 29 (running) created at:
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1404 +0x10d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1132 +0xc30
+  go.temporal.io/sdk/internal.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1050 +0x1e0
+  go.temporal.io/sdk/workflow.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/workflow/workflow.go:262 +0x1d0
+  github.com/temporality-project/temporality/kernel/agent.executeModelWithNudge()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:2842 +0x14c
+  github.com/temporality-project/temporality/kernel/agent.AgentRun()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:1328 +0x272c
+  runtime.call1024()
+      /usr/lib/go/src/runtime/asm_arm64.s:675 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1003 +0x1c4
+  go.temporal.io/sdk/internal.(*workflowExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1125 +0x4b4
+  go.temporal.io/sdk/internal.(*workflowExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2140 +0xa48
+  go.temporal.io/sdk/internal.(*syncWorkflowDefinition).Execute.func1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:553 +0x100
+  go.temporal.io/sdk/internal.(*coroutineState).run()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1227 +0x118
+  go.temporal.io/sdk/internal.(*dispatcherImpl).NewCoroutine.gowrap1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1236 +0x48
+==================
+2026/10/23 05:21:16 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 10 ActivityType kernel.call_model
+2026/10/23 05:21:16 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 11 ActivityType kernel.record_event
+2026/10/23 05:21:16 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 12 ActivityType kernel.record_event
+2026/10/23 05:21:16 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 13 ActivityType kernel.record_event
+2026/10/23 05:21:16 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 14 ActivityType kernel.record_event
+2026/10/23 05:21:16 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 15 ActivityType kernel.record_event
+2026/10/23 05:21:16 INFO  ExecuteChildWorkflow WorkflowType KnowledgeExtraction
+--- FAIL: TestAgentRunNudgeCancelsStuckModelCallAndRetries (1.11s)
+    testing.go:1712: race detected during execution of test
+2026/10/23 05:21:18 DEBUG Auto fire timer TimerID 0 TimerDuration 2s TimeSkipped 2s
+2026/10/23 05:21:18 DEBUG RequestCancelActivity ActivityID 3
+2026/10/23 05:21:18 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 4 ActivityType kernel.record_event
+==================
+WARNING: DATA RACE
+Read at 0x00c000142338 by goroutine 61:
+  github.com/temporality-project/temporality/kernel/agent.TestNudgeDoesNotResetScheduleToCloseBudget.func2()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:261 +0x6c
+  runtime.call512()
+      /usr/lib/go/src/runtime/asm_arm64.s:674 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.executeFunctionWithContext()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2812 +0x1b8
+  go.temporal.io/sdk/internal.(*activityEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_activity.go:357 +0xa8
+  go.temporal.io/sdk/internal.(*activityExecutor).ExecuteWithActualArgs()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1181 +0x1a4
+  go.temporal.io/sdk/internal.(*activityExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1167 +0x318
+  go.temporal.io/sdk/internal.(*activityExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2041 +0x628
+  go.temporal.io/sdk/internal.(*activityTaskHandlerImpl).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_task_handlers.go:2461 +0x1584
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).executeActivityWithRetryForTest()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1675 +0xf8
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity.func3()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1457 +0x1d0
+
+Previous write at 0x00c000142338 by goroutine 55:
+  github.com/temporality-project/temporality/kernel/agent.TestNudgeDoesNotResetScheduleToCloseBudget.func2()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:261 +0x7c
+  runtime.call512()
+      /usr/lib/go/src/runtime/asm_arm64.s:674 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.executeFunctionWithContext()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2812 +0x1b8
+  go.temporal.io/sdk/internal.(*activityEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_activity.go:357 +0xa8
+  go.temporal.io/sdk/internal.(*activityExecutor).ExecuteWithActualArgs()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1181 +0x1a4
+  go.temporal.io/sdk/internal.(*activityExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1167 +0x318
+  go.temporal.io/sdk/internal.(*activityExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2041 +0x628
+  go.temporal.io/sdk/internal.(*activityTaskHandlerImpl).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_task_handlers.go:2461 +0x1584
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).executeActivityWithRetryForTest()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1675 +0xf8
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity.func3()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1457 +0x1d0
+
+Goroutine 61 (running) created at:
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1404 +0x10d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1132 +0xc30
+  go.temporal.io/sdk/internal.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1050 +0x1e0
+  go.temporal.io/sdk/workflow.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/workflow/workflow.go:262 +0x1d0
+  github.com/temporality-project/temporality/kernel/agent.executeModelWithNudge()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:2842 +0x14c
+  github.com/temporality-project/temporality/kernel/agent.executeModelWithNudge()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:2859 +0x374
+  github.com/temporality-project/temporality/kernel/agent.budgetProbeWorkflow()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:242 +0x364
+  runtime.call256()
+      /usr/lib/go/src/runtime/asm_arm64.s:673 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1003 +0x1c4
+  go.temporal.io/sdk/internal.(*workflowExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1125 +0x4b4
+  go.temporal.io/sdk/internal.(*workflowExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2140 +0xa48
+  go.temporal.io/sdk/internal.(*syncWorkflowDefinition).Execute.func1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:553 +0x100
+  go.temporal.io/sdk/internal.(*coroutineState).run()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1227 +0x118
+  go.temporal.io/sdk/internal.(*dispatcherImpl).NewCoroutine.gowrap1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1236 +0x48
+
+Goroutine 55 (running) created at:
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1404 +0x10d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1132 +0xc30
+  go.temporal.io/sdk/internal.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1050 +0x1e0
+  go.temporal.io/sdk/workflow.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/workflow/workflow.go:262 +0x1d0
+  github.com/temporality-project/temporality/kernel/agent.executeModelWithNudge()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:2842 +0x14c
+  github.com/temporality-project/temporality/kernel/agent.budgetProbeWorkflow()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:242 +0x364
+  runtime.call256()
+      /usr/lib/go/src/runtime/asm_arm64.s:673 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1003 +0x1c4
+  go.temporal.io/sdk/internal.(*workflowExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1125 +0x4b4
+  go.temporal.io/sdk/internal.(*workflowExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2140 +0xa48
+  go.temporal.io/sdk/internal.(*syncWorkflowDefinition).Execute.func1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:553 +0x100
+  go.temporal.io/sdk/internal.(*coroutineState).run()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1227 +0x118
+  go.temporal.io/sdk/internal.(*dispatcherImpl).NewCoroutine.gowrap1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1236 +0x48
+==================
+==================
+WARNING: DATA RACE
+Read at 0x00c0002c0be8 by goroutine 61:
+  github.com/temporality-project/temporality/kernel/agent.TestNudgeDoesNotResetScheduleToCloseBudget.func2()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:263 +0x13c
+  runtime.call512()
+      /usr/lib/go/src/runtime/asm_arm64.s:674 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.executeFunctionWithContext()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2812 +0x1b8
+  go.temporal.io/sdk/internal.(*activityEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_activity.go:357 +0xa8
+  go.temporal.io/sdk/internal.(*activityExecutor).ExecuteWithActualArgs()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1181 +0x1a4
+  go.temporal.io/sdk/internal.(*activityExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1167 +0x318
+  go.temporal.io/sdk/internal.(*activityExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2041 +0x628
+  go.temporal.io/sdk/internal.(*activityTaskHandlerImpl).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_task_handlers.go:2461 +0x1584
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).executeActivityWithRetryForTest()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1675 +0xf8
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity.func3()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1457 +0x1d0
+
+Previous write at 0x00c0002c0be8 by goroutine 55:
+  github.com/temporality-project/temporality/kernel/agent.TestNudgeDoesNotResetScheduleToCloseBudget.func2()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:263 +0x1a0
+  runtime.call512()
+      /usr/lib/go/src/runtime/asm_arm64.s:674 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.executeFunctionWithContext()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2812 +0x1b8
+  go.temporal.io/sdk/internal.(*activityEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_activity.go:357 +0xa8
+  go.temporal.io/sdk/internal.(*activityExecutor).ExecuteWithActualArgs()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1181 +0x1a4
+  go.temporal.io/sdk/internal.(*activityExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1167 +0x318
+  go.temporal.io/sdk/internal.(*activityExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2041 +0x628
+  go.temporal.io/sdk/internal.(*activityTaskHandlerImpl).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_task_handlers.go:2461 +0x1584
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).executeActivityWithRetryForTest()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1675 +0xf8
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity.func3()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1457 +0x1d0
+
+Goroutine 61 (running) created at:
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1404 +0x10d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1132 +0xc30
+  go.temporal.io/sdk/internal.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1050 +0x1e0
+  go.temporal.io/sdk/workflow.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/workflow/workflow.go:262 +0x1d0
+  github.com/temporality-project/temporality/kernel/agent.executeModelWithNudge()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:2842 +0x14c
+  github.com/temporality-project/temporality/kernel/agent.executeModelWithNudge()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:2859 +0x374
+  github.com/temporality-project/temporality/kernel/agent.budgetProbeWorkflow()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:242 +0x364
+  runtime.call256()
+      /usr/lib/go/src/runtime/asm_arm64.s:673 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1003 +0x1c4
+  go.temporal.io/sdk/internal.(*workflowExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1125 +0x4b4
+  go.temporal.io/sdk/internal.(*workflowExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2140 +0xa48
+  go.temporal.io/sdk/internal.(*syncWorkflowDefinition).Execute.func1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:553 +0x100
+  go.temporal.io/sdk/internal.(*coroutineState).run()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1227 +0x118
+  go.temporal.io/sdk/internal.(*dispatcherImpl).NewCoroutine.gowrap1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1236 +0x48
+
+Goroutine 55 (running) created at:
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1404 +0x10d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1132 +0xc30
+  go.temporal.io/sdk/internal.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1050 +0x1e0
+  go.temporal.io/sdk/workflow.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/workflow/workflow.go:262 +0x1d0
+  github.com/temporality-project/temporality/kernel/agent.executeModelWithNudge()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:2842 +0x14c
+  github.com/temporality-project/temporality/kernel/agent.budgetProbeWorkflow()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:242 +0x364
+  runtime.call256()
+      /usr/lib/go/src/runtime/asm_arm64.s:673 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1003 +0x1c4
+  go.temporal.io/sdk/internal.(*workflowExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1125 +0x4b4
+  go.temporal.io/sdk/internal.(*workflowExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2140 +0xa48
+  go.temporal.io/sdk/internal.(*syncWorkflowDefinition).Execute.func1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:553 +0x100
+  go.temporal.io/sdk/internal.(*coroutineState).run()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1227 +0x118
+  go.temporal.io/sdk/internal.(*dispatcherImpl).NewCoroutine.gowrap1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1236 +0x48
+==================
+==================
+WARNING: DATA RACE
+Read at 0x00c0001427a8 by goroutine 61:
+  runtime.growslice()
+      /usr/lib/go/src/runtime/slice.go:178 +0x0
+  github.com/temporality-project/temporality/kernel/agent.TestNudgeDoesNotResetScheduleToCloseBudget.func2()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:263 +0x16c
+  runtime.call512()
+      /usr/lib/go/src/runtime/asm_arm64.s:674 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.executeFunctionWithContext()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2812 +0x1b8
+  go.temporal.io/sdk/internal.(*activityEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_activity.go:357 +0xa8
+  go.temporal.io/sdk/internal.(*activityExecutor).ExecuteWithActualArgs()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1181 +0x1a4
+  go.temporal.io/sdk/internal.(*activityExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1167 +0x318
+  go.temporal.io/sdk/internal.(*activityExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2041 +0x628
+  go.temporal.io/sdk/internal.(*activityTaskHandlerImpl).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_task_handlers.go:2461 +0x1584
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).executeActivityWithRetryForTest()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1675 +0xf8
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity.func3()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1457 +0x1d0
+
+Previous write at 0x00c0001427a8 by goroutine 55:
+  github.com/temporality-project/temporality/kernel/agent.TestNudgeDoesNotResetScheduleToCloseBudget.func2()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:263 +0x188
+  runtime.call512()
+      /usr/lib/go/src/runtime/asm_arm64.s:674 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.executeFunctionWithContext()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2812 +0x1b8
+  go.temporal.io/sdk/internal.(*activityEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_activity.go:357 +0xa8
+  go.temporal.io/sdk/internal.(*activityExecutor).ExecuteWithActualArgs()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1181 +0x1a4
+  go.temporal.io/sdk/internal.(*activityExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1167 +0x318
+  go.temporal.io/sdk/internal.(*activityExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2041 +0x628
+  go.temporal.io/sdk/internal.(*activityTaskHandlerImpl).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_task_handlers.go:2461 +0x1584
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).executeActivityWithRetryForTest()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1675 +0xf8
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity.func3()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1457 +0x1d0
+
+Goroutine 61 (running) created at:
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1404 +0x10d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1132 +0xc30
+  go.temporal.io/sdk/internal.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1050 +0x1e0
+  go.temporal.io/sdk/workflow.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/workflow/workflow.go:262 +0x1d0
+  github.com/temporality-project/temporality/kernel/agent.executeModelWithNudge()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:2842 +0x14c
+  github.com/temporality-project/temporality/kernel/agent.executeModelWithNudge()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:2859 +0x374
+  github.com/temporality-project/temporality/kernel/agent.budgetProbeWorkflow()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:242 +0x364
+  runtime.call256()
+      /usr/lib/go/src/runtime/asm_arm64.s:673 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1003 +0x1c4
+  go.temporal.io/sdk/internal.(*workflowExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1125 +0x4b4
+  go.temporal.io/sdk/internal.(*workflowExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2140 +0xa48
+  go.temporal.io/sdk/internal.(*syncWorkflowDefinition).Execute.func1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:553 +0x100
+  go.temporal.io/sdk/internal.(*coroutineState).run()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1227 +0x118
+  go.temporal.io/sdk/internal.(*dispatcherImpl).NewCoroutine.gowrap1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1236 +0x48
+
+Goroutine 55 (running) created at:
+  go.temporal.io/sdk/internal.(*testWorkflowEnvironmentImpl).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:1404 +0x10d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1132 +0xc30
+  go.temporal.io/sdk/internal.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1050 +0x1e0
+  go.temporal.io/sdk/workflow.ExecuteActivity()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/workflow/workflow.go:262 +0x1d0
+  github.com/temporality-project/temporality/kernel/agent.executeModelWithNudge()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow.go:2842 +0x14c
+  github.com/temporality-project/temporality/kernel/agent.budgetProbeWorkflow()
+      /workspace/worktrees/trace-runs-tab/kernel/agent/workflow_test.go:242 +0x364
+  runtime.call256()
+      /usr/lib/go/src/runtime/asm_arm64.s:673 +0x74
+  reflect.Value.Call()
+      /usr/lib/go/src/reflect/value.go:369 +0x90
+  go.temporal.io/sdk/internal.executeFunction()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:2828 +0x2d0
+  go.temporal.io/sdk/internal.(*workflowEnvironmentInterceptor).ExecuteWorkflow()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/workflow.go:1003 +0x1c4
+  go.temporal.io/sdk/internal.(*workflowExecutor).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_worker.go:1125 +0x4b4
+  go.temporal.io/sdk/internal.(*workflowExecutorWrapper).Execute()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow_testsuite.go:2140 +0xa48
+  go.temporal.io/sdk/internal.(*syncWorkflowDefinition).Execute.func1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:553 +0x100
+  go.temporal.io/sdk/internal.(*coroutineState).run()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1227 +0x118
+  go.temporal.io/sdk/internal.(*dispatcherImpl).NewCoroutine.gowrap1()
+      /cache/go-mod/go.temporal.io/sdk@v1.46.0/internal/internal_workflow.go:1236 +0x48
+==================
+2026/10/23 05:21:19 DEBUG Auto fire timer TimerID 1 TimerDuration 3s TimeSkipped 1s
+2026/10/23 05:21:19 DEBUG RequestCancelActivity ActivityID 5
+2026/10/23 05:21:19 DEBUG handleActivityResult: *workflowservice.RespondActivityTaskCompletedRequest. ActivityID 6 ActivityType kernel.record_event
+2026/10/23 05:21:20 INFO  Activity complete after timeout. WorkflowID default-test-workflow-id RunID default-test-run-id ActivityType kernel.call_model Attempt 1 Result payloads:{metadata:{key:"encoding" value:"json/plain"} data:"{\"Content\":\"\",\"Reasoning\":\"\",\"ToolCalls\":null,\"Usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0},\"Finish\":\"\"}"} Error context deadline exceeded
+2026/10/23 05:21:20 DEBUG handleActivityResult: context.deadlineExceededError. ActivityID 3 ActivityType kernel.call_model
+2026/10/23 05:21:20 DEBUG handleActivityResult: Activity not found, could be already completed or canceled. ActivityID 3
+2026/10/23 05:21:22 INFO  Activity complete after timeout. WorkflowID default-test-workflow-id RunID default-test-run-id ActivityType kernel.call_model Attempt 1 Result payloads:{metadata:{key:"encoding" value:"json/plain"} data:"{\"Content\":\"\",\"Reasoning\":\"\",\"ToolCalls\":null,\"Usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0},\"Finish\":\"\"}"} Error context deadline exceeded
+2026/10/23 05:21:22 DEBUG handleActivityResult: context.deadlineExceededError. ActivityID 5 ActivityType kernel.call_model
+2026/10/23 05:21:22 DEBUG handleActivityResult: Activity not found, could be already completed or canceled. ActivityID 5
+2026/10/23 05:21:22 INFO  Activity complete after timeout. WorkflowID default-test-workflow-id RunID default-test-run-id ActivityType kernel.call_model Attempt 1 Result payloads:{metadata:{key:"encoding" value:"json/plain"} data:"{\"Content\":\"\",\"Reasoning\":\"\",\"ToolCalls\":null,\"Usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0},\"Finish\":\"\"}"} Error context deadline exceeded
+2026/10/23 05:21:22 DEBUG handleActivityResult: context.deadlineExceededError. ActivityID 7 ActivityType kernel.call_model
+--- FAIL: TestNudgeDoesNotResetScheduleToCloseBudget (6.01s)
+    testing.go:1712: race detected during execution of test
+FAIL
+FAIL	github.com/temporality-project/temporality/kernel/agent	7.157s
+FAIL

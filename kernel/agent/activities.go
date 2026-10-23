@@ -112,6 +112,11 @@ type Activities struct {
 	// Tokens is the ephemeral live-token bus feeding the /runs/{id}/tokens SSE
 	// endpoint; nil disables streaming (tests run the blocking path).
 	Tokens *TokenBus
+	// Console is the ephemeral run_command output registry feeding
+	// /v1/agent/console/{operationID} (v2-consolidated.md §6); nil disables
+	// the live stream and the registry — a test constructing Activities for
+	// other tools must not pay for console bookkeeping.
+	Console *Console
 	// providerCacheMu + providerCache hold recent model→provider resolutions
 	// (see modelConfigFor). call_model fires every turn; providers change
 	// rarely — a short TTL keeps the hot path free of workspace round trips.
@@ -858,9 +863,18 @@ func (a *Activities) RunTool(ctx context.Context, request ToolRequest) (ToolResu
 		if err != nil {
 			return ToolResult{}, err
 		}
+		// Live console (v2-consolidated.md §6): when a registry and an
+		// operation id exist, stdout/stderr chunks stream into the in-memory
+		// tail buffer as the command runs — no journal write, no file, no
+		// database (§11.1 defers persistent storage). A nil registry keeps
+		// the classic wait-for-completion behavior.
+		sbReq.OnOutput = a.Console.Hook(request.Project, request.OperationID)
 		result, err := a.Sandbox.Execute(ctx, sbReq)
 		if err != nil {
 			return ToolResult{}, err
+		}
+		if a.Console != nil {
+			a.Console.Done(request.Project, request.OperationID, result.ExitCode)
 		}
 		exitCode := result.ExitCode
 		return ToolResult{Content: fmt.Sprintf("exit_code=%d\n%s", result.ExitCode, result.Output), ExitCode: &exitCode}, nil

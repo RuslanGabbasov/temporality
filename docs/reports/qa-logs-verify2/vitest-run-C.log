@@ -1,0 +1,61 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90m/workspace/worktrees/trace-runs-tab/debugger[39m
+
+ [32m✓[39m src/consoleStream.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 140[2mms[22m[39m
+[90mstdout[2m | src/Layout.projects.test.tsx[2m > [22m[2mLayout project loading (incident 2026-10-21, spec R3)[2m > [22m[2mretry restores the project list and clears the error
+[22m[39m[@carbon/feature-flags] `enable-v12-dynamic-floating-styles` is available but not enabled.
+Enable dynamic setting of floating styles for components like Popover, Tooltip, etc.
+This becomes the default behavior in v12. Enable it to migrate early, or enable `enable-v12-release` to turn on every v12 flag at once.
+
+ [32m✓[39m src/Layout.projects.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 125[2mms[22m[39m
+ [32m✓[39m src/ConsoleOutput.test.tsx [2m([22m[2m11 tests[22m[2m)[22m[32m 96[2mms[22m[39m
+ [32m✓[39m src/locales/locales.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+ [32m✓[39m src/experience.fixtures.test.ts [2m([22m[2m57 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m src/useDebouncedValue.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m src/TraceLayers.test.tsx [2m([22m[2m12 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m src/Markdown.test.tsx [2m([22m[2m7 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m src/Org.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m src/Artifacts.header.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m src/eventPresentation.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m src/runsLoad.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m src/eventSummary.test.ts [2m([22m[2m52 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m src/Sandbox.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m src/traceFilters.test.ts [2m([22m[2m30 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m src/experience.test.ts [2m([22m[2m35 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m src/Dashboard.users.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m src/RunDisputes.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m src/traceFilters.perf.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m src/sandboxWidgets.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m src/explorer/agentExploreCalls.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m src/explorer/AreaMap.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m src/teamRuns.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m src/workspaceApi.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m src/traceLayers.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/eventCatalog.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m src/kernelApi.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/syntax.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/explorer/RelationGraph.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/workspaceApi.timeout.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/agentEvolution.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/sandboxProfileForm.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/tokenStream.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m src/timelineLoad.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m src/agentRunsWindow.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m src/observationApi.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m src/Workspace.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m src/explorer/sessions.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m src/explorer/HistoryTimeline.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m src/api.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m src/journalStream.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m src/explorer/ConflictPanel.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+ [32m✓[39m src/Artifacts.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 2[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m43 passed[39m[22m[90m (43)[39m
+[2m      Tests [22m [1m[32m434 passed[39m[22m[90m (434)[39m
+[2m   Start at [22m 18:36:58
+[2m   Duration [22m 12.07s[2m (import 65%, environment 14%, transform 13%, tests 7%, worker 1%)[22m
+
+[2m     Import [22m [33m141 modules were evaluated 270 times[39m[2m · 6.36s total, 65% of tracked time[22m
+[2m            [22m [2m~3.04s faster with [22m[33misolate: false[39m[2m — shared modules are evaluated once per worker instead of once per file[22m
+[2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#test-isolation[22m
+
