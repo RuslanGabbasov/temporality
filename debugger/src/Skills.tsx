@@ -143,6 +143,9 @@ export default function Skills() {
   const [importBusy, setImportBusy] = useState(false)
   const [importError, setImportError] = useState('')
   const [importWarnings, setImportWarnings] = useState<string[]>([])
+  // Stand-transfer JSON import: when the file carries several skills, the
+  // wizard lists them for picking; a single skill prefills right away.
+  const [transferJsonSkills, setTransferJsonSkills] = useState<Array<{ id: string; name?: string; description?: string; version?: string; markdown?: string; manifest?: unknown }> | null>(null)
   // Stand-to-stand transfer (temporality.transfer/v1): export downloads the
   // envelope, import posts it back and shows the per-item report.
   const transferFileRef = useRef<HTMLInputElement | null>(null)
@@ -345,6 +348,57 @@ export default function Skills() {
       setWizardOpen(false)
     } catch (f) {
       setImportError(message(f))
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
+  // ── Import: stand-transfer JSON (temporality.transfer/v1) → draft ─────
+
+  interface TransferSkillShape {
+    id: string
+    name?: string
+    description?: string
+    version?: string
+    markdown?: string
+    manifest?: unknown
+  }
+
+  const prefillTransferSkill = (sk: TransferSkillShape) => {
+    // The manifest arrives as a JSON value; older exports may carry it as a
+    // string — the editor needs the object either way.
+    let manifest: Record<string, unknown> = {}
+    if (sk.manifest && typeof sk.manifest === 'object') manifest = sk.manifest as Record<string, unknown>
+    else if (typeof sk.manifest === 'string') {
+      try { manifest = JSON.parse(sk.manifest) as Record<string, unknown> } catch { /* the editor shows an empty manifest instead of dying */ }
+    }
+    setImportWarnings([t('skills.json_import_warning', { name: sk.name || sk.id }) ?? `Imported from transfer file: ${sk.name || sk.id}`])
+    applyDraft({
+      name: sk.name || sk.id,
+      description: sk.description ?? '',
+      version: sk.version || '1.0.0',
+      markdown: sk.markdown ?? '',
+      manifest,
+    }, [])
+    setTransferJsonSkills(null)
+    setWizardOpen(false)
+  }
+
+  const runTransferDraftImport = async (file: File) => {
+    setImportBusy(true); setImportError('')
+    try {
+      const envelope = JSON.parse(await file.text()) as { format?: string; items?: Array<{ type?: string; skill?: TransferSkillShape }> }
+      if (envelope.format !== 'temporality.transfer/v1') {
+        throw new Error(t('skills.json_wrong_format') ?? 'Not a stand-transfer file (temporality.transfer/v1)')
+      }
+      const skills = (envelope.items ?? []).filter((item) => item.type === 'skill' && item.skill).map((item) => item.skill!)
+      if (skills.length === 0) {
+        throw new Error(t('skills.json_no_skills') ?? 'The file contains no skills')
+      }
+      if (skills.length === 1) prefillTransferSkill(skills[0])
+      else setTransferJsonSkills(skills)
+    } catch (f) {
+      setImportError(f instanceof Error ? f.message : String(f))
     } finally {
       setImportBusy(false)
     }
@@ -970,6 +1024,32 @@ export default function Skills() {
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- webkitdirectory is non-standard */}
               <input id="skill-import-folder" type="file" hidden ref={(el) => { if (el) el.setAttribute('webkitdirectory', '') }} onChange={(e) => { void runImport(e.target.files); e.target.value = '' }} />
               {importError && <InlineNotification kind="error" title={t('skills.import_failed') ?? 'Import failed'} subtitle={importError} lowContrast hideCloseButton />}
+            </div>
+            {/* Stand-transfer JSON: the file the Export… button produces. Goes
+                through the same review path — the parsed draft opens in the
+                editor, nothing saves until the human saves. */}
+            <div style={{ border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.75rem', marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ fontSize: '0.875rem', fontWeight: 600 }}>{t('skills.json_import_title') ?? 'From JSON (stand transfer)'}</div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', margin: 0 }}>
+                {t('skills.json_import_hint') ?? 'A temporality.transfer/v1 file produced by Export… The skill opens as a draft in the editor — review and save.'}
+              </p>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <Button size="sm" kind="secondary" disabled={importBusy} onClick={() => document.getElementById('skill-import-json')?.click()}>
+                  {t('skills.json_import_button') ?? 'JSON file…'}
+                </Button>
+                {importBusy && <span style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)', alignSelf: 'center' }}>{t('skills.import_busy') ?? 'Parsing…'}</span>}
+              </div>
+              <input id="skill-import-json" type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void runTransferDraftImport(f) }} />
+              {transferJsonSkills && transferJsonSkills.length > 1 && (
+                <div style={{ display: 'grid', gap: '0.3rem' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--tm-text-3)' }}>{t('skills.json_pick') ?? 'The file has several skills — pick one:'}</div>
+                  {transferJsonSkills.map((sk) => (
+                    <Button key={sk.id} size="sm" kind="ghost" onClick={() => prefillTransferSkill(sk)}>
+                      {sk.name || sk.id}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
             {draftQuestions.length > 0 && (
               <div className="wizard-questions">
