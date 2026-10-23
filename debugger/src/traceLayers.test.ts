@@ -120,7 +120,7 @@ describe('foldTrace (§5)', () => {
     expect(noise.events).toHaveLength(3)
     expect(noise.hasError).toBe(true)
     const summary = groupSummary(noise, t)
-    expect(summary.label).toBe('Эксплуатационные события')
+    expect(summary.label).toBe('Служебные события')
     expect(summary.detail).toContain('3')
   })
 

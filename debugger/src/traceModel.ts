@@ -31,10 +31,9 @@ export type TraceItem =
   | { kind: 'group'; group: TraceGroupKey; events: ObservationEvent[]; hasError: boolean }
 
 /** §5.7: ops noise — folded/filterable by default, never standalone rows.
- *  run.started is the run itself (the page already says it) and the memory
- *  probe / hint query / secret issuance are plumbing the reader skips —
- *  all fold into «Эксплуатация» instead of rendering as empty-ish rows. */
-const NOISE_TYPES = new Set(['storage.snapshot', 'operation.reconciled', 'notification.sent', 'memory.read.failed', 'run.started', 'memory.read', 'hint.query', 'secret.issued'])
+ *  Secret issuance is deliberately NOT here: a credential being minted is
+ *  an audit fact the reader wants visible, not plumbing. */
+const NOISE_TYPES = new Set(['storage.snapshot', 'operation.reconciled', 'notification.sent', 'memory.read.failed', 'run.started', 'memory.read', 'hint.query'])
 
 /** §5.4: minor plan-task transitions fold into «изменения плана». */
 const MINOR_PLAN_TYPES = new Set(['plan.task.skipped', 'plan.task.invalidated', 'plan.task.reopened', 'plan.task.incomplete'])

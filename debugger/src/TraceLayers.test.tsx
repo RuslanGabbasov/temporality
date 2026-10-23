@@ -109,7 +109,7 @@ describe('TraceLayers (three layers, §4)', () => {
 
   it('renders the ops noise group folded (§5.7)', () => {
     const html = renderLayers([ev('storage.snapshot', {}, 1), ev('notification.sent', {}, 2)])
-    expect(html).toContain('Эксплуатационные события')
+    expect(html).toContain('Служебные события')
     expect(html).not.toContain('Уведомление')
   })
 
