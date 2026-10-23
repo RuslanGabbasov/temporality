@@ -289,7 +289,10 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
       case 'event': return `${item.event.source.id}:${item.event.event_id}`
       case 'approvalPair': return `pair:${item.requested.event_id}`
       case 'saga': return `saga:${item.sagaId}`
-      case 'group': return `group:${item.group}`
+      // Groups are keyed by their first member: the same group kind can
+      // appear twice (hints before the turns, extraction after) and each
+      // instance must toggle independently.
+      case 'group': return `group:${item.group}:${item.events[0]?.event_id ?? ''}`
     }
   }
   const turnProps = (event: ObservationEvent) => {
@@ -374,15 +377,15 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
   const renderFolded = (item: TraceItem, keyPrefix: string): React.ReactNode => {
     const key = keyPrefix + keyOf(item)
     if (item.kind === 'group') {
-      const open = openGroups.has(item.group)
+      const open = openGroups.has(key)
       const summary = groupSummary(item, t)
       // The whole header block toggles: the button keeps the keyboard/a11y
       // contract, the container onClick makes every pixel of the header —
       // padding included — clickable the way a reader expects.
       const toggle = () => setOpenGroups((prev) => {
         const next = new Set(prev)
-        if (next.has(item.group)) next.delete(item.group)
-        else next.add(item.group)
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
         return next
       })
       const lastSeen = item.events.length > 0 ? shortTime(item.events[item.events.length - 1].occurred_at) : ''
