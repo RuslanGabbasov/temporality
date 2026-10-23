@@ -410,20 +410,27 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
     return () => { cancelled = true }
   }, [verdicts])
 
-  const resolveConflict = async (row: ClusterRow, kind: 'invalidate_new' | 'invalidate_old' | 'keep_both') => {
+  const resolveConflict = async (row: ClusterRow, kind: 'invalidate_new' | 'invalidate_old' | 'invalidate_both' | 'keep_both') => {
     const conflict = row.conflict!
     setBusyCase(row.key)
     try {
       if (kind !== 'keep_both') {
-        const target = kind === 'invalidate_new'
-          ? { id: conflict.newID, project: conflict.newProject }
-          : { id: conflict.oldID, project: conflict.oldProject }
-        await observationApi.invalidate({
-          knowledge_id: target.id,
-          project: target.project,
-          actor: { id: 'supervisor-queue', type: 'human' },
-          reason: t('supervisor.action_invalidated_reason', { score: (conflict.score || 0).toFixed(2) }),
-        })
+        const targets = kind === 'invalidate_both'
+          ? [
+              { id: conflict.newID, project: conflict.newProject },
+              { id: conflict.oldID, project: conflict.oldProject },
+            ]
+          : [kind === 'invalidate_new'
+              ? { id: conflict.newID, project: conflict.newProject }
+              : { id: conflict.oldID, project: conflict.oldProject }]
+        for (const target of targets) {
+          await observationApi.invalidate({
+            knowledge_id: target.id,
+            project: target.project,
+            actor: { id: 'supervisor-queue', type: 'human' },
+            reason: t('supervisor.action_invalidated_reason', { score: (conflict.score || 0).toFixed(2) }),
+          })
+        }
       }
       // Same optimistic ack-set add: invalidate → acknowledge → refresh must
       // hide the row on the first click, not after the next manual reload.
@@ -500,7 +507,7 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   /** Runs one row action after another across the selection. Conflicts are
    *  only touched when every selected row carries the same resolution kind —
    *  mixed selections degrade to acknowledge-only for safety. */
-  const bulkApply = async (kind: 'acknowledge' | 'invalidate_new' | 'invalidate_old') => {
+  const bulkApply = async (kind: 'acknowledge' | 'invalidate_new' | 'invalidate_old' | 'invalidate_both') => {
     if (selectedRows.length === 0) return
     setBulkBusy(true)
     setError('')
@@ -524,19 +531,26 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
   }
   /** resolveConflict without its per-row load()/busy churn — the bulk loop
    *  reloads once at the end. */
-  async function resolveConflictQuiet(row: ClusterRow, kind: 'invalidate_new' | 'invalidate_old' | 'keep_both') {
+  async function resolveConflictQuiet(row: ClusterRow, kind: 'invalidate_new' | 'invalidate_old' | 'invalidate_both' | 'keep_both') {
     const conflict = row.conflict!
     if (kind !== 'keep_both') {
-      const target = kind === 'invalidate_new'
-        ? { id: conflict.newID, project: conflict.newProject }
-        : { id: conflict.oldID, project: conflict.oldProject }
-      try {
-        await observationApi.invalidate({
-          knowledge_id: target.id, project: target.project,
-          actor: { id: 'supervisor-queue', type: 'human' },
-          reason: t('supervisor.action_invalidated_reason', { score: (conflict.score || 0).toFixed(2) }),
-        })
-      } catch { /* one failure must not sink the batch; the reload shows survivors */ }
+      const targets = kind === 'invalidate_both'
+        ? [
+            { id: conflict.newID, project: conflict.newProject },
+            { id: conflict.oldID, project: conflict.oldProject },
+          ]
+        : [kind === 'invalidate_new'
+            ? { id: conflict.newID, project: conflict.newProject }
+            : { id: conflict.oldID, project: conflict.oldProject }]
+      for (const target of targets) {
+        try {
+          await observationApi.invalidate({
+            knowledge_id: target.id, project: target.project,
+            actor: { id: 'supervisor-queue', type: 'human' },
+            reason: t('supervisor.action_invalidated_reason', { score: (conflict.score || 0).toFixed(2) }),
+          })
+        } catch { /* one failure must not sink the batch; the reload shows survivors */ }
+      }
     }
     for (const eventID of row.eventIDs) {
       try { await workspaceApi.acknowledgeSupervisorVerdict(eventID) } catch { /* best-effort */ }
@@ -703,6 +717,9 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                         <Button size="sm" kind="danger" disabled={bulkBusy} onClick={() => void bulkApply('invalidate_old')}>
                           {t('supervisor.bulk_invalidate_old') ?? 'Invalidate existing'}
                         </Button>
+                        <Button size="sm" kind="danger" disabled={bulkBusy} onClick={() => void bulkApply('invalidate_both')} title={t('supervisor.bulk_invalidate_both_hint') ?? undefined}>
+                          {t('supervisor.bulk_invalidate_both') ?? 'Invalidate both'}
+                        </Button>
                       </>
                     )}
                     <Button size="sm" kind="ghost" disabled={bulkBusy} onClick={() => setSelected(new Set())}>
@@ -851,6 +868,11 @@ export function SupervisorPanels({ onPendingChange, setProject }: { onPendingCha
                             <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
                               <Button size="sm" kind="secondary" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'keep_both')} title={t('supervisor.action_skip_hint') ?? undefined}>
                                 {busyCase === row.key ? '…' : t('supervisor.action_skip') ?? 'Skip'}
+                              </Button>
+                              {/* Both formulations outdated: retire the whole pair
+                                  in one click — two invalidations + ack. */}
+                              <Button size="sm" kind="danger--ghost" disabled={busyCase === row.key} onClick={() => void resolveConflict(row, 'invalidate_both')} title={t('supervisor.action_invalidate_both_hint') ?? undefined}>
+                                {busyCase === row.key ? '…' : t('supervisor.action_invalidate_both') ?? 'Invalidate both'}
                               </Button>
                               <Button
                                 size="sm"

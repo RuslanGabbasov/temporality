@@ -20,12 +20,13 @@ import (
 	"time"
 
 	"github.com/temporality-project/temporality/kernel/agent"
+	"github.com/temporality-project/temporality/kernel/llm"
 	"github.com/temporality-project/temporality/observation"
 )
 
 const embeddingBackfillInterval = 5 * time.Minute
 
-func startEmbeddingBackfillLoop(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL string) {
+func startEmbeddingBackfillLoop(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL string, modelClient func(ctx context.Context) (*llm.Client, error)) {
 	go func() {
 		// First pass shortly after boot so a freshly configured model fills
 		// the backlog without waiting a full interval.
@@ -34,7 +35,7 @@ func startEmbeddingBackfillLoop(ctx context.Context, log *slog.Logger, activitie
 			return
 		case <-time.After(30 * time.Second):
 		}
-		runEmbeddingBackfill(ctx, log, activities, observationURL)
+		runEmbeddingBackfill(ctx, log, activities, observationURL, modelClient)
 		ticker := time.NewTicker(embeddingBackfillInterval)
 		defer ticker.Stop()
 		for {
@@ -42,13 +43,13 @@ func startEmbeddingBackfillLoop(ctx context.Context, log *slog.Logger, activitie
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				runEmbeddingBackfill(ctx, log, activities, observationURL)
+				runEmbeddingBackfill(ctx, log, activities, observationURL, modelClient)
 			}
 		}
 	}()
 }
 
-func runEmbeddingBackfill(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL string) {
+func runEmbeddingBackfill(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL string, modelClient func(ctx context.Context) (*llm.Client, error)) {
 	// Token read per pass: a boot-order race (journal down at kernel start)
 	// self-heals here instead of requiring a kernel restart.
 	journalToken := os.Getenv("TEMPORALITY_API_TOKEN")
@@ -92,7 +93,7 @@ func runEmbeddingBackfill(ctx context.Context, log *slog.Logger, activities *age
 	// Wave C5 (docs/supervisor-model.md §3): a fresh vector landing close to
 	// an existing one predicts a knowledge conflict — flag it before the
 	// contradiction ever reaches a run.
-	predictKnowledgeConflicts(ctx, log, activities, observationURL, journalToken, model, items)
+	predictKnowledgeConflicts(ctx, log, activities, observationURL, journalToken, model, items, modelClient)
 }
 
 // conflictScoreBand brackets "close but not the same": below it the items are
@@ -133,8 +134,17 @@ func fetchKnowledgeMeta(ctx context.Context, observationURL, journalToken string
 	return meta
 }
 
-func predictKnowledgeConflicts(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL, journalToken, model string, items map[string][]float32) {
+// predictKnowledgeConflicts flags pairs of close-but-not-equal knowledge.
+// Cosine closeness only NOMINATES a candidate — unrelated statements land in
+// the score band all the time — so with a judge available each candidate is
+// verified first: only a judged conflict reaches the queue. No judge
+// (unconfigured or erroring) fails open: the deterministic behavior as before.
+func predictKnowledgeConflicts(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL, journalToken, model string, items map[string][]float32, modelClient func(ctx context.Context) (*llm.Client, error)) {
 	metaByKnowledge := fetchKnowledgeMeta(ctx, observationURL, journalToken)
+	var client *llm.Client
+	if modelClient != nil {
+		client, _ = modelClient(ctx) // nil on error — the gate fails open
+	}
 	checked := 0
 	for id := range items {
 		if checked >= 4 {
@@ -150,9 +160,18 @@ func predictKnowledgeConflicts(ctx context.Context, log *slog.Logger, activities
 			if neighbor.Score < conflictScoreMin || neighbor.Score > conflictScoreMax {
 				continue
 			}
-			subject := id + "~" + neighbor.ID
 			newMeta := metaByKnowledge[id]
 			oldMeta := metaByKnowledge[neighbor.ID]
+			if client != nil {
+				verdict, vErr := agent.ConflictPredictionCase(ctx, client, newMeta.Proposition, oldMeta.Proposition)
+				if vErr != nil {
+					log.Warn("conflict prediction: judge", "pair", id+"~"+neighbor.ID, "error", vErr.Error())
+				} else if !verdict.Conflict {
+					log.Info("conflict prediction: judge rejected a look-alike pair", "pair", id+"~"+neighbor.ID, "explanation", verdict.Explanation)
+					break // this item's best neighbor is not a conflict — next item
+				}
+			}
+			subject := id + "~" + neighbor.ID
 			summary := fmt.Sprintf("«%s» (новое) против «%s» (существующее) — косинус %.2f: формулировки близки, смысл может конфликтовать.",
 				newMeta.Proposition, oldMeta.Proposition, neighbor.Score)
 			project := oldMeta.Project

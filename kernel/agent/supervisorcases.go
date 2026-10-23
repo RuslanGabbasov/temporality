@@ -74,7 +74,51 @@ func parseCaseReply(content string, v any) error {
 	return json.Unmarshal([]byte(payload), v)
 }
 
-// ── B1: knowledge contradiction triage ──────────────────────────────────────
+// ── B1: knowledge contradiction triage ──────────────────────────────────
+
+// ConflictPredictionVerdict is the judge's answer to „do these two
+// propositions actually contradict each other“. Vector closeness only
+// nominates a candidate; this verdict decides whether a human ever sees it.
+type ConflictPredictionVerdict struct {
+	Conflict    bool   `json:"conflict"`
+	Explanation string `json:"explanation"`
+}
+
+// ConflictPredictionPrompt asks the judge to separate real contradictions
+// (one asserts what the other denies, or they prescribe incompatible
+// actions) from merely-related statements — cosine closeness over-nominates.
+func ConflictPredictionPrompt(newProp, oldProp string) string {
+	return fmt.Sprintf(`Two knowledge statements look similar in embedding space. Decide whether they genuinely contradict each other: one asserts what the other denies, or following both would prescribe incompatible actions. Merely overlapping topics, different scopes or different aspects of one subject are NOT a contradiction.
+
+NEW: %s
+
+EXISTING: %s
+
+Respond with one JSON object:
+{"conflict": <true|false>, "explanation": "<1-2 sentences: what exactly contradicts, or why both can coexist>"}`, newProp, oldProp)
+}
+
+// ConflictPredictionCase runs the judge over one candidate conflict pair.
+// A model hiccup is reported to the caller (fail-open is the caller's call).
+func ConflictPredictionCase(ctx context.Context, model *llm.Client, newProp, oldProp string) (ConflictPredictionVerdict, error) {
+	var verdict ConflictPredictionVerdict
+	if model == nil {
+		return verdict, fmt.Errorf("model client is not configured")
+	}
+	return completeParsed(ctx, model, []llm.Message{
+		{Role: "system", Content: "You triage predicted knowledge conflicts for a platform administrator. You answer with JSON only."},
+		{Role: "user", Content: ConflictPredictionPrompt(newProp, oldProp)},
+	}, func(content string) (ConflictPredictionVerdict, error) {
+		var v ConflictPredictionVerdict
+		if err := parseCaseReply(content, &v); err != nil {
+			return v, err
+		}
+		if strings.TrimSpace(v.Explanation) == "" {
+			return v, fmt.Errorf("model returned an empty explanation")
+		}
+		return v, nil
+	})
+}
 
 // ContradictionCaseInput is what the supervisor sees for one challenged item.
 type ContradictionCaseInput struct {

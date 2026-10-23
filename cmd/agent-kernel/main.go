@@ -7180,7 +7180,9 @@ func main() {
 	// Semantic knowledge layer (docs/supervisor-model.md §6): preload the
 	// in-process embedding model, then backfill knowledge missing a vector.
 	activities.StartEmbeddingPreload()
-	startEmbeddingBackfillLoop(ctx, log, activities, observationURL)
+	startEmbeddingBackfillLoop(ctx, log, activities, observationURL, func(ctx context.Context) (*llm.Client, error) {
+		return judgeModelClient(ctx, ws, secretMasterKey)
+	})
 	// Supervisor triage (docs/supervisor-model.md §3 wave A1): diagnose
 	// failed runs with the supervisor model, journal supervisor.verdict.
 	startSupervisorTriageLoop(ctx, log, activities, ws, observationURL, func(ctx context.Context) (*llm.Client, error) {
