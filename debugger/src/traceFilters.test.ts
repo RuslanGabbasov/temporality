@@ -227,6 +227,17 @@ describe('matchesChipSet — quick chips (§8)', () => {
     expect(labels(items)).toEqual(['group:opsNoise', 'group:turns'])
     expect(labels(filterTraceItems(items, EMPTY_FILTER, chips('errors'), RU, t))).toEqual(['group:opsNoise'])
   })
+
+  it('hint.query and memory.read fold into the knowledge group, not opsNoise', () => {
+    // Regression: both types sat in NOISE_TYPES, so the isNoise branch swallowed
+    // them before the knowledge branch could — the «Знания и подсказки» group
+    // never received them and they surfaced as «Служебные события».
+    const items = itemsOf([
+      ev('hint.query', { candidate_count: 8 }, 1),
+      ev('memory.read', { hint_count: 8, primed_hints: 5 }, 2),
+    ])
+    expect(labels(items)).toEqual(['group:knowledge'])
+  })
 })
 
 describe('filterTraceItems — folded groups (§8)', () => {

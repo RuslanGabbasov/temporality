@@ -35,7 +35,7 @@ export type TraceItem =
  *  an audit fact the reader wants visible, not plumbing. run.started is not
  *  here either: it is the run's birth marker and renders as a standalone
  *  (non-expandable) row at the top of the trace. */
-const NOISE_TYPES = new Set(['storage.snapshot', 'operation.reconciled', 'notification.sent', 'memory.read.failed', 'memory.read', 'hint.query'])
+const NOISE_TYPES = new Set(['storage.snapshot', 'operation.reconciled', 'notification.sent', 'memory.read.failed'])
 
 /** §5.4: minor plan-task transitions fold into «изменения плана». */
 const MINOR_PLAN_TYPES = new Set(['plan.task.skipped', 'plan.task.invalidated', 'plan.task.reopened', 'plan.task.incomplete'])

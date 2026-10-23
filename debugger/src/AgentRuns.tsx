@@ -1257,7 +1257,13 @@ export default function AgentRuns({ project }: { project: string }) {
                     onNudgeTurn={(turn) => void nudge(turn)}
                   />
                   {olderAvailable && view === 'trace' && (
-                    <TraceOlderSentinel onVisible={loadOlder} />
+                    /* key = window size: after each extension the sentinel
+                       remounts and a fresh IntersectionObserver re-reports a
+                       still-visible intersection. Without it a sentinel that
+                       never leaves the viewport (collapsed turn nodes keep
+                       the page short) fires exactly once and older events
+                       stop loading. */
+                    <TraceOlderSentinel key={traceWindow.length} onVisible={loadOlder} />
                   )}
                 </Tile>
                 )}
