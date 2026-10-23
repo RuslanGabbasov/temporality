@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="How to deploy, configure and operate Temporality as a working harness — the stack, upgrades, providers, authentication, knowledge, skills, sandboxes, observability, backups and troubleshooting.">
+<title>Harness Operations — Temporality</title>
+<link rel="icon" href="../../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../styles.css"><link rel="stylesheet" href="../docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../../" aria-label="Temporality home"><img src="../../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Docs</a><a href="../../#product">Product</a><a href="../../#guide">Get started</a><a href="../../#architecture">Architecture</a></nav><div class="top-actions"><a class="lang-toggle" href="../operations.html" aria-label="Switch language">RU</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/en/operations.md" target="_blank" rel="noreferrer"><span>Edit this page</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Getting started</div>
+<a class="docs-nav-row" href="intro.html">Introduction</a>
+<a class="docs-nav-row" href="quickstart.html">Quick start</a>
+<div class="docs-nav-section">Working with the agent</div>
+<a class="docs-nav-row" href="chat.html">Chat and runs</a>
+<a class="docs-nav-row" href="agents.html">Agents and teams</a>
+<div class="docs-nav-section">Knowledge and experience</div>
+<a class="docs-nav-row" href="knowledge.html">Knowledge</a>
+<a class="docs-nav-row" href="observability.html">Observability and storage</a>
+<a class="docs-nav-row" href="skills.html">Skills</a>
+<a class="docs-nav-row" href="artifacts.html">Artifacts</a>
+<div class="docs-nav-section">Automation</div>
+<a class="docs-nav-row" href="inbound.html">Inbound and channels</a>
+<a class="docs-nav-row" href="triggers.html">Triggers</a>
+<div class="docs-nav-section">Administration</div>
+<a class="docs-nav-row" href="administration.html">Administration</a>
+<div class="docs-nav-section">Integrations</div>
+<a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
+<div class="docs-nav-section">Reference</div>
+<a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">Operations</div>
+<a class="docs-nav-row active" href="operations.html">Harness Operations</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Operations</div>
+<h1>Harness Operations</h1>
+<p class="docs-lead">How to deploy, configure and operate Temporality as a working harness — the stack, upgrades, providers, authentication, knowledge, skills, sandboxes, observability, backups and troubleshooting.</p>
+<p>This guide is for whoever is responsible for a working deployment: rolling it
+out, upgrading it, configuring providers and access, observability, and
+troubleshooting typical failures. Day-to-day user work is covered in the
+neighboring sections; exact variable values — in the <a href="reference.html">Reference</a>.</p>
+<h2 id="1-the-stack-what-runs-where-and-where-state-lives"><a class="anchor" href="#1-the-stack-what-runs-where-and-where-state-lives" aria-label="Section link">#</a>1. The stack: what runs where and where state lives</h2><p>Compose brings up seven services:</p>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Image</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>postgres</code></td>
+<td>pgvector/pgvector:pg17</td>
+<td>The only persistent store: events, knowledge, users, configs, secrets, reviews</td>
+</tr>
+<tr>
+<td><code>journal</code></td>
+<td>temporality/journal</td>
+<td>Event store API: event reads/search, SSE streams of runs</td>
+</tr>
+<tr>
+<td><code>agent-kernel</code></td>
+<td>temporality/agent-kernel</td>
+<td>The kernel: a Temporal worker (long-lived runs), the <code>:8090</code> API, sandboxes, MCP, channels</td>
+</tr>
+<tr>
+<td><code>debugger</code></td>
+<td>temporality/debugger</td>
+<td>Web UI <code>:3000</code>, a proxy to the kernel and journal</td>
+</tr>
+<tr>
+<td><code>temporal</code></td>
+<td>temporalio/auto-setup</td>
+<td>The durable execution engine (its own store)</td>
+</tr>
+<tr>
+<td><code>searxng</code></td>
+<td>searxng</td>
+<td>Meta-search for the <code>web_search</code> tool</td>
+</tr>
+<tr>
+<td><code>lightpanda</code></td>
+<td>lightpanda/browser</td>
+<td>Headless browser (CDP) for the <code>browser</code> tool</td>
+</tr>
+</tbody></table>
+<p><strong>Where state lives</strong> — this matters for backups and migrations:</p>
+<ul>
+<li><strong>Postgres</strong> — the source of truth. Observation events (<code>observation_events</code>),
+knowledge and its history, users/sessions/IdP configs, secrets (encrypted
+with <code>KERNEL_SECRET_MASTER_KEY</code>), artifact reviews, quotas. The kernel writes
+to it (via outbox → journal); everyone reads from it.</li>
+<li><strong><code>KERNEL_SANDBOX_ROOT</code></strong> — persistent sandbox workspaces (the files the
+agent edits between runs). Defaults to <code>/srv/temporality/sandbox</code> in compose.</li>
+<li><strong>Temporal</strong> — the state of active workflows. Completed runs live in Postgres
+as events; Temporal is needed to resume unfinished ones.</li>
+</ul>
+<p>Nothing important lives inside the containers: they can be recreated freely.</p>
+<h2 id="2-deployment-and-upgrades"><a class="anchor" href="#2-deployment-and-upgrades" aria-label="Section link">#</a>2. Deployment and upgrades</h2><p>Images are published to GHCR under the <code>v2026.2.N</code> release tags. The version
+is pinned by a variable:</p>
+<pre><code class="language-bash">TEMPORALITY_VERSION=2026.2.66 docker compose up -d
+</code></pre>
+<p>The upgrade procedure:</p>
+<ol>
+<li>Read the release notes (the tag annotation) — migrations and breaking
+changes are written there.</li>
+<li><code>docker compose pull journal debugger agent-kernel</code></li>
+<li><code>docker compose up -d</code> — Postgres migrations apply automatically at kernel
+startup (<code>migrations/workspace</code>, quota migrations); the migration log is
+idempotent.</li>
+<li>Check health: <code>docker compose ps</code> (all healthy), the <code>/dashboard</code> page, one
+test run.</li>
+</ol>
+<p>Rollback — bring up the previous <code>TEMPORALITY_VERSION</code>. Schema migrations
+<strong>do not roll back</strong>: take a dump before major upgrades (§9). Building locally
+from sources instead of GHCR:</p>
+<pre><code class="language-bash">docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build agent-kernel debugger
+</code></pre>
+<p>(<code>docker-compose.dev.yml</code> switches the images to builds from the repository;
+it overrides only the listed services.) A common hiccup: on the first
+simultaneous build of the two targets, buildx sometimes trips over a cache
+lock — rerunning the build goes through.</p>
+<h2 id="3-providers-and-models"><a class="anchor" href="#3-providers-and-models" aria-label="Section link">#</a>3. Providers and models</h2><p>Three default provider variables are the minimum to get going:</p>
+<pre><code class="language-bash">TEMPORALITY_MODEL_BASE_URL=https://api.provider.com/v1
+TEMPORALITY_MODEL_ID=mimo-v2.6-flash
+TEMPORALITY_MODEL_API_KEY=...
+</code></pre>
+<p>Full setup lives on the <code>/providers</code> page: several providers, model catalogs,
+assigning models to roles.</p>
+<h3 id="model-roles-and-where-each-one-lands"><a class="anchor" href="#model-roles-and-where-each-one-lands" aria-label="Section link">#</a>Model roles and where each one lands</h3><ul>
+<li><strong>chat</strong> — the agents&#39; main model (dialogue, tools, plans).</li>
+<li><strong>embedding</strong> — the knowledge semantic layer (§6).</li>
+<li><strong>asr</strong> — audio transcription; it must not participate in chat roles.</li>
+</ul>
+<p>The model catalog is synced from the provider on a schedule
+(<code>KERNEL_PROVIDER_MODELS_REFRESH</code>, 24h by default, <code>0</code> disables the cycle)
+plus a manual refresh and a probe check in the UI.</p>
+<p><strong>The judge</strong> — a separate chat model for evaluations. It is used more widely
+than it seems: the quality loop, knowledge area normalization, supervisor
+passes and cases, the <code>worth_skill</code> verdict when mining skills, model
+selection in the draft wizards (agent/skill/team):
+env model → judge model → the first chat candidate in the catalog. Non-chat
+catalog entries (ASR, embedding, image) are filtered out of the candidates —
+if a wizard &quot;picked the first ASR model it saw&quot;, refresh the catalog and
+assign the roles explicitly.</p>
+<h3 id="streaming-and-timeouts"><a class="anchor" href="#streaming-and-timeouts" aria-label="Section link">#</a>Streaming and timeouts</h3><table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT</code></td>
+<td><code>2m</code></td>
+<td>Waiting for the first token; adaptively +60s per MB of prompt</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_STREAM_IDLE_TIMEOUT</code></td>
+<td><code>90s</code></td>
+<td>Silence in the stream between tokens</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_STREAM_NO_PROGRESS_TIMEOUT</code></td>
+<td><code>4m</code></td>
+<td>The stream is alive, but overall progress has stalled</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_TIMEOUT</code></td>
+<td><code>180s</code></td>
+<td>The base HTTP request timeout</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_ACTIVITY_TIMEOUT</code></td>
+<td><code>20m</code></td>
+<td>Ceiling for one model activity</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS</code></td>
+<td><code>16384</code> (code) / <code>1024</code> (compose)</td>
+<td>Generation limit. The compose stack deliberately sets 1024 — raise it consciously</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_TEMPERATURE</code> / <code>_REASONING</code></td>
+<td>—</td>
+<td>Overrides for request parameters</td>
+</tr>
+</tbody></table>
+<p>Buffering gateways (they return the whole response as one chunk) are not a
+malfunction. In the trace this shows up as the &quot;provider does not stream
+(a single chunk)&quot; verdict on long calls; stream retries follow a ladder with a
+growing interval (&quot;↻ stream retry after N s&quot;). The &quot;token channel did not
+connect (transport, not model)&quot; diagnostic means an SSE transport problem on
+the way to the provider, not a model choice. A hung call can be pushed
+manually — the <code>↻</code> button on the live model-call line cancels the request and
+restarts the turn.</p>
+<h2 id="4-authentication-and-access"><a class="anchor" href="#4-authentication-and-access" aria-label="Section link">#</a>4. Authentication and access</h2><p>Four modes, from simple to enterprise:</p>
+<ol>
+<li><strong>No authentication</strong> — <code>KERNEL_AUTH_TOKENS</code> empty. For local experiments
+only.</li>
+<li><strong>Bearer tokens</strong> — <code>KERNEL_AUTH_TOKENS=token:user:role:projects,...</code>. For
+service agents and scripts.</li>
+<li><strong>Password + sessions</strong> — the main UI mode. Login is password-first, the
+&quot;Password | API token&quot; form. Sessions: <code>KERNEL_SESSION_TTL</code> (sliding, 12h),
+<code>KERNEL_SESSION_ABSOLUTE_TTL</code> (7d); <code>KERNEL_COOKIE_SECURE=true</code> behind
+HTTPS.</li>
+<li><strong>OIDC SSO</strong> — federation (Keycloak/Entra/Authentik), JIT provisioning,
+group-to-role mappings, the <code>deny</code> role = &quot;login succeeds, access denied&quot;
+until a manual decision. The config lives on <code>/users</code> (admin-only); every
+change writes an audit event.</li>
+</ol>
+<p>Self-service: a user changes their password via the account menu
+(<code>POST /v1/auth/password</code>). An account with a password confirms the current
+one; an SSO account without a local password sets its first one with an empty
+current field — minimum 8 characters, the bearer token survives the change.
+Break-glass: with SSO enabled, password login remains for the admin only (IdP
+unavailability does not block operations).</p>
+<p>Project scoping: a role plus a project list in the token; for SSO — claim
+mappings; <code>*</code> means all projects. The org structure (<code>/org</code>) additionally
+restricts visibility by department.</p>
+<h2 id="5-secrets"><a class="anchor" href="#5-secrets" aria-label="Section link">#</a>5. Secrets</h2><ul>
+<li><code>KERNEL_SECRET_MASTER_KEY</code> (<code>openssl rand -hex 32</code>) — the key that encrypts
+secrets in Postgres. <strong>Losing the key means losing every secret.</strong> Keep it
+off the deployment; rotation is only possible with re-encryption.</li>
+<li>Secrets are created in <code>/secrets</code> and referenced from configs as
+<code>secret://…</code>; the value is resolved at the point of use.</li>
+<li><code>KERNEL_SECRET_CACHE_TTL_SECONDS</code> — how long a resolved value lives in the
+kernel&#39;s memory.</li>
+<li>Issuing a secret to a run is the <code>secret.issued</code> event in the trace (shown
+explicitly — an audit fact, not noise).</li>
+</ul>
+<h2 id="6-knowledge-hints-and-embeddings"><a class="anchor" href="#6-knowledge-hints-and-embeddings" aria-label="Section link">#</a>6. Knowledge, hints and embeddings</h2><p>The semantic layer (knowledge similarity, hints drawn from similar experience,
+conflict prediction, semantic search) requires an embeddings model:</p>
+<pre><code class="language-bash">KERNEL_EMBEDDINGS_MODEL=intfloat/multilingual-e5-small
+</code></pre>
+<p>The model loads in-process (rembed) from Hugging Face. If it fails to load,
+the kernel keeps working, but with a &quot;not all tools are configured&quot; banner and
+without semantics — retries follow a growing interval; check reachability of
+huggingface.co. The model cache is on disk; for ownership problems see the log
+(there is a fallback to the OS user).</p>
+<p>Operating knowledge:</p>
+<ul>
+<li>Lifecycle: <code>proposed → verified → (challenged/invalidated/superseded)</code>.
+Verification is manual or by the judge; unverified knowledge never reaches
+hints.</li>
+<li>Challenge/invalidate straight from the run trace (⚑ on the event carrying
+knowledge) and from the dossier.</li>
+<li>Priming: before a turn the agent receives hints drawn from similar
+experience (<code>hint.query</code> → <code>memory.read</code>); usage facts (<code>hint.used</code> /
+ignored) are visible in the trace&#39;s knowledge group — they are how you
+evaluate how useful the experience was.</li>
+<li>Knowledge area normalization is performed by the judge; the area map is
+<code>/knowledge</code>.</li>
+</ul>
+<h2 id="7-skills-and-artifacts"><a class="anchor" href="#7-skills-and-artifacts" aria-label="Section link">#</a>7. Skills and artifacts</h2><p><strong>Skills</strong> — versioned procedures with a contract. Creation paths: describing
+in the UI, import, manual, and <strong>mining</strong> — the supervisor looks for repeated
+tool-call trigrams across runs, a deterministic gate filters out read-only
+sequences, the judge issues a <code>worth_skill</code> verdict with a rationale; the
+candidate lands in the queue and is pre-filled as a draft on <code>/skills</code>.
+Versions: a draft is <code>0.x</code>, applying/rejecting revisions is a human decision;
+the skill list shows <code>draft</code> and &quot;↺ N&quot; badges — pending draft revisions. Do
+not let unapplied revisions pile up: go through the queue by badge.</p>
+<p><strong>Artifacts</strong> — reference documents agents load on demand. Statuses:
+<code>draft / in_review / rejected / approved</code>. The review cycle: submit
+(idempotent per version) → reviewers are notified → the decision is
+<strong>human-only</strong> (self-approval is forbidden at the API level) →
+approved/rejected. Reviewers: the <code>all</code> mode (everyone must decide) or <code>any</code>
+(one is enough). The per-run submission quota is <code>ARTIFACT_SUBMIT_PER_DAY</code>.
+Artifact bodies render markdown with mermaid diagrams (typical LLM errors in
+erDiagram are fixed automatically).</p>
+<h2 id="8-agents-teams-and-the-plan-dag"><a class="anchor" href="#8-agents-teams-and-the-plan-dag" aria-label="Section link">#</a>8. Agents, teams and the plan DAG</h2><ul>
+<li><strong>Agent</strong> (<code>/agent-config</code>): model, system prompt, tools and their
+approvals, sandbox. <code>max_turns</code> caps the run&#39;s length — for child runs it is
+set from the task.</li>
+<li><strong>Team</strong> (<code>/teams</code>): a pipeline of lead → executors → QA. The team manifest
+pins the roles and limits.</li>
+<li><strong>Plan</strong> — a DAG of tasks with dependencies. Key task fields: <code>on_failure</code>
+(<code>continue | stop | abort</code> — what happens to the wave when a task fails),
+<code>mode: wave</code> (staged execution in ready batches instead of full DAG
+ordering), <code>max_turns</code>. Review tasks work as gates: the next stage does not
+start without a verdict.</li>
+<li><strong>Supervisor</strong> — periodic triage of failed runs
+(<code>KERNEL_SUPERVISOR_TRIAGE_INTERVAL</code>, 2m; a value below the minimum is
+treated as the default — there is no off switch). It proposes restarts and
+cases; contested operations wait for a human reconcile decision in the run
+panel.</li>
+</ul>
+<h2 id="9-sandboxes-tools-and-limits"><a class="anchor" href="#9-sandboxes-tools-and-limits" aria-label="Section link">#</a>9. Sandboxes, tools and limits</h2><ul>
+<li><strong><code>KERNEL_SANDBOX_ROOT</code></strong> — the root of the workspaces. The code default is
+<code>./.sandbox</code>, in compose — <code>/srv/temporality/sandbox</code>. Do not use <code>/tmp</code>:
+tmpfs cleanup on a node reboot will destroy the agents&#39; workspaces.</li>
+<li><code>KERNEL_SANDBOX_IMAGE</code> — the sandbox image; <code>TEMPORALITY_DOCKER_GID</code> — the
+gid of the docker group on the host (the socket). <code>KERNEL_SANDBOX_PIDS</code>,
+<code>KERNEL_SANDBOX_SCRATCH_SIZE</code> — container limits.</li>
+<li><code>KERNEL_TOOL_MAX_SECONDS</code> (900) — the ceiling for one command;
+<code>TEMPORALITY_TOOL_ACTIVITY_TIMEOUT</code> (16m) — the ceiling for a <code>run_tool</code>
+activity.</li>
+<li>Web: <code>KERNEL_SEARXNG_URL</code> (search), <code>KERNEL_WEB_SEARCH_PER_MIN</code> /
+<code>KERNEL_BROWSER_PER_MIN</code> (rate limits), <code>KERNEL_WEB_FETCH_ALLOW_PRIVATE</code>
+(private networks are forbidden by default — SSRF protection; enable it
+deliberately), <code>KERNEL_BROWSER_CDP_URL</code> (lightpanda; empty = browser off).</li>
+<li><strong>MCP</strong>: <code>KERNEL_MCP_COMMAND/_ARGS</code> — an external MCP server, <code>_ALLOW</code> — the
+allowed tools, <code>_APPROVAL</code> — require approval.</li>
+<li>Run quotas: <code>KERNEL_RUN_QUOTAS</code> (<code>project:limit</code>, <code>*</code> — the default);
+exceeding one = 429. Prices for cost reporting: <code>KERNEL_MODEL_PRICES</code>
+(<code>model:prompt:completion</code>).</li>
+</ul>
+<h2 id="10-operational-observability"><a class="anchor" href="#10-operational-observability" aria-label="Section link">#</a>10. Operational observability</h2><ul>
+<li><strong>The run trace</strong> (<code>/agents</code>) — a tree of turns, newest first; a turn
+expands in full: tool calls, approvals, answers. The window is 50 events;
+older ones lazy-load on scroll. The live model-call line shows
+elapsed/tokens/speed and the channel state; <code>↻</code> pushes a hung call. A
+running <code>run_command</code> has a live console tail right in its line (a 2000-line
+/ 256 KB buffer, kept 6h after activity; after eviction — fallback to the
+event journal, ≤1 KB).</li>
+<li><strong>The dashboard</strong> (<code>/dashboard</code>) — health, models, projects, quality;
+<code>/supervisor</code> — the triage queue; <code>/mcp</code> — the MCP server state.</li>
+<li><strong>The event bus</strong>: the kernel writes through the outbox
+(<code>kernel_event_outbox</code>) into the journal; the UI listens on SSE + polls
+every 10s as a safety net. Kernel→journal authentication is
+<code>TEMPORALITY_API_TOKEN</code> (provisioned automatically).</li>
+<li>UI lag usually = journal stream lag: check restarts of
+<code>temporality-journal-1</code> and the reconnection backoff.</li>
+</ul>
+<h2 id="11-backup-and-restore"><a class="anchor" href="#11-backup-and-restore" aria-label="Section link">#</a>11. Backup and restore</h2><p>The minimum — nightly:</p>
+<pre><code class="language-bash">docker exec temporality-postgres-1 pg_dump -U temporality temporality | gzip &gt; backup-$(date +%F).sql.gz
+tar -C /srv/temporality/sandbox -czf sandbox-$(date +%F).tgz .
+</code></pre>
+<p>Restore: bring up an empty stack of the same version → restore the dump → put
+back the sandbox root → start the kernel. Active (unfinished) runs continue
+after a restore only if the Temporal DB was restored too — for most cases it
+is acceptable to accept that unfinished runs die and get restarted. Verify
+restores periodically on a separate deployment — a backup that has never been
+restored is not a backup.</p>
+<h2 id="12-troubleshooting-typical-failures"><a class="anchor" href="#12-troubleshooting-typical-failures" aria-label="Section link">#</a>12. Troubleshooting typical failures</h2><table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Where to look</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A run &quot;hangs&quot; on a model call</td>
+<td>the trace&#39;s live line: waiting for the first token</td>
+<td>if &quot;the token channel did not connect&quot; — transport to the provider (SSE/proxy), not the model; wait for the retry ladder or push <code>↻</code></td>
+</tr>
+<tr>
+<td>&quot;Provider does not stream (a single chunk)&quot;</td>
+<td><code>model.completed</code> details</td>
+<td>a gateway buffers the response; not an error — pick another provider/endpoint for streaming</td>
+</tr>
+<tr>
+<td>Answers get cut off mid-way</td>
+<td><code>TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS</code></td>
+<td>raise the limit (the compose default of 1024 is small for large turns)</td>
+</tr>
+<tr>
+<td>A command&#39;s console shows &quot;Output unavailable: 404&quot;</td>
+<td>the console buffer</td>
+<td>the buffer was evicted (6h idle / kernel restart); output ≤1 KB is recovered from the event journal</td>
+</tr>
+<tr>
+<td>The &quot;not all tools are configured: embeddings&quot; banner</td>
+<td>the kernel log</td>
+<td>reachability of huggingface.co, correctness of <code>KERNEL_EMBEDDINGS_MODEL</code>; retries are automatic</td>
+</tr>
+<tr>
+<td>A run failed and nothing picks it up</td>
+<td><code>/supervisor</code></td>
+<td>check <code>KERNEL_SUPERVISOR_TRIAGE_INTERVAL</code>; contested operations — reconcile in the run panel</td>
+</tr>
+<tr>
+<td>429 on launches</td>
+<td>quotas</td>
+<td><code>KERNEL_RUN_QUOTAS</code> — raise the project&#39;s limit or the <code>*</code> default</td>
+</tr>
+<tr>
+<td>A sandbox does not start</td>
+<td>the kernel log, <code>docker compose ps</code></td>
+<td>the docker socket gid (<code>TEMPORALITY_DOCKER_GID</code>), presence of <code>KERNEL_SANDBOX_IMAGE</code></td>
+</tr>
+<tr>
+<td>The UI does not see everything (projects)</td>
+<td>scoping</td>
+<td>the token&#39;s role+projects / SSO mappings / org departments</td>
+</tr>
+</tbody></table>
+<p>Practice: the trace first (it shows both the transport and the retry
+verdicts), then the kernel logs, then the journal. Most &quot;hangs&quot; are transport
+to the provider, and the trace names it outright.</p>
+<h2 id="13-change-discipline"><a class="anchor" href="#13-change-discipline" aria-label="Section link">#</a>13. Change discipline</h2><ul>
+<li>Everything that changes behavior ships as a <code>v2026.2.N</code> tag with an
+annotation — read it before upgrading.</li>
+<li>Keep the deployment config (<code>.env</code>, compose overlays) in version control;
+secrets only as <code>secret://</code> references.</li>
+<li>The DB schema only migrates forward; between versions with major migrations
+take a dump.</li>
+<li>Audit events (logins, secret issuances, IdP config changes) are part of
+operations: they are searchable in the journal like any other events.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="reference.html"><small>← Previous</small><strong>Reference</strong></a>
+    
+  </nav>
+</article>
+</main>
+</body>
+</html>

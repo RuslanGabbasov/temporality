@@ -1,6 +1,6 @@
 # Temporality
 
-**Русский** · [English](README.en.md) · [Документация](https://ruslangabbasov.github.io/temporality/docs/)
+**Русский** · [English](README.en.md) · [Документация](https://ruslangabbasov.github.io/temporality/docs/) · [Эксплуатация харнеса](https://ruslangabbasov.github.io/temporality/docs/operations.html)
 
 Temporality — система наблюдаемости и накопления опыта для ИИ-агентов.
 
@@ -58,11 +58,11 @@ Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge /
 curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
 curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
 cp .env.example .env   # настроить TEMPORALITY_MODEL_* и опционально песочницу
-TEMPORALITY_VERSION=2026.2.10 docker compose up -d
+TEMPORALITY_VERSION=2026.2.66 docker compose up -d
 ```
 
 `TEMPORALITY_VERSION` — версия образов (см. [релизы](https://github.com/RuslanGabbasov/temporality/releases));
-`latest` тянется по умолчанию, но для стенда фиксируйте версию явно.
+Для стенда фиксируйте версию явно (дефолт compose-файла отстаёт от релизов).
 Обновление до новой версии: `TEMPORALITY_VERSION=<новая> docker compose up -d`
 (миграции применяются ядром на старте автоматически).
 

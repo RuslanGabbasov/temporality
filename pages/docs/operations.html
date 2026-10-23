@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F1F1D"><meta name="description" content="Как правильно развернуть, настроить и эксплуатировать Temporality как рабочий харнес — стек, обновления, провайдеры, аутентификация, знания, навыки, песочницы, наблюдаемость, бэкапы и диагностика.">
+<title>Эксплуатация харнеса — Temporality</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;650;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="docs.f6c5d702.css">
+</head>
+<body class="docs-page">
+<header class="topbar"><a class="brand" href="../" aria-label="Temporality home"><img src="../assets/temporality-mark.svg" alt=""/><span>temporality</span></a><nav class="nav"><a class="nav-docs active" href="index.html">Документация</a><a href="../#product">Продукт</a><a href="../#guide">Руководство</a><a href="../#architecture">Архитектура</a></nav><div class="top-actions"><a class="lang-toggle" href="en/operations.html" aria-label="Switch language">EN</a><a class="github-link" href="https://github.com/RuslanGabbasov/temporality/blob/main/docs/user/operations.md" target="_blank" rel="noreferrer"><span>Изменить страницу</span><span class="arrow">↗</span></a></div></header>
+<main class="docs-layout">
+<aside class="docs-sidebar"><nav><div class="docs-nav-section">Начало</div>
+<a class="docs-nav-row" href="intro.html">Введение</a>
+<a class="docs-nav-row" href="quickstart.html">Быстрый старт</a>
+<div class="docs-nav-section">Работа с агентом</div>
+<a class="docs-nav-row" href="chat.html">Чат и запуски</a>
+<a class="docs-nav-row" href="agents.html">Агенты и команды</a>
+<div class="docs-nav-section">Знания и опыт</div>
+<a class="docs-nav-row" href="knowledge.html">Знания</a>
+<a class="docs-nav-row" href="observability.html">Наблюдаемость и хранилище</a>
+<a class="docs-nav-row" href="skills.html">Навыки</a>
+<a class="docs-nav-row" href="artifacts.html">Артефакты</a>
+<div class="docs-nav-section">Автоматизация</div>
+<a class="docs-nav-row" href="inbound.html">Входящие и каналы</a>
+<a class="docs-nav-row" href="triggers.html">Триггеры</a>
+<div class="docs-nav-section">Администрирование</div>
+<a class="docs-nav-row" href="administration.html">Администрирование</a>
+<div class="docs-nav-section">Интеграции</div>
+<a class="docs-nav-row" href="external-agents.html">Внешние агенты (experience-слой)</a>
+<div class="docs-nav-section">Справка</div>
+<a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">Эксплуатация</div>
+<a class="docs-nav-row active" href="operations.html">Эксплуатация харнеса</a>
+<div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
+<article class="docs-content">
+<div class="docs-eyebrow">Эксплуатация</div>
+<h1>Эксплуатация харнеса</h1>
+<p class="docs-lead">Как правильно развернуть, настроить и эксплуатировать Temporality как рабочий харнес — стек, обновления, провайдеры, аутентификация, знания, навыки, песочницы, наблюдаемость, бэкапы и диагностика.</p>
+<p>Это руководство — для того, кто отвечает за работающий стенд: развёртывание, обновление,
+настройка провайдеров и доступа, наблюдаемость и разбор типовых проблем. Повседневная
+работа пользователя разобрана в соседних разделах, точные значения переменных — в
+<a href="reference.html">Справочнике</a>.</p>
+<h2 id="1-стек-что-где-крутится-и-где-живёт-состояние"><a class="anchor" href="#1-стек-что-где-крутится-и-где-живёт-состояние" aria-label="Section link">#</a>1. Стек: что где крутится и где живёт состояние</h2><p>Compose поднимает семь сервисов:</p>
+<table>
+<thead>
+<tr>
+<th>Сервис</th>
+<th>Образ</th>
+<th>Роль</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>postgres</code></td>
+<td>pgvector/pgvector:pg17</td>
+<td>Единственное постоянное хранилище: события, знания, пользователи, конфиги, секреты, ревью</td>
+</tr>
+<tr>
+<td><code>journal</code></td>
+<td>temporality/journal</td>
+<td>Event store API: чтение/поиск событий, SSE-потоки ранов</td>
+</tr>
+<tr>
+<td><code>agent-kernel</code></td>
+<td>temporality/agent-kernel</td>
+<td>Ядро: Temporal-воркер (долгоживущие раны), API <code>:8090</code>, песочницы, MCP, каналы</td>
+</tr>
+<tr>
+<td><code>debugger</code></td>
+<td>temporality/debugger</td>
+<td>Веб-интерфейс <code>:3000</code>, прокси к kernel и journal</td>
+</tr>
+<tr>
+<td><code>temporal</code></td>
+<td>temporalio/auto-setup</td>
+<td>Движок durable-выполнения (своё хранилище)</td>
+</tr>
+<tr>
+<td><code>searxng</code></td>
+<td>searxng</td>
+<td>Метапоиск для инструмента <code>web_search</code></td>
+</tr>
+<tr>
+<td><code>lightpanda</code></td>
+<td>lightpanda/browser</td>
+<td>Headless-браузер (CDP) для инструмента <code>browser</code></td>
+</tr>
+</tbody></table>
+<p><strong>Где живёт состояние</strong> — важно для бэкапов и миграций:</p>
+<ul>
+<li><strong>Postgres</strong> — источник истины. События наблюдения (<code>observation_events</code>), знания и их
+историю, пользователей/сессии/ IdP-конфиг, секреты (зашифрованы <code>KERNEL_SECRET_MASTER_KEY</code>),
+ревью артефактов, квоты. Пишет kernel (через outbox → journal), читают все.</li>
+<li><strong><code>KERNEL_SANDBOX_ROOT</code></strong> — персистентные воркспейсы песочниц (файлы, которые агент
+правит между ранами). По умолчанию в compose — <code>/srv/temporality/sandbox</code>.</li>
+<li><strong>Temporal</strong> — состояние активных воркфлоу. Завершённые раны живут в Postgres как события;
+Temporal нужен, чтобы продолжить незавершённые.</li>
+</ul>
+<p>Ничего важного не живёт в контейнерах: их можно пересоздавать.</p>
+<h2 id="2-развёртывание-и-обновление"><a class="anchor" href="#2-развёртывание-и-обновление" aria-label="Section link">#</a>2. Развёртывание и обновление</h2><p>Образы публикуются в GHCR по тегам релизов <code>v2026.2.N</code>. Версия пинится переменной:</p>
+<pre><code class="language-bash">TEMPORALITY_VERSION=2026.2.66 docker compose up -d
+</code></pre>
+<p>Порядок обновления стенда:</p>
+<ol>
+<li>Прочитай заметки релиза (аннотация тега) — миграции и ломающие изменения пишутся туда.</li>
+<li><code>docker compose pull journal debugger agent-kernel</code></li>
+<li><code>docker compose up -d</code> — миграции Postgres применяются автоматически при старте kernel
+(<code>migrations/workspace</code>, миграции квот); журнал миграций — идемпотентный.</li>
+<li>Проверь здоровье: <code>docker compose ps</code> (все healthy), дашборд <code>/dashboard</code>, один тестовый ран.</li>
+</ol>
+<p>Откат — подними предыдущий <code>TEMPORALITY_VERSION</code>. Миграции схемы <strong>не откатываются</strong>:
+перед крупными обновлениями делай дамп (§11). Локальная сборка из исходников вместо GHCR:</p>
+<pre><code class="language-bash">docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build agent-kernel debugger
+</code></pre>
+<p>(<code>docker-compose.dev.yml</code> переключает образы на build из репозитория; перебивает только
+указанные сервисы.) Признак частого сбоя: при первой сборке двух целей одновременно buildx
+иногда спотыкается о блокировку кэша — повторная сборка проходит.</p>
+<h2 id="3-провайдеры-и-модели"><a class="anchor" href="#3-провайдеры-и-модели" aria-label="Section link">#</a>3. Провайдеры и модели</h2><p>Минимум для работы — три переменные провайдера по умолчанию:</p>
+<pre><code class="language-bash">TEMPORALITY_MODEL_BASE_URL=https://api.provider.com/v1
+TEMPORALITY_MODEL_ID=mimo-v2.6-flash
+TEMPORALITY_MODEL_API_KEY=...
+</code></pre>
+<p>Полная настройка — на странице <code>/providers</code>: несколько провайдеров, каталоги моделей,
+назначение моделей по ролям.</p>
+<h3 id="роли-моделей-и-куда-какая-попадает"><a class="anchor" href="#роли-моделей-и-куда-какая-попадает" aria-label="Section link">#</a>Роли моделей и куда какая попадает</h3><ul>
+<li><strong>chat</strong> — основная модель агентов (диалог, инструменты, план).</li>
+<li><strong>embedding</strong> — семантический слой знаний (§6).</li>
+<li><strong>asr</strong> — расшифровка аудио; в ролях чата участвовать не должна.</li>
+</ul>
+<p>Каталог моделей синхронизируется с провайдером по расписанию
+(<code>KERNEL_PROVIDER_MODELS_REFRESH</code>, по умолчанию 24h, <code>0</code> — выключить цикл) плюс ручной
+refresh и probe-проверка в UI.</p>
+<p><strong>Судья (judge)</strong> — отдельная chat-модель для оценок. Она используется шире, чем кажется:
+контур качества, нормализация областей знаний, супервайзерские проходы и кейсы, вердикт
+<code>worth_skill</code> при майнинге навыков, выбор модели в мастерах-черновиках (агент/навык/команда):
+env-модель → judge-модель → первый chat-кандидат каталога. Не-chat записи каталога
+(ASR, embedding, image) из кандидатов отфильтрованы — если мастер «взял первую попавшуюся
+ASR-модель», обнови каталог и назначь роли явно.</p>
+<h3 id="стрим-и-таймауты"><a class="anchor" href="#стрим-и-таймауты" aria-label="Section link">#</a>Стрим и таймауты</h3><table>
+<thead>
+<tr>
+<th>Переменная</th>
+<th>Дефолт</th>
+<th>Смысл</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>TEMPORALITY_MODEL_FIRST_TOKEN_TIMEOUT</code></td>
+<td><code>2m</code></td>
+<td>Ожидание первого токена; адаптивно +60с за МБ промпта</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_STREAM_IDLE_TIMEOUT</code></td>
+<td><code>90s</code></td>
+<td>Тишина в стриме между токенами</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_STREAM_NO_PROGRESS_TIMEOUT</code></td>
+<td><code>4m</code></td>
+<td>Стрим жив, но общий прогресс встал</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_TIMEOUT</code></td>
+<td><code>180s</code></td>
+<td>Базовый таймаут HTTP-запроса</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_ACTIVITY_TIMEOUT</code></td>
+<td><code>20m</code></td>
+<td>Потолок одной модельной активности</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS</code></td>
+<td><code>16384</code> (код) / <code>1024</code> (compose)</td>
+<td>Лимит генерации. Compose-стек сознательно ставит 1024 — подними осознанно</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_TEMPERATURE</code> / <code>_REASONING</code></td>
+<td>—</td>
+<td>Переопределение параметров запроса</td>
+</tr>
+</tbody></table>
+<p>Буферизующие гейтвеи (отдают весь ответ одним чанком) — не поломка. В трейсе это видно
+как вердикт «провайдер не стримит (один чанк)» на длинных вызовах; ретраи стрима — по
+лестнице с нарастающим интервалом («↻ повтор стрима после N с»). Диагностика «канал
+токенов не подключился (транспорт, не модель)» означает проблему SSE-транспорта до
+провайдера, а не выбор модели. Зависший вызов можно толкнуть вручную — кнопка <code>↻</code> на
+живой строке вызова модели отменяет запрос и перезапускает ход.</p>
+<h2 id="4-аутентификация-и-доступ"><a class="anchor" href="#4-аутентификация-и-доступ" aria-label="Section link">#</a>4. Аутентификация и доступ</h2><p>Четыре режима, от простого к корпоративному:</p>
+<ol>
+<li><strong>Без аутентификации</strong> — <code>KERNEL_AUTH_TOKENS</code> пуст. Только для локальных экспериментов.</li>
+<li><strong>Bearer-токены</strong> — <code>KERNEL_AUTH_TOKENS=token:user:role:projects,...</code>. Для сервисных
+агентов и скриптов.</li>
+<li><strong>Пароль + сессии</strong> — основной режим UI. Вход password-first, форма «Пароль | API-токен».
+Сессии: <code>KERNEL_SESSION_TTL</code> (скользящая, 12h), <code>KERNEL_SESSION_ABSOLUTE_TTL</code> (7d);
+<code>KERNEL_COOKIE_SECURE=true</code> за HTTPS.</li>
+<li><strong>OIDC SSO</strong> — федерация (Keycloak/Entra/Authentik), JIT-провижининг, маппинги групп на
+роли, роль <code>deny</code> = «вход успешен, доступ запрещён» до ручного решения. Конфиг —
+<code>/users</code> (admin-only), каждое изменение пишет аудит-событие.</li>
+</ol>
+<p>Self-service: пользователь меняет свой пароль через меню аккаунта (<code>POST /v1/auth/password</code>).
+Аккаунт с паролем подтверждает текущий; SSO-аккаунт без локального пароля задаёт первый
+с пустым полем current — минимум 8 символов, bearer-токен переживает смену. Break-glass:
+при включённом SSO парольный вход остаётся только у admin (недоступность IdP не блокирует
+эксплуатацию).</p>
+<p>Проектный скоупинг: роль + список проектов в токене, для SSO — маппинги claim&#39;ов;
+<code>*</code> означает все проекты. Оргструктура (<code>/org</code>) дополнительно ограничивает видимость
+по подразделениям.</p>
+<h2 id="5-секреты"><a class="anchor" href="#5-секреты" aria-label="Section link">#</a>5. Секреты</h2><ul>
+<li><code>KERNEL_SECRET_MASTER_KEY</code> (<code>openssl rand -hex 32</code>) — ключ шифрования секретов в Postgres.
+<strong>Потеря ключа = потеря всех секретов.</strong> Храни вне стенда; ротация — только с
+перекриптованием.</li>
+<li>Секреты создаются в <code>/secrets</code>, ссылаются из конфигов как <code>secret://…</code>; значение
+разрешается на границе использования.</li>
+<li><code>KERNEL_SECRET_CACHE_TTL_SECONDS</code> — сколько разрешённое значение живёт в памяти ядра.</li>
+<li>Выдача секрета рану — событие <code>secret.issued</code> в трейсе (показывается явно, это
+аудит-факт, не шум).</li>
+</ul>
+<h2 id="6-знания-подсказки-и-embeddings"><a class="anchor" href="#6-знания-подсказки-и-embeddings" aria-label="Section link">#</a>6. Знания, подсказки и embeddings</h2><p>Семантический слой (похожесть знаний, подсказки похожего опыта, предсказание конфликтов,
+семантический поиск) требует модель embeddings:</p>
+<pre><code class="language-bash">KERNEL_EMBEDDINGS_MODEL=intfloat/multilingual-e5-small
+</code></pre>
+<p>Модель грузится ин-процесс (rembed) с Hugging Face. Если она не загрузилась, ядро
+работает дальше, но с баннером «настроены не все инструменты» и без семантики — ретраи
+идут с нарастающим интервалом; проверь доступ до huggingface.co. Кэш модели — на диске;
+при проблемах прав владельца смотри лог (есть fallback на пользователя ОС).</p>
+<p>Эксплуатация знаний:</p>
+<ul>
+<li>Жизненный цикл: <code>proposed → confirmed → (challenged/invalidated/superseded)</code>. Проверка —
+ручная или судейская; неподтверждённое в подсказки не попадает.</li>
+<li>Оспорить/инвалидировать можно прямо из трейса рана (⚑ на событии со знанием) и из досье.</li>
+<li>Примаринг: перед ходом агент получает подсказки похожего опыта (<code>hint.query</code> →
+<code>memory.read</code>); факты использования (<code>hint.used</code>/проигнорировано) видны в
+knowledge-группе трейса — по ним оценивают пользу опыта.</li>
+<li>Нормализация областей знаний выполняется судьёй; карта областей — <code>/knowledge</code>.</li>
+</ul>
+<h2 id="7-навыки-и-артефакты"><a class="anchor" href="#7-навыки-и-артефакты" aria-label="Section link">#</a>7. Навыки и артефакты</h2><p><strong>Навыки</strong> — версионируемые процедуры с контрактом. Пути создания: описание в UI, импорт,
+вручную и <strong>майнинг</strong> — супервайзер ищет повторяющиеся три-граммы вызовов инструментов
+между ранами, детерминированный гейт отсекает read-only последовательности, судья выносит
+вердикт <code>worth_skill</code> с обоснованием; кандидат попадает в очередь и префиллится черновиком
+на <code>/skills</code>. Версии: черновик <code>0.x</code>, применение/отклонение редакций — человеком; в списке
+навыков бейджи <code>draft</code> и «↺ N» — ожидающие черновики-редакции. Не копи неприменённые
+редакции: просматривай очередь по бейджу.</p>
+<p><strong>Артефакты</strong> — справочные документы, которые агенты подгружают по требованию. Статусы:
+<code>draft / in_review / rejected / approved</code>. Ревью-цикл: submit (идемпотентен по версии) →
+уведомление ревьюерам → решение <strong>только человеком</strong> (само-одобрение запрещено на уровне
+API) → approved/rejected. Ревьюеры: режим <code>all</code> (все должны) или <code>any</code> (любого достаточно).
+Квота отправок на ран — <code>ARTIFACT_SUBMIT_PER_DAY</code>. Тела артефактов рендерят markdown
+с mermaid-диаграммами (типовые ошибки LLM в erDiagram чинятся автоматически).</p>
+<h2 id="8-агенты-команды-и-план-dag"><a class="anchor" href="#8-агенты-команды-и-план-dag" aria-label="Section link">#</a>8. Агенты, команды и план-DAG</h2><ul>
+<li><strong>Агент</strong> (<code>/agent-config</code>): модель, системный промпт, инструменты и их подтверждения,
+песочница. <code>max_turns</code> ограничивает длину рана — для дочерних ранов задаётся из задачи.</li>
+<li><strong>Команда</strong> (<code>/teams</code>): конвейер lead → исполнители → QA. Манифест команды фиксирует
+роли и лимиты.</li>
+<li><strong>План</strong> — DAG задач с зависимостями. Ключевые поля задачи: <code>on_failure</code>
+(<code>continue | stop | abort</code> — что делать с волной при падении задачи), <code>mode: wave</code>
+(поэтапный запуск готовыми батчами вместо полного DAG-упорядочивания), <code>max_turns</code>.
+Ревью-задачи работают как ворота: следующий этап не стартует без вердикта.</li>
+<li><strong>Супервайзер</strong> — периодический триаж упавших ранов
+(<code>KERNEL_SUPERVISOR_TRIAGE_INTERVAL</code>, 2m; значение ниже минимального трактуется как
+дефолт — выключателя нет). Предлагает перезапуски и кейсы; спорные операции ждут
+reconcile-решения человека в панели рана.</li>
+</ul>
+<h2 id="9-песочницы-инструменты-и-лимиты"><a class="anchor" href="#9-песочницы-инструменты-и-лимиты" aria-label="Section link">#</a>9. Песочницы, инструменты и лимиты</h2><ul>
+<li><strong><code>KERNEL_SANDBOX_ROOT</code></strong> — корень воркспейсов. Дефолт кода <code>./.sandbox</code>, в compose —
+<code>/srv/temporality/sandbox</code>. Не ставь <code>/tmp</code>: tmpfs-очистка при ребуте узла уничтожит
+воркспейсы агентов.</li>
+<li><code>KERNEL_SANDBOX_IMAGE</code> — образ песочницы; <code>TEMPORALITY_DOCKER_GID</code> — gid группы docker
+на хосте (сокет). <code>KERNEL_SANDBOX_PIDS</code>, <code>KERNEL_SANDBOX_SCRATCH_SIZE</code> — лимиты контейнера.</li>
+<li><code>KERNEL_TOOL_MAX_SECONDS</code> (900) — потолок одной команды; <code>TEMPORALITY_TOOL_ACTIVITY_TIMEOUT</code>
+(16m) — потолок активности <code>run_tool</code>.</li>
+<li>Веб: <code>KERNEL_SEARXNG_URL</code> (поиск), <code>KERNEL_WEB_SEARCH_PER_MIN</code>/<code>KERNEL_BROWSER_PER_MIN</code>
+(rate-лимиты), <code>KERNEL_WEB_FETCH_ALLOW_PRIVATE</code> (по умолчанию private-сети запрещены —
+SSRF-защита; включай осознанно), <code>KERNEL_BROWSER_CDP_URL</code> (lightpanda; пусто = browser off).</li>
+<li><strong>MCP</strong>: <code>KERNEL_MCP_COMMAND/_ARGS</code> — внешний MCP-сервер, <code>_ALLOW</code> — разрешённые
+инструменты, <code>_APPROVAL</code> — требовать подтверждение.</li>
+<li>Квоты запусков: <code>KERNEL_RUN_QUOTAS</code> (<code>project:limit</code>, <code>*</code> — дефолт); превышение = 429.
+Цены для стоимости: <code>KERNEL_MODEL_PRICES</code> (<code>model:prompt:completion</code>).</li>
+</ul>
+<h2 id="10-наблюдаемость-эксплуатации"><a class="anchor" href="#10-наблюдаемость-эксплуатации" aria-label="Section link">#</a>10. Наблюдаемость эксплуатации</h2><ul>
+<li>Трейс рана (<code>/agents</code>) — дерево ходов, свежие сверху; ход разворачивается целиком:
+вызовы инструментов, подтверждения, ответы. Окно — 50 событий, старые догружаются
+скроллом. Живая строка вызова модели показывает elapsed, токены, скорость и состояние
+канала; <code>↻</code> толкает зависший вызов. У работающего <code>run_command</code> прямо в строке —
+живой хвост консоли (буфер 2000 строк / 256 КБ, живёт 6h после активности; после
+очистки — fallback в журнал события ≤1 КБ).</li>
+<li><strong>Дашборд</strong> (<code>/dashboard</code>) — health, модели, проекты, качество; <code>/supervisor</code> — очередь
+триажа; <code>/mcp</code> — состояние MCP-сервера.</li>
+<li><strong>Шина событий</strong>: kernel пишет через outbox (<code>kernel_event_outbox</code>) в journal, UI слушает
+SSE + опрос каждые 10с как страховку. Аутентификация kernel→journal —
+<code>TEMPORALITY_API_TOKEN</code> (провижинится автоматически).</li>
+<li>Лаги UI обычно = лаг journal stream: смотри рестарты <code>temporality-journal-1</code> и бэккофф
+переподключений.</li>
+</ul>
+<h2 id="11-резервное-копирование-и-восстановление"><a class="anchor" href="#11-резервное-копирование-и-восстановление" aria-label="Section link">#</a>11. Резервное копирование и восстановление</h2><p>Минимум — nightly:</p>
+<pre><code class="language-bash">docker exec temporality-postgres-1 pg_dump -U temporality temporality | gzip &gt; backup-$(date +%F).sql.gz
+tar -C /srv/temporality/sandbox -czf sandbox-$(date +%F).tgz .
+</code></pre>
+<p>Восстановление: поднять пустой стек той же версии → восстановить дамп → вернуть
+sandbox-корень → поднять kernel. Активные (незавершённые) раны после восстановления
+продолжаются, только если восстановлена и БД Temporal — в большинстве случаев достаточно
+принять, что незавершённые раны умрут и их перезапустят. Проверяй восстановление
+периодически на отдельном стенде — бэкап, который ни разу не восстанавливали, не бэкап.</p>
+<h2 id="12-диагностика-типовых-проблем"><a class="anchor" href="#12-диагностика-типовых-проблем" aria-label="Section link">#</a>12. Диагностика типовых проблем</h2><table>
+<thead>
+<tr>
+<th>Симптом</th>
+<th>Где смотреть</th>
+<th>Что делать</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Ран «висит» на вызове модели</td>
+<td>живая строка трейса: ожидание первого токена</td>
+<td>если «канал токенов не подключился» — транспорт до провайдера (SSE/прокси), не модель; жди retry-лестницу или толкни <code>↻</code></td>
+</tr>
+<tr>
+<td>«Провайдер не стримит (один чанк)»</td>
+<td>детали <code>model.completed</code></td>
+<td>гейтвей буферизует ответ; это не ошибка — для стриминга выбери другого провайдера/эндпоинт</td>
+</tr>
+<tr>
+<td>Ответы обрываются на середине</td>
+<td><code>TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS</code></td>
+<td>подними лимит (compose-дефолт 1024 мал для больших ходов)</td>
+</tr>
+<tr>
+<td>Консоль команды «Вывод недоступен: 404»</td>
+<td>буфер консоли</td>
+<td>буфер вымыт (6h бездействия/рестарт ядра); вывод ≤1 КБ восстановится из журнала события</td>
+</tr>
+<tr>
+<td>Баннер «настроены не все инструменты: embeddings»</td>
+<td>лог kernel</td>
+<td>доступ до huggingface.co, корректность <code>KERNEL_EMBEDDINGS_MODEL</code>; ретраи автоматические</td>
+</tr>
+<tr>
+<td>Ран упал и никто его не поднимает</td>
+<td><code>/supervisor</code></td>
+<td>проверь <code>KERNEL_SUPERVISOR_TRIAGE_INTERVAL</code>; спорные операции — reconcile в панели рана</td>
+</tr>
+<tr>
+<td>429 на запусках</td>
+<td>квоты</td>
+<td><code>KERNEL_RUN_QUOTAS</code> — подними лимит проекта или дефолт <code>*</code></td>
+</tr>
+<tr>
+<td>Песочница не стартует</td>
+<td>лог kernel, <code>docker compose ps</code></td>
+<td>gid сокета docker (<code>TEMPORALITY_DOCKER_GID</code>), наличие <code>KERNEL_SANDBOX_IMAGE</code></td>
+</tr>
+<tr>
+<td>UI видит не всё (проекты)</td>
+<td>скоупинг</td>
+<td>роль+проекты токена / маппинги SSO / оргподразделения</td>
+</tr>
+</tbody></table>
+<p>Практика: сначала трейс (он показывает и транспорт, и вердикты ретраев), потом логи
+kernel, потом journal. Большинство «зависаний» — транспорт до провайдера, и трейс это
+прямо называет.</p>
+<h2 id="13-дисциплина-изменений"><a class="anchor" href="#13-дисциплина-изменений" aria-label="Section link">#</a>13. Дисциплина изменений</h2><ul>
+<li>Всё, что меняет поведение, выпускается тегом <code>v2026.2.N</code> с аннотацией — читай её перед
+обновлением.</li>
+<li>Конфиг стенда (<code>.env</code>, compose-оверлеи) держи в системе контроля версий; секреты —
+только ссылками <code>secret://</code>.</li>
+<li>Схема БД мигрирует только вперёд; между версиями с крупными миграциями делай дамп.</li>
+<li>Аудит-события (входы, выдачи секретов, изменения IdP-конфига) — часть эксплуатации:
+они ищутся в journal как обычные события.</li>
+</ul>
+
+
+  <nav class="docs-pager">
+    <a class="pager-prev" href="reference.html"><small>← Назад</small><strong>Справочник</strong></a>
+    
+  </nav>
+</article>
+</main>
+</body>
+</html>

@@ -7,8 +7,6 @@ description: Users and RBAC, the org structure, providers, secrets, sandboxes an
 
 # Administration
 
-# Administration
-
 ## Backup and restore
 
 Three stores — three stories:
@@ -72,8 +70,16 @@ channels. Roles are ordered: `reader < writer < operator < admin`.
 | admin | Users, providers, channels, org structure, everything else |
 
 A project scope limits visibility: a user sees only the allowed projects (or
-all with `*`). The token is entered via Login in the header and kept in the
-browser.
+all with `*`). Login is password-first: the "Password | API token" form, with
+the token as a secondary mode for service accounts and scripts.
+
+### Changing the password
+
+Your own — via the account menu (`POST /v1/auth/password`): an account with a
+password confirms the current one; an SSO account without a local password
+sets its first one with an empty current field (minimum 8 characters, the
+session is not interrupted). With SSO enabled, password login remains for the
+admin only — IdP unavailability does not block operations (break-glass).
 
 ## Org structure
 
@@ -86,9 +92,14 @@ the structure, not by lists.
 ## Providers and models
 
 The **Providers** page (`/providers`): OpenAI-compatible endpoints (base URL,
-key, model list — fetched automatically). A run's model is routed to the
-provider that declares it; provider keys are stored as secret references.
-Token prices for cost reporting — `KERNEL_MODEL_PRICES`.
+key, model catalog — fetched automatically on the `KERNEL_PROVIDER_MODELS_REFRESH`
+schedule plus a manual refresh and a probe check). A run's model is routed to
+the provider that declares it; catalog models carry roles (chat / embedding /
+asr) — draft wizards (agent, skill, team) pick a model through the chain
+"env model → judge model → first chat candidate in the catalog", and non-chat
+entries (ASR, embedding, image) are filtered out of the candidates. Provider
+keys are stored as secret references. Token prices for cost reporting —
+`KERNEL_MODEL_PRICES`.
 
 ## Secrets
 
@@ -114,7 +125,11 @@ The persistent project filesystem is covered in [Observability](observability.ht
 
 In Agents → "Quality settings":
 
-- **the judge model** — an installation-wide LLM judge for skill and agent evaluations (with agreement calibration below the threshold the judge degrades and the gate goes red);
+- **the judge model** — an installation-wide LLM judge: skill and agent
+  evaluations, knowledge area normalization, supervisor passes and cases, the
+  `worth_skill` verdict when mining skills, model selection in the draft
+  wizards (with agreement calibration below the threshold the judge degrades
+  and the gate goes red);
 - **the schedule** — how often evaluation suites re-run.
 
 Applying agent and skill proposals is gated on a green evaluation run — see
@@ -123,3 +138,8 @@ Applying agent and skill proposals is gated on a green evaluation run — see
 ## External authentication
 
 OIDC federation is supported (Keycloak, authentik and others): `docs/auth-federation.md`.
+The scheme: discovery + a JWKS cache (key rotation without restart),
+server-side sessions (`KERNEL_SESSION_TTL` 12h / `KERNEL_SESSION_ABSOLUTE_TTL`
+7d), JIT provisioning with a default role and the `deny` role ("login
+succeeds, access denied" until a manual mapping), claim mappings to roles and
+projects. Every IdP config change writes an audit event.

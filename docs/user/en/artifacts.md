@@ -24,15 +24,21 @@ The **Artifacts** page (`/artifacts`); details — `docs/artifact-registry.md`.
 
 ## Approval flow
 
-An artifact exists in two statuses: **draft** (an agent created it — say,
-requirements from an analysis) and **approved** (a human edited and confirmed
-it). Only approved artifacts are referenced from skills and prompts: "see
-policy X" means a human-verified version.
+An artifact goes through four statuses: **draft**, **in_review** (sent for
+review), **rejected** (rejected with a verdict) and **approved**. Only
+approved artifacts are referenced from skills and prompts: "see policy X"
+means a human-verified version.
 
-A typical cycle: an analyst agent drafts the document → sends it to a human
-for approval (`ask_human` or an artifact notification) → the human edits it
-themselves or with the agent → approves → the document becomes available to
-all executor agents as a link from a skill.
+The review cycle: the author submits the artifact for review (idempotent per
+version, the `ARTIFACT_SUBMIT_PER_DAY` quota per run) → reviewers get a
+notification → the decision is made by **a human only** (self-approval is
+forbidden at the API level). Reviewers are configured with the `all` mode
+(everyone must decide) or `any` (one is enough). A rejection returns the
+artifact to the author with a reason.
+
+A typical cycle: an analyst agent drafts the document → sends it for review →
+the human edits it themselves or with the agent → approves → the document
+becomes available to all executor agents as a link from a skill.
 
 ## Relations
 

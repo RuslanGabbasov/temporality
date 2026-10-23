@@ -30,8 +30,10 @@
 <a class="docs-nav-row" href="administration.html">Administration</a>
 <div class="docs-nav-section">Integrations</div>
 <a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
-<div class="docs-nav-section">Administration</div>
+<div class="docs-nav-section">Reference</div>
 <a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">Operations</div>
+<a class="docs-nav-row" href="operations.html">Harness Operations</a>
 <div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
 <article class="docs-content">
 <div class="docs-eyebrow">Knowledge and experience</div>
@@ -73,14 +75,23 @@ item unchanged; <strong>Generalize…</strong> replaces both with one broader st
 <p>The run trace (Trajectory tab) shows the session&#39;s human factors next to
 cost: ⏳ human wait (HWT, measured), 👁 human attention (HAB, estimate),
 ✋ human decisions.</p>
-<h2 id="the-run-trace"><a class="anchor" href="#the-run-trace" aria-label="Section link">#</a>The run trace</h2><p>Every run expands into an event feed: model calls (tokens, latency, stream),
-tool calls with arguments and results, approval decisions, knowledge events.
-Uncertain operations are flagged and resolved through reconcile. A long model
-call shows signs of life (tokens/sec, first-token wait) and can be nudged or
-cancelled. A stuck run is stopped with the compact <strong>■ Stop</strong> action in the
-list (click twice to confirm): a forced workflow terminate that journals the
-terminal event — it lands even when a graceful cancel cannot reach the stuck
-workflow.</p>
+<h2 id="the-run-trace"><a class="anchor" href="#the-run-trace" aria-label="Section link">#</a>The run trace</h2><p>The trace is a <strong>tree of turns</strong>, newest first. An expanded turn contains
+everything that happened inside it: model calls, tool calls with arguments
+and results, approvals, knowledge events (knowledge/recall/hints collapse
+into a knowledge group with the aggregate &quot;N learned · M extracted · K hints&quot;).
+The window is 50 events; older ones load as you scroll down. Uncertain
+operations are flagged and resolved through reconcile; cross-agent knowledge
+disputes are shown as a banner.</p>
+<p>A long model call is the first line of the trace: elapsed, tokens, speed and
+the channel state (&quot;the token channel did not connect&quot; — a transport problem
+up to the provider, not the model; &quot;the provider does not stream (a single
+chunk)&quot; — a gateway is buffering the response). It can be nudged with the <code>↻</code>
+button (the request is cancelled and the turn restarted) or cancelled. A
+running <code>run_command</code> shows a live console tail right in its line; after
+completion the output is available in the row details.</p>
+<p>A stuck run is stopped with the <strong>■ Stop</strong> action in the list (click twice to
+confirm): a forced workflow terminate that journals the terminal event — it
+lands even when a graceful cancel cannot reach the stuck workflow.</p>
 <h2 id="the-experience-timeline"><a class="anchor" href="#the-experience-timeline" aria-label="Section link">#</a>The experience timeline</h2><p>The <strong>Timeline</strong> (<code>/experience</code>) is a temporal unfolding of knowledge and
 runs: which knowledge appeared/changed, in which runs it was applied, where it
 worked and where it misled. Grouped by scopes, with retrospective audit: &quot;what

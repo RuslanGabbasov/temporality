@@ -30,8 +30,10 @@
 <a class="docs-nav-row" href="administration.html">Administration</a>
 <div class="docs-nav-section">Integrations</div>
 <a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
-<div class="docs-nav-section">Administration</div>
+<div class="docs-nav-section">Reference</div>
 <a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">Operations</div>
+<a class="docs-nav-row" href="operations.html">Harness Operations</a>
 <div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
 <article class="docs-content">
 <div class="docs-eyebrow">Knowledge and experience</div>
@@ -55,8 +57,16 @@ on demand via <code>artifact_read</code>, not from the prompt.</li>
 the builder drafts the skill referencing only tools that actually exist.</li>
 <li><strong>Import</strong> — a folder or archive in the <a href="https://agentskills.io" target="_blank" rel="noreferrer">agentskills.io&nbsp;<span class="ext">↗</span></a> format.</li>
 <li><strong>Manually</strong> — the manifest editor.</li>
+<li><strong>Mining</strong> — the supervisor finds repeated tool-call trigrams across runs
+(a deterministic gate filters out read-only sequences and back-to-back
+repeats), the judge issues a <code>worth_skill</code> verdict with a rationale; the
+candidate appears in the queue on the Skills page as a pre-filled draft —
+all that is left is to read and approve or reject it.</li>
 </ol>
-<p>A new skill is a draft (0.x). It reaches production after human review.</p>
+<p>A new skill is a draft (0.x). It reaches production after human review.
+Badges in the skill list show the unfinished work: <code>draft</code> — drafts,
+&quot;↺ N&quot; — pending draft revisions; applying or rejecting a version is a
+human decision.</p>
 <h2 id="quality-evaluations"><a class="anchor" href="#quality-evaluations" aria-label="Section link">#</a>Quality evaluations</h2><p>Golden cases attach to a skill: input → expected answer. An evaluation run
 (manual or scheduled) checks answers with patterns and an LLM judge with
 agreement calibration. The result is visible in the skill&#39;s card and on the

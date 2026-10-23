@@ -52,8 +52,10 @@ transition history, primary sources (links to specific run events), relations
 to other knowledge (supports/contradicts/derived from), usage statistics.
 
 From the dossier: **challenge**, **correct**, **invalidate** — with a reason
-and evidence. These are human actions; the agent flags doubts, but you move
-the lifecycle.
+and evidence. You can also challenge or invalidate straight from the run
+trace — the ⚑ button on the event that references the knowledge: the doubt is
+captured right where you noticed it. These are human actions; the agent flags
+doubts, but you move the lifecycle.
 
 ## Contradictions
 

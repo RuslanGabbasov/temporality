@@ -30,11 +30,13 @@
 <a class="docs-nav-row" href="administration.html">Администрирование</a>
 <div class="docs-nav-section">Интеграции</div>
 <a class="docs-nav-row" href="external-agents.html">Внешние агенты (experience-слой)</a>
-<div class="docs-nav-section">Администрирование</div>
+<div class="docs-nav-section">Справка</div>
 <a class="docs-nav-row active" href="reference.html">Справочник</a>
+<div class="docs-nav-section">Эксплуатация</div>
+<a class="docs-nav-row" href="operations.html">Эксплуатация харнеса</a>
 <div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
 <article class="docs-content">
-<div class="docs-eyebrow">Администрирование</div>
+<div class="docs-eyebrow">Справка</div>
 <h1>Справочник</h1>
 <p class="docs-lead">Переменные окружения, порты, страницы интерфейса и ссылки на подробные документы.</p>
 <h2 id="переменные-окружения-основные"><a class="anchor" href="#переменные-окружения-основные" aria-label="Section link">#</a>Переменные окружения (основные)</h2><table>
@@ -52,8 +54,28 @@
 </tr>
 <tr>
 <td><code>TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS</code></td>
-<td><code>16384</code></td>
-<td>Лимит генерации; reasoning-моделям — с запасом</td>
+<td><code>16384</code> (код) / <code>1024</code> (compose)</td>
+<td>Лимит генерации; reasoning-моделям — с запасом. Compose-стек по умолчанию ставит 1024</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_TIMEOUT</code></td>
+<td><code>180s</code></td>
+<td>Базовый таймаут HTTP-запроса к провайдеру</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_STREAM_IDLE_TIMEOUT</code></td>
+<td><code>90s</code></td>
+<td>Тишина в стриме между токенами</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_STREAM_NO_PROGRESS_TIMEOUT</code></td>
+<td><code>4m</code></td>
+<td>Стрим жив, но прогресса нет</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_TEMPERATURE</code> / <code>_REASONING</code></td>
+<td>—</td>
+<td>Переопределение параметров запроса</td>
 </tr>
 <tr>
 <td><code>TEMPORALITY_MODEL_ACTIVITY_TIMEOUT</code></td>
@@ -81,19 +103,94 @@
 <td>Модель семантического слоя знаний (ин-процесс, rembed)</td>
 </tr>
 <tr>
+<td><code>KERNEL_EMBEDDING_WORKERS</code></td>
+<td>—</td>
+<td>Параллелизм фоновых embed-вычислений</td>
+</tr>
+<tr>
+<td><code>KERNEL_PROVIDER_MODELS_REFRESH</code></td>
+<td><code>24h</code></td>
+<td>Цикл фоновой синхронизации каталога моделей провайдера (<code>0</code> — выключить)</td>
+</tr>
+<tr>
 <td><code>KERNEL_SUPERVISOR_TRIAGE_INTERVAL</code></td>
 <td><code>2m</code></td>
-<td>Периодичность триажа упавших ранов (<code>0</code> — выключить)</td>
+<td>Периодичность триажа упавших ранов (значения вне допустимого диапазона откатываются к дефолту — выключателя нет)</td>
 </tr>
 <tr>
 <td><code>KERNEL_SANDBOX_ROOT</code></td>
-<td><code>/tmp</code></td>
-<td>Корень персистентных воркспейсов</td>
+<td><code>./.sandbox</code> (код) / <code>/srv/temporality/sandbox</code> (compose)</td>
+<td>Корень персистентных воркспейсов. Не ставь <code>/tmp</code> — очистка при ребуте узла уничтожит воркспейсы</td>
+</tr>
+<tr>
+<td><code>KERNEL_SANDBOX_PIDS</code> / <code>KERNEL_SANDBOX_SCRATCH_SIZE</code></td>
+<td>—</td>
+<td>Лимиты контейнера песочницы: процессы и размер scratch</td>
 </tr>
 <tr>
 <td><code>KERNEL_DOCKER_BINARY</code></td>
 <td><code>docker</code></td>
 <td>Путь к docker CLI</td>
+</tr>
+<tr>
+<td><code>KERNEL_SESSION_TTL</code></td>
+<td><code>12h</code></td>
+<td>Скользящий TTL браузерной сессии</td>
+</tr>
+<tr>
+<td><code>KERNEL_SESSION_ABSOLUTE_TTL</code></td>
+<td><code>168h</code></td>
+<td>Абсолютный потолок сессии</td>
+</tr>
+<tr>
+<td><code>KERNEL_COOKIE_SECURE</code></td>
+<td><code>false</code></td>
+<td>Флаг Secure у сессионной cookie (включай за HTTPS)</td>
+</tr>
+<tr>
+<td><code>KERNEL_WEB_SEARCH_PER_MIN</code> / <code>KERNEL_BROWSER_PER_MIN</code></td>
+<td><code>30</code> / <code>60</code></td>
+<td>Rate-лимиты поиска и браузера</td>
+</tr>
+<tr>
+<td><code>KERNEL_WEB_FETCH_ALLOW_PRIVATE</code></td>
+<td><code>false</code></td>
+<td>Разрешить <code>web_fetch</code> в приватные сети (SSRF-защита; включай осознанно)</td>
+</tr>
+<tr>
+<td><code>KERNEL_SECRET_CACHE_TTL_SECONDS</code></td>
+<td>—</td>
+<td>Сколько разрешённое значение секрета живёт в памяти ядра</td>
+</tr>
+<tr>
+<td><code>KERNEL_MCP_COMMAND</code> / <code>_ARGS</code> / <code>_ALLOW</code> / <code>_APPROVAL</code> / <code>_SERVER_NAME</code></td>
+<td>—</td>
+<td>Внешний MCP-сервер: команда, аргументы, разрешённые инструменты, подтверждение</td>
+</tr>
+<tr>
+<td><code>KERNEL_STORAGE_DEFAULT_QUOTA_BYTES</code> / <code>KERNEL_STORAGE_SWEEPER</code></td>
+<td>—</td>
+<td>Квоты и очистка хранилища песочниц</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_API_TOKEN</code></td>
+<td>автопровижин</td>
+<td>Bearer-токен kernel → journal</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_OPERATIONS_WINDOW</code></td>
+<td><code>7d</code></td>
+<td>Окно для эксплуатационных свёрток</td>
+</tr>
+<tr>
+<td><code>KERNEL_UI_URL</code></td>
+<td>—</td>
+<td>Базовый URL UI (письма/ссылки)</td>
+</tr>
+<tr>
+<td><code>ARTIFACT_SUBMIT_PER_DAY</code></td>
+<td><code>10</code></td>
+<td>Квота отправок артефактов на ревью в сутки на ран</td>
 </tr>
 <tr>
 <td><code>KERNEL_SECRET_MASTER_KEY</code></td>
@@ -182,6 +279,10 @@
 <td>Дашборд: health, модели, проекты, качество, саги, песочницы</td>
 </tr>
 <tr>
+<td><code>/supervisor</code></td>
+<td>Очередь супервайзера: триаж упавших ранов, кейсы, кандидаты в навыки</td>
+</tr>
+<tr>
 <td><code>/workspace</code></td>
 <td>Чат с агентом</td>
 </tr>
@@ -221,6 +322,10 @@
 <td><code>/users</code> · <code>/org</code></td>
 <td>Пользователи и оргструктура</td>
 </tr>
+<tr>
+<td><code>/mcp</code></td>
+<td>Состояние внешнего MCP-сервера</td>
+</tr>
 </tbody></table>
 <h2 id="глоссарий"><a class="anchor" href="#глоссарий" aria-label="Section link">#</a>Глоссарий</h2><ul>
 <li><strong>Ран</strong> — один запуск агента над задачей (durable workflow).</li>
@@ -245,7 +350,7 @@
 
   <nav class="docs-pager">
     <a class="pager-prev" href="external-agents.html"><small>← Назад</small><strong>Внешние агенты (experience-слой)</strong></a>
-    
+    <a class="pager-next" href="operations.html"><small>Далее →</small><strong>Эксплуатация харнеса</strong></a>
   </nav>
 </article>
 </main>

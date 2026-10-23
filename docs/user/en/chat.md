@@ -21,7 +21,9 @@ survives restarts.
   `/workspace/inbox` and are available to the agent.
 
 The reply streams in chunks; reasoning-model "thinking" expands in a separate
-block. Markdown (including tables and code) is rendered.
+block. Markdown is rendered: tables, code and mermaid diagrams (SVG). Broken
+diagrams from the model do not break the page — typical erDiagram errors are
+fixed automatically, and a fully invalid block is shown as source.
 
 ## Approvals (human in the loop)
 
@@ -41,10 +43,14 @@ ends gracefully.
 
 For larger tasks the agent can decompose the work:
 
-- **`delegate`** — a subtask to another agent with its own prompt and turn budget.
+- **`delegate`** — a subtask to another agent with its own prompt and turn
+  budget (`max_turns`, including from the task field).
 - **`plan`** — a task DAG with dependencies: independent branches run in
   parallel, dependent results are appended to followers' prompts, review tasks
   act as acceptance gates (a rework verdict sends work back with feedback).
+  Task parameters: `on_failure` (`continue | stop | abort` — the wave's fate
+  when a task fails), `mode: wave` (staged execution in ready batches),
+  `max_turns` per task.
 
 Plan progress is visible right in the chat: tasks, statuses, dependencies.
 The full mechanism — `docs/agent-delegation.md`.

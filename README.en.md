@@ -1,6 +1,6 @@
 # Temporality
 
-[Русский](README.md) · **English**
+[Русский](README.md) · **English** · [Docs](https://ruslangabbasov.github.io/temporality/docs/en/) · [Harness operations](https://ruslangabbasov.github.io/temporality/docs/en/operations.html)
 
 Temporality is an observability and experience accumulation system for AI agents.
 
@@ -58,12 +58,12 @@ Prebuilt images from GHCR — no repository clone, no local build:
 curl -o docker-compose.yml https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/docker-compose.yml
 curl -o .env.example https://raw.githubusercontent.com/RuslanGabbasov/temporality/main/.env.example
 cp .env.example .env   # configure TEMPORALITY_MODEL_* and optionally the sandbox
-TEMPORALITY_VERSION=2026.2.11 docker compose up -d
+TEMPORALITY_VERSION=2026.2.66 docker compose up -d
 ```
 
 `TEMPORALITY_VERSION` is the image version (see
 [releases](https://github.com/RuslanGabbasov/temporality/releases)); `latest`
-is the default, but pin an explicit version on any real deployment.
+pin an explicit version on any real deployment (the compose-file default lags releases).
 Upgrading: `TEMPORALITY_VERSION=<new> docker compose up -d` — the kernel runs
 its migrations on start automatically.
 

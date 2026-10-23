@@ -52,14 +52,25 @@ cost: ⏳ human wait (HWT, measured), 👁 human attention (HAB, estimate),
 
 ## The run trace
 
-Every run expands into an event feed: model calls (tokens, latency, stream),
-tool calls with arguments and results, approval decisions, knowledge events.
-Uncertain operations are flagged and resolved through reconcile. A long model
-call shows signs of life (tokens/sec, first-token wait) and can be nudged or
-cancelled. A stuck run is stopped with the compact **■ Stop** action in the
-list (click twice to confirm): a forced workflow terminate that journals the
-terminal event — it lands even when a graceful cancel cannot reach the stuck
-workflow.
+The trace is a **tree of turns**, newest first. An expanded turn contains
+everything that happened inside it: model calls, tool calls with arguments
+and results, approvals, knowledge events (knowledge/recall/hints collapse
+into a knowledge group with the aggregate "N learned · M extracted · K hints").
+The window is 50 events; older ones load as you scroll down. Uncertain
+operations are flagged and resolved through reconcile; cross-agent knowledge
+disputes are shown as a banner.
+
+A long model call is the first line of the trace: elapsed, tokens, speed and
+the channel state ("the token channel did not connect" — a transport problem
+up to the provider, not the model; "the provider does not stream (a single
+chunk)" — a gateway is buffering the response). It can be nudged with the `↻`
+button (the request is cancelled and the turn restarted) or cancelled. A
+running `run_command` shows a live console tail right in its line; after
+completion the output is available in the row details.
+
+A stuck run is stopped with the **■ Stop** action in the list (click twice to
+confirm): a forced workflow terminate that journals the terminal event — it
+lands even when a graceful cancel cannot reach the stuck workflow.
 
 ## The experience timeline
 

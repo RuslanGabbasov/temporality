@@ -29,8 +29,16 @@ The manifest (`SKILL.md` + metadata) describes:
    the builder drafts the skill referencing only tools that actually exist.
 2. **Import** — a folder or archive in the [agentskills.io](https://agentskills.io) format.
 3. **Manually** — the manifest editor.
+4. **Mining** — the supervisor finds repeated tool-call trigrams across runs
+   (a deterministic gate filters out read-only sequences and back-to-back
+   repeats), the judge issues a `worth_skill` verdict with a rationale; the
+   candidate appears in the queue on the Skills page as a pre-filled draft —
+   all that is left is to read and approve or reject it.
 
 A new skill is a draft (0.x). It reaches production after human review.
+Badges in the skill list show the unfinished work: `draft` — drafts,
+"↺ N" — pending draft revisions; applying or rejecting a version is a
+human decision.
 
 ## Quality evaluations
 

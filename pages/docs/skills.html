@@ -30,8 +30,10 @@
 <a class="docs-nav-row" href="administration.html">Администрирование</a>
 <div class="docs-nav-section">Интеграции</div>
 <a class="docs-nav-row" href="external-agents.html">Внешние агенты (experience-слой)</a>
-<div class="docs-nav-section">Администрирование</div>
+<div class="docs-nav-section">Справка</div>
 <a class="docs-nav-row" href="reference.html">Справочник</a>
+<div class="docs-nav-section">Эксплуатация</div>
+<a class="docs-nav-row" href="operations.html">Эксплуатация харнеса</a>
 <div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../">← На сайт</a></nav></aside>
 <article class="docs-content">
 <div class="docs-eyebrow">Знания и опыт</div>
@@ -56,8 +58,16 @@
 инструменты.</li>
 <li><strong>Импорт</strong> — папка или архив в формате <a href="https://agentskills.io" target="_blank" rel="noreferrer">agentskills.io&nbsp;<span class="ext">↗</span></a>.</li>
 <li><strong>Вручную</strong> — редактор манифеста.</li>
+<li><strong>Майнинг</strong> — супервайзер находит повторяющиеся три-граммы вызовов
+инструментов между ранами (детерминированный гейт отсекает read-only
+последовательности и повторы подряд), судья выносит вердикт <code>worth_skill</code>
+с обоснованием; кандидат появляется в очереди на странице Навыков как
+предзаполненный черновик — остаётся прочитать и утвердить или отклонить.</li>
 </ol>
-<p>Новый навык — черновик (0.x). В продакшн он попадает после human review.</p>
+<p>Новый навык — черновик (0.x). В продакшн он попадает после human review.
+В списке навыков бейджи показывают незавершённое: <code>draft</code> — черновики,
+«↺ N» — ожидающие черновики-редакции; применение/отклонение версии —
+решение человека.</p>
 <h2 id="оценки-качества-evaluations"><a class="anchor" href="#оценки-качества-evaluations" aria-label="Section link">#</a>Оценки качества (evaluations)</h2><p>К навыку привязываются golden-кейсы: вход → ожидаемый ответ. Прогон оценки
 (вручную или по расписанию) проверяет ответы паттернами и LLM-судьёй с
 калибровкой согласия. Результат виден в карточке навыка и на дашборде

@@ -30,14 +30,16 @@
 <a class="docs-nav-row active" href="administration.html">Administration</a>
 <div class="docs-nav-section">Integrations</div>
 <a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
-<div class="docs-nav-section">Administration</div>
+<div class="docs-nav-section">Reference</div>
 <a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">Operations</div>
+<a class="docs-nav-row" href="operations.html">Harness Operations</a>
 <div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
 <article class="docs-content">
 <div class="docs-eyebrow">Administration</div>
 <h1>Administration</h1>
 <p class="docs-lead">Users and RBAC, the org structure, providers, secrets, sandboxes and quality settings.</p>
-<h1 id="administration"><a class="anchor" href="#administration" aria-label="Section link">#</a>Administration</h1><h2 id="backup-and-restore"><a class="anchor" href="#backup-and-restore" aria-label="Section link">#</a>Backup and restore</h2><p>Three stores — three stories:</p>
+<h2 id="backup-and-restore"><a class="anchor" href="#backup-and-restore" aria-label="Section link">#</a>Backup and restore</h2><p>Three stores — three stories:</p>
 <table>
 <thead>
 <tr>
@@ -113,17 +115,27 @@ channels. Roles are ordered: <code>reader &lt; writer &lt; operator &lt; admin</
 </tr>
 </tbody></table>
 <p>A project scope limits visibility: a user sees only the allowed projects (or
-all with <code>*</code>). The token is entered via Login in the header and kept in the
-browser.</p>
+all with <code>*</code>). Login is password-first: the &quot;Password | API token&quot; form, with
+the token as a secondary mode for service accounts and scripts.</p>
+<h3 id="changing-the-password"><a class="anchor" href="#changing-the-password" aria-label="Section link">#</a>Changing the password</h3><p>Your own — via the account menu (<code>POST /v1/auth/password</code>): an account with a
+password confirms the current one; an SSO account without a local password
+sets its first one with an empty current field (minimum 8 characters, the
+session is not interrupted). With SSO enabled, password login remains for the
+admin only — IdP unavailability does not block operations (break-glass).</p>
 <h2 id="org-structure"><a class="anchor" href="#org-structure" aria-label="Section link">#</a>Org structure</h2><p>The <strong>Organization</strong> page (<code>/org</code>, admin): the department tree, users on
 nodes, node <strong>policies</strong> (model/MCP/token/network/sandbox restrictions; a ban
 on channel tasks for a subtree) and inheritance modes. A project binds to a
 node and inherits its policies and visibility: team access is configured by
 the structure, not by lists.</p>
 <h2 id="providers-and-models"><a class="anchor" href="#providers-and-models" aria-label="Section link">#</a>Providers and models</h2><p>The <strong>Providers</strong> page (<code>/providers</code>): OpenAI-compatible endpoints (base URL,
-key, model list — fetched automatically). A run&#39;s model is routed to the
-provider that declares it; provider keys are stored as secret references.
-Token prices for cost reporting — <code>KERNEL_MODEL_PRICES</code>.</p>
+key, model catalog — fetched automatically on the <code>KERNEL_PROVIDER_MODELS_REFRESH</code>
+schedule plus a manual refresh and a probe check). A run&#39;s model is routed to
+the provider that declares it; catalog models carry roles (chat / embedding /
+asr) — draft wizards (agent, skill, team) pick a model through the chain
+&quot;env model → judge model → first chat candidate in the catalog&quot;, and non-chat
+entries (ASR, embedding, image) are filtered out of the candidates. Provider
+keys are stored as secret references. Token prices for cost reporting —
+<code>KERNEL_MODEL_PRICES</code>.</p>
 <h2 id="secrets"><a class="anchor" href="#secrets" aria-label="Section link">#</a>Secrets</h2><p>The <strong>Secrets</strong> page (<code>/secrets</code>): values are encrypted with AES-256-GCM using
 <code>KERNEL_SECRET_MASTER_KEY</code> and decrypted only inside the kernel. A secret is
 granted to an agent on the agent&#39;s card: the value arrives in <code>run_command</code> as
@@ -139,12 +151,21 @@ agents themselves never see Docker.</p>
 <p>The persistent project filesystem is covered in <a href="observability.html#sandbox-storage">Observability</a>.</p>
 <h2 id="the-quality-loop"><a class="anchor" href="#the-quality-loop" aria-label="Section link">#</a>The quality loop</h2><p>In Agents → &quot;Quality settings&quot;:</p>
 <ul>
-<li><strong>the judge model</strong> — an installation-wide LLM judge for skill and agent evaluations (with agreement calibration below the threshold the judge degrades and the gate goes red);</li>
+<li><strong>the judge model</strong> — an installation-wide LLM judge: skill and agent
+evaluations, knowledge area normalization, supervisor passes and cases, the
+<code>worth_skill</code> verdict when mining skills, model selection in the draft
+wizards (with agreement calibration below the threshold the judge degrades
+and the gate goes red);</li>
 <li><strong>the schedule</strong> — how often evaluation suites re-run.</li>
 </ul>
 <p>Applying agent and skill proposals is gated on a green evaluation run — see
 <a href="agents.html#agent-evolution">Agents</a>.</p>
-<h2 id="external-authentication"><a class="anchor" href="#external-authentication" aria-label="Section link">#</a>External authentication</h2><p>OIDC federation is supported (Keycloak, authentik and others): <code>docs/auth-federation.md</code>.</p>
+<h2 id="external-authentication"><a class="anchor" href="#external-authentication" aria-label="Section link">#</a>External authentication</h2><p>OIDC federation is supported (Keycloak, authentik and others): <code>docs/auth-federation.md</code>.
+The scheme: discovery + a JWKS cache (key rotation without restart),
+server-side sessions (<code>KERNEL_SESSION_TTL</code> 12h / <code>KERNEL_SESSION_ABSOLUTE_TTL</code>
+7d), JIT provisioning with a default role and the <code>deny</code> role (&quot;login
+succeeds, access denied&quot; until a manual mapping), claim mappings to roles and
+projects. Every IdP config change writes an audit event.</p>
 
 
   <nav class="docs-pager">

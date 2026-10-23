@@ -30,8 +30,10 @@
 <a class="docs-nav-row" href="administration.html">Administration</a>
 <div class="docs-nav-section">Integrations</div>
 <a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
-<div class="docs-nav-section">Administration</div>
+<div class="docs-nav-section">Reference</div>
 <a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">Operations</div>
+<a class="docs-nav-row" href="operations.html">Harness Operations</a>
 <div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
 <article class="docs-content">
 <div class="docs-eyebrow">Knowledge and experience</div>
@@ -59,14 +61,19 @@ yet is always there when needed.</p>
 <td>Proxied and cached by the kernel (corporate wiki, Confluence)</td>
 </tr>
 </tbody></table>
-<h2 id="approval-flow"><a class="anchor" href="#approval-flow" aria-label="Section link">#</a>Approval flow</h2><p>An artifact exists in two statuses: <strong>draft</strong> (an agent created it — say,
-requirements from an analysis) and <strong>approved</strong> (a human edited and confirmed
-it). Only approved artifacts are referenced from skills and prompts: &quot;see
-policy X&quot; means a human-verified version.</p>
-<p>A typical cycle: an analyst agent drafts the document → sends it to a human
-for approval (<code>ask_human</code> or an artifact notification) → the human edits it
-themselves or with the agent → approves → the document becomes available to
-all executor agents as a link from a skill.</p>
+<h2 id="approval-flow"><a class="anchor" href="#approval-flow" aria-label="Section link">#</a>Approval flow</h2><p>An artifact goes through four statuses: <strong>draft</strong>, <strong>in_review</strong> (sent for
+review), <strong>rejected</strong> (rejected with a verdict) and <strong>approved</strong>. Only
+approved artifacts are referenced from skills and prompts: &quot;see policy X&quot;
+means a human-verified version.</p>
+<p>The review cycle: the author submits the artifact for review (idempotent per
+version, the <code>ARTIFACT_SUBMIT_PER_DAY</code> quota per run) → reviewers get a
+notification → the decision is made by <strong>a human only</strong> (self-approval is
+forbidden at the API level). Reviewers are configured with the <code>all</code> mode
+(everyone must decide) or <code>any</code> (one is enough). A rejection returns the
+artifact to the author with a reason.</p>
+<p>A typical cycle: an analyst agent drafts the document → sends it for review →
+the human edits it themselves or with the agent → approves → the document
+becomes available to all executor agents as a link from a skill.</p>
 <h2 id="relations"><a class="anchor" href="#relations" aria-label="Section link">#</a>Relations</h2><ul>
 <li><strong>Saga</strong> — an artifact can belong to a long-running effort (requirements for a feature inside a saga).</li>
 <li><strong>Skill</strong> — a skill&#39;s manifest references artifacts as reference material.</li>

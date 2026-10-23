@@ -30,11 +30,13 @@
 <a class="docs-nav-row" href="administration.html">Administration</a>
 <div class="docs-nav-section">Integrations</div>
 <a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
-<div class="docs-nav-section">Administration</div>
+<div class="docs-nav-section">Reference</div>
 <a class="docs-nav-row active" href="reference.html">Reference</a>
+<div class="docs-nav-section">Operations</div>
+<a class="docs-nav-row" href="operations.html">Harness Operations</a>
 <div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
 <article class="docs-content">
-<div class="docs-eyebrow">Administration</div>
+<div class="docs-eyebrow">Reference</div>
 <h1>Reference</h1>
 <p class="docs-lead">Environment variables, ports, UI pages and links to the in-depth documents.</p>
 <h2 id="environment-variables-essentials"><a class="anchor" href="#environment-variables-essentials" aria-label="Section link">#</a>Environment variables (essentials)</h2><table>
@@ -52,8 +54,28 @@
 </tr>
 <tr>
 <td><code>TEMPORALITY_MODEL_MAX_OUTPUT_TOKENS</code></td>
-<td><code>16384</code></td>
-<td>Generation limit; leave head room for reasoning models</td>
+<td><code>16384</code> (code) / <code>1024</code> (compose)</td>
+<td>Generation limit; leave head room for reasoning models. The compose stack defaults to 1024</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_TIMEOUT</code></td>
+<td><code>180s</code></td>
+<td>Base HTTP request timeout for the provider</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_STREAM_IDLE_TIMEOUT</code></td>
+<td><code>90s</code></td>
+<td>Silence in the stream between tokens</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_STREAM_NO_PROGRESS_TIMEOUT</code></td>
+<td><code>4m</code></td>
+<td>The stream is alive, but overall progress has stalled</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_MODEL_TEMPERATURE</code> / <code>_REASONING</code></td>
+<td>—</td>
+<td>Overrides for request parameters</td>
 </tr>
 <tr>
 <td><code>TEMPORALITY_MODEL_ACTIVITY_TIMEOUT</code></td>
@@ -76,14 +98,99 @@
 <td>Ceiling for a single sandbox command</td>
 </tr>
 <tr>
+<td><code>KERNEL_EMBEDDINGS_MODEL</code></td>
+<td><code>intfloat/multilingual-e5-small</code></td>
+<td>Model of the knowledge semantic layer (in-process, rembed)</td>
+</tr>
+<tr>
+<td><code>KERNEL_EMBEDDING_WORKERS</code></td>
+<td>—</td>
+<td>Parallelism of background embedding computations</td>
+</tr>
+<tr>
+<td><code>KERNEL_PROVIDER_MODELS_REFRESH</code></td>
+<td><code>24h</code></td>
+<td>Background refresh cycle of the provider model catalog (<code>0</code> — disable)</td>
+</tr>
+<tr>
+<td><code>KERNEL_SUPERVISOR_TRIAGE_INTERVAL</code></td>
+<td><code>2m</code></td>
+<td>How often failed runs are triaged (values outside the valid range fall back to the default — there is no off switch)</td>
+</tr>
+<tr>
 <td><code>KERNEL_SANDBOX_ROOT</code></td>
-<td><code>/tmp</code></td>
-<td>Root of the persistent workspaces</td>
+<td><code>./.sandbox</code> (code) / <code>/srv/temporality/sandbox</code> (compose)</td>
+<td>Root of the persistent workspaces. Do not use <code>/tmp</code> — cleanup on node reboot will destroy the workspaces</td>
+</tr>
+<tr>
+<td><code>KERNEL_SANDBOX_PIDS</code> / <code>KERNEL_SANDBOX_SCRATCH_SIZE</code></td>
+<td>—</td>
+<td>Sandbox container limits: processes and scratch size</td>
 </tr>
 <tr>
 <td><code>KERNEL_DOCKER_BINARY</code></td>
 <td><code>docker</code></td>
 <td>Path to the docker CLI</td>
+</tr>
+<tr>
+<td><code>KERNEL_SESSION_TTL</code></td>
+<td><code>12h</code></td>
+<td>Sliding TTL of a browser session</td>
+</tr>
+<tr>
+<td><code>KERNEL_SESSION_ABSOLUTE_TTL</code></td>
+<td><code>168h</code></td>
+<td>Absolute ceiling for a session</td>
+</tr>
+<tr>
+<td><code>KERNEL_COOKIE_SECURE</code></td>
+<td><code>false</code></td>
+<td>Secure flag on the session cookie (enable it behind HTTPS)</td>
+</tr>
+<tr>
+<td><code>KERNEL_WEB_SEARCH_PER_MIN</code> / <code>KERNEL_BROWSER_PER_MIN</code></td>
+<td><code>30</code> / <code>60</code></td>
+<td>Rate limits for search and the browser</td>
+</tr>
+<tr>
+<td><code>KERNEL_WEB_FETCH_ALLOW_PRIVATE</code></td>
+<td><code>false</code></td>
+<td>Allow <code>web_fetch</code> into private networks (SSRF protection; enable deliberately)</td>
+</tr>
+<tr>
+<td><code>KERNEL_SECRET_CACHE_TTL_SECONDS</code></td>
+<td>—</td>
+<td>How long a resolved secret value lives in the kernel&#39;s memory</td>
+</tr>
+<tr>
+<td><code>KERNEL_MCP_COMMAND</code> / <code>_ARGS</code> / <code>_ALLOW</code> / <code>_APPROVAL</code> / <code>_SERVER_NAME</code></td>
+<td>—</td>
+<td>External MCP server: command, arguments, allowed tools, approval</td>
+</tr>
+<tr>
+<td><code>KERNEL_STORAGE_DEFAULT_QUOTA_BYTES</code> / <code>KERNEL_STORAGE_SWEEPER</code></td>
+<td>—</td>
+<td>Sandbox storage quotas and sweeping</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_API_TOKEN</code></td>
+<td>auto-provisioned</td>
+<td>Bearer token kernel → journal</td>
+</tr>
+<tr>
+<td><code>TEMPORALITY_OPERATIONS_WINDOW</code></td>
+<td><code>7d</code></td>
+<td>Window for operational rollups</td>
+</tr>
+<tr>
+<td><code>KERNEL_UI_URL</code></td>
+<td>—</td>
+<td>Base URL of the UI (emails/links)</td>
+</tr>
+<tr>
+<td><code>ARTIFACT_SUBMIT_PER_DAY</code></td>
+<td><code>10</code></td>
+<td>Daily quota of artifact review submissions per run</td>
 </tr>
 <tr>
 <td><code>KERNEL_SECRET_MASTER_KEY</code></td>
@@ -172,6 +279,10 @@
 <td>Dashboard: health, models, projects, quality, sagas, sandboxes</td>
 </tr>
 <tr>
+<td><code>/supervisor</code></td>
+<td>Supervisor queue: triage of failed runs, cases, skill candidates</td>
+</tr>
+<tr>
 <td><code>/workspace</code></td>
 <td>Agent chat</td>
 </tr>
@@ -211,6 +322,10 @@
 <td><code>/users</code> · <code>/org</code></td>
 <td>Users and the org structure</td>
 </tr>
+<tr>
+<td><code>/mcp</code></td>
+<td>External MCP server status</td>
+</tr>
 </tbody></table>
 <h2 id="glossary"><a class="anchor" href="#glossary" aria-label="Section link">#</a>Glossary</h2><ul>
 <li><strong>Run</strong> — one agent execution over a task (a durable workflow).</li>
@@ -235,7 +350,7 @@
 
   <nav class="docs-pager">
     <a class="pager-prev" href="external-agents.html"><small>← Previous</small><strong>External agents (experience layer)</strong></a>
-    
+    <a class="pager-next" href="operations.html"><small>Next →</small><strong>Harness Operations</strong></a>
   </nav>
 </article>
 </main>

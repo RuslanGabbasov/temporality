@@ -30,8 +30,10 @@
 <a class="docs-nav-row" href="administration.html">Administration</a>
 <div class="docs-nav-section">Integrations</div>
 <a class="docs-nav-row" href="external-agents.html">External agents (experience layer)</a>
-<div class="docs-nav-section">Administration</div>
+<div class="docs-nav-section">Reference</div>
 <a class="docs-nav-row" href="reference.html">Reference</a>
+<div class="docs-nav-section">Operations</div>
+<a class="docs-nav-row" href="operations.html">Harness Operations</a>
 <div class="docs-nav-section">&nbsp;</div><a class="docs-nav-row" href="../../">← Back to site</a></nav></aside>
 <article class="docs-content">
 <div class="docs-eyebrow">Working with the agent</div>
@@ -49,7 +51,9 @@ running run…&quot;). The run is not duplicated.</li>
 <code>/workspace/inbox</code> and are available to the agent.</li>
 </ul>
 <p>The reply streams in chunks; reasoning-model &quot;thinking&quot; expands in a separate
-block. Markdown (including tables and code) is rendered.</p>
+block. Markdown is rendered: tables, code and mermaid diagrams (SVG). Broken
+diagrams from the model do not break the page — typical erDiagram errors are
+fixed automatically, and a fully invalid block is shown as source.</p>
 <h2 id="approvals-human-in-the-loop"><a class="anchor" href="#approvals-human-in-the-loop" aria-label="Section link">#</a>Approvals (human in the loop)</h2><p>For consequential actions (writing files, commands with outward effects —
 depending on the agent&#39;s policy) the agent must get your decision. The
 question appears as a card in the chat and under <strong>Runs → questions</strong>. If the
@@ -62,10 +66,14 @@ the UI. You can cancel a pending approval — the run continues another way or
 ends gracefully.</p>
 <h2 id="delegation-and-plans"><a class="anchor" href="#delegation-and-plans" aria-label="Section link">#</a>Delegation and plans</h2><p>For larger tasks the agent can decompose the work:</p>
 <ul>
-<li><strong><code>delegate</code></strong> — a subtask to another agent with its own prompt and turn budget.</li>
+<li><strong><code>delegate</code></strong> — a subtask to another agent with its own prompt and turn
+budget (<code>max_turns</code>, including from the task field).</li>
 <li><strong><code>plan</code></strong> — a task DAG with dependencies: independent branches run in
 parallel, dependent results are appended to followers&#39; prompts, review tasks
-act as acceptance gates (a rework verdict sends work back with feedback).</li>
+act as acceptance gates (a rework verdict sends work back with feedback).
+Task parameters: <code>on_failure</code> (<code>continue | stop | abort</code> — the wave&#39;s fate
+when a task fails), <code>mode: wave</code> (staged execution in ready batches),
+<code>max_turns</code> per task.</li>
 </ul>
 <p>Plan progress is visible right in the chat: tasks, statuses, dependencies.
 The full mechanism — <code>docs/agent-delegation.md</code>.</p>
