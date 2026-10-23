@@ -33,7 +33,9 @@ import type { Locale } from './locales'
 export interface TraceFilter {
   /** Catalog group of the row («Инструменты», «Модель» …). */
   category: EventCategory | ''
-  /** Exact event type (`run_command`-style dotted type). */
+  /** Exact event type(s), comma-separated when the checkbox dropdown
+   *  selected several (`run_command,tool.started`). A row matches when any
+   *  listed type is among its events. */
   type: string
   /** Row status: success, failure, cancelled. */
   status: 'ok' | 'error' | 'cancelled' | ''
@@ -110,7 +112,10 @@ export function durationMsOf(event: ObservationEvent): number {
 export function matchesFilter(filter: TraceFilter, item: TraceItem): boolean {
   if (item.kind === 'group') return true
   if (filter.category && categoryOfItem(item) !== filter.category) return false
-  if (filter.type && !itemEventsOf(item).some((event) => event.type === filter.type)) return false
+  if (filter.type) {
+    const wanted = filter.type.split(',').map((value) => value.trim()).filter(Boolean)
+    if (!itemEventsOf(item).some((event) => wanted.includes(event.type))) return false
+  }
   if (filter.status && statusOfItem(item) !== filter.status) return false
   if (filter.participant && participantOfItem(item) !== filter.participant) return false
   if (filter.minMs > 0) {

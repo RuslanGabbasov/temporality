@@ -1,5 +1,4 @@
-import { useMemo } from 'react'
-import { Search } from '@carbon/react'
+import { useMemo, useState } from 'react'
 import type { EventCategory, TranslateFn } from './eventPresentation'
 import { EVENT_GROUPS } from './eventCatalog'
 import type { ObservationEvent } from './observationApi'
@@ -16,14 +15,14 @@ import type { TraceItem } from './traceModel'
 type TFn = TranslateFn
 
 /**
- * The §8 filter panel above the folded timeline (DoD-4): category, event
- * type, status, participant, duration threshold, the quick chips and the
- * text search. Fully controlled — the state lives in AgentRuns (URL-backed
- * through `trace*` params), so a link restores the exact view. The panel
- * itself performs zero fetches (NFR-9): filtering and search run over the
- * already-loaded window; the console buffers it searches are the ones the
- * client actually holds (§6/§11.2 tail) and the hint under the search box
- * states that limit.
+ * The §8 filter bar above the folded timeline — deliberately ONE row of
+ * minimal controls: quick chips (icons), the event-type checkbox dropdown,
+ * compact status/participant/duration selects, the reset and a bare search
+ * input in the right corner. Fully controlled — the state lives in AgentRuns
+ * (URL-backed through `trace*` params), so a link restores the exact view.
+ * Zero fetches (NFR-9): filtering and search run over the already-loaded
+ * window; the console buffers the search covers are the ones the client
+ * actually holds (§6/§11.2 tail).
  */
 
 /** The minimal console shape the search index reads (ConsoleOutput state). */
@@ -96,14 +95,23 @@ const DURATION_OPTIONS: Array<{ value: number; key: string }> = [
   { value: 30000, key: 'runs.filters.duration.30s' },
 ]
 
-const SELECT_STYLE: React.CSSProperties = {
+const CONTROL_STYLE: React.CSSProperties = {
   background: 'var(--tm-raised)',
   color: 'var(--tm-text)',
   border: '1px solid var(--tm-border)',
   borderRadius: '4px',
   fontSize: '0.72rem',
-  padding: '0.15rem 0.25rem',
+  padding: '0.12rem 0.3rem',
   minWidth: 0,
+  height: '1.7rem',
+}
+
+/** The comma-separated multi-type semantics of filter.type: a row matches
+ *  when any listed exact type is among its events. Empty = no constraint; a
+ *  single value behaves exactly like the old exact match, and the URL state
+ *  stays one string parameter. */
+export function typeList(filterType: string): string[] {
+  return filterType.split(',').map((value) => value.trim()).filter(Boolean)
 }
 
 export default function TraceFiltersPanel({ state, onState, items, consoleStates, locale, t }: {
@@ -118,21 +126,26 @@ export default function TraceFiltersPanel({ state, onState, items, consoleStates
   t: TFn
 }) {
   const { filter, query, chips } = state
-  // Category labels come from the catalog's own ru/en pair (symmetric by
-  // construction, no extra i18n keys).
-  const categoryOptions = EVENT_GROUPS.map((group) => ({ value: group.id, label: locale === 'ru' ? group.ru : group.en }))
+  const [typesOpen, setTypesOpen] = useState(false)
   const consoleIndex = useMemo(
     () => consoleSearchIndex(consoleStates, items),
     [consoleStates, items],
   )
-  const typeOptions = useMemo(() => {
-    const types = new Set<string>()
+  const typeCounts = useMemo(() => {
+    const counts = new Map<string, number>()
     for (const item of items) {
-      for (const event of itemEventsOf(item)) types.add(event.type)
+      for (const event of itemEventsOf(item)) counts.set(event.type, (counts.get(event.type) ?? 0) + 1)
     }
-    return [...types].sort()
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
   }, [items])
+  const selectedTypes = useMemo(() => new Set(typeList(filter.type)), [filter.type])
   const setFilter = (patch: Partial<TraceFilter>) => onState({ ...state, filter: { ...filter, ...patch } })
+  const toggleType = (type: string) => {
+    const next = new Set(selectedTypes)
+    if (next.has(type)) next.delete(type)
+    else next.add(type)
+    setFilter({ type: [...next].sort().join(',') })
+  }
   const toggleChip = (chip: Exclude<FilterChip, 'all'>) => {
     const next = new Set(chips)
     if (next.has(chip)) next.delete(chip)
@@ -146,96 +159,109 @@ export default function TraceFiltersPanel({ state, onState, items, consoleStates
   const reset = () => onState({ filter: { category: '', type: '', status: '', participant: '', minMs: 0 }, query: '', chips: new Set() })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', marginBottom: '0.5rem' }}>
-      <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', alignItems: 'center' }} role="toolbar" aria-label={t('runs.layers.chips')}>
-        {CHIP_OPTIONS.map((chip) => (
-          <button
-            key={chip.value}
-            type="button"
-            title={t(chip.key)}
-            aria-pressed={chips.has(chip.value)}
-            onClick={() => toggleChip(chip.value)}
-            style={{ background: chips.has(chip.value) ? 'rgba(122,162,247,0.15)' : 'none', border: `1px solid ${chips.has(chip.value) ? 'var(--tm-teal)' : 'var(--tm-border)'}`, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.72rem', padding: '0.1rem 0.45rem', borderRadius: '4px', lineHeight: 1.4 }}
-          >
-            {chip.icon}
-          </button>
-        ))}
-        {anyActive && (
-          <button type="button" onClick={reset} title={t('runs.filters.reset')} aria-label={t('runs.filters.reset')} style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.78rem', padding: '0.1rem 0.35rem' }}>✕</button>
-        )}
-      </div>
-      <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap', alignItems: 'center' }}>
-        <select
-          aria-label={t('runs.filters.category')}
-          title={t('runs.filters.category')}
-          value={filter.category}
-          onChange={(e) => setFilter({ category: e.target.value as EventCategory | '' })}
-          style={SELECT_STYLE}
+    <div
+      style={{ display: 'flex', gap: '0.3rem', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', position: 'relative' }}
+      role="toolbar"
+      aria-label={t('runs.layers.chips')}
+    >
+      {CHIP_OPTIONS.map((chip) => (
+        <button
+          key={chip.value}
+          type="button"
+          title={t(chip.key)}
+          aria-pressed={chips.has(chip.value)}
+          onClick={() => toggleChip(chip.value)}
+          style={{ background: chips.has(chip.value) ? 'rgba(122,162,247,0.15)' : 'none', border: `1px solid ${chips.has(chip.value) ? 'var(--tm-teal)' : 'var(--tm-border)'}`, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.72rem', padding: '0.1rem 0.45rem', borderRadius: '4px', lineHeight: 1.4, height: '1.7rem' }}
         >
-          <option value="">{t('runs.filters.category')}</option>
-          {categoryOptions.map((entry) => (
-            <option key={entry.value} value={entry.value}>{entry.label}</option>
-          ))}
-        </select>
-        <select
+          {chip.icon}
+        </button>
+      ))}
+      <div style={{ position: 'relative' }}>
+        <button
+          type="button"
+          aria-expanded={typesOpen}
           aria-label={t('runs.filters.type')}
           title={t('runs.filters.type')}
-          value={filter.type}
-          onChange={(e) => setFilter({ type: e.target.value })}
-          style={SELECT_STYLE}
+          onClick={() => setTypesOpen((value) => !value)}
+          style={{ ...CONTROL_STYLE, cursor: 'pointer', borderColor: selectedTypes.size > 0 ? 'var(--tm-teal)' : 'var(--tm-border)' }}
         >
-          <option value="">{t('runs.filters.type')}</option>
-          {typeOptions.map((type) => (
-            <option key={type} value={type}>{type}</option>
-          ))}
-        </select>
-        <select
-          aria-label={t('runs.filters.status')}
-          title={t('runs.filters.status')}
-          value={filter.status}
-          onChange={(e) => setFilter({ status: e.target.value as TraceFilter['status'] })}
-          style={SELECT_STYLE}
-        >
-          <option value="">{t('runs.filters.status')}</option>
-          {STATUS_OPTIONS.map((entry) => (
-            <option key={entry.value} value={entry.value}>{t(entry.key)}</option>
-          ))}
-        </select>
-        <select
-          aria-label={t('runs.filters.participant')}
-          title={t('runs.filters.participant')}
-          value={filter.participant}
-          onChange={(e) => setFilter({ participant: e.target.value as TraceParticipant | '' })}
-          style={SELECT_STYLE}
-        >
-          <option value="">{t('runs.filters.participant')}</option>
-          {PARTICIPANT_OPTIONS.map((entry) => (
-            <option key={entry.value} value={entry.value}>{t(entry.key)}</option>
-          ))}
-        </select>
-        <select
-          aria-label={t('runs.filters.duration')}
-          title={t('runs.filters.duration')}
-          value={String(filter.minMs)}
-          onChange={(e) => setFilter({ minMs: Number(e.target.value) || 0 })}
-          style={SELECT_STYLE}
-        >
-          {DURATION_OPTIONS.map((entry) => (
-            <option key={String(entry.value)} value={String(entry.value)}>{t(entry.key)}</option>
-          ))}
-        </select>
+          {t('runs.filters.type')}{selectedTypes.size > 0 ? `: ${selectedTypes.size}` : ''} ▾
+        </button>
+        {typesOpen && (
+          <>
+            {/* click-away shield: closes the dropdown without mounting anything */}
+            <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onClick={() => setTypesOpen(false)} />
+            <div
+              role="listbox"
+              aria-label={t('runs.filters.type')}
+              style={{ position: 'absolute', top: 'calc(100% + 2px)', left: 0, zIndex: 21, background: 'var(--tm-bg)', border: '1px solid var(--tm-border)', borderRadius: '4px', maxHeight: '18rem', overflowY: 'auto', minWidth: '17rem', padding: '0.25rem', boxShadow: '0 4px 14px rgba(0,0,0,0.25)' }}
+            >
+              {typeCounts.length === 0 && <div style={{ fontSize: '0.72rem', color: 'var(--tm-text-3)', padding: '0.15rem 0.3rem' }}>{t('runs.filters.type')}</div>}
+              {typeCounts.map(([type, count]) => (
+                <label
+                  key={type}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.72rem', padding: '0.14rem 0.3rem', cursor: 'pointer', borderRadius: '3px' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedTypes.has(type)}
+                    onChange={() => toggleType(type)}
+                  />
+                  <span style={{ fontFamily: 'var(--tm-mono, monospace)', overflowWrap: 'anywhere' }}>{type}</span>
+                  <span style={{ marginLeft: 'auto', color: 'var(--tm-text-3)' }}>{count}</span>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
       </div>
-      <div style={{ maxWidth: '26rem' }}>
-        <Search
-          size="sm"
-          id="trace-search"
-          labelText=""
-          placeholder={t('runs.filters.search_placeholder')}
-          value={query}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onState({ ...state, query: e.target.value })}
-        />
-        <div style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)', marginTop: '0.1rem' }}>{t('runs.filters.search_hint')}</div>
-      </div>
+      <select
+        aria-label={t('runs.filters.status')}
+        title={t('runs.filters.status')}
+        value={filter.status}
+        onChange={(e) => setFilter({ status: e.target.value as TraceFilter['status'] })}
+        style={CONTROL_STYLE}
+      >
+        <option value="">{t('runs.filters.status')}</option>
+        {STATUS_OPTIONS.map((entry) => (
+          <option key={entry.value} value={entry.value}>{t(entry.key)}</option>
+        ))}
+      </select>
+      <select
+        aria-label={t('runs.filters.participant')}
+        title={t('runs.filters.participant')}
+        value={filter.participant}
+        onChange={(e) => setFilter({ participant: e.target.value as TraceParticipant | '' })}
+        style={CONTROL_STYLE}
+      >
+        <option value="">{t('runs.filters.who')}</option>
+        {PARTICIPANT_OPTIONS.map((entry) => (
+          <option key={entry.value} value={entry.value}>{t(entry.key)}</option>
+        ))}
+      </select>
+      <select
+        aria-label={t('runs.filters.duration')}
+        title={t('runs.filters.duration')}
+        value={String(filter.minMs)}
+        onChange={(e) => setFilter({ minMs: Number(e.target.value) || 0 })}
+        style={CONTROL_STYLE}
+      >
+        {DURATION_OPTIONS.map((entry) => (
+          <option key={String(entry.value)} value={String(entry.value)}>{t(entry.key)}</option>
+        ))}
+      </select>
+      {anyActive && (
+        <button type="button" onClick={reset} title={t('runs.filters.reset')} aria-label={t('runs.filters.reset')} style={{ background: 'none', border: 'none', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.78rem', padding: '0.1rem 0.35rem', height: '1.7rem' }}>✕</button>
+      )}
+      <input
+        type="search"
+        value={query}
+        placeholder={t('runs.filters.search_placeholder')}
+        title={t('runs.filters.search_hint')}
+        aria-label={t('runs.filters.search_placeholder')}
+        onChange={(e) => onState({ ...state, query: e.target.value })}
+        style={{ ...CONTROL_STYLE, marginLeft: 'auto', width: '11rem', paddingLeft: '0.45rem' }}
+      />
     </div>
   )
 }

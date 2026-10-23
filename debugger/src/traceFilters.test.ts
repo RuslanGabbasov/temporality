@@ -104,6 +104,20 @@ describe('matchesFilter — the structured §8 dimensions', () => {
     expect(filterTraceItems(items, { ...EMPTY_FILTER, type: 'tool.failed' }, chips(), RU, t)).toHaveLength(0)
   })
 
+  // The checkbox dropdown selects several types: filter.type carries them
+  // comma-separated, a row matches when ANY listed type is among its events.
+  it('type matches any of the comma-separated list', () => {
+    const items = itemsOf([
+      ev('approval.requested', { operation_id: 'op-1', action: 'deploy' }, 1),
+      ev('approval.granted', { operation_id: 'op-1', approver: 'ruslan' }, 2),
+      ev('model.completed', {}, 3),
+      ev('run.started', {}, 4),
+    ])
+    expect(labels(filterTraceItems(items, { ...EMPTY_FILTER, type: 'approval.granted,model.completed' }, chips(), RU, t)))
+      .toEqual(['pair:op-1', 'model.completed'])
+    expect(filterTraceItems(items, { ...EMPTY_FILTER, type: 'run.completed, tool.failed' }, chips(), RU, t)).toHaveLength(0)
+  })
+
   it('status keeps matching rows; a folded group has no own status', () => {
     const items = itemsOf([
       ev('run.failed', { error: 'boom' }, 1),

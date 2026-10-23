@@ -419,7 +419,10 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
   }
   return (
     <div>
-      {activeFilter && filterState && onFilterState ? (
+      {/* The compact control bar renders always; without a URL-backed state
+          (the only test/path that renders TraceLayers bare) the quick chips
+          fall back to the local chip state, everything else hides. */}
+      {filterState && onFilterState ? (
         <TraceFiltersPanel
           state={filterState}
           onState={onFilterState}
@@ -429,7 +432,24 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
           t={t}
         />
       ) : (
-        <TraceChips chip={chip} onChip={setChip} items={items} t={t} />
+        <div style={{ display: 'flex', gap: '0.3rem', marginBottom: '0.5rem' }} role="toolbar" aria-label={t('runs.layers.chips')}>
+          {[
+            { key: 'errors' as TraceChip, label: '⚠', title: t('runs.chip.errors') },
+            { key: 'tools' as TraceChip, label: '🔧', title: t('runs.chip.tools') },
+            { key: 'human' as TraceChip, label: '✋', title: t('runs.chip.human') },
+          ].map((entry) => (
+            <button
+              key={entry.key}
+              type="button"
+              title={entry.title}
+              aria-pressed={chip === entry.key}
+              onClick={() => setChip(chip === entry.key ? 'all' : entry.key)}
+              style={{ background: chip === entry.key ? 'rgba(122,162,247,0.15)' : 'none', border: `1px solid ${chip === entry.key ? 'var(--tm-teal)' : 'var(--tm-border)'}`, color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.72rem', padding: '0.1rem 0.45rem', borderRadius: '4px', lineHeight: 1.4 }}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </div>
       )}
       {searchEntries.length > 0 && (
         <div style={{ marginBottom: '0.4rem', border: '1px solid var(--tm-border)', borderRadius: '4px', padding: '0.35rem 0.5rem' }}>

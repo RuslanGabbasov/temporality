@@ -2331,6 +2331,7 @@ export const ru: Record<string, string> = {
     'runs.filters.status.ok': 'Успех',
     'runs.filters.status.error': 'Ошибка',
     'runs.filters.status.cancelled': 'Отмена',
+    'runs.filters.who': 'Кто действовал',
     'runs.filters.who.model': 'Модель',
     'runs.filters.who.tool': 'Инструмент',
     'runs.filters.who.human': 'Человек',

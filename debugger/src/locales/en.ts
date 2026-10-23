@@ -2331,6 +2331,7 @@ export const en: Record<string, string> = {
     'runs.filters.status.ok': 'Success',
     'runs.filters.status.error': 'Error',
     'runs.filters.status.cancelled': 'Cancelled',
+    'runs.filters.who': 'Who acted',
     'runs.filters.who.model': 'Model',
     'runs.filters.who.tool': 'Tool',
     'runs.filters.who.human': 'Human',
