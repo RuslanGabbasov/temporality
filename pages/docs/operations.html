@@ -99,7 +99,27 @@
 Temporal нужен, чтобы продолжить незавершённые.</li>
 </ul>
 <p>Ничего важного не живёт в контейнерах: их можно пересоздавать.</p>
-<h2 id="2-развёртывание-и-обновление"><a class="anchor" href="#2-развёртывание-и-обновление" aria-label="Section link">#</a>2. Развёртывание и обновление</h2><p>Образы публикуются в GHCR по тегам релизов <code>v2026.2.N</code>. Версия пинится переменной:</p>
+<h2 id="2-развёртывание-и-обновление"><a class="anchor" href="#2-развёртывание-и-обновление" aria-label="Section link">#</a>2. Развёртывание и обновление</h2><h3 id="перенос-скиллов-и-агентов-между-стендами"><a class="anchor" href="#перенос-скиллов-и-агентов-между-стендами" aria-label="Section link">#</a>Перенос скиллов и агентов между стендами</h3><p>Набор поведенческих конфигураций переносится одним JSON-файлом во внутреннем
+формате <code>temporality.transfer/v1</code>:</p>
+<pre><code class="language-bash">curl -H &quot;Authorization: Bearer $ADMIN_TOKEN&quot; \
+  &quot;https://stand-a.example/kernel-api/v1/workspace/export?type=all&quot; -o transfer.json
+curl -H &quot;Authorization: Bearer $ADMIN_TOKEN&quot; -F file=@transfer.json \
+  &quot;https://stand-b.example/kernel-api/v1/workspace/import?mode=merge&quot;
+</code></pre>
+<ul>
+<li><code>type=skills|agents|all</code>, <code>ids=ci-fix,dev-1</code> — выборочное экспортирование.</li>
+<li>Импорт создаёт отсутствующее и никогда не перетирает молча: у скилла с
+изменениями новая версия ложится <strong>черновиком</strong> (применяет человек), агент при
+<code>mode=merge</code> (по умолчанию) пропускается, с <code>mode=overwrite</code> — обновляется.</li>
+<li>Ответ содержит постатейный отчёт (created/updated/skipped/errors). То же
+самое — кнопками «Экспорт…/Импорт…» на страницах Навыков и Агентов.</li>
+<li>Внутри переносятся: манифест, тело, версии с провенансом (у скиллов);
+модель, промпты, определение, инструменты, имена секретов, песочница (у
+агентов). Стендозависимое — привязка к оргединице, ID провайдера —
+сохраняется как есть: на целевом стенде проверьте, что провайдер и секреты
+с теми же именами существуют.</li>
+</ul>
+<p>Обновление стенда:</p>
 <pre><code class="language-bash">TEMPORALITY_VERSION=2026.2.66 docker compose up -d
 </code></pre>
 <p>Порядок обновления стенда:</p>

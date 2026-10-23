@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
   TextInput,
@@ -12,7 +12,7 @@ import {
 import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, Renew } from '@carbon/icons-react'
 import GeneratingState from './GeneratingState'
-import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion, type SkillEvaluationCase, type SkillEvaluationRun } from './workspaceApi'
+import { workspaceApi, type Skill, type SkillVersion, type SkillExecution, type SkillMemoryItem, type SkillValidationIssue, type SkillDraftQuestion, type SkillEvaluationCase, type SkillEvaluationRun, type TransferReport, type TransferResultItem } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
@@ -143,6 +143,36 @@ export default function Skills() {
   const [importBusy, setImportBusy] = useState(false)
   const [importError, setImportError] = useState('')
   const [importWarnings, setImportWarnings] = useState<string[]>([])
+  // Stand-to-stand transfer (temporality.transfer/v1): export downloads the
+  // envelope, import posts it back and shows the per-item report.
+  const transferFileRef = useRef<HTMLInputElement | null>(null)
+  const [transferBusy, setTransferBusy] = useState(false)
+  const [transferReport, setTransferReport] = useState<TransferReport | null>(null)
+
+  const runTransferExport = async () => {
+    setTransferBusy(true)
+    setError('')
+    try {
+      const blob = await workspaceApi.exportTransfer('skills')
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `temporality-skills-${new Date().toISOString().slice(0, 10)}.json`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (f) { setError(message(f)) }
+    finally { setTransferBusy(false) }
+  }
+
+  const runTransferImport = async (file: File) => {
+    setTransferBusy(true)
+    setError('')
+    try {
+      setTransferReport(await workspaceApi.importTransfer(file, 'merge'))
+      await load()
+    } catch (f) { setError(message(f)) }
+    finally { setTransferBusy(false) }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -457,11 +487,49 @@ export default function Skills() {
   return (
     <div style={{ padding: '1rem' }}>
       {confirmDialogNode}
+      {transferReport && (
+        <AppModal onClose={() => setTransferReport(null)} panelStyle={{ width: '560px' }}>
+          <Heading style={{ fontSize: '1.05rem', marginBottom: '0.75rem' }}>{t('skills.transfer_report_title') ?? 'Transfer report'}</Heading>
+          <div style={{ display: 'grid', gap: '0.75rem', fontSize: '0.8rem' }}>
+            {([['created', transferReport.created, 'green'], ['updated', transferReport.updated, 'blue'], ['skipped', transferReport.skipped, 'gray'], ['errors', transferReport.errors, 'red']] as const).map(([label, items, tagType]) => (
+              items.length > 0 && (
+                <div key={label}>
+                  <div style={{ marginBottom: '0.25rem' }}><Tag size="sm" type={tagType}>{t(`skills.transfer_${label}`) ?? label} · {items.length}</Tag></div>
+                  {items.map((item: TransferResultItem) => (
+                    <div key={item.id + (item.detail ?? '')} style={{ color: 'var(--tm-text-2)', padding: '0.1rem 0' }}>
+                      <strong>{item.name || item.id}</strong>{item.detail && <span style={{ color: 'var(--tm-text-3)' }}> — {item.detail}</span>}
+                    </div>
+                  ))}
+                </div>
+              )
+            ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+            <Button onClick={() => setTransferReport(null)}>{t('action.close') ?? 'Close'}</Button>
+          </div>
+        </AppModal>
+      )}
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <Heading>{t('skills.title') ?? 'Skills'}</Heading>
         <Stack orientation="horizontal" gap={3}>
+          {/* Stand-to-stand transfer (docs/user/operations.md §2): the file
+              inputs live in the DOM permanently; the buttons just click
+              them. */}
+          <input
+            ref={transferFileRef}
+            type="file"
+            accept=".json,application/json"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (file) void runTransferImport(file)
+            }}
+          />
+          <Button kind="ghost" disabled={transferBusy} onClick={() => void runTransferExport()}>{t('skills.transfer_export') ?? 'Export…'}</Button>
+          <Button kind="ghost" disabled={transferBusy} onClick={() => transferFileRef.current?.click()}>{t('skills.transfer_import') ?? 'Import…'}</Button>
           <Button kind="ghost" hasIconOnly renderIcon={Renew} iconDescription={t('action.refresh') ?? 'Refresh'} onClick={() => void load()} />
           <Button renderIcon={Add} onClick={startWizard}>{t('skills.new_skill') ?? 'New Skill'}</Button>
         </Stack>

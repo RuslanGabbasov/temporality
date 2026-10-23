@@ -7174,6 +7174,9 @@ func main() {
 
 	// Quality dashboard and version diffs (specs/quality-loop.md §7).
 	RegisterQualityRoutes(mux, gate, ws, events, visibleUnits)
+	// Stand-to-stand transfer (docs/user/operations.md §2): export/import of
+	// skills and agents in the internal format. Admin-only.
+	registerTransferRoutes(mux, gate, ws)
 	// LLM-judge configuration and calibration (specs/quality-loop.md §6).
 	RegisterJudgeRoutes(mux, gate, ws, activities, events, visibleUnits, log)
 	// Judge-driven knowledge-area normalization (docs/human-knowledge-explorer.md §4.2).

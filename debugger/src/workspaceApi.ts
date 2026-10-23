@@ -8,6 +8,21 @@ const KERNEL_API = '/kernel-api'
 // its subtree.
 export type OrgUnitKind = 'organization' | 'department' | 'team'
 
+/** Per-item outcome of a transfer import (temporality.transfer/v1). */
+export interface TransferResultItem {
+  id: string
+  name?: string
+  outcome: 'created' | 'skipped' | 'version_added' | 'updated' | 'error'
+  detail?: string
+}
+export interface TransferReport {
+  created: TransferResultItem[]
+  updated: TransferResultItem[]
+  skipped: TransferResultItem[]
+  errors: TransferResultItem[]
+  ignored?: string[]
+}
+
 export interface OrgUnit {
   id: string
   parent_id?: string
@@ -1306,6 +1321,32 @@ export const workspaceApi = {
   // Skills (workspace-global registry)
   listSkills: () =>
     request<{ skills: Skill[]; count: number }>('/v1/workspace/skills'),
+
+  // Stand-to-stand transfer (docs/user/operations.md §2): export downloads
+  // the raw envelope (browser saves the file), import posts it back and
+  // returns the per-item report.
+  exportTransfer: (type: 'skills' | 'agents' | 'all', ids?: string[]) => {
+    const params = new URLSearchParams({ type })
+    if (ids && ids.length > 0) params.set('ids', ids.join(','))
+    return fetch(`/kernel-api/v1/workspace/export?${params.toString()}`, { headers: { ...authHeaders() } }).then(async (resp) => {
+      if (!resp.ok) throw new Error(`${resp.status} ${await resp.text()}`)
+      return resp.blob()
+    })
+  },
+  importTransfer: async (file: File, mode: 'merge' | 'overwrite'): Promise<TransferReport> => {
+    const body = new FormData()
+    body.append('file', file)
+    const response = await fetch(`${KERNEL_API}/v1/workspace/import?mode=${mode}`, {
+      method: 'POST',
+      body,
+      headers: authHeaders(),
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      throw new Error(payload.error ?? `HTTP ${response.status}`)
+    }
+    return response.json()
+  },
   getSkill: (id: string) => request<Skill>(`/v1/workspace/skills/${id}`),
   createSkill: (data: { id: string; name: string; description: string; version: string; markdown: string; manifest_yaml: string; org_unit_id?: string }) =>
     request<Skill>('/v1/workspace/skills', { method: 'POST', body: JSON.stringify(data) }),

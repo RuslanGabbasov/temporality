@@ -100,8 +100,28 @@ agent edits between runs). Defaults to <code>/srv/temporality/sandbox</code> in 
 as events; Temporal is needed to resume unfinished ones.</li>
 </ul>
 <p>Nothing important lives inside the containers: they can be recreated freely.</p>
-<h2 id="2-deployment-and-upgrades"><a class="anchor" href="#2-deployment-and-upgrades" aria-label="Section link">#</a>2. Deployment and upgrades</h2><p>Images are published to GHCR under the <code>v2026.2.N</code> release tags. The version
-is pinned by a variable:</p>
+<h2 id="2-deployment-and-upgrades"><a class="anchor" href="#2-deployment-and-upgrades" aria-label="Section link">#</a>2. Deployment and upgrades</h2><h3 id="moving-skills-and-agents-between-stands"><a class="anchor" href="#moving-skills-and-agents-between-stands" aria-label="Section link">#</a>Moving skills and agents between stands</h3><p>The behavioral configuration set transfers in one JSON file in the internal
+<code>temporality.transfer/v1</code> format:</p>
+<pre><code class="language-bash">curl -H &quot;Authorization: Bearer $ADMIN_TOKEN&quot; \
+  &quot;https://stand-a.example/kernel-api/v1/workspace/export?type=all&quot; -o transfer.json
+curl -H &quot;Authorization: Bearer $ADMIN_TOKEN&quot; -F file=@transfer.json \
+  &quot;https://stand-b.example/kernel-api/v1/workspace/import?mode=merge&quot;
+</code></pre>
+<ul>
+<li><code>type=skills|agents|all</code>, <code>ids=ci-fix,dev-1</code> select what to export.</li>
+<li>The import creates what is missing and never silently overwrites: a skill
+with changes lands as a <strong>draft</strong> version (a human applies it); an agent is
+skipped under the default <code>mode=merge</code> and updated only with
+<code>mode=overwrite</code>.</li>
+<li>The response carries a per-item report (created/updated/skipped/errors).
+The Skills and Agents pages expose the same as «Export…/Import…» buttons.</li>
+<li>Transferred inside: manifest, body, versions with provenance (skills);
+model, prompts, definition, tools, secret names, sandbox (agents).
+Stand-specific references — org unit binding, provider id — are preserved
+verbatim: on the target stand make sure a provider with that id and secrets
+with those names exist.</li>
+</ul>
+<p>Upgrading the stack:</p>
 <pre><code class="language-bash">TEMPORALITY_VERSION=2026.2.66 docker compose up -d
 </code></pre>
 <p>The upgrade procedure:</p>

@@ -45,6 +45,8 @@ import {
   type JudgeConfig,
   type QualitySchedule,
   type SupervisorSettings,
+  type TransferReport,
+  type TransferResultItem,
 } from './workspaceApi'
 import { applyGateErrorView, detectRegressions, latestEvalByVersion, passRate, runsByVersion as aggregateRunsByVersion } from './agentEvolution'
 import { useT } from './i18n'
@@ -125,6 +127,35 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   // saved through their own endpoints. Collapsed by default — a rarely used
   // operator surface that must not push the agent list down.
   const [qualityOpen, setQualityOpen] = useState(false)
+  // Stand-to-stand transfer (temporality.transfer/v1): agents export/import.
+  const transferFileRef = useRef<HTMLInputElement | null>(null)
+  const [transferBusy, setTransferBusy] = useState(false)
+  const [transferReport, setTransferReport] = useState<TransferReport | null>(null)
+
+  const runTransferExport = async () => {
+    setTransferBusy(true)
+    setError('')
+    try {
+      const blob = await workspaceApi.exportTransfer('agents')
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `temporality-agents-${new Date().toISOString().slice(0, 10)}.json`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (f) { setError(message(f)) }
+    finally { setTransferBusy(false) }
+  }
+
+  const runTransferImport = async (file: File) => {
+    setTransferBusy(true)
+    setError('')
+    try {
+      setTransferReport(await workspaceApi.importTransfer(file, 'merge'))
+      await load()
+    } catch (f) { setError(message(f)) }
+    finally { setTransferBusy(false) }
+  }
   const [judgeConfig, setJudgeConfig] = useState<JudgeConfig | null>(null)
   const [judgeDraft, setJudgeDraft] = useState('')
   const [schedule, setSchedule] = useState<QualitySchedule | null>(null)
@@ -847,11 +878,48 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   return (
     <div style={{ padding: '1rem' }}>
       {confirmDialogNode}
+      {transferReport && (
+        <AppModal onClose={() => setTransferReport(null)} panelStyle={{ width: '560px' }}>
+          <Heading style={{ fontSize: '1.05rem', marginBottom: '0.75rem' }}>{t('skills.transfer_report_title') ?? 'Transfer report'}</Heading>
+          <div style={{ display: 'grid', gap: '0.75rem', fontSize: '0.8rem' }}>
+            {([['created', transferReport.created, 'green'], ['updated', transferReport.updated, 'blue'], ['skipped', transferReport.skipped, 'gray'], ['errors', transferReport.errors, 'red']] as const).map(([label, items, tagType]) => (
+              items.length > 0 && (
+                <div key={label}>
+                  <div style={{ marginBottom: '0.25rem' }}><Tag size="sm" type={tagType}>{t(`skills.transfer_${label}`) ?? label} · {items.length}</Tag></div>
+                  {items.map((item: TransferResultItem) => (
+                    <div key={item.id + (item.detail ?? '')} style={{ color: 'var(--tm-text-2)', padding: '0.1rem 0' }}>
+                      <strong>{item.name || item.id}</strong>{item.detail && <span style={{ color: 'var(--tm-text-3)' }}> — {item.detail}</span>}
+                    </div>
+                  ))}
+                </div>
+              )
+            ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+            <Button onClick={() => setTransferReport(null)}>{t('action.close') ?? 'Close'}</Button>
+          </div>
+        </AppModal>
+      )}
       {error && <InlineNotification kind="error" title={t('action.error') ?? 'Error'} subtitle={error} onClose={() => setError('')} lowContrast style={{ marginBottom: '1rem' }} />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <Heading>{t('agents.title') ?? 'Agents'}</Heading>
         <Stack orientation="horizontal" gap={2}>
+          {/* Stand-to-stand transfer: agents export/import (admin endpoints —
+              readers see an error bubble from the 403). */}
+          <input
+            ref={transferFileRef}
+            type="file"
+            accept=".json,application/json"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (file) void runTransferImport(file)
+            }}
+          />
+          <Button kind="ghost" disabled={transferBusy} onClick={() => void runTransferExport()}>{t('agents.transfer_export') ?? 'Export…'}</Button>
+          <Button kind="ghost" disabled={transferBusy} onClick={() => transferFileRef.current?.click()}>{t('agents.transfer_import') ?? 'Import…'}</Button>
           <Button kind="ghost" renderIcon={Settings} iconDescription={t('quality.show_settings') ?? 'Quality settings'} onClick={() => setQualityOpen(true)}>{t('quality.show_settings') ?? 'Quality settings'}</Button>
           <Button kind="secondary" onClick={() => setShowTemplates(true)}>{t('agents.from_template') ?? 'From template'}</Button>
           <Button renderIcon={Add} onClick={openWizard}>{t('agents.new_agent') ?? 'New Agent'}</Button>

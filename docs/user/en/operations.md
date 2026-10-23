@@ -41,8 +41,32 @@ Nothing important lives inside the containers: they can be recreated freely.
 
 ## 2. Deployment and upgrades
 
-Images are published to GHCR under the `v2026.2.N` release tags. The version
-is pinned by a variable:
+### Moving skills and agents between stands
+
+The behavioral configuration set transfers in one JSON file in the internal
+`temporality.transfer/v1` format:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "https://stand-a.example/kernel-api/v1/workspace/export?type=all" -o transfer.json
+curl -H "Authorization: Bearer $ADMIN_TOKEN" -F file=@transfer.json \
+  "https://stand-b.example/kernel-api/v1/workspace/import?mode=merge"
+```
+
+- `type=skills|agents|all`, `ids=ci-fix,dev-1` select what to export.
+- The import creates what is missing and never silently overwrites: a skill
+  with changes lands as a **draft** version (a human applies it); an agent is
+  skipped under the default `mode=merge` and updated only with
+  `mode=overwrite`.
+- The response carries a per-item report (created/updated/skipped/errors).
+  The Skills and Agents pages expose the same as «Export…/Import…» buttons.
+- Transferred inside: manifest, body, versions with provenance (skills);
+  model, prompts, definition, tools, secret names, sandbox (agents).
+  Stand-specific references — org unit binding, provider id — are preserved
+  verbatim: on the target stand make sure a provider with that id and secrets
+  with those names exist.
+
+Upgrading the stack:
 
 ```bash
 TEMPORALITY_VERSION=2026.2.66 docker compose up -d
