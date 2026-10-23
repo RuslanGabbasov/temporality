@@ -1190,6 +1190,8 @@ export const en: Record<string, string> = {
     'skills.stat_current': 'Current',
     'skills.published': 'published',
     'skills.draft': 'draft',
+    'skills.pending_count': '{{count}} pending',
+    'skills.pending_hint': '{{count}} agent proposal(s) awaiting review, newest {{version}} — open the Revisions tab to read and apply',
     'skills.proposed': 'proposed',
     'skills.apply': 'Apply',
     'skills.apply_confirm': 'It becomes the current revision for all agents.',

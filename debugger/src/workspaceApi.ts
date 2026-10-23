@@ -384,6 +384,11 @@ export interface Skill {
   org_unit_id?: string
   /** draft = the current version awaits human apply; never served to agents */
   version_status?: string
+  /** Agent evolution proposals awaiting human apply (not the current
+   * version): the list badge makes them discoverable without opening every
+   * skill. pending_version names the newest such draft. */
+  pending_drafts?: number
+  pending_version?: string
   created_at: string
   updated_at: string
 }

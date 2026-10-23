@@ -44,8 +44,14 @@ type Skill struct {
 	// "draft" awaits human apply and is never served to agents; "active" is
 	// the normal state. Empty when no version row matches the pointer.
 	VersionStatus string    `json:"version_status,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	// PendingDrafts counts versions awaiting human apply that are NOT the
+	// current revision — agent evolution proposals a human has yet to read.
+	// Surfaced in the skills list so proposals are discoverable without
+	// opening every skill. PendingVersion names the newest such draft.
+	PendingDrafts  int       `json:"pending_drafts,omitempty"`
+	PendingVersion string    `json:"pending_version,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // SkillProvenance records why a version exists: who authored it and which
@@ -132,11 +138,15 @@ func (s *Store) GetSkill(ctx context.Context, id string) (Skill, error) {
 	var sk Skill
 	var manifest []byte
 	var orgUnitID *string
+	var pending int
+	var pendingVersion *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT s.id, s.name, s.description, s.version, s.markdown, s.manifest, s.org_unit_id, s.created_at, s.updated_at, COALESCE(cv.status, '')
-			 FROM workspace_skill s LEFT JOIN workspace_skill_version cv ON cv.skill_id = s.id AND cv.version = s.version
-			 WHERE s.id = $1`, id).
-		Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &orgUnitID, &sk.CreatedAt, &sk.UpdatedAt, &sk.VersionStatus)
+		`SELECT s.id, s.name, s.description, s.version, s.markdown, s.manifest, s.org_unit_id, s.created_at, s.updated_at, COALESCE(cv.status, ''),
+				 (SELECT count(*) FROM workspace_skill_version v WHERE v.skill_id = s.id AND v.status = 'draft' AND v.version <> s.version),
+				 (SELECT v.version FROM workspace_skill_version v WHERE v.skill_id = s.id AND v.status = 'draft' AND v.version <> s.version ORDER BY v.created_at DESC LIMIT 1)
+				 FROM workspace_skill s LEFT JOIN workspace_skill_version cv ON cv.skill_id = s.id AND cv.version = s.version
+				 WHERE s.id = $1`, id).
+		Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &orgUnitID, &sk.CreatedAt, &sk.UpdatedAt, &sk.VersionStatus, &pending, &pendingVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sk, ErrNotFound
 	}
@@ -145,14 +155,18 @@ func (s *Store) GetSkill(ctx context.Context, id string) (Skill, error) {
 	}
 	sk.OrgUnitID = derefPtr(orgUnitID)
 	sk.Manifest = rawMessage(manifest)
+	sk.PendingDrafts = pending
+	sk.PendingVersion = derefPtr(pendingVersion)
 	return sk, nil
 }
 
 func (s *Store) ListAllSkills(ctx context.Context) ([]Skill, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT s.id, s.name, s.description, s.version, s.markdown, s.manifest, s.org_unit_id, s.created_at, s.updated_at, COALESCE(cv.status, '')
-			 FROM workspace_skill s LEFT JOIN workspace_skill_version cv ON cv.skill_id = s.id AND cv.version = s.version
-			 ORDER BY s.created_at`)
+		`SELECT s.id, s.name, s.description, s.version, s.markdown, s.manifest, s.org_unit_id, s.created_at, s.updated_at, COALESCE(cv.status, ''),
+				 (SELECT count(*) FROM workspace_skill_version v WHERE v.skill_id = s.id AND v.status = 'draft' AND v.version <> s.version),
+				 (SELECT v.version FROM workspace_skill_version v WHERE v.skill_id = s.id AND v.status = 'draft' AND v.version <> s.version ORDER BY v.created_at DESC LIMIT 1)
+				 FROM workspace_skill s LEFT JOIN workspace_skill_version cv ON cv.skill_id = s.id AND cv.version = s.version
+				 ORDER BY s.created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -168,9 +182,11 @@ func (s *Store) ListSkillsVisible(ctx context.Context, units []string) ([]Skill,
 		return s.ListAllSkills(ctx)
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT s.id, s.name, s.description, s.version, s.markdown, s.manifest, s.org_unit_id, s.created_at, s.updated_at, COALESCE(cv.status, '')
-			 FROM workspace_skill s LEFT JOIN workspace_skill_version cv ON cv.skill_id = s.id AND cv.version = s.version
-			 WHERE s.org_unit_id IS NULL OR s.org_unit_id = ANY($1) ORDER BY s.created_at`, units)
+		`SELECT s.id, s.name, s.description, s.version, s.markdown, s.manifest, s.org_unit_id, s.created_at, s.updated_at, COALESCE(cv.status, ''),
+				 (SELECT count(*) FROM workspace_skill_version v WHERE v.skill_id = s.id AND v.status = 'draft' AND v.version <> s.version),
+				 (SELECT v.version FROM workspace_skill_version v WHERE v.skill_id = s.id AND v.status = 'draft' AND v.version <> s.version ORDER BY v.created_at DESC LIMIT 1)
+				 FROM workspace_skill s LEFT JOIN workspace_skill_version cv ON cv.skill_id = s.id AND cv.version = s.version
+				 WHERE s.org_unit_id IS NULL OR s.org_unit_id = ANY($1) ORDER BY s.created_at`, units)
 	if err != nil {
 		return nil, err
 	}
@@ -184,11 +200,15 @@ func scanSkills(rows pgx.Rows) ([]Skill, error) {
 		var sk Skill
 		var manifest []byte
 		var orgUnitID *string
-		if err := rows.Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &orgUnitID, &sk.CreatedAt, &sk.UpdatedAt, &sk.VersionStatus); err != nil {
+		var pending int
+		var pendingVersion *string
+		if err := rows.Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Version, &sk.Markdown, &manifest, &orgUnitID, &sk.CreatedAt, &sk.UpdatedAt, &sk.VersionStatus, &pending, &pendingVersion); err != nil {
 			return nil, err
 		}
 		sk.OrgUnitID = derefPtr(orgUnitID)
 		sk.Manifest = rawMessage(manifest)
+		sk.PendingDrafts = pending
+		sk.PendingVersion = derefPtr(pendingVersion)
 		result = append(result, sk)
 	}
 	return result, rows.Err()

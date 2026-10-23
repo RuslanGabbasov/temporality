@@ -495,6 +495,18 @@ export default function Skills() {
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
                     <OrgBadge orgUnitID={skill.org_unit_id} org={org} />
                     {skill.version_status === 'draft' && <Tag size="sm" type="purple">{t('skills.draft') ?? 'draft'}</Tag>}
+                    {!!skill.pending_drafts && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        title={t('skills.pending_hint', { count: String(skill.pending_drafts), version: skill.pending_version ?? '' })}
+                        onClick={(e) => { e.stopPropagation(); setSelected(skill) }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setSelected(skill) } }}
+                        style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}
+                      >
+                        <Tag size="sm" type="teal">↺ {t('skills.pending_count', { count: String(skill.pending_drafts) })}</Tag>
+                      </span>
+                    )}
                     <Tag size="sm">{skill.version}</Tag>
                   </span>
                 </div>
@@ -512,6 +524,7 @@ export default function Skills() {
                     <strong style={{ fontSize: '1.1rem' }}>{selected.name}</strong>
                     <Tag size="sm">{selected.version}</Tag>
                     {selected.version_status === 'draft' && <Tag size="sm" type="purple">{t('skills.draft') ?? 'draft'}</Tag>}
+                    {!!selected.pending_drafts && <Tag size="sm" type="teal">↺ {t('skills.pending_count', { count: String(selected.pending_drafts) })}</Tag>}
                     <OrgBadge orgUnitID={selected.org_unit_id} org={org} />
                     <code style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{selected.id}</code>
                   </div>

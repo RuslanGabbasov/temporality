@@ -1190,6 +1190,8 @@ export const ru: Record<string, string> = {
     'skills.stat_current': 'Текущая',
     'skills.published': 'опубликована',
     'skills.draft': 'черновик',
+    'skills.pending_count': '{{count}} предложений',
+    'skills.pending_hint': '{{count}} предложений агентов ждут ревью, новейшая {{version}} — откройте вкладку «Ревизии», чтобы прочитать и утвердить',
     'skills.proposed': 'предложена',
     'skills.apply': 'Применить',
     'skills.apply_confirm': 'Он станет текущей версией для всех агентов.',
