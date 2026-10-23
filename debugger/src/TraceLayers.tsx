@@ -178,7 +178,7 @@ export function TraceEventRow({ event, locale, t, project, response, reasoning, 
             aria-expanded={rawOpen}
             aria-label={`${t('runs.layers.raw_summary')}: ${row.title}`}
             title={t('runs.layers.raw_summary')}
-            style={{ background: rawOpen ? 'var(--tm-raised)' : 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.62rem', fontFamily: 'monospace', padding: '0.05rem 0.28rem', lineHeight: 1.4, borderRadius: '4px', flexShrink: 0, marginLeft: 'auto' }}
+            style={{ background: rawOpen ? 'var(--tm-raised)' : 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-3)', cursor: 'pointer', fontSize: '0.62rem', fontFamily: 'monospace', padding: '0.05rem 0.28rem', lineHeight: 1.4, borderRadius: '4px', flexShrink: 0, marginLeft: '0.35rem' }}
           >
             {'{}'}
           </button>
