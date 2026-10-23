@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ObservationEvent } from './observationApi'
-import { foldTrace, groupSummary, hintAggregate, matchesChip } from './traceModel'
+import { foldTrace, groupSummary, hintAggregate, matchesChip, turnAlignedWindow } from './traceModel'
 import { timelineRow } from './eventPresentation'
 import { ru } from './locales/ru'
 import { en } from './locales/en'
@@ -197,5 +197,39 @@ describe('timelineRow × foldTrace consistency', () => {
     expect(row.category).toBe('mcp')
     expect(row.status).toBe('ok')
     expect(row.fact).toContain('2.0 KB')
+  })
+})
+
+describe('turnAlignedWindow — the window never cuts a turn in half', () => {
+  const ev = (type: string, turn?: number): ObservationEvent =>
+    ({ type, data: turn !== undefined ? { turn } : {}, context: { run: 'r1' } } as unknown as ObservationEvent)
+
+  const events = [
+    ev('run.started'),
+    ev('turn.started', 1),
+    ev('tool.completed', 1),
+    ev('turn.completed', 1),
+    ev('turn.started', 2),
+    ev('tool.completed', 2),
+    ev('turn.completed', 2),
+  ]
+
+  it('keeps the whole run when the window covers it', () => {
+    expect(turnAlignedWindow(events, 10)).toHaveLength(events.length)
+  })
+
+  it('extends the cut back to the turn boundary', () => {
+    // limit=2 lands inside turn 2 (its tool.completed): the window must pull
+    // back to include that turn's turn.started.
+    const windowed = turnAlignedWindow(events, 2)
+    expect(windowed[0].type).toBe('turn.started')
+    expect(windowed[0].data.turn).toBe(2)
+  })
+
+  it('does not pull in the previous turn', () => {
+    // limit=3 from the end = [turn.started(2), tool, turn.completed] — the
+    // window stops at turn 2's own boundary, turn 1 stays out.
+    const windowed = turnAlignedWindow(events, 3)
+    expect(windowed.some((e) => e.data?.turn === 1)).toBe(false)
   })
 })

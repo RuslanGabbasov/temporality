@@ -2289,6 +2289,7 @@ export const ru: Record<string, string> = {
     'runs.layers.group.turns_hint': 'Служебные границы ходов свернуты',
     'runs.layers.turn_n': 'Ход {{n}}',
     'runs.layers.turn_empty': 'В этом ходе нет событий',
+    'runs.trace.older_hint': 'Показаны последние {{shown}} из {{total}} событий — прокрутите ниже, чтобы загрузить более старые',
     'runs.layers.group.hints': 'Знания и подсказки',
     'runs.layers.group.hints_zero': 'Агент не обращался к подсказкам',
     'runs.layers.group.hints_aggregate': 'подсказок {{total}} (использовано {{used}})',

@@ -10,6 +10,7 @@ import { useT, useI18n, pluralT } from './i18n'
 import { eventSummary, shortTime, explainKernelError, restoreMarkdownLines, unwrapJsonString, formatDuration, approvalHint } from './eventSummary'
 import { humanFactorsOf, type RunHumanFactors } from './humanFactors'
 import { useRunTokenMetrics } from './tokenStream'
+import { turnAlignedWindow } from './traceModel'
 import { subscribeRunJournal } from './journalStream'
 import {
   Button,
@@ -63,6 +64,29 @@ export const TRACE_WINDOW_STEP = 50
 export function windowedTrace<T>(rows: readonly T[], limit: number): T[] {
   const bounded = Math.max(0, limit)
   return rows.slice(Math.max(0, rows.length - bounded)).reverse()
+}
+
+/** Scroll-triggered loader: fires onVisible whenever the sentinel enters the
+ *  viewport (page scroll — the trace list itself grows with the page). The
+ *  owner extends the render window; the sentinel re-fires only after it
+ *  leaves and re-enters, which the growing window naturally provides. */
+export function TraceOlderSentinel({ onVisible }: { onVisible: () => void }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const node = ref.current
+    if (!node || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          onVisible()
+          break
+        }
+      }
+    }, { rootMargin: '160px' })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [onVisible])
+  return <div ref={ref} style={{ height: 1 }} aria-hidden />
 }
 
 /** Inline doubt actions for knowledge referenced by a run: challenge keeps the
@@ -377,7 +401,16 @@ export default function AgentRuns({ project }: { project: string }) {
    *  whole run at once. Reset on every run switch / view open. */
   const [traceLimit, setTraceLimit] = useState(TRACE_WINDOW)
   useEffect(() => { setTraceLimit(TRACE_WINDOW) }, [selected, view])
-  const traceWindow = useMemo(() => windowedTrace(trace.visible, traceLimit), [trace, traceLimit])
+  // The window snaps back to the nearest turn boundary: a cut mid-turn would
+  // strand the turn's tool calls and answers outside their «Ход N» node.
+  const traceWindow = useMemo(
+    () => turnAlignedWindow(trace.visible, traceLimit),
+    [trace, traceLimit],
+  )
+  const olderAvailable = trace.visible.length > traceWindow.length
+  const loadOlder = useCallback(() => {
+    setTraceLimit((value) => value + TRACE_WINDOW_STEP)
+  }, [])
 
   // The live model-call row for the trace view: the newest visible event being
   // this run's model.started means a call is in flight right now. The parts
@@ -1189,6 +1222,14 @@ export default function AgentRuns({ project }: { project: string }) {
                     onConsoleState={collectConsoleState}
                     liveModelParts={liveModelParts}
                   />
+                  {olderAvailable && view === 'trace' && (
+                    <TraceOlderSentinel onVisible={loadOlder} />
+                  )}
+                  {olderAvailable && (
+                    <div style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--tm-text-3)', padding: '0.35rem 0' }}>
+                      {t('runs.trace.older_hint', { shown: String(traceWindow.length), total: String(trace.visible.length) })}
+                    </div>
+                  )}
                 </Tile>
                 )}
 

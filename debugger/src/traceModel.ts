@@ -205,6 +205,19 @@ export type TraceTreeItem =
   | { kind: 'turn'; turn: TurnNode }
   | TraceItem
 
+/** Extend a render window backwards so it starts at a turn boundary: a
+ *  window that cuts a turn in half would render the turn's tail events
+ *  (tool calls, approvals, the answer) as loose top-level rows outside any
+ *  «Ход N» node. Walk back to the nearest turn.started (inclusive); the
+ *  events are ordered oldest → newest, so the cut sits at index
+ *  events.length − limit. */
+export function turnAlignedWindow(events: ObservationEvent[], limit: number): ObservationEvent[] {
+  if (limit >= events.length) return events.slice()
+  let start = events.length - limit
+  while (start > 0 && events[start].type !== 'turn.started') start -= 1
+  return events.slice(start)
+}
+
 /** Split the window into tree segments: turn nodes (one per
  *  turn.started…turn.completed span) and runs of between-turn events. Pure
  *  over the loaded window (NFR-9). Turn interiors stay raw here; the caller

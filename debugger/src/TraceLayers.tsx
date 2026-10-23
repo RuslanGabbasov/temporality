@@ -308,8 +308,14 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
         ? formatTurnDuration(turn.started.occurred_at, turn.completed.occurred_at)
         : ''
       const tools = turn.events.filter((e) => e.type === 'tool.completed').length
+      const tokens = turn.events
+        .filter((e) => e.type === 'model.completed')
+        .reduce((sum, e) => sum + (Number(e.data?.total_tokens) || 0), 0)
       const response = responsesByTurn?.get(`${turn.runId}:${turn.number}`) ?? ''
-      const preview = response.replace(/\s+/g, ' ').trim().slice(0, 160)
+      // The collapsed header carries the turn's own summary: tool count,
+      // token spend and up to two lines of the model's intermediate answer —
+      // the reader skims turns by these without expanding anything.
+      const preview = response.replace(/\s+/g, ' ').trim().slice(0, 320)
       const running = Boolean(live) && !turn.completed
       const statusDot = turn.hasError ? '#f7768e' : running ? 'var(--tm-teal)' : turn.completed ? '#9ece6a' : ''
       return (
@@ -319,12 +325,15 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
             aria-expanded={expanded}
             aria-label={t('runs.layers.group.turns') + ' ' + turn.number}
             onClick={() => pinTurn(turn.number, !expanded)}
-            style={{ background: 'var(--tm-raised)', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', padding: '0.35rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.78rem', minWidth: 0 }}
+            style={{ background: 'var(--tm-raised)', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', padding: '0.35rem 0.5rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.78rem', minWidth: 0 }}
           >
             {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             <strong style={{ flexShrink: 0 }}>{t('runs.layers.turn_n', { n: String(turn.number) })}</strong>
             {tools > 0 && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', flexShrink: 0 }}>⚙ {tools}</span>}
-            {preview && <span style={{ color: 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{preview}</span>}
+            {tokens > 0 && <span style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', flexShrink: 0 }}>{tokens.toLocaleString()} tok</span>}
+            {preview
+              ? <span style={{ color: 'var(--tm-text-3)', flex: 1, minWidth: 0, fontSize: '0.72rem', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{preview}</span>
+              : <span style={{ flex: 1 }} />}
             {duration && <span style={{ color: 'var(--tm-muted)', fontSize: '0.7rem', flexShrink: 0 }}>{duration}</span>}
             {statusDot && <span aria-hidden title={running ? 'running' : turn.hasError ? 'error' : 'completed'} style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: statusDot, flexShrink: 0 }} />}
           </button>
