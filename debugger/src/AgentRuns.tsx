@@ -413,6 +413,12 @@ export default function AgentRuns({ project }: { project: string }) {
   const loadOlder = useCallback(() => {
     setTraceLimit((value) => value + TRACE_WINDOW_STEP)
   }, [])
+  // The turn of the in-flight model call — what the ↻ nudge button targets.
+  const liveModelTurn = useMemo(() => {
+    if (!selectedLive) return undefined
+    const newest = [...trace.visible].reverse().find((event) => event.type === 'model.started' && runID(event) === selected)
+    return newest ? Number(newest.data?.turn ?? 0) || undefined : undefined
+  }, [selectedLive, trace.visible, selected])
 
   // The live model-call row for the trace view: the newest visible event being
   // this run's model.started means a call is in flight right now. The parts
@@ -1246,7 +1252,8 @@ export default function AgentRuns({ project }: { project: string }) {
                     consoleStates={consoleStates}
                     onConsoleState={collectConsoleState}
                     liveModelParts={liveModelParts}
-                    newestFirst
+                    liveModelTurn={liveModelTurn}
+                    onNudgeTurn={(turn) => void nudge(turn)}
                   />
                   {olderAvailable && view === 'trace' && (
                     <TraceOlderSentinel onVisible={loadOlder} />

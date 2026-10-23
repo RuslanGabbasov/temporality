@@ -229,7 +229,7 @@ function TraceChips({ chip, onChip, items, t }: { chip: TraceChip; onChip: (chip
 /** Grouped trace: the §5 folded timeline with the three-layer rows, the §8
  *  filter panel (category/type/status/participant/duration, quick chips,
  *  text search — all URL-backed) above it. */
-export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates, onConsoleState, liveModelParts, newestFirst }: {
+export default function TraceLayers({ events, locale, t, project, responsesByTurn, reasoningsByTurn, knowledgeDoubtOf, live, emptyHint, filterState, onFilterState, consoleStates, onConsoleState, liveModelParts, newestFirst, liveModelTurn, onNudgeTurn }: {
   events: ObservationEvent[]
   locale: Locale
   t: TFn
@@ -256,6 +256,10 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
    *  Non-empty renders as the first timeline row — the live call is the most
    *  recent thing in the trace. */
   liveModelParts?: string[]
+  /** The in-flight call's turn and the owner's nudge callback: the ↻ button
+   *  cancels the stuck request and retries the turn immediately. */
+  liveModelTurn?: number
+  onNudgeTurn?: (turn: number) => void
   /** Display order of the turn tree: newest segment first (the running turn
    *  opens the view). The segment EVENTS stay chronological — a turn reads
    *  top-down like a log regardless of the spine's direction. */
@@ -516,6 +520,15 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
           <span style={{ color: 'var(--tm-teal)', width: '1.2rem', textAlign: 'center', flexShrink: 0 }}>⏳</span>
           <strong style={{ minWidth: '100px' }}>{t('runs.event.model_call')}</strong>
           <span style={{ color: 'var(--tm-text-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{liveModelParts.join(' · ')}</span>
+          {liveModelTurn !== undefined && onNudgeTurn && (
+            <button
+              type="button"
+              onClick={() => onNudgeTurn(liveModelTurn)}
+              title={t('runs.nudge_hint') ?? 'Cancel the stuck model call and retry immediately'}
+              aria-label={t('runs.nudge') ?? 'Nudge model call'}
+              style={{ background: 'none', border: '1px solid var(--tm-border)', color: 'var(--tm-text-2)', cursor: 'pointer', fontSize: '0.75rem', padding: '0.1rem 0.35rem', lineHeight: 1, borderRadius: '4px', flexShrink: 0 }}
+            >↻</button>
+          )}
         </div>
       )}
       {visibleItems.length === 0 && !activeFilter && <div style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem', padding: '0.5rem 0' }}>{emptyHint ?? t('runs.layers.timeline.empty')}</div>}
