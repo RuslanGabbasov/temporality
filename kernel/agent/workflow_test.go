@@ -99,6 +99,59 @@ func (l *durationLog) snapshot() []time.Duration {
 	return values
 }
 
+// promptLog accumulates prompts captured by activity mocks (e.g. plan task
+// prompts); guarded for the same reason as callCounter: parallel plan tasks
+// run the mock on separate goroutines, so a bare append to a shared slice
+// races.
+type promptLog struct {
+	mu      sync.Mutex
+	prompts []string
+}
+
+// add records one prompt.
+func (p *promptLog) add(prompt string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.prompts = append(p.prompts, prompt)
+}
+
+// snapshot returns a copy of the recorded prompts; assertions read it after
+// the workflow has settled.
+func (p *promptLog) snapshot() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	prompts := make([]string, len(p.prompts))
+	copy(prompts, p.prompts)
+	return prompts
+}
+
+func newPromptLog() *promptLog { return &promptLog{} }
+
+// resolvedRuns is a mutex-guarded set of child run ids recorded by the
+// ResolveAgent mock: plan tasks resolve on parallel goroutines, so a bare
+// map write races like a bare slice append.
+type resolvedRuns struct {
+	mu   sync.Mutex
+	runs map[string]bool
+}
+
+// mark records one resolved run id.
+func (r *resolvedRuns) mark(runID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.runs[runID] = true
+}
+
+// marked reads whether the run id was resolved; assertions call it after the
+// workflow has settled.
+func (r *resolvedRuns) marked(runID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.runs[runID]
+}
+
+func newResolvedRuns() *resolvedRuns { return &resolvedRuns{runs: map[string]bool{}} }
+
 func registerExtraction(env *testsuite.TestWorkflowEnvironment, result KnowledgeExtractResult, err error) {
 	env.RegisterActivityWithOptions(func(context.Context, KnowledgeExtractRequest) (KnowledgeExtractResult, error) {
 		return result, err
@@ -1649,7 +1702,7 @@ func TestAgentRunPlanExecutesDAG(t *testing.T) {
 	// The model mock serves every run: children are recognized by their resolved
 	// system prompt and answer by marker; the parent issues one plan call and
 	// then reads the summary. DAG: a and b in parallel, mid after both, end last.
-	var childPrompts []string
+	childPrompts := newPromptLog()
 	parentCalls := 0
 	env.RegisterActivityWithOptions(func(_ context.Context, request ModelRequest) (llm.Completion, error) {
 		if len(request.Messages) == 0 {
@@ -1657,7 +1710,7 @@ func TestAgentRunPlanExecutesDAG(t *testing.T) {
 		}
 		if strings.Contains(request.Messages[0].Content, "child-system-prompt") {
 			prompt := request.Messages[1].Content
-			childPrompts = append(childPrompts, prompt)
+			childPrompts.add(prompt)
 			switch {
 			case strings.Contains(prompt, "work a"):
 				return llm.Completion{Content: "A-DONE"}, nil
@@ -1691,11 +1744,11 @@ func TestAgentRunPlanExecutesDAG(t *testing.T) {
 		require.True(t, sawSummary, "the parent must receive the plan summary with every answer")
 		return llm.Completion{Content: "parent done"}, nil
 	}, activity.RegisterOptions{Name: ActivityCallModel})
-	resolveRuns := map[string]bool{}
+	resolveRuns := newResolvedRuns()
 	env.RegisterActivityWithOptions(func(_ context.Context, request ResolveAgentRequest) (RunInput, error) {
 		require.Equal(t, "repo-a", request.Project)
 		require.Equal(t, 1, request.DelegationDepth)
-		resolveRuns[request.RunID] = true
+		resolveRuns.mark(request.RunID)
 		return RunInput{SystemPrompt: "child-system-prompt", Model: "child-model", AgentID: request.AgentID, DelegationDepth: request.DelegationDepth, RunID: request.RunID, Project: request.Project, TaskID: request.TaskID, Prompt: request.Prompt, MaxTurns: 4}, nil
 	}, activity.RegisterOptions{Name: ActivityResolveAgent})
 	env.RegisterActivityWithOptions(func(context.Context, ToolRequest) (ToolResult, error) {
@@ -1714,11 +1767,11 @@ func TestAgentRunPlanExecutesDAG(t *testing.T) {
 
 	// Every task is resolved up front, before any child starts.
 	for _, id := range []string{"run-plan/plan/01-a", "run-plan/plan/02-b", "run-plan/plan/03-mid", "run-plan/plan/04-end"} {
-		require.True(t, resolveRuns[id], "task run %s must be resolved up front", id)
+		require.True(t, resolveRuns.marked(id), "task run %s must be resolved up front", id)
 	}
 	// Dependent prompts are composed from upstream answers.
 	var midPrompt, endPrompt string
-	for _, prompt := range childPrompts {
+	for _, prompt := range childPrompts.snapshot() {
 		if strings.Contains(prompt, "merge work") {
 			midPrompt = prompt
 		}
