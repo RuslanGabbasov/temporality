@@ -1,0 +1,3 @@
+exit_code=0
+ok  	github.com/temporality-project/temporality/kernel/agent	1.036s
+ok  	github.com/temporality-project/temporality/cmd/agent-kernel	1.869s

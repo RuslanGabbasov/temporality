@@ -1,0 +1,3 @@
+exit_code=0
+command: npx tsc --noEmit (debugger/)
+date: 2026-10-23T05:19:08Z
