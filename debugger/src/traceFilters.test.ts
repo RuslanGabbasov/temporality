@@ -88,7 +88,7 @@ describe('matchesFilter — the structured §8 dimensions', () => {
       ev('tool.completed', { tool: 'read_file', exit_code: 0 }, 2),
       ev('run.started', {}, 3),
     ])
-    expect(labels(items)).toEqual(['model.completed', 'tool.completed', 'group:opsNoise'])
+    expect(labels(items)).toEqual(['model.completed', 'tool.completed', 'run.started'])
     expect(matchesFilter(EMPTY_FILTER, items[0])).toBe(true)
     expect(labels(filterTraceItems(items, { ...EMPTY_FILTER, category: 'tools' }, chips(), RU, t))).toEqual(['tool.completed'])
   })
@@ -155,7 +155,7 @@ describe('matchesFilter — the structured §8 dimensions', () => {
     expect(labels(filterTraceItems(items, { ...EMPTY_FILTER, participant: 'model' }, chips(), RU, t))).toEqual(['model.completed'])
     expect(labels(filterTraceItems(items, { ...EMPTY_FILTER, participant: 'tool' }, chips(), RU, t))).toEqual(['tool.completed'])
     expect(labels(filterTraceItems(items, { ...EMPTY_FILTER, participant: 'human' }, chips(), RU, t))).toEqual(['pair:op-1'])
-    expect(labels(filterTraceItems(items, { ...EMPTY_FILTER, participant: 'system' }, chips(), RU, t))).toEqual(['group:opsNoise'])
+    expect(labels(filterTraceItems(items, { ...EMPTY_FILTER, participant: 'system' }, chips(), RU, t))).toEqual(['run.started'])
   })
 
   it('minMs keeps only rows with a known duration at/above the threshold', () => {
@@ -171,7 +171,7 @@ describe('matchesFilter — the structured §8 dimensions', () => {
     expect(durationMsOf(events[2])).toBe(2000)
     expect(durationMsOf(events[3])).toBe(0)
     expect(labels(filterTraceItems(items, { ...EMPTY_FILTER, minMs: 1000 }, chips(), RU, t)))
-      .toEqual(['model.completed', 'tool.completed', 'group:opsNoise'])
+      .toEqual(['model.completed', 'tool.completed', 'run.started'])
     expect(labels(filterTraceItems(items, { ...EMPTY_FILTER, minMs: 4000 }, chips(), RU, t)))
       .toEqual(['model.completed'])
   })
@@ -238,7 +238,7 @@ describe('filterTraceItems — folded groups (§8)', () => {
       ev('approval.requested', { operation_id: 'op-1' }, 4),
       ev('approval.granted', { operation_id: 'op-1' }, 5),
     ])
-    expect(labels(items)).toEqual(['group:opsNoise', 'saga:s1', 'pair:op-1'])
+    expect(labels(items)).toEqual(['run.started', 'saga:s1', 'group:opsNoise', 'pair:op-1'])
     expect(filterTraceItems(items, EMPTY_FILTER, chips(), RU, t)).toEqual(items)
   })
 

@@ -385,6 +385,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
         else next.add(item.group)
         return next
       })
+      const lastSeen = item.events.length > 0 ? shortTime(item.events[item.events.length - 1].occurred_at) : ''
       return (
         <div
           key={key}
@@ -401,6 +402,7 @@ export default function TraceLayers({ events, locale, t, project, responsesByTur
             {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             <strong>{summary.label}</strong>
             <span style={{ color: 'var(--tm-text-3)', fontWeight: 400 }}>{summary.detail}</span>
+            {lastSeen && <span style={{ color: 'var(--tm-muted)', fontSize: '0.65rem', marginLeft: 'auto', flexShrink: 0 }}>{lastSeen}</span>}
           </button>
           {open && (
             <div style={{ marginTop: '0.35rem', display: 'flex', flexDirection: 'column', gap: '0.15rem' }} onClick={(e) => e.stopPropagation()}>

@@ -32,8 +32,10 @@ export type TraceItem =
 
 /** §5.7: ops noise — folded/filterable by default, never standalone rows.
  *  Secret issuance is deliberately NOT here: a credential being minted is
- *  an audit fact the reader wants visible, not plumbing. */
-const NOISE_TYPES = new Set(['storage.snapshot', 'operation.reconciled', 'notification.sent', 'memory.read.failed', 'run.started', 'memory.read', 'hint.query'])
+ *  an audit fact the reader wants visible, not plumbing. run.started is not
+ *  here either: it is the run's birth marker and renders as a standalone
+ *  (non-expandable) row at the top of the trace. */
+const NOISE_TYPES = new Set(['storage.snapshot', 'operation.reconciled', 'notification.sent', 'memory.read.failed', 'memory.read', 'hint.query'])
 
 /** §5.4: minor plan-task transitions fold into «изменения плана». */
 const MINOR_PLAN_TYPES = new Set(['plan.task.skipped', 'plan.task.invalidated', 'plan.task.reopened', 'plan.task.incomplete'])
@@ -155,7 +157,7 @@ export function foldTrace(events: ObservationEvent[], locale: Locale, t: Transla
       group.hasError = group.hasError || row.status === 'error'
       continue
     }
-    if (isHint(type) || isKnowledge(type)) {
+    if (isHint(type) || isKnowledge(type) || type === 'memory.read' || type === 'hint.query') {
       const group = groupOf('knowledge')
       group.events.push(event)
       group.hasError = group.hasError || row.status === 'error'

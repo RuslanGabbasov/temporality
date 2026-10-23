@@ -226,7 +226,10 @@ function titleOf(meta: EventMeta | undefined, locale: Locale): string {
  *  the catalog group + payload (DoD-1: full coverage via the generic row). */
 const OVERRIDES: Record<string, (d: Record<string, unknown>, ctx: OverrideContext) => Partial<TimelineRow>> = {
   // ── §5.1 runs ──
-  'run.started': (d, { t }) => ({ title: t('runs.event.run_started'), fact: squash(d.model), status: 'running' }),
+  // The run's birth marker: a non-expandable row — the initiating request
+  // renders as its own overview tile, and the payload has nothing else a
+  // reader would act on.
+  'run.started': (d, { t }) => ({ title: t('runs.event.run_started'), fact: squash(d.request ?? d.model), status: 'running', hasDetails: false }),
   'run.completed': (d, { t }) => ({ title: t('runs.event.run_completed'), fact: `${squash(d.turns ?? '?')} ${t('runs.turns')}`, status: 'ok' }),
   'run.failed': (d, { t }) => ({ title: t('runs.event.run_failed'), status: 'error', fact: causeOf(d) }),
   'run.cancelled': () => ({ status: 'cancelled' }),
