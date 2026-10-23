@@ -305,16 +305,19 @@ export default function Artifacts() {
                 </button>
               ))}
             </div>
-            <div style={{ display: 'grid', gap: '0.4rem', marginBottom: '0.6rem' }}>
-              <label className="toolbar-select">{t('artifacts.filter_provider_label') ?? 'Source'}
-                <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)}>
+            {/* Label-free selects: the first option doubles as the label
+                («Все источники» / «Все подразделения»), the full name is on
+                hover — the whole filter block stays one compact row. */}
+            <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.6rem' }}>
+              <label className="toolbar-select" title={t('artifacts.filter_provider_label') ?? 'Source'} style={{ flex: 1, minWidth: 0 }}>
+                <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)} style={{ width: '100%' }}>
                   <option value="">{t('artifacts.filter_all_providers') ?? 'All providers'}</option>
                   <option value="builtin">{providerLabel('builtin')}</option>
                   <option value="url">{providerLabel('url')}</option>
                 </select>
               </label>
               {org.units.length > 0 && (
-                <label className="toolbar-select">{t('artifacts.filter_org_label') ?? 'Unit'}
+                <label className="toolbar-select" title={t('artifacts.filter_org_label') ?? 'Unit'} style={{ flex: 1, minWidth: 0 }}>
                   <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)}>
                     <option value="">{t('artifacts.filter_all_orgs') ?? 'All units'}</option>
                     {org.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
