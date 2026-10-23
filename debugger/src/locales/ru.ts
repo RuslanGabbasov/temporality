@@ -2277,6 +2277,8 @@ export const ru: Record<string, string> = {
     'runs.layers.raw_empty': 'У события нет данных для отображения.',
     'runs.layers.group.turns': 'Ходы агента',
     'runs.layers.group.turns_hint': 'Служебные границы ходов свернуты',
+    'runs.layers.turn_n': 'Ход {{n}}',
+    'runs.layers.turn_empty': 'В этом ходе нет событий',
     'runs.layers.group.hints': 'Подсказки и знания',
     'runs.layers.group.hints_zero': 'Агент не обращался к подсказкам',
     'runs.layers.group.hints_aggregate': '{{total}} подсказок, {{used}} применено',

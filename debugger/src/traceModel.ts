@@ -177,6 +177,60 @@ export function hintAggregate(events: ObservationEvent[]): { total: number; used
  *  on the loaded window, no network (NFR-9). */
 export type TraceChip = 'all' | 'errors' | 'tools' | 'human' | 'myInput'
 
+/** One turn node of the trace tree: every event between turn.started and
+ *  turn.completed lives inside its «Ход N» node. While the turn runs the
+ *  node is expanded; once it completes it collapses (unless pinned open by
+ *  the reader). */
+export interface TurnNode {
+  kind: 'turn'
+  number: number
+  runId: string
+  started: ObservationEvent
+  completed: ObservationEvent | null
+  events: ObservationEvent[]
+  hasError: boolean
+}
+
+export type TraceTreeItem =
+  | { kind: 'turn'; turn: TurnNode }
+  | TraceItem
+
+/** Split the window into tree segments: turn nodes (one per
+ *  turn.started…turn.completed span) and runs of between-turn events. Pure
+ *  over the loaded window (NFR-9). Turn interiors stay raw here; the caller
+ *  folds them with foldTrace at render time (the same folding rules, one
+ *  level deeper). */
+export function foldTraceTree(events: ObservationEvent[]): Array<{ turn: TurnNode | null; events: ObservationEvent[] }> {
+  const segments: Array<{ turn: TurnNode | null; events: ObservationEvent[] }> = []
+  let current: TurnNode | null = null
+  for (const event of events) {
+    if (event.type === 'turn.started') {
+      const number = Number(event.data?.turn ?? 0)
+      current = { kind: 'turn', number, runId: event.context?.run ?? '', started: event, completed: null, events: [], hasError: false }
+      segments.push({ turn: current, events: [] })
+      continue
+    }
+    if (event.type === 'turn.completed') {
+      const last = segments[segments.length - 1]
+      if (current && last?.turn === current) {
+        current.completed = event
+        current = null
+      }
+      // A completed without a started span: dropped — the tree spine is the
+      // turn node, an orphan marker has nothing to attach to.
+      continue
+    }
+    if (current) {
+      current.events.push(event)
+      continue
+    }
+    const last = segments[segments.length - 1]
+    if (last && last.turn === null) last.events.push(event)
+    else segments.push({ turn: null, events: [event] })
+  }
+  return segments
+}
+
 /** §8 «только мой ввод»: the event types carrying the user's own words. */
 function isMyInputType(type: string): boolean {
   return type === 'run.user_note' || type === 'hitl.verdict.recorded'

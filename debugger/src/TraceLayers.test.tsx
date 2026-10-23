@@ -61,10 +61,17 @@ describe('TraceLayers (three layers, §4)', () => {
     expect(html).not.toContain('tool.completed')
   })
 
-  it('renders the «Ход N» group folded by default (§5.1)', () => {
-    const html = renderLayers([ev('turn.started', { turn: 1 }, 1), ev('turn.completed', { turn: 1 }, 2)])
-    expect(html).toContain('Ходы агента')
-    expect(html).not.toContain('Ход 1')
+  it('renders turns as tree nodes — the header is visible, the interior folded (§5.1 reworked)', () => {
+    const html = renderLayers([
+      ev('turn.started', { turn: 1 }, 1),
+      ev('tool.completed', { tool: 'run_command', exit_code: 0 }, 2),
+      ev('turn.completed', { turn: 1 }, 3),
+    ])
+    expect(html).toContain('Ход 1')
+    // The interior stays folded: the tool row renders only when the node is
+    // expanded.
+    expect(html).not.toContain('run_command')
+    expect(html).toContain('aria-expanded="false"')
   })
 
   it('renders the hint aggregate «6 подсказок, 2 использовано» (§5.6)', () => {
@@ -93,9 +100,11 @@ describe('TraceLayers (three layers, §4)', () => {
     expect(html).not.toContain('Уведомление')
   })
 
-  it('the raw layer is collapsed by default and absent from the markup (§4.3, K-1)', () => {
+  it('the raw layer is an icon; the raw JSON is absent from the markup until opened (§4.3, K-1)', () => {
     const html = renderLayers([ev('run.completed', { turns: 3 }, 1)])
-    expect(html).not.toContain('Сырое событие')
+    // The {} icon carries the raw disclosure label, the payload itself stays
+    // out of the markup until the icon is clicked.
+    expect(html).toContain('Сырое событие')
     expect(html).not.toContain('"turns":3')
   })
 
@@ -104,7 +113,6 @@ describe('TraceLayers (three layers, §4)', () => {
     expect(html).toContain('API_TOKEN')
     expect(html).toContain('значение задано')
     expect(html).not.toContain('hunter2')
-    expect(html).not.toContain('Сырое событие')
   })
 
   it('streaming types do not render as rows (§5.2)', () => {

@@ -267,7 +267,7 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
         onScroll={onScroll}
         role="log"
         aria-live={streamLive ? 'polite' : 'off'}
-        style={{ maxHeight: '220px', overflowY: 'auto', padding: '0.4rem 0.5rem', fontSize: '0.72rem', lineHeight: 1.45, fontFamily: '"SFMono-Regular", Consolas, monospace', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0 }}
+        style={{ maxHeight: '8.5rem', overflowY: 'auto', padding: '0.4rem 0.5rem', fontSize: '0.72rem', lineHeight: 1.45, fontFamily: '"SFMono-Regular", Consolas, monospace', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0 }}
       >
         {lines.length === 0
           ? <span style={{ color: 'var(--tm-text-3)' }}>{streamLive ? t('runs.console.waiting') : t('runs.console.empty')}</span>

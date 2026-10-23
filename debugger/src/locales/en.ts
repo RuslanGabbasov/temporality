@@ -2277,6 +2277,8 @@ export const en: Record<string, string> = {
     'runs.layers.raw_empty': 'The event carries no displayable data.',
     'runs.layers.group.turns': 'Agent turns',
     'runs.layers.group.turns_hint': 'Service turn boundaries are folded',
+    'runs.layers.turn_n': 'Turn {{n}}',
+    'runs.layers.turn_empty': 'No events in this turn',
     'runs.layers.group.hints': 'Hints and knowledge',
     'runs.layers.group.hints_zero': 'The agent used no hints',
     'runs.layers.group.hints_aggregate': '{{total}} hints, {{used}} used',
