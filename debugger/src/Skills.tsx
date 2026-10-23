@@ -558,9 +558,9 @@ export default function Skills() {
                 }}
                 onClick={() => setSelected(skill)}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-                  <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{skill.name}</strong>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.35rem 0.5rem', flexWrap: 'wrap' }}>
+                  <strong style={{ overflowWrap: 'anywhere' }}>{skill.name}</strong>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap', marginLeft: 'auto' }}>
                     <OrgBadge orgUnitID={skill.org_unit_id} org={org} />
                     {skill.version_status === 'draft' && <Tag size="sm" type="purple">{t('skills.draft') ?? 'draft'}</Tag>}
                     {!!skill.pending_drafts && (
@@ -572,7 +572,9 @@ export default function Skills() {
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setSelected(skill) } }}
                         style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}
                       >
-                        <Tag size="sm" type="teal">↺ {t('skills.pending_count', { count: String(skill.pending_drafts) })}</Tag>
+                        {/* Just the glyph and the number — the words live in
+                            the tooltip; the row is too tight for a sentence. */}
+                        <Tag size="sm" type="teal">↺ {skill.pending_drafts}</Tag>
                       </span>
                     )}
                     <Tag size="sm">{skill.version}</Tag>
@@ -592,7 +594,7 @@ export default function Skills() {
                     <strong style={{ fontSize: '1.1rem' }}>{selected.name}</strong>
                     <Tag size="sm">{selected.version}</Tag>
                     {selected.version_status === 'draft' && <Tag size="sm" type="purple">{t('skills.draft') ?? 'draft'}</Tag>}
-                    {!!selected.pending_drafts && <Tag size="sm" type="teal">↺ {t('skills.pending_count', { count: String(selected.pending_drafts) })}</Tag>}
+                    {!!selected.pending_drafts && <Tag size="sm" type="teal" title={t('skills.pending_hint', { count: String(selected.pending_drafts), version: selected.pending_version ?? '' })}>↺ {selected.pending_drafts}</Tag>}
                     <OrgBadge orgUnitID={selected.org_unit_id} org={org} />
                     <code style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{selected.id}</code>
                   </div>
