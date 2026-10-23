@@ -658,7 +658,6 @@ export const ru: Record<string, string> = {
     'runs.event.memory_lookup': 'Поиск в памяти',
     'runs.event.memory_read': 'Память прочитана',
     'runs.event.memory_read_detail': 'подсказок: {{hints}}, в промт вошло: {{primed}}',
-    'runs.event.memory_read': 'Чтение памяти',
     'runs.event.approval_needed': 'Требуется подтверждение',
     'runs.event.approved': 'Подтверждено',
     'runs.event.auto_approved': 'Автоподтверждено',
