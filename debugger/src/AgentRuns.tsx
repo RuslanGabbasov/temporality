@@ -1253,6 +1253,7 @@ export default function AgentRuns({ project }: { project: string }) {
                     onConsoleState={collectConsoleState}
                     liveModelParts={liveModelParts}
                     liveModelTurn={liveModelTurn}
+                    newestFirst
                     onNudgeTurn={(turn) => void nudge(turn)}
                   />
                   {olderAvailable && view === 'trace' && (
