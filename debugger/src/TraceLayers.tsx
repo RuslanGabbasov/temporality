@@ -101,6 +101,7 @@ function EventLayeredDetails({ event, t, project, response, reasoning, knowledge
         <ConsoleOutput
           operationId={details.consoleOperationId}
           project={project}
+          runId={event.context?.run}
           live={Boolean(live)}
           onStateLoaded={onConsoleState}
         />          )}

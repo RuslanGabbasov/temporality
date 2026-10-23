@@ -48,7 +48,7 @@ const consoleTailLines = 2000
 // consoleIdleSweep is how long a finished, unsubscribed console entry
 // survives so late readers still see the tail; idle running entries of
 // crashed activities are dropped on the same clock (the TokenBus precedent).
-const consoleIdleSweep = 30 * time.Minute
+const consoleIdleSweep = 6 * time.Hour
 
 // consoleSubBuffer bounds one subscriber's pending chunks: a slow consumer
 // must never stall the command's output path, so an overflow drops frames

@@ -752,6 +752,7 @@ export const ru: Record<string, string> = {
     'runs.console.tail_short_server': 'Показан хвост: сервер отбросил более старый вывод (объём неизвестен)',
     'runs.console.tail_short_hint': 'Буфер ограничен хвостом (2000 строк / 256 КБ); полная история не сохраняется.',
     'runs.console.unavailable': 'Вывод недоступен',
+    'runs.console.saved_copy': 'Сохранённый вывод (из журнала, обрезан до 1 КБ):',
     'runs.console.waiting': 'Ожидание вывода…',
     'runs.console.empty': 'Вывода нет.',
     'runs.console.to_tail': 'К хвосту вывода',

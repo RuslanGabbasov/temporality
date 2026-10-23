@@ -752,6 +752,7 @@ export const en: Record<string, string> = {
     'runs.console.tail_short_server': 'Tail shown: the server dropped older output (exact volume unknown)',
     'runs.console.tail_short_hint': 'The buffer keeps a bounded tail (2000 lines / 256 KB); full history is not stored.',
     'runs.console.unavailable': 'Output unavailable',
+    'runs.console.saved_copy': 'Saved output (from the journal, capped at 1 KB):',
     'runs.console.waiting': 'Waiting for output…',
     'runs.console.empty': 'No output.',
     'runs.console.to_tail': 'To output tail',

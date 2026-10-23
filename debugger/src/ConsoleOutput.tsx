@@ -4,6 +4,18 @@ import { Copy } from '@carbon/icons-react'
 import { useT } from './i18n'
 import { applyConsoleFrame, consoleCopyText, consoleDroppedBytes, consoleDroppedLines, consoleTailShort, consoleURI, fetchConsoleTail, subscribeConsoleStream, type ConsoleFrame, type ConsoleState } from './consoleStream'
 import { copyText } from './clipboard'
+import { observationApi } from './observationApi'
+
+/** Journal fallback for a swept/in-memory-lost console: the tool.completed
+ *  event of this operation carries up to 1KB of the output — recovered and
+ *  shown with a "saved copy" marker instead of a dead console. */
+async function recoverSavedOutput(runId: string, operationId: string, project: string, signal: AbortSignal): Promise<string | null> {
+  const page = await observationApi.events(project, undefined, undefined, undefined, { run: runId, type: 'tool.completed', limit: 500 })
+  if (signal.aborted) return null
+  const match = page.events.find((e) => e.data?.operation_id === operationId)
+  const output = match?.data?.output
+  return typeof output === 'string' && output.trim() ? output : null
+}
 
 /** Console panel of one run_command event (v2-consolidated.md §6): separate
  *  stdout/stderr tabs, error highlighting, copy button, canonical
@@ -47,6 +59,10 @@ export interface ConsoleOutputProps {
   operationId: string
   /** The event lives under a run; the console endpoint scopes by project. */
   project: string
+  /** The run this operation belongs to: when the in-memory console is gone
+   *  (sweep, kernel restart), the saved tool.completed output is recovered
+   *  from the journal instead — that copy is capped at 1KB but always there. */
+  runId?: string
   /** True while tool.completed/tool.failed has not landed in the trace —
    *  i.e. the run is selected AND still live. Gates the SSE subscription:
    *  a console opened on a run that is no longer live holds the tail fetch
@@ -58,11 +74,12 @@ export interface ConsoleOutputProps {
   onStateLoaded?: (state: ConsoleState) => void
 }
 
-export default function ConsoleOutput({ operationId, project, live, onStateLoaded }: ConsoleOutputProps) {
+export default function ConsoleOutput({ operationId, project, live, onStateLoaded, runId }: ConsoleOutputProps) {
   const t = useT()
   const [tab, setTab] = useState<ConsoleTab>('stdout')
   const [state, setState] = useState<ConsoleState | null>(null)
   const [error, setError] = useState('')
+  const [savedOutput, setSavedOutput] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   /** Manual pause of the auto-scroll: set when the reader scrolls up, until
    *  they return to the bottom or press «to tail». */
@@ -125,6 +142,18 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
       .catch((failure) => {
         if (controller.signal.aborted) return
         setError(failure instanceof Error ? failure.message : String(failure))
+        // The in-memory console is gone (swept after 6h idle, or the kernel
+        // restarted): recover what the journal kept — the tool.completed
+        // output, capped at 1KB by the emitter but always available.
+        if (runId && !document.hidden) {
+          void recoverSavedOutput(runId, operationId, project, controller.signal)
+            .then((saved) => {
+              if (controller.signal.aborted || !saved) return
+              setSavedOutput(saved)
+              setError('')
+            })
+            .catch(() => { /* no journal copy either — the error stays */ })
+        }
       })
     return stop
   }, [operationId, project, live, applyFrame, stop, visibleTick])
@@ -253,8 +282,16 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
       </div>
 
       {error && (
-        <div style={{ padding: '0.4rem 0.5rem', fontSize: '0.72rem', color: '#f7768e' }}>
+        <div style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', padding: '0.3rem 0.5rem' }}>
           {t('runs.console.unavailable')}: {error}
+        </div>
+      )}
+      {savedOutput && (
+        <div style={{ marginBottom: '0.3rem' }}>
+          <div style={{ fontSize: '0.68rem', color: 'var(--tm-text-3)', marginBottom: '0.15rem' }}>
+            {t('runs.console.saved_copy')}
+          </div>
+          <pre style={{ maxHeight: '8.5rem', overflowY: 'auto', padding: '0.4rem 0.5rem', fontSize: '0.72rem', lineHeight: 1.45, fontFamily: '"SFMono-Regular", Consolas, monospace', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0, background: 'var(--tm-raised)', borderRadius: '4px' }}>{savedOutput}</pre>
         </div>
       )}
 
