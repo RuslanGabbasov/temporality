@@ -126,6 +126,10 @@ type RunInput struct {
 	// Policy-derived constraints (docs/org-structure.md §24): resolved from the
 	// org position at run start and enforced here, in the execution model.
 	RequireToolApproval bool    `json:"require_tool_approval,omitempty"` // consequential tools need approval
+	// BehaviorMonitor turns on the oversight judge (docs/agent-behavior-
+	// monitoring.md, stage 3): every completed turn of this run is reviewed
+	// for escape/exfil/tamper/deception patterns and flagged to the supervisor.
+	BehaviorMonitor bool    `json:"behavior_monitor,omitempty"`
 	TokenBudget         int     `json:"token_budget,omitempty"`          // 0 = uncapped
 	MaxBudgetUSD        float64 `json:"max_budget_usd,omitempty"`        // 0 = uncapped
 	TimeoutSeconds      int     `json:"timeout_seconds,omitempty"`       // 0 = uncapped; checked at turn boundaries
@@ -2179,7 +2183,7 @@ func AgentRun(ctx workflow.Context, input RunInput) (RunResult, error) {
 				Images:  turnImages,
 			})
 		}
-		if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "tool_calls": len(completion.ToolCalls)}); err != nil {
+		if err := emit(activityCtx, state, "turn.completed", map[string]any{"turn": turn, "tool_calls": len(completion.ToolCalls), "behavior_monitor": input.BehaviorMonitor}); err != nil {
 			return result, err
 		}
 		// Acceptance gate (docs/agent-delegation.md): a reviewer run ends with

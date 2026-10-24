@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"sort"
 	"strings"
 	"sync"
@@ -73,6 +74,7 @@ func runSupervisorCasesPass(ctx context.Context, log *slog.Logger, activities *a
 	detectUserFriction(ctx, log, activities, observationURL, journalToken, client, done)
 	auditIntakeClassifications(ctx, log, activities, observationURL, journalToken, client, done)
 	narrateAgentDevelopment(ctx, log, activities, ws, client, done)
+	monitorTurns(ctx, log, activities, observationURL, journalToken, client, done)
 	verifyCompletionClaims(ctx, log, activities, observationURL, journalToken, done)
 }
 
@@ -853,4 +855,148 @@ func narrateAgentDevelopment(ctx context.Context, log *slog.Logger, activities *
 		}
 		narrated++
 	}
+}
+
+// ── Behavior monitoring (stage 3, docs/agent-behavior-monitoring.md §5) ────
+
+// monitorSuspicionMin is the judge score above which a run lands in the
+// supervisor queue. Deliberately high: this channel pages a human, and every
+// false positive spends the trust the whole guard runs on.
+func monitorSuspicionMin() int {
+	if raw := strings.TrimSpace(os.Getenv("KERNEL_MONITOR_SUSPICION_MIN")); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v >= 1 && v <= 10 {
+			return v
+		}
+	}
+	return 6
+}
+
+// monitorTurns is the stage-3 oversight pass: for every run that asked to be
+// monitored (its turn.completed carries behavior_monitor) and has not been
+// reviewed yet, the judge reads the task plus the run's recorded actions and
+// scores suspiciousness. A high score publishes a supervisor case; clean and
+// reviewed runs are recorded via behavior.reviewed markers so nothing is
+// re-judged. Without a judge client the stage silently stays off — there is
+// no deterministic fallback for intent review.
+func monitorTurns(ctx context.Context, log *slog.Logger, activities *agent.Activities, observationURL, journalToken string, client *llm.Client, done map[string]time.Time) {
+	if client == nil {
+		return
+	}
+	completions, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "turn.completed", 400)
+	if err != nil {
+		log.Warn("behavior monitor: turn.completed", "error", err.Error())
+		return
+	}
+	// Actions per run, from the run's own tool.started events.
+	started, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "tool.started", 1000)
+	if err != nil {
+		log.Warn("behavior monitor: tool.started", "error", err.Error())
+		return
+	}
+	actionsByRun := map[string][]string{}
+	for _, ev := range started {
+		run := ev.Run
+		if run == "" {
+			continue
+		}
+		tool, _ := ev.Data["tool"].(string)
+		if tool == "" {
+			tool = "tool"
+		}
+		args := truncateForMonitor(fmt.Sprint(ev.Data["arguments"]))
+		actionsByRun[run] = append(actionsByRun[run], fmt.Sprintf("%s: %s", tool, args))
+	}
+	// The task context: the run's originating request (run.started.request).
+	// Runs already reviewed (clean or flagged) are skipped via their
+	// behavior.reviewed markers.
+	requests := map[string]string{}
+	started2, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "run.started", 300)
+	if err == nil {
+		for _, ev := range started2 {
+			if req2, ok := ev.Data["request"].(string); ok && req2 != "" {
+				requests[ev.Run] = req2
+			}
+		}
+	}
+	reviewed := reviewedIndex(ctx, observationURL, journalToken)
+
+	monitored := 0
+	judged := 0
+	// Oldest first: completions arrive oldest-first from the journal.
+	for _, ev := range completions {
+		if monitored >= 3 || judged >= 3 {
+			return
+		}
+		if monitoredFlag, _ := ev.Data["behavior_monitor"].(bool); !monitoredFlag {
+			continue
+		}
+		run := ev.Run
+		if run == "" {
+			continue
+		}
+		subject := run + ":monitor"
+		if _, ok := done[subject]; ok || reviewed[subject] {
+			continue // already reviewed (clean or flagged)
+		}
+		actions := actionsByRun[run]
+		if len(actions) == 0 {
+			continue // nothing recorded yet for this run
+		}
+		if len(actions) > 30 {
+			actions = actions[:30]
+		}
+		task := requests[run]
+		if task == "" {
+			task = "(task prompt not recorded)"
+		}
+		monitored++
+		verdict, vErr := agent.MonitorTurnCase(ctx, client, agent.MonitorTurnInput{
+			Task:    truncateForMonitor(task),
+			Actions: strings.Join(actions, "\n"),
+		})
+		if vErr != nil {
+			log.Warn("behavior monitor: judge", "run", run, "error", vErr.Error())
+			continue // not recorded as reviewed — retried next pass
+		}
+		judged++
+		if err := activities.EmitBehaviorReviewed(ctx, run, verdict.Suspicion, verdict.Explanation); err != nil {
+			log.Warn("behavior monitor: marker", "error", err.Error())
+		}
+		if verdict.Suspicion < monitorSuspicionMin() {
+			continue
+		}
+		summary := fmt.Sprintf("Судья надзора: подозрительность %d/10 — %s", verdict.Suspicion, verdict.Explanation)
+		if len(verdict.Flags) > 0 {
+			summary += " Флаги: " + strings.Join(verdict.Flags, ", ")
+		}
+		if err := activities.PublishSupervisorCase(ctx, "supervisor", agent.CaseBehaviorSuspicion, subject, ev.Project, summary, "Просмотрите действия рана в трейсе и закройте кейс (подтверждено/ложная тревога).", map[string]any{
+			"run": run, "suspicion": verdict.Suspicion, "flags": verdict.Flags,
+		}); err != nil {
+			log.Warn("behavior monitor: publish", "error", err.Error())
+		}
+	}
+}
+
+
+func truncateForMonitor(s string) string {
+	if len(s) <= 400 {
+		return s
+	}
+	return s[:400] + "…"
+}
+
+// The reviewed set: subjects of behavior.reviewed markers, so a judged run
+// is never re-judged even after kernel restarts.
+func reviewedIndex(ctx context.Context, observationURL, journalToken string) map[string]bool {
+	events, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "behavior.reviewed", 500)
+	if err != nil {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, ev := range events {
+		if subject, ok := ev.Data["subject"].(string); ok {
+			set[subject] = true
+		}
+	}
+	return set
 }

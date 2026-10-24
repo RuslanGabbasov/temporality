@@ -8296,13 +8296,22 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	// the sandbox auto-approval policy (sandbox.workspace.v1) stops applying.
 	// 'auto' and empty keep the default posture. Org policy still wins:
 	// applyRunPolicy runs after this and re-sets RequireToolApproval.
+	// Control levels (docs/approval-model.md Decision levels + docs/agent-
+	// behavior-monitoring.md): 'monitored' keeps the default auto-approvals
+	// but turns on the oversight judge for every completed turn; 'strict'
+	// (and the legacy 'prompt'/'manual'/'tools') additionally asks a human
+	// before every consequential tool; 'autonomous'/empty keeps the plain
+	// default posture.
 	agentApprovalMode := ""
 	if a.ApprovalMode != nil {
 		agentApprovalMode = *a.ApprovalMode
 	}
 	switch strings.TrimSpace(strings.ToLower(agentApprovalMode)) {
-	case "prompt", "manual", "tools":
+	case "monitored":
+		input.BehaviorMonitor = true
+	case "strict", "prompt", "manual", "tools":
 		input.RequireToolApproval = true
+		input.BehaviorMonitor = true
 		input.AutoApproveTools = nil
 	}
 	resolveAgentSandbox(ctx, ws, a, input)
@@ -8529,6 +8538,7 @@ func applyRunPolicy(ctx context.Context, ws *workspace.Store, prices cost.Config
 	}
 	if effective.ApprovalMode == "tools" {
 		input.RequireToolApproval = true
+		input.BehaviorMonitor = true
 	}
 	if effective.MaxTokens != nil {
 		input.TokenBudget = *effective.MaxTokens

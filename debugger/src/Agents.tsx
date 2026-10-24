@@ -1725,13 +1725,14 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                 )}
                 <Select
                   id="agent-approval"
-                  labelText={t('agents.approval_mode') ?? 'Tool approvals'}
+                  labelText={t('agents.approval_mode') ?? 'Control level'}
                   value={form.approval_mode ?? ''}
                   onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, approval_mode: e.target.value })}
-                  helperText={t('agents.approval_mode_hint') ?? 'Default: workspace commands and web tools run without confirmation. "Every tool" asks a human before each consequential call.'}
+                  helperText={t('agents.approval_mode_hint') ?? 'Autonomous: workspace and web run without confirmation. Monitored: the same, plus a judge reviews every completed turn and flags suspicious behavior. Strict: every consequential tool asks a human first.'}
                 >
-                  <SelectItem value="" text={t('agents.approval_auto') ?? 'Default (auto-approve workspace & web)'} />
-                  <SelectItem value="tools" text={t('agents.approval_tools') ?? 'Every tool (ask a human)'} />
+                  <SelectItem value="monitored" text={t('agents.approval_monitored') ?? 'Monitored (recommended)'} />
+                  <SelectItem value="autonomous" text={t('agents.approval_autonomous') ?? 'Autonomous (no oversight)'} />
+                  <SelectItem value="strict" text={t('agents.approval_strict') ?? 'Strict (confirm every tool)'} />
                 </Select>
               </Stack>
             )}
