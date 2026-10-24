@@ -33,6 +33,7 @@ import {
   type UncertainOperation, type ReconcileEffect, type Whoami,
 } from './kernelApi'
 import TraceLayers from './TraceLayers'
+import { runStatusLabel } from './eventPresentation'
 import { parseTraceState, stripTraceParams, traceStateQuery, type TraceUrlState } from './traceFilters'
 import { useDebouncedValue } from './useDebouncedValue'
 import type { ConsoleState } from './consoleStream'
@@ -91,7 +92,10 @@ export function TraceOlderSentinel({ onVisible }: { onVisible: () => void }) {
 
 /** Inline doubt actions for knowledge referenced by a run: challenge keeps the
  *  item visible but flagged (hints carry a caution), invalidation retires it.
- *  Lives next to where the reader noticed the problem — the run itself. */
+ *  Lives next to where the reader noticed the problem — the run itself. The
+ *  click is the verdict: the reason field is an optional comment (an empty
+ *  one travels as a localized default), so flagging an outdated rule takes
+ *  one click, not a form. */
 function KnowledgeActions({ knowledgeID, project, actorID, onDone }: { knowledgeID: string; project: string; actorID: string; onDone: () => void }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -99,11 +103,15 @@ function KnowledgeActions({ knowledgeID, project, actorID, onDone }: { knowledge
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   async function act(kind: 'challenge' | 'invalidate') {
-    if (!reason.trim()) return
+    if (busy) return
     setBusy(true); setError('')
     try {
       const actor = { id: actorID, type: 'human' }
-      const body = { knowledge_id: knowledgeID, project, actor, reason: reason.trim() }
+      const comment = reason.trim()
+        || (kind === 'challenge'
+          ? (t('explorer.default_reason_challenge') ?? 'needs verification')
+          : (t('explorer.default_reason_invalidate') ?? 'outdated'))
+      const body = { knowledge_id: knowledgeID, project, actor, reason: comment }
       if (kind === 'challenge') await observationApi.challenge(body)
       else await observationApi.invalidate(body)
       setReason(''); setOpen(false); onDone()
@@ -124,13 +132,13 @@ function KnowledgeActions({ knowledgeID, project, actorID, onDone }: { knowledge
           id={`doubt-${knowledgeID}`}
           size="sm"
           labelText={t('knowledge.reason') ?? 'Reason'}
-          placeholder={t('runs.knowledge_reason_placeholder') ?? 'Why does this knowledge look wrong?'}
+          placeholder={t('explorer.lifecycle_reason_optional') ?? 'Comment (optional)'}
           value={reason}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)}
         />
       </div>
-      <Button size="sm" kind="secondary" disabled={busy || !reason.trim()} onClick={() => void act('challenge')}>{t('runs.knowledge_challenge') ?? 'Challenge'}</Button>
-      <Button size="sm" kind="danger" disabled={busy || !reason.trim()} onClick={() => void act('invalidate')}>{t('runs.knowledge_invalidate') ?? 'Invalidate'}</Button>
+      <Button size="sm" kind="secondary" disabled={busy} onClick={() => void act('challenge')}>{t('runs.knowledge_challenge') ?? 'Challenge'}</Button>
+      <Button size="sm" kind="danger" disabled={busy} onClick={() => void act('invalidate')}>{t('runs.knowledge_invalidate') ?? 'Invalidate'}</Button>
       <Button size="sm" kind="ghost" onClick={() => setOpen(false)}>✕</Button>
       {error && <div style={{ width: '100%', fontSize: '0.75rem', color: '#f7768e' }}>{error}</div>}
     </div>
@@ -1199,7 +1207,7 @@ export default function AgentRuns({ project }: { project: string }) {
                   <Tile>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
                       <Heading style={{ fontSize: '0.875rem' }}>{t('runs.answer') ?? 'Agent Answer'}</Heading>
-                      <Tag type={result?.status === 'completed' ? 'green' : result?.status === 'cancelled' ? 'warm-gray' : 'red'} size="sm">{String(result?.status ?? '')}</Tag>
+                      <Tag type={result?.status === 'completed' ? 'green' : result?.status === 'cancelled' ? 'warm-gray' : 'red'} size="sm">{runStatusLabel(result?.status, t)}</Tag>
                     </div>
                     <Markdown content={answer} />
                   </Tile>

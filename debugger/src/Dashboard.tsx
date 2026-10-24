@@ -22,6 +22,7 @@ import { SupervisorPanels } from './Supervisor'
 import { workspaceApi, type UserMetricsRow, type UserFact } from './workspaceApi'
 import { useI18n, pluralT } from './i18n'
 import { formatDuration } from './eventSummary'
+import { runStatusLabel } from './eventPresentation'
 import { sandboxLoad, maxSandboxNet, sandboxDiameter, sandboxColor, topSandboxes, sandboxShortName } from './sandboxWidgets'
 import { fmtBytes } from './format'
 
@@ -759,7 +760,7 @@ function UsersTab() {
                       {row.last_run && (
                         <span>
                           {t('dashboard.users_last_run_did') ?? 'Last'}: <strong style={{ color: 'var(--tm-text)' }}>{row.last_run.title || row.last_run.run_id}</strong>
-                          {' '}· [{row.last_run.project}] · {row.last_run.status}
+                          {' '}· [{row.last_run.project}] · {runStatusLabel(row.last_run.status, t)}
                           {row.failed_runs > 0 && <span style={{ color: 'var(--tm-danger)' }}> · ⚠ {t('dashboard.users_failed_n', { count: String(row.failed_runs) })}</span>}
                         </span>
                       )}

@@ -1112,8 +1112,14 @@ func (s *Server) invalidateObservationKnowledge(w http.ResponseWriter, r *http.R
 	input.Actor.ID = strings.TrimSpace(input.Actor.ID)
 	input.Reason = strings.TrimSpace(input.Reason)
 	input.ReplacementID = strings.TrimSpace(input.ReplacementID)
-	if input.KnowledgeID == "" || input.Project == "" || input.Actor.ID == "" || input.Reason == "" {
-		writeError(w, http.StatusUnprocessableEntity, errors.New("knowledge_id, project, actor.id, and reason are required"))
+	// Reason is optional (docs/knowledge-evolution.md: a human who sees an
+	// outdated rule should not have to write an essay) — the journal invariant
+	// (knowledge.invalidated carries a reason) is kept with a neutral default.
+	if input.Reason == "" {
+		input.Reason = "outdated (human verdict, no comment)"
+	}
+	if input.KnowledgeID == "" || input.Project == "" || input.Actor.ID == "" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("knowledge_id, project, and actor.id are required"))
 		return
 	}
 	if !s.gate.Allow(w, r, controlplane.RoleOperator, input.Project) {
@@ -1231,8 +1237,14 @@ func (s *Server) challengeObservationKnowledge(w http.ResponseWriter, r *http.Re
 	input.Project = strings.TrimSpace(input.Project)
 	input.Actor.ID = strings.TrimSpace(input.Actor.ID)
 	input.Reason = strings.TrimSpace(input.Reason)
-	if input.KnowledgeID == "" || input.Project == "" || input.Actor.ID == "" || input.Reason == "" {
-		writeError(w, http.StatusUnprocessableEntity, errors.New("knowledge_id, project, actor.id, and reason are required"))
+	// Reason is optional — a doubt is a flag, not a verdict; the journal
+	// invariant (knowledge.challenged carries a reason) is kept with a
+	// neutral default.
+	if input.Reason == "" {
+		input.Reason = "needs verification (human flag, no comment)"
+	}
+	if input.KnowledgeID == "" || input.Project == "" || input.Actor.ID == "" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("knowledge_id, project, and actor.id are required"))
 		return
 	}
 	if !s.gate.Allow(w, r, controlplane.RoleOperator, input.Project) {
@@ -1315,8 +1327,11 @@ func (s *Server) promoteObservationKnowledge(w http.ResponseWriter, r *http.Requ
 	input.ScopeID = strings.TrimSpace(input.ScopeID)
 	input.Actor.ID = strings.TrimSpace(input.Actor.ID)
 	input.Reason = strings.TrimSpace(input.Reason)
-	if input.KnowledgeID == "" || input.Project == "" || input.Actor.ID == "" || input.Reason == "" {
-		writeError(w, http.StatusUnprocessableEntity, errors.New("knowledge_id, project, actor.id, scope_kind, and reason are required"))
+	if input.Reason == "" {
+		input.Reason = "promoted by human (no comment)"
+	}
+	if input.KnowledgeID == "" || input.Project == "" || input.Actor.ID == "" {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("knowledge_id, project, and actor.id are required"))
 		return
 	}
 	if input.ScopeKind != "org_unit" && input.ScopeKind != "organization" {

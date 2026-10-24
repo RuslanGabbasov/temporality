@@ -9,12 +9,14 @@ import {
   type ExploreRelation,
   type ObservationEvent,
 } from './observationApi'
-import { useT } from './i18n'
+import { useI18n, useT } from './i18n'
+import type { Locale } from './locales'
 import HistoryTimeline from './explorer/HistoryTimeline'
 import RelationGraph from './explorer/RelationGraph'
 import ConflictPanel from './explorer/ConflictPanel'
 import LifecycleBar from './explorer/LifecycleBar'
 import { stateLabel } from './explorer/shared'
+import { timelineRow } from './eventPresentation'
 
 /** Dossier of one knowledge item (ТЗ §8): content, lifecycle, applicability,
  *  provenance (primary sources, activation chain), relations and conflicts —
@@ -49,6 +51,7 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
   onRefresh: () => void
 }) {
   const t = useT()
+  const { locale } = useI18n()
   const [tab, setTab] = useState<Tab>('overview')
   const [trace, setTrace] = useState<ExploreHistory | null>(null)
   const [asOf, setAsOf] = useState('')
@@ -217,14 +220,20 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
 
           {tab === 'overview' && (
             <div>
-              {/* Provenance + applicability (ТЗ §8.2). Blocks with no data are
-                  omitted rather than shown empty. */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.4rem', fontSize: '0.72rem', color: 'var(--tm-text-2)', marginBottom: '0.7rem' }}>
-                <div>{t('explorer.dossier_created') ?? 'Created'}: {new Date(trace.created_at).toLocaleString()}</div>
-                {trace.created_by && <div>{t('explorer.dossier_created_by') ?? 'by'}: {trace.created_by}</div>}
-                {chain?.formed_in && <div>{t('explorer.dossier_formed_in') ?? 'Formed in run'}: {chain.formed_in}</div>}
-                {chain?.total_runs !== undefined && <div>{t('explorer.dossier_usage_runs') ?? 'Used in runs'}: {chain.total_runs}</div>}
-                <div>{t('explorer.offers') ?? 'offers'}: {trace.usage.hint_offers} · {t('explorer.uses') ?? 'uses'}: {trace.usage.hint_uses} · 👍 {trace.usage.helpful_outcomes} / 👎 {trace.usage.harmful_outcomes}</div>
+              {/* Provenance + applicability (ТЗ §8.2), phrased for a human:
+                  where the statement came from and whether it earns trust by
+                  use. Raw ids and counters stay in the History/chain details.
+                  Blocks with no data are omitted rather than shown empty. */}
+              <div style={{ display: 'flex', gap: '0.35rem 1rem', flexWrap: 'wrap', fontSize: '0.74rem', color: 'var(--tm-text-2)', marginBottom: '0.7rem' }}>
+                <span>🕑 {t('explorer.dossier_created') ?? 'Created'} {new Date(trace.created_at).toLocaleString()}</span>
+                {chain?.formed_in && <span>🏃 {t('explorer.dossier_formed_in') ?? 'Formed in run'} <code style={{ fontFamily: 'var(--tm-font-mono)', fontSize: '0.7rem' }}>{chain.formed_in}</code></span>}
+                {chain?.total_runs !== undefined && chain.total_runs > 0 && <span>🔁 {t('explorer.dossier_used_in_runs', { count: String(chain.total_runs) }) ?? `Used in ${chain.total_runs} runs`}</span>}
+              </div>
+              <div style={{ display: 'flex', gap: '0.35rem 1rem', flexWrap: 'wrap', fontSize: '0.74rem', color: 'var(--tm-text-2)', marginBottom: '0.7rem' }}>
+                <span>👁 {t('explorer.offers') ?? 'offers'}: {trace.usage.hint_offers}</span>
+                <span>✅ {t('explorer.uses') ?? 'uses'}: {trace.usage.hint_uses}</span>
+                {trace.usage.hint_ignores > 0 && <span>🚫 {t('explorer.ignores') ?? 'ignored'}: {trace.usage.hint_ignores}</span>}
+                <span>👍 {trace.usage.helpful_outcomes} / 👎 {trace.usage.harmful_outcomes}</span>
               </div>
 
               {trace.replacement_id && (
@@ -246,12 +255,17 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
                     <div style={{ marginTop: '0.4rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                       {evidenceRefs.map((ref) => {
                         const event = sources.get(ref)
+                        // Human line first (the same presentation the trace
+                        // uses), raw envelope only on explicit expansion —
+                        // a reader decides from the phrase, not from JSON.
+                        const row = event ? timelineRow(event, locale, t) : undefined
                         return (
                           <div key={ref} style={{ border: '1px solid var(--tm-border)', borderRadius: '6px', padding: '0.4rem 0.5rem', fontSize: '0.72rem' }}>
                             <div role="button" tabIndex={0} style={{ cursor: 'pointer', display: 'flex', gap: '0.5rem', alignItems: 'baseline', flexWrap: 'wrap' }} onClick={() => setExpandedSource(expandedSource === ref ? '' : ref)}>
-                              <span style={{ fontWeight: 600 }}>{event?.type ?? 'event'}</span>
+                              <span style={{ fontWeight: 600 }}>{row?.title ?? event?.type ?? 'event'}</span>
+                              {row?.fact && <span style={{ color: 'var(--tm-text-2)' }}>{row.fact}</span>}
                               <span style={{ color: 'var(--tm-muted)' }}>{event ? new Date(event.occurred_at).toLocaleString() : ref}</span>
-                              {event?.context?.run && <span style={{ color: 'var(--tm-text-3)' }}>run: {event.context.run}</span>}
+                              {event?.context?.run && <span style={{ color: 'var(--tm-text-3)', fontFamily: 'var(--tm-font-mono)', fontSize: '0.66rem' }}>{event.context.run}</span>}
                             </div>
                             {expandedSource === ref && (
                               <pre style={{ margin: '0.4rem 0 0', fontSize: '0.65rem', fontFamily: 'var(--tm-font-mono)', color: 'var(--tm-text-2)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
@@ -277,7 +291,7 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
                       <div key={i} style={{ fontSize: '0.7rem', color: 'var(--tm-text-2)', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                         <span style={{ fontFamily: 'var(--tm-font-mono)' }}>{activation.run_id}</span>
                         {activation.recalled_at && <span style={{ color: 'var(--tm-muted)' }}>{new Date(activation.recalled_at).toLocaleString()}</span>}
-                        {activation.outcome && <span>{activation.outcome === 'success' ? '✓' : activation.outcome === 'failure' ? '✕' : '?'} {activation.outcome}</span>}
+                        {activation.outcome && <span>{activation.outcome === 'success' ? `✓ ${t('knowledge.outcome_success') ?? 'success'}` : activation.outcome === 'failure' ? `✕ ${t('knowledge.outcome_failure') ?? 'failed'}` : activation.outcome}</span>}
                       </div>
                     ))}
                   </div>
@@ -306,7 +320,7 @@ export default function Dossier({ project, knowledgeID, revision = 0, onBack, on
                           onClick={(e) => { e.preventDefault(); onOpenDossier(item.id) }}
                           style={{ color: 'var(--tm-teal)', cursor: 'pointer' }}
                         >{item.proposition || item.id}</a>
-                        {item.state && item.state !== 'proposed' && item.state !== 'confirmed' && <Tag size="sm" type="warm-gray">{item.state}</Tag>}
+                        {item.state && item.state !== 'proposed' && item.state !== 'confirmed' && <Tag size="sm" type="warm-gray">{stateLabel(item.state, t)}</Tag>}
                       </div>
                     ))}
                   </div>

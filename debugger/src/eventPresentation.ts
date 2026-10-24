@@ -107,6 +107,22 @@ export function shortHandle(id: unknown): string {
   return s.length <= 16 ? s : `${s.slice(0, 8)}…`
 }
 
+/** Localized run status: the raw journal values (running/completed/…) never
+ *  reach the user — callers keep their own tag colors, only the label is
+ *  shared. Unknown values fall back to the raw string. */
+export function runStatusLabel(status: unknown, t: TranslateFn): string {
+  const value = String(status ?? '')
+  if (!value) return ''
+  const key = value === 'cancelled' ? 'status.cancelled'
+    : value === 'completed' ? 'chat.delegation.completed'
+      : value === 'failed' ? 'chat.delegation.failed'
+        : value === 'running' ? 'chat.delegation.running'
+          : ''
+  if (!key) return value
+  const label = t(key)
+  return label === key ? value : label
+}
+
 /** Try to parse JSON-encoded tool arguments; tool payloads arrive as JSON
  *  strings (`{"command":["go","test"]}`), the human preview reads fields. */
 function parseArguments(raw: unknown): Record<string, unknown> | null {
@@ -607,7 +623,10 @@ export function eventDetails(event: ObservationEvent, t: TranslateFn): EventDeta
   }
   const knowledgeID = textOf(d.knowledge_id)
   if (knowledgeID) {
-    links.push({ kind: 'knowledge', label: knowledgeID, url: `/knowledge?project=${encodeURIComponent(project)}&dossier=${encodeURIComponent(knowledgeID)}` })
+    // Lead with the statement itself when the event carries it — a hash id
+    // tells the reader nothing. The id stays in the dossier header.
+    const statement = squash(d.proposition ?? d.reason).slice(0, 70)
+    links.push({ kind: 'knowledge', label: statement || knowledgeID, url: `/knowledge?project=${encodeURIComponent(project)}&dossier=${encodeURIComponent(knowledgeID)}` })
   }
   const exitCode = d.exit_code
   const exitFailed = typeof exitCode === 'number' && exitCode !== 0

@@ -3,6 +3,7 @@ import { Button, TextInput } from '@carbon/react'
 import { observationApi, type ExploreKnowledgeCard, type ExploreRelation } from '../observationApi'
 import { useT } from '../i18n'
 import { STATE_FILL } from './AreaMap'
+import { stateLabel } from './shared'
 
 /** Relation neighborhood of one knowledge item (ТЗ §7). The engine's expand
  *  walk already bounds the graph: explicit edges first, heuristic candidates
@@ -268,7 +269,7 @@ export default function RelationGraph({ project, rootID, revision, onOpenDossier
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(active ? '' : node.id) } }}
                 style={{ cursor: 'pointer' }}
               >
-                <title>{`${node.label} [${node.state}]${node.via ? ` · via ${node.via}` : ''}${node.basis === 'candidate' ? ' · candidate' : ''}`}</title>
+                <title>{`${node.label} [${stateLabel(node.state, t)}]${node.via ? ` · via ${node.via}` : ''}${node.basis === 'candidate' ? ' · candidate' : ''}`}</title>
                 <circle
                   cx={x} cy={y} r={r}
                   fill={STATE_FILL[node.state] ?? 'var(--tm-info)'}

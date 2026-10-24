@@ -41,6 +41,7 @@ import {
 import { observationApi, type ObservationEvent } from './observationApi'
 import { teamRunsFromEvents, type TeamRunRow } from './teamRuns'
 import { useT } from './i18n'
+import { runStatusLabel } from './eventPresentation'
 import { useOrgUnits, OrgUnitSelect, OrgBadge } from './orgUnits'
 import { INTAKE_PROJECT_ID } from './kernelApi'
 
@@ -896,7 +897,7 @@ function TeamRunsTab({ runs, project, t }: { runs: TeamRunRow[]; project: string
                             <tr key={row.run_id} style={{ borderTop: '1px solid var(--tm-border)' }}>
                               <td style={{ padding: '0.2rem 0.4rem', fontFamily: 'monospace', maxWidth: '18rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.run_id}>{row.run_id}</td>
                               <td style={{ padding: '0.2rem 0.4rem' }}>{row.agent_id || '—'}</td>
-                              <td style={{ padding: '0.2rem 0.4rem' }}>{row.status}</td>
+                              <td style={{ padding: '0.2rem 0.4rem' }}>{runStatusLabel(row.status, t)}</td>
                               <td style={{ padding: '0.2rem 0.4rem' }}>{formatMS(row.duration_ms)}</td>
                               <td style={{ padding: '0.2rem 0.4rem' }}>{row.total_tokens.toLocaleString()}</td>
                               <td style={{ padding: '0.2rem 0.4rem' }}>{row.cost_usd > 0 ? `$${row.cost_usd.toFixed(4)}` : '—'}</td>
@@ -1339,7 +1340,7 @@ function LaunchDialog({ team, agents, projects, currentProject, onClose }: {
                       ) : (
                         <Tag type="red" size="sm">{t('teams.slot_unresolvable') ?? 'no matching agent'}</Tag>
                       )}
-                      {choice.mode && !chosen && <Tag size="sm" type="cool-gray">{choice.mode}</Tag>}
+                      {choice.mode && !chosen && <Tag size="sm" type="cool-gray">{choice.mode === 'fixed' ? (t('teams.slot_mode_fixed') ?? 'fixed') : choice.mode === 'role' ? (t('teams.slot_mode_role') ?? 'by role') : choice.mode}</Tag>}
                     </div>
                     {choice.reason && <div style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', marginTop: '0.25rem' }}>{choice.reason}</div>}
                     {(choice.requirements?.length ?? 0) > 0 && (

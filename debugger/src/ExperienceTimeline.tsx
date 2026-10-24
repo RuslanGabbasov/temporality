@@ -3,6 +3,8 @@ import { CenterToFit, ChevronDown } from '@carbon/icons-react'
 import { API_BASE } from './api'
 import { pluralT, useI18n, useT } from './i18n'
 import { observationApi, type ObservationEvent } from './observationApi'
+import { runStatusLabel } from './eventPresentation'
+import { stateLabel } from './explorer/shared'
 import { aliveRowAt, buildRunChains, detectMisleads, foldExperience, forensicOf, LIFECYCLE_KINDS, shortKnowledge, stateBucket, windowAround, type ForensicRecord, type KnowledgeLineage, type KnowledgeRow, type LifecycleKind, type MemoryBucket, type MisleadSignal, type RunChain, type RunInfo } from './experience'
 import { useOrgUnits } from './orgUnits'
 import { workspaceApi, type User } from './workspaceApi'
@@ -683,7 +685,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                     <label>
                       <input type="checkbox" checked={!hiddenRoots.has(root.id)} onChange={() => toggleRoot(root.id)} />
                       <span>{title ?? shortRun(root.id)}</span>
-                      <small className={root.status === 'failed' ? 'failed' : ''}>{when(root.startedAt)}{root.status ? ` · ${root.status}` : ''}</small>
+                      <small className={root.status === 'failed' ? 'failed' : ''}>{when(root.startedAt)}{root.status ? ` · ${runStatusLabel(root.status, t)}` : ''}</small>
                     </label>
                   </li>
                 )
@@ -893,7 +895,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                     const chainRoot = view.rootOf.get(run.id) ?? run.id
                     const runMisleads = view.misleadsByRun.get(run.id) ?? []
                     return <g key={run.id} className={`run-lane ${selected === run.id ? 'selected' : ''}`}>
-                      <text x={20} y={yLane + 3} className="lane-label run-label">{run.parentRun ? '↳ ' : ''}{shortRun(run.id)}{run.status ? ` · ${run.status}` : ''}</text>
+                      <text x={20} y={yLane + 3} className="lane-label run-label">{run.parentRun ? '↳ ' : ''}{shortRun(run.id)}{run.status ? ` · ${runStatusLabel(run.status, t)}` : ''}</text>
                       <text x={runIndex === 0 ? GUTTER - 18 : GUTTER - 8} y={yLane + 3} textAnchor="end" className="lane-sublabel" onClick={(click) => { click.stopPropagation(); window.location.assign(`/agents?project=${encodeURIComponent(project)}&run=${encodeURIComponent(run.id)}`) }} style={{ cursor: 'pointer' }}>
                         <title>{t('timeline.open_in_runs')}</title>↗
                       </text>
@@ -983,7 +985,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                     return <g key={`died-${row.knowledgeId}`} stroke={row.state === 'invalidated' ? '#f7768e' : '#565f89'} strokeWidth={1.4}>
                       <line x1={px - 3} y1={bandCenter + 4} x2={px + 3} y2={bandCenter + 9} />
                       <line x1={px - 3} y1={bandCenter + 9} x2={px + 3} y2={bandCenter + 4} />
-                      <title>{`${row.knowledgeId} ${row.terminal.kind} · ${clock(row.terminal.at)}`}</title>
+                      <title>{`${row.knowledgeId} ${t('timeline.kind.' + row.terminal.kind) || row.terminal.kind} · ${clock(row.terminal.at)}`}</title>
                     </g>
                   })())}
                   <text x={Math.min(bx1 + 8, width - 78)} y={bandCenter + 3} className="lane-sublabel">{rows.length} {t('timeline.exp_abbr')} · {alive} {t('timeline.alive')}</text>
@@ -997,9 +999,9 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                 return <g key={row.knowledgeId} className={`row-lane ${selected === row.knowledgeId ? 'selected' : ''}`} onClick={() => setSelected(row.knowledgeId)}>
                   <rect x={0} y={yLane - ROW_LANE / 2} width={width} height={ROW_LANE} fill="transparent" />
                   <circle cx={12} cy={yLane} r={3.4} fill={stateColor}>
-                    <title>{`${row.state}${row.scopes.secondary.length ? ` · +${row.scopes.secondary.join(', ')}` : ''}`}</title>
+                    <title>{`${stateLabel(row.state, t)}${row.scopes.secondary.length ? ` · +${row.scopes.secondary.join(', ')}` : ''}`}</title>
                   </circle>
-                  <text x={20} y={yLane + 3} className="row-label"><title>{`${row.knowledgeId} · ${row.state}`}</title>{claimLabel(row.proposition)}</text>
+                  <text x={20} y={yLane + 3} className="row-label"><title>{`${row.knowledgeId} · ${stateLabel(row.state, t)}`}</title>{claimLabel(row.proposition)}</text>
                   <rect x={Math.max(GUTTER, x0)} width={Math.max(3, Math.min(x1, GUTTER + track) - Math.max(GUTTER, x0))} y={yLane - 2} height={4} rx={2} fill={stateColor} opacity={0.25 + row.strength * 0.55}>
                     <title>{`${row.knowledgeId} · ${t('timeline.state.' + row.state) || row.state} · ${t('timeline.strength_abbr')} ${row.strength.toFixed(2)} (${t('timeline.derived')})${row.terminal ? ` · ${t('timeline.died')} ${row.terminal.at}` : ` · ${t('timeline.alive')}`}`}</title>
                   </rect>
@@ -1011,7 +1013,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                     return <g key={point.eventId}>
                       {isFocus && <circle cx={px} cy={yLane} r={8} className="point-focus-ring" />}
                       <circle cx={px} cy={yLane} r={point.kind === 'appeared' ? 4.5 : 3.4} fill={hollow ? 'var(--tm-ink)' : LIFECYCLE_COLORS[point.kind]} fillOpacity={point.kind === 'appeared' ? 0.25 : 0.95} stroke={LIFECYCLE_COLORS[point.kind]} strokeWidth={isFocus ? 2.4 : 1.4}>
-                        <title>{`${point.kind} · ${point.at} · ${point.run ?? ''}${point.role ? ` (${point.role})` : ''}${point.rule ? ` · ${point.rule}` : ''}`}</title>
+                        <title>{`${t('timeline.kind.' + point.kind) || point.kind} · ${point.at} · ${point.run ?? ''}${point.role ? ` (${point.role})` : ''}${point.rule ? ` · ${point.rule}` : ''}`}</title>
                       </circle>
                     </g>
                   })}
@@ -1022,7 +1024,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                     const epColor = ep.kind === 'artifact' ? '#9ece6a' : ep.kind === 'validation' ? '#73daca' : ep.kind === 'invalidation' ? '#f7768e' : '#7e8a9c'
                     return <g key={`ep-${ei}`}>
                       <rect x={px - 1.5} y={yLane - ROW_LANE / 2 + 2} width={3} height={ROW_LANE - 4} rx={1} fill={epColor} opacity={0.6}>
-                        <title>{`${ep.kind} · ${ep.at} · ${ep.run}${ep.role ? ` (${ep.role})` : ''}`}</title>
+                        <title>{`${ep.kind === 'artifact' ? (t('timeline.episode_artifact') ?? 'artifact') : ep.kind === 'validation' ? (t('timeline.episode_validation') ?? 'validation') : ep.kind === 'invalidation' ? (t('timeline.episode_invalidation') ?? 'invalidation') : ep.kind} · ${ep.at} · ${ep.run}${ep.role ? ` (${ep.role})` : ''}`}</title>
                       </rect>
                     </g>
                   })}
@@ -1034,7 +1036,7 @@ export default function ExperienceTimeline({ project }: { project: string }) {
                     return <g className="death-marker" stroke={stroke} strokeWidth={1.6}>
                       <line x1={px - 3.5} y1={yLane - 3.5} x2={px + 3.5} y2={yLane + 3.5} />
                       <line x1={px - 3.5} y1={yLane + 3.5} x2={px + 3.5} y2={yLane - 3.5} />
-                      <title>{`${row.terminal.kind} · ${row.terminal.at}`}</title>
+                      <title>{`${t('timeline.kind.' + row.terminal.kind) || row.terminal.kind} · ${row.terminal.at}`}</title>
                     </g>
                   })()}
                 </g>
@@ -1179,7 +1181,7 @@ function RowDetails({ row, lineage, forensic, onFocus, related, project }: { row
         {row.points.map((point) => <li key={point.eventId} data-kind={point.kind} title={t('timeline.locate')} onClick={() => onFocus(point.at, point.eventId, `${point.kind} · ${shortKnowledge(row.knowledgeId)}`)}>
           <span className="point-dot" style={{ background: LIFECYCLE_COLORS[point.kind] }} />
           <time>{point.at}</time>
-          <strong>{point.kind}</strong>
+          <strong>{t(`timeline.kind.${point.kind}`) !== `timeline.kind.${point.kind}` ? t(`timeline.kind.${point.kind}`) : point.kind}</strong>
           <small>{point.run ?? '—'}{point.role ? ` · ${point.role}` : ''}{point.rule ? ` · ${point.rule}` : ''}</small>
         </li>)}
       </ol>
@@ -1236,7 +1238,7 @@ function RelatedExperiences({ related }: { related: KnowledgeRow[] }) {
         )}
       </h4>
       <ul className="related-list">
-        {shown.map((item) => <li key={item.knowledgeId}><code>{shortKnowledge(item.knowledgeId)}</code><span className={`member-state ${item.state}`}>{item.state}</span><small>{item.scopes.primary}</small></li>)}
+        {shown.map((item) => <li key={item.knowledgeId}><code>{shortKnowledge(item.knowledgeId)}</code><span className={`member-state ${item.state}`}>{stateLabel(item.state, t)}</span><small>{item.scopes.primary}</small></li>)}
       </ul>
     </section>
   )

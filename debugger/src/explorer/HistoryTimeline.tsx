@@ -3,6 +3,7 @@ import { TextInput, Button } from '@carbon/react'
 import type { ExploreHistory, ExploreHistoryStep } from '../observationApi'
 import { useI18n, useT } from '../i18n'
 import { eventInfo } from '../eventCatalog'
+import { stateLabel } from './shared'
 
 /** Temporal history of one knowledge item (ТЗ §9): the trace steps as a
  *  vertical timeline, plus bitemporal cuts (as_of / known_at). The cut is
@@ -103,7 +104,7 @@ export default function HistoryTimeline({ trace, asOf, knownAt, onCutChange }: {
               <div style={{ position: 'absolute', left: '-1.05rem', top: '0.1rem', fontSize: '0.8rem', background: 'var(--tm-bg)', borderRadius: '50%', width: '1.2rem', textAlign: 'center' }}>{stepIcon(step.type)}</div>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>{stepLabel(step.type, locale)}</span>
-                {step.state && <span style={{ fontSize: '0.7rem', color: 'var(--tm-teal)' }}>→ {step.state}</span>}
+                {step.state && <span style={{ fontSize: '0.7rem', color: 'var(--tm-teal)' }}>→ {stateLabel(step.state, t)}</span>}
                 <span style={{ fontSize: '0.7rem', color: 'var(--tm-muted)' }}>{new Date(step.at).toLocaleString()}</span>
                 {step.actor_id && <span style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)' }}>{step.actor_id}</span>}
               </div>

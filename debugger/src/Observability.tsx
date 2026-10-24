@@ -417,8 +417,8 @@ export default function Observability({ project }: { project: string }) {
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                     {projection.scopes.map((s: any, i: number) => (
                       <div key={i} style={{ padding: '0.4rem 0.6rem', background: 'var(--tm-ink)', borderRadius: '4px', border: '1px solid var(--tm-border)', fontSize: '0.8rem' }}>
-                        <strong>{s.scope}</strong>
-                        <span style={{ color: 'var(--tm-text-3)', marginLeft: '0.5rem' }}>{s.tool_count} tools · {s.run_ids?.length ?? 0} runs</span>
+                        <strong>{t(`projection.scope_${s.scope}`) !== `projection.scope_${s.scope}` ? t(`projection.scope_${s.scope}`) : s.scope}</strong>
+                        <span style={{ color: 'var(--tm-text-3)', marginLeft: '0.5rem' }}>{t('projection.scope_tools', { count: String(s.tool_count ?? 0) })} · {t('projection.scope_runs', { count: String(s.run_ids?.length ?? 0) })}</span>
                       </div>
                     ))}
                   </div>

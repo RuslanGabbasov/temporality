@@ -1003,9 +1003,6 @@ func TestKnowledgePromoteValidation(t *testing.T) {
 		req  map[string]any
 		want int
 	}{
-		{"missing reason", map[string]any{
-			"knowledge_id": "K1", "project": "alpha", "actor": map[string]any{"id": "ruslan", "type": "human"}, "scope_kind": "organization",
-		}, http.StatusUnprocessableEntity},
 		{"invalid scope kind", promoteRequest("K1", "alpha", "project", "", "narrowing is not promote"), http.StatusUnprocessableEntity},
 		{"org unit without scope id", promoteRequest("K1", "alpha", "org_unit", "", "must name a unit"), http.StatusUnprocessableEntity},
 		{"organization with scope id", promoteRequest("K1", "alpha", "organization", "dept-dev", "organization is global"), http.StatusUnprocessableEntity},
@@ -1503,24 +1500,13 @@ func TestKnowledgeManualChallenge(t *testing.T) {
 		t.Fatalf("ingest status = %d, body = %v", res.StatusCode, body)
 	}
 
+	// An empty reason is fine (docs/knowledge-evolution.md: a human who sees a
+	// problem should not have to write an essay) — the event carries a neutral
+	// default instead of failing.
 	if res, body := doJSON(t, handler, "POST", "/v1/observations/knowledge/challenge", map[string]any{
-		"knowledge_id": "K1", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"}, "reason": "looks wrong on staging",
-	}); res.StatusCode != http.StatusCreated {
-		t.Fatalf("challenge status = %d, body = %v", res.StatusCode, body)
-	}
-
-	_, body := doJSON(t, handler, "GET", "/v1/observations/knowledge?project=lighthouse", nil)
-	knowledge := body["knowledge"].([]any)
-	if state := knowledge[0].(map[string]any)["state"]; state != "challenged" {
-		t.Fatalf("state after challenge = %v, want challenged", state)
-	}
-
-	// A bare reason is mandatory — a drive-by doubt without justification is
-	// worthless in the audit trail.
-	if res, _ := doJSON(t, handler, "POST", "/v1/observations/knowledge/challenge", map[string]any{
 		"knowledge_id": "K1", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"}, "reason": "  ",
-	}); res.StatusCode != http.StatusUnprocessableEntity {
-		t.Fatalf("challenge without reason status = %d, want 422", res.StatusCode)
+	}); res.StatusCode != http.StatusCreated {
+		t.Fatalf("challenge without reason status = %d, want 201, body = %v", res.StatusCode, body)
 	}
 	if res, _ := doJSON(t, handler, "POST", "/v1/observations/knowledge/challenge", map[string]any{
 		"knowledge_id": "K404", "project": "lighthouse", "actor": map[string]any{"id": "operator", "type": "human"}, "reason": "missing target",
