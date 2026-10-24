@@ -36,7 +36,11 @@ func (s *Server) putKnowledgeEmbeddings(w http.ResponseWriter, r *http.Request) 
 		Model string               `json:"model"`
 		Items map[string][]float32 `json:"items"`
 	}
-	if err := decodeJSON(r, &input); err != nil {
+	// Batch ceiling: maxEmbeddingBatch vectors × maxEmbeddingDim floats — a
+	// JSON float costs ~20 bytes, so 64 MiB covers the worst legal batch with
+	// headroom; anything bigger is a client bug the truncation would only
+	// mask as a decode error.
+	if err := decodeJSONLimit(r, &input, 64<<20); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}

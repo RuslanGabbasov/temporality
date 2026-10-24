@@ -1702,7 +1702,14 @@ func appendObservationNow(r *http.Request, store observation.Store, now func() t
 }
 
 func decodeJSON(r *http.Request, target any) error {
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	return decodeJSONLimit(r, target, 1<<20)
+}
+
+// decodeJSONLimit is decodeJSON with an explicit body cap. Large-payload
+// endpoints (embedding batches) use a bigger one: the default 1 MiB cuts a
+// realistic vector batch mid-value and json answers "unexpected EOF".
+func decodeJSONLimit(r *http.Request, target any, limit int64) error {
+	decoder := json.NewDecoder(io.LimitReader(r.Body, limit))
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(target)
 }

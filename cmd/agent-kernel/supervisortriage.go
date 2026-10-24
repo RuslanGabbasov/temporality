@@ -154,6 +154,12 @@ type journalTypedEvents struct {
 // predictor then published verdicts with empty propositions once the corpus
 // passed one page). Follows cursors to the end, bounded by maxTypedEventPages.
 func fetchJournalTypedEvents(ctx context.Context, observationURL, journalToken, eventType string, limit int) ([]journalEvent, error) {
+	// The journal rejects any page limit above 500 (HTTP 400), and the cursor
+	// walk below is what actually covers volume — clamp so a wrong caller
+	// constant degrades to fewer pages, never to a failed sweep.
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
 	var refs []journalEvent
 	cursor := ""
 	for page := 0; page < maxTypedEventPages; page++ {

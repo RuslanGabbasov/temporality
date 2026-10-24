@@ -107,7 +107,7 @@ func verifyCompletionClaims(ctx context.Context, log *slog.Logger, activities *a
 		log.Warn("verification claims: completions", "error", err.Error())
 		return
 	}
-	started, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "tool.started", 800)
+	started, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "tool.started", 500)
 	if err != nil {
 		log.Warn("verification claims: tool events", "error", err.Error())
 		return
@@ -887,8 +887,10 @@ func monitorTurns(ctx context.Context, log *slog.Logger, activities *agent.Activ
 		log.Warn("behavior monitor: turn.completed", "error", err.Error())
 		return
 	}
-	// Actions per run, from the run's own tool.started events.
-	started, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "tool.started", 1000)
+	// Actions per run, from the run's own tool.started events. The journal
+	// caps one page at 500 — the cursor walk in fetchJournalTypedEvents
+	// covers the rest, so asking for more than the cap is just a 400.
+	started, err := fetchJournalTypedEvents(ctx, observationURL, journalToken, "tool.started", 500)
 	if err != nil {
 		log.Warn("behavior monitor: tool.started", "error", err.Error())
 		return
