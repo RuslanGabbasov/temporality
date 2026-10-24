@@ -20,7 +20,7 @@ func TestGenerateEgressConfigPrivateDenyAndExplicitAllow(t *testing.T) {
 		t.Fatalf("agent blocks are not sorted: %s", conf)
 	}
 	// researcher: explicit entries (including the private CIDR) allowed.
-	if !strings.Contains(conf, "acl p_researcher_dom dstdomain api.github.com gitlab.corp") {
+	if !strings.Contains(conf, "acl p_researcher_dom dstdomain .api.github.com .gitlab.corp") {
 		t.Fatalf("researcher domain ACL missing: %s", conf)
 	}
 	if !strings.Contains(conf, "acl p_researcher_dst dst 10.20.30.0/24") {
