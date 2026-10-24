@@ -144,6 +144,9 @@ export interface Agent {
   read_only?: boolean
   max_turns?: number
   approval_mode: string
+  /** Egress allowlist (docs/agent-behavior-monitoring.md §7): destinations
+   *  beyond the public internet, enforced by the egress proxy. */
+  egress_allowlist?: string[]
   labels: Record<string, string>
   created_at: string
   updated_at: string

@@ -283,7 +283,23 @@ API) → approved/rejected. Ревьюеры: режим <code>all</code> (вс�
 дефолт — выключателя нет). Предлагает перезапуски и кейсы; спорные операции ждут
 reconcile-решения человека в панели рана.</li>
 </ul>
-<h2 id="9-песочницы-инструменты-и-лимиты"><a class="anchor" href="#9-песочницы-инструменты-и-лимиты" aria-label="Section link">#</a>9. Песочницы, инструменты и лимиты</h2><ul>
+<h2 id="9-песочницы-инструменты-и-лимиты"><a class="anchor" href="#9-песочницы-инструменты-и-лимиты" aria-label="Section link">#</a>9. Песочницы, инструменты и лимиты</h2><h3 id="egress-контроль-белые-списки-адресов"><a class="anchor" href="#egress-контроль-белые-списки-адресов" aria-label="Section link">#</a>Egress-контроль (белые списки адресов)</h3><p>Песочница с сетью попадает не в общий bridge, а в <strong>internal-сеть без маршрута
+наружу</strong>; единственный выход — egress-proxy (squid), чей конфиг ядро
+генерирует из настроек агентов. Семантика: публичный интернет разрешён
+(NetworkAccess), <strong>приватные диапазоны (LAN, RFC1918, metadata) запрещены по
+умолчанию</strong>, и только явные записи в <code>egress_allowlist</code> агента открывают
+конкретные внутренние адреса:</p>
+<pre><code>egress_allowlist: [&quot;api.github.com&quot;, &quot;*.example.com&quot;, &quot;gitlab.corp:8443&quot;, &quot;10.20.30.0/24&quot;]
+</code></pre>
+<p>Формат: домен, глоб, CIDR, хост:порт. Прокси сам резолвит имена — внутренний
+DNS работает, а отказ сопровождается понятной ошибкой. Не-HTTP трафик наружу
+(ssh, произвольные порты) не ходит — для задач агентов это почти всегда
+не важно, и это фича. Контролируется только HTTP(S): значения секретов всё
+равно защищены сканером утечки и canary.</p>
+<p>Разворачивается автоматически вместе со стеком (сервис <code>egress-proxy</code> + сети
+<code>temporality-sandbox-internal</code>/<code>temporality-egress-out</code>); без egress-стека
+песочницы работают по-старому через bridge.</p>
+<h3 id="прочее"><a class="anchor" href="#прочее" aria-label="Section link">#</a>Прочее</h3><ul>
 <li><strong><code>KERNEL_SANDBOX_ROOT</code></strong> — корень воркспейсов. Дефолт кода <code>./.sandbox</code>, в compose —
 <code>/srv/temporality/sandbox</code>. Не ставь <code>/tmp</code>: tmpfs-очистка при ребуте узла уничтожит
 воркспейсы агентов.</li>

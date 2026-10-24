@@ -871,6 +871,17 @@ func (a *Activities) sandboxRequest(request ToolRequest, command []string, timeo
 		// can show who consumes the host.
 		Labels: sandboxLabels(request),
 	}
+	// Egress control (docs/agent-behavior-monitoring.md §7): when the egress
+	// stack is deployed (ports file exists), network-needing sandboxes run on
+	// the internal network and reach the internet only through the proxy —
+	// the agent's dedicated port IS its allowlist policy. Without the stack,
+	// the legacy bridge behavior stays.
+	if net != "" {
+		if proxyEnv := a.EgressProxyEnv(request.AgentID); len(proxyEnv) > 0 {
+			net = sandbox.SandboxInternalNetworkName
+			req.Env = append(req.Env, proxyEnv...)
+		}
+	}
 	if spec := request.Sandbox; spec != nil {
 		if spec.Image == "" {
 			// Never silently substitute the installation image for an assigned
@@ -889,6 +900,36 @@ func (a *Activities) sandboxRequest(request ToolRequest, command []string, timeo
 		req.DockerSocket = spec.DockerSocket
 	}
 	return req, nil
+}
+
+// EgressProxyEnv returns the HTTP(S)_PROXY env entries pointing the sandbox
+// at the agent's dedicated egress-proxy port, or nil when the egress stack is
+// not deployed (no ports file) — then the legacy bridge network stays.
+func (a *Activities) EgressProxyEnv(agentID string) []string {
+	if a.Sandbox == nil || a.Sandbox.SandboxRoot() == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(a.Sandbox.SandboxRoot(), "egress", "ports.json"))
+	if err != nil {
+		return nil
+	}
+	var ports map[string]int
+	if json.Unmarshal(raw, &ports) != nil {
+		return nil
+	}
+	port, ok := ports[agentID]
+	if !ok {
+		port = ports["default"]
+	}
+	if port == 0 {
+		return nil
+	}
+	proxy := fmt.Sprintf("http://egress-proxy:%d", port)
+	return []string{
+		"HTTP_PROXY=" + proxy, "HTTPS_PROXY=" + proxy,
+		"http_proxy=" + proxy, "https_proxy=" + proxy,
+		"NO_PROXY=localhost,127.0.0.1",
+	}
 }
 
 // sandboxLabels tags a sandbox container with the run identity: only non-empty

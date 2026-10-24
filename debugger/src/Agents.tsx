@@ -1674,6 +1674,14 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                   <SelectItem value="" text={t('agents.approval_auto') ?? 'Default (auto-approve workspace & web)'} />
                   <SelectItem value="tools" text={t('agents.approval_tools') ?? 'Every tool (ask a human)'} />
                 </Select>
+                <TextArea
+                  id="agent-egress"
+                  labelText={t('agents.egress_allowlist') ?? 'Egress allowlist'}
+                  value={(form.egress_allowlist ?? []).join('\n')}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, egress_allowlist: e.target.value.split('\n').map((line) => line.trim()).filter(Boolean) })}
+                  rows={3}
+                  helperText={t('agents.egress_allowlist_hint') ?? 'One entry per line: a domain (api.github.com), a glob (*.example.com), a CIDR (10.20.30.0/24) or host:port. Private addresses are denied by default — the list opens specific ones. Requires the egress proxy on the stand.'}
+                />
               </Stack>
             )}
             {formTab === 'bindings' && (

@@ -401,6 +401,13 @@ func (d *Docker) Execute(parent context.Context, request Request) (result Result
 // rebuilds. KERNEL_SANDBOX_NETWORK overrides the mapping entirely.
 const SandboxNetworkName = "temporality-sandbox"
 
+// SandboxInternalNetworkName is the egress-controlled variant (docs/agent-
+// behavior-monitoring.md §7): created with docker --internal, so containers
+// on it have no route to the internet or the LAN at all — the only way out
+// is the egress proxy container attached to the same network. The activities
+// layer picks this network when the egress stack is deployed.
+const SandboxInternalNetworkName = "temporality-sandbox-internal"
+
 // dockerSocketPath is the daemon socket both inside the kernel container and
 // on the host: sandbox bind mounts need the path to mean the same thing in
 // both namespaces (the same discipline as the sandbox root mount).
@@ -430,19 +437,40 @@ func socketMountArgs(path string, info os.FileInfo) ([]string, error) {
 // failure fails the run loudly: a missing network would otherwise surface
 // as a baffling per-command network error.
 func (d *Docker) ensureNetwork(network string) error {
-	if network != SandboxNetworkName {
+	if network != SandboxNetworkName && network != SandboxInternalNetworkName {
 		return nil
 	}
 	inspect := exec.Command(d.Binary, "network", "inspect", network)
-	if err := inspect.Run(); err == nil {
+	if err := inspect.Run(); err != nil {
+		// Absent (or broken) — create. The internal variant MUST be --internal:
+		// the whole egress design rests on the sandbox network having no route
+		// to the internet or the LAN.
+		createArgs := []string{"network", "create"}
+		if network == SandboxInternalNetworkName {
+			createArgs = append(createArgs, "--internal")
+		}
+		create := exec.Command(d.Binary, append(createArgs, network)...)
+		if out, err := create.CombinedOutput(); err != nil && !strings.Contains(string(out), "already exists") {
+			if len(out) > 300 {
+				out = out[:300]
+			}
+			return fmt.Errorf("create sandbox network %q: %s", network, string(out))
+		}
 		return nil
 	}
-	create := exec.Command(d.Binary, "network", "create", network)
-	if out, err := create.CombinedOutput(); err != nil && !strings.Contains(string(out), "already exists") {
-		if len(out) > 300 {
-			out = out[:300]
+	// Exists: for the internal variant verify it really is internal — an
+	// older deployment created it as a plain bridge (internet-routed), which
+	// would silently bypass the egress proxy. Recreate once; sandboxes are
+	// ephemeral so there is nothing to migrate.
+	if network == SandboxInternalNetworkName {
+		out, err := exec.Command(d.Binary, "network", "inspect", network, "--format", "{{.Internal}}").Output()
+		if err == nil && strings.TrimSpace(string(out)) == "false" {
+			_ = exec.Command(d.Binary, "network", "rm", network).Run()
+			create := exec.Command(d.Binary, "network", "create", "--internal", network)
+			if cOut, cErr := create.CombinedOutput(); cErr != nil {
+				return fmt.Errorf("recreate sandbox network %q as internal: %s", network, string(cOut))
+			}
 		}
-		return fmt.Errorf("create sandbox network %q: %s", network, string(out))
 	}
 	return nil
 }

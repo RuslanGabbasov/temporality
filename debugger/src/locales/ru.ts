@@ -831,6 +831,8 @@ export const ru: Record<string, string> = {
     'agents.approval_mode_hint': 'По умолчанию команды в воркспейсе и веб-инструменты выполняются без подтверждения. «Каждый тул» запрашивает человека перед каждым существенным вызовом.',
     'agents.approval_auto': 'По умолчанию (авто: воркспейс и веб)',
     'agents.approval_tools': 'Каждый тул (спрашивать человека)',
+    'agents.egress_allowlist': 'Разрешённые адреса (egress)',
+    'agents.egress_allowlist_hint': 'По строке: домен (api.github.com), глоб (*.example.com), CIDR (10.20.30.0/24) или хост:порт. Приватные адреса запрещены по умолчанию — список открывает конкретные. Требует egress-proxy на стенде.',
     'agents.sandbox_not_built': 'не собран',
     'agents.network': 'Сеть',
     'agents.read_only': 'Только чтение',

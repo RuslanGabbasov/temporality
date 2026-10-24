@@ -2379,7 +2379,7 @@ func main() {
 			Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 			Skills: req.Skills, MCPServers: req.MCPServers, Secrets: req.Secrets, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
-			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels,
+			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels, EgressAllowlist: req.EgressAllowlist,
 			Definition: req.Definition, OrgUnitID: req.OrgUnitID,
 		}
 		if a.Definition != nil {
@@ -2392,6 +2392,7 @@ func main() {
 		if a.Definition != nil {
 			writeAgentVersion(r.Context(), ws, *a, requestSubject(r), req.PromptSource, req.GeneratorModel)
 		}
+		nudgeEgress()
 		writeJSON(w, 201, a)
 	})
 	mux.HandleFunc("GET /v1/workspace/agents/{agentID}", func(w http.ResponseWriter, r *http.Request) {
@@ -2432,7 +2433,7 @@ func main() {
 			Temperature: req.Temperature, MaxTokens: req.MaxTokens,
 			Skills: req.Skills, MCPServers: req.MCPServers, Secrets: req.Secrets, Tools: req.Tools,
 			SandboxProfile: req.SandboxProfile, NetworkAccess: req.NetworkAccess, ReadOnly: req.ReadOnly,
-			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels,
+			MaxTurns: req.MaxTurns, ApprovalMode: req.ApprovalMode, Labels: req.Labels, EgressAllowlist: req.EgressAllowlist,
 			Definition: req.Definition, OrgUnitID: req.OrgUnitID,
 		}
 		prev, prevErr := ws.GetAgent(r.Context(), a.ID)
@@ -2511,6 +2512,7 @@ func main() {
 		if a.Definition != nil && a.DefinitionVersion != prev.DefinitionVersion {
 			writeAgentVersion(r.Context(), ws, a, requestSubject(r), req.PromptSource, req.GeneratorModel)
 		}
+		nudgeEgress()
 		writeJSON(w, 200, a)
 	})
 	mux.HandleFunc("DELETE /v1/workspace/agents/{agentID}", func(w http.ResponseWriter, r *http.Request) {
@@ -2526,6 +2528,7 @@ func main() {
 			return
 		}
 		writeJSON(w, 200, map[string]bool{"deleted": true})
+		nudgeEgress()
 	})
 	mux.HandleFunc("GET /v1/workspace/agents/{agentID}/versions", func(w http.ResponseWriter, r *http.Request) {
 		if !gate.Allow(w, r, controlplane.RoleReader) {
@@ -7183,6 +7186,9 @@ func main() {
 	// Stand-to-stand transfer (docs/user/operations.md §2): export/import of
 	// skills and agents in the internal format. Admin-only.
 	registerTransferRoutes(mux, gate, ws)
+	// Egress control (docs/agent-behavior-monitoring.md §7): generate the
+	// proxy config from agent settings; agent CRUD nudges regeneration.
+	startEgressLoop(ctx, log, ws, env("KERNEL_DOCKER_BINARY", "docker"))
 	// LLM-judge configuration and calibration (specs/quality-loop.md §6).
 	RegisterJudgeRoutes(mux, gate, ws, activities, events, visibleUnits, log)
 	// Judge-driven knowledge-area normalization (docs/human-knowledge-explorer.md §4.2).

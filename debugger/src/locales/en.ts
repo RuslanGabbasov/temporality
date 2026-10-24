@@ -831,6 +831,8 @@ export const en: Record<string, string> = {
     'agents.approval_mode_hint': 'Default: workspace commands and web tools run without confirmation. "Every tool" asks a human before each consequential call.',
     'agents.approval_auto': 'Default (auto-approve workspace & web)',
     'agents.approval_tools': 'Every tool (ask a human)',
+    'agents.egress_allowlist': 'Egress allowlist',
+    'agents.egress_allowlist_hint': 'One entry per line: a domain (api.github.com), a glob (*.example.com), a CIDR (10.20.30.0/24) or host:port. Private addresses are denied by default — the list opens specific ones. Requires the egress proxy on the stand.',
     'agents.sandbox_not_built': 'not built',
     'agents.network': 'Network',
     'agents.read_only': 'Read-only',

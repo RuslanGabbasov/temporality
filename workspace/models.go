@@ -402,6 +402,11 @@ type Agent struct {
 	// Execution limits
 	MaxTurns     *int    `json:"max_turns,omitempty"`
 	ApprovalMode *string `json:"approval_mode,omitempty"` // auto, prompt, manual
+	// Egress allowlist (docs/agent-behavior-monitoring.md §7): network
+	// destinations (domains, globs, CIDRs, host:port) the agent may reach
+	// beyond the public internet. Private addresses are denied by default —
+	// only explicit entries open them. Enforced by the egress proxy.
+	EgressAllowlist []string `json:"egress_allowlist,omitempty"`
 	// Metadata
 	Labels map[string]string `json:"labels,omitempty"`
 	// Org binding (docs/org-structure.md §3.2): empty = whole installation.
@@ -691,6 +696,10 @@ type CreateAgentRequest struct {
 	ReadOnly       *bool             `json:"read_only,omitempty"`
 	MaxTurns       *int              `json:"max_turns,omitempty"`
 	ApprovalMode   *string           `json:"approval_mode,omitempty"`
+	// EgressAllowlist (docs/agent-behavior-monitoring.md §7): destinations the
+	// agent may reach beyond the public internet. Entries: domain, *.glob,
+	// CIDR, host:port.
+	EgressAllowlist []string `json:"egress_allowlist,omitempty"`
 	Labels         map[string]string `json:"labels,omitempty"`
 	OrgUnitID      string            `json:"org_unit_id,omitempty"`
 	// Structured definition (docs/evaluable-agent.md). PromptSource marks the

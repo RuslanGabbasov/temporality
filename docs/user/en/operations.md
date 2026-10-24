@@ -258,6 +258,31 @@ erDiagram are fixed automatically).
 
 ## 9. Sandboxes, tools and limits
 
+### Egress control (address allowlists)
+
+A network-enabled sandbox lands not on a public bridge but on an **internal
+network with no outbound route**; the only way out is the egress proxy
+(squid), whose config the kernel generates from agent settings. Semantics:
+the public internet is allowed (NetworkAccess), **private ranges (LAN,
+RFC1918, metadata) are denied by default**, and only explicit entries in the
+agent's `egress_allowlist` open specific internal addresses:
+
+```
+egress_allowlist: ["api.github.com", "*.example.com", "gitlab.corp:8443", "10.20.30.0/24"]
+```
+
+Entry format: a domain, a glob, a CIDR, or host:port. The proxy resolves
+names itself — internal DNS works, and a denial comes back as a clear error.
+Non-HTTP traffic (ssh, arbitrary ports) does not leave — for agent workloads
+that is almost always irrelevant, and it is a feature. Only HTTP(S) is
+controlled: secret values remain protected by the leak scanner and canaries.
+
+Deployed automatically with the stack (the `egress-proxy` service + the
+`temporality-sandbox-internal`/`temporality-egress-out` networks); without
+the egress stack sandboxes keep the legacy bridge behavior.
+
+### The rest
+
 - **`KERNEL_SANDBOX_ROOT`** — the root of the workspaces. The code default is
   `./.sandbox`, in compose — `/srv/temporality/sandbox`. Do not use `/tmp`:
   tmpfs cleanup on a node reboot will destroy the agents' workspaces.
