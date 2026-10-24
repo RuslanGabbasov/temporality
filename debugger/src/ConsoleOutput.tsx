@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useT } from './i18n'
 import { applyConsoleFrame, consoleURI, fetchConsoleTail, subscribeConsoleStream, type ConsoleFrame, type ConsoleState } from './consoleStream'
+import { parseAnsiSegments, stripAnsi, type AnsiSegment } from './ansi'
 import { copyText } from './clipboard'
 import { observationApi } from './observationApi'
 
@@ -161,13 +162,13 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
   }, [stop])
 
   // ONE merged feed: stdout and stderr interleave by arrival; stderr lines
-  // carry the error tint. The tabs split what a terminal shows together —
-  // reading a command output through a tab switch was the old mess.
+  // carry the error tint. ANSI escapes in the stream become styled segments
+  // at render; the copy path strips them back to plain text.
   const merged = useMemo(() => {
     const out: Array<{ text: string; stream: 'stdout' | 'stderr' }> = []
     const push = (text: string | undefined, stream: 'stdout' | 'stderr') => {
       if (!text) return
-      for (const line of text.split('\n')) out.push({ text: line, stream })
+      for (const line of stripAnsi(text).split('\n')) out.push({ text: line, stream })
     }
     push(state?.stdout.text, 'stdout')
     push(state?.stderr.text, 'stderr')
@@ -175,7 +176,7 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
     return out
   }, [state?.stdout.text, state?.stderr.text])
 
-  const shown = savedOutput ?? merged.map((line) => line.text).join('\n')
+  const shown = savedOutput !== null ? stripAnsi(savedOutput) : merged.map((line) => line.text).join('\n')
   const streamLive = live && !state?.done && !savedOutput
   const hasContent = shown.length > 0
   const copyAll = useCallback(() => {
@@ -185,6 +186,21 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
   }, [shown])
 
   if (!operationId) return null
+
+  /** ANSI-aware line rendering: SGR colors become span colors, stderr keeps
+   *  its tint wherever the sequence did not set one. */
+  function renderSegments(text: string, fallbackColor?: string) {
+    const segments = parseAnsiSegments(text)
+    if (segments.length === 0) return '\u00a0'
+    return segments.map((segment: AnsiSegment, index: number) => (
+      <span key={index} style={{ color: segment.color ?? fallbackColor, fontWeight: segment.bold ? 600 : undefined }}>{segment.text}</span>
+    ))
+  }
+  function renderAnsiLines(text: string) {
+    const lines = stripAnsi(text).split('\n')
+    if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
+    return lines.map((line, index) => <div key={index}>{renderSegments(line) || '\u00a0'}</div>)
+  }
 
   return (
     <div style={{ marginTop: '0.35rem', border: '1px solid var(--tm-border)', borderRadius: '4px', background: '#101418', minWidth: 0, overflow: 'hidden' }}>
@@ -223,9 +239,11 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
         {!hasContent
           ? <span style={{ color: '#565f89' }}>{streamLive ? (t('runs.console.waiting') ?? 'Waiting for output…') : (t('runs.console.empty') ?? '(no output)')}</span>
           : (savedOutput
-            ? shown
+            ? renderAnsiLines(shown)
             : merged.map((line, index) => (
-              <div key={index} style={line.stream === 'stderr' ? { color: '#f7768e' } : undefined}>{line.text || '\u00a0'}</div>
+              <div key={index}>
+                {renderSegments(line.text, line.stream === 'stderr' ? '#f7768e' : undefined)}
+              </div>
             )))}
       </div>
       {followPaused && (
