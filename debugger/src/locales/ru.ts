@@ -195,6 +195,8 @@ export const ru: Record<string, string> = {
     'supervisor.cause_user_error': 'Ошибка пользователя',
     'supervisor.cause_external_dependency': 'Внешняя зависимость',
     'supervisor.cause_unknown': 'Причина не определена',
+    'runs.event.eval_source_succeeded_run': 'из успешного рана',
+    'runs.event.eval_source_human_corrected': 'из правки человека',
     'supervisor.case_sandbox_limit': 'Лимит песочницы',
     'supervisor.case_user_error': 'Ошибка пользователя',
     'runs.event.behavior_canary': 'Сработала секрет-ловушка',

@@ -647,7 +647,10 @@ export function eventSummary(event: ObservationEvent, t: TranslateFn, propositio
       return { icon: '📅', label: t('runs.event.quality_schedule_changed'), detail: d.interval_hours != null ? t('runs.event.interval_hours', { count: String(d.interval_hours) }) : '', color: '#7aa2f7' }
     case 'eval.case_candidate.created': {
       const redaction = d.redaction_applied ? t('runs.event.redaction_applied') : ''
-      return { icon: '🧪', label: t('runs.event.eval_case_created'), detail: [String(d.agent_id ?? ''), String(d.source ?? ''), redaction].filter(Boolean).join(' · '), color: '#73daca' }
+      const source = d.source === 'human_corrected' ? t('runs.event.eval_source_human_corrected')
+        : d.source === 'succeeded_run' ? t('runs.event.eval_source_succeeded_run')
+          : String(d.source ?? '')
+      return { icon: '🧪', label: t('runs.event.eval_case_created'), detail: [String(d.agent_id ?? ''), source, redaction].filter(Boolean).join(' · '), color: '#73daca' }
     }
     case 'eval.case_candidate.decided': {
       const verdict = d.verdict === 'accepted' ? t('runs.event.eval_verdict_accepted')
