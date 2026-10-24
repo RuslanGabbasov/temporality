@@ -1682,7 +1682,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                 {(!form.definition || Object.keys(form.definition).length === 0) && (
                   <div style={{ display: 'flex', gap: '1rem' }}>
                     <Toggle id="agent-readonly" labelText={t('agents.read_only') ?? 'Read-only workspace'} toggled={form.read_only ?? false} onToggle={(checked: boolean) => setForm({ ...form, read_only: checked })} />
-                    <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', alignSelf: 'center', margin: 0 }}>{t('agents.read_only_legacy_hint') ?? 'Legacy agent without a structured definition — set file permissions in the Capabilities panel of defined agents.'}</p>
+                    <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', alignSelf: 'center', margin: 0, maxWidth: '420px' }}>{t('agents.read_only_legacy_hint') ?? 'This agent has no structured definition (the Capabilities panel does not apply to it) — so its file access switches here. Example: the system intake agent.'}</p>
                   </div>
                 )}
                 <Select
