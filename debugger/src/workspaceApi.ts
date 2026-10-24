@@ -110,6 +110,9 @@ export interface AgentCapabilities {
   skills?: boolean
   knowledge?: boolean
   delegation?: boolean
+  /** Create/update/delete launch triggers — denied by default (a runaway
+   *  trigger burns the token budget on every fire). */
+  triggers?: boolean
 }
 
 /** Structured definition (docs/evaluable-agent.md): capabilities, hard

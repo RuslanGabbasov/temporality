@@ -91,7 +91,7 @@ function setCaps(caps?: AgentCapabilities): AgentCapabilities {
   const result: AgentCapabilities = {}
   // Delegation is serialized with the rest: the backend default is denied,
   // so dropping it here would silently revoke a granted toggle on save.
-  for (const key of [...CAP_KEYS, 'delegation'] as const) {
+  for (const key of [...CAP_KEYS, 'delegation', 'triggers'] as const) {
     const value = caps?.[key]
     if (typeof value === 'boolean') result[key] = value
   }
@@ -319,7 +319,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
   const setDef = (part: Partial<AgentDefinition>) =>
     setForm((prev) => ({ ...prev, definition: { ...prev.definition, ...part } }))
 
-  const setCap = (key: CapKey | 'delegation', value: boolean | undefined) =>
+  const setCap = (key: CapKey | 'delegation' | 'triggers', value: boolean | undefined) =>
     setForm((prev) => ({
       ...prev,
       definition: {
@@ -1034,6 +1034,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
                       {enabledCaps(selected.definition?.capabilities).map((key) => <Tag key={key} type="green" size="sm">{capLabel(key)}</Tag>)}
                       {selected.definition?.capabilities?.delegation === true && <Tag type="green" size="sm">{t('agents.cap.delegation') ?? 'Delegate to other agents'}</Tag>}
+                      {selected.definition?.capabilities?.triggers === true && <Tag type="green" size="sm">{t('agents.cap.triggers') ?? 'Create triggers'}</Tag>}
                       {enabledCaps(selected.definition?.capabilities).length === 0 && disabledCaps(selected.definition?.capabilities).length === 0 && (
                         <span style={{ color: 'var(--tm-text-3)' }}>{t('agents.all_caps') ?? 'All capabilities allowed'}</span>
                       )}
@@ -1610,6 +1611,12 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     labelText={t('agents.cap.delegation') ?? 'Delegate to other agents'}
                     toggled={form.definition?.capabilities?.delegation === true}
                     onToggle={(checked: boolean) => { touch('capabilities'); setCap('delegation', checked ? true : undefined) }}
+                  />
+                  <Toggle
+                    id="agent-cap-triggers"
+                    labelText={t('agents.cap.triggers') ?? 'Create triggers'}
+                    toggled={form.definition?.capabilities?.triggers === true}
+                    onToggle={(checked: boolean) => { touch('capabilities'); setCap('triggers', checked ? true : undefined) }}
                   />
                 </div>
               </Stack>

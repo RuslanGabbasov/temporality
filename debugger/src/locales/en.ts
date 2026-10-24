@@ -896,6 +896,7 @@ export const en: Record<string, string> = {
     'agents.cap.skills': 'Use skills',
     'agents.cap.knowledge': 'Use knowledge',
     'agents.cap.delegation': 'Delegate to other agents',
+    'agents.cap.triggers': 'Create triggers',
     'agents.constraints': 'Constraints',
     'agents.constraints_hint': 'What the agent must never do. One item per line.',
     'agents.constraints_placeholder': 'Never modify infrastructure configuration.\nNever delete files.',

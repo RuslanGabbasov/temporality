@@ -896,6 +896,7 @@ export const ru: Record<string, string> = {
     'agents.cap.skills': 'Использовать навыки',
     'agents.cap.knowledge': 'Использовать знания',
     'agents.cap.delegation': 'Делегировать другим агентам',
+    'agents.cap.triggers': 'Создавать триггеры',
     'agents.constraints': 'Ограничения',
     'agents.constraints_hint': 'Что агенту запрещено делать. По одному пункту на строку.',
     'agents.constraints_placeholder': 'Не изменять конфигурацию инфраструктуры.\nНе удалять файлы.',

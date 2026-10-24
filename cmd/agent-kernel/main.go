@@ -8281,6 +8281,13 @@ func applyAgentConfig(ctx context.Context, ws *workspace.Store, a *workspace.Age
 	if a.Definition == nil || a.Definition.Capabilities.Delegation == nil || !*a.Definition.Capabilities.Delegation {
 		input.DenyTools = append(input.DenyTools, "delegate", "plan", "agents")
 	}
+	// Trigger management is explicitly granted too (docs/agent-behavior-
+	// monitoring.md §8): a runaway trigger burns the token budget on every
+	// fire, so create/update/delete stay denied unless the human ticked the
+	// capability. list_triggers stays available — it is read-only.
+	if a.Definition == nil || a.Definition.Capabilities.Triggers == nil || !*a.Definition.Capabilities.Triggers {
+		input.DenyTools = append(input.DenyTools, "create_trigger", "update_trigger", "delete_trigger")
+	}
 	if a.ReadOnly != nil && *a.ReadOnly {
 		input.ReadOnly = true
 	}
@@ -8375,6 +8382,9 @@ func applyAgentDefaults(ctx context.Context, ws *workspace.Store, a *workspace.A
 	// agent that cannot delegate has no use for the target list.
 	if a.Definition == nil || a.Definition.Capabilities.Delegation == nil || !*a.Definition.Capabilities.Delegation {
 		input.DenyTools = append(input.DenyTools, "delegate", "plan", "agents")
+	}
+	if a.Definition == nil || a.Definition.Capabilities.Triggers == nil || !*a.Definition.Capabilities.Triggers {
+		input.DenyTools = append(input.DenyTools, "create_trigger", "update_trigger", "delete_trigger")
 	}
 	if a.ReadOnly != nil && *a.ReadOnly {
 		input.ReadOnly = true

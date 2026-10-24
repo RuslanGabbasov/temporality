@@ -259,6 +259,11 @@ type AgentCapabilities struct {
 	// tool (docs/agent-delegation.md). Inverted default: nil or false ⇒ denied,
 	// because delegation must be granted explicitly by a human.
 	Delegation *bool `json:"delegation,omitempty"`
+	// Triggers lets the agent create/update/delete launch triggers (docs/
+	// agent-behavior-monitoring.md §8). Inverted default like delegation:
+	// nil or false ⇒ denied — a runaway trigger burns the token budget on
+	// every fire.
+	Triggers *bool `json:"triggers,omitempty"`
 }
 
 // Cap returns the effective value of a capability: nil (unset) means allowed,
