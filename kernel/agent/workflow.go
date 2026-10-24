@@ -125,14 +125,14 @@ type RunInput struct {
 	ExecutionIdentityID string `json:"execution_identity_id,omitempty"`
 	// Policy-derived constraints (docs/org-structure.md §24): resolved from the
 	// org position at run start and enforced here, in the execution model.
-	RequireToolApproval bool    `json:"require_tool_approval,omitempty"` // consequential tools need approval
+	RequireToolApproval bool `json:"require_tool_approval,omitempty"` // consequential tools need approval
 	// BehaviorMonitor turns on the oversight judge (docs/agent-behavior-
 	// monitoring.md, stage 3): every completed turn of this run is reviewed
 	// for escape/exfil/tamper/deception patterns and flagged to the supervisor.
 	BehaviorMonitor bool    `json:"behavior_monitor,omitempty"`
-	TokenBudget         int     `json:"token_budget,omitempty"`          // 0 = uncapped
-	MaxBudgetUSD        float64 `json:"max_budget_usd,omitempty"`        // 0 = uncapped
-	TimeoutSeconds      int     `json:"timeout_seconds,omitempty"`       // 0 = uncapped; checked at turn boundaries
+	TokenBudget     int     `json:"token_budget,omitempty"`    // 0 = uncapped
+	MaxBudgetUSD    float64 `json:"max_budget_usd,omitempty"`  // 0 = uncapped
+	TimeoutSeconds  int     `json:"timeout_seconds,omitempty"` // 0 = uncapped; checked at turn boundaries
 	// Model prices resolved once at run-config time so the workflow can score
 	// the budget without carrying the price table. Zero = no price configured;
 	// a USD budget then degrades to the token cap.

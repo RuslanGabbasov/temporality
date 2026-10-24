@@ -9,8 +9,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"io"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -530,7 +530,7 @@ func (d *Docker) arguments(workspace string, request Request, name string, socke
 	}
 	args := []string{"run", "--init", "--pull=never", "--name", name, "--network=" + network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit", strconv.Itoa(pids), "--memory", memory, "--memory-swap", memory, "--cpus", cpus, "--ulimit", "nofile=1024:1024", "--user", fmt.Sprintf("%d:%d", d.UID, d.GID), "--workdir", "/workspace", "--tmpfs", "/tmp:rw,noexec,nosuid,size=" + tmpSize}
 	args = append(args, scratchArgs...)
-	args = append(args, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace + ":/workspace:" + mode)
+	args = append(args, "--env", "HOME=/scratch", "--env", "TMPDIR=/scratch", "--volume", workspace+":/workspace:"+mode)
 	// Socket passthrough flags land with the other volume/env flags — before
 	// the image, where every docker argument must stay.
 	args = append(args, socketArgs...)

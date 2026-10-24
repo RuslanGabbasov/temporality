@@ -13,11 +13,11 @@ import (
 // fakeTransferStore is a second stand: an in-memory workspace with the same
 // ErrNotFound contract, enough to exercise the transfer decisions.
 type fakeTransferStore struct {
-	skills        map[string]workspace.Skill
-	agents        map[string]workspace.Agent
-	versions      map[string][]workspace.SkillVersion
-	createdSkill  []string
-	updatedAgent  []string
+	skills       map[string]workspace.Skill
+	agents       map[string]workspace.Agent
+	versions     map[string][]workspace.SkillVersion
+	createdSkill []string
+	updatedAgent []string
 }
 
 func newFakeTransferStore() *fakeTransferStore {

@@ -33,17 +33,17 @@ import (
 
 // transferEnvelope is the portable container (temporality.transfer/v1).
 type transferEnvelope struct {
-	Format     string          `json:"format"`
-	Kind       string          `json:"kind"` // skills | agents | mixed
-	ExportedAt time.Time       `json:"exported_at"`
-	Items      []transferItem  `json:"items"`
+	Format     string         `json:"format"`
+	Kind       string         `json:"kind"` // skills | agents | mixed
+	ExportedAt time.Time      `json:"exported_at"`
+	Items      []transferItem `json:"items"`
 }
 
 type transferItem struct {
-	Type     string             `json:"type"` // skill | agent
-	Skill    *workspace.Skill   `json:"skill,omitempty"`
-	Versions []workspace.SkillVersion `json:"versions,omitempty"`
-	Agent    *workspace.Agent   `json:"agent,omitempty"`
+	Type          string                   `json:"type"` // skill | agent
+	Skill         *workspace.Skill         `json:"skill,omitempty"`
+	Versions      []workspace.SkillVersion `json:"versions,omitempty"`
+	Agent         *workspace.Agent         `json:"agent,omitempty"`
 	AgentVersions []workspace.AgentVersion `json:"agent_versions,omitempty"`
 }
 
@@ -311,6 +311,7 @@ func sameSkillContent(a, b workspace.Skill) bool {
 func sameAgentContent(a, b workspace.Agent) bool {
 	return agentsEqual(a, b)
 }
+
 // agentsEqual compares every behavioral field of an agent definition.
 func agentsEqual(a, b workspace.Agent) bool {
 	return a.Name == b.Name && a.Description == b.Description &&

@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -976,7 +976,6 @@ func monitorTurns(ctx context.Context, log *slog.Logger, activities *agent.Activ
 		}
 	}
 }
-
 
 func truncateForMonitor(s string) string {
 	if len(s) <= 400 {

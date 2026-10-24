@@ -19,18 +19,18 @@ import (
 // behaviorHit is one scanner finding. Detail is human-readable and bounded;
 // never includes the secret value itself.
 type behaviorHit struct {
-	Kind    string `json:"kind"`    // secret_leak | canary | danger_content | suspicious_arg | test_edit
-	Detail  string `json:"detail"`  // bounded human context (no secret values)
+	Kind    string `json:"kind"`   // secret_leak | canary | danger_content | suspicious_arg | test_edit
+	Detail  string `json:"detail"` // bounded human context (no secret values)
 	Canary  bool   `json:"canary,omitempty"`
 	Pattern string `json:"pattern,omitempty"`
 }
 
 const (
-	behaviorKindSecretLeak     = "secret_leak"
-	behaviorKindCanary         = "canary"
-	behaviorKindDangerContent  = "danger_content"
-	behaviorKindSuspiciousArg  = "suspicious_arg"
-	behaviorKindTestEdit       = "test_edit"
+	behaviorKindSecretLeak    = "secret_leak"
+	behaviorKindCanary        = "canary"
+	behaviorKindDangerContent = "danger_content"
+	behaviorKindSuspiciousArg = "suspicious_arg"
+	behaviorKindTestEdit      = "test_edit"
 
 	behaviorScanCap = 32 << 10 // per-field scan cap — payloads beyond this are truncated by callers anyway
 )
@@ -39,8 +39,8 @@ const (
 // leak could travel in. Values are compared verbatim; short values (<8 chars)
 // are skipped — they cannot be told apart from ordinary words.
 type behaviorSecret struct {
-	name     string
-	canary   bool
+	name      string
+	canary    bool
 	encodings []string // exact, base64, hex, urlencoded — all lowercase
 }
 
@@ -111,9 +111,9 @@ func minLen(a, b int) int {
 // essentially never legitimate in ordinary project code; when in doubt, leave
 // it out (precision beats recall — a bored human disables the guard).
 var dangerContentPatterns = []struct {
-	id       string
-	pattern  *regexp.Regexp
-	note     string
+	id      string
+	pattern *regexp.Regexp
+	note    string
 }{
 	{"rm_root", regexp.MustCompile("rm\\s+(-[a-zA-Z]*[rf][a-zA-Z]*\\s+)+(/|~|\\$HOME)(\\s|$|\"|'|`|]|\\))"), "rm -rf корня или домашней директории"},
 	{"no_preserve_root", regexp.MustCompile(`--no-preserve-root`), "rm с --no-preserve-root"},
