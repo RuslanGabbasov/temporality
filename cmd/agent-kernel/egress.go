@@ -91,7 +91,7 @@ func generateEgressConfig(agents []workspace.Agent) (string, EgressPorts) {
 		}
 		b.WriteString(fmt.Sprintf("# agent %s (project %s)\n", agent.ID, agent.Project))
 		b.WriteString(fmt.Sprintf("http_port %d\n", port))
-		b.WriteString(fmt.Sprintf("acl p_%s myport %d\n", slug, port))
+		b.WriteString(fmt.Sprintf("acl p_%s localport %d\n", slug, port))
 		// Per-agent destination entries: domains and CIDRs share one ACL.
 		var domains, cidrs []string
 		for _, entry := range agent.Allow {
@@ -124,7 +124,7 @@ func generateEgressConfig(agents []workspace.Agent) (string, EgressPorts) {
 	// Default port: everything not matching an agent block. Private denied,
 	// public denied — ad-hoc runs without an agent keep the strict posture.
 	b.WriteString(fmt.Sprintf("http_port %d\n", egressDefaultPort))
-	b.WriteString(fmt.Sprintf("acl p_default myport %d\n", egressDefaultPort))
+	b.WriteString(fmt.Sprintf("acl p_default localport %d\n", egressDefaultPort))
 	b.WriteString("http_access deny p_default\n")
 	b.WriteString("http_access deny all\n")
 

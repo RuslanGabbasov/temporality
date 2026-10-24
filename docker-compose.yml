@@ -274,8 +274,12 @@ services:
     image: ubuntu/squid:latest
     container_name: temporality-egress-proxy
     # The kernel writes the config a moment after boot; wait for it instead
-    # of crash-looping on a missing file, then run squid in the foreground.
-    entrypoint: ["/bin/sh", "-c", "until [ -f /etc/squid/squid.conf ]; do sleep 2; done; exec squid -N -d 1"]
+    # of crash-looping on a missing file. The stale /run/squid.pid MUST go:
+    # squid -N writes its own PID (1 in a container) into it, and the file
+    # survives into the next container start (the container layer is not
+    # tmpfs) — the fresh squid then sees "PID 1 already running" (itself)
+    # and crash-loops forever.
+    entrypoint: ["/bin/sh", "-c", "until [ -f /etc/squid/squid.conf ]; do sleep 2; done; rm -f /run/squid.pid /var/run/squid.pid; exec squid -N -d 1"]
     volumes:
       # The kernel writes squid.conf into the sandbox root's egress/ dir.
       - ${TEMPORALITY_SANDBOX_ROOT:-/srv/temporality/sandbox}/egress:/etc/squid:ro
