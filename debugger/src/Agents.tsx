@@ -15,8 +15,6 @@ import {
   Toggle,
   NumberInput,
   Checkbox,
-  RadioTile,
-  TileGroup,
 
 } from '@carbon/react'
 import PageLoading from './PageLoading'
@@ -1673,32 +1671,26 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                 <div style={{ display: 'flex', gap: '1rem' }}>
                   <Toggle id="agent-readonly" labelText={t('agents.read_only') ?? 'Read-only'} toggled={form.read_only ?? false} onToggle={(checked: boolean) => setForm({ ...form, read_only: checked })} />
                 </div>
-                {/* Network access as three human levels instead of a toggle
-                    + a list: the level IS the semantics, the list is the
-                    exception detail (docs/agent-behavior-monitoring.md §7). */}
-                <TileGroup
-                  name="agent-egress-level"
-                  legend={t('agents.egress_level') ?? 'Network access'}
-                  valueSelected={egressLevel}
-                  onChange={(value: string) => {
-                    if (value === 'off') setForm({ ...form, network_access: false, egress_allowlist: [] })
-                    else if (value === 'allowlist') setForm({ ...form, network_access: false, egress_allowlist: form.egress_allowlist && form.egress_allowlist.length > 0 ? form.egress_allowlist : [] })
+                <Select
+                  id="agent-egress-level"
+                  labelText={t('agents.egress_level') ?? 'Network access'}
+                  value={egressLevel}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                    const level = e.target.value
+                    if (level === 'off') setForm({ ...form, network_access: false, egress_allowlist: [] })
+                    else if (level === 'allowlist') setForm({ ...form, network_access: false, egress_allowlist: form.egress_allowlist && form.egress_allowlist.length > 0 ? form.egress_allowlist : [] })
                     else setForm({ ...form, network_access: true })
                   }}
+                  helperText={egressLevel === 'off'
+                    ? (t('agents.egress_off_hint') ?? 'The agent works only inside its workspace.')
+                    : egressLevel === 'allowlist'
+                      ? (t('agents.egress_allowlist_only_hint') ?? 'Exactly the addresses listed below — nothing else.')
+                      : (t('agents.egress_public_hint') ?? 'Public internet is reachable; your LAN stays closed.')}
                 >
-                  <RadioTile id="egress-off" value="off">
-                    {t('agents.egress_off') ?? 'No network'}
-                    <span className="tile-hint">{t('agents.egress_off_hint') ?? 'The agent works only inside its workspace.'}</span>
-                  </RadioTile>
-                  <RadioTile id="egress-allowlist" value="allowlist">
-                    {t('agents.egress_allowlist_only') ?? 'Only allowed addresses'}
-                    <span className="tile-hint">{t('agents.egress_allowlist_only_hint') ?? 'Exactly the addresses listed below — nothing else, not even the public internet.'}</span>
-                  </RadioTile>
-                  <RadioTile id="egress-public" value="public">
-                    {t('agents.egress_public') ?? 'Open internet'}
-                    <span className="tile-hint">{t('agents.egress_public_hint') ?? 'The public internet is reachable. Your LAN and private addresses stay closed — unless listed below.'}</span>
-                  </RadioTile>
-                </TileGroup>
+                  <SelectItem value="off" text={t('agents.egress_off') ?? 'No network'} />
+                  <SelectItem value="allowlist" text={t('agents.egress_allowlist_only') ?? 'Only allowed addresses'} />
+                  <SelectItem value="public" text={t('agents.egress_public') ?? 'Open internet (LAN closed)'} />
+                </Select>
                 {egressLevel !== 'off' && (
                   <TextArea
                     id="agent-egress"
