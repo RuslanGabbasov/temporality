@@ -88,10 +88,16 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
   /** NFR-9: one abort controller owns the tail fetch AND the stream —
    *  collapse/unmount/hidden-tab all cancel through it. */
   const abortRef = useRef<AbortController | null>(null)
+  /** Pending 404-retry timer (live runs): cancelled on every effect teardown. */
+  const retryRef = useRef<number | null>(null)
 
   const stop = useCallback(() => {
     abortRef.current?.abort()
     abortRef.current = null
+    if (retryRef.current !== null) {
+      window.clearTimeout(retryRef.current)
+      retryRef.current = null
+    }
   }, [])
 
   const applyFrame = useCallback((frame: ConsoleFrame) => {
@@ -141,7 +147,16 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
       })
       .catch((failure) => {
         if (controller.signal.aborted) return
-        setError(failure instanceof Error ? failure.message : String(failure))
+        const failureMessage = failure instanceof Error ? failure.message : String(failure)
+        // A 404 tail on a LIVE run is expected before the first output chunk
+        // lands (and right after a kernel restart wiped the buffers): retry
+        // shortly instead of declaring the console dead — the command may be
+        // producing output a second later.
+        if (live && failureMessage.includes('404')) {
+          retryRef.current = window.setTimeout(() => setVisibleTick((value) => value + 1), 2000)
+          return
+        }
+        setError(failureMessage)
         // The in-memory console is gone (swept after 6h idle, or the kernel
         // restarted): recover what the journal kept — the tool.completed
         // output, capped at 1KB by the emitter but always available.

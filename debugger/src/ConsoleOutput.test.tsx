@@ -202,9 +202,18 @@ describe('ConsoleOutput (§6, DoD-5)', () => {
     expect(published.stderr.text).toBe('warn line\n')
   })
 
-  it('shows the failure surface when the console endpoint is unavailable', async () => {
+  it('keeps waiting (no failure surface) on a 404 tail for a live run — the command may not have produced output yet', async () => {
+    vi.useFakeTimers()
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('not found', { status: 404 }))))
     await renderConsole({ live: true })
+    expect(text()).not.toContain('Output unavailable')
+    expect(text()).toContain('Waiting for output')
+    vi.useRealTimers()
+  })
+
+  it('shows the failure surface on a 404 tail when the run is not live', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('not found', { status: 404 }))))
+    await renderConsole({ live: false })
     expect(text()).toContain('Output unavailable')
     expect(text()).toContain('console tail 404')
   })

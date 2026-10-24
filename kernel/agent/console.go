@@ -131,6 +131,11 @@ func (c *Console) Hook(project, operationID string) func(stream string, chunk []
 	if c == nil || operationID == "" {
 		return nil
 	}
+	// Eager registration: the tail must exist (empty) from the moment the
+	// command starts. A lazy entry created on the first chunk left a window
+	// where the tail snapshot 404'd and the UI gave up on a perfectly live
+	// command.
+	c.op(project, operationID)
 	return func(stream string, chunk []byte) {
 		c.Write(project, operationID, stream, chunk)
 	}
