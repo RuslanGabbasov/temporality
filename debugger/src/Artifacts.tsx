@@ -13,7 +13,7 @@ import {
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, CheckmarkOutline, CloseOutline } from '@carbon/icons-react'
-import { workspaceApi, type Artifact, type ArtifactReview } from './workspaceApi'
+import { workspaceApi, type Artifact, type ArtifactReview, type ArtifactVersion } from './workspaceApi'
 import { useT } from './i18n'
 import ListFilter, { matchesFilter } from './ListFilter'
 import AppModal from './Modal'
@@ -388,11 +388,16 @@ export default function Artifacts() {
                         {t('artifacts.submit_review') ?? 'Send to review'}
                       </Button>
                     )}
-                    <Button size="sm" kind="ghost" renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'}
-                      disabled={selected.status === 'approved' || selected.status === 'in_review'}
-                      title={selected.status === 'approved' ? (t('artifacts.edit_locked_approved') ?? 'The approved body is immutable') : selected.status === 'in_review' ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
+                    {selected.status === 'approved' && (
+                      <Button size="sm" kind="secondary" renderIcon={Edit} onClick={() => void startEdit(selected)}>
+                        {t('artifacts.new_revision') ?? 'New revision'}
+                      </Button>
+                    )}
+                    <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'}
+                      disabled={selected.status === 'in_review'}
+                      title={selected.status === 'in_review' ? (t('artifacts.edit_locked_review') ?? 'Locked while a review is open') : undefined}
                       onClick={() => void startEdit(selected)} />
-                    <Button size="sm" kind="danger--ghost" renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
+                    <Button size="sm" kind="danger--ghost" hasIconOnly renderIcon={TrashCan} iconDescription={t('action.delete') ?? 'Delete'} onClick={() => void remove(selected)} />
                   </Stack>
                 </div>
 
@@ -500,6 +505,12 @@ export default function Artifacts() {
                     <p style={{ color: 'var(--tm-text-3)', fontSize: '0.8rem' }}>{t('artifacts.body_empty') ?? 'No stored body.'}</p>
                   )}
                 </div>
+
+                {/* Version history (docs/artifact-lifecycle.md §12): every
+                    approved revision is archived when a new revision opens.
+                    Bodies are viewable — the point of history is reading what
+                    the old version actually said. */}
+                <VersionHistory artifactID={selected.id} />
               </Tile>
             )
           })()}
@@ -508,7 +519,16 @@ export default function Artifacts() {
 
       {showForm && (
         <AppModal onClose={() => { setShowForm(false); setEditing(null) }} panelStyle={{ width: '640px' }}>
-          <Heading>{editing ? (t('artifacts.edit') ?? 'Edit Artifact') : (t('artifacts.new') ?? 'New Artifact')}</Heading>
+          <Heading>{editing
+            ? (editing.status === 'approved' ? (t('artifacts.new_revision_title', { version: String((editing.version ?? 1) + 1) }) ?? `New revision (v${(editing.version ?? 1) + 1})`)
+              : (t('artifacts.edit') ?? 'Edit Artifact'))
+            : (t('artifacts.new') ?? 'New Artifact')}</Heading>
+          {editing?.status === 'approved' && (
+            <InlineNotification kind="info" lowContrast hideCloseButton
+              title={t('artifacts.new_revision_banner_title') ?? 'New revision'}
+              subtitle={t('artifacts.new_revision_banner') ?? 'The approved body is archived to version history; the artifact becomes draft until the new revision is approved. Skills referencing it will see the draft status in the meantime.'}
+              style={{ marginBottom: '0.75rem' }} />
+          )}
           <Stack gap={3}>
             <TextInput
               id="artifact-id"
@@ -641,6 +661,82 @@ export default function Artifacts() {
       )}
 
       {loading && <PageLoading />}
+    </div>
+  )
+}
+
+/** Version history of one artifact (docs/artifact-lifecycle.md §12): archived
+ *  approved revisions, newest first. The discloser stays collapsed — history
+ *  matters after the first «Новая редакция», not before. A version row
+ *  expands into its stored body. */
+function VersionHistory({ artifactID }: { artifactID: string }) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const [versions, setVersions] = useState<ArtifactVersion[] | null>(null)
+  const [expanded, setExpanded] = useState(0)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setOpen(false)
+    setVersions(null)
+    setExpanded(0)
+    setError('')
+  }, [artifactID])
+
+  useEffect(() => {
+    if (!open || versions !== null) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const page = await workspaceApi.listArtifactVersions(artifactID)
+        if (!cancelled) setVersions(page.versions ?? [])
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Request failed')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [open, versions, artifactID])
+
+  return (
+    <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--tm-border)', paddingTop: '0.75rem' }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{ background: 'none', border: 'none', color: 'var(--tm-teal)', cursor: 'pointer', fontSize: '0.78rem', padding: 0, display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+      >
+        <span className="chevron-rotate" style={{ display: 'inline-flex', ...(open ? { transform: 'rotate(90deg)' } : {}) }}>›</span>
+        {t('artifacts.versions_title') ?? 'Version history'}
+      </button>
+      {open && (
+        <div style={{ marginTop: '0.4rem' }}>
+          {error && <p style={{ color: 'var(--tm-danger)', fontSize: '0.75rem' }}>{error}</p>}
+          {versions !== null && versions.length === 0 && (
+            <p style={{ color: 'var(--tm-muted)', fontSize: '0.75rem' }}>{t('artifacts.versions_empty') ?? 'No archived revisions yet — history appears when a new revision of an approved artifact opens.'}</p>
+          )}
+          {versions !== null && versions.map((v) => (
+            <div key={v.version} style={{ marginBottom: '0.4rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
+              <div
+                role="button" tabIndex={0}
+                onClick={() => setExpanded(expanded === v.version ? 0 : v.version)}
+                style={{ padding: '0.4rem 0.55rem', cursor: 'pointer', display: 'flex', gap: '0.5rem', alignItems: 'baseline', flexWrap: 'wrap', fontSize: '0.75rem' }}
+              >
+                <strong>v{v.version}</strong>
+                <Tag type="green" size="sm">{v.status}</Tag>
+                <span style={{ color: 'var(--tm-text-2)' }}>{v.title}</span>
+                <span style={{ color: 'var(--tm-muted)', marginLeft: 'auto', fontSize: '0.7rem' }}>
+                  {t('artifacts.versions_superseded') ?? 'superseded'} {v.superseded_at ? new Date(v.superseded_at).toLocaleString() : ''}
+                </span>
+              </div>
+              {expanded === v.version && (
+                <div style={{ padding: '0 0.55rem 0.55rem' }}>
+                  <div className="artifact-body" style={{ border: '1px dashed var(--tm-border)', borderRadius: '6px', padding: '0.5rem', maxHeight: '22rem', overflowY: 'auto' }}>
+                    <Markdown content={v.content || ''} />
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -281,11 +281,13 @@ func (s *Store) ArtifactsByIDs(ctx context.Context, ids []string) ([]Artifact, e
 // SaveArtifactEdit applies an edit respecting the lifecycle (docs/artifact-lifecycle.md
 // §5, §9): draft/rejected rewrite in place (an edit of a rejected version reopens
 // it as draft), in_review refuses (the version is locked while a review is
-// open), approved refuses too — the approved body is immutable, and with
-// phase-1 storage (single body column) there is no way to open a next draft
-// version without destroying the approved one, so the edit is a 409 pointing
-// at that limitation (versioned bodies arrive with phase 3). The org binding
-// is preserved either way: bindings move through the admin binding endpoint only.
+// open), and approved opens a NEW REVISION: the approved body is snapshotted
+// into workspace_artifact_version (migration 0006), then the row becomes
+// version+1 / draft with the new content. Approving the revision closes the
+// loop — the previous approved version stays readable in the history. The
+// tradeoff is documented (§8): while the revision is open the artifact's live
+// status is draft, so skills referencing it see an unapproved source until
+// the new version is approved.
 func (s *Store) SaveArtifactEdit(ctx context.Context, artifact Artifact) error {
 	artifact.normalize()
 	artifact.Status = "draft"
@@ -304,6 +306,106 @@ func (s *Store) SaveArtifactEdit(ctx context.Context, artifact Artifact) error {
 		return nil
 	}
 	return s.artifactEditConflict(ctx, artifact.ID)
+}
+
+// SaveArtifactNewVersion is the human path for editing an approved artifact:
+// the approved body is snapshotted, then the row reopens as version+1 draft
+// with the new content (docs/artifact-lifecycle.md §5 «правка approved →
+// draft(v+1)», made real by the version table). Transactions guard the
+// read-modify-write against a concurrent review opening on the same row.
+func (s *Store) SaveArtifactNewVersion(ctx context.Context, artifact Artifact) error {
+	artifact.normalize()
+	artifact.Status = "draft"
+	artifact.UpdatedAt = time.Now().UTC()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var current Artifact
+	err = tx.QueryRow(ctx,
+		`SELECT version, title, description, content, content_hash, size_bytes, mime_type, status, origin_type, origin_user
+		 FROM workspace_artifact WHERE id=$1 FOR UPDATE`, artifact.ID).
+		Scan(&current.Version, &current.Title, &current.Description, &current.Content, &current.ContentHash,
+			&current.SizeBytes, &current.MimeType, &current.Status, &current.OriginType, &current.OriginUser)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if current.Status == ArtifactInReview {
+		return fmt.Errorf("%w: artifact is in_review — the version is locked while a review is open", ErrArtifactLocked)
+	}
+	if current.Status != ArtifactApproved {
+		return fmt.Errorf("%w: artifact is %s", ErrArtifactLocked, current.Status)
+	}
+	// The approved body becomes immutable history before anything overwrites it.
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO workspace_artifact_version
+		 (artifact_id, version, title, description, content, content_hash, size_bytes, mime_type, status, origin_type, origin_user, created_at, superseded_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'approved',$9,$10, now(), now())
+		 ON CONFLICT (artifact_id, version) DO NOTHING`,
+		artifact.ID, current.Version, current.Title, current.Description, current.Content, current.ContentHash,
+		current.SizeBytes, current.MimeType, current.OriginType, nullString(current.OriginUser)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE workspace_artifact
+		 SET title=$2, description=$3, provider=$4, external_ref=$5, content=$6, content_hash=$7, size_bytes=$8, mime_type=$9, kind=$10, saga_id=$11,
+		     status='draft', version=$12, updated_at=$13
+		 WHERE id=$1`,
+		artifact.ID, artifact.Title, artifact.Description, artifact.Provider, artifact.ExternalRef,
+		artifact.Content, artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
+		artifact.Kind, nullString(artifact.SagaID), current.Version+1, artifact.UpdatedAt); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// ArtifactVersion is one archived revision of an artifact (migration 0006):
+// today only approved versions are snapshotted, at the moment a new draft
+// revision opens.
+type ArtifactVersion struct {
+	Version      int        `json:"version"`
+	Title        string     `json:"title"`
+	Description  string     `json:"description,omitempty"`
+	Content      string     `json:"content,omitempty"`
+	ContentHash  string     `json:"content_hash,omitempty"`
+	SizeBytes    int64      `json:"size_bytes"`
+	MimeType     string     `json:"mime_type"`
+	Status       string     `json:"status"`
+	OriginType   string     `json:"origin_type,omitempty"`
+	OriginUser   string     `json:"origin_user,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	SupersededAt *time.Time `json:"superseded_at,omitempty"`
+}
+
+// ListArtifactVersions returns the archived revisions of one artifact,
+// newest first, bodies included (bounded list — versions accumulate slowly:
+// one row per approved revision).
+func (s *Store) ListArtifactVersions(ctx context.Context, id string) ([]ArtifactVersion, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT version, title, description, content, content_hash, size_bytes, mime_type, status, origin_type, COALESCE(origin_user, ''), created_at, superseded_at
+		 FROM workspace_artifact_version WHERE artifact_id = $1 ORDER BY version DESC`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []ArtifactVersion{}
+	for rows.Next() {
+		var v ArtifactVersion
+		var originUser string
+		var supersededAt *time.Time
+		if err := rows.Scan(&v.Version, &v.Title, &v.Description, &v.Content, &v.ContentHash, &v.SizeBytes,
+			&v.MimeType, &v.Status, &v.OriginType, &originUser, &v.CreatedAt, &supersededAt); err != nil {
+			return nil, err
+		}
+		v.OriginUser = originUser
+		v.SupersededAt = supersededAt
+		result = append(result, v)
+	}
+	return result, rows.Err()
 }
 
 // artifactEditConflict distinguishes the reasons an edit landed on zero rows.

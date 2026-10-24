@@ -125,6 +125,10 @@ func (f *fakeArtifactLifecycleStore) ListArtifactReviews(_ context.Context, _ st
 	return f.reviews, nil
 }
 
+func (f *fakeArtifactLifecycleStore) ListArtifactVersions(_ context.Context, _ string) ([]workspace.ArtifactVersion, error) {
+	return []workspace.ArtifactVersion{}, nil
+}
+
 func (f *fakeArtifactLifecycleStore) CountArtifactSubmits(_ context.Context, _ string, _ time.Time) (int, error) {
 	return f.submitCount, f.countErr
 }

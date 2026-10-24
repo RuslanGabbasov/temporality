@@ -5924,6 +5924,39 @@ func main() {
 			artifact.SagaID = current.SagaID
 		}
 		artifact.OrgUnitID = current.OrgUnitID
+		// Editing an approved artifact is the documented «новая редакция» move
+		// (docs/artifact-lifecycle.md §5): the approved body is snapshotted and
+		// the row reopens as version+1 draft. Humans get that path; the
+		// kernel service identity (artifact_update tool) keeps the hard
+		// refusal — agents must not cycle approved documents on their own.
+		if current.Status == workspace.ArtifactApproved {
+			if isKernelInternal(r) {
+				writeError(w, 409, fmt.Errorf("%w: artifact is approved — agents cannot revise approved documents; ask a human", workspace.ErrArtifactLocked))
+				return
+			}
+			if err := ws.SaveArtifactNewVersion(r.Context(), artifact); err != nil {
+				if errors.Is(err, workspace.ErrArtifactLocked) {
+					writeError(w, 409, err)
+					return
+				}
+				if errors.Is(err, workspace.ErrNotFound) {
+					writeError(w, 404, err)
+					return
+				}
+				writeError(w, 500, err)
+				return
+			}
+			_ = ws.RecordAccessAudit(r.Context(), requestUserID(r), workspace.AuditArtifactUpdated, "artifact", artifact.ID, map[string]any{
+				"title": artifact.Title, "new_version": true, "from_version": current.Version,
+			})
+			emitArtifactLifecycleEvent(r.Context(), events, "artifact.updated", artifact.ID, map[string]any{
+				"artifact_id": artifact.ID, "version": current.Version + 1, "new_version": true, "from_version": current.Version, "actor": requestUserID(r),
+			})
+			updated, _ := ws.GetArtifactRange(r.Context(), artifact.ID, 0, 0)
+			updated.Content = ""
+			writeJSON(w, 200, updated)
+			return
+		}
 		if err := ws.SaveArtifactEdit(r.Context(), artifact); err != nil {
 			if errors.Is(err, workspace.ErrArtifactLocked) {
 				writeError(w, 409, err)

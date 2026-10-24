@@ -39,6 +39,7 @@ type artifactLifecycleStore interface {
 	GetArtifactReview(ctx context.Context, reviewID string) (workspace.ArtifactReview, error)
 	ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error)
 	ListArtifactReviews(ctx context.Context, artifactID string) ([]workspace.ArtifactReview, error)
+	ListArtifactVersions(ctx context.Context, artifactID string) ([]workspace.ArtifactVersion, error)
 	CountArtifactSubmits(ctx context.Context, runID string, since time.Time) (int, error)
 	ListUsers(ctx context.Context) ([]workspace.User, error)
 	RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error
@@ -198,6 +199,21 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			reviews = []workspace.ArtifactReview{}
 		}
 		writeJSON(w, 200, map[string]any{"reviews": reviews})
+	})
+
+	// Archived revisions of one artifact (docs/artifact-lifecycle.md §12:
+	// version snapshots), newest first. Bodies included — the list is small
+	// (one row per approved revision), and the UI shows the stored text.
+	mux.HandleFunc("GET /v1/workspace/artifacts/{artifactID}/versions", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		versions, err := ws.ListArtifactVersions(r.Context(), r.PathValue("artifactID"))
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"versions": versions})
 	})
 
 	decisionHandler := func(approve bool) http.HandlerFunc {

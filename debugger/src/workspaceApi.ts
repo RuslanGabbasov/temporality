@@ -760,6 +760,23 @@ export interface Artifact {
   updated_at: string
 }
 
+/** One archived revision of an artifact (docs/artifact-lifecycle.md §12):
+ * the approved body, snapshotted when a new draft revision opened. */
+export interface ArtifactVersion {
+  version: number
+  title: string
+  description?: string
+  content?: string
+  content_hash?: string
+  size_bytes: number
+  mime_type: string
+  status: string
+  origin_type?: 'human' | 'agent'
+  origin_user?: string
+  created_at: string
+  superseded_at?: string
+}
+
 /** One review round of one artifact version (docs/artifact-lifecycle.md §3.3):
  * mode=all closes when every reviewer approved (a reject closes immediately),
  * mode=any closes on the first decision. */
@@ -1494,6 +1511,8 @@ export const workspaceApi = {
   },
   getArtifact: (id: string) =>
     request<{ artifact: Artifact; offset: number; next_offset: number; truncated: boolean }>(`/v1/workspace/artifacts/${id}`),
+  listArtifactVersions: (id: string) =>
+    request<{ versions: ArtifactVersion[] }>(`/v1/workspace/artifacts/${id}/versions`),
   createArtifact: (data: Partial<Artifact> & { id: string; title: string }) =>
     request<Artifact>('/v1/workspace/artifacts', { method: 'POST', body: JSON.stringify(data) }),
   updateArtifact: (id: string, data: Partial<Artifact>) =>
