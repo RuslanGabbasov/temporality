@@ -1692,37 +1692,46 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', alignSelf: 'center', margin: 0, maxWidth: '420px' }}>{t('agents.read_only_legacy_hint') ?? 'This agent has no structured definition (the Capabilities panel does not apply to it) — so its file access switches here. Example: the system intake agent.'}</p>
                   </div>
                 )}
-                <Select
-                  id="agent-egress-level"
-                  labelText={t('agents.egress_level') ?? 'Network access'}
-                  value={egressLevel}
-                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
-                    const level = e.target.value
-                    setEgressLevelOverride(level)
-                    if (level === 'off') setForm({ ...form, network_access: false, egress_allowlist: [] })
-                    else if (level === 'allowlist') setForm({ ...form, network_access: false, egress_allowlist: form.egress_allowlist && form.egress_allowlist.length > 0 ? form.egress_allowlist : [] })
-                    else setForm({ ...form, network_access: true })
-                  }}
-                  helperText={egressLevel === 'off'
-                    ? (t('agents.egress_off_hint') ?? 'The agent works only inside its workspace.')
-                    : egressLevel === 'allowlist'
-                      ? (t('agents.egress_allowlist_only_hint') ?? 'Exactly the addresses listed below — nothing else.')
-                      : (t('agents.egress_public_hint') ?? 'Public internet is reachable; your LAN stays closed.')}
-                >
-                  <SelectItem value="off" text={t('agents.egress_off') ?? 'No network'} />
-                  <SelectItem value="allowlist" text={t('agents.egress_allowlist_only') ?? 'Only allowed addresses'} />
-                  <SelectItem value="public" text={t('agents.egress_public') ?? 'Open internet (LAN closed)'} />
-                </Select>
-                {egressLevel !== 'off' && (
-                  <TextArea
-                    id="agent-egress"
-                    labelText={t('agents.egress_allowlist') ?? 'Allowed addresses'}
-                    value={(form.egress_allowlist ?? []).join('\n')}
-                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, egress_allowlist: e.target.value.split('\n').map((line) => line.trim()).filter(Boolean) })}
-                    rows={3}
-                    helperText={t('agents.egress_allowlist_hint') ?? 'One entry per line: a domain (api.github.com), a glob (*.example.com), a CIDR (10.20.30.0/24) or host:port. Your local network stays closed unless you list an address from it.'}
-                  />
-                )}
+                {/* Network access as one horizontal block: the level on the
+                    left, the destination list (when the level uses it) on
+                    the right. */}
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                  <div style={{ width: '45%', minWidth: 0 }}>
+                    <Select
+                      id="agent-egress-level"
+                      labelText={t('agents.egress_level') ?? 'Network access'}
+                      value={egressLevel}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                        const level = e.target.value
+                        setEgressLevelOverride(level)
+                        if (level === 'off') setForm({ ...form, network_access: false, egress_allowlist: [] })
+                        else if (level === 'allowlist') setForm({ ...form, network_access: false, egress_allowlist: form.egress_allowlist && form.egress_allowlist.length > 0 ? form.egress_allowlist : [] })
+                        else setForm({ ...form, network_access: true })
+                      }}
+                      helperText={egressLevel === 'off'
+                        ? (t('agents.egress_off_hint') ?? 'The agent works only inside its workspace.')
+                        : egressLevel === 'allowlist'
+                          ? (t('agents.egress_allowlist_only_hint') ?? 'Exactly the addresses listed on the right — nothing else.')
+                          : (t('agents.egress_public_hint') ?? 'Public internet is reachable; your LAN stays closed.')}
+                    >
+                      <SelectItem value="off" text={t('agents.egress_off') ?? 'No network'} />
+                      <SelectItem value="allowlist" text={t('agents.egress_allowlist_only') ?? 'Only allowed addresses'} />
+                      <SelectItem value="public" text={t('agents.egress_public') ?? 'Open internet (LAN closed)'} />
+                    </Select>
+                  </div>
+                  {egressLevel !== 'off' && (
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <TextArea
+                        id="agent-egress"
+                        labelText={t('agents.egress_allowlist') ?? 'Allowed addresses'}
+                        value={(form.egress_allowlist ?? []).join('\n')}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, egress_allowlist: e.target.value.split('\n').map((line) => line.trim()).filter(Boolean) })}
+                        rows={3}
+                        helperText={t('agents.egress_allowlist_hint') ?? 'One entry per line: a domain (api.github.com), a glob (*.example.com), a CIDR (10.20.30.0/24) or host:port. Your local network stays closed unless you list an address from it.'}
+                      />
+                    </div>
+                  )}
+                </div>
                 <Select
                   id="agent-approval"
                   labelText={t('agents.approval_mode') ?? 'Control level'}
