@@ -93,7 +93,7 @@ describe('ConsoleOutput (§6, DoD-5)', () => {
     expect(fetchCalls()).toEqual([TAIL_URL])
   })
 
-  it('streams stdout/stderr frames into separate tabs and settles on done+exit_code', async () => {
+  it('streams stdout/stderr frames into one merged feed and settles on done+exit_code', async () => {
     vi.stubGlobal('fetch', vi.fn((input: unknown) => {
       const url = String(input)
       if (url === TAIL_URL) return Promise.resolve(tailResponse())
@@ -109,12 +109,15 @@ describe('ConsoleOutput (§6, DoD-5)', () => {
     }))
     await renderConsole({ live: true })
     expect(streamOpened).toBe(1)
-    expect(tabs().map((tab) => tab.textContent)).toEqual(['stdout · 3', 'stderr · 1'])
+    // Streamed frames apply asynchronously — wait (bounded) for the merged
+    // feed to pick them up.
+    for (let i = 0; i < 20 && !text().includes('boom'); i += 1) {
+      await act(async () => { await Promise.resolve() })
+    }
     expect(text()).toContain('working')
-    // Switch to the stderr tab — its content is separate, and highlighted.
-    await act(async () => { tabs()[1].click() })
     expect(text()).toContain('boom')
-    expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('stderr')
+    // Let the done frame's state update flush before asserting the badge.
+    await act(async () => {})
     // done ends the stream: the exit badge replaces the live marker.
     expect(text()).toContain('exit 2')
     expect(text()).not.toContain('streaming output')
@@ -211,31 +214,33 @@ describe('ConsoleOutput (§6, DoD-5)', () => {
     vi.useRealTimers()
   })
 
-  it('shows the failure surface on a 404 tail when the run is not live', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('not found', { status: 404 }))))
-    await renderConsole({ live: false })
-    expect(text()).toContain('Output unavailable')
-    expect(text()).toContain('console tail 404')
+  it('shows the journal saved copy on a 404 tail when the run is not live', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: unknown) => {
+      const url = String(input)
+      if (url.includes('/console/')) return Promise.resolve(new Response('not found', { status: 404 }))
+      if (url.includes('/observations/events')) {
+        return Promise.resolve(new Response(JSON.stringify({ events: [{ data: { operation_id: 'op-42', output: 'saved line\n' } }] }), { headers: { 'Content-Type': 'application/json' } }))
+      }
+      return Promise.reject(new Error(`unexpected ${url}`))
+    }))
+    await renderConsole({ live: false, runId: 'run-1' })
+    expect(text()).toContain('saved line')
+    expect(text()).not.toContain('\\n')
   })
 
-  it('copies the active stream buffer and the console:// URI', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(tailResponse())))
+  it('copies the merged output buffer', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(tailResponse({ stderr_tail: 'warn line\n' }))))
     const writeText = vi.fn(async () => {})
     // Keep `language` explicit: navigator's own enumerable properties do not
     // include the prototype getters (language), and the I18nProvider reads it.
     vi.stubGlobal('navigator', { ...navigator, language: navigator.language, clipboard: { writeText } })
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true })
     await renderConsole({ live: false })
-    const copy = tabs().find(() => false) // placeholder, replaced below
-    void copy
-    const buttons = Array.from(document.querySelectorAll('button'))
-    const streamCopy = buttons.find((button) => button.textContent === 'Copy')
-    await act(async () => { streamCopy!.click() })
-    expect(writeText).toHaveBeenLastCalledWith('first line\nsecond line\n')
-    expect(text()).toContain('Copied')
-    const uriCopy = buttons.find((button) => button.getAttribute('title')?.includes('console://'))
-    await act(async () => { uriCopy!.click() })
-    expect(writeText).toHaveBeenLastCalledWith('console://op-42')
+    const copy = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '⧉')
+    await act(async () => { copy!.click() })
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('second line'))
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('warn line'))
+    expect(text()).toContain('✓')
   })
 })
 
