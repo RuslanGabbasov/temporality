@@ -380,6 +380,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
       tools: [],
     })
     setFromWizard(true)
+    setEgressLevelOverride(null)
     setFormTab('general')
     setShowForm(true)
     setWizardOpen(false)
@@ -416,6 +417,7 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     setDraftQuestions([])
     setPromptPreview(null)
     setForm({ ...agent, definition: agent.definition ? { ...agent.definition } : {} })
+    setEgressLevelOverride(null)
     setShowForm(true)
   }
 
@@ -878,10 +880,13 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
 
   // The human network-access level (docs/agent-behavior-monitoring.md §7):
   // derived from the stored pair so the radio tiles reflect any agent —
-  // including ones configured through the API before this UI existed.
-  const egressLevel = form.network_access
-    ? 'public'
-    : (form.egress_allowlist ?? []).length > 0 ? 'allowlist' : 'off'
+  // including ones configured through the API before this UI existed. The
+  // override exists because "allowlist with an empty list" derives back to
+  // "off", which would make the level unselectable exactly when the user
+  // needs to start typing entries into it. Reset whenever a fresh form loads.
+  const [egressLevelOverride, setEgressLevelOverride] = useState<string | null>(null)
+  const egressLevel = egressLevelOverride
+    ?? (form.network_access ? 'public' : (form.egress_allowlist ?? []).length > 0 ? 'allowlist' : 'off')
 
   return (
     <div style={{ padding: '1rem' }}>
@@ -1668,15 +1673,25 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                     <SelectItem key={p.id} value={p.id} text={`${p.name}${(p.toolchains ?? []).length > 0 ? ' · ' + (p.toolchains ?? []).join(', ') : ''}${p.available ? '' : ' — ' + (t('agents.sandbox_not_built') ?? 'not built')}`} />
                   ))}
                 </Select>
-                <div style={{ display: 'flex', gap: '1rem' }}>
-                  <Toggle id="agent-readonly" labelText={t('agents.read_only') ?? 'Read-only'} toggled={form.read_only ?? false} onToggle={(checked: boolean) => setForm({ ...form, read_only: checked })} />
-                </div>
+                {/* Read-only is NOT a separate switch when the structured
+                    definition exists: «Возможности → Изменять файлы» is the
+                    single source — unticking it makes the workspace mount
+                    read-only AND removes the file-writing tools (the backend
+                    has done this coordination all along). The manual toggle
+                    survives only for legacy prompt-only agents. */}
+                {(!form.definition || Object.keys(form.definition).length === 0) && (
+                  <div style={{ display: 'flex', gap: '1rem' }}>
+                    <Toggle id="agent-readonly" labelText={t('agents.read_only') ?? 'Read-only workspace'} toggled={form.read_only ?? false} onToggle={(checked: boolean) => setForm({ ...form, read_only: checked })} />
+                    <p style={{ fontSize: '0.7rem', color: 'var(--tm-text-3)', alignSelf: 'center', margin: 0 }}>{t('agents.read_only_legacy_hint') ?? 'Legacy agent without a structured definition — set file permissions in the Capabilities panel of defined agents.'}</p>
+                  </div>
+                )}
                 <Select
                   id="agent-egress-level"
                   labelText={t('agents.egress_level') ?? 'Network access'}
                   value={egressLevel}
                   onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
                     const level = e.target.value
+                    setEgressLevelOverride(level)
                     if (level === 'off') setForm({ ...form, network_access: false, egress_allowlist: [] })
                     else if (level === 'allowlist') setForm({ ...form, network_access: false, egress_allowlist: form.egress_allowlist && form.egress_allowlist.length > 0 ? form.egress_allowlist : [] })
                     else setForm({ ...form, network_access: true })

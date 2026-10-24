@@ -834,6 +834,7 @@ export const en: Record<string, string> = {
     'agents.egress_allowlist': 'Egress allowlist',
     'agents.egress_allowlist_hint': 'One entry per line: a domain (api.github.com), a glob (*.example.com), a CIDR (10.20.30.0/24) or host:port. Private addresses are denied by default — the list opens specific ones. Requires the egress proxy on the stand.',
     'agents.egress_level': 'Network access',
+    'agents.read_only_legacy_hint': 'A legacy agent without a structured definition. For defined agents, file permissions live in Capabilities → Modify files — unticking it mounts the workspace read-only.',
     'agents.egress_off': 'No network',
     'agents.egress_off_hint': 'The agent works only inside its workspace.',
     'agents.egress_allowlist_only': 'Only allowed addresses',
