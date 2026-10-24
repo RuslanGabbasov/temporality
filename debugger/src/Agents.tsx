@@ -2034,6 +2034,22 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
     onChange: (tools: string[]) => void
   }) {
     const t = useT()
+    // Filter: tons of tools once MCP servers join — match against tool name
+    // AND description, case-insensitive.
+    const [toolFilter, setToolFilter] = useState('')
+    const matches = (tool: MCPToolInfo) => {
+      const q = toolFilter.trim().toLowerCase()
+      if (!q) return true
+      return (tool.name ?? '').toLowerCase().includes(q)
+        || (tool.model_name ?? '').toLowerCase().includes(q)
+        || (tool.description ?? '').toLowerCase().includes(q)
+    }
+    const visibleBuiltins = builtinDefs.filter(matches)
+    const visibleServers = servers
+      .map((s) => ({ ...s, tools: s.tools.filter(matches) }))
+      .filter((s) => s.tools.length > 0)
+    const filterEmpty = toolFilter.trim() !== '' && visibleBuiltins.length === 0 && visibleServers.length === 0
+
     if (builtinDefs.length === 0 && servers.length === 0) return null
     // Empty selection = all tools allowed; show every checkbox checked.
     const allMode = selected.length === 0
@@ -2084,18 +2100,27 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
             ? (t('agents.tools_all_hint') ?? 'All tools are allowed. Uncheck one to restrict the agent.')
             : (t('agents.tools_restricted_hint', { count: String(selected.length) }) ?? `${selected.length} tools allowed.`)}
         </p>
-        <div style={{ maxHeight: '12rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
-          <p className="cds--label" style={{ fontSize: '0.7rem', margin: '0 0 0.25rem' }}>{t('agents.tools_builtin') ?? 'Built-in'}</p>
-          {builtinDefs.map((tool) => row(tool, `b-${tool.name}`))}
-          {servers.map((server) => (
-            <div key={server.id}>
-              <p className="cds--label" style={{ fontSize: '0.7rem', margin: '0.5rem 0 0.25rem' }}>{server.name}</p>
-              {server.tools.length === 0 && (
-                <p style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', margin: 0 }}>{t('agents.tools_no_tools') ?? 'no tools discovered'}</p>
-              )}
-              {server.tools.map((tool) => row(tool, `s-${server.id}-${tool.name}`))}
-            </div>
-          ))}
+        <div style={{ marginBottom: '0.5rem' }}>
+          <ListFilter value={toolFilter} onChange={setToolFilter} placeholder={t('agents.tools_filter') ?? 'Filter tools…'} />
+        </div>
+        <div style={{ maxHeight: '22rem', overflow: 'auto', padding: '0.5rem 0.75rem', border: '1px solid var(--tm-border)', borderRadius: '6px' }}>
+          {filterEmpty ? (
+            <p style={{ color: 'var(--tm-text-3)', fontSize: '0.75rem', margin: 0 }}>{t('agents.tools_filter_empty') ?? 'Nothing matches the filter.'}</p>
+          ) : (
+            <>
+              <p className="cds--label" style={{ fontSize: '0.7rem', margin: '0 0 0.25rem' }}>{t('agents.tools_builtin') ?? 'Built-in'}</p>
+              {visibleBuiltins.map((tool) => row(tool, `b-${tool.name}`))}
+              {visibleServers.map((server) => (
+                <div key={server.id}>
+                  <p className="cds--label" style={{ fontSize: '0.7rem', margin: '0.5rem 0 0.25rem' }}>{server.name}</p>
+                  {server.tools.length === 0 && (
+                    <p style={{ color: 'var(--tm-text-3)', fontSize: '0.7rem', margin: 0 }}>{t('agents.tools_no_tools') ?? 'no tools discovered'}</p>
+                  )}
+                  {server.tools.map((tool) => row(tool, `s-${server.id}-${tool.name}`))}
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </div>
     )

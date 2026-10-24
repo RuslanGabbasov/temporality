@@ -899,6 +899,8 @@ export const en: Record<string, string> = {
     'agents.tools_count': '{{count}} tools',
     'agents.tools_builtin': 'Built-in',
     'agents.tools_no_tools': 'no tools discovered',
+    'agents.tools_filter': 'Filter tools…',
+    'agents.tools_filter_empty': 'Nothing matches the filter.',
     'agents.mcp_servers': 'MCP servers',
     // Structured definitions (docs/evaluable-agent.md)
     'agents.purpose': 'Purpose',
