@@ -39,8 +39,14 @@
 <div class="docs-eyebrow">Getting started</div>
 <h1>Introduction</h1>
 <p class="docs-lead">What Temporality is, who it is for and what it is made of — a ten-minute overview of the system.</p>
-<p><strong>Temporality</strong> is an open observability and experience-compounding system for AI agents.</p>
-<p>A conventional chat bot forgets everything between sessions, and its &quot;memory&quot; is a junk drawer of notes stuffed into context. Temporality works differently: the agent runs tasks in a durable runtime while the system records <strong>what it knew and did</strong> — where the knowledge came from, how it was applied, what held up and what turned out to be wrong, and how that experience changed over time. On the next task, verified experience comes back to the agent in a compact form that does not flood the context.</p>
+<p><strong>Temporality</strong> is an open runtime and control plane for agent systems: it runs long-lived tasks, keeps an evidence-backed history of every action, governs permissions and oversight — and turns verified experience into knowledge and skills that work on the next tasks.</p>
+<p>A conventional chat bot forgets everything between sessions, and its &quot;memory&quot; is a junk drawer of notes stuffed into context. An autonomous agent working inside a team needs execution, control and learning at once: tasks must survive restarts, actions must leave evidence, permissions must match the org structure, and mistakes must become experience instead of repeating. Temporality covers all four layers with one self-hosted stack:</p>
+<ol>
+<li><strong>Execute</strong> — long-lived tasks, delegation to subagents, plan DAGs, human approvals.</li>
+<li><strong>Observe</strong> — an event journal, traces, a live command console, cause reconstruction.</li>
+<li><strong>Control</strong> — capabilities and policies, secrets, egress rules, behavior-anomaly signals.</li>
+<li><strong>Improve</strong> — experience → knowledge with status and provenance → skills → reuse.</li>
+</ol>
 <pre><code class="language-text">Agent Kernel ──events──▶ Journal ──projection──▶ Knowledge / Hints
      ▲                      │                         │
      └──────── hints ◀──────┴──── Experience Timeline ┘
