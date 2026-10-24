@@ -871,16 +871,18 @@ func (a *Activities) sandboxRequest(request ToolRequest, command []string, timeo
 		// can show who consumes the host.
 		Labels: sandboxLabels(request),
 	}
-	// Egress control (docs/agent-behavior-monitoring.md §7): when the egress
-	// stack is deployed (ports file exists), network-needing sandboxes run on
-	// the internal network and reach the internet only through the proxy —
-	// the agent's dedicated port IS its allowlist policy. Without the stack,
-	// the legacy bridge behavior stays.
-	if net != "" {
-		if proxyEnv := a.EgressProxyEnv(request.AgentID); len(proxyEnv) > 0 {
-			net = sandbox.SandboxInternalNetworkName
-			req.Env = append(req.Env, proxyEnv...)
-		}
+	// Egress control (docs/agent-behavior-monitoring.md §7): the public-network
+	// toggle and the allowlist are INDEPENDENT axes. An allowlist-only agent
+	// (network off, specific destinations listed) still gets the internal
+	// network + its proxy port — the port allows exactly the listed entries
+	// and nothing else. Without the egress stack, the legacy bridge behavior
+	// stays.
+	proxyEnv, hasPort := a.EgressProxyEnv(request.AgentID)
+	if net != "" || hasPort {
+		net = sandbox.SandboxInternalNetworkName
+		req.Env = append(req.Env, proxyEnv...)
+	} else if net != "" {
+		net = "bridge" // network on, egress stack absent — legacy
 	}
 	if spec := request.Sandbox; spec != nil {
 		if spec.Image == "" {
@@ -903,33 +905,37 @@ func (a *Activities) sandboxRequest(request ToolRequest, command []string, timeo
 }
 
 // EgressProxyEnv returns the HTTP(S)_PROXY env entries pointing the sandbox
-// at the agent's dedicated egress-proxy port, or nil when the egress stack is
-// not deployed (no ports file) — then the legacy bridge network stays.
-func (a *Activities) EgressProxyEnv(agentID string) []string {
+// at the agent's dedicated egress-proxy port, and whether the agent has an
+// egress identity at all. nil/false = the egress stack is not deployed (no
+// ports file) — the legacy bridge network stays. The default port (deny-all)
+// is used only for runs without an agent.
+func (a *Activities) EgressProxyEnv(agentID string) ([]string, bool) {
 	if a.Sandbox == nil || a.Sandbox.SandboxRoot() == "" {
-		return nil
+		return nil, false
 	}
 	raw, err := os.ReadFile(filepath.Join(a.Sandbox.SandboxRoot(), "egress", "ports.json"))
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	var ports map[string]int
 	if json.Unmarshal(raw, &ports) != nil {
-		return nil
+		return nil, false
 	}
 	port, ok := ports[agentID]
 	if !ok {
-		port = ports["default"]
+		// An agent unknown to the egress config (network-off without an
+		// allowlist) has no business on the internal network.
+		return nil, false
 	}
 	if port == 0 {
-		return nil
+		return nil, false
 	}
 	proxy := fmt.Sprintf("http://egress-proxy:%d", port)
 	return []string{
 		"HTTP_PROXY=" + proxy, "HTTPS_PROXY=" + proxy,
 		"http_proxy=" + proxy, "https_proxy=" + proxy,
 		"NO_PROXY=localhost,127.0.0.1",
-	}
+	}, true
 }
 
 // sandboxLabels tags a sandbox container with the run identity: only non-empty

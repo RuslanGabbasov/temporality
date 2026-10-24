@@ -75,8 +75,14 @@ func generateEgressConfig(agents []workspace.Agent) (string, EgressPorts) {
 	b.WriteString("acl private_nets dst 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 127.0.0.0/8 fc00::/7\n\n")
 
 	for _, agent := range entries {
+		// Allowlist-only agents (network off, specific destinations listed)
+		// get a port too: their proxy allows exactly the listed entries and
+		// nothing else — the public internet stays out of reach.
+		if !agent.Public && len(agent.Allow) == 0 {
+			continue
+		}
 		port := assignEgressPort(agent.ID, used, ports)
-		if agent.Public {
+		if agent.Public || len(agent.Allow) > 0 {
 			ports[agent.ID] = port
 		}
 		slug := egressSlug(agent.ID)

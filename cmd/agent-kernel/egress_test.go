@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -58,6 +59,27 @@ func TestGenerateEgressConfigNoNetworkNoPublic(t *testing.T) {
 	}
 	if strings.Contains(conf, "http_access allow p_local-only !private_nets") {
 		t.Fatalf("network-off agent must not get a public allow")
+	}
+}
+
+// The allowlist works independently of the public-network toggle: an agent
+// with network OFF and destinations listed gets a port and an explicit-allow
+// block, but NO public-internet rule.
+func TestGenerateEgressConfigAllowlistOnlyAgent(t *testing.T) {
+	conf, ports := generateEgressConfig([]workspace.Agent{
+		{ID: "scoped", EgressAllowlist: []string{"gitlab.corp", "10.20.30.0/24"}},
+	})
+	if ports["scoped"] == 0 {
+		t.Fatalf("allowlist-only agent must get a port: %+v", ports)
+	}
+	if !strings.Contains(conf, "http_port "+fmt.Sprint(ports["scoped"])) {
+		t.Fatalf("port not declared: %s", conf)
+	}
+	if !strings.Contains(conf, "http_access allow p_scoped p_scoped_dst") {
+		t.Fatalf("explicit CIDR allow missing: %s", conf)
+	}
+	if strings.Contains(conf, "http_access allow p_scoped !private_nets") {
+		t.Fatalf("public allow must be absent for an allowlist-only agent")
 	}
 }
 
