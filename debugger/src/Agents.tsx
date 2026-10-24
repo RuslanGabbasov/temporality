@@ -15,6 +15,9 @@ import {
   Toggle,
   NumberInput,
   Checkbox,
+  RadioTile,
+  TileGroup,
+
 } from '@carbon/react'
 import PageLoading from './PageLoading'
 import { Add, Edit, TrashCan, Copy, Star, Renew, Settings } from '@carbon/icons-react'
@@ -875,6 +878,13 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
         : source === 'legacy' ? (t('agents.source_legacy') ?? 'manual prompt (legacy)')
           : (t('agents.source_role') ?? 'base contract')
 
+  // The human network-access level (docs/agent-behavior-monitoring.md §7):
+  // derived from the stored pair so the radio tiles reflect any agent —
+  // including ones configured through the API before this UI existed.
+  const egressLevel = form.network_access
+    ? 'public'
+    : (form.egress_allowlist ?? []).length > 0 ? 'allowlist' : 'off'
+
   return (
     <div style={{ padding: '1rem' }}>
       {confirmDialogNode}
@@ -1661,9 +1671,44 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                   ))}
                 </Select>
                 <div style={{ display: 'flex', gap: '1rem' }}>
-                  <Toggle id="agent-network" labelText={t('agents.network') ?? 'Network'} toggled={form.network_access ?? false} onToggle={(checked: boolean) => setForm({ ...form, network_access: checked })} />
                   <Toggle id="agent-readonly" labelText={t('agents.read_only') ?? 'Read-only'} toggled={form.read_only ?? false} onToggle={(checked: boolean) => setForm({ ...form, read_only: checked })} />
                 </div>
+                {/* Network access as three human levels instead of a toggle
+                    + a list: the level IS the semantics, the list is the
+                    exception detail (docs/agent-behavior-monitoring.md §7). */}
+                <TileGroup
+                  name="agent-egress-level"
+                  legend={t('agents.egress_level') ?? 'Network access'}
+                  valueSelected={egressLevel}
+                  onChange={(value: string) => {
+                    if (value === 'off') setForm({ ...form, network_access: false, egress_allowlist: [] })
+                    else if (value === 'allowlist') setForm({ ...form, network_access: false, egress_allowlist: form.egress_allowlist && form.egress_allowlist.length > 0 ? form.egress_allowlist : [] })
+                    else setForm({ ...form, network_access: true })
+                  }}
+                >
+                  <RadioTile id="egress-off" value="off">
+                    {t('agents.egress_off') ?? 'No network'}
+                    <span className="tile-hint">{t('agents.egress_off_hint') ?? 'The agent works only inside its workspace.'}</span>
+                  </RadioTile>
+                  <RadioTile id="egress-allowlist" value="allowlist">
+                    {t('agents.egress_allowlist_only') ?? 'Only allowed addresses'}
+                    <span className="tile-hint">{t('agents.egress_allowlist_only_hint') ?? 'Exactly the addresses listed below — nothing else, not even the public internet.'}</span>
+                  </RadioTile>
+                  <RadioTile id="egress-public" value="public">
+                    {t('agents.egress_public') ?? 'Open internet'}
+                    <span className="tile-hint">{t('agents.egress_public_hint') ?? 'The public internet is reachable. Your LAN and private addresses stay closed — unless listed below.'}</span>
+                  </RadioTile>
+                </TileGroup>
+                {egressLevel !== 'off' && (
+                  <TextArea
+                    id="agent-egress"
+                    labelText={t('agents.egress_allowlist') ?? 'Allowed addresses'}
+                    value={(form.egress_allowlist ?? []).join('\n')}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, egress_allowlist: e.target.value.split('\n').map((line) => line.trim()).filter(Boolean) })}
+                    rows={3}
+                    helperText={t('agents.egress_allowlist_hint') ?? 'One entry per line: a domain (api.github.com), a glob (*.example.com), a CIDR (10.20.30.0/24) or host:port. Your local network stays closed unless you list an address from it.'}
+                  />
+                )}
                 <Select
                   id="agent-approval"
                   labelText={t('agents.approval_mode') ?? 'Tool approvals'}
@@ -1674,14 +1719,6 @@ export default function Agents({ project, defaultAgentId, refreshProjects }: { p
                   <SelectItem value="" text={t('agents.approval_auto') ?? 'Default (auto-approve workspace & web)'} />
                   <SelectItem value="tools" text={t('agents.approval_tools') ?? 'Every tool (ask a human)'} />
                 </Select>
-                <TextArea
-                  id="agent-egress"
-                  labelText={t('agents.egress_allowlist') ?? 'Egress allowlist'}
-                  value={(form.egress_allowlist ?? []).join('\n')}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, egress_allowlist: e.target.value.split('\n').map((line) => line.trim()).filter(Boolean) })}
-                  rows={3}
-                  helperText={t('agents.egress_allowlist_hint') ?? 'One entry per line: a domain (api.github.com), a glob (*.example.com), a CIDR (10.20.30.0/24) or host:port. Private addresses are denied by default — the list opens specific ones. Requires the egress proxy on the stand.'}
-                />
               </Stack>
             )}
             {formTab === 'bindings' && (
