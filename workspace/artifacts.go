@@ -323,17 +323,19 @@ func (s *Store) SaveArtifactNewVersion(ctx context.Context, artifact Artifact) e
 	}
 	defer tx.Rollback(ctx)
 	var current Artifact
+	var originUser string
 	err = tx.QueryRow(ctx,
-		`SELECT version, title, description, content, content_hash, size_bytes, mime_type, status, origin_type, origin_user
+		`SELECT version, title, description, content, content_hash, size_bytes, mime_type, status, origin_type, COALESCE(origin_user, '')
 		 FROM workspace_artifact WHERE id=$1 FOR UPDATE`, artifact.ID).
 		Scan(&current.Version, &current.Title, &current.Description, &current.Content, &current.ContentHash,
-			&current.SizeBytes, &current.MimeType, &current.Status, &current.OriginType, &current.OriginUser)
+			&current.SizeBytes, &current.MimeType, &current.Status, &current.OriginType, &originUser)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
+	current.OriginUser = originUser
 	if current.Status == ArtifactInReview {
 		return fmt.Errorf("%w: artifact is in_review — the version is locked while a review is open", ErrArtifactLocked)
 	}
