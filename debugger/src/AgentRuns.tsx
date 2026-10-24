@@ -1184,7 +1184,12 @@ export default function AgentRuns({ project }: { project: string }) {
                         {agent && <Tag type="gray" size="sm">{agent}</Tag>}
                         {turns > 0 && <Tag type="gray" size="sm">≤ {turns} {t('runs.turns')}</Tag>}
                       </div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--tm-text)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '14rem', overflowY: 'auto', background: 'var(--tm-raised)', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>{request}</div>
+                      {/* Markdown: delegated prompts carry tables and lists
+                          (agents delegate to agents) — plain text mangles
+                          them. Same scroll cap as before. */}
+                      <div style={{ fontSize: '0.85rem', maxHeight: '14rem', overflowY: 'auto', background: 'var(--tm-raised)', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>
+                        <Markdown content={request} />
+                      </div>
                     </Tile>
                   )
                 })()}
