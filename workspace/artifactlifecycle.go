@@ -152,7 +152,7 @@ func (s *Store) SubmitArtifactReview(ctx context.Context, artifactID string, rev
 			return ArtifactReview{}, err
 		}
 		review := ArtifactReview{
-			ID: fmt.Sprintf("%s-v%d-%d", artifactID, draftVersion, time.Now().UTC().UnixNano()),
+			ID:         fmt.Sprintf("%s-v%d-%d", artifactID, draftVersion, time.Now().UTC().UnixNano()),
 			ArtifactID: artifactID, ArtifactVersion: draftVersion,
 			Reviewers: reviewers, Mode: mode, Status: "open",
 			Note: note, RequestedBy: requestedBy, RequestedAt: time.Now().UTC(),
