@@ -168,7 +168,10 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
     const out: Array<{ text: string; stream: 'stdout' | 'stderr' }> = []
     const push = (text: string | undefined, stream: 'stdout' | 'stderr') => {
       if (!text) return
-      for (const line of stripAnsi(text).split('\n')) out.push({ text: line, stream })
+      // RAW lines: ANSI escapes stay in the text — parseAnsiSegments at
+      // render time turns them into colored spans (stripping here would
+      // throw the command's colors away before they ever reach the panel).
+      for (const line of text.split('\n')) out.push({ text: line, stream })
     }
     push(state?.stdout.text, 'stdout')
     push(state?.stderr.text, 'stderr')
@@ -178,7 +181,7 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
 
   // Auto-follow: scroll to the newest line on every content change while
   // the reader has not scrolled away (followPaused).
-  const shown = savedOutput !== null ? stripAnsi(savedOutput) : merged.map((line) => line.text).join('\n')
+  const shown = savedOutput !== null ? stripAnsi(savedOutput) : stripAnsi(merged.map((line) => line.text).join('\n'))
 
   useEffect(() => {
     if (followPaused) return
@@ -206,7 +209,7 @@ export default function ConsoleOutput({ operationId, project, live, onStateLoade
     ))
   }
   function renderAnsiLines(text: string) {
-    const lines = stripAnsi(text).split('\n')
+    const lines = text.split('\n')
     if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
     return lines.map((line, index) => <div key={index}>{renderSegments(line) || '\u00a0'}</div>)
   }
