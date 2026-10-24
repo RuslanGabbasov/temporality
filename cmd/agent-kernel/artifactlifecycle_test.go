@@ -129,6 +129,10 @@ func (f *fakeArtifactLifecycleStore) ListArtifactVersions(_ context.Context, _ s
 	return []workspace.ArtifactVersion{}, nil
 }
 
+func (f *fakeArtifactLifecycleStore) PendingArtifactRevision(context.Context, string) (*workspace.ArtifactVersion, error) {
+	return nil, workspace.ErrNotFound
+}
+
 func (f *fakeArtifactLifecycleStore) CountArtifactSubmits(_ context.Context, _ string, _ time.Time) (int, error) {
 	return f.submitCount, f.countErr
 }

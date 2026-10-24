@@ -71,6 +71,10 @@ export default function Artifacts() {
   const [submitNote, setSubmitNote] = useState('')
   const [decisionComment, setDecisionComment] = useState('')
   const [busy, setBusy] = useState(false)
+  // The open revision of the selected artifact (docs/artifact-lifecycle.md
+  // §5): while it exists the approved version stays live and the card shows
+  // the revision state — edit/review actions target the revision.
+  const [revision, setRevision] = useState<ArtifactVersion | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -98,6 +102,7 @@ export default function Artifacts() {
     setReviews([])
     setReviewsOpen(false)
     setDecisionComment('')
+    setRevision(null)
     if (!selected) return
     if (selected.provider === 'url') return
     let stale = false
@@ -108,6 +113,11 @@ export default function Artifacts() {
         setBodyTruncated(Boolean(page.truncated))
       })
       .catch((f) => { if (!stale) setError(message(f)) })
+    if (selected.status === 'approved') {
+      workspaceApi.getArtifactRevision(selected.id)
+        .then((page) => { if (!stale) setRevision(page.revision ?? null) })
+        .catch(() => { if (!stale) setRevision(null) })
+    }
     return () => { stale = true }
   }, [selected?.id, selected?.version, selected?.provider]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -174,13 +184,37 @@ export default function Artifacts() {
 
   const startEdit = async (a: Artifact) => {
     let content = a.content ?? ''
+    let form: ArtifactForm = { ...a, content }
     if (a.provider !== 'url') {
       try {
         const page = await workspaceApi.getArtifact(a.id)
         content = page.artifact.content ?? ''
+        form = { ...a, content }
       } catch { /* the form still opens with what the listing carries */ }
     }
-    setForm({ ...a, content })
+    // An open revision is the editing surface: the approved body the live
+    // row carries is NOT what the revision continues from.
+    if (a.status === 'approved') {
+      try {
+        const page = await workspaceApi.getArtifactRevision(a.id)
+        if (page.revision) {
+          form = {
+            ...a,
+            title: page.revision.title,
+            description: page.revision.description ?? '',
+            provider: (page.revision.provider as Artifact['provider']) ?? a.provider,
+            external_ref: page.revision.external_ref ?? a.external_ref,
+            content: page.revision.content ?? '',
+            mime_type: page.revision.mime_type ?? a.mime_type,
+            kind: (page.revision.kind as Artifact['kind']) ?? a.kind,
+            saga_id: page.revision.saga_id ?? a.saga_id,
+            content_hash: page.revision.content_hash ?? undefined,
+            size_bytes: page.revision.size_bytes,
+          }
+        }
+      } catch { /* fall back to the live body */ }
+    }
+    setForm(form)
     setEditing(a)
     setShowForm(true)
   }
@@ -370,6 +404,10 @@ export default function Artifacts() {
             const usedBy = references[selected.id] ?? []
             const reviewable = selected.status === 'draft' || selected.status === 'rejected'
             const openReview = (selected.status ?? '') === 'in_review'
+            // An open revision keeps the approved version live: edit/review
+            // actions target the revision, the card keeps showing approved.
+            const revisionOpen = selected.status === 'approved' && revision !== null
+            const revisionEditable = revision?.status === 'draft' || revision?.status === 'rejected'
             return (
               <Tile style={{ padding: '1rem 1.1rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -383,14 +421,19 @@ export default function Artifacts() {
                     </p>
                   </div>
                   <Stack orientation="horizontal" gap={2}>
-                    {reviewable && (
+                    {(reviewable || (revisionOpen && revisionEditable)) && (
                       <Button size="sm" onClick={() => { setSubmitReviewers(''); setSubmitNote(''); setSubmitOpen(true) }}>
                         {t('artifacts.submit_review') ?? 'Send to review'}
                       </Button>
                     )}
-                    {selected.status === 'approved' && (
+                    {selected.status === 'approved' && !revisionOpen && (
                       <Button size="sm" kind="secondary" renderIcon={Edit} onClick={() => void startEdit(selected)}>
                         {t('artifacts.new_revision') ?? 'New revision'}
+                      </Button>
+                    )}
+                    {revisionOpen && revisionEditable && (
+                      <Button size="sm" kind="secondary" renderIcon={Edit} onClick={() => void startEdit(selected)}>
+                        {t('artifacts.edit_revision') ?? 'Edit revision'}
                       </Button>
                     )}
                     <Button size="sm" kind="ghost" hasIconOnly renderIcon={Edit} iconDescription={t('action.edit') ?? 'Edit'}
@@ -413,6 +456,14 @@ export default function Artifacts() {
 
                 {selected.description && (
                   <p style={{ color: 'var(--tm-text-2)', fontSize: '0.8rem', marginTop: '0.6rem', wordBreak: 'break-word' }}>{selected.description}</p>
+                )}
+                {revisionOpen && revision && (
+                  <div style={{ border: '1px solid var(--tm-border)', borderLeft: '3px solid var(--tm-amber)', borderRadius: '6px', padding: '0.5rem 0.7rem', marginTop: '0.6rem', fontSize: '0.78rem' }}>
+                    <strong>{t('artifacts.revision_open_title', { version: String(revision.version) }) ?? `Revision v${revision.version} is open`}</strong>
+                    {' · '}{revision.status === 'in_review'
+                      ? (t('artifacts.revision_in_review') ?? 'on review — the approved version keeps serving until the round resolves')
+                      : (t('artifacts.revision_draft') ?? 'draft — the approved version keeps serving until the revision is approved')}
+                  </div>
                 )}
                 <p style={{ fontSize: '0.7rem', marginTop: '0.4rem', color: 'var(--tm-text-3)' }}>
                   {t('artifacts.origin_prefix') ?? 'created by'}: {originLabel(selected)}
@@ -526,7 +577,7 @@ export default function Artifacts() {
           {editing?.status === 'approved' && (
             <InlineNotification kind="info" lowContrast hideCloseButton
               title={t('artifacts.new_revision_banner_title') ?? 'New revision'}
-              subtitle={t('artifacts.new_revision_banner') ?? 'The approved body is archived to version history; the artifact becomes draft until the new revision is approved. Skills referencing it will see the draft status in the meantime.'}
+              subtitle={t('artifacts.new_revision_banner') ?? 'The edit is saved as draft revision; the approved version keeps serving agents and skills until the revision is approved.'}
               style={{ marginBottom: '0.75rem' }} />
           )}
           <Stack gap={3}>

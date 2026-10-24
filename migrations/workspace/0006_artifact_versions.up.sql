@@ -1,5 +1,5 @@
--- Artifact version history (docs/artifact-lifecycle.md §5, §12 Phase 3 —
--- pulled forward): every approved version is snapshotted before a new draft
+-- Artifact version history (docs/artifact-lifecycle.md §5, §12 — pulled
+-- forward): every approved version is snapshotted before a new draft
 -- revision opens, so «создать новую редакцию» stops destroying the approved
 -- body. One row per (artifact, version); the live workspace_artifact row
 -- always carries the current version.

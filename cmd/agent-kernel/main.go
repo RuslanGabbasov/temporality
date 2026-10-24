@@ -5925,10 +5925,12 @@ func main() {
 		}
 		artifact.OrgUnitID = current.OrgUnitID
 		// Editing an approved artifact is the documented «новая редакция» move
-		// (docs/artifact-lifecycle.md §5): the approved body is snapshotted and
-		// the row reopens as version+1 draft. Humans get that path; the
-		// kernel service identity (artifact_update tool) keeps the hard
-		// refusal — agents must not cycle approved documents on their own.
+		// (docs/artifact-lifecycle.md §5): the edit lands as a draft revision
+		// in the version table while the approved version stays live — agents,
+		// skills and reads keep serving it until the revision is approved.
+		// Humans get that path; the kernel service identity (artifact_update
+		// tool) keeps the hard refusal — agents must not revise approved
+		// documents on their own.
 		if current.Status == workspace.ArtifactApproved {
 			if isKernelInternal(r) {
 				writeError(w, 409, fmt.Errorf("%w: artifact is approved — agents cannot revise approved documents; ask a human", workspace.ErrArtifactLocked))

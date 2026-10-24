@@ -40,6 +40,7 @@ type artifactLifecycleStore interface {
 	ResolveArtifactReview(ctx context.Context, reviewID string, entries []string, decidedBy string, approve bool, comment string) (workspace.ArtifactReview, workspace.Artifact, error)
 	ListArtifactReviews(ctx context.Context, artifactID string) ([]workspace.ArtifactReview, error)
 	ListArtifactVersions(ctx context.Context, artifactID string) ([]workspace.ArtifactVersion, error)
+	PendingArtifactRevision(ctx context.Context, artifactID string) (*workspace.ArtifactVersion, error)
 	CountArtifactSubmits(ctx context.Context, runID string, since time.Time) (int, error)
 	ListUsers(ctx context.Context) ([]workspace.User, error)
 	RecordAccessAudit(ctx context.Context, actor, action, entityKind, entityID string, details map[string]any) error
@@ -214,6 +215,21 @@ func RegisterArtifactLifecycleRoutes(mux *http.ServeMux, gate *controlplane.Gate
 			return
 		}
 		writeJSON(w, 200, map[string]any{"versions": versions})
+	})
+
+	// The open revision of an artifact, if any (docs/artifact-lifecycle.md
+	// §5): the draft the human edits while the approved version stays live.
+	// 200 with revision:null when none — the card polls this on select.
+	mux.HandleFunc("GET /v1/workspace/artifacts/{artifactID}/revision", func(w http.ResponseWriter, r *http.Request) {
+		if !gate.Allow(w, r, controlplane.RoleReader) {
+			return
+		}
+		revision, err := ws.PendingArtifactRevision(r.Context(), r.PathValue("artifactID"))
+		if err != nil && !errors.Is(err, workspace.ErrNotFound) {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"revision": revision})
 	})
 
 	decisionHandler := func(approve bool) http.HandlerFunc {

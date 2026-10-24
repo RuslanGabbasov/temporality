@@ -775,6 +775,11 @@ export interface ArtifactVersion {
   origin_user?: string
   created_at: string
   superseded_at?: string
+  /** Draft-revision fields: the open revision carries the full document. */
+  provider?: 'builtin' | 'url'
+  external_ref?: string
+  kind?: 'reference' | 'work'
+  saga_id?: string
 }
 
 /** One review round of one artifact version (docs/artifact-lifecycle.md §3.3):
@@ -1513,6 +1518,8 @@ export const workspaceApi = {
     request<{ artifact: Artifact; offset: number; next_offset: number; truncated: boolean }>(`/v1/workspace/artifacts/${id}`),
   listArtifactVersions: (id: string) =>
     request<{ versions: ArtifactVersion[] }>(`/v1/workspace/artifacts/${id}/versions`),
+  getArtifactRevision: (id: string) =>
+    request<{ revision: ArtifactVersion | null }>(`/v1/workspace/artifacts/${id}/revision`),
   createArtifact: (data: Partial<Artifact> & { id: string; title: string }) =>
     request<Artifact>('/v1/workspace/artifacts', { method: 'POST', body: JSON.stringify(data) }),
   updateArtifact: (id: string, data: Partial<Artifact>) =>

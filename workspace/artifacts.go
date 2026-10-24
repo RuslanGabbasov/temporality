@@ -308,11 +308,13 @@ func (s *Store) SaveArtifactEdit(ctx context.Context, artifact Artifact) error {
 	return s.artifactEditConflict(ctx, artifact.ID)
 }
 
-// SaveArtifactNewVersion is the human path for editing an approved artifact:
-// the approved body is snapshotted, then the row reopens as version+1 draft
-// with the new content (docs/artifact-lifecycle.md §5 «правка approved →
-// draft(v+1)», made real by the version table). Transactions guard the
-// read-modify-write against a concurrent review opening on the same row.
+// SaveArtifactNewVersion is the human edit path for an approved artifact
+// (docs/artifact-lifecycle.md §5 «правка approved → draft(v+1)»): the
+// approved version STAYS live — agents, skills and reads keep serving it —
+// while the revision is a separate draft row in the version table. First
+// call snapshots the approved body and opens the draft; follow-up calls
+// update the same draft (a rejected draft reopens). The approved version is
+// marked superseded only when the revision is approved (ResolveArtifactReview).
 func (s *Store) SaveArtifactNewVersion(ctx context.Context, artifact Artifact) error {
 	artifact.normalize()
 	artifact.Status = "draft"
@@ -342,32 +344,86 @@ func (s *Store) SaveArtifactNewVersion(ctx context.Context, artifact Artifact) e
 	if current.Status != ArtifactApproved {
 		return fmt.Errorf("%w: artifact is %s", ErrArtifactLocked, current.Status)
 	}
-	// The approved body becomes immutable history before anything overwrites it.
+	// An already-open revision is updated in place; a rejected one reopens.
+	var pendingVersion int
+	var pendingStatus string
+	pendingErr := tx.QueryRow(ctx,
+		`SELECT version, status FROM workspace_artifact_version
+		 WHERE artifact_id=$1 AND status IN ('draft','in_review','rejected')
+		 ORDER BY version DESC LIMIT 1 FOR UPDATE`, artifact.ID).
+		Scan(&pendingVersion, &pendingStatus)
+	if pendingErr == nil {
+		if pendingStatus == ArtifactInReview {
+			return fmt.Errorf("%w: revision v%d is in_review — resolve the round first", ErrArtifactLocked, pendingVersion)
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE workspace_artifact_version
+			 SET title=$3, description=$4, content=$5, content_hash=$6, size_bytes=$7, mime_type=$8,
+			     provider=$9, external_ref=$10, kind=$11, saga_id=$12, status='draft'
+			 WHERE artifact_id=$1 AND version=$2`,
+			artifact.ID, pendingVersion, artifact.Title, artifact.Description, artifact.Content,
+			artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
+			artifact.Provider, artifact.ExternalRef, artifact.Kind, nullString(artifact.SagaID)); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+	if !errors.Is(pendingErr, pgx.ErrNoRows) {
+		return pendingErr
+	}
+	// First revision: the approved body becomes immutable history (not yet
+	// superseded — it serves until the revision is approved), then the draft.
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO workspace_artifact_version
-		 (artifact_id, version, title, description, content, content_hash, size_bytes, mime_type, status, origin_type, origin_user, created_at, superseded_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'approved',$9,$10, now(), now())
+		 (artifact_id, version, title, description, content, content_hash, size_bytes, mime_type, status, origin_type, origin_user, provider, external_ref, kind, saga_id, created_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'approved',$9,$10,$11,$12,$13,$14, now())
 		 ON CONFLICT (artifact_id, version) DO NOTHING`,
 		artifact.ID, current.Version, current.Title, current.Description, current.Content, current.ContentHash,
-		current.SizeBytes, current.MimeType, current.OriginType, nullString(current.OriginUser)); err != nil {
+		current.SizeBytes, current.MimeType, current.OriginType, nullString(current.OriginUser),
+		current.Provider, current.ExternalRef, current.Kind, nullString(current.SagaID)); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx,
-		`UPDATE workspace_artifact
-		 SET title=$2, description=$3, provider=$4, external_ref=$5, content=$6, content_hash=$7, size_bytes=$8, mime_type=$9, kind=$10, saga_id=$11,
-		     status='draft', version=$12, updated_at=$13
-		 WHERE id=$1`,
-		artifact.ID, artifact.Title, artifact.Description, artifact.Provider, artifact.ExternalRef,
-		artifact.Content, artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
-		artifact.Kind, nullString(artifact.SagaID), current.Version+1, artifact.UpdatedAt); err != nil {
+		`INSERT INTO workspace_artifact_version
+		 (artifact_id, version, title, description, content, content_hash, size_bytes, mime_type, status, origin_type, origin_user, provider, external_ref, kind, saga_id, created_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'draft',$9,$10,$11,$12,$13,$14, now())`,
+		artifact.ID, current.Version+1, artifact.Title, artifact.Description, artifact.Content,
+		artifact.ContentHash, artifact.SizeBytes, artifact.MimeType,
+		artifact.OriginType, nullString(artifact.OriginUser),
+		artifact.Provider, artifact.ExternalRef, artifact.Kind, nullString(artifact.SagaID)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
+// PendingArtifactRevision loads the open revision of an artifact — the draft
+// row in the version table (draft/in_review/rejected), if any.
+func (s *Store) PendingArtifactRevision(ctx context.Context, id string) (*ArtifactVersion, error) {
+	var v ArtifactVersion
+	var provider, externalRef, kind, sagaID string
+	var supersededAt *time.Time
+	err := s.pool.QueryRow(ctx,
+		`SELECT version, title, description, content, content_hash, size_bytes, mime_type, status,
+		        provider, external_ref, kind, COALESCE(saga_id, ''), superseded_at
+		 FROM workspace_artifact_version
+		 WHERE artifact_id=$1 AND status IN ('draft','in_review','rejected')
+		 ORDER BY version DESC LIMIT 1`, id).
+		Scan(&v.Version, &v.Title, &v.Description, &v.Content, &v.ContentHash, &v.SizeBytes, &v.MimeType, &v.Status,
+			&provider, &externalRef, &kind, &sagaID, &supersededAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	v.Provider, v.ExternalRef, v.Kind, v.SagaID, v.SupersededAt = provider, externalRef, kind, sagaID, supersededAt
+	return &v, nil
+}
+
 // ArtifactVersion is one archived revision of an artifact (migration 0006):
-// today only approved versions are snapshotted, at the moment a new draft
-// revision opens.
+// approved versions are snapshotted when a new revision opens; the open
+// revision itself is a draft row in the same table (migration 0007 adds the
+// full document fields it carries).
 type ArtifactVersion struct {
 	Version      int        `json:"version"`
 	Title        string     `json:"title"`
@@ -381,6 +437,12 @@ type ArtifactVersion struct {
 	OriginUser   string     `json:"origin_user,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 	SupersededAt *time.Time `json:"superseded_at,omitempty"`
+	// Draft-row fields (migration 0007): the open revision carries the full
+	// document so promotion can overwrite the live row wholesale.
+	Provider    string `json:"provider,omitempty"`
+	ExternalRef string `json:"external_ref,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	SagaID      string `json:"saga_id,omitempty"`
 }
 
 // ListArtifactVersions returns the archived revisions of one artifact,
@@ -438,6 +500,9 @@ func (s *Store) DeleteArtifact(ctx context.Context, id string) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	// The version archive has no FK to the live row — sweep it explicitly so
+	// a deleted artifact leaves no orphaned bodies behind.
+	_, _ = s.pool.Exec(ctx, `DELETE FROM workspace_artifact_version WHERE artifact_id=$1`, id)
 	return nil
 }
 

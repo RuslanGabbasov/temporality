@@ -127,6 +127,49 @@ func (s *Store) SubmitArtifactReview(ctx context.Context, artifactID string, rev
 	if mode != "all" && mode != "any" {
 		return ArtifactReview{}, fmt.Errorf("mode must be all or any (got %q)", mode)
 	}
+	// An open revision (docs/artifact-lifecycle.md §5): the draft lives in
+	// the version table while the approved version stays live — the round
+	// reviews the draft, the live row keeps serving agents until approval.
+	var draftVersion int
+	var draftStatus string
+	draftErr := s.pool.QueryRow(ctx,
+		`SELECT version, status FROM workspace_artifact_version
+		 WHERE artifact_id=$1 AND status IN ('draft','in_review','rejected')
+		 ORDER BY version DESC LIMIT 1`, artifactID).Scan(&draftVersion, &draftStatus)
+	if draftErr == nil {
+		existing, err := scanArtifactReview(s.pool.QueryRow(ctx,
+			`SELECT `+artifactReviewColumns+` FROM workspace_artifact_review
+			 WHERE artifact_id = $1 AND artifact_version = $2 AND status = 'open'`, artifactID, draftVersion))
+		if err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return ArtifactReview{}, err
+		}
+		if _, err := s.pool.Exec(ctx,
+			`UPDATE workspace_artifact_version SET status = 'in_review' WHERE artifact_id = $1 AND version = $2`,
+			artifactID, draftVersion); err != nil {
+			return ArtifactReview{}, err
+		}
+		review := ArtifactReview{
+			ID: fmt.Sprintf("%s-v%d-%d", artifactID, draftVersion, time.Now().UTC().UnixNano()),
+			ArtifactID: artifactID, ArtifactVersion: draftVersion,
+			Reviewers: reviewers, Mode: mode, Status: "open",
+			Note: note, RequestedBy: requestedBy, RequestedAt: time.Now().UTC(),
+			Decisions: map[string]ReviewDecision{},
+		}
+		if _, err := s.pool.Exec(ctx,
+			`INSERT INTO workspace_artifact_review (`+artifactReviewColumns+`)
+			 VALUES ($1,$2,$3,$4,$5,'open',$6,$7,$8,'{}'::jsonb,NULL,NULL,NULL,NULL)`,
+			review.ID, review.ArtifactID, review.ArtifactVersion, review.Reviewers, review.Mode,
+			review.Note, review.RequestedBy, review.RequestedAt); err != nil {
+			return ArtifactReview{}, err
+		}
+		return review, nil
+	}
+	if !errors.Is(draftErr, pgx.ErrNoRows) {
+		return ArtifactReview{}, draftErr
+	}
 	var version int
 	err := s.pool.QueryRow(ctx, `SELECT version FROM workspace_artifact WHERE id = $1`, artifactID).Scan(&version)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -259,9 +302,54 @@ func (s *Store) ResolveArtifactReview(ctx context.Context, reviewID string, entr
 			review.ID, encoded, review.Status, decidedBy, now); err != nil {
 			return ArtifactReview{}, Artifact{}, err
 		}
-		if _, err := tx.Exec(ctx,
-			`UPDATE workspace_artifact SET status = $2, updated_at = now() WHERE id = $1`, review.ArtifactID, closedStatus); err != nil {
-			return ArtifactReview{}, Artifact{}, err
+		// The round may review a pending revision (a draft row in the version
+		// table) rather than the live row — the live row stayed approved and
+		// kept serving agents while the revision was open. Approve promotes
+		// the draft wholesale (the previous approved version is stamped
+		// superseded exactly now); reject retires the draft row.
+		var draftStatus string
+		draftErr := tx.QueryRow(ctx,
+			`SELECT status FROM workspace_artifact_version WHERE artifact_id=$1 AND version=$2 FOR UPDATE`,
+			review.ArtifactID, review.ArtifactVersion).Scan(&draftStatus)
+		switch {
+		case draftErr == nil:
+			if !approve {
+				if _, err := tx.Exec(ctx,
+					`UPDATE workspace_artifact_version SET status = 'rejected' WHERE artifact_id=$1 AND version=$2`,
+					review.ArtifactID, review.ArtifactVersion); err != nil {
+					return ArtifactReview{}, Artifact{}, err
+				}
+				break
+			}
+			if _, err := tx.Exec(ctx,
+				`UPDATE workspace_artifact a SET
+				   title = v.title, description = v.description, provider = v.provider, external_ref = v.external_ref,
+				   content = v.content, content_hash = v.content_hash, size_bytes = v.size_bytes, mime_type = v.mime_type,
+				   kind = v.kind, saga_id = v.saga_id, status = 'approved', version = v.version, updated_at = now()
+				 FROM workspace_artifact_version v
+				 WHERE a.id = $1 AND v.artifact_id = a.id AND v.version = $2`,
+				review.ArtifactID, review.ArtifactVersion); err != nil {
+				return ArtifactReview{}, Artifact{}, err
+			}
+			if _, err := tx.Exec(ctx,
+				`UPDATE workspace_artifact_version SET status = 'approved' WHERE artifact_id=$1 AND version=$2`,
+				review.ArtifactID, review.ArtifactVersion); err != nil {
+				return ArtifactReview{}, Artifact{}, err
+			}
+			if _, err := tx.Exec(ctx,
+				`UPDATE workspace_artifact_version SET superseded_at = $3
+				 WHERE artifact_id=$1 AND version < $2 AND status = 'approved' AND superseded_at IS NULL`,
+				review.ArtifactID, review.ArtifactVersion, now); err != nil {
+				return ArtifactReview{}, Artifact{}, err
+			}
+		case errors.Is(draftErr, pgx.ErrNoRows):
+			// Live-row flow: the row itself was in_review.
+			if _, err := tx.Exec(ctx,
+				`UPDATE workspace_artifact SET status = $2, updated_at = now() WHERE id = $1`, review.ArtifactID, closedStatus); err != nil {
+				return ArtifactReview{}, Artifact{}, err
+			}
+		default:
+			return ArtifactReview{}, Artifact{}, draftErr
 		}
 	} else if _, err := tx.Exec(ctx,
 		`UPDATE workspace_artifact_review SET decisions = $2 WHERE id = $1`, review.ID, encoded); err != nil {
